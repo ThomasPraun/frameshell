@@ -17,6 +17,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Transcription (transcript file, word ids, audio source) | `packages/core/src/transcripts/transcriber.ts`; provider `plugins/whisper-cpp` |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
+| Release packaging, signing secrets, cutting a release | `docs/release.md` |
 
 ## Rules
 

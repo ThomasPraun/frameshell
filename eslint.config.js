@@ -9,6 +9,7 @@ export default tseslint.config(
       "spikes/**",
       ".claude/**",
       "apps/desktop/out/**",
+      "apps/desktop/release/**",
       "apps/desktop/test-results/**",
       "apps/desktop/playwright-report/**",
     ],
