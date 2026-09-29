@@ -1,0 +1,19 @@
+{
+  "name": "spike-whisper-word-timing",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROTOTYPE (throwaway): compare whisper.cpp vs faster-whisper word timestamps on Spanish speech. Spike for ticket #4.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "fixture": "node scripts/fixture.mjs",
+    "transcribe": "node scripts/transcribe.mjs",
+    "analyze": "node scripts/analyze.mjs",
+    "all": "npm run setup && npm run fixture && npm run transcribe && npm run analyze"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  }
+}

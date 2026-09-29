@@ -1,0 +1,8 @@
+# Generated / third-party. Regenerate with `npm run setup && npm run fixture`.
+node_modules/
+vendor/
+models/
+media/
+out/
+.venv/
+*.log
