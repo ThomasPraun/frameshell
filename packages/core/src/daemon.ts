@@ -1,0 +1,158 @@
+import { createRequire } from "node:module";
+import { type Server, type Socket, createServer } from "node:net";
+import {
+  ErrorCode,
+  type HandshakeResult,
+  type JsonRpcRequest,
+  type Methods,
+  PROTOCOL_VERSION,
+  RpcError,
+  readMessages,
+  writeMessage,
+} from "@frameshell/protocol";
+import { listenCleaningStaleSocket } from "./listen.js";
+import { ProjectRegistry } from "./projects.js";
+
+/** Package version reported in the handshake. */
+export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
+  .version;
+
+/** Five minutes: long enough to span an agent's think time between CLI calls. */
+export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+
+/** Options for {@link startDaemon}. */
+export interface DaemonOptions {
+  /** Unix socket path or Windows pipe name; see `resolveSocketPath`. */
+  socketPath: string;
+  /**
+   * Exit after this long with no connected clients. Counted from start and
+   * from each last disconnect. `Infinity` disables.
+   */
+  idleTimeoutMs?: number;
+}
+
+/** Running daemon handle. */
+export interface Daemon {
+  readonly socketPath: string;
+  /** Resolves once the daemon has stopped, by idle timeout or {@link Daemon.close}. */
+  readonly closed: Promise<void>;
+  /** Stop listening, drop clients, release the socket. Idempotent. */
+  close(): Promise<void>;
+}
+
+type Handlers = { [M in keyof Methods]: (params: Methods[M]["params"]) => Promise<Methods[M]["result"]> };
+
+/**
+ * Start frameshelld on `socketPath`.
+ *
+ * Rejects with code `EADDRINUSE` when a live daemon already owns the socket.
+ * A stale unix socket left by a crashed daemon is removed first.
+ */
+export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
+  const { socketPath } = options;
+  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const clients = new Set<Socket>();
+  const projects = new ProjectRegistry();
+  const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
+
+  let idleTimer: NodeJS.Timeout | undefined;
+  let closing: Promise<void> | undefined;
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
+
+  const handlers: Handlers = {
+    handshake: async () => identity,
+    status: async ({ cwd }) => {
+      const project = await projects.openEnclosing(cwd);
+      return {
+        daemon: { ...identity, uptimeMs: Date.now() - startedAt, clients: clients.size, socketPath },
+        project,
+        openProjects: projects.list(),
+      };
+    },
+    "project.init": (params) => projects.init(params.dir, params.name),
+  };
+
+  const server: Server = createServer((socket) => {
+    clients.add(socket);
+    armIdleTimer();
+    let handshaken = false;
+    socket.on("error", () => socket.destroy());
+    socket.on("close", () => {
+      clients.delete(socket);
+      armIdleTimer();
+    });
+    readMessages(
+      socket,
+      (message) => {
+        void dispatch(message as JsonRpcRequest).then((reply) => {
+          if (reply) writeMessage(socket, reply);
+        });
+      },
+      () => writeMessage(socket, errorReply(null, ErrorCode.ParseError, "Parse error: each line must be one JSON value")),
+    );
+
+    async function dispatch(request: JsonRpcRequest) {
+      const id = request.id ?? null;
+      if (request?.jsonrpc !== "2.0" || typeof request.method !== "string") {
+        return errorReply(id, ErrorCode.InvalidRequest, "Invalid JSON-RPC 2.0 request");
+      }
+      try {
+        if (request.method === "handshake") {
+          checkProtocolVersion(request.params);
+          handshaken = true;
+        } else if (!handshaken) {
+          throw new RpcError(ErrorCode.HandshakeRequired, "Send `handshake` before any other method");
+        }
+        const handler = handlers[request.method as keyof Methods] as ((p: unknown) => Promise<unknown>) | undefined;
+        if (!handler) throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${request.method}`);
+        const result = await handler(request.params);
+        return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
+      } catch (error) {
+        if (request.id === undefined) return undefined;
+        if (error instanceof RpcError) return errorReply(id, error.code, error.message, error.data);
+        return errorReply(id, ErrorCode.InternalError, (error as Error).message ?? String(error));
+      }
+    }
+  });
+
+  function armIdleTimer() {
+    clearTimeout(idleTimer);
+    if (clients.size > 0 || !Number.isFinite(idleTimeoutMs)) return;
+    idleTimer = setTimeout(() => void close(), idleTimeoutMs);
+    idleTimer.unref?.();
+  }
+
+  function close(): Promise<void> {
+    closing ??= new Promise<void>((resolve) => {
+      clearTimeout(idleTimer);
+      for (const socket of clients) socket.destroy();
+      server.close(() => resolve());
+    }).then(resolveClosed);
+    return closing;
+  }
+
+  await listenCleaningStaleSocket(server, socketPath);
+  armIdleTimer();
+  return { socketPath, closed, close };
+}
+
+function checkProtocolVersion(params: unknown): void {
+  const clientVersion = (params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
+  if (typeof clientVersion !== "number") {
+    throw new RpcError(ErrorCode.InvalidParams, "handshake requires a numeric `protocolVersion`");
+  }
+  if (clientVersion === PROTOCOL_VERSION) return;
+  const older = clientVersion < PROTOCOL_VERSION ? "the client (frameshell CLI or app)" : "frameshelld";
+  throw new RpcError(
+    ErrorCode.IncompatibleProtocol,
+    `Protocol mismatch: client speaks v${clientVersion}, frameshelld ${DAEMON_VERSION} (pid ${process.pid}) speaks v${PROTOCOL_VERSION}. ` +
+      `Upgrade ${older} so both match. A stale daemon exits after its idle timeout, or stop it with \`kill ${process.pid}\`.`,
+    { clientProtocolVersion: clientVersion, daemonProtocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION },
+  );
+}
+
+function errorReply(id: number | string | null, code: number, message: string, data?: unknown) {
+  return { jsonrpc: "2.0" as const, id, error: data === undefined ? { code, message } : { code, message, data } };
+}

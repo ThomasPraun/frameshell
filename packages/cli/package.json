@@ -1,0 +1,24 @@
+{
+  "name": "@frameshell/cli",
+  "version": "0.0.0",
+  "description": "frameshell: thin command-line client of frameshelld, for humans and agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "frameshell": "./dist/bin/frameshell.js"
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@frameshell/core": "workspace:*",
+    "@frameshell/protocol": "workspace:*"
+  }
+}
