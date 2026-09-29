@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: pre-implementation. Spec settled, no code yet.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli}`. Node >= 22.
 
 ## Doc map
 
@@ -11,6 +11,7 @@ Status: pre-implementation. Spec settled, no code yet.
 | Domain terms | `GLOSSARY.md` |
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
+| Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
 
 ## Rules
 
@@ -18,6 +19,10 @@ Status: pre-implementation. Spec settled, no code yet.
 - English for code, comments, docs, CLAUDE.md, UI strings (i18n-ready). Talk to user in Spanish.
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
+- Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
+- Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
+- Wire change: bump `PROTOCOL_VERSION`.
+- Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*`.
 
 ## Agent skills
 
