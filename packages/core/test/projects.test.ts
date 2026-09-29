@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import { parseProjectConfig, parseTimeline } from "@frameshell/schema";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -70,5 +70,17 @@ describe("status", () => {
       code: ErrorCode.InvalidProjectFile,
       message: expect.stringContaining("fps"),
     });
+  });
+});
+
+describe("declared result schemas", () => {
+  // parse() strips undeclared keys, so equality proves the schema lists every field the daemon sends.
+  it("match what the daemon actually returns", async () => {
+    const dir = tempDir();
+    const init = await conn.request("project.init", { dir });
+    expect(methods["project.init"].result.parse(init)).toEqual(init);
+    const status = await conn.request("status", { cwd: dir });
+    expect(methods.status.result.parse(status)).toEqual(status);
+    expect(methods.handshake.result.parse(conn.daemon)).toEqual(conn.daemon);
   });
 });

@@ -4,9 +4,14 @@ import {
   ErrorCode,
   type HandshakeResult,
   type JsonRpcRequest,
-  type Methods,
+  type MethodName,
+  type MethodResult,
   PROTOCOL_VERSION,
   RpcError,
+  type ValidatedParams,
+  assertSocketPathFits,
+  isMethodName,
+  parseParams,
   readMessages,
   writeMessage,
 } from "@frameshell/protocol";
@@ -40,16 +45,19 @@ export interface Daemon {
   close(): Promise<void>;
 }
 
-type Handlers = { [M in keyof Methods]: (params: Methods[M]["params"]) => Promise<Methods[M]["result"]> };
+/** One handler per registry method; params arrive already validated. */
+type Handlers = { [M in MethodName]: (params: ValidatedParams<M>) => Promise<MethodResult<M>> };
 
 /**
  * Start frameshelld on `socketPath`.
  *
- * Rejects with code `EADDRINUSE` when a live daemon already owns the socket.
+ * Rejects with code `EADDRINUSE` when a live daemon already owns the socket,
+ * or `ENAMETOOLONG` when the unix socket path exceeds the OS limit.
  * A stale unix socket left by a crashed daemon is removed first.
  */
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const { socketPath } = options;
+  assertSocketPathFits(socketPath);
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   const clients = new Set<Socket>();
@@ -102,15 +110,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (!isRequest(message)) return errorReply(id, ErrorCode.InvalidRequest, "Invalid JSON-RPC 2.0 request");
       const request = message;
       try {
-        if (request.method === "handshake") {
+        const { method } = request;
+        if (method === "handshake") {
           checkProtocolVersion(request.params);
-          handshaken = true;
         } else if (!handshaken) {
           throw new RpcError(ErrorCode.HandshakeRequired, "Send `handshake` before any other method");
         }
-        const handler = handlers[request.method as keyof Methods] as ((p: unknown) => Promise<unknown>) | undefined;
-        if (!handler) throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${request.method}`);
-        const result = await handler(request.params);
+        if (!isMethodName(method)) throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
+        const params = parseParams(method, request.params);
+        // Set before the await: a request pipelined behind the handshake is dispatched
+        // while the handshake handler is still pending. Invalid params never get here.
+        if (method === "handshake") handshaken = true;
+        const result = await (handlers[method] as (p: typeof params) => Promise<unknown>)(params);
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;
@@ -158,11 +169,10 @@ function requestId(message: unknown): number | string | null {
   return isValidId(id) ? id : null;
 }
 
+/** Runs before param validation so a future client's handshake still gets the actionable mismatch error. */
 function checkProtocolVersion(params: unknown): void {
-  const clientVersion = (params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-  if (typeof clientVersion !== "number") {
-    throw new RpcError(ErrorCode.InvalidParams, "handshake requires a numeric `protocolVersion`");
-  }
+  const clientVersion = (params as { protocolVersion?: unknown } | null | undefined)?.protocolVersion;
+  if (typeof clientVersion !== "number") return; // parseParams reports it.
   if (clientVersion === PROTOCOL_VERSION) return;
   const older = clientVersion < PROTOCOL_VERSION ? "the client (frameshell CLI or app)" : "frameshelld";
   throw new RpcError(

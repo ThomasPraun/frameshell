@@ -45,6 +45,14 @@ describe("daemon lifecycle", () => {
     conn.close();
   });
 
+  it.skipIf(process.platform === "win32")("refuses an over-long socket path the kernel would truncate", async () => {
+    const socketPath = join(tempDir(), `${"x".repeat(120)}.sock`);
+    await expect(startDaemon({ socketPath })).rejects.toMatchObject({
+      code: "ENAMETOOLONG",
+      message: expect.stringContaining("too long"),
+    });
+  });
+
   it.skipIf(process.platform === "win32")("never deletes a regular file sitting at the socket path", async () => {
     const socketPath = join(tempDir(), "not-a-socket");
     writeFileSync(socketPath, "keep me");
