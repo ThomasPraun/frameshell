@@ -116,8 +116,8 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 
 ### 3.4 Preview
 
-- `media` clips: proxies (H.264, short GOP, CFR, reduced resolution) played in `<video>` elements, double-buffered per track to hide cut boundaries; audio mixed with Web Audio.
-- Generated clips (`hyperframes`, later `remotion`): played from cached renders (`.frameshell/cache/clips/<hash>.mov`, with alpha). While a render is pending, show a placeholder with progress.
+- `media` clips: proxies decoded with **WebCodecs** (`VideoDecoder`) from the keyframe before each in-point, pre-roll discarded, frames drawn to a canvas on the **audio clock**. Decode and draw run in a Worker with `OffscreenCanvas`. Program audio comes from a PCM sidecar mixed in one `AudioWorklet` with its own sample counter and 2 ms edge fades; all audio tracks mix in the same worklet. Double-buffered `<video>` elements were measured and rejected (ADR 0001).
+- Generated clips (`hyperframes`, later `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a placeholder with progress.
 - Overlays: CSS/canvas compositing with the clip `transform` (position, scale, opacity).
 - Subtitles: rendered in the DOM from the transcript, same style tokens as export.
 - v0.2: `livePreview()` mounts the active clip's engine directly (iframe for HyperFrames, `@remotion/player` for Remotion), synced to the playhead.
@@ -126,7 +126,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 
 1. Resolve timeline (nested timelines flattened, subtitle words resolved).
 2. Ensure every generated clip has a fresh cache entry (render missing ones via adapters).
-3. **Video:** split the timeline into segments at clean boundaries, compile each to an ffmpeg `filter_complex` (`trim`, `setpts`, `scale`, `overlay`, `subtitles`/`ass`), encode segments in parallel, join with the concat demuxer.
+3. **Video:** split the timeline into segments at clean boundaries, compile each to an ffmpeg `filter_complex` (`trim`, `setpts`, `scale`, `overlay`, `subtitles`/`ass`), encode segments in parallel, join with the concat demuxer. Every VP9 input with alpha is decoded with `-c:v libvpx-vp9` (the native `vp9` decoder silently drops alpha).
 4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix`, two-pass `loudnorm` to the preset target (default −17 LUFS integrated).
 5. Mux, apply preset (codec, bitrate, resolution, aspect ratio).
 6. Optional: `frameshell transcribe --verify` compares the export against source transcripts and reports lost words.
@@ -146,8 +146,8 @@ The compiler is a pure function (timeline → plan → ffmpeg args) tested with 
 | Terminal | node-pty (ConPTY on Windows) |
 | Schema | Zod as source; JSON Schema generated and published |
 | File watching | chokidar |
-| Media | ffmpeg / ffprobe (managed download, GPL build with x264) |
-| Transcription | whisper.cpp (default provider, `large-v3-turbo`); cloud providers as plugins |
+| Media | ffmpeg / ffprobe (managed download, GPL build with x264 and libvpx) |
+| Transcription | whisper.cpp pinned version (default provider, `large-v3-turbo-q5_0`, DTW token timestamps); cloud providers as plugins |
 | First adapter | HyperFrames (`@frameshell/hyperframes`) |
 | Tests | Vitest; golden files for compiler; short smoke renders in CI |
 | Repo | pnpm workspaces monorepo |
@@ -222,7 +222,7 @@ my-video/
     "@frameshell/hyperframes": "0.1.0",
     "@frameshell/whisper-cpp": "0.1.0"
   },
-  "transcription": { "provider": "whisper-cpp", "model": "large-v3-turbo", "language": "es" },
+  "transcription": { "provider": "whisper-cpp", "model": "large-v3-turbo-q5_0", "language": "es" },
   "binaries": { "ffmpeg": "managed" },
   "export": { "defaultPreset": "youtube-1440p", "loudness": -17 }
 }
@@ -294,7 +294,7 @@ Rules:
   "asset": "assets/raw-01.mp4",
   "assetHash": "sha256:…",
   "provider": "whisper-cpp",
-  "model": "large-v3-turbo",
+  "model": "large-v3-turbo-q5_0",
   "language": "es",
   "words": [
     { "id": "w_000001", "text": "Hola", "start": 0.520, "end": 0.810, "confidence": 0.97 },
@@ -305,6 +305,7 @@ Rules:
 ```
 
 - Times are source-asset seconds (same clock as the asset's `in`/`out`), measured on the CFR proxy.
+- `start` is the DTW onset; `end` is derived from audio energy (last speech frame before the next onset), because DTW gives no word end (ADR 0003).
 - `assetHash` invalidates the transcript if the asset changes.
 - `edits` holds human corrections; re-transcribing keeps them where word IDs still match.
 
@@ -339,7 +340,7 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 
 ### 6.3 Asset ingestion
 
-Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies (short GOP), waveforms and thumbnails. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
+Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies, a PCM audio sidecar, waveforms and thumbnails. Proxy recipe (ADR 0001): H.264, CFR, fixed GOP 15, **no B-frames** (decode order = display order), faststart, reduced resolution. The sidecar is s16le 48 kHz PCM (~165 MiB per 30 min mono); both are regenerable. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
 
 ### 6.4 Direct file edits and conflicts
 
@@ -434,7 +435,7 @@ Design rules:
 
 | Point | v0.1 | Contract (sketch) |
 |---|---|---|
-| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`, optional `livePreview` (v0.2) |
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; optional `livePreview` (v0.2) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
 | Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |
@@ -455,8 +456,9 @@ Design rules:
 
 - Managed by the daemon under the OS app-data directory, versioned (`ffmpeg/7.x/…`).
 - Sources: pinned URLs + SHA-256; mirrored on Frameshell GitHub Releases to avoid depending on third-party availability.
-- ffmpeg: GPL build (x264/x265) downloaded by the user at first run; not redistributed inside the installer.
-- whisper.cpp: prebuilt per platform (Metal on macOS; CUDA/Vulkan where available; CPU fallback). Models downloaded on first transcription.
+- ffmpeg: GPL build (x264/x265, libvpx encoder and decoder) downloaded by the user at first run; not redistributed inside the installer. `doctor` checks libvpx.
+- Headless Chrome for HTML engines (HyperFrames): managed like other binaries and passed via `PRODUCER_HEADLESS_SHELL_PATH`.
+- whisper.cpp: pinned version, prebuilt per platform (Metal on macOS; CUDA/Vulkan where available; CPU fallback). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
 
 ---
@@ -523,8 +525,10 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Gapless multi-clip preview in `<video>` (visible hiccups at hundreds of cuts) | Core UX of Case B | Double-buffered elements per track, short-GOP proxies, Web Audio for audio; fallback: background "preview renders" of dense regions |
-| Word timestamp accuracy of whisper.cpp (cuts inside words) | Lost or clipped words | Snap cuts to energy valleys between words (not raw word bounds); `--verify` on every export; DTW timestamps when available |
+| Gapless multi-clip preview (visible hiccups at hundreds of cuts) | Core UX of Case B | WebCodecs + audio-clocked worklet (ADR 0001, passes all thresholds on the 200-cut fixture); decode in a Worker so React stalls do not freeze video; preview renders stay a documented fallback |
+| Word timestamp accuracy of whisper.cpp (cuts inside words) | Lost or clipped words | Mandatory snapping of every cut to the interior of an energy-detected pause (±500 ms window); DTW onsets required; word `end` derived from energy; never cut at raw engine times (ADR 0003) |
+| Retake silently dropped from transcript (whisper can collapse a repeated phrase) | Repeated take kept or wrong take cut | `--verify` on every export; pause-based cut candidates that do not rely on text alone |
+| VP9 alpha is 4:2:0 and lossy | Soft coloured text in overlays | Optional ProRes master render for export only (~+22 s per 8 s clip, ADR 0002) |
 | ffmpeg graph size with hundreds of cuts | Slow or failing exports | Segmented video render + concat; continuous separate audio pass; golden tests |
 | VFR sources drifting from transcript/cut times | A/V desync in long videos | CFR proxies at import; transcripts measured on proxies; export maps times on the same clock |
 | Scope for a solo developer | MVP slips | Scenario-defined MVP; explicit cut list (§11); official plugins limited to two |
@@ -543,5 +547,4 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 
 - Idle gap for automatic transaction grouping (start at ~10 s, tune with real agent sessions).
 - Subtitle style presets and ASS generation details.
-- Exact whisper.cpp model quantization default (quality vs download size).
 - Plugin index hosting (static site generated from GitHub topic search).
