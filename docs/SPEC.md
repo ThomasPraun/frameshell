@@ -43,7 +43,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 6 | Agent integration | **`frameshell` CLI** and **MCP server** as equal first-class paths, both clients of the daemon; direct file edits allowed (guarded by `revision`); bundled **agent skill** | Validated ops, low token cost, works with any agent or script (CLI) and with typed tools for MCP clients; each op is undoable | File-only (invalid JSON, token-heavy, races), MCP-only (excludes scripts) |
 | 7 | On-disk format | **JSON + published JSON Schema**, split files (see §5) | Agents edit JSON reliably; small diffs; nested sequences; transcripts isolated | YAML (type gotchas; comments lost on rewrite anyway), single file (huge diffs) |
 | 8 | Time unit | **Decimal seconds**, snapped by core to project frame grid, 3 decimals; **CFR proxies** for VFR sources | Native to humans, agents, whisper and ffmpeg; VFR (OBS, phones) handled at import | Integer frames (conversions everywhere, fps change rewrites all), rationals (hostile to agents) |
-| 9 | AI | **Bring your own agent**: no built-in LLM. Later the UI injects context-rich requests into the agent terminal | Zero model cost; does not compete with agents that improve monthly | Built-in chat/agent |
+| 9 | AI | **Bring your own agent**: no built-in LLM. The UI injects context references from the user's selection into the agent terminal (decision 21) | Zero model cost; does not compete with agents that improve monthly | Built-in chat/agent |
 | 10 | Media AI services | **Transcription is first-class** (`frameshell transcribe`, provider interface, whisper.cpp default, `--verify`). TTS, video, image, music = assets produced by the agent | The data model needs word timestamps in one format; everything else changes too fast to own | Everything built in, nothing built in |
 | 11 | Licence | **Apache 2.0** + protected "Frameshell" trademark + DCO | Adoption and ecosystem over protection; patent grant; monetize via services | MIT (no patent grant), GPLv3/AGPLv3 + CLA (lower adoption) |
 | 12 | Native binaries | **Downloaded on first use**: pinned versions + checksums (ffmpeg GPL build with x264, whisper.cpp, whisper models). Override with system binaries. `frameshell doctor` | Small installer; controlled versions; x264 quality; Frameshell does not redistribute GPL binaries | Bundled in installer (size, GPL obligations), system only (version chaos) |
@@ -55,6 +55,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
 | 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
 | 20 | MCP scope | **Project + observe + navigate**: every core operation as a typed tool, frame capture as images, UI state (playhead, selection, open tab) and navigation (seek, play, select, open file, show transaction diff) | Model can see what it built and resolve "this" from the user's selection; UI actions are already core operations | Project-only (model edits blind), full UI automation (clicks/drags: fragile, adds no capability) |
+| 21 | Ask agent from selection | **"Ask agent" action** (Cmd/Ctrl+L, context menu) writes a compact text reference of the current selection into the active agent terminal's prompt, unsent. Selectable: clips, words/subtitles, time ranges, assets, script scenes, and a **rectangular region of the preview frame** | Removes "which one?" round trips; plain text works with any agent CLI; ids let the agent fetch detail via CLI/MCP | Agent-pull only via `ui_state` (user must still explain), chat panel (decision 9) |
 
 ### Cross-cutting rules
 
@@ -480,6 +481,13 @@ Design rules:
 - **Transcript view:** words synced to the playhead; words removed by cuts shown struck through; clicking a struck word restores it (an op that re-extends or re-inserts the clip range); selecting words selects the timeline range.
 - **Timeline v0.1:** multiple video tracks (overlay transform: position, scale, opacity), audio tracks with gain and waveform, subtitle tracks. Move, trim, split, ripple delete, snapping, zoom. Generated clips show render state.
 - **History panel:** transactions by author, diff highlight, revert.
+- **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Region selection: drag a rectangle on the preview; the reference carries normalized coordinates and a frame capture saved under `.frameshell/context/` (regenerable, gitignored). Reference format, one line per selected item:
+  ```
+  [frameshell] subtitle "hola a todos" · 00:03:12.40–00:03:14.10 · clip c_0012 · words w_000123–w_000127
+  [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_0421.png
+  [frameshell] asset assets/logo.png
+  ```
+  Times are timeline times; ids match the project files, so the agent resolves details with `frameshell` CLI or MCP tools. The same selection is exposed by `ui_state` (§7b).
 
 ---
 
@@ -504,6 +512,7 @@ Design rules:
 | Plugins | API v1 for §8.2 v0.1 points, install from GitHub/npm, project trust; `@frameshell/hyperframes`, `@frameshell/whisper-cpp` |
 | Agent | `skills/frameshell/SKILL.md` + plugin skills |
 | MCP | `frameshell mcp` per §7b: project tools, resources, frame capture, UI state and navigation |
+| Ask agent | Selection references into the agent terminal, including preview region selection (decision 21) |
 | Platforms | macOS + Linux stable, Windows beta, CI on all three |
 
 Estimate: 3–5 months for one developer. First cuts if needed: overlay transform (stack only) and the vertical preset.
@@ -514,7 +523,7 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 
 | Version | Content |
 |---|---|
-| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; UI → terminal context injection ("ask agent about selection"); opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
+| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
 | **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
