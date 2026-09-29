@@ -89,7 +89,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           <CollapsedRail side="left" label="Show sidebar" onExpand={() => toggle("sidebar")} />
         ) : (
           <>
-            <div className="panel sidebar" style={{ width: sidebar.size }}>
+            <div className="panel sidebar" style={{ flexBasis: sidebar.size }}>
               <Sidebar
                 view={layout.sidebarView}
                 onView={(view) => setLayout({ ...layout, sidebarView: view })}
@@ -133,7 +133,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         {terminal.collapsed && <CollapsedRail side="right" label="Show terminal" onExpand={() => toggle("terminal")} />}
         <div
           className="panel terminal-panel"
-          style={terminal.collapsed ? { display: "none" } : { width: terminal.size }}
+          style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}
         >
           <TerminalPanel
             visible={!terminal.collapsed}

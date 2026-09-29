@@ -33,6 +33,8 @@ async function launch(): Promise<void> {
     },
   });
   page = await app.firstWindow();
+  // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
   page.on("console", (message) => {
     if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
   });
@@ -128,12 +130,12 @@ test("the pty follows the terminal panel size", async () => {
   const box = (await splitter.boundingBox())!;
   await page.mouse.move(box.x + 1, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.move(box.x + 200, box.y + box.height / 2, { steps: 5 });
   await page.mouse.up();
 
   await runInTerminal("clear");
   await runInTerminal('echo "cols=$(tput cols)"');
-  await expect.poll(colsNow).toBeGreaterThan(before + 10);
+  await expect.poll(colsNow).toBeLessThan(before - 10);
 });
 
 test("layout persists per project across restarts", async () => {

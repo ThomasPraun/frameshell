@@ -279,11 +279,12 @@ code {
   flex: 1;
   min-height: 0;
   display: flex;
+  overflow: hidden;
 }
 
 .center-column {
-  flex: 1;
-  min-width: 320px;
+  flex: 1 1 0;
+  min-width: 420px;
   display: flex;
   flex-direction: column;
 }
@@ -303,9 +304,19 @@ code {
   overflow: hidden;
 }
 
+/* Stored sizes are preferred widths: small windows shrink the side panels instead of overflowing. */
 .sidebar,
 .terminal-panel {
-  flex: none;
+  flex-grow: 0;
+  flex-shrink: 1;
+}
+
+.sidebar {
+  min-width: 160px;
+}
+
+.terminal-panel {
+  min-width: 280px;
 }
 
 .preview {
