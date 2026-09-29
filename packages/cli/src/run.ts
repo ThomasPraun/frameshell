@@ -266,6 +266,7 @@ function formatDoctor(report: DoctorResult): string {
   lines.push("", report.problems.length === 0 ? "No problems found." : "Problems:");
   for (const problem of report.problems) lines.push(`  - ${problem}`);
   return `${lines.join("\n")}\n`;
+}
 
 function trustLabel(state: string): string {
   if (state === "trusted") return "trusted";
