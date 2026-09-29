@@ -1,0 +1,17 @@
+{
+  "name": "@frameshell/protocol",
+  "version": "0.0.0",
+  "description": "JSON-RPC methods, errors and transport shared by frameshelld and its clients.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.12"
+  }
+}

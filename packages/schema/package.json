@@ -1,0 +1,21 @@
+{
+  "name": "@frameshell/schema",
+  "version": "0.0.0",
+  "description": "Zod models for Frameshell project files and their generated JSON Schema.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./json-schema/*": "./json-schema/*"
+  },
+  "files": ["dist", "json-schema"],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  }
+}

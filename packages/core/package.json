@@ -1,0 +1,25 @@
+{
+  "name": "@frameshell/core",
+  "version": "0.0.0",
+  "description": "frameshelld: the per-user Frameshell daemon, sole writer of project files.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./frameshelld": "./dist/bin/frameshelld.js"
+  },
+  "bin": {
+    "frameshelld": "./dist/bin/frameshelld.js"
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@frameshell/protocol": "workspace:*",
+    "@frameshell/schema": "workspace:*"
+  }
+}

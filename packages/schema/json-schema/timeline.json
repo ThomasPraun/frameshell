@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "video",
+              "audio",
+              "subtitles"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "tracks"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/timeline.json"
+}
