@@ -19,8 +19,8 @@ Fixture: 9:47 LibriVox Spanish reading (Public Domain Mark), plus a variant with
 inserted silences (2.5 to 6 s), one repeated phrase and -60 dBFS room noise. No human
 ground truth: reference is agreement between engines plus energy analysis (pause =
 ≥200 ms below "speech level − 40 dB"). The machine was shared with other jobs during
-the runs (1-min load average 2 to 8 recorded per run; one discarded faster-whisper run
-saw 19), so speed numbers are upper bounds.
+the runs (1-min load average 2 to 8 recorded per run, `results/summary.md`), so speed
+numbers are upper bounds.
 
 **Speed** (RTF = wall time incl. model load / audio duration, original fixture):
 
@@ -41,9 +41,9 @@ cost is not measured.
 
 **Text.** WER against faster-whisper float32: whisper.cpp 1.2 to 3.5 % across all
 configs, faster-whisper int8 0.3 %. whisper.cpp configs with the same f16 weights
-(Metal/CPU, DTW on/off, VAD on/off) differ from each other by up to 5.1 %, and faster-whisper float32 produced 1444 then 1450
-words on two identical runs: differences below ~3 % are noise, so q5_0 shows no
-measurable loss against f16 (2.1 % vs 3.0 % WER vs reference).
+(Metal/CPU, DTW on/off, VAD on/off) differ from each other by up to 5.1 %: differences
+below that spread are not attributable to the weights, so q5_0 shows no measurable loss
+against f16 (2.1 % vs 3.0 % WER vs reference). Run-to-run repeatability was not measured.
 
 **Word timing** (ms, |error| mean / p95 / worst; original fixture):
 
@@ -99,8 +99,9 @@ broken at the pinned commit: DTW times are not remapped to the original timeline
 
 ## Consequences
 
-- **docs/SPEC.md** (to be edited by the maintainer): §2 decision 10 and §7 table: default
-  model `large-v3-turbo-q5_0`. §5.4 example `model` value, and note that `end` is
+- **docs/SPEC.md** (to be edited by the maintainer): default model `large-v3-turbo-q5_0`
+  in §4 Stack table (Transcription row), §5.2 `frameshell.json` example
+  (`transcription.model`) and §5.4 example `model` value; in §5.4 also note that `end` is
   energy-derived. §13 risk "word timestamp accuracy": energy snapping is mandatory and
   DTW is required, not "when available"; add risk "retake silently dropped from the
   transcript" (whisper can collapse repeated phrases), mitigated by `--verify` and by

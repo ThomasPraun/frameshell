@@ -64,7 +64,8 @@ npm run transcribe && npm run analyze              # ~45 min on an M3 (faster-wh
 Limits: energy pause edges are not word edges. Soft word endings (/s/, breath, final
 unstressed vowels) can sit under the threshold, so the energy "speech end" can be early
 and slightly overstate clipping; connected speech often has no valley at all between words,
-so the all-boundaries rate has a floor above 0 % even with perfect timestamps. faster-whisper float32 gave 1444 then 1450 words on two identical runs: engine output is not bit-stable. A LibriVox
+so the all-boundaries rate has a floor above 0 % even with perfect timestamps. Each config
+ran once, so run-to-run repeatability is not measured. A LibriVox
 reading is cleaner and more fluent than a talking-head take.
 
 ## Notes found while building
