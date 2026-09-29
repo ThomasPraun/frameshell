@@ -29,3 +29,35 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm build
+
+  # Drives the built Electron app: real daemon, real login shell, real pty.
+  e2e:
+    name: e2e ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Smoke test (xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm test:e2e
+      - name: Smoke test
+        if: runner.os != 'Linux'
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-${{ matrix.os }}
+          path: |
+            apps/desktop/test-results/
+            apps/desktop/playwright-report/
+          retention-days: 7

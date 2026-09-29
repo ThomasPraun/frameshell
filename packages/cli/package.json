@@ -8,7 +8,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./frameshell": "./dist/bin/frameshell.js"
   },
   "bin": {
     "frameshell": "./dist/bin/frameshell.js"

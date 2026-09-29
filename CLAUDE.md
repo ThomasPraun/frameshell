@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`. Node >= 22.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`, `apps/desktop` (Electron). Node >= 22.
 
 ## Doc map
 
@@ -14,6 +14,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
 | Managed binaries (ffmpeg pins, sources, licences, re-pin) | `docs/binaries.md` |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
+| Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 
 ## Rules
 
@@ -22,6 +23,9 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
+- Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
+- Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.
+- node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
 - New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
 - Wire change: bump `PROTOCOL_VERSION`.

@@ -3,3 +3,9 @@ packages:
   - apps/*
   - packages/*
   - plugins/*
+# Native/binary postinstalls the desktop app needs. node-pty: N-API prebuilds (macOS, Windows) or node-gyp (Linux).
+allowBuilds:
+  esbuild: true
+  node-pty: true
+minimumReleaseAgeExclude:
+  - electron@44.5.0

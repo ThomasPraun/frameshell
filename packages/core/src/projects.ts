@@ -1,8 +1,22 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { ErrorCode, type PluginPins, type ProjectInitResult, type ProjectSummary, RpcError } from "@frameshell/protocol";
-import { type ProjectConfig, createProjectConfig, createTimeline, parseProjectConfig } from "@frameshell/schema";
-import { exists, writeJsonAtomic } from "./fs-util.js";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  ErrorCode,
+  type FileWriteResult,
+  type PluginPins,
+  type ProjectInitResult,
+  type ProjectSummary,
+  RpcError,
+} from "@frameshell/protocol";
+import {
+  type ParseResult,
+  type ProjectConfig,
+  createProjectConfig,
+  createTimeline,
+  parseProjectConfig,
+  parseTimeline,
+} from "@frameshell/schema";
+import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
 
 /** Project config file name; its directory is the project root. */
 export const PROJECT_FILE = "frameshell.json";
@@ -94,6 +108,54 @@ export class ProjectRegistry {
     await writeJsonAtomic(join(root, PROJECT_FILE), { ...raw, plugins: pins });
   }
 
+  /**
+   * Replace a text file inside the project enclosing `path`, atomically.
+   * Confinement checks real paths, not path text: symlinked dirs cannot lead
+   * outside the project, and case variants of `.frameshell/` are refused on
+   * case-insensitive filesystems (APFS, NTFS).
+   * Throws `OutsideProject` for paths in no project, under `.frameshell/`, or
+   * naming a symlink; `InvalidProjectFile` when a config or timeline fails its schema.
+   */
+  async writeFile(path: string, content: string): Promise<FileWriteResult> {
+    const target = resolve(path);
+    const configPath = await findUp(dirname(target), PROJECT_FILE);
+    if (!configPath) throw notInProject(target);
+    const root = dirname(configPath);
+    const realRoot = await realpath(root);
+
+    // Pre-check before mkdir so no directory is created through a symlink or under .frameshell/.
+    const { real: realAncestor, rest } = await realAncestorOf(dirname(target));
+    assertWritable(target, relativeTo(realRoot, join(realAncestor, ...rest, basename(target))));
+    await mkdir(dirname(target), { recursive: true });
+
+    // Re-check on the canonical parent: realpath resolves symlinks and on-disk name case.
+    const realParent = await realpath(dirname(target));
+    let realTarget = join(realParent, basename(target));
+    const entry = await lstat(realTarget).catch(() => null);
+    if (entry?.isSymbolicLink()) {
+      throw new RpcError(ErrorCode.OutsideProject, `${target} is a symlink; write the file it points to instead`, {
+        path: target,
+      });
+    }
+    if (entry) realTarget = await realpath(realTarget);
+    const rel = relativeTo(realRoot, realTarget);
+    assertWritable(target, rel);
+
+    const validate = VALIDATED_FILES.find(({ match }) => match(rel))?.parse;
+    if (validate) {
+      let parsed: ParseResult<unknown>;
+      try {
+        parsed = validate(JSON.parse(content));
+      } catch (error) {
+        throw invalid(target, (error as Error).message);
+      }
+      if (!parsed.ok) throw invalid(target, parsed.error);
+    }
+    await writeTextAtomic(realTarget, content);
+    if (rel === PROJECT_FILE) await this.openEnclosing(root);
+    return { project: root, path: rel };
+  }
+
   /** Snapshot of open projects. */
   list(): ProjectSummary[] {
     return [...this.#open.values()];
@@ -123,6 +185,55 @@ async function readConfig(root: string): Promise<{ raw: Record<string, unknown>;
   const parsed = parseProjectConfig(raw);
   if (!parsed.ok) throw invalid(configPath, parsed.error);
   return { raw: raw as Record<string, unknown>, config: parsed.value };
+}
+
+/** Project files whose content the daemon must be able to load; a bad write would break the project. */
+const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown) => ParseResult<unknown> }[] = [
+  { match: (rel) => rel === PROJECT_FILE, parse: parseProjectConfig },
+  { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
+];
+
+function notInProject(target: string): RpcError {
+  return new RpcError(
+    ErrorCode.OutsideProject,
+    `${target} is not inside a Frameshell project. Run \`frameshell init\` in its folder first.`,
+    { path: target },
+  );
+}
+
+/** `/`-separated path of `path` under `root`, or `null` when outside it. Both must be real paths. */
+function relativeTo(root: string, path: string): string | null {
+  const rel = relative(root, path);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  return rel.split(sep).join("/");
+}
+
+/**
+ * Refuse writes outside the project or into daemon-owned `.frameshell/`.
+ * Case-folds the first segment: a case-insensitive filesystem maps `.FRAMESHELL` onto `.frameshell`.
+ */
+function assertWritable(target: string, rel: string | null): asserts rel is string {
+  if (rel === null) throw notInProject(target);
+  if ((rel.split("/")[0] ?? "").toLowerCase() === ".frameshell") {
+    throw new RpcError(
+      ErrorCode.OutsideProject,
+      `${target} is daemon-owned state under .frameshell/; it cannot be written directly`,
+      { path: target },
+    );
+  }
+}
+
+/** Realpath of the nearest existing ancestor of `dir`, plus the missing segments below it. */
+async function realAncestorOf(dir: string): Promise<{ real: string; rest: string[] }> {
+  const rest: string[] = [];
+  for (let current = dir; ; current = dirname(current)) {
+    try {
+      return { real: await realpath(current), rest };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(current) === current) throw error;
+      rest.unshift(basename(current));
+    }
+  }
 }
 
 function invalid(path: string, details: string): RpcError {
