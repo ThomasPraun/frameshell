@@ -1,9 +1,6 @@
 .claude/settings.local.json
 .claude/worktrees/
-<<<<<<< HEAD
-=======
 node_modules/
 dist/
 *.tsbuildinfo
 coverage/
->>>>>>> f854c50 (chore: set up pnpm workspaces monorepo with TypeScript, Vitest and ESLint)
