@@ -9,6 +9,7 @@ const techs = process.argv.slice(2).length ? process.argv.slice(2) : ['A1', 'A2'
 
 const pct = (a, p) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN);
+const max = (a, d = -Infinity) => a.reduce((m, x) => (x > m ? x : m), d);
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 
 function analyzeVideo(R) {
@@ -111,8 +112,16 @@ function analyzeAudio(R, tech) {
       spliceCtx,
     };
   });
+  // Render quanta (128 samples) identical to the previous one: stale graph output. The 220 Hz
+  // sine never repeats within 128 samples, so any hit is a glitch.
+  let repeatedQuanta = 0;
+  for (let q = Math.ceil(a / 128) + 1; (q + 1) * 128 <= b; q++) {
+    let eq = 0, loud = 0;
+    for (let i = 0; i < 128; i++) { if (x[q * 128 + i] === x[(q - 1) * 128 + i]) eq++; if (Math.abs(x[q * 128 + i]) > 0.01) loud++; }
+    if (eq >= 100 && loud > 50) repeatedQuanta++; // silent quanta repeat trivially
+  }
   const spurious = cl.filter((c) => !used.has(c));
-  return { cuts, spurious: spurious.length, spuriousSample: spurious.slice(0, 5).map((c) => ({ ctx: r1(ctxAt(c.start)), types: [...c.types] })) };
+  return { cuts, repeatedQuanta, spurious: spurious.length, spuriousSample: spurious.slice(0, 5).map((c) => ({ ctx: r1(ctxAt(c.start)), types: [...c.types] })) };
 }
 
 // Context time -> performance.now() time the sample is heard, from nearest output timestamp.
@@ -124,7 +133,7 @@ function ctxToPerf(R, c) {
 
 const summary = {};
 const md = [];
-for (const tech of techs) {
+for (const tech of techs.filter((t) => !t.startsWith('C'))) { // C-* are audio-only controls: see repeated-quanta.mjs
   const jf = join(out, `${tech}.json`);
   if (!existsSync(jf)) { console.warn('missing', jf); continue; }
   const R = JSON.parse(readFileSync(jf, 'utf8'));
@@ -146,24 +155,24 @@ for (const tech of techs) {
     video: {
       cutsWithDroppedFrames: vc.filter((c) => c.dropped > 0).length,
       droppedFramesTotal: vc.reduce((s, c) => s + c.dropped, 0),
-      droppedMax: Math.max(0, ...vc.map((c) => c.dropped)),
+      droppedMax: max(vc.map((c) => c.dropped), 0),
       cutsWithFreezeGe1Frame: vc.filter((c) => c.dup >= 1).length,
       dupFramesTotal: vc.reduce((s, c) => s + c.dup, 0),
-      freezeMsMean: r1(mean(freezes)), freezeMsP95: r1(pct(freezes, 0.95)), freezeMsMax: r1(Math.max(...freezes)),
+      freezeMsMean: r1(mean(freezes)), freezeMsP95: r1(pct(freezes, 0.95)), freezeMsMax: r1(max(freezes)),
       cutsWithStrayFrames: vc.filter((c) => c.strayFrames > 0).length, strayFramesTotal: vc.reduce((s, c) => s + c.strayFrames, 0),
       interiorDrops: V.interiorDrops, interiorFrames: V.interiorFrames, interiorFreezes: V.interiorFreezes,
       invalidProbes: V.invalid, probes: V.probes,
-      rafP50: r1(pct(V.rafDt, 0.5)), rafP99: r1(pct(V.rafDt, 0.99)), rafMax: r1(Math.max(...V.rafDt)),
+      rafP50: r1(pct(V.rafDt, 0.5)), rafP99: r1(pct(V.rafDt, 0.99)), rafMax: r1(max(V.rafDt)),
       probeCostMsMean: r1(mean(V.probeCost)), probeCostMsP99: r1(pct(V.probeCost, 0.99)),
     },
     audio: {
       cutsWithClick: ac.filter((c) => c.click).length,
       cutsWithGapGe1ms: ac.filter((c) => c.silenceMs >= 1).length,
-      gapMsMean: r1(mean(ac.map((c) => c.silenceMs))), gapMsP95: r1(pct(ac.map((c) => c.silenceMs), 0.95)), gapMsMax: r1(Math.max(0, ...ac.map((c) => c.silenceMs))),
+      gapMsMean: r1(mean(ac.map((c) => c.silenceMs))), gapMsP95: r1(pct(ac.map((c) => c.silenceMs), 0.95)), gapMsMax: r1(max(ac.map((c) => c.silenceMs), 0)),
       cutsWithOverlap: ac.filter((c) => c.overlap).length,
-      glitchesOutsideCuts: A.spurious, glitchSample: A.spuriousSample, recorderGaps: R.recGaps,
+      glitchesOutsideCuts: A.spurious, repeatedQuanta: A.repeatedQuanta, glitchSample: A.spuriousSample, recorderGaps: R.recGaps,
     },
-    avOffsetAtCutMs: { n: av.length, mean: r1(mean(av)), p5: r1(pct(av, 0.05)), p95: r1(pct(av, 0.95)), absMax: r1(Math.max(...av.map(Math.abs))) },
+    avOffsetAtCutMs: { n: av.length, mean: r1(mean(av)), p5: r1(pct(av, 0.05)), p95: r1(pct(av, 0.95)), absMax: r1(max(av.map(Math.abs))) },
     cpuTotalPctMean: r1(mean(cpu)),
     extra: { maxDriftS: R.maxDrift, rateChanges: R.rateChanges, lateReveals: R.lateReveals, seekNotReady: R.seekNotReady, starvedRafs: R.starvedRafs, prerollFrames: R.prerollFrames, decoded: R.decoded, outputLatency: R.outputLatency, baseLatency: R.baseLatency, notes: R.notes },
   };
@@ -184,6 +193,7 @@ const rows = [
   ['audio gap ms mean / p95 / max', (s) => `${s.audio.gapMsMean} / ${s.audio.gapMsP95} / ${s.audio.gapMsMax}`],
   ['audio: cuts with overlap', (s) => `${s.audio.cutsWithOverlap}`],
   ['audio glitches outside cuts', (s) => `${s.audio.glitchesOutsideCuts}`],
+  ['audio: repeated 128-sample quanta', (s) => `${s.audio.repeatedQuanta}`],
   ['A/V offset at cut ms mean [p5, p95]', (s) => `${s.avOffsetAtCutMs.mean} [${s.avOffsetAtCutMs.p5}, ${s.avOffsetAtCutMs.p95}] (n=${s.avOffsetAtCutMs.n})`],
   ['rAF interval ms p50 / p99 / max', (s) => `${s.video.rafP50} / ${s.video.rafP99} / ${s.video.rafMax}`],
   ['probe cost ms mean / p99', (s) => `${s.video.probeCostMsMean} / ${s.video.probeCostMsP99}`],

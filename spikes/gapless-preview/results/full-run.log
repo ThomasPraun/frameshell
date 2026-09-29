@@ -1,0 +1,39 @@
+martes, 29 de septiembre de 2026, 16:14:44 -03
+16:14  up 6 days,  4:30, 2 users, load averages: 8,82 8,98 7,95
+== A1 (load avg before: 8.82 8.98 7.95)
+[A1] start A1: 201 segments, 200 cuts, program 961.6 s
+[A1] done (end); probes=114991 cuts=201 errors=0
+== A2 (load avg before: 2.75 4.52 6.28)
+[A2] start A2: 201 segments, 200 cuts, program 961.6 s
+[A2] done (end); probes=115491 cuts=200 errors=0
+== B (load avg before: 5.47 4.67 5.08)
+[B] start B: 201 segments, 200 cuts, program 961.6 s
+[B] done (end); probes=115907 cuts=200 errors=0
+== B-bufsrc (load avg before: 3.26 3.39 4.07)
+[B-bufsrc] start B: 201 segments, 200 cuts, program 961.6 s
+[B-bufsrc] done (end); probes=115595 cuts=200 errors=0
+| metric | A1 | A2 | B | B-bufsrc |
+|---|---|---|---|---|
+| cuts measured | 200/200 | 200/200 | 200/200 | 200/200 |
+| program / wall (s) | 961.6 / 968.7 | 961.6 / 963.6 | 961.6 / 961.6 | 961.6 / 961.6 |
+| cuts with dropped frames | 0 (total 0, max 0) | 1 (total 2, max 2) | 0 (total 0, max 0) | 0 (total 0, max 0) |
+| cuts with freeze >= 1 frame | 117 (dup total 126) | 29 (dup total 41) | 4 (dup total 5) | 2 (dup total 7) |
+| freeze at cut ms mean / p95 / max | 21.8 / 41.1 / 133.6 | 6.7 / 50 / 149 | 2.1 / 9.8 / 64.7 | 1.3 / 4.2 / 155.2 |
+| cuts showing wrong (stray) frames | 0 (total 0) | 0 (total 0) | 0 (total 0) | 0 (total 0) |
+| interior drops / freezes (baseline) | 171 of 28445 / 83 | 114 of 28445 / 116 | 7 of 28445 / 18 | 16 of 28445 / 13 |
+| audio: cuts with click | 196 | 0 | 1 | 15 |
+| audio: cuts with gap >= 1 ms | 200 | 0 | 0 | 0 |
+| audio gap ms mean / p95 / max | 60.6 / 69.3 / 90.7 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| audio: cuts with overlap | 0 | 0 | 0 | 4 |
+| audio glitches outside cuts | 0 | 16 | 28 | 0 |
+| audio: repeated 128-sample quanta | 0 | 16 | 29 | 0 |
+| A/V offset at cut ms mean [p5, p95] | -30.4 [-33.5, -27.1] (n=200) | 17.4 [5.1, 24.6] (n=200) | 4 [0.5, 7.8] (n=200) | 3.7 [0.5, 7.6] (n=200) |
+| rAF interval ms p50 / p99 / max | 8.3 / 9.3 / 1870.7 | 8.3 / 9.3 / 191.7 | 8.3 / 10.2 / 98.4 | 8.3 / 9.3 / 188.4 |
+| probe cost ms mean / p99 | 1.6 / 4.1 | 2.3 / 8.9 | 1.2 / 3.7 | 1 / 2.2 |
+| CPU all processes % mean | 2.8 | 3.3 | 2.5 | 1.8 |
+A1 {"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[]} 
+A2 {"maxDriftS":0.07576433333315435,"rateChanges":38,"lateReveals":1,"seekNotReady":0,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[]} 
+B {"starvedRafs":0,"prerollFrames":1296,"decoded":30143,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[{"decoderConfig":{"codec":"avc1.64001f","supported":true,"hw":"prefer-hardware"}}]} 
+B-bufsrc {"starvedRafs":0,"prerollFrames":1296,"decoded":30143,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[{"decoderConfig":{"codec":"avc1.64001f","supported":true,"hw":"prefer-hardware"}}]} 
+martes, 29 de septiembre de 2026, 17:19:26 -03
+17:19  up 6 days,  5:35, 2 users, load averages: 3,12 3,59 4,16

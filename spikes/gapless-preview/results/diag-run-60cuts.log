@@ -1,0 +1,31 @@
+== B-chunked (load avg before: 2.31 3.28 3.43)
+[B-chunked] start B: 61 segments, 60 cuts, program 277.8 s
+[B-chunked] done (end); probes=34212 cuts=60 errors=0
+== B-chunkedself (load avg before: 2.31 2.66 3.09)
+[B-chunkedself] start B: 61 segments, 60 cuts, program 277.8 s
+[B-chunkedself] done (end); probes=33963 cuts=60 errors=0
+| metric | B-chunked | B-chunkedself |
+|---|---|---|
+| cuts measured | 60/60 | 60/60 |
+| program / wall (s) | 277.8 / 277.8 | 277.8 / 277.8 |
+| cuts with dropped frames | 0 (total 0, max 0) | 0 (total 0, max 0) |
+| cuts with freeze >= 1 frame | 4 (dup total 4) | 4 (dup total 4) |
+| freeze at cut ms mean / p95 / max | 5.1 / 25.2 / 32.4 | 3.2 / 17.7 / 27 |
+| cuts showing wrong (stray) frames | 0 (total 0) | 0 (total 0) |
+| interior drops / freezes (baseline) | 3 of 8212 / 15 | 0 of 8212 / 24 |
+| audio: cuts with click | 0 | 0 |
+| audio: cuts with gap >= 1 ms | 0 | 0 |
+| audio gap ms mean / p95 / max | 0 / 0 / 0 | 0 / 0 / 0 |
+| audio: cuts with overlap | 0 | 0 |
+| audio glitches outside cuts | 4 | 0 |
+| audio: repeated 128-sample quanta | 4 | 0 |
+| A/V offset at cut ms mean [p5, p95] | 3.9 [0.3, 7.8] (n=60) | 3.6 [0.3, 8.1] (n=60) |
+| rAF interval ms p50 / p99 / max | 8.1 / 10.2 / 39 | 8.1 / 12.5 / 38 |
+| probe cost ms mean / p99 | 1.9 / 5.9 | 2 / 4 |
+| CPU all processes % mean | 4 | 5 |
+B-chunked {"starvedRafs":0,"prerollFrames":413,"decoded":8747,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[{"decoderConfig":{"codec":"avc1.64001f","supported":true,"hw":"prefer-hardware"}}]} 
+B-chunkedself {"starvedRafs":0,"prerollFrames":413,"decoded":8747,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[{"decoderConfig":{"codec":"avc1.64001f","supported":true,"hw":"prefer-hardware"}}]} 
+B-chunked: 4 repeated quanta in 278 s of non-silent audio
+B-chunkedself: 0 repeated quanta in 278 s of non-silent audio
+B-chunked {"bad":4,"ex":[[572416,572288],[857728,857600],[4618112,4617984],[8150784,8150656]]}
+B-chunkedself {"bad":10,"ex":[[260096,259968],[1107840,1107712],[2370176,2370048],[2376832,2376704],[5520256,5520128],[6186880,6186752],[6396800,6396672],[7434880,7434752],[10025984,10025856],[10709120,10708992]]}

@@ -14,6 +14,7 @@ const q = new URLSearchParams(location.search);
 const TECH = q.get('technique');
 const AUDIO = q.get('audio') || 'worklet';
 const RUN = TECH + (TECH !== 'A1' && AUDIO !== 'worklet' ? '-' + AUDIO : '');
+const CONTROL_S = 300; // C: audio-only control length
 const OUT = q.get('out');
 const MEDIA = q.get('media');
 const SR = 48000;
@@ -100,25 +101,45 @@ function setStart(delayS) {
 // AUDIO=worklet: one AudioWorklet plays pre-faded segment PCM at exact frames (no node churn).
 // AUDIO=bufsrc: one AudioBufferSourceNode per segment, start(t) at the splice time.
 async function setupPlayer() {
-  if (AUDIO !== 'worklet') return;
+  if (AUDIO === 'bufsrc') return;
+  // Chunks carry either pre-faded f32 (AUDIO=worklet) or raw s16 plus segment edges (AUDIO=chunked,
+  // fades applied here, so the main thread never loops over samples).
   const src = `class Prog extends AudioWorkletProcessor {
-    constructor(){super();this.q=[];this.port.onmessage=(e)=>this.q.push(e.data);}
-    process(_i,outputs){const o=outputs[0][0];const f0=currentFrame;
+    constructor(o){super();this.q=[];this.self=o.processorOptions.self;this.n=-1;this.bad=0;this.ex=[];
+      this.port.onmessage=(e)=>this.q.push(e.data);}
+    process(_i,outputs){const o=outputs[0][0];
+      // Diagnostic: global currentFrame vs own quantum counter.
+      if(this.n<0)this.n=currentFrame;else this.n+=128;
+      if(currentFrame!==this.n){this.bad++;if(this.ex.length<10)this.ex.push([this.n,currentFrame]);this.port.postMessage({bad:this.bad,ex:this.ex});}
+      const f0=this.self?this.n:currentFrame;
       while(this.q.length&&this.q[0].at+this.q[0].data.length<=f0)this.q.shift();
       for(const s of this.q){if(s.at>=f0+128)break;
         const a=Math.max(f0,s.at),b=Math.min(f0+128,s.at+s.data.length);
-        for(let f=a;f<b;f++)o[f-f0]+=s.data[f-s.at];}
+        if(s.s16){for(let f=a;f<b;f++){const g=Math.min(1,(f-s.segA)/${FADE},(s.segB-1-f)/${FADE});o[f-f0]+=s.data[f-s.at]/32768*g;}}
+        else for(let f=a;f<b;f++)o[f-f0]+=s.data[f-s.at];}
       return true;}}
     registerProcessor('prog',Prog);`;
   await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
-  player = new AudioWorkletNode(ctx, 'prog', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+  player = new AudioWorkletNode(ctx, 'prog', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { self: AUDIO === 'chunkedself' } });
+  player.port.onmessage = ({ data }) => { R.frameClockMismatches = data; };
   player.connect(master);
 }
 function scheduleAudio(horizon = 2) {
   while (nextAudio < segs.length && startCtx + T(nextAudio) < ctx.currentTime + horizon) {
     const s = segs[nextAudio];
-    const buf = segmentBuffer(s);
     const at = startFrame + s.pF * (SR / FPS);
+    if (AUDIO === 'chunked' || AUDIO === 'chunkedself') {
+      const n = (s.outF - s.inF) * (SR / FPS), CH = SR / 2;
+      for (let i = 0; i < n; i += CH) {
+        const m = Math.min(CH, n - i);
+        const data = new Int16Array(m);
+        fs.readSync(pcmFd, new Uint8Array(data.buffer), 0, m * 2, (s.inF * (SR / FPS) + i) * 2);
+        player.port.postMessage({ at: at + i, data, s16: true, segA: at, segB: at + n }, [data.buffer]);
+      }
+      nextAudio++;
+      continue;
+    }
+    const buf = segmentBuffer(s);
     if (player) {
       const data = buf.getChannelData(0).slice();
       player.port.postMessage({ at, data }, [data.buffer]);
@@ -412,6 +433,26 @@ async function runB() {
   requestAnimationFrame(loop);
 }
 
+// C: audio-only control, no video, no messages. Isolates repeated render quanta to the graph.
+//   C-osc    native OscillatorNode 220 Hz -> recorder
+//   C-wsine  AudioWorklet computing the same sine -> recorder
+async function runC() {
+  let node;
+  if (AUDIO === 'wsine') {
+    const src = `class Sine extends AudioWorkletProcessor { process(_i,o){const c=o[0][0];for(let i=0;i<c.length;i++)c[i]=0.354*Math.sin(2*Math.PI*220*(currentFrame+i)/sampleRate);return true;} } registerProcessor('sine',Sine);`;
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+    node = new AudioWorkletNode(ctx, 'sine', { numberOfInputs: 0, outputChannelCount: [1] });
+  } else {
+    node = ctx.createOscillator(); node.frequency.value = 220;
+    const g = ctx.createGain(); g.gain.value = 0.354; node.connect(g); node.start(); node = g;
+  }
+  node.connect(master);
+  const t0 = performance.now();
+  const loop = () => { if (finished) return; hud.textContent = `C-${AUDIO} ${((performance.now() - t0) / 1000).toFixed(0)}/${CONTROL_S} s`; requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  setTimeout(() => finish('end'), CONTROL_S * 1000);
+}
+
 (async () => {
   try {
     await setupRecorder();
@@ -421,6 +462,7 @@ async function runB() {
     if (TECH === 'A1') await runA1();
     else if (TECH === 'A2') await runA2();
     else if (TECH === 'B') await runB();
+    else if (TECH === 'C') await runC();
     else throw new Error('unknown technique ' + TECH);
     // Watchdog: program length + 60 s.
     setTimeout(() => finish('watchdog'), (TOTAL_FRAMES / FPS + 60) * 1000);

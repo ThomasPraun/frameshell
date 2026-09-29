@@ -17,7 +17,10 @@ npm run measure   # plays the full cut list with A1, A2, B, B-bufsrc (one visibl
 ```
 
 - Quick smoke run: `node scripts/run-all.mjs --cuts=20` (first 20 cuts only).
-- One run: `node scripts/run-all.mjs B` (ids: `A1`, `A2`, `B`, `B-bufsrc`).
+- One run: `node scripts/run-all.mjs B` (ids: `A1`, `A2`, `B`, `B-bufsrc`, `B-chunked`, `B-chunkedself`, `C-osc`, `C-wsine`).
+- Every run used in the ADR: `node scripts/run-all.mjs A1 A2 B B-bufsrc B-chunked B-chunkedself C-osc C-wsine` (~1 h 50 min).
+- Sample-exact audio check (audio-clocked runs): `node scripts/audio-residual.mjs A2 B B-bufsrc B-chunkedself`.
+- Repeated render quanta: `node scripts/repeated-quanta.mjs C-osc C-wsine A1 A2 B B-bufsrc B-chunked B-chunkedself`.
 - Barcode sanity check on the proxy: `node scripts/check-barcode.mjs 0 1 777`.
 - Re-analyze existing raw logs: `npm run analyze` (writes `out/summary.md`, `out/summary.json`, `out/<T>.cuts.json`).
 - Keep the window visible and the machine otherwise idle: numbers are real-time measurements.
@@ -42,6 +45,9 @@ npm run measure   # plays the full cut list with A1, A2, B, B-bufsrc (one visibl
 | A2 | same double buffer, but the idle element is pre-seeked 5 frames before the in-point and started hidden 5 frames early to absorb `play()` latency; revealed once it presents the in-frame; outgoing element pauses on its last frame; ±3 % `playbackRate` nudges with hysteresis keep it on the audio clock | `AudioContext` | PCM sidecar, one `AudioWorklet` writes pre-faded (2 ms) segment samples at exact sample frames |
 | B | WebCodecs `VideoDecoder` (hardware) fed from the mp4box sample table; decodes from the keyframe before each in-point, discards pre-roll, keeps up to 12 frames ready, draws the `VideoFrame` for the current program frame to a canvas | `AudioContext` | same worklet as A2 |
 | B-bufsrc | same as B | `AudioContext` | one `AudioBufferSourceNode` per segment, `start(t)` at the splice (control for the worklet) |
+| B-chunked | same as B | `AudioContext` | worklet fed raw s16 in 0.5 s messages, fades applied in the worklet (main thread never loops over samples) |
+| B-chunkedself | same as B | `AudioContext` | as B-chunked, but the worklet keeps its own sample counter instead of reading the global `currentFrame` (recommended shape) |
+| C-osc, C-wsine | none | - | 300 s audio-only controls: native `OscillatorNode`, and a worklet computing the sine without messages |
 
 ## What is measured and how
 
@@ -57,4 +63,20 @@ npm run measure   # plays the full cut list with A1, A2, B, B-bufsrc (one visibl
 - A/V offset at a cut: time the first new video frame is sampled minus the time the audio splice
   is heard (`AudioContext.getOutputTimestamp`). Approximate: rAF time precedes photons by about
   one vsync.
+- Repeated quanta: non-silent 128-sample render quanta identical to the previous quantum
+  (`scripts/repeated-quanta.mjs`; also a row in the summary). The worklet also reports how often
+  the global `currentFrame` differed from its own quantum counter (`frameClockMismatches` in `out/<run>.json`).
 - CPU: `app.getAppMetrics()` every 2 s, summed over all Electron processes.
+
+## Recorded results (this machine)
+
+`results/` keeps the console logs of the runs behind the ADR (raw `out/` data is gitignored):
+
+- `summary.md`: A1, A2, B, B-bufsrc, B-chunkedself on the full 200-cut list.
+- `full-run.log` (A1, A2, B, B-bufsrc), `chunked-run.log` (B-chunked), `final-run.log`
+  (B-chunkedself, plus sample-exact residual and `currentFrame` mismatch counts).
+- `control-run.log`: C-osc, C-wsine and repeated-quanta counts for every run.
+- `diag-run-60cuts.log`: B-chunked vs B-chunkedself on the first 60 cuts (`currentFrame` diagnosis).
+  This run overwrote the full-length `out/B-chunked.*` files, so the full B-chunked numbers live
+  only in `chunked-run.log`.
+- `fixture.log`: fixture generation times and sizes.
