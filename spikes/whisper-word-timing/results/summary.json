@@ -1,0 +1,2914 @@
+{
+  "reference": "fw-f32-cpu",
+  "params": {
+    "DTW_BIAS": 0.14,
+    "PAUSE_MIN": 0.2,
+    "SNAP_WIN": 0.1,
+    "CLIP_TOL": 0.02,
+    "MATCH_WIN": 1,
+    "AUDIBLE_DB": 40
+  },
+  "audio": {
+    "original": {
+      "floorDb": -89.7,
+      "speechDb": -20.7,
+      "thrDb": -60.7,
+      "pauses": 201
+    },
+    "variant": {
+      "floorDb": -60,
+      "speechDb": -20.8,
+      "thrDb": -50,
+      "pauses": 207
+    }
+  },
+  "runs": {
+    "fw-f32-cpu__original": {
+      "run": "fw-f32-cpu",
+      "audio": "original",
+      "words": 1450,
+      "audioSec": 587,
+      "wallSec": 720.5,
+      "rtf": 1.227,
+      "engineSec": 719.2,
+      "load1": [
+        3.6,
+        5.3
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 200,
+                "mean": 88,
+                "p95": 150,
+                "worst": 260,
+                "signedMean": -87
+              },
+              "start": {
+                "n": 201,
+                "mean": 172,
+                "p95": 460,
+                "worst": 610,
+                "signedMean": 99
+              },
+              "endClipPct": 92,
+              "startClipPct": 89.6,
+              "endMissPct": 0.5,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 42.3,
+              "startClipBeyondSnapPct": 55.2
+            },
+            "allBoundaries": {
+              "n": 1449,
+              "insideSpeechPct": 97,
+              "insideAfterSnapPct": 79.9,
+              "snapGainDbMean": 20.4,
+              "snapShift": {
+                "n": 1449,
+                "mean": 69,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 14
+              }
+            }
+          }
+        }
+      },
+      "werVsWcppF16": 3.06
+    },
+    "fw-f32-cpu__variant": {
+      "run": "fw-f32-cpu",
+      "audio": "variant",
+      "words": 1446,
+      "audioSec": 605.7,
+      "wallSec": 630.9,
+      "rtf": 1.041,
+      "engineSec": 629.7,
+      "load1": [
+        5.3,
+        2.9
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": {
+                "n": 204,
+                "mean": 64,
+                "p95": 130,
+                "worst": 460,
+                "signedMean": -55
+              },
+              "start": {
+                "n": 205,
+                "mean": 163,
+                "p95": 460,
+                "worst": 610,
+                "signedMean": 104
+              },
+              "endClipPct": 77.7,
+              "startClipPct": 91.3,
+              "endMissPct": 1,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 18.9,
+              "startClipBeyondSnapPct": 53.9
+            },
+            "allBoundaries": {
+              "n": 1445,
+              "insideSpeechPct": 94.9,
+              "insideAfterSnapPct": 54.4,
+              "snapGainDbMean": 17.8,
+              "snapShift": {
+                "n": 1445,
+                "mean": 68,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 14
+              }
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 2.34,
+            "startDrift": {
+              "n": 1416,
+              "mean": 20,
+              "p95": 30,
+              "worst": 1520,
+              "signedMean": 0
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 1,
+              "text": "a"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 1,
+              "text": "en"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 7,
+              "text": "preciso es poseerla en el nuestro lo",
+              "srcWords": 6,
+              "extraWords": 6,
+              "windowText": "y estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 1,
+              "text": "al"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        }
+      },
+      "werVsWcppF16": 2.59
+    },
+    "fw-int8-cpu__original": {
+      "run": "fw-int8-cpu",
+      "audio": "original",
+      "words": 1451,
+      "audioSec": 587,
+      "wallSec": 202.3,
+      "rtf": 0.345,
+      "engineSec": 201.4,
+      "load1": [
+        3.1,
+        7.6
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 200,
+                "mean": 89,
+                "p95": 160,
+                "worst": 240,
+                "signedMean": -88
+              },
+              "start": {
+                "n": 201,
+                "mean": 173,
+                "p95": 460,
+                "worst": 610,
+                "signedMean": 89
+              },
+              "endClipPct": 92,
+              "startClipPct": 88.1,
+              "endMissPct": 0.5,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 44.3,
+              "startClipBeyondSnapPct": 55.2
+            },
+            "allBoundaries": {
+              "n": 1450,
+              "insideSpeechPct": 96.6,
+              "insideAfterSnapPct": 80.3,
+              "snapGainDbMean": 20.2,
+              "snapShift": {
+                "n": 1450,
+                "mean": 69,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 14
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1447,
+              "mean": 10,
+              "p95": 20,
+              "worst": 1780,
+              "signedMean": 2
+            },
+            "end": {
+              "n": 1447,
+              "mean": 4,
+              "p95": 20,
+              "worst": 1460,
+              "signedMean": 1
+            }
+          }
+        }
+      },
+      "werVsRef": 0.28,
+      "werVsWcppF16": 2.92
+    },
+    "wcpp-f16-cpu__original": {
+      "run": "wcpp-f16-cpu",
+      "audio": "original",
+      "words": 1418,
+      "audioSec": 587,
+      "wallSec": 152.2,
+      "rtf": 0.259,
+      "engineSec": 151.9,
+      "metalCompileSec": 0.7,
+      "load1": [
+        4,
+        5.6
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 198,
+                "mean": 135,
+                "p95": 500,
+                "worst": 940,
+                "signedMean": -20
+              },
+              "start": {
+                "n": 198,
+                "mean": 167,
+                "p95": 410,
+                "worst": 870,
+                "signedMean": 20
+              },
+              "endClipPct": 54.2,
+              "startClipPct": 48.3,
+              "endMissPct": 1.5,
+              "startMissPct": 1.5,
+              "endClipBeyondSnapPct": 21.4,
+              "startClipBeyondSnapPct": 34.3
+            },
+            "allBoundaries": {
+              "n": 1417,
+              "insideSpeechPct": 78.5,
+              "insideAfterSnapPct": 61.3,
+              "snapGainDbMean": 17.7,
+              "snapShift": {
+                "n": 1417,
+                "mean": 66,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 8
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1408,
+              "mean": 489,
+              "p95": 1640,
+              "worst": 9120,
+              "signedMean": -310
+            },
+            "end": {
+              "n": 1408,
+              "mean": 466,
+              "p95": 1600,
+              "worst": 8300,
+              "signedMean": -275
+            }
+          }
+        }
+      },
+      "werVsRef": 2.97,
+      "werVsWcppF16": 4.32
+    },
+    "wcpp-f16-metal-dtw-vad__original": {
+      "run": "wcpp-f16-metal-dtw-vad",
+      "audio": "original",
+      "words": 1421,
+      "audioSec": 587,
+      "wallSec": 54.6,
+      "rtf": 0.093,
+      "engineSec": 54.1,
+      "metalCompileSec": 0.6,
+      "load1": [
+        2.4,
+        4.6
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 199,
+              "end": {
+                "n": 199,
+                "mean": 78,
+                "p95": 150,
+                "worst": 890,
+                "signedMean": -60
+              },
+              "start": {
+                "n": 198,
+                "mean": 102,
+                "p95": 400,
+                "worst": 640,
+                "signedMean": 0
+              },
+              "endClipPct": 71.9,
+              "startClipPct": 50.3,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 25.1,
+              "startClipBeyondSnapPct": 14.1
+            },
+            "allBoundaries": {
+              "n": 1420,
+              "insideSpeechPct": 84.8,
+              "insideAfterSnapPct": 67.7,
+              "snapGainDbMean": 18.9,
+              "snapShift": {
+                "n": 1420,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 7
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1416,
+              "mean": 263,
+              "p95": 650,
+              "worst": 9020,
+              "signedMean": -150
+            },
+            "end": {
+              "n": 1416,
+              "mean": 199,
+              "p95": 490,
+              "worst": 8990,
+              "signedMean": -177
+            }
+          }
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": null,
+              "start": {
+                "n": 164,
+                "mean": 117,
+                "p95": 280,
+                "worst": 410,
+                "signedMean": 16
+              },
+              "endClipPct": null,
+              "startClipPct": 39.5,
+              "endMissPct": null,
+              "startMissPct": 18,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 21
+            },
+            "allBoundaries": {
+              "n": 1420,
+              "insideSpeechPct": 75.4,
+              "insideAfterSnapPct": 62.8,
+              "snapGainDbMean": 15.7,
+              "snapShift": {
+                "n": 1420,
+                "mean": 61,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 7
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1416,
+              "mean": 44892,
+              "p95": 82640,
+              "worst": 86200,
+              "signedMean": -44891
+            },
+            "end": null
+          }
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": null,
+              "start": {
+                "n": 165,
+                "mean": 120,
+                "p95": 310,
+                "worst": 890,
+                "signedMean": 8
+              },
+              "endClipPct": null,
+              "startClipPct": 34.5,
+              "endMissPct": null,
+              "startMissPct": 17.5,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 22.5
+            },
+            "allBoundaries": {
+              "n": 1420,
+              "insideSpeechPct": 75.5,
+              "insideAfterSnapPct": 61.8,
+              "snapGainDbMean": 16.4,
+              "snapShift": {
+                "n": 1420,
+                "mean": 62,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 7
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1416,
+              "mean": 45031,
+              "p95": 82780,
+              "worst": 86340,
+              "signedMean": -45031
+            },
+            "end": null
+          }
+        }
+      },
+      "werVsRef": 2.34,
+      "werVsWcppF16": 4.04
+    },
+    "wcpp-f16-metal-dtw-vad__variant": {
+      "run": "wcpp-f16-metal-dtw-vad",
+      "audio": "variant",
+      "words": 1448,
+      "audioSec": 605.7,
+      "wallSec": 54.2,
+      "rtf": 0.089,
+      "engineSec": 53.8,
+      "metalCompileSec": 0.6,
+      "load1": [
+        4.6,
+        3.6
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 205,
+              "end": {
+                "n": 205,
+                "mean": 52,
+                "p95": 120,
+                "worst": 240,
+                "signedMean": -39
+              },
+              "start": {
+                "n": 205,
+                "mean": 93,
+                "p95": 360,
+                "worst": 820,
+                "signedMean": 21
+              },
+              "endClipPct": 65.9,
+              "startClipPct": 47.3,
+              "endMissPct": 0,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 9.8,
+              "startClipBeyondSnapPct": 13.2
+            },
+            "allBoundaries": {
+              "n": 1447,
+              "insideSpeechPct": 80,
+              "insideAfterSnapPct": 46.4,
+              "snapGainDbMean": 15.1,
+              "snapShift": {
+                "n": 1447,
+                "mean": 61,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 4
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1427,
+              "mean": 218,
+              "p95": 650,
+              "worst": 4480,
+              "signedMean": -93
+            },
+            "end": {
+              "n": 1427,
+              "mean": 145,
+              "p95": 420,
+              "worst": 4480,
+              "signedMean": -123
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 2.11,
+            "startDrift": {
+              "n": 1410,
+              "mean": 163,
+              "p95": 540,
+              "worst": 8800,
+              "signedMean": 71
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 2,
+              "text": "¿A qué"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro,",
+              "srcWords": 8,
+              "extraWords": 7,
+              "windowText": "convencido. Para hacer pasar la verdad a su espíritu, preciso es poseerla en el nuestro, preciso es poseerla en el nuestro, lo cual solo puede alcanzarse tanto por parte del que debe transmitirla, como por parte de los demás, independientemente de la iluminación de",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 1,
+              "text": "al"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": null,
+              "start": {
+                "n": 166,
+                "mean": 116,
+                "p95": 280,
+                "worst": 420,
+                "signedMean": 5
+              },
+              "endClipPct": null,
+              "startClipPct": 37.4,
+              "endMissPct": null,
+              "startMissPct": 19.4,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 19.4
+            },
+            "allBoundaries": {
+              "n": 1447,
+              "insideSpeechPct": 68.1,
+              "insideAfterSnapPct": 38.7,
+              "snapGainDbMean": 12.5,
+              "snapShift": {
+                "n": 1447,
+                "mean": 58,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 3
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1427,
+              "mean": 53372,
+              "p95": 98440,
+              "worst": 102180,
+              "signedMean": -53370
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 2.11,
+            "startDrift": {
+              "n": 1374,
+              "mean": 6186,
+              "p95": 13050,
+              "worst": 13130,
+              "signedMean": -6167
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 9,
+              "text": "por medio del conocimiento y convicción de la palabra"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 13,
+              "text": "cautivar el corazón con las excitaciones de la sensibilidad, he aquí lo que"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 7,
+              "text": "relativo y lo absoluto, tiene constantemente delante",
+              "srcWords": 8,
+              "extraWords": 3,
+              "windowText": "aún de lo bello, del ser supremo, de las criaturas y sus leyes, de lo finito y lo infinito, de lo contingente y lo necesario, de lo relativo y lo absoluto, tiene constantemente delante una idea que exponer, desarrollar y esclarecer, debiendo el conocimiento de esta idea que trata de infundir a sus discípulos, servir para",
+              "retakeInText": false
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 16,
+              "text": "en sus consecuencias y confirmar su teoría por medio de aplicaciones a las artes mecánicas, a"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": null,
+              "start": {
+                "n": 166,
+                "mean": 123,
+                "p95": 350,
+                "worst": 460,
+                "signedMean": -27
+              },
+              "endClipPct": null,
+              "startClipPct": 31.6,
+              "endMissPct": null,
+              "startMissPct": 19.4,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 16.5
+            },
+            "allBoundaries": {
+              "n": 1447,
+              "insideSpeechPct": 68.1,
+              "insideAfterSnapPct": 39.6,
+              "snapGainDbMean": 12.7,
+              "snapShift": {
+                "n": 1447,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 6
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1427,
+              "mean": 53512,
+              "p95": 98580,
+              "worst": 102320,
+              "signedMean": -53510
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 2.11,
+            "startDrift": {
+              "n": 1375,
+              "mean": 6179,
+              "p95": 13050,
+              "worst": 13130,
+              "signedMean": -6160
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 8,
+              "text": "medio del conocimiento y convicción de la palabra"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 13,
+              "text": "cautivar el corazón con las excitaciones de la sensibilidad, he aquí lo que"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 7,
+              "text": "y lo absoluto, tiene constantemente delante una",
+              "srcWords": 8,
+              "extraWords": 3,
+              "windowText": "de lo bello, del ser supremo, de las criaturas y sus leyes, de lo finito y lo infinito, de lo contingente y lo necesario, de lo relativo y lo absoluto, tiene constantemente delante una idea que exponer, desarrollar y esclarecer, debiendo el conocimiento de esta idea que trata de infundir a sus discípulos, servir para",
+              "retakeInText": false
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 16,
+              "text": "en sus consecuencias y confirmar su teoría por medio de aplicaciones a las artes mecánicas, a"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        }
+      },
+      "werVsRef": 2.28,
+      "werVsWcppF16": 2.52
+    },
+    "wcpp-f16-metal-dtw__original": {
+      "run": "wcpp-f16-metal-dtw",
+      "audio": "original",
+      "words": 1445,
+      "audioSec": 587,
+      "wallSec": 59.5,
+      "rtf": 0.101,
+      "engineSec": 59.2,
+      "metalCompileSec": 0.5,
+      "load1": [
+        5.7,
+        4.1
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": {
+                "n": 199,
+                "mean": 190,
+                "p95": 610,
+                "worst": 990,
+                "signedMean": 4
+              },
+              "start": {
+                "n": 198,
+                "mean": 160,
+                "p95": 520,
+                "worst": 850,
+                "signedMean": 22
+              },
+              "endClipPct": 48,
+              "startClipPct": 46,
+              "endMissPct": 0.5,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": 33,
+              "startClipBeyondSnapPct": 31.5
+            },
+            "allBoundaries": {
+              "n": 1444,
+              "insideSpeechPct": 78.8,
+              "insideAfterSnapPct": 65.1,
+              "snapGainDbMean": 16.9,
+              "snapShift": {
+                "n": 1444,
+                "mean": 62,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 7
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1436,
+              "mean": 418,
+              "p95": 1250,
+              "worst": 5140,
+              "signedMean": 3
+            },
+            "end": {
+              "n": 1436,
+              "mean": 413,
+              "p95": 1180,
+              "worst": 5140,
+              "signedMean": 29
+            }
+          }
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 199,
+              "end": null,
+              "start": {
+                "n": 199,
+                "mean": 147,
+                "p95": 320,
+                "worst": 540,
+                "signedMean": 147
+              },
+              "endClipPct": null,
+              "startClipPct": 100,
+              "endMissPct": null,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 65.3
+            },
+            "allBoundaries": {
+              "n": 1444,
+              "insideSpeechPct": 99.7,
+              "insideAfterSnapPct": 85.6,
+              "snapGainDbMean": 19.4,
+              "snapShift": {
+                "n": 1444,
+                "mean": 64,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -1
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1436,
+              "mean": 290,
+              "p95": 720,
+              "worst": 2940,
+              "signedMean": 283
+            },
+            "end": null
+          }
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": null,
+              "start": {
+                "n": 200,
+                "mean": 57,
+                "p95": 170,
+                "worst": 400,
+                "signedMean": 18
+              },
+              "endClipPct": null,
+              "startClipPct": 39,
+              "endMissPct": null,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 14
+            },
+            "allBoundaries": {
+              "n": 1444,
+              "insideSpeechPct": 90.4,
+              "insideAfterSnapPct": 74.2,
+              "snapGainDbMean": 18.7,
+              "snapShift": {
+                "n": 1444,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -5
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1436,
+              "mean": 161,
+              "p95": 580,
+              "worst": 3080,
+              "signedMean": 143
+            },
+            "end": null
+          }
+        }
+      },
+      "werVsRef": 1.17,
+      "werVsWcppF16": 2.72
+    },
+    "wcpp-f16-metal-dtw__variant": {
+      "run": "wcpp-f16-metal-dtw",
+      "audio": "variant",
+      "words": 1434,
+      "audioSec": 605.7,
+      "wallSec": 65.8,
+      "rtf": 0.109,
+      "engineSec": 65.4,
+      "metalCompileSec": 0.5,
+      "load1": [
+        4.1,
+        2.4
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": {
+                "n": 206,
+                "mean": 162,
+                "p95": 460,
+                "worst": 730,
+                "signedMean": 7
+              },
+              "start": {
+                "n": 205,
+                "mean": 163,
+                "p95": 490,
+                "worst": 740,
+                "signedMean": -9
+              },
+              "endClipPct": 45.1,
+              "startClipPct": 43.7,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 28.6,
+              "startClipBeyondSnapPct": 30.1
+            },
+            "allBoundaries": {
+              "n": 1433,
+              "insideSpeechPct": 72.4,
+              "insideAfterSnapPct": 39.9,
+              "snapGainDbMean": 13.4,
+              "snapShift": {
+                "n": 1433,
+                "mean": 61,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 5
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1384,
+              "mean": 500,
+              "p95": 1360,
+              "worst": 6280,
+              "signedMean": -142
+            },
+            "end": {
+              "n": 1384,
+              "mean": 503,
+              "p95": 1390,
+              "worst": 6280,
+              "signedMean": -98
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 4.36,
+            "startDrift": {
+              "n": 1371,
+              "mean": 514,
+              "p95": 1510,
+              "worst": 4080,
+              "signedMean": -103
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 5,
+              "text": "sagrado a qué debe aspirar"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 1,
+              "text": "palabra"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 8,
+              "text": "en el nuestro lo cual sólo puede alcanzarse",
+              "srcWords": 8,
+              "extraWords": 0,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": false
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 2,
+              "text": "mejores al"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 2,
+              "text": "más distingue"
+            }
+          ]
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 205,
+              "end": null,
+              "start": {
+                "n": 203,
+                "mean": 147,
+                "p95": 310,
+                "worst": 910,
+                "signedMean": 140
+              },
+              "endClipPct": null,
+              "startClipPct": 98.5,
+              "endMissPct": null,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 60.5
+            },
+            "allBoundaries": {
+              "n": 1433,
+              "insideSpeechPct": 97.4,
+              "insideAfterSnapPct": 57.8,
+              "snapGainDbMean": 17.8,
+              "snapShift": {
+                "n": 1433,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 0
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1384,
+              "mean": 303,
+              "p95": 720,
+              "worst": 3360,
+              "signedMean": 273
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 4.36,
+            "startDrift": {
+              "n": 1388,
+              "mean": 21,
+              "p95": 30,
+              "worst": 3640,
+              "signedMean": 2
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 0,
+              "text": "",
+              "srcWords": 6,
+              "extraWords": 0,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": false
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 205,
+              "end": null,
+              "start": {
+                "n": 203,
+                "mean": 66,
+                "p95": 170,
+                "worst": 860,
+                "signedMean": 16
+              },
+              "endClipPct": null,
+              "startClipPct": 38,
+              "endMissPct": null,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 13.2
+            },
+            "allBoundaries": {
+              "n": 1433,
+              "insideSpeechPct": 84.4,
+              "insideAfterSnapPct": 48.7,
+              "snapGainDbMean": 15.6,
+              "snapShift": {
+                "n": 1433,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -3
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1384,
+              "mean": 174,
+              "p95": 580,
+              "worst": 3500,
+              "signedMean": 133
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 4.36,
+            "startDrift": {
+              "n": 1388,
+              "mean": 21,
+              "p95": 30,
+              "worst": 3640,
+              "signedMean": 2
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 0,
+              "text": "",
+              "srcWords": 6,
+              "extraWords": 0,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": false
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        }
+      },
+      "werVsRef": 4.43,
+      "werVsWcppF16": 5.11
+    },
+    "wcpp-f16-metal__original": {
+      "run": "wcpp-f16-metal",
+      "audio": "original",
+      "words": 1436,
+      "audioSec": 587,
+      "wallSec": 48.8,
+      "rtf": 0.083,
+      "engineSec": 48.6,
+      "metalCompileSec": 0.7,
+      "load1": [
+        3.7,
+        3.3
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 201,
+                "mean": 110,
+                "p95": 360,
+                "worst": 740,
+                "signedMean": -14
+              },
+              "start": {
+                "n": 200,
+                "mean": 166,
+                "p95": 460,
+                "worst": 910,
+                "signedMean": 28
+              },
+              "endClipPct": 60.2,
+              "startClipPct": 50.2,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 19.9,
+              "startClipBeyondSnapPct": 34.3
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 78.5,
+              "insideAfterSnapPct": 60.6,
+              "snapGainDbMean": 18.1,
+              "snapShift": {
+                "n": 1435,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 11
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1417,
+              "mean": 387,
+              "p95": 1280,
+              "worst": 5140,
+              "signedMean": -247
+            },
+            "end": {
+              "n": 1417,
+              "mean": 360,
+              "p95": 1210,
+              "worst": 5140,
+              "signedMean": -215
+            }
+          }
+        }
+      },
+      "werVsRef": 3.03
+    },
+    "wcpp-f16-metal__variant": {
+      "run": "wcpp-f16-metal",
+      "audio": "variant",
+      "words": 1428,
+      "audioSec": 605.7,
+      "wallSec": 54,
+      "rtf": 0.089,
+      "engineSec": 53.7,
+      "metalCompileSec": 0.6,
+      "load1": [
+        3.3,
+        5.7
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": {
+                "n": 205,
+                "mean": 63,
+                "p95": 170,
+                "worst": 870,
+                "signedMean": -23
+              },
+              "start": {
+                "n": 206,
+                "mean": 217,
+                "p95": 530,
+                "worst": 870,
+                "signedMean": 49
+              },
+              "endClipPct": 57.8,
+              "startClipPct": 57.3,
+              "endMissPct": 0.5,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 8.3,
+              "startClipBeyondSnapPct": 43.7
+            },
+            "allBoundaries": {
+              "n": 1427,
+              "insideSpeechPct": 78.5,
+              "insideAfterSnapPct": 42.7,
+              "snapGainDbMean": 14.9,
+              "snapShift": {
+                "n": 1427,
+                "mean": 63,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 15
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1413,
+              "mean": 282,
+              "p95": 1080,
+              "worst": 7820,
+              "signedMean": -149
+            },
+            "end": {
+              "n": 1413,
+              "mean": 242,
+              "p95": 830,
+              "worst": 7760,
+              "signedMean": -100
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 5.01,
+            "startDrift": {
+              "n": 1376,
+              "mean": 312,
+              "p95": 990,
+              "worst": 5960,
+              "signedMean": 145
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 3,
+              "text": "elocuciones de este"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 7,
+              "text": "es poseerla en el nuestro lo cual",
+              "srcWords": 7,
+              "extraWords": 7,
+              "windowText": "y estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual solo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 3,
+              "text": "al propio tiempo"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 2,
+              "text": "que más"
+            }
+          ]
+        }
+      },
+      "werVsRef": 2.56
+    },
+    "wcpp-q5_0-cpu__original": {
+      "run": "wcpp-q5_0-cpu",
+      "audio": "original",
+      "words": 1429,
+      "audioSec": 587,
+      "wallSec": 135.6,
+      "rtf": 0.231,
+      "engineSec": 135.4,
+      "metalCompileSec": 0.7,
+      "load1": [
+        5.6,
+        7.7
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": {
+                "n": 200,
+                "mean": 75,
+                "p95": 150,
+                "worst": 580,
+                "signedMean": -50
+              },
+              "start": {
+                "n": 200,
+                "mean": 100,
+                "p95": 340,
+                "worst": 480,
+                "signedMean": -5
+              },
+              "endClipPct": 72.5,
+              "startClipPct": 40,
+              "endMissPct": 0,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 24,
+              "startClipBeyondSnapPct": 17
+            },
+            "allBoundaries": {
+              "n": 1428,
+              "insideSpeechPct": 78.5,
+              "insideAfterSnapPct": 60,
+              "snapGainDbMean": 18.8,
+              "snapShift": {
+                "n": 1428,
+                "mean": 64,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 3
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1418,
+              "mean": 288,
+              "p95": 760,
+              "worst": 6720,
+              "signedMean": -168
+            },
+            "end": {
+              "n": 1418,
+              "mean": 235,
+              "p95": 630,
+              "worst": 6720,
+              "signedMean": -209
+            }
+          }
+        }
+      },
+      "werVsRef": 2.28,
+      "werVsWcppF16": 3.69
+    },
+    "wcpp-q5_0-metal-dtw__original": {
+      "run": "wcpp-q5_0-metal-dtw",
+      "audio": "original",
+      "words": 1433,
+      "audioSec": 587,
+      "wallSec": 60.9,
+      "rtf": 0.104,
+      "engineSec": 60.6,
+      "metalCompileSec": 0.6,
+      "load1": [
+        3.3,
+        3.8
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": {
+                "n": 198,
+                "mean": 82,
+                "p95": 280,
+                "worst": 900,
+                "signedMean": -32
+              },
+              "start": {
+                "n": 198,
+                "mean": 198,
+                "p95": 530,
+                "worst": 900,
+                "signedMean": 5
+              },
+              "endClipPct": 62,
+              "startClipPct": 49.5,
+              "endMissPct": 1,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": 17,
+              "startClipBeyondSnapPct": 36
+            },
+            "allBoundaries": {
+              "n": 1432,
+              "insideSpeechPct": 82.1,
+              "insideAfterSnapPct": 62.8,
+              "snapGainDbMean": 18.6,
+              "snapShift": {
+                "n": 1432,
+                "mean": 66,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 17
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1423,
+              "mean": 262,
+              "p95": 940,
+              "worst": 7200,
+              "signedMean": -136
+            },
+            "end": {
+              "n": 1423,
+              "mean": 236,
+              "p95": 800,
+              "worst": 6790,
+              "signedMean": -105
+            }
+          }
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 199,
+              "end": null,
+              "start": {
+                "n": 198,
+                "mean": 152,
+                "p95": 320,
+                "worst": 1000,
+                "signedMean": 133
+              },
+              "endClipPct": null,
+              "startClipPct": 98.5,
+              "endMissPct": null,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 63.8
+            },
+            "allBoundaries": {
+              "n": 1432,
+              "insideSpeechPct": 99.8,
+              "insideAfterSnapPct": 85.8,
+              "snapGainDbMean": 19.6,
+              "snapShift": {
+                "n": 1432,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 0
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1423,
+              "mean": 293,
+              "p95": 720,
+              "worst": 4880,
+              "signedMean": 283
+            },
+            "end": null
+          }
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": null,
+              "start": {
+                "n": 199,
+                "mean": 65,
+                "p95": 180,
+                "worst": 1000,
+                "signedMean": 16
+              },
+              "endClipPct": null,
+              "startClipPct": 34.5,
+              "endMissPct": null,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 13
+            },
+            "allBoundaries": {
+              "n": 1432,
+              "insideSpeechPct": 89.9,
+              "insideAfterSnapPct": 73.9,
+              "snapGainDbMean": 18.7,
+              "snapShift": {
+                "n": 1432,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -5
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1423,
+              "mean": 163,
+              "p95": 580,
+              "worst": 5020,
+              "signedMean": 143
+            },
+            "end": null
+          }
+        }
+      },
+      "werVsRef": 1.86,
+      "werVsWcppF16": 3.41
+    },
+    "wcpp-q5_0-metal-dtw__variant": {
+      "run": "wcpp-q5_0-metal-dtw",
+      "audio": "variant",
+      "words": 1436,
+      "audioSec": 605.7,
+      "wallSec": 69.7,
+      "rtf": 0.115,
+      "engineSec": 69.5,
+      "metalCompileSec": 0.7,
+      "load1": [
+        3.8,
+        4
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 207,
+              "end": {
+                "n": 207,
+                "mean": 178,
+                "p95": 520,
+                "worst": 820,
+                "signedMean": 21
+              },
+              "start": {
+                "n": 206,
+                "mean": 162,
+                "p95": 450,
+                "worst": 680,
+                "signedMean": 4
+              },
+              "endClipPct": 43,
+              "startClipPct": 42.5,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 28,
+              "startClipBeyondSnapPct": 29.5
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 72.5,
+              "insideAfterSnapPct": 42.6,
+              "snapGainDbMean": 13.1,
+              "snapShift": {
+                "n": 1435,
+                "mean": 60,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 3
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1421,
+              "mean": 405,
+              "p95": 1130,
+              "worst": 5980,
+              "signedMean": -44
+            },
+            "end": {
+              "n": 1421,
+              "mean": 406,
+              "p95": 1120,
+              "worst": 5980,
+              "signedMean": -11
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 3.42,
+            "startDrift": {
+              "n": 1385,
+              "mean": 401,
+              "p95": 1130,
+              "worst": 6040,
+              "signedMean": 106
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 7,
+              "text": "el orador sagrado a qué debe aspirar"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 2,
+              "text": "palabra en"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 9,
+              "text": "nuestro preciso es poseerla en el nuestro lo cual",
+              "srcWords": 7,
+              "extraWords": 5,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación de la fe sobrenatural",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": null,
+              "start": {
+                "n": 204,
+                "mean": 142,
+                "p95": 330,
+                "worst": 690,
+                "signedMean": 140
+              },
+              "endClipPct": null,
+              "startClipPct": 98.5,
+              "endMissPct": null,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 60.7
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 97.4,
+              "insideAfterSnapPct": 57.1,
+              "snapGainDbMean": 17.7,
+              "snapShift": {
+                "n": 1435,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 0
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1421,
+              "mean": 291,
+              "p95": 700,
+              "worst": 3360,
+              "signedMean": 282
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 3.42,
+            "startDrift": {
+              "n": 1395,
+              "mean": 21,
+              "p95": 20,
+              "worst": 5440,
+              "signedMean": 0
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 6,
+              "extraWords": 6,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": null,
+              "start": {
+                "n": 204,
+                "mean": 59,
+                "p95": 190,
+                "worst": 550,
+                "signedMean": 18
+              },
+              "endClipPct": null,
+              "startClipPct": 37.4,
+              "endMissPct": null,
+              "startMissPct": 1,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 13.1
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 84.8,
+              "insideAfterSnapPct": 49.1,
+              "snapGainDbMean": 15.7,
+              "snapShift": {
+                "n": 1435,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -4
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1421,
+              "mean": 163,
+              "p95": 580,
+              "worst": 3500,
+              "signedMean": 142
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 3.42,
+            "startDrift": {
+              "n": 1395,
+              "mean": 21,
+              "p95": 20,
+              "worst": 5440,
+              "signedMean": 0
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 6,
+              "extraWords": 6,
+              "windowText": "y estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        }
+      },
+      "werVsRef": 1.87,
+      "werVsWcppF16": 2.38
+    },
+    "wcpp-q5_0-metal__original": {
+      "run": "wcpp-q5_0-metal",
+      "audio": "original",
+      "words": 1430,
+      "audioSec": 587,
+      "wallSec": 51.1,
+      "rtf": 0.087,
+      "engineSec": 50.9,
+      "metalCompileSec": 0.3,
+      "load1": [
+        2.9,
+        2.1
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 201,
+                "mean": 74,
+                "p95": 150,
+                "worst": 580,
+                "signedMean": -55
+              },
+              "start": {
+                "n": 200,
+                "mean": 93,
+                "p95": 320,
+                "worst": 480,
+                "signedMean": -2
+              },
+              "endClipPct": 75.1,
+              "startClipPct": 38.3,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 23.9,
+              "startClipBeyondSnapPct": 16.4
+            },
+            "allBoundaries": {
+              "n": 1429,
+              "insideSpeechPct": 78,
+              "insideAfterSnapPct": 59.8,
+              "snapGainDbMean": 19.2,
+              "snapShift": {
+                "n": 1429,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 4
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1421,
+              "mean": 278,
+              "p95": 720,
+              "worst": 6720,
+              "signedMean": -153
+            },
+            "end": {
+              "n": 1421,
+              "mean": 224,
+              "p95": 620,
+              "worst": 6720,
+              "signedMean": -195
+            }
+          }
+        }
+      },
+      "werVsRef": 2.07,
+      "werVsWcppF16": 3.62
+    },
+    "wcpp-q5_0-metal__variant": {
+      "run": "wcpp-q5_0-metal",
+      "audio": "variant",
+      "words": 1449,
+      "audioSec": 605.7,
+      "wallSec": 59.5,
+      "rtf": 0.098,
+      "engineSec": 59.3,
+      "metalCompileSec": 0.6,
+      "load1": [
+        2.1,
+        3.3
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": {
+                "n": 204,
+                "mean": 160,
+                "p95": 480,
+                "worst": 890,
+                "signedMean": 29
+              },
+              "start": {
+                "n": 205,
+                "mean": 167,
+                "p95": 500,
+                "worst": 750,
+                "signedMean": -12
+              },
+              "endClipPct": 38.3,
+              "startClipPct": 39.3,
+              "endMissPct": 1,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 22.8,
+              "startClipBeyondSnapPct": 28.6
+            },
+            "allBoundaries": {
+              "n": 1448,
+              "insideSpeechPct": 68.9,
+              "insideAfterSnapPct": 39.7,
+              "snapGainDbMean": 12.6,
+              "snapShift": {
+                "n": 1448,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 6
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1426,
+              "mean": 417,
+              "p95": 1240,
+              "worst": 4770,
+              "signedMean": -57
+            },
+            "end": {
+              "n": 1426,
+              "mean": 414,
+              "p95": 1200,
+              "worst": 5580,
+              "signedMean": -17
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 2.38,
+            "startDrift": {
+              "n": 1391,
+              "mean": 447,
+              "p95": 1370,
+              "worst": 5700,
+              "signedMean": 102
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 5,
+              "text": "sagrado a qué debe aspirar"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 4,
+              "text": "elocuciones de este género"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 7,
+              "text": "es poseerla en el nuestro lo cual",
+              "srcWords": 5,
+              "extraWords": 4,
+              "windowText": "estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación de la fe sobrenatural",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 6,
+              "text": "servir para hacerlos mejores al propio"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 4,
+              "text": "poesía y artes habladas"
+            }
+          ]
+        }
+      },
+      "werVsRef": 2.35,
+      "werVsWcppF16": 2.87
+    },
+    "wcpp-q8_0-metal-dtw__original": {
+      "run": "wcpp-q8_0-metal-dtw",
+      "audio": "original",
+      "words": 1487,
+      "audioSec": 587,
+      "wallSec": 63.5,
+      "rtf": 0.108,
+      "engineSec": 63.2,
+      "metalCompileSec": 0.6,
+      "load1": [
+        4.4,
+        4.4
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": {
+                "n": 201,
+                "mean": 96,
+                "p95": 300,
+                "worst": 740,
+                "signedMean": -17
+              },
+              "start": {
+                "n": 201,
+                "mean": 184,
+                "p95": 520,
+                "worst": 880,
+                "signedMean": -2
+              },
+              "endClipPct": 58.2,
+              "startClipPct": 48.8,
+              "endMissPct": 0,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 18.4,
+              "startClipBeyondSnapPct": 32.3
+            },
+            "allBoundaries": {
+              "n": 1486,
+              "insideSpeechPct": 77.2,
+              "insideAfterSnapPct": 59.6,
+              "snapGainDbMean": 17.7,
+              "snapShift": {
+                "n": 1486,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 13
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1439,
+              "mean": 316,
+              "p95": 1190,
+              "worst": 5140,
+              "signedMean": -146
+            },
+            "end": {
+              "n": 1439,
+              "mean": 289,
+              "p95": 1030,
+              "worst": 5140,
+              "signedMean": -120
+            }
+          }
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": null,
+              "start": {
+                "n": 200,
+                "mean": 145,
+                "p95": 320,
+                "worst": 480,
+                "signedMean": 145
+              },
+              "endClipPct": null,
+              "startClipPct": 99.5,
+              "endMissPct": null,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 65
+            },
+            "allBoundaries": {
+              "n": 1486,
+              "insideSpeechPct": 96.8,
+              "insideAfterSnapPct": 83.2,
+              "snapGainDbMean": 19.1,
+              "snapShift": {
+                "n": 1486,
+                "mean": 65,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -1
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1439,
+              "mean": 295,
+              "p95": 720,
+              "worst": 4820,
+              "signedMean": 294
+            },
+            "end": null
+          }
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 201,
+              "end": null,
+              "start": {
+                "n": 201,
+                "mean": 57,
+                "p95": 180,
+                "worst": 340,
+                "signedMean": 16
+              },
+              "endClipPct": null,
+              "startClipPct": 35.8,
+              "endMissPct": null,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 13.4
+            },
+            "allBoundaries": {
+              "n": 1486,
+              "insideSpeechPct": 87.4,
+              "insideAfterSnapPct": 71.8,
+              "snapGainDbMean": 18.3,
+              "snapShift": {
+                "n": 1486,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -7
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1439,
+              "mean": 165,
+              "p95": 580,
+              "worst": 4680,
+              "signedMean": 154
+            },
+            "end": null
+          }
+        }
+      },
+      "werVsRef": 3.52,
+      "werVsWcppF16": 5.99
+    },
+    "wcpp-q8_0-metal-dtw__variant": {
+      "run": "wcpp-q8_0-metal-dtw",
+      "audio": "variant",
+      "words": 1436,
+      "audioSec": 605.7,
+      "wallSec": 64.1,
+      "rtf": 0.106,
+      "engineSec": 63.7,
+      "metalCompileSec": 0.4,
+      "load1": [
+        4.4,
+        2.9
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 206,
+              "end": {
+                "n": 206,
+                "mean": 181,
+                "p95": 490,
+                "worst": 860,
+                "signedMean": 5
+              },
+              "start": {
+                "n": 206,
+                "mean": 166,
+                "p95": 480,
+                "worst": 790,
+                "signedMean": 27
+              },
+              "endClipPct": 44.7,
+              "startClipPct": 50.5,
+              "endMissPct": 0,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 29.6,
+              "startClipBeyondSnapPct": 34
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 74,
+              "insideAfterSnapPct": 43,
+              "snapGainDbMean": 13.7,
+              "snapShift": {
+                "n": 1435,
+                "mean": 60,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 0
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1429,
+              "mean": 432,
+              "p95": 1290,
+              "worst": 6280,
+              "signedMean": -119
+            },
+            "end": {
+              "n": 1429,
+              "mean": 431,
+              "p95": 1290,
+              "worst": 6280,
+              "signedMean": -85
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 5.04,
+            "startDrift": {
+              "n": 1405,
+              "mean": 420,
+              "p95": 1230,
+              "worst": 3210,
+              "signedMean": 70
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 5,
+              "text": "sagrado a qué debe aspirar"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 3,
+              "text": "de este género"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 10,
+              "extraWords": 3,
+              "windowText": "y estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 2,
+              "text": "al propio"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 205,
+              "end": null,
+              "start": {
+                "n": 204,
+                "mean": 139,
+                "p95": 310,
+                "worst": 690,
+                "signedMean": 139
+              },
+              "endClipPct": null,
+              "startClipPct": 99.5,
+              "endMissPct": null,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 59.5
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 97.5,
+              "insideAfterSnapPct": 58,
+              "snapGainDbMean": 17.6,
+              "snapShift": {
+                "n": 1435,
+                "mean": 64,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 0
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1429,
+              "mean": 290,
+              "p95": 720,
+              "worst": 3360,
+              "signedMean": 281
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 5.04,
+            "startDrift": {
+              "n": 1415,
+              "mean": 17,
+              "p95": 30,
+              "worst": 3640,
+              "signedMean": -7
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 6,
+              "extraWords": 6,
+              "windowText": "y estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        },
+        "dtw-bias": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 205,
+              "end": null,
+              "start": {
+                "n": 204,
+                "mean": 59,
+                "p95": 170,
+                "worst": 550,
+                "signedMean": 15
+              },
+              "endClipPct": null,
+              "startClipPct": 35.6,
+              "endMissPct": null,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": null,
+              "startClipBeyondSnapPct": 12.7
+            },
+            "allBoundaries": {
+              "n": 1435,
+              "insideSpeechPct": 83.8,
+              "insideAfterSnapPct": 49.1,
+              "snapGainDbMean": 15.4,
+              "snapShift": {
+                "n": 1435,
+                "mean": 58,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": -4
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1429,
+              "mean": 163,
+              "p95": 580,
+              "worst": 3500,
+              "signedMean": 141
+            },
+            "end": null
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 5.04,
+            "startDrift": {
+              "n": 1415,
+              "mean": 17,
+              "p95": 30,
+              "worst": 3640,
+              "signedMean": -7
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 6,
+              "extraWords": 6,
+              "windowText": "y estar convencido para hacer pasar la verdad a su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 0,
+              "text": ""
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 0,
+              "text": ""
+            }
+          ]
+        }
+      },
+      "werVsRef": 1.24,
+      "werVsWcppF16": 1.75
+    },
+    "wcpp-q8_0-metal__original": {
+      "run": "wcpp-q8_0-metal",
+      "audio": "original",
+      "words": 1439,
+      "audioSec": 587,
+      "wallSec": 49.5,
+      "rtf": 0.084,
+      "engineSec": 49.2,
+      "metalCompileSec": 0.6,
+      "load1": [
+        7.1,
+        5.5
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 200,
+              "end": {
+                "n": 200,
+                "mean": 94,
+                "p95": 340,
+                "worst": 740,
+                "signedMean": -26
+              },
+              "start": {
+                "n": 200,
+                "mean": 182,
+                "p95": 520,
+                "worst": 960,
+                "signedMean": 2
+              },
+              "endClipPct": 63,
+              "startClipPct": 48,
+              "endMissPct": 0,
+              "startMissPct": 0,
+              "endClipBeyondSnapPct": 21,
+              "startClipBeyondSnapPct": 34.5
+            },
+            "allBoundaries": {
+              "n": 1438,
+              "insideSpeechPct": 80.5,
+              "insideAfterSnapPct": 61.6,
+              "snapGainDbMean": 17.9,
+              "snapShift": {
+                "n": 1438,
+                "mean": 66,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 16
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1421,
+              "mean": 293,
+              "p95": 1120,
+              "worst": 5140,
+              "signedMean": -146
+            },
+            "end": {
+              "n": 1421,
+              "mean": 267,
+              "p95": 960,
+              "worst": 5140,
+              "signedMean": -116
+            }
+          }
+        }
+      },
+      "werVsRef": 2.14,
+      "werVsWcppF16": 3.69
+    },
+    "wcpp-q8_0-metal__variant": {
+      "run": "wcpp-q8_0-metal",
+      "audio": "variant",
+      "words": 1434,
+      "audioSec": 605.7,
+      "wallSec": 60,
+      "rtf": 0.099,
+      "engineSec": 59.8,
+      "metalCompileSec": 0.6,
+      "load1": [
+        5.5,
+        4.4
+      ],
+      "views": {
+        "tok": {
+          "energy": {
+            "pauseEdges": {
+              "pauses": 207,
+              "end": {
+                "n": 207,
+                "mean": 197,
+                "p95": 480,
+                "worst": 950,
+                "signedMean": -21
+              },
+              "start": {
+                "n": 206,
+                "mean": 162,
+                "p95": 460,
+                "worst": 990,
+                "signedMean": -7
+              },
+              "endClipPct": 50.2,
+              "startClipPct": 44.4,
+              "endMissPct": 0,
+              "startMissPct": 0.5,
+              "endClipBeyondSnapPct": 34.3,
+              "startClipBeyondSnapPct": 31.4
+            },
+            "allBoundaries": {
+              "n": 1433,
+              "insideSpeechPct": 72.1,
+              "insideAfterSnapPct": 41.9,
+              "snapGainDbMean": 13.1,
+              "snapShift": {
+                "n": 1433,
+                "mean": 59,
+                "p95": 100,
+                "worst": 100,
+                "signedMean": 6
+              }
+            }
+          },
+          "vsRef": {
+            "start": {
+              "n": 1426,
+              "mean": 458,
+              "p95": 1390,
+              "worst": 5550,
+              "signedMean": -54
+            },
+            "end": {
+              "n": 1426,
+              "mean": 459,
+              "p95": 1380,
+              "worst": 6140,
+              "signedMean": -15
+            }
+          },
+          "variantConsistency": {
+            "werVsOwnOriginal": 3.2,
+            "startDrift": {
+              "n": 1383,
+              "mean": 390,
+              "p95": 1060,
+              "worst": 3670,
+              "signedMean": 113
+            }
+          },
+          "inserted": [
+            {
+              "kind": "silence",
+              "at": 76.21,
+              "len": 2.5,
+              "wordsInside": 4,
+              "text": "qué debe aspirar por"
+            },
+            {
+              "kind": "silence",
+              "at": 199.02,
+              "len": 4,
+              "wordsInside": 1,
+              "text": "palabra"
+            },
+            {
+              "kind": "repeat",
+              "at": 263.06,
+              "len": 3.21,
+              "wordsInside": 6,
+              "text": "preciso es poseerla en el nuestro",
+              "srcWords": 8,
+              "extraWords": 6,
+              "windowText": "estar convencido para hacer pasar la verdad á su espíritu preciso es poseerla en el nuestro preciso es poseerla en el nuestro lo cual sólo puede alcanzarse tanto por parte del que debe transmitirla como por parte de los demás independientemente de la iluminación de la fe sobrenatural",
+              "retakeInText": true
+            },
+            {
+              "kind": "silence",
+              "at": 330.5,
+              "len": 6,
+              "wordsInside": 9,
+              "text": "infundir a sus discípulos servir para hacerlos mejores al"
+            },
+            {
+              "kind": "silence",
+              "at": 482.17,
+              "len": 3,
+              "wordsInside": 3,
+              "text": "distingue a los"
+            }
+          ]
+        }
+      },
+      "werVsRef": 1.38,
+      "werVsWcppF16": 1.89
+    }
+  }
+}
