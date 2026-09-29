@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # HyperFrames clips render headlessly to VP9-alpha WebM; `render()` stays `{ file, hasAlpha }`
 
-The HyperFrames adapter renders from Node with `@hyperframes/producer` (`createRenderJob` + `executeRenderJob`, no CLI). It writes **VP9 WebM with alpha** (`format: "webm"`) as the clip cache file. It does not use ProRes 4444 `.mov`. Chromium's `<video>` cannot decode ProRes, so a `.mov` cache (what SPEC §3.4 says now) would fail in the preview. The same WebM plays in Chromium with correct alpha and overlays correctly in ffmpeg, and it is about 65x smaller. The adapter contract keeps its shape, `render(clip, ctx) → { file, hasAlpha }`, and gains one format rule: when `hasAlpha` is true, `file` is VP9 WebM with `alpha_mode=1`. Status stays *proposed* until the user approves the SPEC edits listed under Consequences.
+The HyperFrames adapter renders from Node with `@hyperframes/producer` (`createRenderJob` + `executeRenderJob`, no CLI). It writes **VP9 WebM with alpha** (`format: "webm"`) as the clip cache file. It does not use ProRes 4444 `.mov`. Chromium's `<video>` cannot decode ProRes, so a `.mov` cache (what SPEC §3.4 says now) would fail in the preview. The same WebM plays in Chromium with correct alpha and overlays correctly in ffmpeg, and it is about 65x smaller. The adapter contract keeps its shape, `render(clip, ctx) → { file, hasAlpha }`, and gains one format rule: when `hasAlpha` is true, `file` is VP9 WebM with `alpha_mode=1`. SPEC edits under Consequences were approved and applied.
 
 ## Evidence
 
