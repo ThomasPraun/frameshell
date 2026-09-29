@@ -1,6 +1,13 @@
 import { createConnection, type Socket } from "node:net";
 import { type JsonRpcResponse, readMessages, writeMessage } from "./framing.js";
-import { type HandshakeResult, type Methods, PROTOCOL_VERSION, RpcError } from "./methods.js";
+import {
+  type HandshakeResult,
+  type MethodName,
+  type MethodParams,
+  type MethodResult,
+  PROTOCOL_VERSION,
+  RpcError,
+} from "./methods.js";
 
 /** Options for {@link connectToDaemon}. */
 export interface ConnectOptions {
@@ -15,7 +22,7 @@ export interface DaemonConnection {
   /** Identity the daemon reported during the handshake. */
   readonly daemon: HandshakeResult;
   /** Typed JSON-RPC call. Rejects with {@link RpcError} on a daemon error. */
-  request<M extends keyof Methods>(method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]>;
+  request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** End the connection. Pending requests reject. */
   close(): void;
 }
