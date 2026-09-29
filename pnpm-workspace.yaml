@@ -1,0 +1,5 @@
+# Product code only. Never spikes/*: throwaway experiments stay out of the build.
+packages:
+  - apps/*
+  - packages/*
+  - plugins/*
