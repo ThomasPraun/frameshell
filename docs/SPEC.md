@@ -40,7 +40,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 3 | Source of truth | **Declarative timeline JSON**; clips reference media or compositions of any engine through **adapters** | Human and agent edit the same structured data; moving a clip = changing a number; not tied to one engine | Remotion TSX as truth (timeline edits would require rewriting arbitrary code), OTIO native (verbose, poor fit for code compositions; export only) |
 | 4 | Preview | **Hybrid**: `media` clips play directly from proxies; generated clips play from a per-clip render cache; live preview of the active clip later | Preview matches export; a new engine works with `render()` only | All-live multi-engine sync (hard, preview/export drift), render-only (too slow to feel live) |
 | 5 | Final export | **ffmpeg as compositor**; core compiles timeline → ffmpeg graph, rendered in segments | Minutes, not hours, for 30-min cut videos; loudnorm/atempo native; engines only produce clips | Remotion as full compositor (frame-by-frame capture, licence leaks into core), MLT (painful cross-platform bundling, second model to sync) |
-| 6 | Agent integration | **`frameshell` CLI** as primary path; direct file edits allowed (guarded by `revision`); bundled **agent skill**; MCP in v0.2 | Validated ops, low token cost, works with any agent or script; each op is undoable | File-only (invalid JSON, token-heavy, races), MCP-only (MCP clients only) |
+| 6 | Agent integration | **`frameshell` CLI** and **MCP server** as equal first-class paths, both clients of the daemon; direct file edits allowed (guarded by `revision`); bundled **agent skill** | Validated ops, low token cost, works with any agent or script (CLI) and with typed tools for MCP clients; each op is undoable | File-only (invalid JSON, token-heavy, races), MCP-only (excludes scripts) |
 | 7 | On-disk format | **JSON + published JSON Schema**, split files (see §5) | Agents edit JSON reliably; small diffs; nested sequences; transcripts isolated | YAML (type gotchas; comments lost on rewrite anyway), single file (huge diffs) |
 | 8 | Time unit | **Decimal seconds**, snapped by core to project frame grid, 3 decimals; **CFR proxies** for VFR sources | Native to humans, agents, whisper and ffmpeg; VFR (OBS, phones) handled at import | Integer frames (conversions everywhere, fps change rewrites all), rationals (hostile to agents) |
 | 9 | AI | **Bring your own agent**: no built-in LLM. Later the UI injects context-rich requests into the agent terminal | Zero model cost; does not compete with agents that improve monthly | Built-in chat/agent |
@@ -54,6 +54,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left** | Agent, preview and timeline visible together | Terminal tabbed with timeline, free docking |
 | 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
 | 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
+| 20 | MCP scope | **Project + observe + navigate**: every core operation as a typed tool, frame capture as images, UI state (playhead, selection, open tab) and navigation (seek, play, select, open file, show transaction diff) | Model can see what it built and resolve "this" from the user's selection; UI actions are already core operations | Project-only (model edits blind), full UI automation (clicks/drags: fragile, adds no capability) |
 
 ### Cross-cutting rules
 
@@ -87,10 +88,10 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 │  Binary manager (ffmpeg, whisper.cpp, models)                            │
 └──────────────▲───────────────────────────────────────────────────────────┘
                │ same JSON-RPC
-      ┌────────┴────────┐        ┌──────────────┐
-      │ frameshell CLI  │◄───────│ Agent in pty │  (Claude Code, Codex…)
-      └─────────────────┘        └──────────────┘
-      (v0.2: MCP server = another client)
+      ┌────────┴────────┬─────────────────┐
+      │ frameshell CLI  │ frameshell mcp  │  (stdio MCP server)
+      └────────▲────────┴────────▲────────┘
+               └──── Agent ──────┘  (Claude Code, Codex, any MCP client)
 ```
 
 ### 3.1 Daemon `frameshelld`
@@ -379,6 +380,8 @@ frameshell history [--since <tx>] [--json]
 frameshell revert <tx|op>
 
 frameshell render [--preset p] [--out file]   # export
+frameshell frame --at <s> --out <png>         # composited frame, same path as MCP frame_capture
+frameshell mcp                                # stdio MCP server (§7b)
 frameshell plugin install|remove|list <spec>  # github:user/repo | npm name
 frameshell <plugin> <command> …               # plugin-provided commands
 ```
@@ -386,6 +389,26 @@ frameshell <plugin> <command> …               # plugin-provided commands
 All mutating commands accept `--timeline <id>` (default `main`) and print the resulting `revision`.
 
 ---
+
+## 7b. MCP server (v0.1)
+
+`frameshell mcp` starts a stdio MCP server that is one more daemon client (register it with e.g. `claude mcp add frameshell -- frameshell mcp`). It adds no logic of its own: tools map to daemon methods.
+
+| Group | Tools / resources |
+|---|---|
+| **Project** | Every CLI operation of §7 as a typed tool (`clip_add`, `clip_trim`, `cut`, `track_add`, `transcribe`, `render`, `tx_begin`, `history`, `revert`, `plugin_install`…). Input schemas generated from the same Zod models as the protocol; errors as actionable tool errors. |
+| **Read** | Resources for timeline, transcript, script outline, history and project status, in the compact form of `--json` CLI output. Resource change notifications on `timeline.changed` / `history.appended`. |
+| **Observe** | `frame_capture(timeline, at)` returns the composited frame as an image; `frames_strip(timeline, from, to, count)` returns a contact sheet. Rendered by the daemon with the export compiler (single-frame plan), so it works with the app closed and matches export. |
+| **UI state** | `ui_state()` returns playhead, selection (clips, words, time range), open editor tab and visible range. Available when the app is connected; otherwise returns `{ connected: false }`. |
+| **Navigate** | `ui_seek`, `ui_play`, `ui_pause`, `ui_select`, `ui_open_file`, `ui_show_tx_diff`. Routed daemon → connected UI client. Navigation only: no pixel clicks, no drags. |
+
+Design rules:
+
+- Tool names, descriptions and schemas are written for models: one verb per tool, explicit units (seconds), enumerated values, examples in descriptions.
+- Tool outputs stay compact (ids, revision, changed ranges); large data goes through resources.
+- Every mutating tool reports the new `revision` and transaction id, so the model can revert its own work.
+- The UI publishes its state to the daemon; the daemon is the only broker. MCP never talks to Electron directly.
+- CLI parity: `frameshell frame --at <s> --out <png>` exists for non-MCP agents.
 
 ## 8. Plugin system
 
@@ -478,6 +501,7 @@ All mutating commands accept `--timeline <id>` (default `main`) and print the re
 | Export | Segmented ffmpeg compiler, continuous audio pass, loudnorm, presets `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920` |
 | Plugins | API v1 for §8.2 v0.1 points, install from GitHub/npm, project trust; `@frameshell/hyperframes`, `@frameshell/whisper-cpp` |
 | Agent | `skills/frameshell/SKILL.md` + plugin skills |
+| MCP | `frameshell mcp` per §7b: project tools, resources, frame capture, UI state and navigation |
 | Platforms | macOS + Linux stable, Windows beta, CI on all three |
 
 Estimate: 3–5 months for one developer. First cuts if needed: overlay transform (stack only) and the vertical preset.
@@ -488,7 +512,7 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 
 | Version | Content |
 |---|---|
-| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; MCP server (thin client of the daemon); UI → terminal context injection ("ask agent about selection"); opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
+| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; UI → terminal context injection ("ask agent about selection"); opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
 | **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
