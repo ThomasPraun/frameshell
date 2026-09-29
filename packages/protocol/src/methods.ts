@@ -136,6 +136,11 @@ export const methods = {
     params: z.object({
       protocolVersion: z.int().positive().describe("Wire protocol version the client speaks."),
       client: z.string().min(1).describe("Free-form client id for logs and history attribution, e.g. `cli/0.1.0`."),
+      session: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Terminal session the caller runs in (`FRAMESHELL_SESSION`); attributes its operations to that terminal."),
     }),
     result: DaemonIdentitySchema,
   },
@@ -158,6 +163,15 @@ export const methods = {
         .nullable()
         .describe("Plugin trust of `project`; null when there is no project."),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
+      caller: z
+        .object({
+          client: z.string().describe("Client id the caller sent in its handshake."),
+          session: z
+            .string()
+            .nullable()
+            .describe("Terminal session the caller's operations are attributed to; null outside a Frameshell terminal."),
+        })
+        .describe("Who the daemon attributes this connection's operations to."),
     }),
   },
   "project.init": {
@@ -282,6 +296,21 @@ export const methods = {
         .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
     }),
   },
+  "file.write": {
+    description:
+      "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
+      "Missing parent directories are created. `frameshell.json` and `timelines/*.json` must pass schema validation " +
+      "or the write is rejected with InvalidProjectFile and the old file kept. " +
+      "Fails with OutsideProject for paths in no project or under daemon-owned `.frameshell/`.",
+    params: z.strictObject({
+      path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),
+      content: z.string().describe("Full new file content, UTF-8."),
+    }),
+    result: z.object({
+      project: z.string().describe("Absolute root of the project holding the file."),
+      path: z.string().describe("Written file, project-relative and `/`-separated."),
+    }),
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -325,6 +354,10 @@ export type TrustState = z.output<typeof TrustStateSchema>;
 export type PluginInfo = z.output<typeof PluginInfoSchema>;
 /** Declared plugins: package name to pinned spec. */
 export type PluginPins = Record<string, string>;
+/** `file.write` params. */
+export type FileWriteParams = MethodParams<"file.write">;
+/** Result of `file.write`. */
+export type FileWriteResult = MethodResult<"file.write">;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 
@@ -415,6 +448,8 @@ export const ErrorCode = {
   CommandNotFound: -32016,
   /** data: `{ command, plugin }` */
   PluginCommandFailed: -32017,
+  /** data: `{ path }` of the refused file */
+  OutsideProject: -32018,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

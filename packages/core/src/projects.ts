@@ -1,8 +1,22 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { ErrorCode, type PluginPins, type ProjectInitResult, type ProjectSummary, RpcError } from "@frameshell/protocol";
-import { type ProjectConfig, createProjectConfig, createTimeline, parseProjectConfig } from "@frameshell/schema";
-import { exists, writeJsonAtomic } from "./fs-util.js";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+  ErrorCode,
+  type FileWriteResult,
+  type PluginPins,
+  type ProjectInitResult,
+  type ProjectSummary,
+  RpcError,
+} from "@frameshell/protocol";
+import {
+  type ParseResult,
+  type ProjectConfig,
+  createProjectConfig,
+  createTimeline,
+  parseProjectConfig,
+  parseTimeline,
+} from "@frameshell/schema";
+import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
 
 /** Project config file name; its directory is the project root. */
 export const PROJECT_FILE = "frameshell.json";
@@ -94,6 +108,41 @@ export class ProjectRegistry {
     await writeJsonAtomic(join(root, PROJECT_FILE), { ...raw, plugins: pins });
   }
 
+  /**
+   * Replace a text file inside the project enclosing `path`, atomically.
+   * Throws `OutsideProject` for paths in no project or under `.frameshell/`,
+   * `InvalidProjectFile` when a config or timeline fails its schema.
+   */
+  async writeFile(path: string, content: string): Promise<FileWriteResult> {
+    const target = resolve(path);
+    const configPath = await findUp(dirname(target), PROJECT_FILE);
+    const root = configPath ? dirname(configPath) : null;
+    const rel = root ? relative(root, target).split(sep).join("/") : "";
+    if (!root || rel === "" || rel.startsWith("../") || rel === ".frameshell" || rel.startsWith(".frameshell/")) {
+      throw new RpcError(
+        ErrorCode.OutsideProject,
+        root
+          ? `${target} is daemon-owned state under .frameshell/; it cannot be written directly`
+          : `${target} is not inside a Frameshell project. Run \`frameshell init\` in its folder first.`,
+        { path: target },
+      );
+    }
+    const validate = VALIDATED_FILES.find(({ match }) => match(rel))?.parse;
+    if (validate) {
+      let parsed: ParseResult<unknown>;
+      try {
+        parsed = validate(JSON.parse(content));
+      } catch (error) {
+        throw invalid(target, (error as Error).message);
+      }
+      if (!parsed.ok) throw invalid(target, parsed.error);
+    }
+    await mkdir(dirname(target), { recursive: true });
+    await writeTextAtomic(target, content);
+    if (rel === PROJECT_FILE) await this.openEnclosing(root);
+    return { project: root, path: rel };
+  }
+
   /** Snapshot of open projects. */
   list(): ProjectSummary[] {
     return [...this.#open.values()];
@@ -124,6 +173,12 @@ async function readConfig(root: string): Promise<{ raw: Record<string, unknown>;
   if (!parsed.ok) throw invalid(configPath, parsed.error);
   return { raw: raw as Record<string, unknown>, config: parsed.value };
 }
+
+/** Project files whose content the daemon must be able to load; a bad write would break the project. */
+const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown) => ParseResult<unknown> }[] = [
+  { match: (rel) => rel === PROJECT_FILE, parse: parseProjectConfig },
+  { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
+];
 
 function invalid(path: string, details: string): RpcError {
   return new RpcError(ErrorCode.InvalidProjectFile, `Invalid ${path}:\n${details}`, { path, details });

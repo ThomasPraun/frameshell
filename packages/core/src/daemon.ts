@@ -54,8 +54,14 @@ export interface Daemon {
   close(): Promise<void>;
 }
 
+/** Per-connection identity from the handshake. */
+interface Caller {
+  client: string;
+  session: string | null;
+}
+
 /** One handler per registry method; params arrive already validated. */
-type Handlers = { [M in MethodName]: (params: ValidatedParams<M>) => Promise<MethodResult<M>> };
+type Handlers = { [M in MethodName]: (params: ValidatedParams<M>, caller: Caller) => Promise<MethodResult<M>> };
 
 /**
  * Start frameshelld on `socketPath`.
@@ -82,8 +88,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
 
   const handlers: Handlers = {
-    handshake: async () => identity,
-    status: async ({ cwd }) => {
+    handshake: async ({ client, session }, caller) => {
+      caller.client = client;
+      caller.session = session ?? null;
+      return identity;
+    },
+    status: async ({ cwd }, caller) => {
       const project = await projects.openEnclosing(cwd);
       let trust = null;
       if (project) {
@@ -95,6 +105,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         project,
         trust,
         openProjects: projects.list(),
+        caller: { ...caller },
       };
     },
     "project.init": (params) => projects.init(params.dir, params.name),
@@ -109,12 +120,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => plugins.presets(await root(cwd)),
+    "file.write": ({ path, content }) => projects.writeFile(path, content),
   };
 
   const server: Server = createServer((socket) => {
     clients.add(socket);
     armIdleTimer();
     let handshaken = false;
+    const caller: Caller = { client: "", session: null };
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
       clients.delete(socket);
@@ -150,7 +163,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         // Set before the await: a request pipelined behind the handshake is dispatched
         // while the handshake handler is still pending. Invalid params never get here.
         if (method === "handshake") handshaken = true;
-        const result = await (handlers[method] as (p: typeof params) => Promise<unknown>)(params);
+        const result = await (handlers[method] as (p: typeof params, c: Caller) => Promise<unknown>)(params, caller);
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;

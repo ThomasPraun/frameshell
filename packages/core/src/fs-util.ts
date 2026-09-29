@@ -24,9 +24,14 @@ export async function readJsonIfExists(path: string): Promise<unknown> {
 }
 
 /** Temp + rename so readers never see a half-written file (SPEC §6.1). Creates the parent directory. */
-export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+export async function writeTextAtomic(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(temp, content);
   await rename(temp, path);
+}
+
+/** {@link writeTextAtomic} of pretty-printed JSON with a trailing newline. */
+export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }

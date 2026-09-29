@@ -14,6 +14,8 @@ import { assertSocketPathFits } from "./socket-path.js";
 export interface ConnectOptions {
   /** Client id sent in the handshake, e.g. `cli/0.1.0`. */
   client: string;
+  /** Terminal session to attribute this connection's operations to, from `FRAMESHELL_SESSION`. Empty or absent = none. */
+  session?: string | undefined;
   /** Override only to test version negotiation. Defaults to {@link PROTOCOL_VERSION}. */
   protocolVersion?: number;
 }
@@ -77,6 +79,7 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
     daemon = (await call("handshake", {
       protocolVersion: options.protocolVersion ?? PROTOCOL_VERSION,
       client: options.client,
+      ...(options.session ? { session: options.session } : {}),
     })) as HandshakeResult;
   } catch (error) {
     socket.destroy();

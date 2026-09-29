@@ -77,6 +77,17 @@ describe("frameshell CLI", () => {
     expect(status.stdout).toMatch(/frameshell init/);
   });
 
+  it("attributes a call to the terminal session named by FRAMESHELL_SESSION", () => {
+    const status = frameshell(["status", "--json"], tempDir(), { FRAMESHELL_SESSION: "term-4f2a" });
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout).caller).toEqual({ client: expect.stringMatching(/^cli\//), session: "term-4f2a" });
+  });
+
+  it("reports no session when run outside a Frameshell terminal", () => {
+    const status = frameshell(["status", "--json"], tempDir(), { FRAMESHELL_SESSION: "" });
+    expect(JSON.parse(status.stdout).caller.session).toBeNull();
+  });
+
   it("reports daemon errors on stderr with a non-zero exit", () => {
     const root = tempDir();
     expect(frameshell(["init"], root).code).toBe(0);
