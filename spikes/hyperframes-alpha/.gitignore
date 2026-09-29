@@ -1,0 +1,5 @@
+node_modules/
+# Generated media: regenerate with `npm run all` (see README).
+out/
+# Copied from node_modules by src/render.mjs.
+composition/gsap.min.js
