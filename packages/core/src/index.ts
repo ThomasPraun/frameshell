@@ -32,3 +32,5 @@ export {
   probeVersion,
 } from "./binaries/probe.js";
 export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
+export { resolveAppDataDir } from "./app-data.js";
+export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";

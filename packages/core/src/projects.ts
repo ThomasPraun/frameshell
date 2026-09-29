@@ -1,7 +1,8 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { ErrorCode, type ProjectInitResult, type ProjectSummary, RpcError } from "@frameshell/protocol";
+import { ErrorCode, type PluginPins, type ProjectInitResult, type ProjectSummary, RpcError } from "@frameshell/protocol";
 import { type ProjectConfig, createProjectConfig, createTimeline, parseProjectConfig } from "@frameshell/schema";
+import { exists, writeJsonAtomic } from "./fs-util.js";
 
 /** Project config file name; its directory is the project root. */
 export const PROJECT_FILE = "frameshell.json";
@@ -71,6 +72,28 @@ export class ProjectRegistry {
     return project;
   }
 
+  /** Like {@link openEnclosing}, but throws `ProjectNotFound` instead of returning `null`. */
+  async requireEnclosing(cwd: string): Promise<ProjectSummary> {
+    const project = await this.openEnclosing(cwd);
+    if (project) return project;
+    throw new RpcError(
+      ErrorCode.ProjectNotFound,
+      `No Frameshell project in ${cwd} or its parents. Run \`frameshell init\` to create one.`,
+      { cwd },
+    );
+  }
+
+  /** Declared plugin pins of the project rooted at `root` (SPEC §5.2). */
+  async readPins(root: string): Promise<PluginPins> {
+    return (await readConfig(root)).config.plugins;
+  }
+
+  /** Replace the declared plugin pins, keeping every other key of `frameshell.json` as written. */
+  async writePins(root: string, pins: PluginPins): Promise<void> {
+    const { raw } = await readConfig(root);
+    await writeJsonAtomic(join(root, PROJECT_FILE), { ...raw, plugins: pins });
+  }
+
   /** Snapshot of open projects. */
   list(): ProjectSummary[] {
     return [...this.#open.values()];
@@ -85,6 +108,12 @@ export class ProjectRegistry {
 export async function readEnclosingProject(cwd: string): Promise<{ dir: string; config: ProjectConfig } | null> {
   const configPath = await findUp(resolve(cwd), PROJECT_FILE);
   if (!configPath) return null;
+  const dir = dirname(configPath);
+  return { dir, config: (await readConfig(dir)).config };
+}
+
+async function readConfig(root: string): Promise<{ raw: Record<string, unknown>; config: ProjectConfig }> {
+  const configPath = join(root, PROJECT_FILE);
   let raw: unknown;
   try {
     raw = JSON.parse(await readFile(configPath, "utf8"));
@@ -93,7 +122,7 @@ export async function readEnclosingProject(cwd: string): Promise<{ dir: string; 
   }
   const parsed = parseProjectConfig(raw);
   if (!parsed.ok) throw invalid(configPath, parsed.error);
-  return { dir: dirname(configPath), config: parsed.value };
+  return { raw: raw as Record<string, unknown>, config: parsed.value };
 }
 
 function invalid(path: string, details: string): RpcError {
@@ -106,20 +135,4 @@ async function findUp(start: string, file: string): Promise<string | null> {
     if (await exists(candidate)) return candidate;
     if (dirname(dir) === dir) return null;
   }
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Temp + rename so readers never see a half-written file (SPEC §6.1). */
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(temp, path);
 }

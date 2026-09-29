@@ -15,10 +15,12 @@ import {
   readMessages,
   writeMessage,
 } from "@frameshell/protocol";
+import { resolveAppDataDir } from "./app-data.js";
 import { resolveAppDirs } from "./app-dirs.js";
 import { runDoctor } from "./binaries/doctor.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { listenCleaningStaleSocket } from "./listen.js";
+import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 
 /** Package version reported in the handshake. */
@@ -39,6 +41,8 @@ export interface DaemonOptions {
   idleTimeoutMs?: number;
   /** Native binaries. Defaults to the OS app dirs (see `resolveAppDirs`) and the pinned manifest. */
   binaries?: BinaryManager;
+  /** Per-user data directory (trust decisions). Defaults to {@link resolveAppDataDir}. */
+  appDataDir?: string;
 }
 
 /** Running daemon handle. */
@@ -68,6 +72,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const clients = new Set<Socket>();
   const projects = new ProjectRegistry();
   const binaries = options.binaries ?? new BinaryManager(resolveAppDirs());
+  const plugins = new PluginHost({ appDataDir: options.appDataDir ?? resolveAppDataDir(), pins: projects });
+  const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
 
   let idleTimer: NodeJS.Timeout | undefined;
@@ -79,9 +85,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     handshake: async () => identity,
     status: async ({ cwd }) => {
       const project = await projects.openEnclosing(cwd);
+      let trust = null;
+      if (project) {
+        const pins = await projects.readPins(project.dir);
+        trust = { state: await plugins.trustState(project.dir, pins), plugins: pins };
+      }
       return {
         daemon: { ...identity, uptimeMs: Date.now() - startedAt, clients: clients.size, socketPath },
         project,
+        trust,
         openProjects: projects.list(),
       };
     },
@@ -91,6 +103,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
       return runDoctor(binaries, { project, install });
     },
+    "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
+    "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
+    "plugin.install": async ({ cwd, spec }) => plugins.install(await root(cwd), spec),
+    "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
+    "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
+    "export.presets": async ({ cwd }) => plugins.presets(await root(cwd)),
   };
 
   const server: Server = createServer((socket) => {

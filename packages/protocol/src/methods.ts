@@ -75,6 +75,52 @@ const CodecReportSchema = z.object({
 });
 
 /**
+ * Whether a project's declared plugins may load (SPEC §6.6). `not-required`:
+ * no plugins declared. `unknown`: never decided for this exact plugin list.
+ */
+const TrustStateSchema = z
+  .enum(["not-required", "unknown", "trusted", "denied"])
+  .describe(
+    "Plugin trust: `not-required` (no plugins declared), `unknown` (never decided for this plugin list), " +
+      "`trusted` (plugins load), `denied` (plugins stay off).",
+  );
+
+const PinsSchema = z
+  .record(z.string(), z.string())
+  .describe("Declared plugins from `frameshell.json`: package name to pinned npm spec (exact version or git URL#commit).");
+
+const CwdParam = AbsolutePath.describe(
+  "Absolute directory inside the project, e.g. `/home/ana/videos/launch`. The project is found searching upwards.",
+);
+
+const PluginInfoSchema = z.object({
+  name: z.string().describe("npm package name."),
+  pin: z.string().describe("Pinned spec from `frameshell.json`."),
+  status: z
+    .enum(["loaded", "error", "untrusted"])
+    .describe("`loaded`: contributions active. `error`: see `error`. `untrusted`: project not trusted, code not run."),
+  version: z.string().nullable().describe("Manifest version; null unless read."),
+  apiVersion: z.string().nullable().describe("Plugin API version the manifest targets; null unless read."),
+  error: z.string().nullable().describe("Why the plugin did not load; null otherwise."),
+  contributes: z
+    .object({
+      clipTypes: z.array(z.string()),
+      transcriptionProviders: z.array(z.string()),
+      commands: z.array(z.string()).describe("`<group> <command>`, run as `frameshell <group> <command>`."),
+      exportPresets: z.array(z.string()),
+      skills: z.array(z.string()).describe("Absolute paths of the plugin's agent skill files."),
+    })
+    .nullable()
+    .describe("Declared contributions; null unless the manifest was read."),
+});
+
+const ExportPresetResultSchema = z.looseObject({
+  id: z.string(),
+  label: z.string().optional(),
+  plugin: z.string().describe("Package that contributed the preset."),
+});
+
+/**
  * Every method frameshelld serves: the single source for client and daemon
  * types, daemon param validation and generated tool schemas.
  * Adding a method = one entry here plus its daemon handler (the compiler
@@ -107,6 +153,10 @@ export const methods = {
         socketPath: z.string().describe("Unix socket path or Windows pipe name the daemon listens on."),
       }),
       project: ProjectSummarySchema.nullable().describe("Project enclosing `cwd`; null when none."),
+      trust: z
+        .object({ state: TrustStateSchema, plugins: PinsSchema })
+        .nullable()
+        .describe("Plugin trust of `project`; null when there is no project."),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
     }),
   },
@@ -150,6 +200,88 @@ export const methods = {
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
     }),
   },
+  "project.trust": {
+    description:
+      "Record the user's trust decision for the plugins the enclosing project declares (SPEC §6.6). " +
+      "Plugins run with full access to the machine: only send `trust` after the user explicitly agreed. " +
+      "Stored per user, keyed by project path and the exact plugin list; a changed list is `unknown` again.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      decision: z.enum(["trust", "deny"]).describe("`trust` loads the plugins; `deny` keeps them off."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      trust: TrustStateSchema,
+      plugins: PinsSchema,
+    }),
+  },
+  "plugin.list": {
+    description:
+      "List the plugins the enclosing project declares, with load status and contributions. " +
+      "Loads them first when the project is trusted, reinstalling from the pins if `.frameshell/plugins` is stale.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      trust: TrustStateSchema,
+      plugins: z.array(PluginInfoSchema),
+    }),
+  },
+  "plugin.install": {
+    description:
+      "Install a plugin into the enclosing project and pin it in `frameshell.json`. " +
+      "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, or an npm name `[@scope/]name[@version]`. " +
+      "Git sources pin the resolved commit; npm sources pin the exact version. " +
+      "Fails with ProjectNotTrusted when the project already declares plugins that are not trusted, " +
+      "InvalidPlugin when the package has no valid manifest or targets another plugin API version (nothing is pinned then).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      spec: z.string().min(1).describe("Plugin source, e.g. `github:acme/frameshell-titles` or `@acme/titles@1.2.0`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      name: z.string().describe("Installed package name."),
+      pin: z.string().describe("Spec written to `frameshell.json`."),
+      plugin: PluginInfoSchema,
+    }),
+  },
+  "plugin.remove": {
+    description:
+      "Remove a plugin from the enclosing project: unpin it in `frameshell.json` and uninstall it. Fails with PluginNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: z.string().min(1).describe("Package name as listed by `plugin.list`, e.g. `@acme/titles`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      name: z.string(),
+      pin: z.string().describe("Pin that was removed."),
+    }),
+  },
+  "plugin.run": {
+    description:
+      "Run a plugin-contributed command, the same as `frameshell <plugin> <command> [args…]`. " +
+      "Fails with ProjectNotTrusted when the project's plugins are not trusted, CommandNotFound (data lists available commands), " +
+      "or PluginCommandFailed when the command throws.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      plugin: z.string().min(1).describe("Command group, the first word after `frameshell`, e.g. `hyperframes`."),
+      command: z.string().min(1).describe("Command within the group, e.g. `new`."),
+      args: z.array(z.string()).default([]).describe("Remaining arguments, verbatim."),
+    }),
+    result: z.object({
+      output: z.string().nullable().describe("Human-readable output; null when the command printed nothing."),
+      data: z.unknown().describe("JSON result of the command; null when none."),
+    }),
+  },
+  "export.presets": {
+    description: "List the export presets available in the enclosing project, contributed by its trusted plugins.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      presets: z
+        .array(ExportPresetResultSchema)
+        .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
+    }),
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -187,6 +319,12 @@ export type DoctorResult = MethodResult<"doctor">;
 export type BinaryReport = z.output<typeof BinaryReportSchema>;
 /** One encoder or decoder in a {@link DoctorResult}. */
 export type CodecReport = z.output<typeof CodecReportSchema>;
+/** Plugin trust state of a project. */
+export type TrustState = z.output<typeof TrustStateSchema>;
+/** One declared plugin as reported by `plugin.list`. */
+export type PluginInfo = z.output<typeof PluginInfoSchema>;
+/** Declared plugins: package name to pinned spec. */
+export type PluginPins = Record<string, string>;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 
@@ -261,6 +399,22 @@ export const ErrorCode = {
   BinaryInstallFailed: -32008,
   /** data: `{ binary, url, expected, actual }` (SHA-256 hex) */
   BinaryChecksumMismatch: -32009,
+  /** data: `{ cwd }` */
+  ProjectNotFound: -32010,
+  /** data: `{ dir, trust, plugins }` */
+  ProjectNotTrusted: -32011,
+  /** data: `{ spec }` */
+  InvalidPluginSpec: -32012,
+  /** data: `{ spec, output }`; `output` is the tail of npm's stderr */
+  PluginInstallFailed: -32013,
+  /** data: `{ name, details }` */
+  InvalidPlugin: -32014,
+  /** data: `{ name, installed: string[] }` */
+  PluginNotFound: -32015,
+  /** data: `{ command, available: string[] }` */
+  CommandNotFound: -32016,
+  /** data: `{ command, plugin }` */
+  PluginCommandFailed: -32017,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */
