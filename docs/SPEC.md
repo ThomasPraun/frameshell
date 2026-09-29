@@ -364,7 +364,7 @@ On first open of a project that declares plugins, the UI and CLI ask for trust b
 ```
 frameshell init [dir]                         # scaffold project
 frameshell status [--json]                    # project, daemon, jobs, rejected edits
-frameshell doctor [--json]                    # binaries, encoders (x264, VideoToolbox, NVENC), whisper accel
+frameshell doctor [--install] [--json]        # binaries, encoders (x264, libvpx, VideoToolbox, NVENC, VAAPI), whisper accel; downloads only with --install
 
 frameshell import <file…>                     # copy/link into assets/, queue proxies
 frameshell track add|remove|list …
@@ -447,7 +447,7 @@ Design rules:
 
 - Install: `frameshell plugin install github:user/repo` or an npm package name. Pinned per project in `frameshell.json`; global plugins allowed.
 - Discovery: GitHub repos tagged `frameshell-plugin` get indexed automatically (herdr model). No review; trust and security guide in the docs.
-- Plugins run in the daemon process with full Node access (like VS Code extensions). No sandbox in v0.1; project trust is the gate.
+- Plugins run in the daemon process with full Node access (like VS Code extensions). No sandbox in v0.1; project trust is the gate. Package lifecycle scripts (e.g. `prepare` for git plugins) run only after the project is trusted.
 - Official plugins use only the public API; no private hooks.
 
 ---
@@ -455,7 +455,7 @@ Design rules:
 ## 9. Native binaries
 
 - Managed by the daemon under the OS app-data directory, versioned (`ffmpeg/7.x/…`).
-- Sources: pinned URLs + SHA-256; mirrored on Frameshell GitHub Releases to avoid depending on third-party availability.
+- Sources: pinned URLs + SHA-256 (sources and licences in `docs/binaries.md`). A mirror on Frameshell GitHub Releases is redistribution of GPL binaries: it ships only together with the matching source code (or a written offer), published in the same release.
 - ffmpeg: GPL build (x264/x265, libvpx encoder and decoder) downloaded by the user at first run; not redistributed inside the installer. `doctor` checks libvpx.
 - Headless Chrome for HTML engines (HyperFrames): managed like other binaries and passed via `PRODUCER_HEADLESS_SHELL_PATH`.
 - whisper.cpp: pinned version, prebuilt per platform (Metal on macOS; CUDA/Vulkan where available; CPU fallback). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
