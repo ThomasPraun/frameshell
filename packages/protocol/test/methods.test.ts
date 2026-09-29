@@ -33,6 +33,14 @@ describe("method registry JSON Schema", () => {
     expect(parseParams("doctor", { cwd: process.cwd() })).toEqual({ cwd: process.cwd(), install: false });
   });
 
+  it("defaults asset.import to copying and job.list to every job", () => {
+    const cwd = process.cwd();
+    expect(parseParams("asset.import", { cwd, files: [cwd] })).toEqual({ cwd, files: [cwd], mode: "copy" });
+    expect(parseParams("job.list", { cwd })).toEqual({ cwd, active: false });
+    expect(() => parseParams("asset.import", { cwd, files: [] })).toThrow(/params\.files/);
+    expect(() => parseParams("asset.import", { cwd, files: ["relative.mp4"] })).toThrow(/params\.files\.0/);
+  });
+
   it("flags only connection plumbing as internal, so tool generators skip it", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)

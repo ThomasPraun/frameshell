@@ -13,6 +13,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
 | Managed binaries (ffmpeg pins, sources, licences, re-pin) | `docs/binaries.md` |
+| Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 
@@ -23,6 +24,8 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
+- Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media.
+- Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused.
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.
 - node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.

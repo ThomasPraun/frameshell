@@ -8,3 +8,5 @@ coverage/
 apps/desktop/out/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
+# Pinned ffmpeg downloaded for media tests.
+.cache/

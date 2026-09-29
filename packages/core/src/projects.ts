@@ -39,6 +39,12 @@ const LAYOUT_DIRS = [
 /** Projects the daemon holds open, keyed by absolute root directory. */
 export class ProjectRegistry {
   readonly #open = new Map<string, ProjectSummary>();
+  readonly #onOpen: (dir: string) => void;
+
+  /** `onOpen` runs on every open, including re-opens: keep it idempotent. */
+  constructor(options: { onOpen?: (dir: string) => void } = {}) {
+    this.#onOpen = options.onOpen ?? (() => {});
+  }
 
   /**
    * Scaffold a project in `dir` (created if missing) and open it.
@@ -70,6 +76,7 @@ export class ProjectRegistry {
 
     const project = { dir: root, name: config.name, schemaVersion: config.schemaVersion };
     this.#open.set(root, project);
+    this.#onOpen(root);
     return { project, created };
   }
 
@@ -83,6 +90,7 @@ export class ProjectRegistry {
     if (!found) return null;
     const project = { dir: found.dir, name: found.config.name, schemaVersion: found.config.schemaVersion };
     this.#open.set(found.dir, project);
+    this.#onOpen(found.dir);
     return project;
   }
 
