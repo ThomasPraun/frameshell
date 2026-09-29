@@ -1,0 +1,523 @@
+# Frameshell — Specification
+
+> Status: draft v0.1 · 2026-09-29 · Author: Thomas Praun
+> Scope: product and architecture definition before implementation. No code exists yet.
+
+---
+
+## 1. Vision
+
+Frameshell is an open source **IDE for video**: the workflow of VS Code / Cursor, but the build output is a video.
+
+The user and an AI agent work on **the same project**:
+
+1. The agent (Claude Code, Codex, Gemini CLI…) runs in Frameshell's integrated terminal and edits the project through the `frameshell` CLI.
+2. The user sees every change live in the preview and the multitrack timeline.
+3. The user corrects by hand (timeline, transcript view).
+4. The agent reads what the user changed and continues from there.
+
+Frameshell does **not** ship its own LLM. Its value is what agent CLIs lack: a declarative timeline model, a live preview, a visual timeline, a transcript view, and a fast export pipeline.
+
+### Target use cases
+
+| Case | Description | Example |
+|---|---|---|
+| **A: Scripted / motion video** | Explainers, tutorials, product demos, shorts. Built from a script, assets, voice-over, subtitles and code-based motion graphics (HyperFrames, Remotion). | "Turn `scripts/launch.md` into a 60 s 9:16 promo." |
+| **B: Transcript-driven footage editing** | Long recordings (talks, YouTube videos) cut by the agent from a word-level transcript: silences, repeated takes, intro, subtitles, loudness. | "Edit this video, add the intro, remove silences, prepare it for YouTube." |
+
+Case B follows the workflow published by Facundo Corengia ("El prompt para no editar más"): the agent edits and the human's only job is to watch it once and correct. Frameshell makes that review step visual and reversible.
+
+Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grading, advanced keyframing, multicam).
+
+---
+
+## 2. Decision log
+
+| # | Topic | Decision | Rationale | Rejected |
+|---|---|---|---|---|
+| 1 | Use case | A (scripted/motion) + B (transcript-driven editing) on one model | The agent does the heavy lifting and the human reviews; both cases share "clips on tracks" | Classic manual NLE |
+| 2 | App format | **Desktop app: Electron + React + TypeScript** | Real terminal (node-pty + xterm.js, same as VS Code); bundled Chromium + Node, both required by HTML/React video engines; proven IDE pattern | Tauri (per-OS webview codec issues, Node sidecar anyway, Rust), Flutter desktop (Remotion player would need a webview, weak terminal), VS Code extension (webviews lack H.264, panel-bound UI), plain local web app |
+| 3 | Source of truth | **Declarative timeline JSON**; clips reference media or compositions of any engine through **adapters** | Human and agent edit the same structured data; moving a clip = changing a number; not tied to one engine | Remotion TSX as truth (timeline edits would require rewriting arbitrary code), OTIO native (verbose, poor fit for code compositions; export only) |
+| 4 | Preview | **Hybrid**: `media` clips play directly from proxies; generated clips play from a per-clip render cache; live preview of the active clip later | Preview matches export; a new engine works with `render()` only | All-live multi-engine sync (hard, preview/export drift), render-only (too slow to feel live) |
+| 5 | Final export | **ffmpeg as compositor**; core compiles timeline → ffmpeg graph, rendered in segments | Minutes, not hours, for 30-min cut videos; loudnorm/atempo native; engines only produce clips | Remotion as full compositor (frame-by-frame capture, licence leaks into core), MLT (painful cross-platform bundling, second model to sync) |
+| 6 | Agent integration | **`frameshell` CLI** as primary path; direct file edits allowed (guarded by `revision`); bundled **agent skill**; MCP in v0.2 | Validated ops, low token cost, works with any agent or script; each op is undoable | File-only (invalid JSON, token-heavy, races), MCP-only (MCP clients only) |
+| 7 | On-disk format | **JSON + published JSON Schema**, split files (see §5) | Agents edit JSON reliably; small diffs; nested sequences; transcripts isolated | YAML (type gotchas; comments lost on rewrite anyway), single file (huge diffs) |
+| 8 | Time unit | **Decimal seconds**, snapped by core to project frame grid, 3 decimals; **CFR proxies** for VFR sources | Native to humans, agents, whisper and ffmpeg; VFR (OBS, phones) handled at import | Integer frames (conversions everywhere, fps change rewrites all), rationals (hostile to agents) |
+| 9 | AI | **Bring your own agent**: no built-in LLM. Later the UI injects context-rich requests into the agent terminal | Zero model cost; does not compete with agents that improve monthly | Built-in chat/agent |
+| 10 | Media AI services | **Transcription is first-class** (`frameshell transcribe`, provider interface, whisper.cpp default, `--verify`). TTS, video, image, music = assets produced by the agent | The data model needs word timestamps in one format; everything else changes too fast to own | Everything built in, nothing built in |
+| 11 | Licence | **Apache 2.0** + protected "Frameshell" trademark + DCO | Adoption and ecosystem over protection; patent grant; monetize via services | MIT (no patent grant), GPLv3/AGPLv3 + CLA (lower adoption) |
+| 12 | Native binaries | **Downloaded on first use**: pinned versions + checksums (ffmpeg GPL build with x264, whisper.cpp, whisper models). Override with system binaries. `frameshell doctor` | Small installer; controlled versions; x264 quality; Frameshell does not redistribute GPL binaries | Bundled in installer (size, GPL obligations), system only (version chaos) |
+| 13 | Plugins | **Node/TS packages** + `frameshell-plugin.json`; official adapters built on the same API; GitHub topic discovery; per-project pinning; project trust | herdr-style zero-friction ecosystem; API proven by first-party plugins; every plugin teaches the agent via its skill | Curated marketplace, UI extension points in MVP |
+| 14 | Scripts | **Markdown with optional conventions** (`##` = scene, optional frontmatter); clips carry `scriptRef` | Free writing; traceability when useful; generation stays with the agent | Structured script format |
+| 15 | Agent changes | **Applied immediately, grouped in transactions**; history with author; diff review; revert whole tx or single ops | Keeps autonomy (agent works for an hour unattended) and adds review afterwards; `history --since` lets the agent resume from human edits | Plain undo, blocking proposal/diff mode (v0.2 opt-in) |
+| 16 | Platforms | **macOS + Linux stable, Windows beta**; CI on all three from day one | Focus plus early detection of OS assumptions; signing cost only on macOS at v0.1 | macOS only, all three stable |
+| 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left** | Agent, preview and timeline visible together | Terminal tabbed with timeline, free docking |
+| 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
+| 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
+
+### Cross-cutting rules
+
+- **Core is the only writer** of project files.
+- UI persists every operation immediately. No "unsaved" state.
+- Every timeline file carries `revision`; stale direct edits are rejected (see §6.4).
+- Adapter contract: `render()` required, `livePreview()` optional.
+- Nothing in `.frameshell/cache` or `.frameshell/proxies` is precious: all of it can be regenerated.
+
+---
+
+## 3. Architecture
+
+```
+┌────────────────────────────── Electron app ──────────────────────────────┐
+│  Renderer (React)                          Main process                  │
+│  ├─ Explorer / History / Plugins           ├─ node-pty terminals         │
+│  ├─ Preview player                         ├─ window + layout state      │
+│  ├─ Editors (Monaco: md/json, transcript)  └─ frameshell-media:// proto  │
+│  ├─ Timeline (canvas)                          (range requests, proxies) │
+│  └─ xterm.js ◄──────── pty ───────────────────┘                         │
+└──────────────┬───────────────────────────────────────────────────────────┘
+               │ JSON-RPC + events (unix socket / named pipe)
+┌──────────────▼──────────────── frameshelld (Node) ───────────────────────┐
+│  Project manager (multi-project)   Operation engine (validate → apply)   │
+│  Schema (Zod)                      History journal + transactions        │
+│  File watcher (chokidar)           Job queue (proxy, waveform, render,   │
+│  Media service (ffprobe, proxies)             transcribe, export)        │
+│  Clip render cache                 ffmpeg graph compiler                 │
+│  Plugin host (adapters, providers, commands, presets, skills)            │
+│  Binary manager (ffmpeg, whisper.cpp, models)                            │
+└──────────────▲───────────────────────────────────────────────────────────┘
+               │ same JSON-RPC
+      ┌────────┴────────┐        ┌──────────────┐
+      │ frameshell CLI  │◄───────│ Agent in pty │  (Claude Code, Codex…)
+      └─────────────────┘        └──────────────┘
+      (v0.2: MCP server = another client)
+```
+
+### 3.1 Daemon `frameshelld`
+
+- One per OS user. Holds any number of open projects.
+- Transport: Unix domain socket (macOS/Linux), named pipe (Windows). JSON-RPC 2.0 plus server-pushed notifications (`timeline.changed`, `job.progress`, `history.appended`, `asset.added`).
+- Handshake: client sends protocol version; incompatible → clear error with upgrade hint.
+- Lifecycle: auto-started by CLI or app if absent; exits after an idle timeout with no clients and no running jobs.
+- Owns every write to project files. Renders, transcriptions and exports continue if the window closes.
+
+### 3.2 Electron app
+
+- Main process: window, node-pty terminals (sessions die with the app in v0.1), custom `frameshell-media://` protocol serving proxies with HTTP range support.
+- Each pty receives `FRAMESHELL_SOCKET`, `FRAMESHELL_PROJECT` and `FRAMESHELL_SESSION` env vars, so a CLI call from that terminal is attributed to that session.
+- Renderer: React UI; subscribes to daemon events; sends operations, never writes files.
+
+### 3.3 CLI `frameshell`
+
+- Thin client of the daemon; starts it if needed.
+- Human-readable output by default, `--json` for agents and scripts.
+- Errors are actionable (what failed, valid range, suggested command).
+
+### 3.4 Preview
+
+- `media` clips: proxies (H.264, short GOP, CFR, reduced resolution) played in `<video>` elements, double-buffered per track to hide cut boundaries; audio mixed with Web Audio.
+- Generated clips (`hyperframes`, later `remotion`): played from cached renders (`.frameshell/cache/clips/<hash>.mov`, with alpha). While a render is pending, show a placeholder with progress.
+- Overlays: CSS/canvas compositing with the clip `transform` (position, scale, opacity).
+- Subtitles: rendered in the DOM from the transcript, same style tokens as export.
+- v0.2: `livePreview()` mounts the active clip's engine directly (iframe for HyperFrames, `@remotion/player` for Remotion), synced to the playhead.
+
+### 3.5 Export pipeline
+
+1. Resolve timeline (nested timelines flattened, subtitle words resolved).
+2. Ensure every generated clip has a fresh cache entry (render missing ones via adapters).
+3. **Video:** split the timeline into segments at clean boundaries, compile each to an ffmpeg `filter_complex` (`trim`, `setpts`, `scale`, `overlay`, `subtitles`/`ass`), encode segments in parallel, join with the concat demuxer.
+4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix`, two-pass `loudnorm` to the preset target (default −17 LUFS integrated).
+5. Mux, apply preset (codec, bitrate, resolution, aspect ratio).
+6. Optional: `frameshell transcribe --verify` compares the export against source transcripts and reports lost words.
+
+The compiler is a pure function (timeline → plan → ffmpeg args) tested with golden files.
+
+---
+
+## 4. Stack
+
+| Layer | Choice |
+|---|---|
+| Language | TypeScript (strict) everywhere |
+| Runtime | Node ≥ 22 (daemon, CLI, plugins) |
+| Desktop shell | Electron + electron-vite |
+| UI | React, xterm.js, Monaco, custom canvas timeline |
+| Terminal | node-pty (ConPTY on Windows) |
+| Schema | Zod as source; JSON Schema generated and published |
+| File watching | chokidar |
+| Media | ffmpeg / ffprobe (managed download, GPL build with x264) |
+| Transcription | whisper.cpp (default provider, `large-v3-turbo`); cloud providers as plugins |
+| First adapter | HyperFrames (`@frameshell/hyperframes`) |
+| Tests | Vitest; golden files for compiler; short smoke renders in CI |
+| Repo | pnpm workspaces monorepo |
+| CI | GitHub Actions: macOS, Linux, Windows |
+| Packaging | macOS signed + notarized DMG; Linux AppImage/.deb; Windows unsigned (beta) |
+| Docs | TSDoc in code; `CHANGELOG.md` (Keep a Changelog + SemVer); repo `CLAUDE.md` as router |
+| UI language | English, i18n-ready (Spanish as first translation) |
+
+### Repository layout
+
+```
+frameshell/
+├── apps/
+│   └── desktop/              # Electron app (main + renderer)
+├── packages/
+│   ├── schema/               # Zod models, JSON Schema generation, migrations
+│   ├── core/                 # frameshelld: ops, history, jobs, compiler, plugin host
+│   ├── cli/                  # frameshell CLI
+│   ├── protocol/             # JSON-RPC method + event types shared by clients
+│   └── plugin-api/           # public types for plugin authors
+├── plugins/
+│   ├── hyperframes/          # @frameshell/hyperframes adapter + skill
+│   └── whisper-cpp/          # @frameshell/whisper-cpp provider + skill
+├── skills/
+│   └── frameshell/SKILL.md   # agent skill for the core CLI
+├── docs/
+│   └── SPEC.md
+├── LICENSE                   # Apache 2.0
+└── CHANGELOG.md
+```
+
+---
+
+## 5. Project data model
+
+### 5.1 Project layout on disk
+
+```
+my-video/
+├── frameshell.json            # project config
+├── timelines/
+│   ├── main.json              # exported sequence
+│   └── intro.json             # nested sequence (used as a clip)
+├── scripts/
+│   └── script.md              # Markdown scripts
+├── assets/                    # footage, images, audio, fonts, AI-generated media
+├── compositions/
+│   ├── hyperframes/intro/     # HTML compositions
+│   └── remotion/              # TSX components (v0.2)
+├── transcripts/
+│   └── raw-01.words.json      # word-level transcript per asset
+└── .frameshell/               # gitignored
+    ├── cache/clips/           # rendered generated clips (regenerable)
+    ├── proxies/               # CFR preview proxies (regenerable)
+    ├── waveforms/, thumbs/    # regenerable
+    ├── history/               # local operation journal (not shared; loss = loss of undo only)
+    └── rejected/              # stale direct edits kept for recovery
+```
+
+### 5.2 `frameshell.json`
+
+```json
+{
+  "$schema": "https://frameshell.dev/schema/v1/project.json",
+  "schemaVersion": 1,
+  "name": "Launch video",
+  "fps": 30,
+  "resolution": { "width": 2560, "height": 1440 },
+  "sampleRate": 48000,
+  "main": "timelines/main.json",
+  "plugins": {
+    "@frameshell/hyperframes": "0.1.0",
+    "@frameshell/whisper-cpp": "0.1.0"
+  },
+  "transcription": { "provider": "whisper-cpp", "model": "large-v3-turbo", "language": "es" },
+  "binaries": { "ffmpeg": "managed" },
+  "export": { "defaultPreset": "youtube-1440p", "loudness": -17 }
+}
+```
+
+### 5.3 Timeline (`timelines/*.json`)
+
+```json
+{
+  "$schema": "https://frameshell.dev/schema/v1/timeline.json",
+  "schemaVersion": 1,
+  "id": "main",
+  "revision": 184,
+  "tracks": [
+    {
+      "id": "v1", "kind": "video", "name": "Camera",
+      "clips": [
+        { "id": "c_0001", "type": "media", "asset": "assets/raw-01.mp4",
+          "start": 0.000, "in": 3.200, "out": 15.733,
+          "speed": 1.15, "audio": { "gain": 0, "muted": false } },
+        { "id": "c_0002", "type": "media", "asset": "assets/raw-01.mp4",
+          "start": 10.898, "in": 17.100, "out": 42.567, "speed": 1.15 }
+      ]
+    },
+    {
+      "id": "v2", "kind": "video", "name": "Overlays",
+      "clips": [
+        { "id": "c_0100", "type": "hyperframes",
+          "source": "compositions/hyperframes/intro/index.html",
+          "start": 0.000, "duration": 8.000,
+          "props": { "title": "No vendas agentes de IA" },
+          "transform": { "x": 0, "y": 0, "scale": 1, "opacity": 1 },
+          "scriptRef": "scripts/script.md#intro" },
+        { "id": "c_0101", "type": "timeline", "source": "timelines/intro.json",
+          "start": 60.000 }
+      ]
+    },
+    {
+      "id": "a1", "kind": "audio", "name": "Music",
+      "clips": [
+        { "id": "c_0200", "type": "media", "asset": "assets/music.wav",
+          "start": 0.000, "in": 0.000, "out": 30.000, "audio": { "gain": -18 } }
+      ]
+    },
+    {
+      "id": "s1", "kind": "subtitles", "name": "Subtitles",
+      "follows": "v1",
+      "style": { "preset": "big-keyword", "position": "bottom" }
+    }
+  ]
+}
+```
+
+Rules:
+
+- **Layering:** track order = stacking order; first video track is the bottom layer.
+- **Timing:** `start` is timeline time; `in`/`out` are source time. `media` duration = `(out - in) / speed`. Generated clips carry `duration`. All times are seconds, snapped by the core to `1/fps`, stored with 3 decimals.
+- **IDs:** stable, generated by core (`c_…`, `t_…`); agents reference clips by ID.
+- **Subtitle tracks do not copy words.** A subtitle track `follows` a video/audio track: its words are the transcript words that fall inside each followed clip's `[in, out]`, mapped to timeline time. Cutting a clip automatically removes its words from subtitles. Word text corrections live in the transcript file.
+- **Nested timelines:** `type: "timeline"` embeds another timeline file as a clip.
+- **Clip types:** `media` and `timeline` are core types. Others (`hyperframes`, `remotion`, …) are registered by adapter plugins, each with its own `props` schema.
+- Timeline duration is derived, never stored.
+
+### 5.4 Transcript (`transcripts/*.words.json`)
+
+```json
+{
+  "schemaVersion": 1,
+  "asset": "assets/raw-01.mp4",
+  "assetHash": "sha256:…",
+  "provider": "whisper-cpp",
+  "model": "large-v3-turbo",
+  "language": "es",
+  "words": [
+    { "id": "w_000001", "text": "Hola", "start": 0.520, "end": 0.810, "confidence": 0.97 },
+    { "id": "w_000002", "text": "a",    "start": 0.810, "end": 0.880, "confidence": 0.95 }
+  ],
+  "edits": { "w_000002": { "text": "a todos" } }
+}
+```
+
+- Times are source-asset seconds (same clock as the asset's `in`/`out`), measured on the CFR proxy.
+- `assetHash` invalidates the transcript if the asset changes.
+- `edits` holds human corrections; re-transcribing keeps them where word IDs still match.
+
+### 5.5 Script (`scripts/*.md`)
+
+Plain Markdown. Optional conventions:
+
+- YAML frontmatter: `title`, `target_duration`, `aspect`.
+- Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`).
+- `frameshell script outline <file> --json` returns parsed scenes. The UI highlights the scene of the selected clip and flags scenes with no clips.
+
+### 5.6 Schema evolution
+
+Every file carries `schemaVersion`. `packages/schema` ships forward migrations; the daemon migrates on open (with a backup under `.frameshell/`).
+
+---
+
+## 6. Core behaviours
+
+### 6.1 Operations
+
+Every change, whether from the UI, the CLI or a direct file edit, becomes an **operation**: `{ op, args, inverse, author, tx, revisionBefore }`. The daemon validates, snaps times, applies, bumps `revision`, writes the file atomically (temp + rename), appends to history and emits `timeline.changed`.
+
+### 6.2 History and transactions
+
+- Journal: `.frameshell/history/<timeline>.jsonl`.
+- `author`: `ui`, `cli:<session>` (terminal session), `file` (direct edit), `plugin:<name>`.
+- CLI ops from the same terminal session are grouped automatically into a transaction until an idle gap; `frameshell tx begin "<label>"` / `frameshell tx commit` group explicitly.
+- UI: History panel lists transactions ("agent: remove silences, 180 ops"). Actions: show diff on timeline, revert transaction, revert single op.
+- Revert is itself a new operation (history is append-only).
+- `frameshell history --since <tx> --json`: lets the agent see what the human changed since its last transaction.
+
+### 6.3 Asset ingestion
+
+Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies (short GOP), waveforms and thumbnails. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
+
+### 6.4 Direct file edits and conflicts
+
+The watcher sees a timeline file change that the daemon did not write:
+
+- **`revision` equals current:** schema-validate, diff against in-memory state, record as ops with author `file`, bump revision. Invalid content is rejected with a precise error.
+- **`revision` is stale:** reject. Restore the daemon's version, save the incoming file to `.frameshell/rejected/<timestamp>-<timeline>.json`, emit an event (shown in UI and returned by `frameshell doctor`/`status`).
+
+### 6.5 Clip render cache
+
+Cache key = hash(adapter name + adapter version + clip `props` + content hash of the adapter's declared input files + project fps/resolution). Changing a composition file triggers a background re-render of affected clips.
+
+### 6.6 Project trust
+
+On first open of a project that declares plugins, the UI and CLI ask for trust before installing or loading them. Untrusted projects open read-only for plugins (media, timeline and transcripts still work).
+
+---
+
+## 7. CLI surface (v0.1)
+
+```
+frameshell init [dir]                         # scaffold project
+frameshell status [--json]                    # project, daemon, jobs, rejected edits
+frameshell doctor [--json]                    # binaries, encoders (x264, VideoToolbox, NVENC), whisper accel
+
+frameshell import <file…>                     # copy/link into assets/, queue proxies
+frameshell track add|remove|list …
+frameshell clip add|move|trim|split|remove|set …
+frameshell cut <track> --from <s> --to <s>    # remove a timeline range (ripple)
+frameshell timeline show [--json]             # compact dump for agents
+
+frameshell transcribe <asset> [--provider p]  # writes transcripts/<asset>.words.json
+frameshell transcribe --verify <export>       # lost-word report vs sources
+frameshell script outline <file> [--json]
+
+frameshell tx begin "<label>" | commit | abort
+frameshell history [--since <tx>] [--json]
+frameshell revert <tx|op>
+
+frameshell render [--preset p] [--out file]   # export
+frameshell plugin install|remove|list <spec>  # github:user/repo | npm name
+frameshell <plugin> <command> …               # plugin-provided commands
+```
+
+All mutating commands accept `--timeline <id>` (default `main`) and print the resulting `revision`.
+
+---
+
+## 8. Plugin system
+
+### 8.1 Manifest (`frameshell-plugin.json`)
+
+```json
+{
+  "name": "@frameshell/hyperframes",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "dist/index.js",
+  "contributes": {
+    "clipTypes": ["hyperframes"],
+    "transcriptionProviders": [],
+    "commands": ["hyperframes new"],
+    "exportPresets": [],
+    "skills": ["skills/hyperframes/SKILL.md"]
+  }
+}
+```
+
+### 8.2 Extension points
+
+| Point | v0.1 | Contract (sketch) |
+|---|---|---|
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`, optional `livePreview` (v0.2) |
+| Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
+| CLI commands | ✅ | `register(name, handler)` with typed args |
+| Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |
+| Export presets | ✅ | Declarative codec, resolution, aspect and loudness settings |
+| UI panels (webviews) | v0.3 | — |
+| Effects / filters | v0.3 | ffmpeg filter fragments + preview equivalent |
+
+### 8.3 Distribution
+
+- Install: `frameshell plugin install github:user/repo` or an npm package name. Pinned per project in `frameshell.json`; global plugins allowed.
+- Discovery: GitHub repos tagged `frameshell-plugin` get indexed automatically (herdr model). No review; trust and security guide in the docs.
+- Plugins run in the daemon process with full Node access (like VS Code extensions). No sandbox in v0.1; project trust is the gate.
+- Official plugins use only the public API; no private hooks.
+
+---
+
+## 9. Native binaries
+
+- Managed by the daemon under the OS app-data directory, versioned (`ffmpeg/7.x/…`).
+- Sources: pinned URLs + SHA-256; mirrored on Frameshell GitHub Releases to avoid depending on third-party availability.
+- ffmpeg: GPL build (x264/x265) downloaded by the user at first run; not redistributed inside the installer.
+- whisper.cpp: prebuilt per platform (Metal on macOS; CUDA/Vulkan where available; CPU fallback). Models downloaded on first transcription.
+- Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
+
+---
+
+## 10. UI
+
+```
+┌──────────┬─────────────────────────────────┬──────────────┐
+│ Explorer │  Preview        │ Editor tabs   │ Terminal(s)  │
+│ History  │                 │ script.md     │ [agent][zsh] │
+│ Plugins  │                 │ transcript    │              │
+│          │                 │ main.json     │              │
+│          ├─────────────────────────────────┤              │
+│          │ Timeline: V2 overlays / V1 / A1 / S1          │ │
+└──────────┴─────────────────────────────────┴──────────────┘
+```
+
+- All panels resizable and collapsible; timeline maximize shortcut; layout saved per project.
+- **Transcript view:** words synced to the playhead; words removed by cuts shown struck through; clicking a struck word restores it (an op that re-extends or re-inserts the clip range); selecting words selects the timeline range.
+- **Timeline v0.1:** multiple video tracks (overlay transform: position, scale, opacity), audio tracks with gain and waveform, subtitle tracks. Move, trim, split, ripple delete, snapping, zoom. Generated clips show render state.
+- **History panel:** transactions by author, diff highlight, revert.
+
+---
+
+## 11. MVP (v0.1)
+
+### Acceptance scenario
+
+> I record a video, open the folder in Frameshell and ask Claude Code in the integrated terminal: "remove silences and repeated takes, add an intro with subtitles". I watch the cuts appear on the timeline while the agent works. In the transcript view I restore two cuts I disagree with. I ask the agent to continue; it reads `frameshell history --since` and respects my changes. I export to 1440p for YouTube and the `--verify` report shows no lost words.
+
+### In scope
+
+| Area | Scope |
+|---|---|
+| Shell | Electron, layout §10, explorer + watcher, pty terminals with tabs, Monaco for md/json |
+| Core | Daemon, schema + JSON Schema, operations, single writer, `revision`, history + transactions + revert, conflict handling |
+| CLI | Surface in §7 |
+| Media | Import, CFR proxies, waveforms, thumbnails, managed ffmpeg + whisper.cpp |
+| Timeline | §10 feature set |
+| Transcript | whisper.cpp provider, transcript view, strike/restore, subtitle tracks, `--verify` |
+| Preview | Direct proxy playback + cached generated clips |
+| Export | Segmented ffmpeg compiler, continuous audio pass, loudnorm, presets `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920` |
+| Plugins | API v1 for §8.2 v0.1 points, install from GitHub/npm, project trust; `@frameshell/hyperframes`, `@frameshell/whisper-cpp` |
+| Agent | `skills/frameshell/SKILL.md` + plugin skills |
+| Platforms | macOS + Linux stable, Windows beta, CI on all three |
+
+Estimate: 3–5 months for one developer. First cuts if needed: overlay transform (stack only) and the vertical preset.
+
+---
+
+## 12. Roadmap
+
+| Version | Content |
+|---|---|
+| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; MCP server (thin client of the daemon); UI → terminal context injection ("ask agent about selection"); opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
+| **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
+| **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
+| **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
+
+---
+
+## 13. Technical risks
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Gapless multi-clip preview in `<video>` (visible hiccups at hundreds of cuts) | Core UX of Case B | Double-buffered elements per track, short-GOP proxies, Web Audio for audio; fallback: background "preview renders" of dense regions |
+| Word timestamp accuracy of whisper.cpp (cuts inside words) | Lost or clipped words | Snap cuts to energy valleys between words (not raw word bounds); `--verify` on every export; DTW timestamps when available |
+| ffmpeg graph size with hundreds of cuts | Slow or failing exports | Segmented video render + concat; continuous separate audio pass; golden tests |
+| VFR sources drifting from transcript/cut times | A/V desync in long videos | CFR proxies at import; transcripts measured on proxies; export maps times on the same clock |
+| Scope for a solo developer | MVP slips | Scenario-defined MVP; explicit cut list (§11); official plugins limited to two |
+| Daemon lifecycle (stale sockets, version skew after update) | "App won't connect" | Version handshake, socket cleanup on start, `frameshell doctor` |
+| Plugin security (projects declaring plugins) | Code execution from untrusted projects | Project trust prompt; plugins pinned; docs guidance; sandboxing evaluated post-v1 |
+| HyperFrames maturity / API churn | Adapter breakage | Pin version per project; adapter isolated behind plugin API |
+| Remotion licence (paid for companies > 3 people) | User confusion | Optional adapter, documented licence notice; never a core dependency |
+| Binary download sources disappearing | First run broken | Mirror on GitHub Releases; checksums; system override |
+| Windows ConPTY quirks with agent CLIs; path quoting in ffmpeg | Windows bugs | Beta label; CI on Windows from day one; args passed as arrays, never shell strings |
+| Schema evolution breaking projects and agents | Data loss / agent confusion | `schemaVersion`, migrations with backup, published JSON Schema per version |
+| Electron size and memory | Perception | Accepted trade-off; lazy-load Monaco and heavy panels |
+
+---
+
+## 14. Open items (non-blocking)
+
+- Idle gap for automatic transaction grouping (start at ~10 s, tune with real agent sessions).
+- Subtitle style presets and ASS generation details.
+- Exact whisper.cpp model quantization default (quality vs download size).
+- Plugin index hosting (static site generated from GitHub topic search).
