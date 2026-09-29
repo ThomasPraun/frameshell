@@ -86,18 +86,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     readMessages(
       socket,
       (message) => {
-        void dispatch(message as JsonRpcRequest).then((reply) => {
-          if (reply) writeMessage(socket, reply);
-        });
+        // Never let one bad message reject unhandled: Node would kill the daemon.
+        void dispatch(message)
+          .then((reply) => {
+            if (reply) writeMessage(socket, reply);
+          })
+          .catch(() => socket.destroy());
       },
       () => writeMessage(socket, errorReply(null, ErrorCode.ParseError, "Parse error: each line must be one JSON value")),
     );
 
-    async function dispatch(request: JsonRpcRequest) {
-      const id = request.id ?? null;
-      if (request?.jsonrpc !== "2.0" || typeof request.method !== "string") {
-        return errorReply(id, ErrorCode.InvalidRequest, "Invalid JSON-RPC 2.0 request");
-      }
+    /** Any JSON value may arrive; shape is checked before any field is trusted. */
+    async function dispatch(message: unknown) {
+      const id = requestId(message);
+      if (!isRequest(message)) return errorReply(id, ErrorCode.InvalidRequest, "Invalid JSON-RPC 2.0 request");
+      const request = message;
       try {
         if (request.method === "handshake") {
           checkProtocolVersion(request.params);
@@ -136,6 +139,23 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   await listenCleaningStaleSocket(server, socketPath);
   armIdleTimer();
   return { socketPath, closed, close };
+}
+
+function isRequest(message: unknown): message is JsonRpcRequest {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return false;
+  const { jsonrpc, method, id } = message as Record<string, unknown>;
+  return jsonrpc === "2.0" && typeof method === "string" && (id === undefined || isValidId(id));
+}
+
+function isValidId(id: unknown): id is number | string | null {
+  return id === null || typeof id === "string" || typeof id === "number";
+}
+
+/** Echoable id, or `null` when the message has none usable (JSON-RPC 2.0 §5). */
+function requestId(message: unknown): number | string | null {
+  if (typeof message !== "object" || message === null) return null;
+  const id = (message as { id?: unknown }).id;
+  return isValidId(id) ? id : null;
 }
 
 function checkProtocolVersion(params: unknown): void {

@@ -44,4 +44,36 @@ describe("protocol handshake", () => {
     socket.destroy();
     expect(JSON.parse(reply)).toMatchObject({ id: 1, error: { code: ErrorCode.HandshakeRequired } });
   });
+
+  it.each(["null", "42", '"text"', "[]", "true"])(
+    "answers InvalidRequest to non-object message %s and keeps serving",
+    async (line) => {
+      daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+      const { createConnection } = await import("node:net");
+      const socket = createConnection(daemon.socketPath);
+      const reply = await new Promise<string>((resolve) => {
+        socket.setEncoding("utf8");
+        socket.once("data", (chunk: string) => resolve(chunk));
+        socket.write(`${line}\n`);
+      });
+      socket.destroy();
+      expect(JSON.parse(reply)).toMatchObject({ id: null, error: { code: ErrorCode.InvalidRequest } });
+      const conn = await connectToDaemon(daemon.socketPath, { client: "test" });
+      expect(conn.daemon.pid).toBe(process.pid);
+      conn.close();
+    },
+  );
+
+  it("replies with null id when the request id is not a string or number", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const { createConnection } = await import("node:net");
+    const socket = createConnection(daemon.socketPath);
+    const reply = await new Promise<string>((resolve) => {
+      socket.setEncoding("utf8");
+      socket.once("data", (chunk: string) => resolve(chunk));
+      socket.write(`${JSON.stringify({ jsonrpc: "1.0", id: { x: 1 }, method: "status" })}\n`);
+    });
+    socket.destroy();
+    expect(JSON.parse(reply)).toMatchObject({ id: null, error: { code: ErrorCode.InvalidRequest } });
+  });
 });
