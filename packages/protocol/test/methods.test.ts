@@ -28,6 +28,11 @@ describe("method registry JSON Schema", () => {
     });
   });
 
+  it("lets doctor callers omit install, which defaults to report-only", () => {
+    expect(schemas.doctor.params).toMatchObject({ required: ["cwd"], properties: { install: { type: "boolean" } } });
+    expect(parseParams("doctor", { cwd: process.cwd() })).toEqual({ cwd: process.cwd(), install: false });
+  });
+
   it("flags only connection plumbing as internal, so tool generators skip it", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)

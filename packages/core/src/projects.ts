@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { ErrorCode, type ProjectInitResult, type ProjectSummary, RpcError } from "@frameshell/protocol";
-import { createProjectConfig, createTimeline, parseProjectConfig } from "@frameshell/schema";
+import { type ProjectConfig, createProjectConfig, createTimeline, parseProjectConfig } from "@frameshell/schema";
 
 /** Project config file name; its directory is the project root. */
 export const PROJECT_FILE = "frameshell.json";
@@ -64,19 +64,10 @@ export class ProjectRegistry {
    * when the config fails validation. Re-reads on every call so edits show.
    */
   async openEnclosing(cwd: string): Promise<ProjectSummary | null> {
-    const configPath = await findUp(resolve(cwd), PROJECT_FILE);
-    if (!configPath) return null;
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await readFile(configPath, "utf8"));
-    } catch (error) {
-      throw invalid(configPath, (error as Error).message);
-    }
-    const parsed = parseProjectConfig(raw);
-    if (!parsed.ok) throw invalid(configPath, parsed.error);
-    const root = dirname(configPath);
-    const project = { dir: root, name: parsed.value.name, schemaVersion: parsed.value.schemaVersion };
-    this.#open.set(root, project);
+    const found = await readEnclosingProject(cwd);
+    if (!found) return null;
+    const project = { dir: found.dir, name: found.config.name, schemaVersion: found.config.schemaVersion };
+    this.#open.set(found.dir, project);
     return project;
   }
 
@@ -84,6 +75,25 @@ export class ProjectRegistry {
   list(): ProjectSummary[] {
     return [...this.#open.values()];
   }
+}
+
+/**
+ * Validated config of the project enclosing `cwd` (searching upwards), or
+ * `null` outside any project. Read-only: does not open the project. Throws
+ * `InvalidProjectFile` when the config fails validation.
+ */
+export async function readEnclosingProject(cwd: string): Promise<{ dir: string; config: ProjectConfig } | null> {
+  const configPath = await findUp(resolve(cwd), PROJECT_FILE);
+  if (!configPath) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(configPath, "utf8"));
+  } catch (error) {
+    throw invalid(configPath, (error as Error).message);
+  }
+  const parsed = parseProjectConfig(raw);
+  if (!parsed.ok) throw invalid(configPath, parsed.error);
+  return { dir: dirname(configPath), config: parsed.value };
 }
 
 function invalid(path: string, details: string): RpcError {

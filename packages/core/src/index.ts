@@ -6,3 +6,29 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
+export { type AppDirs, resolveAppDirs } from "./app-dirs.js";
+export {
+  type BinaryPackage,
+  DEFAULT_PACKAGES,
+  FFMPEG_PACKAGE,
+  type PinnedArchive,
+  type PinnedBuild,
+  type PlatformKey,
+  currentPlatform,
+} from "./binaries/manifest.js";
+export {
+  type BinaryLocation,
+  BinaryManager,
+  type BinaryManagerOptions,
+  GLOBAL_CONFIG_FILE,
+  type ProjectBinaries,
+} from "./binaries/manager.js";
+export {
+  type Exec,
+  type ExecResult,
+  type FfmpegProbe,
+  execProcess,
+  probeFfmpeg,
+  probeVersion,
+} from "./binaries/probe.js";
+export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
