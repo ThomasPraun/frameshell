@@ -34,8 +34,10 @@ saw 19), so speed numbers are upper bounds.
 | faster-whisper float32 | no Metal backend | 1.227 |
 
 DTW forces flash attention off (whisper.cpp disables DTW otherwise) and costs about
-+20 %. First Metal run on the machine compiled shaders (the flash-attention library alone
-took 16.3 s); later runs spent 0.3 to 0.7 s.
++20 %. Every recorded whisper.cpp run spent 0.3 to 0.7 s compiling Metal shader libraries at process
+start (`results/summary.md`). The first Metal run on the machine was slower, but its log
+was overwritten and the spike has no procedure for a cold shader cache, so the cold-start
+cost is not measured.
 
 **Text.** WER against faster-whisper float32: whisper.cpp 1.2 to 3.5 % across all
 configs, faster-whisper int8 0.3 %. whisper.cpp configs with the same f16 weights
@@ -108,7 +110,8 @@ broken at the pinned commit: DTW times are not remapped to the original timeline
 - **#20:** flags `-dtw large.v3.turbo -nfa -ml 1 -sow -ojf`; derive words from segments;
   no `--vad` with DTW; energy-derived `end`.
 - **#6:** pin the whisper.cpp version (DTW/VAD behaviour changes between commits);
-  download q5_0 by default; first-run Metal shader compile adds tens of seconds.
+  download q5_0 by default; measure first-run (cold cache) Metal shader compile before
+  deciding whether first-run UX needs a warm-up step or progress message.
 
 ## Limits
 
