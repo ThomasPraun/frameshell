@@ -1,0 +1,55 @@
+A2: 46155200 samples compared, 2006 deviate; 16 deviation bursts (0 within 100 ms of a cut)
+  program 16.059 s, 2.7 ms
+  program 17.485 s, 2.7 ms
+  program 198.357 s, 2.7 ms
+  program 314.296 s, 2.7 ms
+  program 318.699 s, 2.7 ms
+  program 403.397 s, 2.7 ms
+  program 417.069 s, 2.7 ms
+  program 432.573 s, 2.7 ms
+  program 452.077 s, 2.7 ms
+  program 556.045 s, 2.7 ms
+  program 604.496 s, 2.7 ms
+  program 738.365 s, 2.6 ms
+  program 745.635 s, 2.6 ms
+  program 750.395 s, 2.7 ms
+  program 894.853 s, 2.7 ms
+  program 945.325 s, 2.7 ms
+B: 46155200 samples compared, 3640 deviate; 29 deviation bursts (1 within 100 ms of a cut)
+  program 41.581 s, 2.7 ms
+  program 47.488 s, 2.7 ms
+  program 75.840 s, 2.7 ms
+  program 81.443 s, 2.7 ms
+  program 99.104 s, 2.6 ms
+  program 111.845 s, 2.7 ms
+  program 190.792 s, 2.7 ms
+  program 195.016 s, 2.7 ms
+  program 237.629 s, 2.7 ms
+  program 267.229 s, 2.7 ms
+  program 293.939 s, 2.7 ms
+  program 347.992 s, 2.7 ms
+  program 383.821 s, 2.7 ms
+  program 412.848 s, 2.7 ms
+  program 457.648 s, 2.7 ms
+  program 473.928 s, 2.7 ms
+  program 480.760 s, 2.7 ms
+  program 493.379 s, 2.7 ms
+  program 615.739 s, 2.7 ms
+  program 691.080 s, 2.7 ms
+B-bufsrc: 46155200 samples compared, 4470 deviate; 15 deviation bursts (15 within 100 ms of a cut)
+  program 7.933 s, 7.7 ms (cut)
+  program 12.333 s, 7.8 ms (cut)
+  program 95.733 s, 7.9 ms (cut)
+  program 211.133 s, 7.8 ms (cut)
+  program 300.567 s, 6.7 ms (cut)
+  program 302.633 s, 6.7 ms (cut)
+  program 432.133 s, 7.7 ms (cut)
+  program 475.800 s, 7.7 ms (cut)
+  program 484.367 s, 6.7 ms (cut)
+  program 606.233 s, 6.7 ms (cut)
+  program 678.133 s, 5.2 ms (cut)
+  program 682.533 s, 5.2 ms (cut)
+  program 707.367 s, 6.7 ms (cut)
+  program 721.867 s, 7.7 ms (cut)
+  program 806.167 s, 6.7 ms (cut)
+B-chunkedself: 46155200 samples compared, 0 deviate; 0 deviation bursts (0 within 100 ms of a cut)

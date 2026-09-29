@@ -1,0 +1,27 @@
+martes, 29 de septiembre de 2026, 17:19:49 -03
+17:19  up 6 days,  5:35, 2 users, load averages: 2,78 3,49 4,11
+== B-chunked (load avg before: 2.78 3.49 4.11)
+[B-chunked] start B: 201 segments, 200 cuts, program 961.6 s
+[B-chunked] done (end); probes=115770 cuts=200 errors=0
+| metric | B-chunked |
+|---|---|
+| cuts measured | 200/200 |
+| program / wall (s) | 961.6 / 961.6 |
+| cuts with dropped frames | 0 (total 0, max 0) |
+| cuts with freeze >= 1 frame | 0 (dup total 0) |
+| freeze at cut ms mean / p95 / max | 0.1 / 4.3 / 9.2 |
+| cuts showing wrong (stray) frames | 0 (total 0) |
+| interior drops / freezes (baseline) | 0 of 28445 / 0 |
+| audio: cuts with click | 0 |
+| audio: cuts with gap >= 1 ms | 0 |
+| audio gap ms mean / p95 / max | 0 / 0 / 0 |
+| audio: cuts with overlap | 0 |
+| audio glitches outside cuts | 21 |
+| audio: repeated 128-sample quanta | 21 |
+| A/V offset at cut ms mean [p5, p95] | 4.6 [0.8, 8.1] (n=200) |
+| rAF interval ms p50 / p99 / max | 8.3 / 9.4 / 41.9 |
+| probe cost ms mean / p99 | 1.9 / 5.3 |
+| CPU all processes % mean | 4.2 |
+B-chunked {"starvedRafs":0,"prerollFrames":1296,"decoded":30143,"outputLatency":0.028,"baseLatency":0.005333333333333333,"notes":[{"decoderConfig":{"codec":"avc1.64001f","supported":true,"hw":"prefer-hardware"}}]} 
+martes, 29 de septiembre de 2026, 17:35:56 -03
+17:35  up 6 days,  5:51, 2 users, load averages: 3,74 2,85 3,27

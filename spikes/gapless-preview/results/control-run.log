@@ -1,0 +1,32 @@
+== C-osc (load avg before: 2.58 2.66 3.18)
+[C-osc] start C: 201 segments, 200 cuts, program 961.6 s
+[C-osc] done (end); probes=0 cuts=0 errors=0
+== C-wsine (load avg before: 5.59 4.07 3.66)
+[C-wsine] start C: 201 segments, 200 cuts, program 961.6 s
+[C-wsine] done (end); probes=0 cuts=0 errors=0
+| metric |  |
+|---||
+| cuts measured |  |
+| program / wall (s) |  |
+| cuts with dropped frames |  |
+| cuts with freeze >= 1 frame |  |
+| freeze at cut ms mean / p95 / max |  |
+| cuts showing wrong (stray) frames |  |
+| interior drops / freezes (baseline) |  |
+| audio: cuts with click |  |
+| audio: cuts with gap >= 1 ms |  |
+| audio gap ms mean / p95 / max |  |
+| audio: cuts with overlap |  |
+| audio glitches outside cuts |  |
+| audio: repeated 128-sample quanta |  |
+| A/V offset at cut ms mean [p5, p95] |  |
+| rAF interval ms p50 / p99 / max |  |
+| probe cost ms mean / p99 |  |
+| CPU all processes % mean |  |
+C-osc: 0 repeated quanta in 300 s of non-silent audio
+C-wsine: 0 repeated quanta in 300 s of non-silent audio
+A1: 0 repeated quanta in 952 s of non-silent audio
+A2: 16 repeated quanta in 962 s of non-silent audio
+B: 29 repeated quanta in 962 s of non-silent audio
+B-bufsrc: 0 repeated quanta in 962 s of non-silent audio
+B-chunked: 21 repeated quanta in 962 s of non-silent audio
