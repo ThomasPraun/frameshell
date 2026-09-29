@@ -4,7 +4,7 @@
 
 Your AI agent (Claude Code, Codex, Gemini CLI…) runs in Frameshell's integrated terminal and edits the project. You watch every change live in the preview and the multitrack timeline, fix what you don't like by hand, and the agent picks up from your changes.
 
-> **Status: pre-alpha.** The specification is settled; implementation has just started (walking skeleton: `frameshell init` / `status` and the `frameshelld` daemon). Nothing is installable yet. Watch the repo or read the spec to follow along.
+> **Status: pre-alpha.** The specification is settled; implementation has just started (walking skeleton: `frameshell init` / `status`, the `frameshelld` daemon and the desktop shell: explorer, editor, terminals). Run the app from source with `pnpm install && pnpm build && pnpm --filter @frameshell/desktop start`. Nothing is installable yet. Watch the repo or read the spec to follow along.
 
 ## What it does
 

@@ -7,10 +7,11 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "build": "tsc -b && pnpm --filter @frameshell/desktop build",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json && pnpm --filter @frameshell/desktop typecheck",
     "lint": "eslint .",
     "test": "tsc -b && vitest run",
+    "test:e2e": "tsc -b && pnpm --filter @frameshell/desktop test:e2e",
     "gen:json-schema": "tsc -b && node packages/schema/scripts/generate-json-schema.mjs"
   },
   "devDependencies": {

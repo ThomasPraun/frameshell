@@ -4,3 +4,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 coverage/
+# Desktop app build output and Playwright artifacts.
+apps/desktop/out/
+apps/desktop/test-results/
+apps/desktop/playwright-report/
