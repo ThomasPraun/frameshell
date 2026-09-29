@@ -19,6 +19,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
+    "@frameshell/plugin-api": "workspace:*",
     "@frameshell/protocol": "workspace:*",
     "@frameshell/schema": "workspace:*",
     "zod": "^4.6.5"

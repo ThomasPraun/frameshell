@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/schema" },
+    { "path": "packages/plugin-api" },
     { "path": "packages/protocol" },
     { "path": "packages/core" },
     { "path": "packages/cli" }

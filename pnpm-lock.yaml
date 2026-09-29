@@ -38,6 +38,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@frameshell/plugin-api':
+        specifier: workspace:*
+        version: link:../plugin-api
       '@frameshell/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -47,6 +50,12 @@ importers:
       zod:
         specifier: ^4.6.5
         version: 4.6.5
+
+  packages/plugin-api:
+    dependencies:
+      '@frameshell/schema':
+        specifier: workspace:*
+        version: link:../schema
 
   packages/protocol:
     dependencies:
