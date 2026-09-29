@@ -1,0 +1,19 @@
+{
+  "name": "spike-gapless-preview",
+  "version": "0.0.0",
+  "private": true,
+  "description": "THROWAWAY spike (#2): gapless preview of a dense cut list in Electron. Not part of any workspace.",
+  "type": "module",
+  "main": "src/main.cjs",
+  "scripts": {
+    "fixture": "node scripts/make-fixture.mjs",
+    "measure": "node scripts/run-all.mjs",
+    "analyze": "node scripts/analyze.mjs"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "mp4box": "^2.4.1"
+  }
+}
