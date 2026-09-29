@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
@@ -48,6 +48,51 @@ describe("file.write", () => {
     await expect(conn.request("file.write", { path, content: "{}" })).rejects.toMatchObject({
       code: ErrorCode.OutsideProject,
     });
+  });
+
+  it("refuses .frameshell/ under any letter case", async () => {
+    for (const name of [".FRAMESHELL", ".FrameShell"]) {
+      const path = join(dir, name, "history", "main.jsonl");
+      await expect(conn.request("file.write", { path, content: "pwn" })).rejects.toMatchObject({
+        code: ErrorCode.OutsideProject,
+      });
+    }
+    expect(existsSync(join(dir, ".frameshell", "history", "main.jsonl"))).toBe(false);
+  });
+
+  it("refuses a path escaping the project through a symlinked directory", async () => {
+    const outside = tempDir();
+    // Junction: directory link Windows creates without admin rights; ignored elsewhere.
+    symlinkSync(outside, join(dir, "link"), "junction");
+    for (const path of [join(dir, "link", "escape.md"), join(dir, "link", "new", "escape.md")]) {
+      await expect(conn.request("file.write", { path, content: "x" })).rejects.toMatchObject({
+        code: ErrorCode.OutsideProject,
+      });
+    }
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("refuses reaching .frameshell/ through a symlinked directory", async () => {
+    symlinkSync(join(dir, ".frameshell"), join(dir, "state"), "junction");
+    const path = join(dir, "state", "history", "main.jsonl");
+    await expect(conn.request("file.write", { path, content: "pwn" })).rejects.toMatchObject({
+      code: ErrorCode.OutsideProject,
+    });
+    expect(existsSync(join(dir, ".frameshell", "history", "main.jsonl"))).toBe(false);
+  });
+
+  it("refuses to write through a symlinked file", async (ctx) => {
+    const outside = join(tempDir(), "target.md");
+    writeFileSync(outside, "before");
+    try {
+      symlinkSync(outside, join(dir, "notes.md"), "file");
+    } catch {
+      ctx.skip(); // Windows without symlink privilege.
+    }
+    await expect(conn.request("file.write", { path: join(dir, "notes.md"), content: "x" })).rejects.toMatchObject({
+      code: ErrorCode.OutsideProject,
+    });
+    expect(readFileSync(outside, "utf8")).toBe("before");
   });
 
   it("refuses a path escaping the project via ..", async () => {

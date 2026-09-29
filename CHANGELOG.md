@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Desktop app (`apps/desktop`, Electron + electron-vite + React): opens a project folder, auto-starts or reconnects to `frameshelld`, and lays out explorer/history/plugins, preview and editor tabs, timeline and a full-height terminal panel (SPEC §10). Explorer updates live from a file watcher. Markdown and JSON open in Monaco, with the project JSON Schemas; saves go through the daemon. Terminals are real login shells (node-pty + xterm.js) with `FRAMESHELL_SOCKET`, `FRAMESHELL_PROJECT`, `FRAMESHELL_SESSION` and a bundled `frameshell` on `PATH`. Panels resize and collapse; layout is saved per project. Playwright smoke test of the built app in CI.
-- Daemon method `file.write`: atomic text-file writes inside a project, schema-checked for `frameshell.json` and timelines. Error code `OutsideProject`.
+- Daemon method `file.write`: atomic text-file writes inside a project, schema-checked for `frameshell.json` and timelines. Confinement checks real paths: symlinks cannot escape the project and `.frameshell/` is refused in any letter case. Error code `OutsideProject`.
 - `status` reports `caller` (client and terminal session). The CLI sends `FRAMESHELL_SESSION` in the handshake, so calls from an app terminal are attributed to it. Protocol bumped to v2.
 - pnpm workspaces monorepo (`packages/schema`, `protocol`, `core`, `cli`), TypeScript strict, Vitest, ESLint.
 - `@frameshell/schema`: Zod models for `frameshell.json` and timeline files (`schemaVersion` 1) with generated JSON Schema (`pnpm gen:json-schema`).

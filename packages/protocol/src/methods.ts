@@ -301,7 +301,8 @@ export const methods = {
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
       "Missing parent directories are created. `frameshell.json` and `timelines/*.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. " +
-      "Fails with OutsideProject for paths in no project or under daemon-owned `.frameshell/`.",
+      "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
+      "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
       path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),
       content: z.string().describe("Full new file content, UTF-8."),

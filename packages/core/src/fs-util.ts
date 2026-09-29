@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** True when `path` exists (file or directory). */
@@ -27,7 +27,9 @@ export async function readJsonIfExists(path: string): Promise<unknown> {
 export async function writeTextAtomic(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, content);
+  // Drop a stale temp (or a planted symlink) and create exclusively so the write never follows a link.
+  await rm(temp, { force: true });
+  await writeFile(temp, content, { flag: "wx" });
   await rename(temp, path);
 }
 
