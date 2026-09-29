@@ -21,6 +21,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli}`. 
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
+- New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
 - Wire change: bump `PROTOCOL_VERSION`.
 - Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*`.
 

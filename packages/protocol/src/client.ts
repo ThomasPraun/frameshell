@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   RpcError,
 } from "./methods.js";
+import { assertSocketPathFits } from "./socket-path.js";
 
 /** Options for {@link connectToDaemon}. */
 export interface ConnectOptions {
@@ -31,7 +32,8 @@ export interface DaemonConnection {
  * Connect and perform the protocol handshake.
  *
  * Rejects with the raw socket error when nobody listens (see
- * {@link isDaemonUnavailable}), or with {@link RpcError} code
+ * {@link isDaemonUnavailable}), with code `ENAMETOOLONG` or `ENOTSOCK` and an
+ * actionable message when the endpoint path is unusable, or with {@link RpcError} code
  * `IncompatibleProtocol` when versions differ; the socket is closed in both cases.
  */
 export async function connectToDaemon(socketPath: string, options: ConnectOptions): Promise<DaemonConnection> {
@@ -97,12 +99,24 @@ export function isDaemonUnavailable(error: unknown): boolean {
 }
 
 function openSocket(socketPath: string): Promise<Socket> {
+  assertSocketPathFits(socketPath);
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
+    const onError = (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOTSOCK") return reject(error);
+      reject(
+        Object.assign(
+          new Error(`${socketPath} exists and is not a socket. Remove it or set FRAMESHELL_SOCKET to another path.`, {
+            cause: error,
+          }),
+          { code: "ENOTSOCK" },
+        ),
+      );
+    };
     socket.once("connect", () => {
-      socket.off("error", reject);
+      socket.off("error", onError);
       resolve(socket);
     });
-    socket.once("error", reject);
+    socket.once("error", onError);
   });
 }

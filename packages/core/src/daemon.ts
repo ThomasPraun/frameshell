@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   RpcError,
   type ValidatedParams,
+  assertSocketPathFits,
   isMethodName,
   parseParams,
   readMessages,
@@ -50,11 +51,13 @@ type Handlers = { [M in MethodName]: (params: ValidatedParams<M>) => Promise<Met
 /**
  * Start frameshelld on `socketPath`.
  *
- * Rejects with code `EADDRINUSE` when a live daemon already owns the socket.
+ * Rejects with code `EADDRINUSE` when a live daemon already owns the socket,
+ * or `ENAMETOOLONG` when the unix socket path exceeds the OS limit.
  * A stale unix socket left by a crashed daemon is removed first.
  */
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const { socketPath } = options;
+  assertSocketPathFits(socketPath);
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   const clients = new Set<Socket>();

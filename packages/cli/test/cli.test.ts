@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -16,13 +16,14 @@ const socketPath =
     ? `\\\\.\\pipe\\frameshell-cli-test-${randomUUID().slice(0, 8)}`
     : join(realpathSync(tmpdir()), `fs-cli-${randomUUID().slice(0, 8)}.sock`);
 
-function frameshell(args: string[], cwd: string) {
+function frameshell(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}) {
+  const startedAt = Date.now();
   const result = spawnSync(process.execPath, [cliBin, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, FRAMESHELL_SOCKET: socketPath, FRAMESHELL_IDLE_TIMEOUT_MS: String(IDLE_MS) },
+    env: { ...process.env, FRAMESHELL_SOCKET: socketPath, FRAMESHELL_IDLE_TIMEOUT_MS: String(IDLE_MS), ...env },
   });
-  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+  return { code: result.status, stdout: result.stdout, stderr: result.stderr, elapsedMs: Date.now() - startedAt };
 }
 
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "frameshell-cli-")));
@@ -96,5 +97,42 @@ describe("frameshell CLI", () => {
     expect(isAlive(pid)).toBe(true);
     expect(await waitForExit(pid)).toBe(true);
     await expect(connectToDaemon(socketPath, { client: "test" })).rejects.toSatisfy(isDaemonUnavailable);
+  });
+});
+
+describe("daemon startup failures", () => {
+  // A fresh endpoint per test: no live daemon may mask the spawn.
+  const freshSocket = () =>
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\frameshell-cli-test-${randomUUID().slice(0, 8)}`
+      : join(realpathSync(tmpdir()), `fs-cli-${randomUUID().slice(0, 8)}.sock`);
+
+  it("reports the daemon's own error instead of a generic start timeout", () => {
+    const result = frameshell(["status"], tempDir(), {
+      FRAMESHELL_SOCKET: freshSocket(),
+      FRAMESHELL_IDLE_TIMEOUT_MS: "soon",
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/FRAMESHELL_IDLE_TIMEOUT_MS.*soon/);
+    expect(result.stderr).not.toMatch(/did not start listening/);
+    expect(result.elapsedMs).toBeLessThan(8_000);
+  });
+
+  it.skipIf(process.platform === "win32")("reports a non-socket file blocking the socket path", () => {
+    const blocker = join(tempDir(), "blocker.sock");
+    writeFileSync(blocker, "keep me");
+    const result = frameshell(["status"], tempDir(), { FRAMESHELL_SOCKET: blocker });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/not a socket/);
+    expect(result.elapsedMs).toBeLessThan(8_000);
+  });
+
+  it.skipIf(process.platform === "win32")("explains an over-long socket path instead of ENOENT", () => {
+    const tooLong = join(tempDir(), `${"x".repeat(120)}.sock`);
+    const result = frameshell(["status"], tempDir(), { FRAMESHELL_SOCKET: tooLong });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/too long/);
+    expect(result.stderr).toMatch(/FRAMESHELL_SOCKET/);
+    expect(result.stderr).not.toMatch(/ENOENT/);
   });
 });
