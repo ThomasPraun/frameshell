@@ -118,8 +118,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
         if (!isMethodName(method)) throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         const params = parseParams(method, request.params);
-        const result = await (handlers[method] as (p: typeof params) => Promise<unknown>)(params);
+        // Set before the await: a request pipelined behind the handshake is dispatched
+        // while the handshake handler is still pending. Invalid params never get here.
         if (method === "handshake") handshaken = true;
+        const result = await (handlers[method] as (p: typeof params) => Promise<unknown>)(params);
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;
