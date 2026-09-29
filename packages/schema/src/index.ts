@@ -14,3 +14,15 @@ export {
   createTimeline,
 } from "./timeline.js";
 export { generateJsonSchemas } from "./json-schema.js";
+export {
+  PLUGIN_MANIFEST_FILE,
+  PLUGIN_MANIFEST_SCHEMA_URL,
+  BUILTIN_COMMANDS,
+  PluginNameSchema,
+  PluginManifestSchema,
+  type PluginManifest,
+  parsePluginManifest,
+  ExportPresetSchema,
+  type ExportPreset,
+  parseExportPreset,
+} from "./plugin.js";

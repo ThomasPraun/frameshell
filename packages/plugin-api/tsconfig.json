@@ -5,5 +5,5 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "references": [{ "path": "../schema" }, { "path": "../plugin-api" }, { "path": "../protocol" }]
+  "references": [{ "path": "../schema" }]
 }

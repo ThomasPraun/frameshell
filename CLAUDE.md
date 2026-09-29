@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli}`. Node >= 22.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`. Node >= 22.
 
 ## Doc map
 
@@ -13,6 +13,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli}`. 
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
 | Managed binaries (ffmpeg pins, sources, licences, re-pin) | `docs/binaries.md` |
+| Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 
 ## Rules
 

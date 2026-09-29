@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^(?:@[a-z0-9-~][a-z0-9-._~]*\\/)?[a-z0-9-~][a-z0-9-._~]*$",
+      "description": "npm package name; must match the installed package."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.+-]+)?$"
+    },
+    "apiVersion": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "Plugin API major version targeted."
+    },
+    "main": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ES module exporting `activate(api)`."
+    },
+    "description": {
+      "type": "string"
+    },
+    "contributes": {
+      "default": {
+        "clipTypes": [],
+        "transcriptionProviders": [],
+        "commands": [],
+        "exportPresets": [],
+        "skills": []
+      },
+      "type": "object",
+      "properties": {
+        "clipTypes": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "transcriptionProviders": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "commands": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]* [a-z][a-z0-9-]*$"
+          }
+        },
+        "exportPresets": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "skills": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "apiVersion",
+    "main"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/plugin.json"
+}

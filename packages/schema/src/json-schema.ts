@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PLUGIN_MANIFEST_SCHEMA_URL, PluginManifestSchema } from "./plugin.js";
 import { PROJECT_SCHEMA_URL, ProjectConfigSchema } from "./project.js";
 import { TIMELINE_SCHEMA_URL, TimelineSchema } from "./timeline.js";
 
@@ -15,5 +16,6 @@ export function generateJsonSchemas(): Record<string, object> {
   return {
     "project.json": toJson(ProjectConfigSchema, PROJECT_SCHEMA_URL),
     "timeline.json": toJson(TimelineSchema, TIMELINE_SCHEMA_URL),
+    "plugin.json": toJson(PluginManifestSchema, PLUGIN_MANIFEST_SCHEMA_URL),
   };
 }
