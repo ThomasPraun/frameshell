@@ -6,7 +6,7 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
-export { type AppDirs, resolveAppDirs } from "./app-dirs.js";
+export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
   type BinaryPackage,
   DEFAULT_PACKAGES,
@@ -32,5 +32,4 @@ export {
   probeVersion,
 } from "./binaries/probe.js";
 export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
-export { resolveAppDataDir } from "./app-data.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";

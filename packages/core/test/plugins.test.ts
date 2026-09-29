@@ -17,7 +17,7 @@ let hello: GitPlugin;
 
 beforeAll(async () => {
   hello = gitPluginFixture();
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), appDataDir: tempDir() });
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() } });
   conn = await connectToDaemon(daemon.socketPath, { client: "test" });
 });
 afterAll(async () => {

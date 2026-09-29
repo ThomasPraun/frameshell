@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  type AppDirs,
   ErrorCode,
   type MethodResult,
   type PluginInfo,
@@ -20,8 +21,8 @@ export interface PinsAccess {
 
 /** Options for {@link PluginHost}. */
 export interface PluginHostOptions {
-  /** Per-user data directory holding trust decisions. */
-  appDataDir: string;
+  /** Per-user directories; trust decisions live in the config dir. */
+  dirs: AppDirs;
   pins: PinsAccess;
 }
 
@@ -45,7 +46,7 @@ export class PluginHost {
   readonly #queues = new Map<string, Promise<unknown>>();
 
   constructor(options: PluginHostOptions) {
-    this.#trust = new TrustStore(options.appDataDir);
+    this.#trust = new TrustStore(options.dirs);
     this.#pins = options.pins;
   }
 

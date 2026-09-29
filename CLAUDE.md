@@ -30,6 +30,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 - New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
 - Wire change: bump `PROTOCOL_VERSION`.
 - Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*`.
+- User-level storage: only via `resolveAppDirs()` (`packages/protocol/src/app-dirs.ts`). Downloads, caches, app state = `dataDir`; user decisions, global config = `configDir`. Overrides: `FRAMESHELL_DATA_DIR`, `FRAMESHELL_CONFIG_DIR` only.
 
 ## Agent skills
 

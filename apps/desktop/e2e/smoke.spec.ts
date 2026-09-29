@@ -12,7 +12,8 @@ const mod = process.platform === "darwin" ? "Meta" : "Control";
 
 const workDir = realpathSync(mkdtempSync(join(tmpdir(), "fs-e2e-")));
 const projectDir = join(workDir, "demo");
-const userDataDir = join(workDir, "user-data");
+const dataDir = join(workDir, "data");
+const configDir = join(workDir, "config");
 // Isolated daemon for this run; exits on idle after the app closes.
 const socketPath = isWindows ? `\\\\.\\pipe\\frameshell-e2e-${randomUUID().slice(0, 8)}` : join(workDir, "d.sock");
 
@@ -28,7 +29,8 @@ async function launch(): Promise<void> {
     env: {
       ...process.env,
       FRAMESHELL_SOCKET: socketPath,
-      FRAMESHELL_USER_DATA_DIR: userDataDir,
+      FRAMESHELL_DATA_DIR: dataDir,
+      FRAMESHELL_CONFIG_DIR: configDir,
       FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
     },
   });

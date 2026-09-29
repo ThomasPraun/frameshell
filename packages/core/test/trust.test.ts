@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
-import { type Daemon, startDaemon } from "../src/index.js";
+import { type AppDirs, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { type GitPlugin, gitPluginFixture } from "./plugin-fixture.js";
 
@@ -15,13 +15,15 @@ afterEach(async () => {
   await Promise.all(daemons.splice(0).map((d) => d.close()));
 });
 
-/** A daemon with its own app data: a user who has never seen the project. */
-async function daemonFor(appDataDir = tempDir()): Promise<{ conn: DaemonConnection; appDataDir: string }> {
-  const daemon = await startDaemon({ socketPath: uniqueSocketPath(), appDataDir });
+/** A daemon with its own app dirs: a user who has never seen the project. */
+async function daemonFor(
+  dirs: AppDirs = { dataDir: tempDir(), configDir: tempDir() },
+): Promise<{ conn: DaemonConnection; dirs: AppDirs }> {
+  const daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs });
   daemons.push(daemon);
   const conn = await connectToDaemon(daemon.socketPath, { client: "test" });
   conns.push(conn);
-  return { conn, appDataDir };
+  return { conn, dirs };
 }
 
 let hello: GitPlugin;
@@ -88,15 +90,40 @@ describe("project trust", () => {
   );
 
   it(
-    "persists the decision in the user's app data across daemon restarts",
+    "persists the decision in the user's config dir across daemon restarts",
     async () => {
       const dir = await projectFromAuthor();
       const first = await daemonFor();
       await first.conn.request("project.trust", { cwd: dir, decision: "trust" });
-      expect(existsSync(join(first.appDataDir, "trust.json"))).toBe(true);
+      expect(existsSync(join(first.dirs.configDir, "trust.json"))).toBe(true);
+      expect(existsSync(join(first.dirs.dataDir, "trust.json"))).toBe(false);
 
-      const again = await daemonFor(first.appDataDir);
+      const again = await daemonFor(first.dirs);
       expect((await again.conn.request("status", { cwd: dir })).trust?.state).toBe("trusted");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "finds decisions earlier releases stored in the data dir (Linux) and moves them to the config dir",
+    async () => {
+      const denied = await projectFromAuthor();
+      const trusted = await projectFromAuthor();
+      // Earlier releases kept trust.json in $XDG_DATA_HOME/frameshell: today's Linux data dir.
+      const legacyDir = tempDir();
+      const legacy = await daemonFor({ dataDir: tempDir(), configDir: legacyDir });
+      await legacy.conn.request("project.trust", { cwd: denied, decision: "deny" });
+      await legacy.conn.request("project.trust", { cwd: trusted, decision: "trust" });
+
+      const upgraded = await daemonFor({ dataDir: legacyDir, configDir: tempDir() });
+      expect((await upgraded.conn.request("status", { cwd: denied })).trust?.state).toBe("denied");
+      expect((await upgraded.conn.request("status", { cwd: trusted })).trust?.state).toBe("trusted");
+
+      // The next decision writes every known decision to the config dir.
+      await upgraded.conn.request("project.trust", { cwd: denied, decision: "trust" });
+      const restarted = await daemonFor({ dataDir: tempDir(), configDir: upgraded.dirs.configDir });
+      expect((await restarted.conn.request("status", { cwd: denied })).trust?.state).toBe("trusted");
+      expect((await restarted.conn.request("status", { cwd: trusted })).trust?.state).toBe("trusted");
     },
     NPM_TIMEOUT,
   );

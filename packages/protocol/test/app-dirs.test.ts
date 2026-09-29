@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { resolveAppDirs } from "../src/index.js";
 
+// Literal paths are also where earlier releases put binaries (data) and, except
+// on Linux, trust (config): installs and decisions are found after an upgrade.
 describe("resolveAppDirs", () => {
   it("uses Application Support on macOS for data and config", () => {
     expect(resolveAppDirs({}, "darwin", "/Users/ana")).toEqual({

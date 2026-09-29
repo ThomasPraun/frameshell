@@ -5,14 +5,31 @@ frameshelld downloads native tools on first use instead of bundling them (SPEC Â
 ## How it works
 
 - Pins are per platform (`<os>-<arch>`): version, URLs (first one is canonical, later ones are mirrors), SHA-256, size, and the path of each executable inside the archive.
-- Install location: `<dataDir>/binaries/<package>/<version>/<platform>/`, with an `install.json` recording the source URL, checksum and licence. `dataDir` is `~/Library/Application Support/Frameshell` (macOS), `$XDG_DATA_HOME/frameshell` or `~/.local/share/frameshell` (Linux), `%LOCALAPPDATA%\Frameshell` (Windows), or `FRAMESHELL_DATA_DIR`.
+- Install location: `<dataDir>/binaries/<package>/<version>/<platform>/`, with an `install.json` recording the source URL, checksum and licence. See [User directories](#user-directories) for `dataDir`.
 - Install steps: download to a private staging directory while hashing, abort on checksum mismatch, extract only the pinned members with the system `tar`, then publish with one directory rename. A failed install leaves nothing behind. Concurrent requests share one download.
 - Extraction uses the system `tar`: bsdtar on macOS and Windows (`%SystemRoot%\System32\tar.exe`) reads zip and tar; GNU tar on Linux needs `xz` for `.tar.xz`. So Linux pins must be tar archives.
 - `frameshell doctor` only reports. It downloads only with `--install`. Other features call `BinaryManager.ensure()`, which downloads on first use.
 
+## User directories
+
+One resolver, `resolveAppDirs()` in `packages/protocol/src/app-dirs.ts`, places every piece of per-user state for the daemon, the CLI and the desktop app. It splits it in two:
+
+- `dataDir`: large or regenerable state that must not roam between machines. Managed binaries, downloads, caches, and the desktop app's Electron data (`<dataDir>/desktop`: Chromium profile, layouts, recent projects, CLI shim).
+- `configDir`: small user decisions. The global `config.json` and project trust decisions (`trust.json`).
+
+| OS | `dataDir` | `configDir` |
+|---|---|---|
+| macOS | `~/Library/Application Support/Frameshell` | same as `dataDir` |
+| Linux | `$XDG_DATA_HOME/frameshell` (default `~/.local/share/frameshell`) | `$XDG_CONFIG_HOME/frameshell` (default `~/.config/frameshell`) |
+| Windows | `%LOCALAPPDATA%\Frameshell` | `%APPDATA%\Frameshell` (roams) |
+
+`FRAMESHELL_DATA_DIR` and `FRAMESHELL_CONFIG_DIR` override each one (tests, portable installs). They are the only overrides: `FRAMESHELL_APP_DATA` and `FRAMESHELL_USER_DATA_DIR` were removed.
+
+Upgrading keeps existing state. Binaries were always in `dataDir`, and trust was already in `configDir` on macOS and Windows. On Linux, earlier builds kept `trust.json` in `dataDir`: the daemon reads it from there while `<configDir>/trust.json` is missing, and the next trust decision writes everything to `configDir`.
+
 ## Overrides
 
-Set `binaries` in `frameshell.json` (project) or in `<configDir>/config.json` (global; `configDir` is the data dir on macOS, `$XDG_CONFIG_HOME/frameshell` on Linux, `%APPDATA%\Frameshell` on Windows, or `FRAMESHELL_CONFIG_DIR`):
+Set `binaries` in `frameshell.json` (project) or in `<configDir>/config.json` (global):
 
 ```json
 { "binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" } }
@@ -41,7 +58,7 @@ Why these builders:
 - **BtbN (Linux, Windows).** These are the builds linked from ffmpeg.org. They are static, the `gpl` variant includes libx264, libvpx, NVENC (ffnvcodec), VAAPI and AMF, and GitHub publishes a SHA-256 digest for each asset. Daily autobuilds are pruned, but the last autobuild of each month is kept (back to 2024-10 when this was pinned). Always pin a month-end autobuild.
 - **gyan.dev (Windows) was not chosen.** Its `essentials` build has no NVENC, and its `full` build is larger than BtbN's for no gain here.
 
-Verified when pinning (2026-09-29): every SHA-256 matched the published value, each archive layout was listed, the configure line of each Linux and Windows `ffmpeg` was read from the binary, and the darwin-arm64 build was run (`-encoders` and `-decoders` list libx264, libvpx-vp9 encode and decode, and VideoToolbox; its outputs are the test fixtures in `packages/core/test/fixtures/`).
+Verified when pinning (2026-09-29): every SHA-256 matched the published value, each archive layout was listed, the configure line of each Linux and Windows `ffmpeg` was read from the binary, and the darwin-arm64 build was run (`-encoders` and `-decoders` list libx264, libvpx-vp9 encode and decode, and VideoToolbox; its outputs are the test fixtures in `packages/core/test/fixtures/`). Since then the Real binaries workflow downloads and runs every pin (see [Re-pinning](#re-pinning)).
 
 ### Licence obligations
 
@@ -53,4 +70,5 @@ We do not redistribute these binaries: the user's machine downloads them from th
 2. Record the size and SHA-256 of each archive: Martin Riedl publishes `<file>.sha256`, and for BtbN run `gh release view <tag> -R BtbN/FFmpeg-Builds --json assets`. Check them against your own download.
 3. Check the configure line (`versions.txt`, or `strings ffmpeg | grep -- --enable-gpl`): it must have `--enable-gpl`, `--enable-libx264` and `--enable-libvpx`, and must not have `--enable-nonfree`.
 4. List the archive (`tar -tf`) and update the member paths in `files`.
-5. Update the manifest and this table, then run `FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test` on each platform you can reach. This opt-in test downloads the real pin, then checks the version and the required codecs.
+5. Update the manifest and this table, then run `FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test` on each platform you can reach. This opt-in test downloads the real pin, checks the version and the required codecs, then runs the binaries: it encodes H.264 and VP9-with-alpha clips, reads them back with `ffprobe`, and checks that the libvpx decoder keeps the alpha.
+6. Open the PR. The [Real binaries](../.github/workflows/real-binaries.yml) workflow runs the same test on every pinned platform (macOS arm64 and x64, Linux x64 and arm64, Windows x64) for any PR that touches `packages/core/src/binaries/`. It also runs weekly, to catch a builder pruning a pinned asset, and on manual dispatch.

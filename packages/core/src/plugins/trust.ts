@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { PluginPins, TrustState } from "@frameshell/protocol";
+import type { AppDirs, PluginPins, TrustState } from "@frameshell/protocol";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
+
+const TRUST_FILE = "trust.json";
 
 /** Stored trust decision; `trusted`/`denied` apply only while the plugin list hashes to `pluginsHash`. */
 interface TrustRecord {
@@ -22,15 +24,23 @@ export function pluginsHash(pins: PluginPins): string {
 }
 
 /**
- * Per-user project trust decisions (SPEC §6.6), in `<appData>/trust.json`,
+ * Per-user project trust decisions (SPEC §6.6), in `<configDir>/trust.json`,
  * keyed by project root and the hash of its declared plugins. Machine-local
  * on purpose: a cloned project never carries its own trust.
+ *
+ * Earlier releases kept the file in the data dir (differs from the config dir
+ * only on Linux and Windows; on Windows it was never there). While
+ * `<configDir>/trust.json` is missing, that legacy file is read instead; the
+ * next decision writes everything to the config dir. The legacy file stays.
  */
 export class TrustStore {
   readonly #file: string;
+  readonly #legacyFile: string | undefined;
 
-  constructor(appDataDir: string) {
-    this.#file = join(appDataDir, "trust.json");
+  constructor(dirs: AppDirs) {
+    this.#file = join(dirs.configDir, TRUST_FILE);
+    const legacy = join(dirs.dataDir, TRUST_FILE);
+    this.#legacyFile = legacy === this.#file ? undefined : legacy;
   }
 
   /** Trust of `root` for exactly `pins`. A corrupt store reads as empty, so the user is asked again. */
@@ -49,7 +59,10 @@ export class TrustStore {
   }
 
   async #read(): Promise<TrustFile> {
-    const raw = (await readJsonIfExists(this.#file).catch(() => undefined)) as Partial<TrustFile> | undefined;
+    const readOrMissing = (path: string) => readJsonIfExists(path).catch(() => null);
+    let raw = (await readOrMissing(this.#file)) as Partial<TrustFile> | null | undefined;
+    // `undefined` = missing; a corrupt current file (null) never falls back to stale legacy decisions.
+    if (raw === undefined && this.#legacyFile) raw = (await readOrMissing(this.#legacyFile)) as typeof raw;
     const projects = raw?.version === 1 && typeof raw.projects === "object" && raw.projects ? raw.projects : {};
     return { version: 1, projects };
   }

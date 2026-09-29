@@ -9,14 +9,14 @@ import {
   PROTOCOL_VERSION,
   RpcError,
   type ValidatedParams,
+  type AppDirs,
   assertSocketPathFits,
   isMethodName,
   parseParams,
   readMessages,
+  resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { resolveAppDataDir } from "./app-data.js";
-import { resolveAppDirs } from "./app-dirs.js";
 import { runDoctor } from "./binaries/doctor.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -39,10 +39,10 @@ export interface DaemonOptions {
    * from each last disconnect. `Infinity` disables.
    */
   idleTimeoutMs?: number;
-  /** Native binaries. Defaults to the OS app dirs (see `resolveAppDirs`) and the pinned manifest. */
+  /** Per-user directories: binaries, global config, trust. Defaults to `resolveAppDirs()`. */
+  dirs?: AppDirs;
+  /** Native binaries. Defaults to a manager over {@link DaemonOptions.dirs} and the pinned manifest. */
   binaries?: BinaryManager;
-  /** Per-user data directory (trust decisions). Defaults to {@link resolveAppDataDir}. */
-  appDataDir?: string;
 }
 
 /** Running daemon handle. */
@@ -77,8 +77,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const startedAt = Date.now();
   const clients = new Set<Socket>();
   const projects = new ProjectRegistry();
-  const binaries = options.binaries ?? new BinaryManager(resolveAppDirs());
-  const plugins = new PluginHost({ appDataDir: options.appDataDir ?? resolveAppDataDir(), pins: projects });
+  const dirs = options.dirs ?? resolveAppDirs();
+  const binaries = options.binaries ?? new BinaryManager(dirs);
+  const plugins = new PluginHost({ dirs, pins: projects });
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
 
