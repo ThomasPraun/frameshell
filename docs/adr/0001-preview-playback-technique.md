@@ -44,7 +44,7 @@ An extra full run, B-chunked (s16 chunks, global `currentFrame`), had 0 cut free
 
 Chromium behaviour found on the way:
 
-- One `AudioBufferSourceNode.start(t)` per segment gave 7-8 ms deviations at 15 of 200 cuts. They hit the same cuts in every run.
+- One `AudioBufferSourceNode.start(t)` per segment gave deviation bursts of 5.2-7.9 ms at 15 of 200 cuts (`results/residual-run.log`). This was one run; whether the same cuts are hit on every run was not measured.
 - Inside `AudioWorkletProcessor.process()`, the global `currentFrame` was one quantum (128 frames) behind the real position 28 times in a 16-minute run, apparently only when the worklet receives messages. The C-wsine control had no messages and 0 repeated quanta. Indexing audio by `currentFrame` therefore repeats a 128-sample block, which is an audible tick. A processor-owned sample counter removed it: 0 deviations.
 
 ## Pass thresholds for #15
@@ -58,7 +58,7 @@ Measured with this harness, or an equivalent one, on the fixture above, full 200
 5. A/V offset at cuts: p5 and p95 within ±20 ms.
 6. Wall time within 0.1 % of program duration.
 
-A1 fails 2, 4 and 5. A2 fails 2 (p95 50 ms) and 5 (p95 +24.6 ms). B-chunkedself passes all six.
+A1 fails 2, 3, 4, 5 and 6: freeze at 58.5 % of cuts, 0.60 % interior drops, clicks and gaps at cuts, A/V p5 -33.5 ms, wall time 0.74 % long. A2 fails all six: 2 dropped frames at a cut, freeze at 14.5 % of cuts (p95 50 ms), 0.40 % interior drops, 16 repeated quanta (2006 deviating samples), A/V p95 +24.6 ms, wall time 0.21 % long. B and B-bufsrc fail 4 only (B: 1 click, 29 repeated quanta; B-bufsrc: 15 clicks, 4 overlaps). B-chunkedself passes all six. Check: `node scripts/check-thresholds.mjs` (`results/thresholds.log`); wall times are rounded to 0.1 s.
 
 ## Consequences
 

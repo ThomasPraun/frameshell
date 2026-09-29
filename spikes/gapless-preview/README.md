@@ -22,6 +22,7 @@ npm run measure   # plays the full cut list with A1, A2, B, B-bufsrc (one visibl
 - Sample-exact audio check (audio-clocked runs): `node scripts/audio-residual.mjs A2 B B-bufsrc B-chunkedself`.
 - Repeated render quanta: `node scripts/repeated-quanta.mjs C-osc C-wsine A1 A2 B B-bufsrc B-chunked B-chunkedself`.
 - Barcode sanity check on the proxy: `node scripts/check-barcode.mjs 0 1 777`.
+- Pass thresholds of ADR 0001 per run: `node scripts/check-thresholds.mjs` (reads `out/summary.json`).
 - Re-analyze existing raw logs: `npm run analyze` (writes `out/summary.md`, `out/summary.json`, `out/<T>.cuts.json`).
 - Keep the window visible and the machine otherwise idle: numbers are real-time measurements.
 
@@ -79,4 +80,6 @@ npm run measure   # plays the full cut list with A1, A2, B, B-bufsrc (one visibl
 - `diag-run-60cuts.log`: B-chunked vs B-chunkedself on the first 60 cuts (`currentFrame` diagnosis).
   This run overwrote the full-length `out/B-chunked.*` files, so the full B-chunked numbers live
   only in `chunked-run.log`.
+- `residual-run.log`: `audio-residual.mjs` output for A2, B, B-bufsrc, B-chunkedself (first 20 bursts per run).
+- `thresholds.log`: `check-thresholds.mjs` output, pass/fail per ADR threshold.
 - `fixture.log`: fixture generation times and sizes.

@@ -1,0 +1,35 @@
+A1: fails 2, 3, 4, 5, 6
+  1 pass  stray 0, dropped at cuts 0
+  2 FAIL  freeze cuts 58.5 %, p95 41.1, max 133.6 ms
+  3 FAIL  interior drops 171/28445 = 0.60 %
+  4 FAIL  clicks 196, gaps 200, overlaps 0, repeated quanta 0
+  5 FAIL  A/V p5 -33.5, p95 -27.1 ms
+  6 FAIL  wall 968.7 s vs 961.6 s = 0.74 %
+A2: fails 1, 2, 3, 4, 5, 6
+  1 FAIL  stray 0, dropped at cuts 2
+  2 FAIL  freeze cuts 14.5 %, p95 50, max 149 ms
+  3 FAIL  interior drops 114/28445 = 0.40 %
+  4 FAIL  clicks 0, gaps 0, overlaps 0, repeated quanta 16
+  5 FAIL  A/V p5 5.1, p95 24.6 ms
+  6 FAIL  wall 963.6 s vs 961.6 s = 0.21 %
+B: fails 4
+  1 pass  stray 0, dropped at cuts 0
+  2 pass  freeze cuts 2.0 %, p95 9.8, max 64.7 ms
+  3 pass  interior drops 7/28445 = 0.02 %
+  4 FAIL  clicks 1, gaps 0, overlaps 0, repeated quanta 29
+  5 pass  A/V p5 0.5, p95 7.8 ms
+  6 pass  wall 961.6 s vs 961.6 s = 0.00 %
+B-bufsrc: fails 4
+  1 pass  stray 0, dropped at cuts 0
+  2 pass  freeze cuts 1.0 %, p95 4.2, max 155.2 ms
+  3 pass  interior drops 16/28445 = 0.06 %
+  4 FAIL  clicks 15, gaps 0, overlaps 4, repeated quanta 0
+  5 pass  A/V p5 0.5, p95 7.6 ms
+  6 pass  wall 961.6 s vs 961.6 s = 0.00 %
+B-chunkedself: passes 1-6
+  1 pass  stray 0, dropped at cuts 0
+  2 pass  freeze cuts 3.5 %, p95 10.3, max 112.3 ms
+  3 pass  interior drops 4/28445 = 0.01 %
+  4 pass  clicks 0, gaps 0, overlaps 0, repeated quanta 0
+  5 pass  A/V p5 1.2, p95 7.6 ms
+  6 pass  wall 961.6 s vs 961.6 s = 0.00 %
