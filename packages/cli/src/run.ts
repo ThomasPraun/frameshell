@@ -1,7 +1,13 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { type DaemonConnection, RpcError, type StatusResult, resolveSocketPath } from "@frameshell/protocol";
+import {
+  type DaemonConnection,
+  type DoctorResult,
+  RpcError,
+  type StatusResult,
+  resolveSocketPath,
+} from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
 
 /** CLI package version, used in `--version` and the handshake client id. */
@@ -12,6 +18,8 @@ const USAGE = `Usage: frameshell <command> [options]
 Commands:
   init [dir] [--name <name>]   Scaffold a project in dir (default: current directory)
   status [--json]              Show daemon and the project enclosing the current directory
+  doctor [--install] [--json]  Check ffmpeg/ffprobe, versions and encoders; exit 1 on problems.
+                               --install downloads missing managed binaries first
 
 Options:
   --json       Machine-readable output
@@ -40,6 +48,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       options: {
         json: { type: "boolean", default: false },
         name: { type: "string" },
+        install: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
         version: { type: "boolean", default: false },
       },
@@ -59,7 +68,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     (values.help ? io.stdout : io.stderr)(USAGE);
     return values.help ? 0 : 2;
   }
-  if ((command !== "init" && command !== "status") || rest.length > (command === "init" ? 1 : 0)) {
+  if (!["init", "status", "doctor"].includes(command) || rest.length > (command === "init" ? 1 : 0)) {
     io.stderr(`Unknown command or extra arguments: ${positionals.join(" ")}\n\n${USAGE}`);
     return 2;
   }
@@ -80,6 +89,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           : `Created project "${result.project.name}" in ${result.project.dir}\n` +
               result.created.map((path) => `  ${path}\n`).join(""),
       );
+    } else if (command === "doctor") {
+      if (values.install && !values.json) io.stderr("Installing missing managed binaries; first download can take minutes...\n");
+      const report = await conn.request("doctor", { cwd: io.cwd, install: values.install });
+      io.stdout(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatDoctor(report));
+      return report.problems.length > 0 ? 1 : 0;
     } else {
       const status = await conn.request("status", { cwd: io.cwd });
       io.stdout(values.json ? `${JSON.stringify(status, null, 2)}\n` : formatStatus(status, io.cwd));
@@ -102,6 +116,31 @@ function formatStatus(status: StatusResult, cwd: string): string {
       ? `Project: ${project.name} (${project.dir}) · schema v${project.schemaVersion}`
       : `Project: none in ${cwd}. Run \`frameshell init\` to create one.`,
   ];
+  return `${lines.join("\n")}\n`;
+}
+
+function formatDoctor(report: DoctorResult): string {
+  const lines = [`Platform ${report.platform} · data dir ${report.dataDir}`, "", "Binaries:"];
+  for (const binary of report.binaries) {
+    const state = binary.installed ? (binary.version ?? "not runnable") : "not installed";
+    const pin = binary.pinned ? ` · pinned ${binary.pinned.version} (${binary.pinned.license}, ${binary.pinned.origin})` : "";
+    lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
+  }
+  if (report.codecs.length > 0) {
+    lines.push("", "Codecs:");
+    for (const codec of report.codecs) {
+      const state = !codec.compiled
+        ? "no"
+        : codec.works === null
+          ? "yes"
+          : codec.works
+            ? "yes (test encode ok)"
+            : "compiled, test encode failed";
+      lines.push(`  ${`${codec.name} ${codec.kind}`.padEnd(28)} ${codec.label.padEnd(24)} ${state}`);
+    }
+  }
+  lines.push("", report.problems.length === 0 ? "No problems found." : "Problems:");
+  for (const problem of report.problems) lines.push(`  - ${problem}`);
   return `${lines.join("\n")}\n`;
 }
 

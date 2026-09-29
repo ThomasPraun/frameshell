@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { connectToDaemon, isDaemonUnavailable } from "@frameshell/protocol";
+import { PROTOCOL_VERSION, connectToDaemon, isDaemonUnavailable } from "@frameshell/protocol";
 
 // Black-box: runs the built CLI (`tsc -b` first) exactly as a user or agent would.
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
@@ -65,7 +65,7 @@ describe("frameshell CLI", () => {
     expect(status.code).toBe(0);
     const json = JSON.parse(status.stdout);
     expect(json.project).toEqual({ dir, name: "Launch video", schemaVersion: 1 });
-    expect(json.daemon.protocolVersion).toBe(1);
+    expect(json.daemon.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(json.daemon.pid).not.toBe(process.pid);
     daemonPids.add(json.daemon.pid);
   });
@@ -73,7 +73,7 @@ describe("frameshell CLI", () => {
   it("status prints a human summary and points to init outside a project", () => {
     const status = frameshell(["status"], tempDir());
     expect(status.code).toBe(0);
-    expect(status.stdout).toMatch(/frameshelld .* protocol v1/);
+    expect(status.stdout).toMatch(new RegExp(`frameshelld .* protocol v${PROTOCOL_VERSION}`));
     expect(status.stdout).toMatch(/frameshell init/);
   });
 
@@ -134,5 +134,63 @@ describe("daemon startup failures", () => {
     expect(result.stderr).toMatch(/too long/);
     expect(result.stderr).toMatch(/FRAMESHELL_SOCKET/);
     expect(result.stderr).not.toMatch(/ENOENT/);
+  });
+});
+
+describe("frameshell doctor", () => {
+  const freshSocket = () =>
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\frameshell-cli-test-${randomUUID().slice(0, 8)}`
+      : join(realpathSync(tmpdir()), `fs-cli-${randomUUID().slice(0, 8)}.sock`);
+  /** Isolated daemon with its own data and config dirs. */
+  const isolated = (configDir = tempDir()) => ({
+    FRAMESHELL_SOCKET: freshSocket(),
+    FRAMESHELL_DATA_DIR: tempDir(),
+    FRAMESHELL_CONFIG_DIR: configDir,
+  });
+
+  it("--json lists managed ffmpeg and ffprobe as not installed, without downloading, and exits 1", () => {
+    const env = isolated();
+    const result = frameshell(["doctor", "--json"], tempDir(), env);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(report.dataDir).toBe(env.FRAMESHELL_DATA_DIR);
+    expect(report.binaries.map((b: { name: string; source: string; installed: boolean }) => [b.name, b.source, b.installed])).toEqual([
+      ["ffmpeg", "managed", false],
+      ["ffprobe", "managed", false],
+    ]);
+    expect(report.problems.join("\n")).toMatch(/doctor --install|No managed ffmpeg build/);
+  });
+
+  // A shell-script ffmpeg needs a unix exec; Windows cannot run it without a shell.
+  it.skipIf(process.platform === "win32")("reports versions and encoders of a system ffmpeg set in the global config", () => {
+    const fixtures = fileURLToPath(new URL("../../core/test/fixtures/ffmpeg-9.0.2-darwin-arm64/", import.meta.url));
+    const bin = tempDir();
+    for (const tool of ["ffmpeg", "ffprobe"]) {
+      const script = join(bin, tool);
+      writeFileSync(
+        script,
+        `#!/bin/sh
+case "$*" in
+  *-version*) echo "${tool} version 7.1-fake Copyright (c) the FFmpeg developers" ;;
+  *-encoders*) cat "${fixtures}encoders.txt" ;;
+  *-decoders*) cat "${fixtures}decoders.txt" ;;
+esac
+`,
+      );
+      chmodSync(script, 0o755);
+    }
+    const configDir = tempDir();
+    writeFileSync(join(configDir, "config.json"), JSON.stringify({ binaries: { ffmpeg: join(bin, "ffmpeg") } }));
+
+    const result = frameshell(["doctor"], tempDir(), isolated(configDir));
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/ffmpeg\s+7\.1-fake · global/);
+    expect(result.stdout).toMatch(/ffprobe\s+7\.1-fake · global/);
+    expect(result.stdout).toMatch(/libvpx-vp9 decoder\s+VP9 with alpha \(libvpx\)\s+yes/);
+    expect(result.stdout).toMatch(/h264_nvenc encoder\s+H\.264 \(NVENC\)\s+no/);
+    expect(result.stdout).toContain("No problems found.");
   });
 });

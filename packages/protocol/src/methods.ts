@@ -5,7 +5,7 @@ import { z } from "zod";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -38,6 +38,40 @@ const ProjectSummarySchema = z.object({
   dir: z.string().describe("Absolute directory holding `frameshell.json`."),
   name: z.string().describe("Project display name."),
   schemaVersion: z.int().describe("On-disk schema version of the project files."),
+});
+
+const BinaryReportSchema = z.object({
+  name: z.string().describe("Executable name without extension, e.g. `ffmpeg`."),
+  package: z.string().describe("Managed package that ships it, e.g. `ffmpeg` (also ships `ffprobe`)."),
+  source: z
+    .enum(["managed", "project", "global"])
+    .describe(
+      "`managed`: pinned download under the app data dir. `project` / `global`: path from `binaries` in " +
+        "`frameshell.json` / the global `config.json`.",
+    ),
+  path: z.string().nullable().describe("Absolute executable path; null when managed and no build is pinned for this platform."),
+  installed: z.boolean().describe("True when the executable exists at `path`."),
+  version: z.string().nullable().describe("Version reported by `<name> -version`; null when missing or not runnable."),
+  pinned: z
+    .object({
+      version: z.string(),
+      origin: z.string().describe("Who builds it (homepage)."),
+      license: z.string().describe("SPDX licence of the build."),
+    })
+    .nullable()
+    .describe("Managed build pinned for this platform; null when none."),
+});
+
+const CodecReportSchema = z.object({
+  name: z.string().describe("ffmpeg codec implementation name, e.g. `libx264`, `libvpx-vp9`, `h264_nvenc`."),
+  kind: z.enum(["encoder", "decoder"]),
+  label: z.string().describe("Human label, e.g. `H.264 (NVENC)`."),
+  hardware: z.boolean().describe("GPU or OS media engine encoder (VideoToolbox, NVENC, VAAPI)."),
+  compiled: z.boolean().describe("Listed by `ffmpeg -encoders` / `-decoders`."),
+  works: z
+    .boolean()
+    .nullable()
+    .describe("Hardware encoders only: a one-frame test encode succeeded on this machine. Null when not tested."),
 });
 
 /**
@@ -92,6 +126,30 @@ export const methods = {
         .describe("Project-relative paths created, `/`-separated; directories end with `/`."),
     }),
   },
+  doctor: {
+    description:
+      "Diagnose native binaries: which ffmpeg/ffprobe will be used (managed download or a `binaries` override " +
+      "from the project enclosing `cwd` or the global config), their versions, and which encoders and decoders " +
+      "ffmpeg provides (x264, libvpx VP9 encode and decode, VideoToolbox, NVENC, VAAPI; hardware ones are " +
+      "test-encoded). `problems` lists what blocks rendering, each with a fix. With `install: true`, missing " +
+      "managed binaries are downloaded and checksum-verified first (tens of MB, may take minutes).",
+    params: z.strictObject({
+      cwd: AbsolutePath.describe("Absolute directory whose enclosing project's `binaries` overrides apply."),
+      install: z
+        .boolean()
+        .default(false)
+        .describe("Download missing managed binaries before diagnosing. Default false: report only."),
+    }),
+    result: z.object({
+      platform: z.string().describe("`<os>-<arch>` key used to pick pinned builds, e.g. `darwin-arm64`."),
+      dataDir: z.string().describe("App data directory holding managed binaries."),
+      binaries: z.array(BinaryReportSchema),
+      codecs: z
+        .array(CodecReportSchema)
+        .describe("Empty when ffmpeg is not installed or not runnable."),
+      problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
+    }),
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -121,6 +179,14 @@ export type StatusResult = MethodResult<"status">;
 export type ProjectInitParams = MethodParams<"project.init">;
 /** Result of `project.init`. */
 export type ProjectInitResult = MethodResult<"project.init">;
+/** `doctor` params. */
+export type DoctorParams = MethodParams<"doctor">;
+/** Result of `doctor`. */
+export type DoctorResult = MethodResult<"doctor">;
+/** One binary in a {@link DoctorResult}. */
+export type BinaryReport = z.output<typeof BinaryReportSchema>;
+/** One encoder or decoder in a {@link DoctorResult}. */
+export type CodecReport = z.output<typeof CodecReportSchema>;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 
@@ -185,6 +251,16 @@ export const ErrorCode = {
   ProjectExists: -32003,
   /** data: `{ path, details }` */
   InvalidProjectFile: -32004,
+  /** data: `{ path, details }` of the global `config.json` */
+  InvalidGlobalConfig: -32005,
+  /** data: `{ binary, platform }`: no build pinned for this platform and no override. */
+  BinaryUnavailable: -32006,
+  /** data: `{ binary, path, source }`: override points at a missing file. */
+  BinaryNotFound: -32007,
+  /** data: `{ binary, url, details }`: download or extraction failed. */
+  BinaryInstallFailed: -32008,
+  /** data: `{ binary, url, expected, actual }` (SHA-256 hex) */
+  BinaryChecksumMismatch: -32009,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

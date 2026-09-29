@@ -12,6 +12,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli}`. 
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
+| Managed binaries (ffmpeg pins, sources, licences, re-pin) | `docs/binaries.md` |
 
 ## Rules
 
