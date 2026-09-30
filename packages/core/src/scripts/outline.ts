@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ErrorCode, RpcError, type ScriptOutlineResult } from "@frameshell/protocol";
-import { type ScriptOutline, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
+import { type ScriptOutline, isScriptPath, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
 
 /** Largest script read (1 MiB, ~150k words). Bigger files are refused, never loaded whole. */
 export const MAX_SCRIPT_BYTES = 1024 * 1024;
@@ -98,11 +98,6 @@ async function locateScript(root: string, cwd: string, file: string): Promise<{ 
 
 type ScriptFailure = { ok: false; missing: boolean; reason: string };
 type ScriptRead = { ok: true; text: string } | ScriptFailure;
-
-/** Script path for a `scriptRef` without anchor: Markdown under `scripts/` (SPEC §4 layout). */
-function isScriptPath(rel: string): boolean {
-  return /^scripts\/.+\.md$/i.test(rel);
-}
 
 function failed(error: unknown): ScriptFailure {
   const code = (error as NodeJS.ErrnoException).code;

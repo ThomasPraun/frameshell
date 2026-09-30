@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
+import { isScriptPath, parseScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
 
 describe("script outline (scripts/*.md, SPEC §5.5)", () => {
   it("turns each level-2 heading into a scene with a slug, line range and word count", () => {
@@ -88,6 +88,16 @@ describe("splitScriptRef", () => {
     expect(splitScriptRef("scripts\\a.md#x")).toEqual({ path: "scripts/a.md", anchor: "x" });
     expect(splitScriptRef("scripts/a.md")).toEqual({ path: "scripts/a.md", anchor: null });
     expect(splitScriptRef("scripts/a.md#")).toEqual({ path: "scripts/a.md", anchor: null });
+  });
+});
+
+describe("isScriptPath", () => {
+  it("accepts Markdown under scripts/ only, any letter case of the extension", () => {
+    expect(isScriptPath("scripts/launch.md")).toBe(true);
+    expect(isScriptPath("scripts/drafts/v2.MD")).toBe(true);
+    expect(isScriptPath("README.md")).toBe(false);
+    expect(isScriptPath("scripts/notes.txt")).toBe(false);
+    expect(isScriptPath("scripts/.md")).toBe(false);
   });
 });
 

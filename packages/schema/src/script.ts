@@ -128,6 +128,15 @@ export function splitScriptRef(ref: string): { path: string; anchor: string | nu
 }
 
 /**
+ * True for a script file: Markdown under `scripts/` (SPEC §4 layout), any
+ * depth, extension in any letter case. Takes a project-relative,
+ * `/`-separated path, e.g. a {@link splitScriptRef} path.
+ */
+export function isScriptPath(path: string): boolean {
+  return /^scripts\/.+\.md$/i.test(path);
+}
+
+/**
  * Why a {@link splitScriptRef} path cannot name a file inside the project,
  * or null when it can. Rejects empty, absolute (`/x`, `//host/x`, `C:x`),
  * NUL, and any `..` segment: `scripts/../../x.md` escapes once joined.

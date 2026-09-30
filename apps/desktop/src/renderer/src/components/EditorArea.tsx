@@ -1,6 +1,6 @@
-import { parseScript } from "@frameshell/schema";
+import { isScriptPath, parseScript } from "@frameshell/schema";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type SceneLink, type ScriptLinks, isScriptPath, linkScenes } from "../../../shared/script-links.js";
+import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -90,9 +90,9 @@ export function EditorArea({
       const script = path && line ? links.current.get(path) : undefined;
       if (!script || !line) return;
       const scene = script.scenes.find((link) => link.line === line);
-      if (scene) selection.selectClips(scene.clips, "script");
+      if (scene) selection.selectClips(scene.clips, "script", { reveal: true });
       else if (line === 1 && script.wholeClips.length > 0 && event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-        selection.selectClips(script.wholeClips, "script");
+        selection.selectClips(script.wholeClips, "script", { reveal: true });
       }
     });
     editor.current = instance;

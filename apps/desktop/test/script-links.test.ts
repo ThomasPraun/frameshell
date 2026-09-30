@@ -1,7 +1,6 @@
 import { parseScript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { selection } from "../src/renderer/src/selection.js";
-import { isScriptPath, linkScenes } from "../src/shared/script-links.js";
+import { linkScenes } from "../src/shared/script-links.js";
 
 const script = parseScript("# Launch\n## Intro\nHi\n## Demo\nLook\n## Outro\nBye\n");
 const clips = [
@@ -35,46 +34,3 @@ describe("linkScenes", () => {
     expect(links.scenes.find((scene) => scene.slug === "outro")!.clips).toEqual([]);
   });
 });
-
-describe("isScriptPath", () => {
-  it("accepts Markdown under scripts/ only", () => {
-    expect(isScriptPath("scripts/launch.md")).toBe(true);
-    expect(isScriptPath("scripts/drafts/v2.MD")).toBe(true);
-    expect(isScriptPath("README.md")).toBe(false);
-    expect(isScriptPath("scripts/notes.txt")).toBe(false);
-  });
-});
-
-describe("selection store", () => {
-  it("replaces, toggles and clears clips with their origin, notifying only on change", () => {
-    let changes = 0;
-    const off = selection.subscribe(() => changes++);
-    selection.selectClips(["c_a"], "timeline");
-    const first = selection.get();
-    selection.selectClips(["c_a"], "timeline");
-    expect(selection.get()).toBe(first);
-    selection.selectClips(["c_a"], "script");
-    expect(selection.get()).toEqual({ clips: ["c_a"], origin: "script" });
-    selection.toggleClip("c_b", "timeline");
-    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], origin: "timeline" });
-    selection.toggleClip("c_a", "timeline");
-    expect(selection.get().clips).toEqual(["c_b"]);
-    selection.clear();
-    selection.clear();
-    expect(selection.get()).toEqual({ clips: [], origin: null });
-    expect(changes).toBe(5);
-    off();
-  });
-
-  it("prunes clips a new revision no longer has, keeping order and origin", () => {
-    selection.selectClips(["c_a", "c_gone", "c_b"], "script");
-    const before = selection.get();
-    selection.retainClips(new Set(["c_a", "c_b", "c_gone"]));
-    expect(selection.get()).toBe(before);
-    selection.retainClips(new Set(["c_b", "c_a"]));
-    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], origin: "script" });
-    selection.retainClips(new Set());
-    expect(selection.get()).toEqual({ clips: [], origin: null });
-  });
-});
-

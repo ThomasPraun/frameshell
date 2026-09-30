@@ -20,11 +20,6 @@ export interface ScriptLinks {
   wholeSelected: boolean;
 }
 
-/** Scripts get scene links: Markdown under `scripts/` (SPEC §4 layout). */
-export function isScriptPath(path: string): boolean {
-  return /^scripts\/.+\.md$/i.test(path);
-}
-
 /**
  * Join the scenes of `scriptPath` (project-relative) with the clips whose
  * `scriptRef` points at them; refs are compared after `splitScriptRef`
