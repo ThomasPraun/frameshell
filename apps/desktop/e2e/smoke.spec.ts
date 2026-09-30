@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { isWindows, launch as launchApp, runInTerminal as run, sandbox, terminalText as textOf } from "./harness.js";
+import { isWindows, laidOutBox, launch as launchApp, runInTerminal as run, sandbox, terminalText as textOf } from "./harness.js";
 
 // Smoke test of the built app: real daemon, real login shell, real file system.
 const box = sandbox("demo");
@@ -94,7 +94,7 @@ test("the pty follows the terminal panel size", async () => {
   const before = (await colsNow())!;
 
   const splitter = page.getByRole("separator", { name: "Resize terminal" });
-  const box = (await splitter.boundingBox())!;
+  const box = await laidOutBox(splitter);
   await page.mouse.move(box.x + 1, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + 200, box.y + box.height / 2, { steps: 5 });

@@ -25,6 +25,8 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
 | Desktop selection (shared store, extend, never duplicate) | `apps/desktop/src/renderer/src/selection.ts` |
+| Preview player (program, engine worker, audio worklet, playhead store) | `apps/desktop/src/renderer/src/preview/`; ADR 0001; media URLs `apps/desktop/src/main/media-protocol.ts` |
+| Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
@@ -39,6 +41,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media.
 - Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused.
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
+- Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.
 - node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.

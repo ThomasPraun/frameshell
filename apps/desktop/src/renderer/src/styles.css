@@ -576,12 +576,90 @@ code {
 }
 
 .preview-frame {
+  --frame-aspect: 1.7778;
   position: relative;
-  aspect-ratio: 16 / 9;
-  width: min(100cqw, calc(100cqh * 16 / 9));
-  background: #0e0e0f;
+  aspect-ratio: var(--frame-aspect);
+  width: min(100cqw, calc(100cqh * var(--frame-aspect)));
+  background: #000;
   display: grid;
   place-items: center;
+  overflow: hidden;
+}
+
+/* The engine worker draws here (OffscreenCanvas); CSS only scales it to the frame. */
+.preview-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.preview-duration::before {
+  content: "/ ";
+}
+
+.preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+  background: repeating-linear-gradient(135deg, #17181a 0 10px, #1b1c1f 10px 20px);
+  color: var(--text-muted);
+}
+
+.preview-placeholder p {
+  margin: 0;
+}
+
+.preview-placeholder-detail {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.preview-transport {
+  flex: none;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.preview-transport-buttons {
+  grid-column: 2;
+  display: flex;
+  gap: 2px;
+}
+
+.preview-transport .icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+
+.preview-play {
+  width: 28px;
+  color: var(--text);
+}
+
+.preview-play.playing {
+  color: var(--accent);
+}
+
+.preview-notice {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11.5px;
 }
 
 .safe-area {

@@ -38,6 +38,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Pinned ffmpeg for the preview e2e test's synthetic media and ingest; re-downloaded only when the pins change.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/test-binaries
+          key: test-binaries-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/core/src/binaries/manifest.ts') }}
       - run: pnpm build
       - name: Package
         id: package

@@ -26,6 +26,7 @@ import {
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type TimelineTheme, paintTimeline } from "../timeline/paint.js";
+import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { PanelHeader } from "./PanelHeader.js";
@@ -56,10 +57,11 @@ interface ViewState {
  * with Ctrl/Cmd + wheel, pinch or `+`/`-`/`0`; scroll natively. Click a clip
  * to select it (Shift/Cmd/Ctrl-click toggles, Esc or a click on empty lane
  * clears) in the shared selection store, which the script editor also
- * reads and sets (scene links, SPEC §5.5). The playhead is static until the
- * player drives it (#15).
+ * reads and sets (scene links, SPEC §5.5). The playhead is the shared
+ * transport's: it moves while the preview plays (the lanes follow it), and
+ * clicking or dragging on the ruler moves it (scrubbing).
  */
-export function TimelinePanel({ collapsed, onToggle, playhead = 0 }: { collapsed: boolean; onToggle: () => void; playhead?: number }) {
+export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const empty = layout !== null && layout.clipCount === 0;
@@ -95,7 +97,6 @@ export function TimelinePanel({ collapsed, onToggle, playhead = 0 }: { collapsed
           layout={layout}
           fps={view?.fps ?? 30}
           revision={view?.revision ?? null}
-          playhead={playhead}
           overlay={
             error && !view ? (
               <p className="timeline-error">{error}</p>
@@ -115,13 +116,11 @@ function TimelineCanvas({
   layout,
   fps,
   revision,
-  playhead,
   overlay,
 }: {
   layout: TimelineLayout | null;
   fps: number;
   revision: number | null;
-  playhead: number;
   overlay: ReactNode;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -136,15 +135,18 @@ function TimelineCanvas({
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
   /** Clip to bring into view: only for selections made elsewhere (a script heading), never under the user's click. */
   const revealClip = origin === "script" ? selectedClips[0] : undefined;
-  const latest = useRef({ layout, fps, playhead, selected });
-  latest.current = { layout, fps, playhead, selected };
+  const latest = useRef({ layout, fps, selected });
+  latest.current = { layout, fps, selected };
+  /** Pointer id while scrubbing on the ruler. */
+  const scrubbing = useRef<number | null>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
 
   const draw = useCallback(() => {
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, playhead: at, selected: chosen } = latest.current;
+    const { layout: current, fps: rate, selected: chosen } = latest.current;
+    const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
     const ratio = window.devicePixelRatio || 1;
@@ -224,7 +226,23 @@ function TimelineCanvas({
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, playhead, selected, settle, draw]);
+  }, [layout, selected, settle, draw]);
+
+  // The playhead moves every frame while playing: repaint outside React, and page the lanes to keep it in view.
+  useEffect(
+    () =>
+      transport.subscribe(() => {
+        const { time, playing } = transport.get();
+        const view = state.current;
+        const x = time * view.pxPerSecond - view.scrollLeft;
+        if (playing && scrubbing.current === null && view.width > 0 && (x < 0 || x > view.width - 16)) {
+          view.scrollLeft = Math.max(0, time * view.pxPerSecond - view.width * 0.1);
+          settle();
+        }
+        schedule();
+      }),
+    [schedule, settle],
+  );
 
   // Keyed on the clip, not the selection: pruning other clips must not move the view.
   useEffect(() => {
@@ -235,6 +253,8 @@ function TimelineCanvas({
     const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === first));
     const clip = row?.clips.find((candidate) => candidate.id === first);
     if (!row || !clip) return;
+    // The player follows selections made elsewhere: the playhead jumps to the clip (not while playing).
+    if (!transport.get().playing) transport.seek(clip.start);
     const view = state.current;
     const x0 = clip.start * view.pxPerSecond;
     const x1 = clip.end * view.pxPerSecond;
@@ -330,13 +350,31 @@ function TimelineCanvas({
     event.preventDefault();
   };
 
-  /** Select the clip under the pointer; clicks on the ruler and the scrollbars leave the selection alone. */
+  /** Playhead to the time under the pointer. */
+  const scrubTo = (clientX: number) => {
+    const box = scroller.current!;
+    const x = Math.min(box.clientWidth, Math.max(0, clientX - box.getBoundingClientRect().left));
+    transport.seek((x + state.current.scrollLeft) / state.current.pxPerSecond);
+  };
+
+  /**
+   * On the ruler: move the playhead there and scrub while dragging (playback
+   * pauses). On a lane: select the clip under the pointer. Scrollbars are left alone.
+   */
   const onPointerDown = (event: PointerEvent) => {
     const box = scroller.current!;
     const rect = box.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    if (event.button !== 0 || !layout || y < RULER_HEIGHT || x >= box.clientWidth || y >= box.clientHeight) return;
+    if (event.button !== 0 || x >= box.clientWidth || y >= box.clientHeight) return;
+    if (y < RULER_HEIGHT) {
+      transport.pause();
+      scrubbing.current = event.pointerId;
+      box.setPointerCapture(event.pointerId);
+      scrubTo(event.clientX);
+      return;
+    }
+    if (!layout) return;
     const hit = clipAt(layout, state.current, x, y);
     if (!hit) selection.clear();
     else if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleClip(hit.clip.id, "timeline");
@@ -344,6 +382,10 @@ function TimelineCanvas({
   };
 
   const onPointerMove = (event: PointerEvent) => {
+    if (scrubbing.current === event.pointerId) {
+      scrubTo(event.clientX);
+      return;
+    }
     if (!layout) return;
     const rect = scroller.current!.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -398,11 +440,15 @@ function TimelineCanvas({
           className="timeline-scroller"
           tabIndex={0}
           role="region"
-          aria-label="Timeline lanes. Click selects a clip, Escape clears. Plus and minus zoom, 0 fits the timeline."
+          aria-label="Timeline lanes. Click the ruler to move the playhead, drag it to scrub. Click selects a clip, Escape clears. Plus and minus zoom, 0 fits the timeline."
           onScroll={onScroll}
           onKeyDown={onKeyDown}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
+          onPointerUp={(event) => {
+            if (scrubbing.current === event.pointerId) scrubbing.current = null;
+          }}
+          onPointerCancel={() => (scrubbing.current = null)}
           onPointerLeave={() => setHover(null)}
         >
           <div ref={sizer} className="timeline-sizer" />

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { cpSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ElectronApplication, type Page, _electron as electron } from "@playwright/test";
+import { type ElectronApplication, type Locator, type Page, _electron as electron, expect } from "@playwright/test";
 
 // Launches the built app (or a packaged one) against an isolated project, daemon and user dirs.
 // FRAMESHELL_E2E_APP: run against a packaged app executable instead (release pipeline).
@@ -73,4 +73,21 @@ export async function runInTerminal(page: Page, command: string): Promise<void> 
   await page.locator(".terminal-view:not([hidden])").click();
   await page.keyboard.type(command);
   await page.keyboard.press("Enter");
+}
+
+/**
+ * Bounding box of `locator` once it is laid out. Never read a box once with a
+ * non-null assertion: on slow runners (packaged-app CI) layout may not have
+ * happened yet and the box is null or empty.
+ */
+export async function laidOutBox(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  const seen: { box: { x: number; y: number; width: number; height: number } | null } = { box: null };
+  await expect
+    .poll(async () => {
+      seen.box = await locator.boundingBox();
+      return seen.box !== null && seen.box.width > 0 && seen.box.height > 0;
+    })
+    .toBe(true);
+  if (!seen.box) throw new Error("unreachable: polled until laid out");
+  return seen.box;
 }
