@@ -364,8 +364,8 @@ export const TimelineProblemSchema = z.object({
 /** A subtitle track's stored `style`, as `timeline.show` and `track.list` report it. */
 const StoredStyleSchema = z
   .looseObject({ preset: z.string().optional(), position: z.enum(["top", "center", "bottom"]).optional() })
-  .nullable()
-  .describe("Subtitle tracks: `style` as stored (unset fields use the preset's; no preset = `big-keyword`); null otherwise or when unset.");
+  .optional()
+  .describe("Subtitle tracks: `style` as stored (unset fields use the preset's; no preset = `big-keyword`); absent for clip tracks and when unset.");
 
 /** Compact track summary of `track.list`. */
 export const TrackSummarySchema = z.object({

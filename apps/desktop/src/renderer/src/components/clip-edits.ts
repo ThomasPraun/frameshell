@@ -5,7 +5,7 @@ import { SELECTION_TIMELINE } from "../selection.js";
 let queue: Promise<unknown> = Promise.resolve();
 
 /**
- * Send one clip settings edit (inspector field, preview handle) as a `ui`
+ * Send one settings edit (inspector field, preview handle, subtitle style) as a `ui`
  * operation on the timeline the selection names. Edits go one after another
  * in the order made, so a fast second change never lands before the first.
  * Rejects with the daemon's message; nothing changed then.

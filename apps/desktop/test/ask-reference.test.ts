@@ -38,7 +38,7 @@ const view: TimelineView = {
   ],
 };
 
-const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null };
+const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, track: null };
 const word = (id: string, text: string, start: number, end: number): SelectedWord => ({ transcript: TRANSCRIPT, asset: ASSET, word: id, text, start, end });
 
 describe("reference lines", () => {

@@ -120,6 +120,9 @@ export interface SubtitleWord {
   /** Timeline frames `[start, end)`, inside the clip. */
   start: number;
   end: number;
+  /** Source-asset seconds of the word in its transcript. */
+  sourceStart: number;
+  sourceEnd: number;
 }
 
 /** A clip's transcript, by asset; null when there is none. */
@@ -162,7 +165,8 @@ export function subtitleWords(timeline: Timeline, trackId: string, transcripts: 
       const text = cleanText(transcript.edits[word.id]?.text ?? word.text);
       const from = at(Math.max(word.start, clip.in));
       if (text === "" || from >= end) continue;
-      words.push({ id: word.id, asset: clip.asset, clip: clip.id, text, start: from, end: Math.max(from, at(Math.min(word.end, clip.out))) });
+      const to = Math.max(from, at(Math.min(word.end, clip.out)));
+      words.push({ id: word.id, asset: clip.asset, clip: clip.id, text, start: from, end: to, sourceStart: word.start, sourceEnd: word.end });
     }
   }
   return words;

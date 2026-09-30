@@ -1,5 +1,5 @@
 import { parseTranscript } from "@frameshell/schema";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import type { TranscriptSource } from "./model.js";
 
@@ -27,79 +27,97 @@ function transcriptPaths(nodes: readonly FileNode[]): string[] {
   return nodes.flatMap((node) => (node.kind === "dir" ? transcriptPaths(node.children) : isTranscriptPath(node.path) ? [node.path] : []));
 }
 
-/**
- * Every `transcripts/**.words.json` of the window's project, re-read when
- * one changes on disk (a `frameshell transcribe` run, a hand edit), with the
- * current hash of each asset from the daemon's asset events. Reads never
- * overlap: a change during a read causes one more.
- */
-export function useTranscripts(): TranscriptsState {
-  const [state, setState] = useState<TranscriptsState>(EMPTY);
+let state: TranscriptsState = EMPTY;
+const listeners = new Set<() => void>();
+let stop: (() => void) | null = null;
 
-  useEffect(() => {
-    let live = true;
-    let reading = false;
-    let again = false;
-    const read = async () => {
-      if (reading) {
-        again = true;
-        return;
-      }
-      reading = true;
-      do {
-        again = false;
-        const paths = transcriptPaths(await window.frameshell.files.tree());
-        const sources: TranscriptSource[] = [];
-        const broken: TranscriptsState["broken"] = [];
-        await Promise.all(
-          paths.map(async (path) => {
-            try {
-              const parsed = parseTranscript(JSON.parse(await window.frameshell.files.read(path)));
-              if (parsed.ok) sources.push({ path, transcript: parsed.value });
-              else broken.push({ path, message: parsed.error });
-            } catch (error) {
-              broken.push({ path, message: (error as Error).message });
-            }
-          }),
-        );
-        sources.sort((a, b) => a.path.localeCompare(b.path));
-        if (live) setState((current) => ({ ...current, sources, broken }));
-      } while (again && live);
-      reading = false;
-    };
-    const offFiles = window.frameshell.files.onChanged((paths) => {
-      if (paths.some((path) => path.startsWith(TRANSCRIPTS_DIR))) void read();
-    });
-    void read();
-    return () => {
-      live = false;
-      offFiles();
-    };
-  }, []);
+function publish(update: (current: TranscriptsState) => TranscriptsState): void {
+  state = update(state);
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Read every transcript file now and on each change under `transcripts/`,
+ * and follow asset hashes. Reads never overlap: a change during a read
+ * causes one more. Returns the stop function.
+ */
+function follow(): () => void {
+  let live = true;
+  let reading = false;
+  let again = false;
+  const read = async () => {
+    if (reading) {
+      again = true;
+      return;
+    }
+    reading = true;
+    do {
+      again = false;
+      const paths = transcriptPaths(await window.frameshell.files.tree());
+      const sources: TranscriptSource[] = [];
+      const broken: TranscriptsState["broken"] = [];
+      await Promise.all(
+        paths.map(async (path) => {
+          try {
+            const parsed = parseTranscript(JSON.parse(await window.frameshell.files.read(path)));
+            if (parsed.ok) sources.push({ path, transcript: parsed.value });
+            else broken.push({ path, message: parsed.error });
+          } catch (error) {
+            broken.push({ path, message: (error as Error).message });
+          }
+        }),
+      );
+      sources.sort((a, b) => a.path.localeCompare(b.path));
+      if (live) publish((current) => ({ ...current, sources, broken }));
+    } while (again && live);
+    reading = false;
+  };
+  const offFiles = window.frameshell.files.onChanged((paths) => {
+    if (paths.some((path) => path.startsWith(TRANSCRIPTS_DIR))) void read();
+  });
+  void read();
 
   // Listening first: an event during the initial read is replayed over it.
-  useEffect(() => {
-    let live = true;
-    const refresh = () =>
-      void window.frameshell.media.assets().then(
-        (assets) => live && setState((current) => ({ ...current, hashes: new Map(assets.map((asset) => [asset.path, asset.hash])) })),
-        () => undefined,
-      );
-    const off = window.frameshell.media.onChanged((change) => {
-      if (change.path === null) return refresh();
-      setState((current) => {
-        const hashes = new Map(current.hashes);
-        if (change.asset) hashes.set(change.path, change.asset.hash);
-        else hashes.delete(change.path);
-        return { ...current, hashes };
-      });
+  const refresh = () =>
+    void window.frameshell.media.assets().then(
+      (assets) => live && publish((current) => ({ ...current, hashes: new Map(assets.map((asset) => [asset.path, asset.hash])) })),
+      () => undefined,
+    );
+  const offAssets = window.frameshell.media.onChanged((change) => {
+    if (change.path === null) return refresh();
+    publish((current) => {
+      const hashes = new Map(current.hashes);
+      if (change.asset) hashes.set(change.path, change.asset.hash);
+      else hashes.delete(change.path);
+      return { ...current, hashes };
     });
-    refresh();
-    return () => {
-      live = false;
-      off();
-    };
-  }, []);
+  });
+  refresh();
+  return () => {
+    live = false;
+    offFiles();
+    offAssets();
+  };
+}
 
-  return state;
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  stop ??= follow();
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size > 0) return;
+    stop?.();
+    stop = null;
+    state = EMPTY;
+  };
+}
+
+/**
+ * Every `transcripts/**.words.json` of the window's project, live, with the
+ * current hash of each asset from the daemon's asset events. One feed shared
+ * by every caller (transcript view, subtitles): one read per change. It
+ * stops with its last caller.
+ */
+export function useTranscripts(): TranscriptsState {
+  return useSyncExternalStore(subscribe, () => state);
 }

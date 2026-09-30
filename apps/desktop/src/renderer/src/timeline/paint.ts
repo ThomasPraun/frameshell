@@ -1,5 +1,6 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
+import type { CueBox } from "../subtitles/model.js";
 import {
   type ClipBox,
   RULER_HEIGHT,
@@ -133,6 +134,10 @@ export interface PaintInput<Img> {
   diff?: readonly ClipDiff[];
   /** Timeline range of selected transcript words: tinted over the lanes, barred on the ruler. */
   range?: { from: number; to: number } | null;
+  /** Cues of each subtitle track, by track id; a lane without any shows a hint. */
+  subtitles?: ReadonlyMap<string, readonly CueBox[]>;
+  /** Selected track (shared selection store): its cues are framed in the accent color. */
+  selectedTrack?: string | null;
 }
 
 /** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
@@ -194,7 +199,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
     ctx.fillStyle = theme.lineSoft;
     ctx.fillRect(0, top + row.height - 1, width, 1);
     if (row.kind === "subtitles") {
-      paintSubtitleLane(ctx, row, top, theme);
+      clipsDrawn += paintSubtitleLane(ctx, input, row, top, t0, t1);
       return;
     }
     for (const clip of visibleClips(row.clips, t0, t1)) {
@@ -534,12 +539,46 @@ function paintHatch<Img>(ctx: Paint2D<Img>, left: number, right: number, y: numb
   ctx.stroke();
 }
 
-function paintSubtitleLane<Img>(ctx: Paint2D<Img>, row: TrackRow, top: number, theme: TimelineTheme): void {
+/** Cues of a subtitle lane as blocks with their words, or a hint when it has none. Returns the cues drawn. */
+function paintSubtitleLane<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, top: number, t0: number, t1: number): number {
+  const { theme } = input;
+  const { pxPerSecond, scrollLeft, width } = input.viewport;
+  const cues = input.subtitles?.get(row.id) ?? [];
   ctx.font = `11px ${theme.fontUi}`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  ctx.fillStyle = theme.textFaint;
-  ctx.fillText("Words show here once the followed track is transcribed", 8, top + row.height / 2);
+  if (cues.length === 0) {
+    ctx.fillStyle = theme.textFaint;
+    ctx.fillText(`Words show here once the clips of ${row.followsLabel ?? "the followed track"} are transcribed`, 8, top + row.height / 2);
+    return 0;
+  }
+  const y = top + CLIP_INSET_Y;
+  const h = row.height - 2 * CLIP_INSET_Y;
+  const selected = input.selectedTrack === row.id;
+  let drawn = 0;
+  for (const cue of cues) {
+    if (cue.end < t0 || cue.start > t1) continue;
+    drawn++;
+    const x0 = cue.start * pxPerSecond - scrollLeft + 0.5;
+    const x1 = cue.end * pxPerSecond - scrollLeft - 0.5;
+    const left = Math.max(x0, -2);
+    const right = Math.min(Math.max(x1, x0 + 1), width + 2);
+    const w = right - left;
+    ctx.fillStyle = withAlpha(theme.subtitles, 0.2);
+    ctx.fillRect(left, y, w, h);
+    ctx.strokeStyle = selected ? theme.accent : withAlpha(theme.subtitles, 0.55);
+    ctx.lineWidth = selected ? 2 : 1;
+    ctx.strokeRect(left + (selected ? 1 : 0.5), y + (selected ? 1 : 0.5), Math.max(0, w - (selected ? 2 : 1)), h - (selected ? 2 : 1));
+    if (w < MIN_LABEL_WIDTH / 2) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left + 3, y, Math.max(0, w - 6), h);
+    ctx.clip();
+    ctx.fillStyle = theme.text;
+    ctx.fillText(cue.text, Math.max(left, 0) + 4, y + h / 2);
+    ctx.restore();
+  }
+  return drawn;
 }
 
 function paintRuler<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {

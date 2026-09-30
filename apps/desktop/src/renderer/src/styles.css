@@ -875,11 +875,17 @@ code {
 }
 
 /* The engine worker draws here (OffscreenCanvas); CSS only scales it to the frame. */
-.preview-canvas {
+.preview-canvas,
+.preview-subtitles {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+/* Subtitles never take a click: layers under them stay selectable. */
+.preview-subtitles {
+  pointer-events: none;
 }
 
 .preview-duration::before {
@@ -1164,6 +1170,68 @@ code {
 .clip-inspector-mute.on {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.clip-field-label.is-static {
+  cursor: default;
+}
+
+.clip-field-select {
+  height: 20px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: 11.5px var(--font-ui);
+}
+
+.clip-field-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* One choice of a few, joined: the pressed one carries the accent. */
+.clip-inspector-group.segmented {
+  gap: 0;
+}
+
+.segmented-option {
+  height: 20px;
+  margin-left: -1px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+.segmented-option:first-child {
+  margin-left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.segmented-option:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+.segmented-option:hover:not(.on) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.segmented-option.on {
+  position: relative;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.segmented-option:focus-visible {
+  position: relative;
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .clip-inspector-hint {
@@ -1626,6 +1694,31 @@ code {
   box-shadow: inset 3px 0 0 var(--track-color);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* Subtitle lane heads select their track (its style is set in the inspector). */
+button.track-head {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.track-head:hover {
+  background: var(--bg-hover);
+}
+
+button.track-head:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.track-head.is-selected {
+  background: var(--accent-soft);
 }
 
 .track-video {

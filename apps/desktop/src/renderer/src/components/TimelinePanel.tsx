@@ -17,6 +17,8 @@ import { diffCounts } from "../history/model.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, revealSeek, selection, useSelection } from "../selection.js";
+import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
+import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
 import { type DragPreview, type EditCommand, type Grab, commandEdits, dragEdit, dragPreview, grabAt, snapPoints } from "../timeline/edit.js";
 import {
   type ClipBox,
@@ -170,6 +172,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
 const KEYS_LABEL =
   "Timeline lanes. Click selects a clip, drag moves it, drag an edge to trim; drag over empty space selects a time range; " +
   "the ruler moves the playhead. " +
+  "Click a subtitle cue to select its words, or a subtitle lane to set its style. " +
   "S splits at the playhead, [ and ] trim to it, comma and period nudge a frame, Delete removes, Shift+Delete ripple deletes, " +
   "arrows move the playhead, N toggles snapping, Escape clears. Plus and minus zoom, 0 fits the timeline. " +
   `${isMac ? "Command" : "Control"}+Z undoes, ${isMac ? "Command+Shift+Z" : "Control+Y"} redoes.`;
@@ -198,16 +201,18 @@ function TimelineCanvas({
   const frame = useRef(0);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, range, reveal } = useSelection();
+  const { clips: selectedClips, range, reveal, track: selectedTrack } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
+  const subtitles = useSubtitles();
+  const cues = useMemo(() => new Map(subtitles.tracks.map((track) => [track.track, cueBoxes(track, subtitles.fps)] as const)), [subtitles]);
   const [snapping, setSnapping] = useState(true);
   const gesture = useRef<Gesture | null>(null);
   /** Ghost drawn from a drag until the daemon's new revision shows the clip there. */
   const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
   /** Edits run one after another, in the order they were made. */
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const latest = useRef({ layout, fps, selected, range, revision, snapping, diff });
-  latest.current = { layout, fps, selected, range, revision, snapping, diff };
+  const latest = useRef({ layout, fps, selected, range, revision, snapping, diff, cues, selectedTrack });
+  latest.current = { layout, fps, selected, range, revision, snapping, diff, cues, selectedTrack };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
@@ -216,7 +221,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks, cues: subtitleCues, selectedTrack: track } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -242,6 +247,8 @@ function TimelineCanvas({
       selected: chosen,
       ...(marks ? { diff: marks } : {}),
       range: words,
+      subtitles: subtitleCues,
+      selectedTrack: track,
       ...(drag ? { drag } : {}),
     });
     performance.measure(PAINT_MEASURE, { start: started });
@@ -308,7 +315,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, range, diff, settle, draw]);
+  }, [layout, revision, selected, range, diff, cues, selectedTrack, settle, draw]);
 
   // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
   useEffect(() => {
@@ -587,6 +594,11 @@ function TimelineCanvas({
     }
     const grab = grabAt(layout, state.current, at.x, at.y);
     if (!grab) {
+      const row = layout.rows.find((candidate) => at.y + state.current.scrollTop >= candidate.top && at.y + state.current.scrollTop < candidate.top + candidate.height);
+      if (row?.kind === "subtitles") {
+        pickSubtitle(row.id, timeAt(at.x));
+        return;
+      }
       selection.clear();
       gesture.current = { kind: "range", pointer: event.pointerId, time: timeAt(at.x), clientX: event.clientX, moving: false };
       box.setPointerCapture(event.pointerId);
@@ -610,6 +622,27 @@ function TimelineCanvas({
     };
     box.setPointerCapture(event.pointerId);
     setHover(null);
+  };
+
+  /** A subtitle lane pressed at `time`: its cue's words (the playhead goes there), else the track alone. */
+  const pickSubtitle = (track: string, time: number) => {
+    const box = cueBoxAt(latest.current.cues.get(track) ?? [], time);
+    const picked = box ? cueSelection(box.cue, subtitles.fps, subtitles.transcriptOf) : null;
+    if (picked && picked.words.length > 0) selection.selectWords(picked.words, picked.range, "timeline", { reveal: true, track });
+    else selection.selectTrack(track, "timeline");
+  };
+
+  /** Add a subtitle track following the likeliest track, then select it for its style. */
+  const addSubtitles = () => {
+    const follows = subtitleSource(latest.current.layout, selectedClips, subtitles);
+    if (!follows) {
+      onStatus({ tone: "info", text: "Add a video or audio track first: subtitles follow one" });
+      return;
+    }
+    send([{ op: "track.add", args: { kind: "subtitles", follows, style: { preset: "big-keyword" } } }], (result) => {
+      const added = result?.changes.added[0];
+      if (added) selection.selectTrack(added, "timeline");
+    });
   };
 
   const onPointerMove = (event: PointerEvent) => {
@@ -733,16 +766,43 @@ function TimelineCanvas({
                 <path d="M4 2.5v6a4 4 0 0 0 8 0v-6M4 5.5h2.5M9.5 5.5H12" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
+            <button
+              className="icon-button"
+              aria-label="Add subtitle track"
+              title="Add subtitles: the transcript words of the selected clip's track (or the first transcribed one)"
+              disabled={!layout?.rows.some((row) => row.kind !== "subtitles")}
+              onClick={addSubtitles}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M4.5 9.5h3.5M9.5 9.5h2M4.5 7h1.5M7.5 7h4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </button>
           </div>
         </div>
         <div className="timeline-heads-rows">
           <div ref={heads}>
-            {layout?.rows.map((row) => (
-              <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>
-                <span className="track-id">{row.label}</span>
-                <span className="track-label">{row.name ?? (row.followsLabel ? `Words of ${row.followsLabel}` : "")}</span>
-              </div>
-            ))}
+            {layout?.rows.map((row) =>
+              row.kind === "subtitles" ? (
+                <button
+                  key={row.id}
+                  className={`track-head track-${row.kind}${selectedTrack === row.id ? " is-selected" : ""}`}
+                  style={{ height: row.height }}
+                  title={`${row.id}: select to set its style`}
+                  aria-pressed={selectedTrack === row.id}
+                  data-track={row.id}
+                  onClick={() => selection.selectTrack(row.id, "timeline")}
+                >
+                  <span className="track-id">{row.label}</span>
+                  <span className="track-label">{row.name ?? `Words of ${row.followsLabel ?? "?"}`}</span>
+                </button>
+              ) : (
+                <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>
+                  <span className="track-id">{row.label}</span>
+                  <span className="track-label">{row.name ?? ""}</span>
+                </div>
+              ),
+            )}
           </div>
         </div>
       </div>
@@ -779,7 +839,7 @@ function TimelineCanvas({
         </div>
         {overlay && <div className="timeline-empty">{overlay}</div>}
         {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} />}
-        <ClipList layout={layout} fps={fps} selected={selected} />
+        <ClipList layout={layout} fps={fps} selected={selected} cues={cues} />
       </div>
     </div>
   );
@@ -840,7 +900,23 @@ const OP_LABELS: Record<string, string> = {
   "clip.remove": "Delete",
   cut: "Ripple delete",
   revert: "Undo",
+  "track.add": "New track",
+  "track.set": "Track change",
 };
+
+/**
+ * Track a new subtitle track should follow: the selected clip's track, else
+ * the first whose clips have a transcript, else the first video (then audio)
+ * track; null when there is no clip track.
+ */
+function subtitleSource(layout: TimelineLayout | null, selectedClips: readonly string[], subtitles: SubtitlesState): string | null {
+  const rows = layout?.rows.filter((row) => row.kind !== "subtitles") ?? [];
+  const picked = rows.find((row) => row.clips.some((clip) => selectedClips.includes(clip.id)));
+  const transcribed = rows.find((row) => row.clips.some((clip) => clip.asset !== null && subtitles.transcriptOf(clip.asset) !== null));
+  // Rows list the top video layer first: the base track is the last video row.
+  const base = rows.filter((row) => row.kind === "video").at(-1) ?? rows[0];
+  return (picked ?? transcribed ?? base)?.id ?? null;
+}
 
 /** Why a key did nothing, in the header. */
 function nothingToDo(command: EditCommand, anySelected: boolean): string {
@@ -893,20 +969,36 @@ function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; 
   );
 }
 
-/** The canvas is opaque to assistive tech: the same clips as a list, selection included, for screen readers and tests. */
-function ClipList({ layout, fps, selected }: { layout: TimelineLayout | null; fps: number; selected: ReadonlySet<string> }) {
+/** The canvas is opaque to assistive tech: the same clips and subtitle cues as a list, selection included, for screen readers and tests. */
+function ClipList({
+  layout,
+  fps,
+  selected,
+  cues,
+}: {
+  layout: TimelineLayout | null;
+  fps: number;
+  selected: ReadonlySet<string>;
+  cues: ReadonlyMap<string, readonly CueBox[]>;
+}) {
   if (!layout) return null;
   return (
     <ul className="sr-only" aria-label="Timeline clips">
       {layout.rows.flatMap((row) =>
-        row.clips.map((clip) => (
-          <li key={clip.id} data-clip={clip.id} data-selected={selected.has(clip.id) || undefined}>
-            {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
-            {clip.problem ? `, ${clip.problem}` : ""}
-            {clipBadges(clip).map((badge) => `, ${badge}`).join("")}
-            {selected.has(clip.id) ? ", selected" : ""}
-          </li>
-        )),
+        row.kind === "subtitles"
+          ? (cues.get(row.id) ?? []).map((cue) => (
+              <li key={`${row.id}@${cue.start}`} data-cue={row.id}>
+                {`${row.label}: "${cue.text}", ${formatTimecode(cue.start, fps)} to ${formatTimecode(cue.end, fps)}`}
+              </li>
+            ))
+          : row.clips.map((clip) => (
+              <li key={clip.id} data-clip={clip.id} data-selected={selected.has(clip.id) || undefined}>
+                {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
+                {clip.problem ? `, ${clip.problem}` : ""}
+                {clipBadges(clip).map((badge) => `, ${badge}`).join("")}
+                {selected.has(clip.id) ? ", selected" : ""}
+              </li>
+            )),
       )}
     </ul>
   );

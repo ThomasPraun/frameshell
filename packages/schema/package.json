@@ -13,6 +13,10 @@
       "types": "./dist/composite.d.ts",
       "default": "./dist/composite.js"
     },
+    "./subtitles": {
+      "types": "./dist/subtitles.d.ts",
+      "default": "./dist/subtitles.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

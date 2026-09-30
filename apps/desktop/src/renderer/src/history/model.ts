@@ -36,6 +36,7 @@ const VERBS: Record<string, string> = {
   cut: "Ripple delete",
   "track.add": "Add track",
   "track.remove": "Remove track",
+  "track.set": "Change track",
   "timeline.patch": "Direct edit",
 };
 

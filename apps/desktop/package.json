@@ -30,6 +30,7 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@expo-google-fonts/archivo-black": "0.4.1",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "@playwright/test": "^1.63.0",

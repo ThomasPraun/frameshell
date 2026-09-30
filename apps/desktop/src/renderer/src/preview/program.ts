@@ -110,11 +110,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const audio: AudioSpan[] = [];
   let frames = 0;
 
-  const nested = options.nested;
-  const flat = flattenTimeline(asTimeline(view, true), (source) => {
-    const found = nested?.get(source);
-    return found ? asTimeline(found, false) : null;
-  });
+  const flat = flattenView(view, options.nested);
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
@@ -231,13 +227,27 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
 }
 
 /**
+ * `view` as a timeline file with its nested timelines flattened (SPEC §3.5
+ * step 1), as export resolves it; `nested` = views by clip `source`, absent
+ * ones stay unresolved.
+ */
+export function flattenView(view: TimelineView, nested?: ReadonlyMap<string, TimelineView>): Timeline {
+  return flattenTimeline(asTimeline(view, true), (source) => {
+    const found = nested?.get(source);
+    return found ? asTimeline(found, false) : null;
+  });
+}
+
+/**
  * `view` as a timeline file for {@link flattenTimeline}: clips as stored.
  * The root keeps its derived `end` (the only length an unreadable nested
  * clip has); nested views drop it, their times move.
  */
 function asTimeline(view: TimelineView, root: boolean): Timeline {
   const tracks = view.tracks.map((track): Track => {
-    if (track.kind === "subtitles") return { id: track.id, kind: "subtitles", follows: track.follows ?? "" };
+    if (track.kind === "subtitles") {
+      return { id: track.id, kind: "subtitles", follows: track.follows ?? "", ...(track.style ? { style: track.style } : {}) };
+    }
     const clips = track.clips.map((clip) => {
       if (root) return clip as unknown as Clip;
       const { end: _end, ...stored } = clip;

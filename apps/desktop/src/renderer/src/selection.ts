@@ -11,7 +11,9 @@ import { useSyncExternalStore } from "react";
  * (scroll, zoom, hover) and has no selection of its own, while selection is
  * read and set by panels that do not draw clips. The History panel (#18)
  * selects a transaction or operation here: its clips are selected and the
- * timeline highlights what it changed. Timeline editing (#16)
+ * timeline highlights what it changed. A subtitle track (#22) is selected
+ * from its lane (alone, or with the words of a cue); the inspector edits its
+ * style. Timeline editing (#16)
  * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Ask agent"
  * (#49) quotes it, and the player (#15) may follow it. Those extend
  * {@link Selection} here; never keep a second store.
@@ -123,6 +125,11 @@ export interface Selection {
   readonly scene: SelectedScene | null;
   /** Rectangle drawn on the preview; null otherwise. */
   readonly region: SelectedRegion | null;
+  /**
+   * Track of {@link SELECTION_TIMELINE} picked on its own or whose cue the
+   * selected words were picked on (a subtitle track); null otherwise.
+   */
+  readonly track: string | null;
 }
 
 /** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
@@ -138,6 +145,7 @@ const EMPTY: Selection = {
   files: [],
   scene: null,
   region: null,
+  track: null,
 };
 let current: Selection = EMPTY;
 const listeners = new Set<() => void>();
@@ -195,7 +203,8 @@ export const selection = {
       current.history === null &&
       current.files.length === 0 &&
       current.scene === null &&
-      current.region === null;
+      current.region === null &&
+      current.track === null;
     const same = onlyClips && ids.length === current.clips.length && ids.every((id, i) => id === current.clips[i]);
     if (!reveal && same && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
     replace(ids.length === 0 ? EMPTY : { ...EMPTY, clips: [...ids], origin, reveal: reveal ? { clip: ids[0]! } : null });
@@ -236,19 +245,32 @@ export const selection = {
   /**
    * Replace the selection with transcript words playing in `range` on the
    * timeline. `reveal` asks the timeline to bring the range into view and
-   * the player to move there. No words or no range selects nothing.
+   * the player to move there; `track` names the subtitle track whose cue
+   * they were picked on. No words or no range selects nothing.
    */
-  selectWords(words: readonly SelectedWord[], range: TimeRange | null, origin: SelectionOrigin, options: { reveal?: boolean } = {}): void {
+  selectWords(
+    words: readonly SelectedWord[],
+    range: TimeRange | null,
+    origin: SelectionOrigin,
+    options: { reveal?: boolean; track?: string } = {},
+  ): void {
     if (words.length === 0 || !range) {
       selection.clear();
       return;
     }
+    const track = options.track ?? null;
     const same =
       words.length === current.words.length &&
       words.every((word, i) => word.transcript === current.words[i]!.transcript && word.word === current.words[i]!.word) &&
-      sameRange(range, current.range);
+      sameRange(range, current.range) &&
+      track === current.track;
     if (same && !options.reveal && origin === current.origin && current.reveal === null) return;
-    replace({ ...EMPTY, words: [...words], range, origin, reveal: options.reveal ? { range } : null });
+    replace({ ...EMPTY, words: [...words], range, origin, reveal: options.reveal ? { range } : null, track });
+  },
+  /** Replace the selection with one track (a subtitle lane clicked); no-op when it is already that alone. */
+  selectTrack(id: string, origin: SelectionOrigin): void {
+    if (current.track === id && current.words.length === 0 && current.clips.length === 0 && current.origin === origin) return;
+    replace({ ...EMPTY, track: id, origin });
   },
   /** Replace the selection with a bare timeline range; an empty range selects nothing. */
   selectRange(range: TimeRange, origin: SelectionOrigin): void {
@@ -327,6 +349,14 @@ export const selection = {
     // Clips selected with the words (`ui_select`) stay when every word is cut.
     if ((placed.length === 0 || !range) && current.clips.length === 0) replace(EMPTY);
     else replace({ ...current, words: placed.map((entry) => entry.word), range });
+  },
+  /**
+   * Drop the selected track, and words picked on it, once a new revision of
+   * {@link SELECTION_TIMELINE} no longer has it (`present` = its track ids).
+   */
+  retainTrack(present: ReadonlySet<string>): void {
+    if (current.track === null || present.has(current.track)) return;
+    replace(EMPTY);
   },
   /** Call `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void {
