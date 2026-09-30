@@ -112,6 +112,8 @@ export interface PaintInput<Img> {
   playhead: number;
   theme: TimelineTheme;
   media: MediaLookup<Img>;
+  /** Ids of selected clips (shared selection store), outlined in the accent color; none when absent. */
+  selected?: ReadonlySet<string>;
 }
 
 /** Clip body inset from its lane, px. */
@@ -237,6 +239,12 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   if (clip.problem) ctx.setLineDash([3, 2]);
   ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, w - 1), h - 1);
   if (clip.problem) ctx.setLineDash([]);
+  if (input.selected?.has(clip.id)) {
+    // Selected: a 2 px accent frame inside the clip, over the outline, so neighbours stay apart.
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left + 1, y + 1, Math.max(0, w - 2), h - 2);
+  }
 
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
 }

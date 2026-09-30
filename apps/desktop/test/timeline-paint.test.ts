@@ -74,6 +74,24 @@ describe("paintTimeline", () => {
     expect(ctx.texts).not.toContain("take-14.mp4");
   });
 
+  it("frames selected clips in the accent color, and only those", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const strokes = (selected?: ReadonlySet<string>) => {
+      const ctx = recorder();
+      const accentFrames: number[] = [];
+      ctx.strokeRect = (x: number) => {
+        if (ctx.strokeStyle === DEFAULT_THEME.accent && ctx.lineWidth === 2) accentFrames.push(x);
+      };
+      const input = { layout, viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia };
+      paintTimeline(ctx, selected ? { ...input, selected } : input);
+      return accentFrames;
+    };
+    expect(strokes()).toEqual([]);
+    expect(strokes(new Set(["c_nope"]))).toEqual([]);
+    // c_1 starts at 3 s: 60 px, plus the half-pixel gap and the 1 px inset.
+    expect(strokes(new Set(["c_1"]))).toEqual([61.5]);
+  });
+
   it("labels the ruler with timecodes of the visible range", () => {
     const layout = layoutTimeline(longTimeline(3));
     const ctx = recorder();

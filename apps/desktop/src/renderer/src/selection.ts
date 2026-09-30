@@ -1,18 +1,27 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * What the user has selected, app-wide (SPEC §10). One store so every panel
- * agrees: the timeline marks selected clips, the script editor highlights
- * their scenes, and later "Ask agent" (#49) and `ui_state` (#33) read it.
+ * What the user has selected, app-wide (SPEC §10). The one selection store
+ * of the renderer: the canvas timeline (#14) marks and sets selected clips,
+ * the script editor highlights their scenes and selects a scene's clips.
  *
- * Minimal on purpose: clip ids of the `main` timeline only. The live
- * timeline (#14) and timeline editing (#16) should extend this store
- * (words, time range, other timelines) instead of keeping their own.
+ * Why here and not in the timeline: the canvas keeps only view state
+ * (scroll, zoom, hover) and has no selection of its own, while selection is
+ * read and set by panels that do not draw clips. Timeline editing (#16)
+ * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Ask agent"
+ * (#49) quotes it, and the player (#15) may follow it. Those extend
+ * {@link Selection} (words, time range, other timelines) here; never keep a
+ * second store.
+ *
+ * Clip ids are those of {@link SELECTION_TIMELINE}.
  */
 export interface Selection {
   /** Selected clip ids, in selection order; empty when nothing is selected. */
   readonly clips: readonly string[];
 }
+
+/** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
+export const SELECTION_TIMELINE = "main";
 
 const EMPTY: Selection = { clips: [] };
 let current: Selection = EMPTY;
@@ -20,6 +29,7 @@ const listeners = new Set<() => void>();
 
 /** Read and replace the selection outside React (event handlers, Monaco callbacks). */
 export const selection = {
+  /** Current selection; the same object until it changes. */
   get: (): Selection => current,
   /** Replace the selected clips; no-op (no re-render) when unchanged. */
   selectClips(ids: readonly string[]): void {
@@ -32,6 +42,7 @@ export const selection = {
     const { clips } = current;
     selection.selectClips(clips.includes(id) ? clips.filter((clip) => clip !== id) : [...clips, id]);
   },
+  /** Call `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);

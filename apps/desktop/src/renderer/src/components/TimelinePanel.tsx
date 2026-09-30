@@ -26,11 +26,12 @@ import {
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type TimelineTheme, paintTimeline } from "../timeline/paint.js";
+import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { PanelHeader } from "./PanelHeader.js";
 
-/** Timeline the panel follows; the project's `main` until timelines can be switched. */
-const TIMELINE = "main";
+/** Timeline the panel follows: the one selections name, the project's `main` until timelines can be switched. */
+const TIMELINE = SELECTION_TIMELINE;
 /** Zoom step of the buttons and `+`/`-` keys. */
 const ZOOM_STEP = 1.5;
 /** Poll `asset.list` this often while an asset on the timeline is still ingesting. */
@@ -52,8 +53,11 @@ interface ViewState {
 /**
  * Canvas timeline of the project's main timeline (SPEC §10): tracks and clips
  * from the daemon, redrawn live as the agent edits from the terminal. Zoom
- * with Ctrl/Cmd + wheel, pinch or `+`/`-`/`0`; scroll natively. The playhead
- * is static until the player drives it (#15).
+ * with Ctrl/Cmd + wheel, pinch or `+`/`-`/`0`; scroll natively. Click a clip
+ * to select it (Shift/Cmd/Ctrl-click toggles, Esc or a click on empty lane
+ * clears) in the shared selection store, which the script editor also
+ * reads and sets (scene links, SPEC §5.5). The playhead is static until the
+ * player drives it (#15).
  */
 export function TimelinePanel({ collapsed, onToggle, playhead = 0 }: { collapsed: boolean; onToggle: () => void; playhead?: number }) {
   const { view, error } = useTimelineView(TIMELINE);
@@ -117,15 +121,17 @@ function TimelineCanvas({
   const frame = useRef(0);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const latest = useRef({ layout, fps, playhead });
-  latest.current = { layout, fps, playhead };
+  const { clips: selectedClips } = useSelection();
+  const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
+  const latest = useRef({ layout, fps, playhead, selected });
+  latest.current = { layout, fps, playhead, selected };
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
 
   const draw = useCallback(() => {
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, playhead: at } = latest.current;
+    const { layout: current, fps: rate, playhead: at, selected: chosen } = latest.current;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
     const ratio = window.devicePixelRatio || 1;
@@ -146,6 +152,7 @@ function TimelineCanvas({
       playhead: at,
       theme: theme.current,
       media: mediaRef.current!,
+      selected: chosen,
     });
     performance.measure(PAINT_MEASURE, { start: started });
     // User Timing buffers are unbounded: keep only recent paints.
@@ -204,7 +211,26 @@ function TimelineCanvas({
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, playhead, settle, draw]);
+  }, [layout, playhead, selected, settle, draw]);
+
+  // A selection made elsewhere (a scene heading in the script) scrolls its first clip into view.
+  useEffect(() => {
+    const first = selectedClips[0];
+    const box = scroller.current;
+    const current = latest.current.layout;
+    if (!first || !box || !current || box.contains(document.activeElement)) return;
+    const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === first));
+    const clip = row?.clips.find((candidate) => candidate.id === first);
+    if (!row || !clip) return;
+    const view = state.current;
+    const x0 = clip.start * view.pxPerSecond;
+    const x1 = clip.end * view.pxPerSecond;
+    if (x0 < view.scrollLeft || x1 > view.scrollLeft + view.width) view.scrollLeft = Math.max(0, x0 - view.width / 4);
+    const lanes = view.height - RULER_HEIGHT;
+    const top = row.top - RULER_HEIGHT;
+    if (top < view.scrollTop || top + row.height > view.scrollTop + lanes) view.scrollTop = Math.max(0, top);
+    settle();
+  }, [selectedClips, settle]);
 
   useEffect(() => {
     const style = getComputedStyle(document.documentElement);
@@ -286,8 +312,22 @@ function TimelineCanvas({
     if (event.key === "=" || event.key === "+") zoom(ZOOM_STEP);
     else if (event.key === "-") zoom(1 / ZOOM_STEP);
     else if (event.key === "0") fit();
+    else if (event.key === "Escape") selection.selectClips([]);
     else return;
     event.preventDefault();
+  };
+
+  /** Select the clip under the pointer; clicks on the ruler and the scrollbars leave the selection alone. */
+  const onPointerDown = (event: PointerEvent) => {
+    const box = scroller.current!;
+    const rect = box.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    if (event.button !== 0 || !layout || y < RULER_HEIGHT || x >= box.clientWidth || y >= box.clientHeight) return;
+    const hit = clipAt(layout, state.current, x, y);
+    if (!hit) selection.selectClips([]);
+    else if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleClip(hit.clip.id);
+    else selection.selectClips([hit.clip.id]);
   };
 
   const onPointerMove = (event: PointerEvent) => {
@@ -337,6 +377,7 @@ function TimelineCanvas({
         data-testid="timeline-lanes"
         data-revision={revision ?? undefined}
         data-clips={layout?.clipCount ?? 0}
+        data-selected={selectedClips.join(" ")}
       >
         <canvas ref={canvas} className="timeline-canvas" aria-hidden="true" />
         <div
@@ -344,9 +385,10 @@ function TimelineCanvas({
           className="timeline-scroller"
           tabIndex={0}
           role="region"
-          aria-label="Timeline lanes. Plus and minus zoom, 0 fits the timeline."
+          aria-label="Timeline lanes. Click selects a clip, Escape clears. Plus and minus zoom, 0 fits the timeline."
           onScroll={onScroll}
           onKeyDown={onKeyDown}
+          onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerLeave={() => setHover(null)}
         >
@@ -354,7 +396,7 @@ function TimelineCanvas({
         </div>
         {overlay && <div className="timeline-empty">{overlay}</div>}
         {hover && <ClipTooltip hover={hover} fps={fps} />}
-        <ClipList layout={layout} fps={fps} />
+        <ClipList layout={layout} fps={fps} selected={selected} />
       </div>
     </div>
   );
@@ -376,16 +418,17 @@ function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x:
   );
 }
 
-/** The canvas is opaque to assistive tech: the same clips as a list, for screen readers and tests. */
-function ClipList({ layout, fps }: { layout: TimelineLayout | null; fps: number }) {
+/** The canvas is opaque to assistive tech: the same clips as a list, selection included, for screen readers and tests. */
+function ClipList({ layout, fps, selected }: { layout: TimelineLayout | null; fps: number; selected: ReadonlySet<string> }) {
   if (!layout) return null;
   return (
     <ul className="sr-only" aria-label="Timeline clips">
       {layout.rows.flatMap((row) =>
         row.clips.map((clip) => (
-          <li key={clip.id} data-clip={clip.id}>
+          <li key={clip.id} data-clip={clip.id} data-selected={selected.has(clip.id) || undefined}>
             {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
             {clip.problem ? `, ${clip.problem}` : ""}
+            {selected.has(clip.id) ? ", selected" : ""}
           </li>
         )),
       )}

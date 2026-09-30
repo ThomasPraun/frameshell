@@ -773,12 +773,14 @@ code {
 
 /* Script scenes: gutter flag per `##` heading, highlight for the selected clip's scene. */
 .scene-glyph-linked,
-.scene-glyph-unlinked {
+.scene-glyph-unlinked,
+.script-glyph-linked {
   cursor: pointer;
 }
 
 .scene-glyph-linked::before,
-.scene-glyph-unlinked::before {
+.scene-glyph-unlinked::before,
+.script-glyph-linked::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -793,6 +795,12 @@ code {
   background: var(--track-video);
 }
 
+/* Square on line 1: clips linked to the whole script (`scriptRef` without `#anchor`). */
+.script-glyph-linked::before {
+  border-radius: 2px;
+  background: var(--track-video);
+}
+
 /* Hollow warning ring: this scene has no clip yet. */
 .scene-glyph-unlinked::before {
   border: 1.5px solid var(--accent);
@@ -803,7 +811,8 @@ code {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.scene-selected {
+.scene-selected,
+.script-selected {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
 }
@@ -848,33 +857,6 @@ code {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.lane {
-  position: relative;
-}
-
-.clip {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  min-width: 3px;
-  padding: 0 6px;
-  overflow: hidden;
-  border: 1px solid var(--track-color, var(--line));
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--track-color, var(--line)) 28%, #1f2023);
-  color: var(--text);
-  font: 11px var(--font-mono);
-  text-align: left;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.clip.is-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .track-head {
