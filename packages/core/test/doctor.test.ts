@@ -86,3 +86,45 @@ describe("runDoctor", () => {
     });
   });
 });
+
+describe("runDoctor with an on-demand package (whisper.cpp)", () => {
+  const whisperLike = (): BinaryPackage => ({
+    name: "whisper-cpp",
+    tools: ["whisper-cli"],
+    onDemand: true,
+    versionProbe: { args: ["--version"], pattern: /whisper\.cpp version: (\S+)/ },
+    builds: {
+      [currentPlatform()]: {
+        version: "1.9.4",
+        origin: "https://example.test",
+        license: "MIT",
+        archives: [{ urls: ["http://127.0.0.1:9/never.tar.gz"], sha256: "b".repeat(64), size: 1, files: { "whisper-cli": "whisper-cli" } }],
+      },
+    },
+  });
+  const whisperExec: Exec = async (file, args) =>
+    file.includes("whisper-cli") && args.includes("--version")
+      ? { code: 0, stdout: "whisper.cpp version: 1.9.4\n", stderr: "" }
+      : exec(file, args);
+
+  it("lists it but does not call it a problem when not installed yet, and --install leaves it for first use", async () => {
+    const system = systemFfmpeg();
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [ffmpegLike(), whisperLike()] });
+    const project = { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}` } };
+    // Would reject if it tried to download whisper-cli from the unreachable pin.
+    const report = await runDoctor(binaries, { exec: whisperExec, project, install: true });
+    expect(report.binaries.at(-1)).toMatchObject({ name: "whisper-cli", source: "managed", installed: false, pinned: { version: "1.9.4" } });
+    expect(report.problems).toEqual([]);
+  });
+
+  it("reads its version with the package's own probe", async () => {
+    const system = systemFfmpeg();
+    const whisper = join(system.dir, `whisper-cli${exe}`);
+    writeFileSync(whisper, "");
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [ffmpegLike(), whisperLike()] });
+    const project = { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}`, "whisper-cli": `whisper-cli${exe}` } };
+    const report = await runDoctor(binaries, { exec: whisperExec, project });
+    expect(report.binaries.at(-1)).toMatchObject({ name: "whisper-cli", source: "project", version: "1.9.4" });
+    expect(report.problems).toEqual([]);
+  });
+});

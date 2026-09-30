@@ -6,6 +6,7 @@ import {
   type MethodParams,
   type MethodResult,
   PROTOCOL_VERSION,
+  type Progress,
   RpcError,
 } from "./methods.js";
 import { assertSocketPathFits } from "./socket-path.js";
@@ -20,12 +21,20 @@ export interface ConnectOptions {
   protocolVersion?: number;
 }
 
+/** Per-call options of {@link DaemonConnection.request}. */
+export interface RequestOptions {
+  onProgress?: ((progress: Progress) => void) | undefined;
+}
+
 /** Open, handshaken connection to frameshelld. */
 export interface DaemonConnection {
   /** Identity the daemon reported during the handshake. */
   readonly daemon: HandshakeResult;
-  /** Typed JSON-RPC call. Rejects with {@link RpcError} on a daemon error. */
-  request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
+  /**
+   * Typed JSON-RPC call. Rejects with {@link RpcError} on a daemon error.
+   * `onProgress` receives the daemon's `progress` notifications for this call.
+   */
+  request<M extends MethodName>(method: M, params: MethodParams<M>, options?: RequestOptions): Promise<MethodResult<M>>;
   /** End the connection. Pending requests reject. */
   close(): void;
 }
@@ -40,7 +49,10 @@ export interface DaemonConnection {
  */
 export async function connectToDaemon(socketPath: string, options: ConnectOptions): Promise<DaemonConnection> {
   const socket = await openSocket(socketPath);
-  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  const pending = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: ((progress: Progress) => void) | undefined }
+  >();
   let nextId = 1;
 
   const failAll = (error: Error) => {
@@ -49,8 +61,17 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   };
 
   readMessages(socket, (message) => {
+    const note = message as { method?: unknown; params?: { requestId?: unknown; message?: unknown; fraction?: unknown } };
+    if (note.method === "progress") {
+      const { requestId, message: text, fraction } = note.params ?? {};
+      const listener = typeof requestId === "number" ? pending.get(requestId)?.onProgress : undefined;
+      if (listener && typeof text === "string") {
+        listener(typeof fraction === "number" ? { message: text, fraction } : { message: text });
+      }
+      return;
+    }
     const response = message as JsonRpcResponse;
-    if (typeof response.id !== "number") return; // Notifications: no subscribers yet.
+    if (typeof response.id !== "number") return; // Other notifications: no subscribers yet.
     const entry = pending.get(response.id);
     if (!entry) return;
     pending.delete(response.id);
@@ -63,14 +84,14 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   socket.on("close", () => failAll(new Error("frameshelld closed the connection")));
   socket.on("error", (error) => failAll(error));
 
-  const call = (method: string, params: unknown): Promise<unknown> =>
+  const call = (method: string, params: unknown, onProgress?: (progress: Progress) => void): Promise<unknown> =>
     new Promise((resolve, reject) => {
       if (socket.destroyed) {
         reject(new Error("connection to frameshelld is closed"));
         return;
       }
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, onProgress });
       writeMessage(socket, { jsonrpc: "2.0", id, method, params });
     });
 
@@ -88,7 +109,7 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
 
   return {
     daemon,
-    request: (method, params) => call(method, params) as never,
+    request: (method, params, options) => call(method, params, options?.onProgress) as never,
     close: () => {
       socket.end();
     },

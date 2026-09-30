@@ -1,0 +1,12 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/plugin.json",
+  "name": "@frameshell/whisper-cpp",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "dist/index.js",
+  "description": "Default transcription provider: local whisper.cpp, DTW word onsets, energy-derived word ends (ADR 0003).",
+  "contributes": {
+    "transcriptionProviders": ["whisper-cpp"],
+    "skills": ["skills/whisper-cpp/SKILL.md"]
+  }
+}

@@ -8,6 +8,7 @@ import {
   RpcError,
   type TrustState,
 } from "@frameshell/protocol";
+import type { TranscriptionProvider } from "@frameshell/plugin-api";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
 import { parsePluginSpec } from "./spec.js";
 import { NpmError, PluginStore } from "./store.js";
@@ -176,6 +177,38 @@ export class PluginHost {
       );
     }
     return normalizeResult(result, full, owner.info.name);
+  }
+
+  /**
+   * Transcription provider `id` from the project's loaded plugins. Throws
+   * `ProjectNotTrusted`, `InvalidPlugin` (its plugin failed to load) or
+   * `TranscriptionProviderNotFound` (data lists the loaded providers).
+   */
+  async transcriptionProvider(root: string, id: string): Promise<TranscriptionProvider> {
+    const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    if (!loaded && trust !== "not-required") throw notTrusted(root, trust, pins);
+    const plugins = loaded ?? [];
+    const owner = plugins.find((p) => p.providers.has(id));
+    if (owner) return owner.providers.get(id)!;
+    const broken = plugins.find((p) => p.manifest?.contributes.transcriptionProviders.includes(id));
+    if (broken) {
+      throw new RpcError(ErrorCode.InvalidPlugin, `${broken.info.name} failed to load: ${broken.info.error}`, {
+        name: broken.info.name,
+        details: broken.info.error,
+      });
+    }
+    const available = plugins.flatMap((p) => [...p.providers.keys()]);
+    const hint =
+      id === "whisper-cpp"
+        ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`."
+        : ` Install the plugin that provides it with \`frameshell plugin install <spec>\`.`;
+    throw new RpcError(
+      ErrorCode.TranscriptionProviderNotFound,
+      `No transcription provider "${id}" in ${root}` +
+        (available.length > 0 ? ` (loaded: ${available.join(", ")}).` : ".") +
+        hint,
+      { provider: id, available },
+    );
   }
 
   /** Export presets contributed by the project's loaded plugins. */

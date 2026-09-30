@@ -25,6 +25,11 @@ export function gitPluginFixture(manifest: Record<string, unknown> = {}): GitPlu
   const manifestPath = join(dir, "frameshell-plugin.json");
   const merged = { ...JSON.parse(readFileSync(manifestPath, "utf8")), ...manifest };
   writeFileSync(manifestPath, `${JSON.stringify(merged, null, 2)}\n`);
+  return commitFixture(dir);
+}
+
+/** Commit everything in `dir` to a fresh local git repo; installable as `git+file://…`. */
+export function commitFixture(dir: string): GitPlugin {
   const git = (...args: string[]) =>
     execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], {
       cwd: dir,

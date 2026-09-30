@@ -15,6 +15,7 @@ import {
   createTimeline,
   parseProjectConfig,
   parseTimeline,
+  parseTranscript,
 } from "@frameshell/schema";
 import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
 
@@ -199,6 +200,7 @@ async function readConfig(root: string): Promise<{ raw: Record<string, unknown>;
 const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown) => ParseResult<unknown> }[] = [
   { match: (rel) => rel === PROJECT_FILE, parse: parseProjectConfig },
   { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
+  { match: (rel) => /^transcripts\/.+\.words\.json$/.test(rel), parse: parseTranscript },
 ];
 
 function notInProject(target: string): RpcError {

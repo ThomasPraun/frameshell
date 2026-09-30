@@ -13,13 +13,16 @@ export interface DoctorOptions {
 
 /**
  * Diagnose every managed tool: source, path, version, pin, and ffmpeg codecs.
- * Report-only by default: never downloads unless `install` is set.
+ * Report-only by default: never downloads unless `install` is set. On-demand
+ * packages (whisper.cpp) are reported, never flagged missing and never
+ * installed here: their feature installs them on first use.
  */
 export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<DoctorResult> {
   const { project, install = false, exec = execProcess } = options;
   const tools = binaries.tools();
   if (install) {
     for (const tool of tools) {
+      if (binaries.packageOf(tool).onDemand) continue;
       const location = await binaries.locate(tool, project);
       // Missing overrides are reported below; only managed tools are installable.
       if (location.source === "managed") await binaries.ensure(tool, project);
@@ -31,7 +34,8 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
   const reportedPackages = new Set<string>();
   for (const tool of tools) {
     const location = await binaries.locate(tool, project);
-    const version = location.installed && location.path ? await probeVersion(location.path, exec) : null;
+    const pkg = binaries.packageOf(tool);
+    const version = location.installed && location.path ? await probeVersion(location.path, exec, pkg.versionProbe) : null;
     const { pinned } = location;
     reports.push({
       name: tool,
@@ -44,13 +48,16 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
     });
 
     if (location.installed) {
-      if (version === null) problems.push(`${location.path} does not run or prints no version (\`${tool} -version\`).`);
+      if (version === null) {
+        const args = (pkg.versionProbe?.args ?? ["-version"]).join(" ");
+        problems.push(`${location.path} does not run or prints no version (\`${tool} ${args}\`).`);
+      }
     } else if (location.source !== "managed") {
       problems.push(
         `${tool} not found at ${location.path} (set by \`binaries\` in the ${location.source} config). ` +
           'Fix the path or set it to "managed".',
       );
-    } else if (!reportedPackages.has(location.package)) {
+    } else if (!pkg.onDemand && !reportedPackages.has(location.package)) {
       // One line per package: its tools install together.
       reportedPackages.add(location.package);
       if (!pinned) {

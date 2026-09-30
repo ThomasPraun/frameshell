@@ -120,6 +120,14 @@ describe("file.write", () => {
     });
   });
 
+  it("rejects a transcript edit that breaks its schema, so re-transcribing never meets a broken file", async () => {
+    const path = join(dir, "transcripts", "raw-01.words.json");
+    await expect(conn.request("file.write", { path, content: '{"schemaVersion": 1, "words": "oops"}' })).rejects.toMatchObject({
+      code: ErrorCode.InvalidProjectFile,
+      message: expect.stringContaining("words"),
+    });
+  });
+
   it("accepts a valid edit to frameshell.json", async () => {
     const path = join(dir, "frameshell.json");
     const config = JSON.parse(readFileSync(path, "utf8"));

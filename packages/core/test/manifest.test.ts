@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BinaryManager, FFMPEG_PACKAGE, currentPlatform, execProcess, runDoctor } from "../src/index.js";
+import { BinaryManager, FFMPEG_PACKAGE, WHISPER_MODELS, WHISPER_PACKAGE, currentPlatform, execProcess, runDoctor } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 
 describe("pinned ffmpeg manifest", () => {
@@ -27,6 +27,44 @@ describe("pinned ffmpeg manifest", () => {
   });
 });
 
+describe("pinned whisper.cpp manifest", () => {
+  it.each(["linux-x64", "linux-arm64", "win32-x64", "win32-arm64"] as const)(
+    "%s pins an upstream v1.9.4 release archive providing whisper-cli and its libraries",
+    (platform) => {
+      const build = WHISPER_PACKAGE.builds[platform]!;
+      expect(build).toMatchObject({ version: "1.9.4", license: "MIT" });
+      expect(build.build).toBeUndefined();
+      const [archive] = build.archives;
+      expect(archive!.urls).toEqual([expect.stringMatching(/^https:\/\/github\.com\/ggml-org\/whisper\.cpp\/releases\/download\/b5130\//)]);
+      expect(archive!.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(Object.keys(archive!.files)).toEqual(["whisper-cli"]);
+      expect(Object.keys(archive!.support ?? {}).some((name) => /whisper\.(dll|so\.1)$/.test(name))).toBe(true);
+    },
+  );
+
+  it.each(["darwin-arm64", "darwin-x64"] as const)("%s builds the same commit from source with Metal", (platform) => {
+    const build = WHISPER_PACKAGE.builds[platform]!;
+    expect(build.archives[0]!.urls[0]).toContain("927cfce34f31707e17f2bff35c349632fb9e2c3a");
+    expect(build.build?.configure).toEqual(expect.arrayContaining(["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DBUILD_SHARED_LIBS=OFF"]));
+    expect(build.build?.files).toEqual({ "whisper-cli": "bin/whisper-cli" });
+  });
+
+  it("is installed on demand, not by doctor --install", () => {
+    expect(WHISPER_PACKAGE.onDemand).toBe(true);
+  });
+
+  it("pins the ADR 0003 default model large-v3-turbo-q5_0 (574 MB) by revision and SHA-256", () => {
+    const q5 = WHISPER_MODELS.find((model) => model.id === "ggml-large-v3-turbo-q5_0")!;
+    expect(q5).toMatchObject({ size: 574_041_195, license: "MIT", file: "ggml-large-v3-turbo-q5_0.bin" });
+    expect(q5.urls[0]).toMatch(/^https:\/\/huggingface\.co\/ggerganov\/whisper\.cpp\/resolve\/[0-9a-f]{40}\//);
+    expect(WHISPER_MODELS.map((model) => model.id).sort()).toEqual([
+      "ggml-large-v3-turbo",
+      "ggml-large-v3-turbo-q5_0",
+      "ggml-large-v3-turbo-q8_0",
+    ]);
+  });
+});
+
 // Opt-in: downloads the real pinned build (~60-170 MB) for this platform, then runs it.
 // Run with FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test; CI runs it weekly (.github/workflows/real-binaries.yml).
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinned ffmpeg download", () => {
@@ -36,7 +74,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
       const report = await runDoctor(binaries, { install: true });
       const pinned = FFMPEG_PACKAGE.builds[currentPlatform()]!.version;
-      for (const binary of report.binaries) {
+      for (const binary of report.binaries.filter((b) => b.package === "ffmpeg")) {
         expect(binary).toMatchObject({ source: "managed", installed: true });
         expect(binary.version).toContain(pinned.split("-")[0]);
       }

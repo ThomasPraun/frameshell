@@ -9,8 +9,10 @@ import {
   type JobInfo,
   type MethodResult,
   type PluginInfo,
+  type Progress,
   RpcError,
   type StatusResult,
+  type TranscribeResult,
   resolveSocketPath,
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
@@ -33,6 +35,9 @@ Commands:
                                or an npm name[@version]
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
+  transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
+             [--provider p] [--model m] [--language l]
+                               First run downloads the engine and model (minutes, once)
   <plugin> <command> [args…]   Run a plugin-provided command
 
 Options:
@@ -42,7 +47,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin"]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe"]);
 
 /** How often `import --wait` polls job progress. */
 const WAIT_POLL_MS = 250;
@@ -68,7 +73,8 @@ type Invocation =
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
-  | { kind: "plugin.run"; plugin: string; command: string; args: string[] };
+  | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
+  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string };
 
 interface Flags {
   json: boolean;
@@ -106,6 +112,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           name: { type: "string" },
+          provider: { type: "string" },
+          model: { type: "string" },
+          language: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -154,9 +163,28 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 
 function parseBuiltin(
   positionals: string[],
-  options: { name?: string | undefined; install: boolean; link: boolean; wait: boolean },
+  options: {
+    name?: string | undefined;
+    install: boolean;
+    link: boolean;
+    wait: boolean;
+    provider?: string | undefined;
+    model?: string | undefined;
+    language?: string | undefined;
+  },
 ): Invocation | null {
   const [command, ...rest] = positionals;
+  if (command === "transcribe") {
+    if (rest.length !== 1) return null;
+    const { provider, model, language } = options;
+    return {
+      kind: "transcribe",
+      asset: rest[0]!,
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(language ? { language } : {}),
+    };
+  }
   if (command === "init" && rest.length <= 1) return { kind: "init", dir: rest[0], name: options.name };
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
@@ -217,6 +245,16 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.list", { cwd });
       return flags.json ? json(result) : formatPluginList(result);
+    }
+    case "transcribe": {
+      await settleTrust(conn, flags, io);
+      const { kind: _kind, ...params } = inv;
+      const result = await conn.request(
+        "transcribe",
+        { cwd, ...params },
+        flags.json ? {} : { onProgress: progressPrinter(io) },
+      );
+      return flags.json ? json(result) : formatTranscribe(result);
     }
     case "plugin.run": {
       await settleTrust(conn, flags, io);
@@ -294,6 +332,39 @@ function formatJob(job: JobInfo): string {
     default:
       return `${what}: ${job.state} (${job.id})`;
   }
+}
+
+/**
+ * Progress lines on stderr: one per new message, plus every 10 % of a step,
+ * so logs and agent terminals stay readable.
+ */
+function progressPrinter(io: CliIo): (progress: Progress) => void {
+  let lastMessage = "";
+  let lastDecile = -1;
+  return ({ message, fraction }) => {
+    const decile = fraction === undefined ? -1 : Math.floor(fraction * 10);
+    if (message === lastMessage && decile === lastDecile) return;
+    io.stderr(`${message}${fraction === undefined ? "" : ` ${Math.round(fraction * 100)}%`}\n`);
+    lastMessage = message;
+    lastDecile = decile;
+  };
+}
+
+function formatTranscribe(result: TranscribeResult): string {
+  const facts = [
+    `${result.words} words`,
+    `${result.provider} ${result.model}`,
+    ...(result.language ? [result.language] : []),
+    ...(result.device ? [result.device] : []),
+    `${result.seconds.toFixed(1)} s`,
+  ];
+  const lines = [`Transcribed ${result.asset} -> ${result.transcript}`, `  ${facts.join(" · ")}`];
+  if (result.audioSource !== result.asset) lines.push(`  audio from ${result.audioSource}`);
+  if (result.keptEdits > 0 || result.droppedEdits.length > 0) {
+    const dropped = result.droppedEdits.length > 0 ? `; dropped ${result.droppedEdits.length} (${result.droppedEdits.join(", ")})` : "";
+    lines.push(`  kept ${result.keptEdits} human edit${result.keptEdits === 1 ? "" : "s"}${dropped}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function formatStatus(status: StatusResult, cwd: string): string {
