@@ -14,9 +14,12 @@ afterEach(() => {
 function setup() {
   const output = new Map<string, string>();
   const exits = new Map<string, number>();
+  /** Agent changes per terminal, in order: `[session, agent]`. */
+  const agents = new Map<string, [string | null, string | null][]>();
   const manager = new TerminalManager({
     onData: (id, data) => output.set(id, (output.get(id) ?? "") + data),
     onExit: (id, code) => exits.set(id, code),
+    onAgent: (id, session, agent) => agents.set(id, [...(agents.get(id) ?? []), [session, agent]]),
   });
   managers.push(manager);
   const projectDir = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-term-")));
@@ -29,7 +32,7 @@ function setup() {
       session,
       binDir: projectDir,
     });
-  return { manager, output, exits, launch, projectDir };
+  return { manager, output, exits, agents, launch, projectDir };
 }
 
 const echoSession =
@@ -66,5 +69,34 @@ describe("TerminalManager", () => {
     manager.resize(id, 132, 40);
     manager.write(id, "stty size\r");
     await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("40 132");
+  });
+
+  it.skipIf(process.platform === "win32")("tags a terminal with the agent CLI in its foreground, until it quits", async () => {
+    const { manager, output, agents, launch } = setup();
+    const { id } = manager.create(launch("term-agent"), { cols: 80, rows: 24 });
+    // Node CLIs such as Claude Code set their process title: `ps` shows `claude`.
+    manager.write(id, `node -e "process.title='claude'; console.log('agent up'); setTimeout(() => {}, 60000)"\r`);
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("agent up");
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 15_000 }).toEqual([["term-agent", "claude"]]);
+    expect(manager.agents()).toEqual([{ session: "term-agent", agent: "claude" }]);
+    manager.write(id, "\x03");
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 15_000 }).toEqual([
+      ["term-agent", "claude"],
+      ["term-agent", null],
+    ]);
+    expect(manager.agents()).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("untags a terminal closed while its agent runs", async () => {
+    const { manager, output, agents, launch } = setup();
+    const { id } = manager.create(launch("term-gone"), { cols: 80, rows: 24 });
+    manager.write(id, `node -e "process.title='codex'; console.log('agent up'); setTimeout(() => {}, 60000)"\r`);
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("agent up");
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 15_000 }).toEqual([["term-gone", "codex"]]);
+    manager.kill(id);
+    expect(agents.get(id)).toEqual([
+      ["term-gone", "codex"],
+      ["term-gone", null],
+    ]);
   });
 });

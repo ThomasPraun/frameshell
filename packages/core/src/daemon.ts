@@ -12,6 +12,7 @@ import {
   type OpenTransaction,
   PROTOCOL_VERSION,
   type Progress,
+  agentAuthor,
   RpcError,
   type ValidatedParams,
   type AppDirs,
@@ -93,6 +94,8 @@ export interface Daemon {
 interface Caller {
   client: string;
   session: string | null;
+  /** Agent the client named in its handshake; null = none; undefined = the app's tag of its session decides. */
+  agent?: string | null | undefined;
 }
 
 /** Per-request services. `progress` sends `progress` notifications for this request; no-op for notifications. */
@@ -148,9 +151,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     writeTimeline: async (dir, id, content, author = "file") => {
       // The saver's transaction, like any operation of theirs (SPEC §6.2).
-      const tx = transactions.next(author);
-      await transactions.touching(author, tx, { root: dir, timeline: id });
-      if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(author, tx);
+      const key = transactionKey(author);
+      const tx = transactions.next(key);
+      await transactions.touching(key, tx, { root: dir, timeline: id });
+      if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(key, tx);
     },
   });
   const plugins = new PluginHost({ dirs, pins: projects });
@@ -200,20 +204,34 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
-    const author = authorOf(caller);
-    const tx = transactions.next(author);
-    await transactions.touching(author, tx, { root: dir, timeline });
-    const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
-    await transactions.applied(author, tx);
+    const key = authorOf(caller);
+    const tx = transactions.next(key);
+    await transactions.touching(key, tx, { root: dir, timeline });
+    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx });
+    await transactions.applied(key, tx);
     return result;
   };
-  /** Revert `target` on one timeline; its own transaction unless an explicit one is open. */
-  const revert = async (dir: string, cwd: string, timeline: string, target: string, author: string, standalone: boolean) => {
-    const tx = transactions.next(author, { standalone });
-    await transactions.touching(author, tx, { root: dir, timeline });
-    const result = await timelines.revert({ root: dir, cwd, timeline, author, tx, target });
-    await transactions.applied(author, tx);
+  /** Revert `target` on one timeline for `caller`; its own transaction unless an explicit one is open. */
+  const revert = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller) => {
+    const key = authorOf(caller);
+    const tx = transactions.next(key, { standalone: true });
+    await transactions.touching(key, tx, { root: dir, timeline });
+    const result = await timelines.revert({ root: dir, cwd, timeline, author: journalAuthorOf(caller), tx, target });
+    await transactions.applied(key, tx);
     return result;
+  };
+  /** Agent tags the app set per terminal session (`session.tag`), each with the connection that set it. */
+  const sessionTags = new Map<string, { agent: string; owner: Caller }>();
+  /** Agent `caller`'s operations run under now: the one it named itself, else the app's tag of its session. */
+  const agentOf = (caller: Caller): string | null => {
+    if (caller.agent !== undefined) return caller.agent;
+    return caller.session ? (sessionTags.get(caller.session)?.agent ?? null) : null;
+  };
+  /** Journal author of `caller`'s operations: {@link authorOf}, or `agent:<label>:<session>` while an agent runs them. */
+  const journalAuthorOf = (caller: Caller): string => {
+    const key = authorOf(caller);
+    const agent = key === "ui" ? null : agentOf(caller);
+    return agent ? agentAuthor(agent, caller.session) : key;
   };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   /** Open explicit transactions that changed project `dir` (however its root was spelled) or nothing yet. */
@@ -245,10 +263,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
 
   const handlers: Handlers = {
-    handshake: async ({ client, session }, caller) => {
+    handshake: async ({ client, session, agent }, caller) => {
       caller.client = client;
       caller.session = session ?? null;
+      caller.agent = agent;
       return identity;
+    },
+    "session.tag": async ({ session, agent }, caller) => {
+      if (agent === null) sessionTags.delete(session);
+      else sessionTags.set(session, { agent, owner: caller });
+      return {};
     },
     status: async ({ cwd }, caller) => {
       const project = await projects.openEnclosing(cwd);
@@ -265,7 +289,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         rejections: project ? await timelines.rejections(project.dir) : [],
         jobs: project ? jobs.list({ project: project.dir }) : [],
         transactions: project ? await openTransactions(project.dir) : [],
-        caller: { ...caller },
+        caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
     },
     "project.init": (params) => projects.init(params.dir, params.name),
@@ -326,7 +350,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         progress: request.progress,
       });
     },
-    "file.write": ({ path, content }, caller) => projects.writeFile(path, content, authorOf(caller)),
+    "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);
@@ -371,13 +395,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
-      const reverted = await timelines.revertAll({ author, tx, target: tx.id, timelines: touched });
+      const reverted = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
       await transactions.end(author);
       return { tx: tx.id, label: tx.label, author, reverted };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
-    revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, authorOf(caller), true),
+    revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, caller),
   };
 
   const server: Server = createServer((socket) => {
@@ -389,6 +413,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
       events.drop(sink);
+      for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
       clients.delete(socket);
       armIdleTimer();
     });
@@ -469,10 +494,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   return { socketPath, closed, close };
 }
 
-/** SPEC §6.2 author of a connection's operations: the app is `ui`, a Frameshell terminal `cli:<session>`. */
+/**
+ * SPEC §6.2 author of a connection's operations as transactions and replays
+ * key them: the app is `ui`, a Frameshell terminal `cli:<session>`, whether
+ * or not an agent runs in it (journal authors may say `agent:…`).
+ */
 function authorOf(caller: Caller): string {
   if (caller.client.startsWith("desktop/")) return "ui";
   return caller.session ? `cli:${caller.session}` : "cli";
+}
+
+/** {@link authorOf} key of a journal author: an agent's operations belong to its terminal session's transactions. */
+function transactionKey(author: string): string {
+  const match = /^agent:[^:]+(?::(.+))?$/.exec(author);
+  if (!match) return author;
+  return match[1] ? `cli:${match[1]}` : "cli";
 }
 
 function isRequest(message: unknown): message is JsonRpcRequest {

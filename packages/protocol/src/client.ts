@@ -20,6 +20,11 @@ export interface ConnectOptions {
   client: string;
   /** Terminal session to attribute this connection's operations to, from `FRAMESHELL_SESSION`. Empty or absent = none. */
   session?: string | undefined;
+  /**
+   * Agent label to journal this connection's operations under (`FRAMESHELL_AGENT`);
+   * null = not an agent, overriding the app's detection; absent = whatever the app detected.
+   */
+  agent?: string | null | undefined;
   /** Override only to test version negotiation. Defaults to {@link PROTOCOL_VERSION}. */
   protocolVersion?: number;
 }
@@ -137,6 +142,7 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
       protocolVersion: options.protocolVersion ?? PROTOCOL_VERSION,
       client: options.client,
       ...(options.session ? { session: options.session } : {}),
+      ...(options.agent !== undefined ? { agent: options.agent } : {}),
     })) as HandshakeResult;
   } catch (error) {
     socket.destroy();

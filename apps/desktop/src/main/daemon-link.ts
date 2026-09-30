@@ -61,13 +61,15 @@ const MAX_RETRY_MS = 2_000;
  * needed) when the connection drops. Daemon errors ({@link RpcError}) pass
  * through untouched; a transport failure is retried once on a fresh connection.
  *
- * Event subscriptions survive reconnects: while any exists, a lost
- * connection is re-established at once, every subscription is renewed and
- * `onResync` tells listeners they may have missed events.
+ * Event subscriptions and session tags survive reconnects: while any exists,
+ * a lost connection is re-established at once, every subscription and tag is
+ * renewed and `onResync` tells listeners they may have missed events.
  */
 export class DaemonLink {
   #connection: Promise<DaemonConnection> | undefined;
   readonly #subscribers = new Set<Subscriber>();
+  /** Terminal session → agent label, as last sent with `session.tag`. */
+  readonly #tags = new Map<string, string>();
   #closed = false;
   #retryTimer: NodeJS.Timeout | undefined;
 
@@ -112,11 +114,23 @@ export class DaemonLink {
     };
   }
 
+  /**
+   * Tag terminal `session` with the agent CLI running in it, or untag it
+   * with null (`session.tag`). The daemon drops tags with the connection
+   * that set them, so the link sets them again on every new connection.
+   */
+  async tagSession(session: string, agent: string | null): Promise<void> {
+    if (agent === null) this.#tags.delete(session);
+    else this.#tags.set(session, agent);
+    await this.request("session.tag", { session, agent });
+  }
+
   /** Close the connection and stop reconnecting. The daemon keeps running until its idle timeout. */
   async close(): Promise<void> {
     this.#closed = true;
     clearTimeout(this.#retryTimer);
     this.#subscribers.clear();
+    this.#tags.clear();
     const connection = this.#connection;
     this.#connection = undefined;
     if (connection) (await connection.catch(() => undefined))?.close();
@@ -153,9 +167,9 @@ export class DaemonLink {
     });
   }
 
-  /** Reconnect and renew every subscription, retrying with backoff while the daemon cannot be reached. */
+  /** Reconnect and renew every subscription and tag, retrying with backoff while the daemon cannot be reached. */
   #resubscribe(delay: number): void {
-    if (this.#closed || this.#subscribers.size === 0) return;
+    if (this.#closed || (this.#subscribers.size === 0 && this.#tags.size === 0)) return;
     clearTimeout(this.#retryTimer);
     this.#retryTimer = setTimeout(() => {
       void this.#renew().then(
@@ -181,6 +195,7 @@ export class DaemonLink {
         if (!(error instanceof RpcError)) throw error;
       }
     }
+    for (const [session, agent] of this.#tags) await conn.request("session.tag", { session, agent });
   }
 
   #drop(): void {

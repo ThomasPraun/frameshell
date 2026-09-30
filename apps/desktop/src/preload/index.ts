@@ -40,6 +40,7 @@ const api: FrameshellApi = {
     kill: (id) => ipcRenderer.send(Channel.terminalKill, id),
     onData: (listener) => subscribe(Channel.terminalData, listener),
     onExit: (listener) => subscribe(Channel.terminalExit, listener),
+    onAgent: (listener) => subscribe(Channel.terminalAgent, listener),
   },
   layout: {
     load: () => ipcRenderer.invoke(Channel.layoutLoad),

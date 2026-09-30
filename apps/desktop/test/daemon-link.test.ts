@@ -206,3 +206,32 @@ describe("DaemonLink retries", () => {
     expect(history.transactions.flatMap((tx) => tx.operations.map((op) => op.op))).toEqual(["track.add"]);
   });
 });
+
+describe("DaemonLink session tags", () => {
+  it("tags a terminal session with its agent, again on every new connection, until untagged", async () => {
+    const path = socketPath();
+    const daemon = await startDaemon({ socketPath: path });
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-link-"))), "talk");
+    const daemonLink = link(path, { FRAMESHELL_IDLE_TIMEOUT_MS: "1000" });
+    await daemonLink.request("project.init", { dir });
+    /** Author of a track added from terminal session `term-1`, on a fresh connection. */
+    const authorFromTerminal = async () => {
+      const cli = await connectToDaemon(path, { client: "cli/test", session: "term-1" });
+      try {
+        return (await cli.request("track.add", { cwd: dir, kind: "video" })).operation.author;
+      } finally {
+        cli.close();
+      }
+    };
+
+    await daemonLink.tagSession("term-1", "claude");
+    expect(await authorFromTerminal()).toBe("agent:claude:term-1");
+
+    // Daemon tags die with the connection: the link restarts the daemon and tags the session again by itself.
+    await daemon.close();
+    await expect.poll(() => authorFromTerminal().catch(() => null), { timeout: 15_000 }).toBe("agent:claude:term-1");
+
+    await daemonLink.tagSession("term-1", null);
+    expect(await authorFromTerminal()).toBe("cli:term-1");
+  });
+});

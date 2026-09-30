@@ -32,6 +32,11 @@ describe("history rows", () => {
     expect(authorOf("plugin:titles")).toEqual({ kind: "plugin", name: "Plugin", detail: "titles" });
   });
 
+  it("names an agent CLI's operations by the agent, keeping its terminal session", () => {
+    expect(authorOf("agent:claude:term-1a2b")).toEqual({ kind: "agent", name: "agent: claude", detail: "term-1a2b" });
+    expect(authorOf("agent:codex")).toEqual({ kind: "agent", name: "agent: codex", detail: null });
+  });
+
   it("titles a transaction by its label, else by what its operations did", () => {
     expect(transactionTitle(tx("tx_00000001", "remove silences", [op("op_1", "cut")]))).toBe("remove silences");
     expect(transactionTitle(tx("tx_00000002", null, [op("op_1", "clip.move")]))).toBe("Move");

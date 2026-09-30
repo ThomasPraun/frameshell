@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { agentLabel } from "@frameshell/protocol";
 
 /** The process that ran the CLI: the user's or agent's shell. */
 export interface ShellProbe {
@@ -25,6 +26,17 @@ export function resolveSession(env: NodeJS.ProcessEnv, probe: ShellProbe = curre
   const started = probe.startTime(probe.ppid);
   if (started === null) return `sh-${probe.ppid}`;
   return `sh-${probe.ppid}-${createHash("sha256").update(`${probe.ppid}\0${started}`).digest("hex").slice(0, 8)}`;
+}
+
+/**
+ * Agent label the CLI reports in its handshake (SPEC §6.2), from
+ * `FRAMESHELL_AGENT`: unset = undefined (the app's detection of the terminal
+ * decides); empty or unusable = null (not an agent, overriding detection).
+ */
+export function resolveAgent(env: NodeJS.ProcessEnv): string | null | undefined {
+  const named = env["FRAMESHELL_AGENT"];
+  if (named === undefined) return undefined;
+  return agentLabel(named);
 }
 
 /** {@link ShellProbe} of this process. */

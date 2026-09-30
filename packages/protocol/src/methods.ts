@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { AgentLabelSchema } from "./agents.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
@@ -19,7 +20,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -347,8 +348,27 @@ export const methods = {
         .describe(
           "Terminal session the caller runs in (`FRAMESHELL_SESSION`, or one the CLI generates per shell); attributes its operations to that terminal.",
         ),
+      agent: AgentLabelSchema.nullable()
+        .optional()
+        .describe(
+          "Agent CLI the caller runs under (`FRAMESHELL_AGENT`): its operations are journaled as `agent:<label>:<session>`. " +
+            "Null: not an agent, whatever the app detected in the terminal. Absent: the label the app set for the session " +
+            "with `session.tag`, if any.",
+        ),
     }),
     result: DaemonIdentitySchema,
+  },
+  "session.tag": {
+    description:
+      "Tag terminal `session` with the agent CLI running in it (the app detects it from the terminal's foreground " +
+      "process), or untag it with null. Operations of that session are then journaled as `agent:<label>:<session>` " +
+      "unless its client named an agent itself in the handshake. Tags last while the connection that set them is open.",
+    internal: true,
+    params: z.strictObject({
+      session: z.string().min(1).describe("Terminal session (`FRAMESHELL_SESSION`), e.g. `term-1a2b3c4d`."),
+      agent: AgentLabelSchema.nullable().describe("Agent label, e.g. `claude`; null when no agent runs any more."),
+    }),
+    result: z.object({}),
   },
   status: {
     description:
@@ -394,6 +414,9 @@ export const methods = {
             .string()
             .nullable()
             .describe("Terminal session the caller's operations are attributed to; null when the client sent none."),
+          agent: AgentLabelSchema.nullable().describe(
+            "Agent the caller's operations are journaled under now (`agent:<label>:<session>`); null when none.",
+          ),
         })
         .describe("Who the daemon attributes this connection's operations to."),
     }),
@@ -1003,7 +1026,7 @@ export const methods = {
   history: {
     description:
       "List a timeline's journaled operations grouped by transaction, oldest first: op, args, author (`ui`, " +
-      "`cli:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Pass `since` with your last transaction id " +
+      "`cli:<session>`, `agent:<label>:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Pass `since` with your last transaction id " +
       "to see only what happened after it, e.g. what the human changed in the app. Fails with HistoryNotFound when " +
       "`since` is not in this timeline's journal.",
     params: z.strictObject({
@@ -1108,7 +1131,9 @@ export const notifications = {
       project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
       timeline: z.string().describe("Timeline id; the file is `timelines/<id>.json`."),
       revision: z.int().describe("Revision after the change."),
-      author: z.string().describe("`ui`, `cli:<session>`, `cli`, `file` (direct edit of the file) or `plugin:<name>`."),
+      author: z
+        .string()
+        .describe("`ui`, `cli:<session>`, `cli`, `agent:<label>:<session>`, `file` (direct edit of the file) or `plugin:<name>`."),
       changes: OperationResultSchema.shape.changes,
     }),
   },
