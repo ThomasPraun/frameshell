@@ -34,8 +34,8 @@ export class ProjectResources {
 
   /**
    * `hasMethod` says whether the daemon registry declares a method; defaults
-   * to the linked protocol registry. Tests stub it to cover the outline path
-   * before `script.outline` exists (#25, #75).
+   * to the linked protocol registry. Tests stub it to cover a registry without
+   * `script.outline`.
    */
   constructor(cwd: string, daemon: () => Promise<DaemonConnection>, hasMethod: (method: string) => boolean = isMethodName) {
     this.#cwd = cwd;

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync } from "node:fs";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -121,6 +121,16 @@ describe("frameshell mcp", () => {
       );
       const transcript = await read("frameshell://transcripts/take.words.json");
       expect(transcript["words"].map((w: { text: string }) => w.text)).toEqual(["Hola", "mundo."]);
+
+      // A script under scripts/ is served as an outline (`script.outline`), one scene per `## ` heading.
+      mkdirSync(join(project, "scripts"), { recursive: true });
+      writeFileSync(join(project, "scripts", "launch.md"), "---\ntitle: Launch\n---\n## Intro\nHola mundo.\n\n## Outro\nAdios.\n");
+      const withScript = await client.listResources();
+      expect(withScript.resources.map((r) => r.uri)).toContain("frameshell://scripts/launch.md/outline");
+      expect((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate)).toContain("frameshell://scripts/{file}/outline");
+      const outline = await read("frameshell://scripts/launch.md/outline");
+      expect(outline).toMatchObject({ path: "scripts/launch.md", meta: { title: "Launch" } });
+      expect(outline["scenes"].map((scene: { slug: string }) => scene.slug)).toEqual(["intro", "outro"]);
 
       // Cut 0.5 s out inside an explicit transaction.
       const tx = json(await call("tx_begin", { label: "tighten intro" }))["tx"] as string;

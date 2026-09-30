@@ -49,12 +49,11 @@ Compact JSON, the same as the matching `--json` CLI output:
 | `frameshell://timelines/{timeline}` | `timeline.show` |
 | `frameshell://timelines/{timeline}/history` | `history` |
 | `frameshell://transcripts/{file}` | `transcripts/{file}` as written, e.g. `raw-01.words.json` |
-| `frameshell://scripts/{file}/outline` | `script.outline`; served only once the daemon registry declares that method (#25). Until then clients get no outline resource (#75) |
+| `frameshell://scripts/{file}/outline` | `script.outline` (one resource per `scripts/**/*.md`); the stdio contract test reads it |
 
 Subscribed timeline and history resources get `notifications/resources/updated` on the daemon's `timeline.changed` event, from any client (CLI, app, file edit). A timeline not listed before, and a transcript written by this server's `transcribe`, send `notifications/resources/list_changed`. After a lost daemon connection the server reconnects on the next request, renews its event subscription and marks every subscribed resource updated.
 
 ## Not yet
 
-- Script outline resource: waits for `script.outline` (#25); stdio contract coverage is #75.
 - UI state and navigation tools (`ui_state`, `ui_seek`…): #33.
 - Change notifications for transcripts written by other clients: they need daemon asset events (#69).
