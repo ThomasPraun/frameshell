@@ -30,10 +30,17 @@ const JSON_MIME = "application/json";
 export class ProjectResources {
   readonly #cwd: string;
   readonly #daemon: () => Promise<DaemonConnection>;
+  readonly #hasMethod: (method: string) => boolean;
 
-  constructor(cwd: string, daemon: () => Promise<DaemonConnection>) {
+  /**
+   * `hasMethod` says whether the daemon registry declares a method; defaults
+   * to the linked protocol registry. Tests stub it to cover the outline path
+   * before `script.outline` exists (#25, #75).
+   */
+  constructor(cwd: string, daemon: () => Promise<DaemonConnection>, hasMethod: (method: string) => boolean = isMethodName) {
     this.#cwd = cwd;
     this.#daemon = daemon;
+    this.#hasMethod = hasMethod;
   }
 
   /** Root of the project enclosing the server's directory; null when there is none. */
@@ -59,7 +66,7 @@ export class ProjectResources {
     for (const file of (await files(join(root, "transcripts"), true)).filter((f) => f.endsWith(".words.json"))) {
       resources.push({ uri: transcriptUri(file), name: `transcript ${file}`, description: `Words of transcripts/${file}.`, mimeType: JSON_MIME });
     }
-    if (isMethodName(OUTLINE_METHOD)) {
+    if (this.#hasMethod(OUTLINE_METHOD)) {
       for (const file of (await files(join(root, "scripts"), true)).filter((f) => f.endsWith(".md"))) {
         resources.push({ uri: outlineUri(file), name: `outline ${file}`, description: `Scenes of scripts/${file}.`, mimeType: JSON_MIME });
       }
@@ -74,7 +81,7 @@ export class ProjectResources {
       { uriTemplate: `${SCHEME}timelines/{timeline}/history`, name: "history", description: "A timeline's operations grouped by transaction (same as `history`).", mimeType: JSON_MIME },
       { uriTemplate: `${SCHEME}transcripts/{file}`, name: "transcript", description: "A transcript file under `transcripts/`, e.g. `raw-01.words.json`: words with ids and source-asset seconds.", mimeType: JSON_MIME },
     ];
-    if (isMethodName(OUTLINE_METHOD)) {
+    if (this.#hasMethod(OUTLINE_METHOD)) {
       templates.push({ uriTemplate: `${SCHEME}scripts/{file}/outline`, name: "script outline", description: "Scenes of a Markdown script under `scripts/`.", mimeType: JSON_MIME });
     }
     return templates;
@@ -90,7 +97,7 @@ export class ProjectResources {
       if (kind === "timelines" && rest === undefined) return this.#call("timeline.show", { timeline: name });
       if (kind === "timelines" && rest === "history") return this.#call("history", { timeline: name });
       if (kind === "transcripts" && rest === undefined) return this.#transcript(name);
-      if (kind === "scripts" && rest === "outline" && isMethodName(OUTLINE_METHOD)) return this.#call(OUTLINE_METHOD, { file: `scripts/${name}` });
+      if (kind === "scripts" && rest === "outline" && this.#hasMethod(OUTLINE_METHOD)) return this.#call(OUTLINE_METHOD as MethodName, { file: `scripts/${name}` });
     }
     throw new McpError(ErrorCode.InvalidParams, `Unknown resource ${uri}. List resources, or use the templates under ${SCHEME}.`);
   }
