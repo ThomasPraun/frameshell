@@ -69,3 +69,15 @@ export {
   scriptSlug,
   splitScriptRef,
 } from "./script.js";
+export {
+  IDENTITY_PLACEMENT,
+  type Placement,
+  type Size,
+  type LayerRect,
+  type NestedTimelines,
+  placementOf,
+  isIdentityPlacement,
+  layerRect,
+  composePlacement,
+  flattenTimeline,
+} from "./composite.js";
