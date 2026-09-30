@@ -176,6 +176,49 @@ describe("export render (real ffmpeg)", () => {
   );
 
   it(
+    "overlays a VP9 alpha render: the base shows through its transparent half, only while the clip is on",
+    async () => {
+      // 64x64 VP9 with alpha: left half transparent, right half opaque white (ADR 0002 cache format).
+      const layer = join(dir, "layer.webm");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "color=c=white:s=32x64:r=30:d=2,format=rgba,pad=64:64:32:0:color=black@0"],
+        ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "10", "-b:v", "0", layer],
+      ]);
+      const timeline: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [media("a", 0, 1, 1.4)] },
+          { id: "v2", kind: "video", clips: [{ id: "t", type: "hyperframes", start: 0.2, duration: 0.1 }] },
+        ],
+      };
+      const generated = new Map([["t", { path: layer, hasAlpha: true, width: 64, height: 64 }]]);
+      const sources = new Map([["assets/counter.mp4", counter]]);
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, generated, resolution: { width: 64, height: 64 }, segmentSeconds: 0.2 });
+      const output = join(dir, "layered.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-layered"), output });
+
+      /** Mean luma of the left and right half of every frame. */
+      // Away from the seam: scaling across it would blend the halves.
+      const halvesGraph = "split[a][b];[a]crop=24:64:0:0,scale=1:1[l];[b]crop=24:64:40:0,scale=1:1[r];[l][r]hstack,format=gray";
+      const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-filter_complex", halvesGraph, "-f", "rawvideo", "-"]);
+      const halves = Array.from({ length: raw.length / 2 }, (_, i) => [raw[2 * i]!, raw[2 * i + 1]!] as const);
+      expect(halves).toHaveLength(12);
+      const levels = (await frameLuma(counter.path)).slice(0, LEVELS);
+      for (const [frame, [left, right]] of halves.entries()) {
+        const footage = levels[(30 + frame) % LEVELS]!;
+        // Transparent half: the footage frame, never black (the native vp9 decoder would make it opaque).
+        expect(Math.abs(left - footage), `frame ${frame} left ${left} vs footage ${footage}`).toBeLessThan(STEP / 2);
+        if (frame >= 6 && frame < 9) expect(right, `frame ${frame} right`).toBeGreaterThan(230);
+        else expect(Math.abs(right - footage), `frame ${frame} right ${right} vs footage ${footage}`).toBeLessThan(STEP / 2);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "captures the single frame the timeline shows at a time, as PNG",
     async () => {
       const timeline = oneTrack([media("a", 0, 1, 1.5), media("b", 0.5, 3, 3.4, 2)]);

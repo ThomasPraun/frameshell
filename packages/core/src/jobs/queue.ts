@@ -52,6 +52,8 @@ export interface JobQueueOptions {
    * Step and state changes always go out at once. Default 200 ms.
    */
   progressIntervalMs?: number;
+  /** Job id prefix; queues sharing one daemon need distinct ones. Default `j_`. */
+  idPrefix?: string;
 }
 
 interface Entry {
@@ -78,6 +80,7 @@ export class JobQueue {
   readonly #drainWaiters: (() => void)[] = [];
   readonly #watchers = new Set<(change: JobChange) => void>();
   readonly #progressIntervalMs: number;
+  readonly #idPrefix: string;
   #nextId = 1;
   #busy = false;
   #closed = false;
@@ -87,6 +90,7 @@ export class JobQueue {
     this.#keepFinished = options.keepFinished ?? 200;
     this.#onBusyChange = options.onBusyChange ?? (() => {});
     this.#progressIntervalMs = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
+    this.#idPrefix = options.idPrefix ?? "j_";
   }
 
   /**
@@ -119,7 +123,7 @@ export class JobQueue {
       }
     }
     const info: JobInfo = {
-      id: `j_${this.#nextId++}`,
+      id: `${this.#idPrefix}${this.#nextId++}`,
       kind: request.kind,
       project: request.project,
       asset: request.asset,

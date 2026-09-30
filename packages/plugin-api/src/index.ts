@@ -63,7 +63,12 @@ export interface CommandContext {
  */
 export type CommandResult = string | void | { output?: string; data?: unknown };
 
-/** Clip adapter contract (SPEC §8.2). Rendering is wired by the export pipeline, not by v0.1 of the host. */
+/**
+ * Clip adapter contract (SPEC §8.2). The host renders adapter clips in the
+ * background into its clip render cache (SPEC §6.5), keyed by plugin name and
+ * version, the clip's `source` and `props`, the content of {@link inputs} and
+ * the project format. Preview plays the cached file; export overlays it.
+ */
 export interface ClipAdapter {
   /** Clip `type` in timeline files: lowercase, not `media` or `timeline`. */
   readonly type: string;
@@ -73,9 +78,20 @@ export interface ClipAdapter {
    * Absent: any props are accepted.
    */
   readonly propsSchema?: PropsSchema;
-  /** Project-relative files whose content feeds the render cache key. */
+  /**
+   * Project-relative, `/`-separated files whose content feeds the render
+   * cache key: editing one re-renders the clip. A missing file counts too
+   * (creating it re-renders). Absent: only `source` and `props` count.
+   */
   inputs?(clip: unknown): string[] | Promise<string[]>;
-  /** Render one clip. `hasAlpha: true` requires VP9 WebM with `alpha_mode=1`. */
+  /**
+   * Render one clip (the timeline clip object, `props` validated) into a
+   * file under `context.outDir`; the host moves it into the cache. File time
+   * t must show composition time t: the clip plays it from its `in`, for its
+   * `duration`, so moving or trimming a clip never re-renders.
+   * `hasAlpha: true` requires VP9 WebM with `alpha_mode=1` (ADR 0002);
+   * opaque renders may be H.264 `.mp4`. Throw to fail; the message reaches the user.
+   */
   render(clip: unknown, context: RenderContext): Promise<{ file: string; hasAlpha: boolean }>;
 }
 
@@ -101,14 +117,34 @@ export type PropsValidation =
       }>;
     };
 
-/** Project facts an adapter needs to render. */
+/** Project facts and host services for one render. Valid only until `render` settles. */
 export interface RenderContext {
   readonly projectDir: string;
-  /** Directory the adapter may write its output into. */
+  /** Empty directory for the output and any scratch files; removed after the render. */
   readonly outDir: string;
+  /** Project frame rate. */
   readonly fps: number;
+  /** Project resolution: a render of this size maps 1:1 onto the frame. */
   readonly width: number;
   readonly height: number;
+  /** Aborted when the daemon stops: stop work and reject. */
+  readonly signal: AbortSignal;
+  /**
+   * Absolute path of a native tool the host manages (SPEC §9), e.g. `ffmpeg`,
+   * `ffprobe`, `chrome-headless-shell`: the user's `binaries` override, or the
+   * pinned build, installed first when missing. Rejects for unknown tools.
+   */
+  ensureBinary(name: string): Promise<string>;
+  /** Report progress to the app and CLI (the job's `progress`). Cheap; call freely. */
+  progress(update: RenderProgress): void;
+}
+
+/** One render progress report. */
+export interface RenderProgress {
+  /** 0..1 of the whole render. */
+  fraction: number;
+  /** Human line, e.g. `Capturing frames`. */
+  message?: string;
 }
 
 /**

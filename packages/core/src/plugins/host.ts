@@ -9,6 +9,7 @@ import {
   type TrustState,
 } from "@frameshell/protocol";
 import type { ClipAdapter, TranscriptionProvider } from "@frameshell/plugin-api";
+import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
 import { parsePluginSpec } from "./spec.js";
 import { NpmError, PluginStore } from "./store.js";
@@ -219,6 +220,34 @@ export class PluginHost {
   async clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>> {
     const { loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
     return new Map((loaded ?? []).flatMap((p) => [...p.clipTypes]));
+  }
+
+  /**
+   * {@link clipTypes} with the plugin that registered each adapter: its name
+   * and version are part of the clip render cache key (SPEC §6.5).
+   */
+  async clipAdapters(root: string): Promise<ReadonlyMap<string, RegisteredClipType>> {
+    const { loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    return new Map(
+      (loaded ?? []).flatMap((p) =>
+        [...p.clipTypes].map(([type, adapter]) => [type, { adapter, plugin: { name: p.info.name, version: p.info.version ?? p.info.pin } }] as const),
+      ),
+    );
+  }
+
+  /** Why no loaded plugin of `root` renders clip type `type`, with the fix. */
+  async clipTypeUnavailable(root: string, type: string): Promise<string> {
+    const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    if (!loaded && trust !== "not-required") {
+      return (
+        `The project's plugins (${Object.keys(pins).join(", ")}) are not trusted${trust === "denied" ? " (trust was denied)" : ""}, ` +
+        `so nothing renders \`${type}\` clips. Trust them with \`frameshell plugin list --trust\` if you trust the project's source.`
+      );
+    }
+    const broken = (loaded ?? []).find((p) => p.manifest?.contributes.clipTypes.includes(type));
+    if (broken) return `${broken.info.name} provides \`${type}\` clips but failed to load: ${broken.info.error}`;
+    const plugin = type === "hyperframes" ? "@frameshell/hyperframes" : "<spec>";
+    return `No installed plugin renders \`${type}\` clips. Install one: \`frameshell plugin install ${plugin}\`.`;
   }
 
   /** Export presets contributed by the project's loaded plugins. */

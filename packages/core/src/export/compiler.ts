@@ -1,5 +1,7 @@
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import {
+  type AdapterClip,
+  type Clip,
   type ExportPreset,
   type MediaClip,
   type Placement,
@@ -34,6 +36,17 @@ export interface ExportSource {
   audio: boolean;
 }
 
+/** Cached render of a generated (adapter) clip, from the clip render cache (SPEC §6.5). */
+export interface GeneratedSource {
+  /** Absolute file: VP9 WebM with alpha, or an opaque render. */
+  path: string;
+  /** True: VP9 with `alpha_mode=1`, decoded with libvpx so alpha survives (ADR 0002). */
+  hasAlpha: boolean;
+  /** Rendered size in pixels. */
+  width: number;
+  height: number;
+}
+
 /** Inputs of {@link compileRender}. */
 export interface RenderInput {
   timeline: Timeline;
@@ -51,6 +64,8 @@ export interface RenderInput {
    * An asset without one shows no subtitles (and a warning when it has sound).
    */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** Render of every generated clip on a video track, by clip id; they composite like footage (SPEC §3.5 step 2). */
+  generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
 }
@@ -136,6 +151,8 @@ export interface FrameInput {
   resolution: Size;
   /** See {@link RenderInput.transcripts}. */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** See {@link RenderInput.generated}. */
+  generated?: ReadonlyMap<string, GeneratedSource>;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -236,7 +253,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, input.transcripts);
+  const layout = layoutTimeline(timeline, fps, input.sources, input.transcripts, input.generated);
   const outFps = preset.video.fps ?? fps;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
@@ -356,7 +373,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, input.transcripts);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, input.transcripts, input.generated);
   const frame = Math.floor((input.at + 0.0005) * fps);
   if (frame < 0 || frame >= layout.frames) {
     const last = seconds(layout.frames - 1, fps);
@@ -404,12 +421,18 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
   return Number.isFinite(integrated) && integrated > -70 ? measured : null;
 }
 
-/** Place the timeline's media clips on the frame grid, resolve subtitle cues, and reject what export cannot render. */
+/**
+ * Place the timeline's clips on the frame grid, resolve subtitle cues, and
+ * reject what export cannot render. A generated clip plays its cached render
+ * like footage: from its `in` (render time = composition time), for its
+ * `duration`, transformed and stacked by its track like any clip.
+ */
 function layoutTimeline(
   timeline: Timeline,
   fps: number,
   sources: ReadonlyMap<string, ExportSource>,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
+  generated: ReadonlyMap<string, GeneratedSource> = new Map(),
 ): Layout {
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
@@ -419,7 +442,8 @@ function layoutTimeline(
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     const placed: Placed[] = [];
-    for (const clip of track.clips) {
+    for (const listed of track.clips) {
+      const clip = track.kind === "video" ? asFootage(listed, generated) : listed;
       if (clip.type === "timeline" && "source" in clip) {
         throw unsupported(
           timeline.id,
@@ -431,12 +455,13 @@ function layoutTimeline(
       if (clip.type !== "media" || !("asset" in clip)) {
         throw unsupported(
           timeline.id,
-          `Clip ${clip.id} on track ${track.id} is a \`${clip.type}\` clip; exports render only media clips so far. ` +
-            `Remove it to export: \`frameshell clip remove ${clip.id}\`.`,
+          `Clip ${clip.id} on track ${track.id} is a \`${clip.type}\` clip with no render to export. Install and trust the plugin ` +
+            `that renders \`${clip.type}\` clips (\`frameshell plugin list\`), or remove it: \`frameshell clip remove ${clip.id}\`.`,
           { track: track.id, clip: clip.id },
         );
       }
-      const source = sources.get(clip.asset);
+      const render = clip.asset.startsWith(GENERATED) ? generated.get(clip.id) : undefined;
+      const source = render ? generatedSource(render) : sources.get(clip.asset);
       if (!source) throw new Error(`no export source for ${clip.asset}`);
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
@@ -498,6 +523,31 @@ function burnSubtitles(layout: Layout, from: number, to: number, fps: number): s
   const shift = from === 0 ? "" : `setpts=PTS+${num(from / fps)}/TB,`;
   const back = from === 0 ? "" : ",setpts=PTS-STARTPTS";
   return `,${shift}ass=filename=${SUBTITLES_FILE}:fontsdir=${FONTS_DIR}${back}`;
+}
+
+/** Asset prefix of a generated clip standing in as footage; never a real project path (those start with a folder). */
+const GENERATED = "generated:";
+
+/** A generated clip with a render, as the media clip playing that render; any other clip unchanged. */
+function asFootage(clip: Clip, generated: ReadonlyMap<string, GeneratedSource>): Clip {
+  if (clip.type === "media" || clip.type === "timeline" || !generated.has(clip.id)) return clip;
+  const adapter = clip as AdapterClip;
+  const clipIn = adapter.in ?? 0;
+  return {
+    id: adapter.id,
+    type: "media",
+    asset: `${GENERATED}${adapter.id}`,
+    start: adapter.start,
+    in: clipIn,
+    out: clipIn + adapter.duration,
+    ...(adapter.transform ? { transform: adapter.transform } : {}),
+  };
+}
+
+function generatedSource(render: GeneratedSource): ExportSource {
+  // ADR 0002: alpha renders are VP9, which `pieceChain` decodes with libvpx.
+  const codec = render.hasAlpha ? "vp9" : "h264";
+  return { path: render.path, video: { codec, still: false, width: render.width, height: render.height }, audio: false };
 }
 
 function unsupported(timeline: string, message: string, data: { track?: string; clip?: string }): RpcError {

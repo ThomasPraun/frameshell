@@ -1,0 +1,10 @@
+{
+  "name": "card-plugin",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "index.js",
+  "contributes": {
+    "clipTypes": ["card"],
+    "skills": ["skills/card/SKILL.md"]
+  }
+}
