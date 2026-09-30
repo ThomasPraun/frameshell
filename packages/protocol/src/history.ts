@@ -15,6 +15,10 @@ export const JournalEntrySchema = OperationRecordSchema.extend({
   txLabel: z.string().nullable().describe("Label given to `tx.begin`; null for automatic transactions."),
   at: z.string().describe("ISO 8601 time the operation was applied."),
   revision: z.int().describe("Timeline revision after the operation."),
+  hashBefore: z
+    .string()
+    .describe("Content hash of the timeline the operation was applied to; must equal the previous entry's `hash`, else the file changed outside the journal."),
+  hash: z.string().describe("Content hash of the timeline the operation wrote. `revert` compares it to the file."),
 });
 
 /** See {@link JournalEntrySchema}. */

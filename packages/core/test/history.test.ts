@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ErrorCode, type MediaProbe, RpcError } from "@frameshell/protocol";
 import { createProjectConfig, createTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
+import { ProjectRegistry } from "../src/projects.js";
 import type { OperationRequest } from "../src/timeline/engine.js";
 import { TimelineService } from "../src/timeline/service.js";
 import { tempDir } from "./helpers.js";
@@ -73,6 +74,9 @@ describe("operation journal", () => {
       ["clip.move", "ui", "tx_0000000c", null, 2, 3],
     ]);
     expect(entries[0]).toMatchObject({ id: first.operation.id, inverse: { op: "timeline.patch" }, at: expect.any(String) });
+    // Content hashes chain: each entry starts from what the previous one wrote.
+    expect(entries[0].hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(entries.slice(1).map((e) => e.hashBefore)).toEqual(entries.slice(0, -1).map((e) => e.hash));
   });
 
   it("lists history grouped by transaction, and only what came after a transaction with `since`", async () => {
@@ -181,6 +185,71 @@ describe("revert", () => {
     const error = await rejection(revert("ui", "tx_000000b1", added.operation.tx));
     expect(error.code).toBe(ErrorCode.RevertConflict);
     expect(error.message).toMatch(/changed outside/);
+  });
+
+  // `file.write` is the desktop editor's save path; it validates but keeps `revision`.
+  const humanSave = async (root: string, edit: (timeline: { revision: number; tracks: { clips: { start: number }[] }[] }) => void) => {
+    const path = join(root, "timelines", "main.json");
+    const timeline = JSON.parse(readFileSync(path, "utf8"));
+    edit(timeline);
+    await new ProjectRegistry().writeFile(path, JSON.stringify(timeline));
+  };
+
+  it("refuses when a file.write save kept the revision but changed the content", async () => {
+    const { root, add, apply, revert, tracks } = setup();
+    await add("cli:agent", "tx_000000a1", 0);
+    const move = await apply("cli:agent", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
+    await humanSave(root, (timeline) => {
+      timeline.tracks[0]!.clips[0]!.start = 5;
+    });
+
+    const error = await rejection(revert("cli:agent", "tx_000000a2", move.operation.id));
+    expect(error.code).toBe(ErrorCode.RevertConflict);
+    expect(error.message).toMatch(/changed outside the journal/);
+    expect(error.data).toMatchObject({ conflicts: [] });
+    expect(tracks()[0].clips[0].start).toBe(5);
+  });
+
+  it("refuses when an unjournaled edit is followed by journaled operations", async () => {
+    const { root, add, apply, revert, tracks } = setup();
+    await add("cli:agent", "tx_000000a1", 0);
+    const move = await apply("cli:agent", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
+    await humanSave(root, (timeline) => {
+      timeline.tracks[0]!.clips[0]!.start = 5;
+      timeline.revision += 1;
+    });
+    await apply("ui", "tx_000000b1", { op: "track.add", args: { kind: "video" } });
+
+    const error = await rejection(revert("cli:agent", "tx_000000a2", move.operation.tx));
+    expect(error.code).toBe(ErrorCode.RevertConflict);
+    expect(error.message).toMatch(new RegExp(`changed outside the journal between ${move.operation.id}`));
+    expect(tracks()[0].clips[0].start).toBe(5);
+  });
+
+  it("refuses to cross an operation whose journal append was lost", async () => {
+    const { root, add, apply, revert, tracks } = setup();
+    const added = await add("cli:agent", "tx_000000a1", 0);
+    await apply("ui", "tx_000000b1", { op: "clip.move", args: { clip: "c_1", start: 5 } });
+    const journal = join(root, ".frameshell", "history", "main.jsonl");
+    const lines = readFileSync(journal, "utf8").trimEnd().split("\n");
+    writeFileSync(journal, `${lines.slice(0, -1).join("\n")}\n`);
+    await apply("ui", "tx_000000b2", { op: "track.add", args: { kind: "video" } });
+
+    const error = await rejection(revert("cli:agent", "tx_000000a2", added.operation.id));
+    expect(error.code).toBe(ErrorCode.RevertConflict);
+    expect(tracks()[0].clips[0].start).toBe(5);
+  });
+
+  it("still reverts when the unjournaled edit came before the target", async () => {
+    const { root, add, apply, revert, tracks } = setup();
+    await add("cli:agent", "tx_000000a1", 0);
+    await humanSave(root, (timeline) => {
+      timeline.tracks[0]!.clips[0]!.start = 5;
+    });
+    const move = await apply("cli:agent", "tx_000000a2", { op: "clip.move", args: { clip: "c_1", start: 7 } });
+
+    await revert("cli:agent", "tx_000000a3", move.operation.id);
+    expect(tracks()[0].clips[0].start).toBe(5);
   });
 
   it("reports an unknown target with HistoryNotFound", async () => {

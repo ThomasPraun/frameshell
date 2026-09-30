@@ -16,7 +16,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -745,7 +745,9 @@ export const methods = {
       "Undo a transaction (`tx_…`) or a single operation (`op_…`) on one timeline by applying the stored inverses, " +
       "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
-      "first. Fails with HistoryNotFound when the id is not in the timeline's journal.",
+      "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
+      "a `file.write` save): the journal cannot undo what it did not record, so edit forward. Fails with " +
+      "HistoryNotFound when the id is not in the timeline's journal.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

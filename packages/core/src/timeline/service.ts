@@ -19,6 +19,7 @@ import { type Timeline, parseTimeline } from "@frameshell/schema";
 import { writeJsonAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
+import { timelineHash } from "../history/hash.js";
 import { appendJournal, readJournal } from "../history/journal.js";
 import { historyView, planRevert } from "../history/revert.js";
 import {
@@ -127,7 +128,11 @@ export class TimelineService {
     return historyView(await readJournal(root, id), id, options.since);
   }
 
-  /** Write the applied result, then journal it. */
+  /**
+   * Write the applied result, then journal it with the content hashes before
+   * and after. If the append fails the file is ahead of the journal; the
+   * hash chain shows that gap and `revert` refuses to cross it.
+   */
   async #record(
     call: CallContext,
     before: Timeline,
@@ -151,6 +156,8 @@ export class TimelineService {
       txLabel: call.tx.label,
       at: new Date().toISOString(),
       revision: applied.timeline.revision,
+      hashBefore: timelineHash(before),
+      hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
     return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes };
