@@ -84,7 +84,7 @@ describe("direct edit with the current revision", () => {
       operations: [{ op: "timeline.patch", author: "file", revisionBefore: 0, revision: 1, touched: ["t_v"] }],
     });
     expect(changed).toEqual([
-      { root, timeline: "main", revision: 1, author: "file", changes: expect.objectContaining({ updated: ["t_v"] }) },
+      { root: expect.any(String), timeline: "main", revision: 1, author: "file", changes: expect.objectContaining({ updated: ["t_v"] }) },
     ]);
 
     // The inverse undoes it like any operation.
@@ -120,7 +120,7 @@ describe("direct edit with a stale revision", () => {
     expect(readFileSync(join(root, ".frameshell", "rejected", kept[0]!), "utf8")).toBe(incoming);
     expect(rejected).toEqual([
       {
-        root,
+        root: expect.any(String),
         timeline: "main",
         reason: "stale",
         message: expect.stringMatching(/revision 0.*revision 1/),

@@ -22,6 +22,7 @@ import {
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
+import { canonicalPath } from "./fs-util.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -150,6 +151,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
         profile: (asset) => energy.profile(dir, asset),
       }),
+    // `root` is canonical, the hub's key; each connection gets `project` spelled as it subscribed.
     onChanged: ({ root, timeline, revision, author, changes }) =>
       events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes }),
     onRejected: ({ root, ...rejection }) => events.publish("timeline.rejected", root, { project: root, ...rejection }),
@@ -265,11 +267,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "events.subscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, events: events.subscribe(request.sink, dir, names) };
+      return { dir, events: events.subscribe(request.sink, await canonicalPath(dir), dir, names) };
     },
     "events.unsubscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, events: events.unsubscribe(request.sink, dir, names) };
+      return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
     "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),

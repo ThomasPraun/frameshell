@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
@@ -17,7 +17,7 @@ import {
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import { type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
-import { exists, writeTextAtomic } from "../fs-util.js";
+import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
@@ -60,13 +60,13 @@ export interface TimelineServiceOptions {
 
 /** A refused direct edit, as reported to {@link TimelineServiceOptions.onRejected} and {@link TimelineService.rejections}. */
 export interface TimelineRejection extends RejectionInfo {
-  /** Project root. */
+  /** Project root, canonical (`canonicalPath`): one spelling however callers named the project. */
   root: string;
 }
 
 /** One applied operation, as reported to {@link TimelineServiceOptions.onChanged}. */
 export interface TimelineChange {
-  /** Project root. */
+  /** Project root, canonical (`canonicalPath`): one spelling however callers named the project. */
   root: string;
   /** Timeline id. */
   timeline: string;
@@ -277,7 +277,7 @@ export class TimelineService {
       const key = await this.#key(root, id);
       const replaced = this.#known.has(key);
       this.#known.set(key, { text: content, timeline: parsed.value });
-      if (replaced) this.#announce(root, id, parsed.value);
+      if (replaced) await this.#announce(root, id, parsed.value);
     });
   }
 
@@ -328,7 +328,13 @@ export class TimelineService {
       hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
-    this.#options.onChanged?.({ root, timeline: id, revision: applied.timeline.revision, author: call.author, changes: applied.changes });
+    this.#options.onChanged?.({
+      root: await this.#realRoot(root),
+      timeline: id,
+      revision: applied.timeline.revision,
+      author: call.author,
+      changes: applied.changes,
+    });
     return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings };
   }
 
@@ -513,7 +519,7 @@ export class TimelineService {
     const parsed = parseText(text);
     this.#known.set(key, { text, timeline: parsed.ok ? parsed.value : null });
     if (!parsed.ok) throw invalidFile(path, parsed.error);
-    if (known) this.#announce(root, id, parsed.value);
+    if (known) await this.#announce(root, id, parsed.value);
     return { timeline: structuredClone(parsed.value), fps, ...snap };
   }
 
@@ -573,8 +579,9 @@ export class TimelineService {
     const restored = this.#known.get(key)?.text ?? `${JSON.stringify(base, null, 2)}\n`;
     await writeTextAtomic(path, restored);
     this.#known.set(key, { text: restored, timeline: base });
+    const real = await this.#realRoot(root);
     const rejection: TimelineRejection = {
-      root,
+      root: real,
       timeline: id,
       reason,
       message,
@@ -583,16 +590,15 @@ export class TimelineService {
       current: base.revision,
       at,
     };
-    const real = await this.#realRoot(root);
     this.#rejections.set(real, [rejection, ...(this.#rejections.get(real) ?? [])].slice(0, MAX_REJECTIONS));
     this.#options.onRejected?.(rejection);
   }
 
   /** A timeline that became readable without an operation (new or repaired file): re-read all of it. */
-  #announce(root: string, id: string, timeline: Timeline): void {
+  async #announce(root: string, id: string, timeline: Timeline): Promise<void> {
     const updated = timeline.tracks.map((track) => track.id);
     this.#options.onChanged?.({
-      root,
+      root: await this.#realRoot(root),
       timeline: id,
       revision: timeline.revision,
       author: "file",
@@ -611,7 +617,7 @@ export class TimelineService {
 
   #realRoot(root: string): Promise<string> {
     let real = this.#realRoots.get(root);
-    if (!real) this.#realRoots.set(root, (real = realpath(root).catch(() => root)));
+    if (!real) this.#realRoots.set(root, (real = canonicalPath(root)));
     return real;
   }
 
