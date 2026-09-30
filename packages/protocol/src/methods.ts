@@ -19,7 +19,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -887,7 +887,10 @@ export const methods = {
       "`{ track: \"t_4d5e6f\", asset: \"assets/raw-01.mp4\", start: 0, in: 3.2, out: 15.733 }` (in/out are source seconds, " +
       "default the whole asset; start defaults to right after the track's last clip). Adapter example: " +
       "`{ track, type: \"hyperframes\", source: \"compositions/hyperframes/intro/index.html\", duration: 8, props: {…} }`. " +
-      "Times snap to the project frame grid. Fails with InvalidOperation (overlap, out beyond the source duration, wrong " +
+      "Times snap to the project frame grid. `ripple: true` inserts: clips at or after `start` on every video and audio " +
+      "track move right to make room (e.g. to restore removed words: `{ track, asset, start: 12.4, in: 30.1, out: 30.9, " +
+      "ripple: true, snap: true }`). `snap: true` moves media `in`/`out` into audio pauses and reports them in `snaps`. " +
+      "Fails with InvalidOperation (overlap, out beyond the source duration, wrong " +
       "track kind, unknown clip type; data says the valid range), AssetNotFound, TrackNotFound.",
     params: operationArgs["clip.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -907,7 +910,9 @@ export const methods = {
       "frames stay where they were on the timeline (start moves right). By timeline time: `{ clip, end: 20.0 }`. Does not " +
       "ripple: use `cut` to close gaps. Media clips with audio: each edge snaps into the nearest audio pause within " +
       "±`snapWindow` (default: project `editing.snapWindow`, else 0.5 s); `snaps` reports requested vs applied and `clean: false` when no pause was in " +
-      "reach. `snap: false` trims exactly. Fails with InvalidOperation giving the valid range.",
+      "reach. `snap: false` trims exactly. `ripple: true` keeps the left edge and moves later clips on every video and " +
+      "audio track by the change in length: extend a clip over removed material with `{ clip, out: 18.4, ripple: true }` " +
+      "(the inverse of `cut`). Fails with InvalidOperation giving the valid range.",
     params: operationArgs["clip.trim"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

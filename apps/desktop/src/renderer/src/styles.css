@@ -1132,6 +1132,187 @@ code {
   margin-top: 6px;
 }
 
+/* Opens a view that is not a file (the transcript); sits after the last tab. */
+.tab-strip-action {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0 12px;
+  color: var(--text-faint);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab-strip-action:hover {
+  color: var(--text);
+}
+
+/* ---------- Transcript ---------- */
+
+/*
+ * Reads like a script, not a data grid: words flow as prose at a reading
+ * measure, a timecode gutter anchors each paragraph to the timeline. Cut
+ * words stay in place, struck in the danger color; the amber tally that marks
+ * the playhead everywhere else underlines the word being heard.
+ */
+.transcript-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+}
+
+.transcript-toolbar {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.transcript-toolbar .hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-toolbar .timeline-status {
+  flex: none;
+  max-width: 60%;
+}
+
+.transcript-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 40px;
+  container-type: inline-size;
+}
+
+.transcript-scroll:focus-visible {
+  outline-offset: -2px;
+}
+
+.transcript-asset {
+  max-width: 76ch;
+}
+
+.transcript-asset + .transcript-asset {
+  margin-top: 28px;
+}
+
+.transcript-asset-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.transcript-asset-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.transcript-asset-head .panel-meta {
+  white-space: nowrap;
+}
+
+.transcript-asset-head .link {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.transcript-missing .hint {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.transcript-para {
+  display: grid;
+  grid-template-columns: 11ch 1fr;
+  gap: 14px;
+  margin: 0 0 12px;
+}
+
+/* Narrow editor column: the timecode sits above its paragraph instead of beside it. */
+@container (max-width: 440px) {
+  .transcript-para {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .transcript-para .transcript-time {
+    padding-top: 0;
+  }
+}
+
+.transcript-time {
+  padding-top: 3px;
+  font: 11px/1.9 var(--font-mono);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.transcript-words {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.tw {
+  border-radius: 2px;
+  padding: 1px 0;
+  cursor: text;
+  transition: background-color 80ms linear;
+}
+
+.tw:hover {
+  background: var(--bg-hover);
+}
+
+.tw.is-struck {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: rgba(224, 103, 95, 0.75);
+  text-decoration-thickness: 1px;
+  cursor: pointer;
+}
+
+.tw.is-struck:hover {
+  color: var(--text-muted);
+  background: rgba(224, 103, 95, 0.12);
+}
+
+.tw.is-restoring {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.tw.is-selected {
+  background: rgba(227, 165, 60, 0.26);
+}
+
+.tw.is-current {
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: #fff4e0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tw {
+    transition: none;
+  }
+}
+
 /* Script scenes: gutter flag per `##` heading, highlight for the selected clip's scene. */
 .scene-glyph-linked,
 .scene-glyph-unlinked,

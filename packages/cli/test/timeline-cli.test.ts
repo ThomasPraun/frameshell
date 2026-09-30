@@ -191,6 +191,25 @@ describe("frameshell timeline editing", () => {
     expect(json<{ problems: unknown[] }>(["timeline", "show"]).problems).toEqual([]);
   });
 
+  it("restores cut material: --ripple extends a clip or inserts one, pushing later clips instead of overlapping them", () => {
+    type View = { tracks: { id: string; clips: { id: string; start: number; end: number; in: number; out: number }[] }[] };
+    const clipsOf = () => json<View>(["timeline", "show"]).tracks.find((t) => t.id === audio)!.clips;
+    const [first, second] = clipsOf();
+    expect(frameshell(["clip", "trim", first!.id, "--out", "0.3", "--no-snap"]).stderr).toMatch(/overlap/);
+    expect(frameshell(["clip", "trim", first!.id, "--out", "0.3", "--ripple", "--no-snap"]).code).toBe(0);
+    expect(clipsOf()).toEqual([
+      expect.objectContaining({ id: first!.id, start: 0, end: 0.3, out: 0.3 }),
+      expect.objectContaining({ id: second!.id, start: 0.3 }),
+    ]);
+    const inserted = json<{ changes: { added: string[] }; snaps: { field: string }[] }>([
+      "clip", "add", audio, "assets/take.mp4", "--start", "0.3", "--in", "1", "--out", "1.2", "--ripple", "--snap",
+    ]);
+    const added = clipsOf().find((c) => c.id === inserted.changes.added[0])!;
+    expect(added.start).toBe(0.3);
+    expect(clipsOf().find((c) => c.id === second!.id)!.start).toBe(added.end);
+    expect(frameshell(["clip", "move", first!.id, "--ripple"]).code).toBe(2);
+  });
+
   it("exits 2 with a precise message on bad arguments", () => {
     const noAt = frameshell(["clip", "split", "c_x"]);
     expect(noAt.code).toBe(2);

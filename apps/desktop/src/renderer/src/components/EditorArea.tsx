@@ -4,6 +4,7 @@ import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/sc
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
 
 /** One open file. `savedVersion` is Monaco's alternative version id at last load or save: differs = dirty. */
 interface OpenDoc {
@@ -24,17 +25,25 @@ interface OpenDoc {
  * script for a clip whose `scriptRef` has no `#anchor`), clicking a scene
  * heading selects its clips, and clicking the whole-script flag on line 1
  * selects the clips linked to the whole script.
+ *
+ * The {@link TRANSCRIPT_TAB} tab shows the transcript view instead of a file.
  */
 export function EditorArea({
   tabs,
   active,
   onActivate,
   onClose,
+  onOpenFile,
+  transcriptFocus,
 }: {
   tabs: string[];
   active: string | null;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
+  /** Open a project file (or {@link TRANSCRIPT_TAB}) in a tab. */
+  onOpenFile: (path: string) => void;
+  /** Transcript file to bring into view in the transcript tab. */
+  transcriptFocus: TranscriptFocus | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -114,7 +123,7 @@ export function EditorArea({
         docs.current.delete(path);
       }
     }
-    if (!active) {
+    if (!active || active === TRANSCRIPT_TAB) {
       editor.current?.setModel(null);
       return;
     }
@@ -235,7 +244,7 @@ export function EditorArea({
               key={path}
               role="tab"
               aria-selected={path === active}
-              aria-label={path}
+              aria-label={path === TRANSCRIPT_TAB ? "Transcript" : path}
               className={`file-tab${path === active ? " is-active" : ""}`}
               title={path}
               onMouseDown={(event) => {
@@ -243,10 +252,10 @@ export function EditorArea({
               }}
               onClick={() => onActivate(path)}
             >
-              <span className="file-tab-name">{path.slice(path.lastIndexOf("/") + 1)}</span>
+              <span className="file-tab-name">{path === TRANSCRIPT_TAB ? "Transcript" : path.slice(path.lastIndexOf("/") + 1)}</span>
               <button
                 className={`file-tab-close${dirty ? " is-dirty" : ""}`}
-                aria-label={dirty ? `Close ${path} (unsaved)` : `Close ${path}`}
+                aria-label={dirty ? `Close ${path} (unsaved)` : `Close ${path === TRANSCRIPT_TAB ? "Transcript" : path}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   close(path);
@@ -255,6 +264,11 @@ export function EditorArea({
             </div>
           );
         })}
+        {!tabs.includes(TRANSCRIPT_TAB) && (
+          <button className="tab-strip-action" title="Show the transcript of the timeline's media" onClick={() => onOpenFile(TRANSCRIPT_TAB)}>
+            Transcript
+          </button>
+        )}
       </div>
 
       {activeDoc?.diskNotice && active && (
@@ -276,6 +290,7 @@ export function EditorArea({
       )}
 
       <div className="editor-host" ref={host} hidden={!activeDoc?.model} />
+      {active === TRANSCRIPT_TAB && <TranscriptView onOpenFile={onOpenFile} focus={transcriptFocus} />}
       {!active && (
         <div className="empty editor-empty">
           <p>Open a script or JSON file from the explorer.</p>

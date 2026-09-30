@@ -224,4 +224,27 @@ describe("paintTimeline", () => {
       { x: 121, color: DEFAULT_THEME.diffChanged, dashed: false },
     ]);
   });
+
+  it("marks the selected words' range on the ruler and over the lanes, and nothing without one", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const bars = (range?: { from: number; to: number }) => {
+      const ctx = recorder();
+      const found: { x: number; w: number; h: number }[] = [];
+      ctx.fillRect = (x: number, y: number, w: number, h: number) => {
+        if (String(ctx.fillStyle).startsWith("rgba(227, 165, 60") || (ctx.fillStyle === DEFAULT_THEME.accent && h === RANGE_BAR)) found.push({ x, w, h });
+      };
+      const input = { layout, viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia };
+      paintTimeline(ctx, range ? { ...input, range } : input);
+      return found;
+    };
+    expect(bars()).toEqual([]);
+    // 2 s to 3.5 s at 20 px/s: 40 px wide 30; a band over the lanes (below the 22 px ruler) and a bar on the ruler.
+    expect(bars({ from: 2, to: 3.5 })).toEqual([
+      { x: 40, w: 30, h: 200 - 22 },
+      { x: 40, w: 30, h: RANGE_BAR },
+    ]);
+  });
 });
+
+/** Height of the ruler bar marking a selected range, px. */
+const RANGE_BAR = 3;

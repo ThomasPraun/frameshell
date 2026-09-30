@@ -1,6 +1,7 @@
 import type { TimelineRejection, TimelineView } from "@frameshell/protocol";
 import { useCallback, useSyncExternalStore } from "react";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
+import { placeWord } from "../transcript/model.js";
 
 /** What the panel shows: the latest `timeline.show`, or why there is none. */
 export interface TimelineState {
@@ -54,8 +55,11 @@ function follow(timeline: string, feed: Feed): () => void {
         const view = await window.frameshell.timeline.show(timeline);
         revision = view.revision;
         if (disposed) continue;
-        // Before publishing: no render may see a selected clip the new revision removed.
-        if (timeline === SELECTION_TIMELINE) selection.retainClips(new Set(view.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
+        // Before publishing: no render may see a selected clip or word the new revision removed, nor a stale word range.
+        if (timeline === SELECTION_TIMELINE) {
+          selection.retainClips(new Set(view.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
+          selection.retainWords((word) => placeWord(view, word));
+        }
         publish({ ...feed.state, view, error: null });
       } catch (error) {
         if (!disposed) publish({ ...feed.state, error: (error as Error).message });
@@ -84,7 +88,7 @@ function follow(timeline: string, feed: Feed): () => void {
  * Every caller of the same timeline shares one feed (one read per change):
  * the timeline panel and the script editor's scene links see the same
  * revision. Each revision of {@link SELECTION_TIMELINE} first prunes the
- * selection to clips it still has. The feed stops when its last caller
+ * selection to clips it still has, and re-places selected words. The feed stops when its last caller
  * unmounts.
  */
 export function useTimelineView(timeline: string): TimelineState {

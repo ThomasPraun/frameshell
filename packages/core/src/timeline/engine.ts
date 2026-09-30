@@ -236,6 +236,9 @@ class Edit {
         : {}),
       ...(args.scriptRef ? { scriptRef: args.scriptRef } : {}),
     };
+    if (args.snap === true && type !== "media") {
+      throw this.invalid(`only media clips take \`snap\`; ${type} clips have no audio to snap to.`, { field: "snap" });
+    }
     const start = args.start === undefined ? await this.trackEnd(track) : this.grid.snap(args.start);
     const id = this.newId("c");
     let clip: Clip;
@@ -269,7 +272,9 @@ class Edit {
       } else {
         out = maxOut;
       }
-      clip = { id, type, asset: args.asset, start, in: clipIn, out, ...(speed !== 1 ? { speed } : {}), ...extras };
+      const media: MediaClip = { id, type, asset: args.asset, start, in: clipIn, out, ...(speed !== 1 ? { speed } : {}), ...extras };
+      if (args.snap === true) await this.snapNewClip(media, info, args.in ?? 0, out, args.snapWindow);
+      clip = media;
     } else if (type === "timeline") {
       this.refuse(args, ["asset", "out", "speed", "props"], "timeline clips");
       if (!args.source) throw this.invalid("timeline clips need `source`, e.g. `timelines/intro.json`.", { field: "source" });
@@ -306,7 +311,30 @@ class Edit {
         ...extras,
       };
     }
+    if (args.ripple === true) {
+      // Room first, so the new clip is never compared with a clip it pushes away.
+      const length = this.grid.snap((await this.span(clip)).end - clip.start);
+      const from = this.grid.frame(clip.start);
+      for (const other of this.clipTracks().flatMap((t) => t.clips)) {
+        if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
+      }
+    }
     track.clips.push(clip);
+  }
+
+  /** `clip.add` with `snap`: move a new media clip's `in` and `out` into audio pauses, on its own source clock. */
+  async snapNewClip(clip: MediaClip, info: SourceInfo, requestedIn: number, requestedOut: number, snapWindow: number | undefined): Promise<void> {
+    const window = snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S;
+    const edge = (time: number, side: EditPoint["edge"]) =>
+      this.resolve(true, { time, clock: "source", edge: side, window, clip: structuredClone(clip) });
+    clip.in = this.report("in", clip, requestedIn, this.grid.snap(Math.max(0, await edge(clip.in, "start"))));
+    clip.out = this.report("out", clip, requestedOut, this.boundOut(await edge(clip.out, "end"), clip.in, info, clip.asset));
+    if (clip.out <= clip.in) {
+      throw this.invalid(`in and out snapped into the same pause (in ${clip.in}, out ${clip.out}).`, {
+        field: "snap",
+        hint: "Take a range that spans speech, or add it without `snap`.",
+      });
+    }
   }
 
   clipMove(args: OperationArgs<"clip.move">): void {
@@ -333,6 +361,35 @@ class Edit {
 
   async clipTrim(args: OperationArgs<"clip.trim">): Promise<void> {
     const { clip } = this.clip(args.clip);
+    const before = { start: clip.start, end: args.ripple === true ? (await this.span(clip)).end : 0 };
+    await this.trimEdges(clip, args);
+    if (args.ripple === true) await this.rippleTrim(clip, before);
+  }
+
+  /**
+   * `clip.trim` with `ripple`: put the clip back at its old left edge, then
+   * move clips of every clip track by what the trim added or removed: those
+   * starting at or after the old end by the whole change, those starting
+   * inside the old clip by the head change only (they stay with its old
+   * first frame). Clips crossing either point stay.
+   */
+  async rippleTrim(clip: Clip, before: { start: number; end: number }): Promise<void> {
+    const g = this.grid;
+    const head = g.snap(before.start - clip.start);
+    clip.start = before.start;
+    const total = g.snap((await this.span(clip)).end - before.end);
+    const [first, last] = [g.frame(before.start), g.frame(before.end)];
+    for (const other of this.clipTracks().flatMap((track) => track.clips)) {
+      if (other === clip) continue;
+      const at = g.frame(other.start);
+      if (at >= last) other.start = g.snap(other.start + total);
+      else if (at >= first) other.start = g.snap(other.start + head);
+    }
+  }
+
+  /** Move the edges `args` names; with `ripple` the left edge may pass timeline 0, {@link Edit.rippleTrim} puts it back. */
+  async trimEdges(clip: Clip, args: OperationArgs<"clip.trim">): Promise<void> {
+    const ripple = args.ripple === true;
     if (args.in !== undefined && args.start !== undefined) throw this.invalid("pass `in` or `start`, not both.", { field: "start" });
     if (args.out !== undefined && args.end !== undefined) throw this.invalid("pass `out` or `end`, not both.", { field: "end" });
     const head = args.in !== undefined || args.start !== undefined;
@@ -360,7 +417,7 @@ class Edit {
         const end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
         out = this.boundOut(this.grid.floor(clip.in + (end - clip.start) * speed), clipIn, info, clip.asset, "end");
       }
-      if (clipIn < 0 || start < 0) throw this.headLimit(clip, speed, args.in !== undefined, span.end, out);
+      if (clipIn < 0 || (start < 0 && !ripple)) throw this.headLimit(clip, speed, args.in !== undefined, span.end, out);
       if (out <= clipIn) {
         throw this.invalid(`the clip would be empty (in ${clipIn}, out ${out}).`, {
           field: head ? (args.in !== undefined ? "in" : "start") : args.out !== undefined ? "out" : "end",
@@ -389,7 +446,7 @@ class Edit {
     } else if (args.end !== undefined) {
       end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
     }
-    if (clipIn < 0 || start < 0) throw this.headLimit(clip, 1, args.in !== undefined, span.end, oldIn + (span.end - clip.start));
+    if (clipIn < 0 || (start < 0 && !ripple)) throw this.headLimit(clip, 1, args.in !== undefined, span.end, oldIn + (span.end - clip.start));
     const duration = this.grid.snap(end - start);
     if (this.grid.frame(duration) < 1) {
       throw this.invalid("the clip would be shorter than one frame.", { hint: "Remove it with `clip.remove` instead." });

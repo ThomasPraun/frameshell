@@ -131,6 +131,8 @@ export interface PaintInput<Img> {
    * otherwise changed ones framed over a dashed outline of their old extent.
    */
   diff?: readonly ClipDiff[];
+  /** Timeline range of selected transcript words: tinted over the lanes, barred on the ruler. */
+  range?: { from: number; to: number } | null;
 }
 
 /** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
@@ -150,6 +152,10 @@ export interface DragGhost {
 const CLIP_INSET_Y = 3;
 /** Labels need this much clip width, px. */
 const MIN_LABEL_WIDTH = 28;
+/** Tint of a selected range over the lanes: the selection must not hide the clips under it. */
+const RANGE_ALPHA = 0.12;
+/** Height of the ruler bar marking a selected range, px. */
+const RANGE_BAR = 3;
 /** A dragged clip stays visible in place, faded, until the daemon applies the move. */
 const DRAGGED_ALPHA = 0.35;
 /** Stand-in length of a diff place whose end is unknown, s (as `layout.ts` does for clips). */
@@ -201,9 +207,18 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   });
   if (input.diff) paintDiff(ctx, input, input.diff);
   if (input.drag) paintDrag(ctx, input, input.drag);
+  const range = input.range ? rangeSpan(input) : null;
+  if (range) {
+    ctx.fillStyle = withAlpha(theme.accent, RANGE_ALPHA);
+    ctx.fillRect(range.x, RULER_HEIGHT, range.w, height - RULER_HEIGHT);
+  }
   ctx.restore();
 
   paintRuler(ctx, input);
+  if (range) {
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(range.x, RULER_HEIGHT - RANGE_BAR, range.w, RANGE_BAR);
+  }
   paintPlayhead(ctx, input);
   return { clipsDrawn, mediaDrawn };
 }
@@ -532,6 +547,15 @@ function paintRuler<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
     ctx.fillStyle = theme.textFaint;
     ctx.fillText(tick.label, x + 4, 4);
   }
+}
+
+/** Visible px span of {@link PaintInput.range}, at least 1 px wide; null when off screen. */
+function rangeSpan<Img>(input: PaintInput<Img>): { x: number; w: number } | null {
+  const { pxPerSecond, scrollLeft, width } = input.viewport;
+  const x0 = Math.max(0, Math.round(input.range!.from * pxPerSecond - scrollLeft));
+  const x1 = Math.min(width, Math.round(input.range!.to * pxPerSecond - scrollLeft));
+  if (x1 < 0 || x0 > width) return null;
+  return { x: x0, w: Math.max(1, x1 - x0) };
 }
 
 function paintPlayhead<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {

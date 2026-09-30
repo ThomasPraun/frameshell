@@ -192,7 +192,7 @@ function TimelineCanvas({
   const frame = useRef(0);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, reveal } = useSelection();
+  const { clips: selectedClips, range, reveal } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
   const [snapping, setSnapping] = useState(true);
   const gesture = useRef<Gesture | null>(null);
@@ -200,8 +200,8 @@ function TimelineCanvas({
   const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
   /** Edits run one after another, in the order they were made. */
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const latest = useRef({ layout, fps, selected, revision, snapping, diff });
-  latest.current = { layout, fps, selected, revision, snapping, diff };
+  const latest = useRef({ layout, fps, selected, range, revision, snapping, diff });
+  latest.current = { layout, fps, selected, range, revision, snapping, diff };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
@@ -210,7 +210,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, diff: marks } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -235,6 +235,7 @@ function TimelineCanvas({
       media: mediaRef.current!,
       selected: chosen,
       ...(marks ? { diff: marks } : {}),
+      range: words,
       ...(drag ? { drag } : {}),
     });
     performance.measure(PAINT_MEASURE, { start: started });
@@ -299,7 +300,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, diff, settle, draw]);
+  }, [layout, revision, selected, range, diff, settle, draw]);
   // The playhead moves every frame while playing: repaint outside React, and page the lanes to keep it in view.
   useEffect(
     () =>
@@ -322,6 +323,20 @@ function TimelineCanvas({
     const box = scroller.current;
     const current = latest.current.layout;
     if (!reveal || !box || !current) return;
+    if (reveal.range) {
+      // Selected words (transcript): the playhead goes to their start (not while playing), the lanes scroll to them.
+      const { from, to } = reveal.range;
+      // First frame inside the range: the transport floors to a frame, which could land before the first word.
+      const rate = latest.current.fps;
+      if (!transport.get().playing) transport.seek(Math.ceil(from * rate - 1e-6) / rate);
+      const view = state.current;
+      view.scrollLeft = box.scrollLeft;
+      if (from * view.pxPerSecond < view.scrollLeft || to * view.pxPerSecond > view.scrollLeft + view.width) {
+        view.scrollLeft = Math.max(0, from * view.pxPerSecond - view.width / 4);
+      }
+      settle();
+      return;
+    }
     let row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === reveal.clip));
     let clip: { start: number; end: number } | undefined = row?.clips.find((candidate) => candidate.id === reveal.clip);
     // Gone from the timeline (a transaction removed it): look where it was.
@@ -693,6 +708,7 @@ function TimelineCanvas({
         data-clips={layout?.clipCount ?? 0}
         data-selected={selectedClips.join(" ")}
         data-diff={diff?.map((mark) => `${mark.change}:${mark.clip}`).join(" ")}
+        data-range={range ? `${range.from}-${range.to}` : undefined}
         ref={lanesEl}
         data-playhead={transport.get().time}
         data-dragging={dragging ? dragging.preview.part : undefined}

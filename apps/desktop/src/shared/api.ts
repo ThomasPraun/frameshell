@@ -58,8 +58,8 @@ export type TimelineChange = { timeline: string; revision: number; author: strin
  */
 export type AssetChange = { path: string; asset: AssetInfo | null } | { path: null };
 
-/** Timeline operations the timeline panel sends (SPEC §10: move, trim, split, delete, ripple delete). */
-export const TIMELINE_EDIT_OPS = ["clip.move", "clip.trim", "clip.split", "clip.remove", "cut"] as const;
+/** Timeline operations the app sends (SPEC §10): the timeline panel moves, trims, splits, deletes, ripple deletes; the transcript view restores words (rippled trim or insert). */
+export const TIMELINE_EDIT_OPS = ["clip.move", "clip.trim", "clip.split", "clip.remove", "cut", "clip.add"] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */
 export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];

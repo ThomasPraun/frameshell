@@ -10,6 +10,8 @@ import { Splitter } from "./Splitter.js";
 import { StatusBar } from "./StatusBar.js";
 import { TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
+import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
+import { isTranscriptPath } from "../transcript/useTranscripts.js";
 
 const SAVE_DELAY_MS = 300;
 const isMac = navigator.userAgent.includes("Mac");
@@ -23,6 +25,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   const dragBase = useRef<Layout | null>(null);
   const centerRow = useRef<HTMLDivElement>(null);
 
@@ -67,6 +70,16 @@ export function Workspace({ project }: { project: ProjectView }) {
     setActive(path);
   }, []);
 
+  // The explorer opens transcript files in the transcript view; its "Open JSON" opens the file itself.
+  const browseFile = useCallback(
+    (path: string) => {
+      if (!isTranscriptPath(path)) return openFile(path);
+      openFile(TRANSCRIPT_TAB);
+      setTranscriptFocus({ path });
+    },
+    [openFile],
+  );
+
   const closeFile = useCallback((path: string) => {
     setTabs((current) => {
       const index = current.indexOf(path);
@@ -106,7 +119,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 view={layout.sidebarView}
                 onView={(view) => setLayout({ ...layout, sidebarView: view })}
                 onCollapse={() => toggle("sidebar")}
-                onOpenFile={openFile}
+                onOpenFile={browseFile}
                 activeFile={active}
               />
             </div>
@@ -131,7 +144,14 @@ export function Workspace({ project }: { project: ProjectView }) {
               onDragEnd={() => (dragBase.current = null)}
             />
             <div className="panel editor">
-              <EditorArea tabs={tabs} active={active} onActivate={setActive} onClose={closeFile} />
+              <EditorArea
+                tabs={tabs}
+                active={active}
+                onActivate={setActive}
+                onClose={closeFile}
+                onOpenFile={openFile}
+                transcriptFocus={transcriptFocus}
+              />
             </div>
           </div>
           {!timeline.collapsed && <Splitter orientation="horizontal" label="Resize timeline" {...edge("timeline", -1)} />}
@@ -155,7 +175,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         </div>
       </div>
 
-      <StatusBar project={project} activeFile={active} session={activeSession} />
+      <StatusBar project={project} activeFile={active === TRANSCRIPT_TAB ? "Transcript" : active} session={activeSession} />
     </div>
   );
 }

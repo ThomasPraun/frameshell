@@ -31,6 +31,17 @@ const snapArgs = {
     ),
 };
 
+/** `ripple` arg of `clip.trim` and `clip.add`: the inverse of `cut`, for restoring removed material. */
+const rippleArg = (what: string) =>
+  z
+    .boolean()
+    .optional()
+    .describe(
+      `${what} Applies to every video and audio track, like \`cut\`, so tracks stay in sync; clips crossing the ` +
+        "insertion point stay where they are. Default false: nothing else moves, and a clip that would overlap its " +
+        "neighbour is refused.",
+    );
+
 /** Timeline id param: the file is `timelines/<id>.json`. */
 export const TimelineIdSchema = z
   .string()
@@ -91,6 +102,15 @@ export const operationArgs = {
     gain: z.number().optional().describe("Audio gain in dB, e.g. -18. Default 0."),
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
+    ripple: rippleArg("Make room: clips starting at or after `start` move right by the new clip's length."),
+    snap: z
+      .boolean()
+      .optional()
+      .describe(
+        "`media` only: move `in` and `out` into the nearest audio pause (>= 200 ms quiet), as `cut` does, so no word is " +
+          "clipped. Default false: in/out are used as given.",
+      ),
+    snapWindow: snapArgs.snapWindow,
   }),
   "clip.move": z.strictObject({
     clip: ClipRef,
@@ -104,6 +124,10 @@ export const operationArgs = {
     start: Seconds("Head trim by timeline time: the clip's new left edge. Alternative to `in`.").optional(),
     end: Seconds("Tail trim by timeline time: the clip's new right edge. Alternative to `out`.").optional(),
     ...snapArgs,
+    ripple: rippleArg(
+      "Ripple: the clip keeps its left edge and later clips move by the change in length (extending pushes them right, " +
+        "shortening pulls them left). Clips starting inside the clip move by the head change only.",
+    ),
   }),
   "clip.split": z.strictObject({
     clip: ClipRef,
