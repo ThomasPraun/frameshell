@@ -490,7 +490,14 @@ Design rules:
   [frameshell] subtitle "hola a todos" · 00:03:12.40–00:03:14.10 · clip c_0012 · words w_000123–w_000127
   [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_0421.png
   [frameshell] asset assets/logo.png
+  [frameshell] file scripts/launch.md
+  [frameshell] clip c_0012 · media assets/raw-01.mp4 · 00:00:12.40–00:00:31.00 · track t_1a2b3c
+  [frameshell] scene scripts/launch.md#intro "Intro" · clips c_0100 c_0101
+  [frameshell] transaction tx_0042
+  [frameshell] operation op_0310
+  [frameshell] range 00:01:00.00–00:01:12.50
   ```
+  One line per item when the terminal program enables bracketed paste; otherwise items share one line (nothing is ever submitted). Control characters are stripped.
   Times are timeline times; ids match the project files, so the agent resolves details with `frameshell` CLI or MCP tools. The same selection is exposed by `ui_state` (§7b).
 
 ---
