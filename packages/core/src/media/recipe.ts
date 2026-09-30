@@ -73,10 +73,11 @@ export function sidecarArgs(input: string, output: string): string[] {
 }
 
 /**
- * JPEG thumbnails `0001.jpg`… every `interval` seconds, the first at time 0.
- * `pattern` is an output path with `%04d`.
+ * JPEG thumbnails `dir/0001.jpg`… every `interval` seconds, the first at time 0.
+ * image2 muxer reads every `%` in its output path as format specifier, so `%` in `dir` is escaped as `%%`.
  */
-export function thumbnailArgs(input: string, pattern: string, interval: number | null): string[] {
+export function thumbnailArgs(input: string, dir: string, interval: number | null): string[] {
+  const pattern = `${dir.replaceAll("%", "%%")}/%04d.jpg`;
   // `select`, not `fps`: always keeps the first frame, even of an asset shorter than one interval.
   const sample =
     interval === null ? [] : [`select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,${interval - 0.001})'`];

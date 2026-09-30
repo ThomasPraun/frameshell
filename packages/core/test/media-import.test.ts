@@ -166,6 +166,28 @@ describe("asset import", () => {
   );
 
   it(
+    "ingests into a project whose path contains '%' (image2 pattern escaping)",
+    async () => {
+      project = join(tempDir(), "100% demo %d");
+      await conn.request("project.init", { dir: project });
+      const source = join(tempDir(), "phone.mp4");
+      await makeVfrRecording(source);
+      const { asset, job } = await importOne(source);
+      expect(job.state).toBe("done");
+      const info = await assetInfo(asset);
+      expect(info.proxy).toMatch(/^\.frameshell\/proxies\//);
+      expect(info.waveform!.path).toMatch(/^\.frameshell\/waveforms\//);
+      const thumbs = info.thumbnails!;
+      expect(thumbs.count).toBeGreaterThanOrEqual(1);
+      for (let n = 1; n <= thumbs.count; n++) {
+        const file = readFileSync(join(project, thumbs.dir, `${String(n).padStart(4, "0")}.jpg`));
+        expect(file.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8])); // JPEG.
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "reuses cached outputs when an unchanged asset is imported again, even under another name",
     async () => {
       const source = join(tempDir(), "phone.mp4");

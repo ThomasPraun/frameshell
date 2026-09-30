@@ -152,7 +152,7 @@ async function build(
       // From the proxy when there is one: already small, so decoding is cheap.
       const input = manifest.proxy ? store.abs(manifest.proxy) : source;
       const interval = moving ? thumbnailInterval(duration) : null;
-      await runTool(tools.ffmpeg, thumbnailArgs(input, `${temp}/%04d.jpg`, interval), {
+      await runTool(tools.ffmpeg, thumbnailArgs(input, temp, interval), {
         signal,
         onProgress: progressOf("thumbnails"),
       });
