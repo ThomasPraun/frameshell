@@ -34,8 +34,8 @@ interface Press {
  * it as a `ui` operation (rippled trim or insert, snapped to pauses; see
  * `restoreEdit`). Clicking or dragging over kept words selects them in the
  * shared selection store with their timeline range, which the timeline
- * highlights and the playhead jumps to. Right-click opens "Ask agent" on
- * the selection (a kept word outside it is selected first).
+ * highlights and the playhead jumps to, also while playing. Right-click opens
+ * "Ask agent" on the selection (a kept word outside it is selected first).
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);
@@ -188,7 +188,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   return (
     <div className="transcript-view">
       <div className="transcript-toolbar">
-        <span className="hint">Click a struck word to restore it. Drag across words to select them on the timeline.</span>
+        <span className="hint">Click a word to jump to it, a struck word to restore it. Drag across words to select them on the timeline.</span>
         <span className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
           {status?.text ?? ""}
         </span>
