@@ -14,6 +14,7 @@ export {
   type BinaryPackage,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
+  CHROME_HEADLESS_SHELL_PACKAGE,
   FFMPEG_PACKAGE,
   type MachineProbe,
   type ManagedModel,

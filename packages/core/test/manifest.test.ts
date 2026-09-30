@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BinaryManager,
+  CHROME_HEADLESS_SHELL_PACKAGE,
   FFMPEG_PACKAGE,
   WHISPER_FRAMESHELL_BUILDS,
   WHISPER_FRAMESHELL_TAG,
@@ -151,6 +152,28 @@ describe("pinned whisper.cpp manifest", () => {
   });
 });
 
+describe("pinned headless Chrome manifest", () => {
+  it.each(["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"] as const)(
+    "%s pins Chrome for Testing 154 headless shell (ADR 0002), installed whole from Google's zip",
+    (platform) => {
+      const [build, ...others] = buildCandidates(CHROME_HEADLESS_SHELL_PACKAGE, platform);
+      expect(others).toEqual([]);
+      expect(build!.version).toBe("154.0.8037.57");
+      const [archive] = build!.archives;
+      expect(archive!.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(archive!.size).toBeGreaterThan(90_000_000);
+      expect(archive!.urls).toEqual([expect.stringMatching(/^https:\/\/storage\.googleapis\.com\/chrome-for-testing-public\/154\.0\.8037\.57\/.+\.zip$/)]);
+      // The executable loads .pak, ICU and SwiftShader files from its own directory.
+      expect(archive!.files["chrome-headless-shell"]).toBe(`${archive!.tree}/chrome-headless-shell${platform === "win32-x64" ? ".exe" : ""}`);
+    },
+  );
+
+  it("is installed by the first render, not by doctor --install, and is never mirrored", () => {
+    expect(CHROME_HEADLESS_SHELL_PACKAGE).toMatchObject({ onDemand: true, tools: ["chrome-headless-shell"] });
+    expect(CHROME_HEADLESS_SHELL_PACKAGE.mirror).toBeUndefined();
+  });
+});
+
 // Opt-in: downloads the real pinned build (~60-170 MB) for this platform, then runs it.
 // Run with FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test; CI runs it weekly (.github/workflows/real-binaries.yml).
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinned ffmpeg download", () => {
@@ -196,6 +219,18 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       expect(decoded.code, decoded.stderr).toBe(0);
       const frame = await execProcess(path("ffprobe"), ["-v", "error", "-show_streams", "-of", "json", png]);
       expect((JSON.parse(frame.stdout) as { streams: { pix_fmt: string }[] }).streams[0]?.pix_fmt).toBe("rgba");
+    },
+    600_000,
+  );
+
+  it.runIf(buildCandidates(CHROME_HEADLESS_SHELL_PACKAGE, currentPlatform()).length > 0)(
+    `installs the ${currentPlatform()} headless Chrome pin whole, verified, and runs it`,
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const shell = await binaries.ensure("chrome-headless-shell");
+      const version = await execProcess(shell, ["--version"], { timeoutMs: 60_000 });
+      expect(version.code, version.stderr).toBe(0);
+      expect(version.stdout).toContain("Chrome for Testing 154.0.8037.57");
     },
     600_000,
   );
