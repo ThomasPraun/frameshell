@@ -3,7 +3,7 @@ import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, selection, unionRange, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
-import { type AssetTranscript, type TranscriptWord, buildTranscriptModel, paragraphs, restoreEdit, wordAt } from "../transcript/model.js";
+import { type AssetTranscript, type TranscriptWord, buildTranscriptModel, isKept, paragraphs, restoreEdit, wordAt } from "../transcript/model.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 
 /** Pseudo path of the transcript editor tab: never a project file (`:` is not in project paths). */
@@ -46,8 +46,8 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   const scroller = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   const lastUserScroll = useRef(0);
-  const latest = useRef({ model, view });
-  latest.current = { model, view };
+  const latest = useRef({ model, view, sources });
+  latest.current = { model, view, sources };
 
   useEffect(() => {
     if (!status) return;
@@ -99,6 +99,13 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     setRestoring(key);
     try {
       await window.frameshell.timeline.edit(SELECTION_TIMELINE, [plan.edit]);
+      // Trust the timeline, not the plan: a restore that left the word cut is undone and reported.
+      const after = await window.frameshell.timeline.show(SELECTION_TIMELINE);
+      if (!isKept(after, current.sources, key)) {
+        await window.frameshell.timeline.undo(SELECTION_TIMELINE);
+        setStatus({ tone: "error", text: `“${word.text}” not restored: the edit left it cut, so it was undone.` });
+        return;
+      }
       setStatus({ tone: "info", text: `Restored “${word.text}”: ${plan.how === "extend" ? `extended ${plan.clip}` : `inserted after ${plan.clip}`}` });
     } catch (failure) {
       setStatus({ tone: "error", text: `“${word.text}” not restored: ${(failure as Error).message}` });

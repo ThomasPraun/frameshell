@@ -488,6 +488,44 @@ describe("ripple trim and insert (restoring cut material)", () => {
     ]);
   });
 
+  it("snapBounds fence snapped in/out edges: the resolver sees them, and a result outside is clamped to the nearest in-range frame", async () => {
+    const seen: EditPoint[] = [];
+    // A resolver that jumps to a pause 0.4 s back, past the word being restored.
+    const ctx = context({
+      resolveEditPoint: (point) => {
+        seen.push(point);
+        return { time: point.time - 0.4, clean: true };
+      },
+    });
+    const trimmed = await apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.5, max: 2.9 } }, ripple: true }, ctx);
+    expect(seen.map((p) => [p.min, p.max])).toEqual([[2.5, 2.9]]);
+    expect(clipsOf(trimmed.timeline, "t_v")[0]).toMatchObject({ out: 2.5 });
+    expect(trimmed.snaps).toEqual([{ field: "out", clip: "c_0001", requested: 2.6, applied: 2.5, clean: true, window: 0.5 }]);
+
+    seen.length = 0;
+    const added = await apply(
+      await cutTake(),
+      "clip.add",
+      { track: "t_v", asset: "assets/talk.mp4", start: 6, in: 2.2, out: 2.7, snap: true, snapBounds: { in: { min: 2.1, max: 2.25 }, out: { min: 2.65 } } },
+      ctx,
+    );
+    expect(seen.map((p) => [p.edge, p.min, p.max])).toEqual([
+      ["start", 2.1, 2.25],
+      ["end", 2.65, undefined],
+    ]);
+    // in: 1.8 clamps up to 2.1; out: 2.3 clamps up to 2.667 (first frame at or after 2.65).
+    expect(clipsOf(added.timeline, "t_v").at(-1)).toMatchObject({ in: 2.1, out: 2.667 });
+  });
+
+  it("snapBounds is refused without its edge, outside the requested time, inverted, or without snap on clip.add", async () => {
+    const t = await cutTake();
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { in: { max: 1 } } }))).message).toMatch(/snapBounds\.in.*needs `in`/);
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.7 } } }))).message).toMatch(/outside/);
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.9, max: 2.5 } } }))).message).toMatch(/past max/);
+    const add = { track: "t_v", asset: "assets/talk.mp4", start: 6, in: 2.2, out: 2.7, snapBounds: { out: { min: 2.6 } } };
+    expect((await rejection(apply(t, "clip.add", add))).message).toMatch(/needs `snap: true`/);
+  });
+
   it("ripple and snap on clip.add apply to media clips only", async () => {
     const error = await rejection(
       apply(await cutTake(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, props: { title: "x" }, snap: true }),

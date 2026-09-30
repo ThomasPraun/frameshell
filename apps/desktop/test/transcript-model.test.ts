@@ -1,7 +1,7 @@
 import type { TimelineView } from "@frameshell/protocol";
 import type { Transcript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { buildTranscriptModel, paragraphs, placeWord, restoreEdit, wordAt } from "../src/renderer/src/transcript/model.js";
+import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, wordAt } from "../src/renderer/src/transcript/model.js";
 
 // Seam under test: the transcript view's pure model. Timeline view and transcript files in; struck words,
 // timeline placements, the word under the playhead and the restore operation out.
@@ -117,7 +117,7 @@ describe("restoreEdit", () => {
     expect(restoreEdit(cutView, model, key("w_000004"))).toEqual({
       how: "extend",
       clip: "c_a",
-      edit: { op: "clip.trim", args: { clip: "c_a", out: 2.95, ripple: true } },
+      edit: { op: "clip.trim", args: { clip: "c_a", out: 2.95, snapBounds: { out: { min: 2.9, max: 3 } }, ripple: true } },
     });
   });
 
@@ -126,7 +126,7 @@ describe("restoreEdit", () => {
     expect(restoreEdit(cutView, model, key("w_000005"))).toEqual({
       how: "extend",
       clip: "c_b",
-      edit: { op: "clip.trim", args: { clip: "c_b", in: 2.95, ripple: true } },
+      edit: { op: "clip.trim", args: { clip: "c_b", in: 2.95, snapBounds: { in: { min: 2.9, max: 3 } }, ripple: true } },
     });
   });
 
@@ -139,7 +139,16 @@ describe("restoreEdit", () => {
       clip: "c_a",
       edit: {
         op: "clip.add",
-        args: { track: "v1", asset: ASSET, start: 2, in: 2.95, out: 3.55, ripple: true, snap: true },
+        args: {
+          track: "v1",
+          asset: ASSET,
+          start: 2,
+          in: 2.95,
+          out: 3.55,
+          ripple: true,
+          snap: true,
+          snapBounds: { in: { min: 2.9, max: 3 }, out: { min: 3.5, max: 3.6 } },
+        },
       },
     });
   });
@@ -147,7 +156,10 @@ describe("restoreEdit", () => {
   it("never extends into source the next clip already plays", () => {
     const close = view([media("c_a", 0, 0, 2), media("c_b", 2, 2.93, 5.5)]);
     const model = buildTranscriptModel(close, sources);
-    expect(restoreEdit(close, model, key("w_000004"))?.edit).toEqual({ op: "clip.trim", args: { clip: "c_a", out: 2.93, ripple: true } });
+    expect(restoreEdit(close, model, key("w_000004"))?.edit).toEqual({
+      op: "clip.trim",
+      args: { clip: "c_a", out: 2.93, snapBounds: { out: { min: 2.9, max: 2.93 } }, ripple: true },
+    });
   });
 
   it("gives an inserted clip the anchor clip's speed and sound", () => {
@@ -161,6 +173,36 @@ describe("restoreEdit", () => {
       how: "insert",
       edit: { op: "clip.add", args: { in: 3.55, out: 3.75, speed: 2, gain: -6, start: 1.4 } },
     });
+  });
+
+  it("fences snapped edges inside sub-200 ms inter-word gaps, so any edge the daemon picks keeps the word and only it", () => {
+    // Continuous speech: pause before W, then 80 ms gaps. W and "next" were cut together; c_b resumes at "then".
+    const speech: Transcript = {
+      ...transcript,
+      words: [
+        { id: "w_1", text: "before", start: 2.5, end: 2.9 },
+        { id: "w_2", text: "W", start: 3.2, end: 3.5 },
+        { id: "w_3", text: "next", start: 3.58, end: 3.9 },
+        { id: "w_4", text: "then", start: 3.98, end: 4.3 },
+      ],
+      edits: {},
+    };
+    const cut = view([media("c_a", 0, 2.4, 3.05), media("c_b", 0.65, 3.94, 5)]);
+    const own = [{ path: PATH, transcript: speech }];
+    const model = buildTranscriptModel(cut, own);
+    const plan = restoreEdit(cut, model, key("w_2"));
+    expect(plan?.edit).toEqual({
+      op: "clip.trim",
+      args: { clip: "c_a", out: 3.54, snapBounds: { out: { min: 3.5, max: 3.58 } }, ripple: true },
+    });
+    // Wherever in its bounds the daemon puts `out`, W comes back and "next" stays cut.
+    for (const out of [3.5, 3.533, 3.567, 3.58]) {
+      const restored = view([media("c_a", 0, 2.4, out), media("c_b", out - 2.4, 3.94, 5)]);
+      expect(isKept(restored, own, key("w_2")), `out ${out}`).toBe(true);
+      expect(isKept(restored, own, key("w_3")), `out ${out}`).toBe(false);
+    }
+    // The pause before W (where an unfenced snap went) leaves it cut: the view's check catches that.
+    expect(isKept(view([media("c_a", 0, 2.4, 3.133), media("c_b", 0.733, 3.94, 5)]), own, key("w_2"))).toBe(false);
   });
 
   it("returns null for a kept word or an unknown key", () => {

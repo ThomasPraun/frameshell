@@ -9,28 +9,43 @@ import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
 // Transcript view (#21) in the built app: a real daemon, a synthetic take whose "words" are tone bursts with
-// silent pauses between them (so energy snapping has pauses to find), and a hand-written transcript of it.
+// silent pauses between them (so energy snapping has pauses to find), then three words of continuous speech
+// (80 ms gaps, shorter than a pause), and a hand-written transcript of it.
 const box = sandbox("transcript");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const journal = join(box.projectDir, ".frameshell", "history", "main.jsonl");
 const ASSET = "assets/talk.mp4";
 const TRANSCRIPT = "transcripts/talk.words.json";
 
-/** Word k (0-based) is a tone at source k + 0.2 to k + 0.7 s; the rest of each second is silence. */
+/** Word k (0-based, k < 6) is a tone at source k + 0.2 to k + 0.7 s; the rest of each second is silence. */
 const TEXTS = ["one", "two", "three", "four", "five", "six"];
+/** Continuous speech after 6 s: 80 ms gaps; silence from 7.3 s to the end (8 s). */
+const RUN: [string, number, number][] = [
+  ["seven", 6.2, 6.5],
+  ["eight", 6.58, 6.9],
+  ["nine", 6.98, 7.3],
+];
+const WORDS = [...TEXTS.map((text, k): [string, number, number] => [text, k + 0.2, k + 0.7]), ...RUN];
 const id = (k: number) => `w_${String(k + 1).padStart(6, "0")}`;
 
 let app: ElectronApplication;
 let page: Page;
 
-/** The take cut around "four" (3.2–3.7 s): source 0–2.9, then 3.9–6 from 2.9 s. */
+/**
+ * The take cut around "four" (3.2–3.7 s): source 0–2.9, then 3.9–6 from 2.9 s. Then "eight" (6.58–6.9) is cut
+ * out of the continuous run: source 6–6.533 ("seven"), then 6.933–7.9 ("nine").
+ */
 const CUT = [
   { id: "c_a", type: "media", asset: ASSET, start: 0, in: 0, out: 2.9 },
   { id: "c_b", type: "media", asset: ASSET, start: 2.9, in: 3.9, out: 6 },
+  { id: "c_c", type: "media", asset: ASSET, start: 5, in: 6, out: 6.533 },
+  { id: "c_d", type: "media", asset: ASSET, start: 5.533, in: 6.933, out: 7.9 },
 ];
 
 async function writeTake(): Promise<void> {
   const ffmpeg = await testFfmpeg();
+  const between = (from: number, to: number) => `between(t\\,${from}\\,${to})`;
+  const voiced = [`between(mod(t\\,1)\\,0.2\\,0.7)*lt(t\\,6)`, ...RUN.map(([, from, to]) => between(from, to))].join("+");
   mkdirSync(join(box.projectDir, "assets"), { recursive: true });
   mkdirSync(box.configDir, { recursive: true });
   writeFileSync(join(box.configDir, "config.json"), JSON.stringify({ binaries: { ffmpeg } }));
@@ -40,8 +55,8 @@ async function writeTake(): Promise<void> {
   const file = join(staging, "talk.mp4");
   await ffmpegRun(ffmpeg, [
     ...["-hide_banner", "-loglevel", "error", "-y"],
-    ...["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=6"],
-    ...["-f", "lavfi", "-i", "aevalsrc=0.5*sin(2*PI*220*t)*between(mod(t\\,1)\\,0.2\\,0.7):s=48000:d=6"],
+    ...["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=8"],
+    ...["-f", "lavfi", "-i", `aevalsrc=0.5*sin(2*PI*220*t)*(${voiced}):s=48000:d=8`],
     ...["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", file],
   ]);
   const hash = `sha256:${createHash("sha256").update(readFileSync(file)).digest("hex")}`;
@@ -54,7 +69,7 @@ async function writeTake(): Promise<void> {
       assetHash: hash,
       provider: "whisper-cpp",
       model: "large-v3-turbo-q5_0",
-      words: TEXTS.map((text, k) => ({ id: id(k), text, start: k + 0.2, end: k + 0.7 })),
+      words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end })),
       edits: {},
     }),
   );
@@ -96,7 +111,7 @@ test.beforeAll(async () => {
   // Current revision: the daemon journals the edit as author `file` (SPEC §6.4).
   timeline.tracks[0].clips = CUT;
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
-  await expect(lanes()).toHaveAttribute("data-clips", "2");
+  await expect(lanes()).toHaveAttribute("data-clips", "4");
 });
 
 test.afterAll(async () => {
@@ -106,9 +121,9 @@ test.afterAll(async () => {
 test("the transcript tab strikes the word the cut removed and keeps the rest", async () => {
   await page.getByRole("button", { name: "Transcript", exact: true }).click();
   await expect(page.getByRole("tab", { name: "Transcript" })).toHaveAttribute("aria-selected", "true");
-  await expect(word(3)).toHaveAttribute("data-state", "struck");
-  for (const k of [0, 1, 2, 4, 5]) await expect(word(k)).toHaveAttribute("data-state", "kept");
-  await expect(page.locator(".transcript-asset-head")).toContainText("5 of 6 words on the timeline");
+  for (const k of [3, 7]) await expect(word(k)).toHaveAttribute("data-state", "struck");
+  for (const k of [0, 1, 2, 4, 5, 6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+  await expect(page.locator(".transcript-asset-head")).toContainText("7 of 9 words on the timeline");
 });
 
 test("clicking a word moves the playhead to it, and playback marks each word as it is heard", async () => {
@@ -157,4 +172,22 @@ test("undo in the timeline strikes the word again", async () => {
   await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+z`);
   await expect(word(3)).toHaveAttribute("data-state", "struck");
   expect(savedClips()).toEqual(CUT);
+});
+
+test("restoring a word in continuous speech brings back that word only, with no pause in reach inside its gap", async () => {
+  const before = journaled().length;
+  const eight = await middle(7);
+  await page.mouse.click(eight.x, eight.y);
+  await expect(word(7)).toHaveAttribute("data-state", "kept");
+  await expect(page.locator(".transcript-toolbar .timeline-status")).toContainText("Restored “eight”");
+  expect(journaled().slice(before)).toEqual([{ op: "clip.trim", author: "ui" }]);
+  const clips = savedClips();
+  const c = clips.find((clip) => clip.id === "c_c")!;
+  const d = clips.find((clip) => clip.id === "c_d")!;
+  // Out stays in the 80 ms gap after "eight": the nearest pause (after "nine", 7.3 s) would play "nine" twice.
+  expect(c.out).toBeGreaterThanOrEqual(6.9);
+  expect(c.out).toBeLessThanOrEqual(6.933);
+  expect(d.in).toBe(6.933);
+  expect(d.start).toBeCloseTo(c.start + (c.out - c.in), 3);
+  for (const k of [6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
 });

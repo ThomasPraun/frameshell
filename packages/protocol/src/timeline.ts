@@ -42,6 +42,27 @@ const rippleArg = (what: string) =>
         "neighbour is refused.",
     );
 
+/** Source-seconds range a snapped edge must stay in. */
+const SnapRangeSchema = z
+  .strictObject({
+    min: z.number().nonnegative().optional().describe("Earliest allowed source second."),
+    max: z.number().nonnegative().optional().describe("Latest allowed source second."),
+  });
+
+/** `snapBounds` arg of `clip.trim` and `clip.add`: fences for the pause search of `in` and `out`. */
+const snapBoundsArg = z
+  .strictObject({
+    in: SnapRangeSchema.optional().describe("Range for the snapped `in`; needs `in`."),
+    out: SnapRangeSchema.optional().describe("Range for the snapped `out`; needs `out`."),
+  })
+  .optional()
+  .describe(
+    "Source seconds each snapped edge must stay in; the requested time must lie inside. The pause search looks only " +
+      "there; with no pause in range the edge takes the quietest frame in range (`clean: false`). Use it to keep a word " +
+      "whole and off material another clip already plays, e.g. restoring a word at 3.2-3.5 between clips ending at 3.1 " +
+      "and starting at 3.55: `{ out: 3.53, snapBounds: { out: { min: 3.5, max: 3.55 } } }`.",
+  );
+
 /** Timeline id param: the file is `timelines/<id>.json`. */
 export const TimelineIdSchema = z
   .string()
@@ -111,6 +132,7 @@ export const operationArgs = {
           "clipped. Default false: in/out are used as given.",
       ),
     snapWindow: snapArgs.snapWindow,
+    snapBounds: snapBoundsArg,
   }),
   "clip.move": z.strictObject({
     clip: ClipRef,
@@ -124,6 +146,7 @@ export const operationArgs = {
     start: Seconds("Head trim by timeline time: the clip's new left edge. Alternative to `in`.").optional(),
     end: Seconds("Tail trim by timeline time: the clip's new right edge. Alternative to `out`.").optional(),
     ...snapArgs,
+    snapBounds: snapBoundsArg,
     ripple: rippleArg(
       "Ripple: the clip keeps its left edge and later clips move by the change in length (extending pushes them right, " +
         "shortening pulls them left). Clips starting inside the clip move by the head change only.",

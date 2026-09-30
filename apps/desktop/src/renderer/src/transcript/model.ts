@@ -190,8 +190,13 @@ export interface Restore {
  *
  * Every variant ripples (later clips on every track move right instead of
  * being overlapped) and snaps its edges into audio pauses (ADR 0003). Edges
- * are requested mid-pause between the word and its neighbours, never inside
- * source another clip already plays. Null for a kept word or unknown key.
+ * are requested mid-gap between the word and its neighbours; `snapBounds`
+ * keeps the snapped edge in that gap: a new `in` between the previous word's
+ * end (or the source the clip before plays) and the word's start, a new `out`
+ * between the word's end and the next word's start (or the source the clip
+ * after plays). Inter-word gaps are often shorter than a pause, so an
+ * unfenced snap could land across the word (leaving it cut) or across a
+ * neighbour (bringing it back). Null for a kept word or unknown key.
  */
 export function restoreEdit(view: TimelineView, model: TranscriptModel, key: string): Restore | null {
   const entry = model.assets.find((asset) => asset.words.some((word) => word.key === key));
@@ -207,14 +212,30 @@ export function restoreEdit(view: TimelineView, model: TranscriptModel, key: str
 
   const previous = entry.words[index - 1];
   const next = entry.words[index + 1];
-  const head = round(Math.max(previous ? (previous.end + word.start) / 2 : word.start, before?.out ?? 0));
-  const tail = round(Math.min(next ? (word.end + next.start) / 2 : word.end, after?.in ?? Infinity));
+  // Fences: source an edge may take without cutting into the word, a neighbour word or another clip's source.
+  const inMin = round(Math.max(previous?.end ?? 0, before?.out ?? 0));
+  const inMax = round(Math.max(inMin, word.start));
+  const outMax = round(Math.min(next?.start ?? Infinity, after?.in ?? Infinity));
+  const outMin = round(Math.min(outMax, word.end));
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+  const head = clamp(round(previous ? (previous.end + word.start) / 2 : word.start), inMin, inMax);
+  const tail = clamp(round(next ? (word.end + next.start) / 2 : word.end), outMin, outMax);
+  const inBounds = { min: inMin, max: inMax };
+  const outBounds = Number.isFinite(outMax) ? { min: outMin, max: outMax } : { min: outMin };
 
   if (before && !cutBetween(before.out, center)) {
-    return { how: "extend", clip: before.id, edit: { op: "clip.trim", args: { clip: before.id, out: tail, ripple: true } } };
+    return {
+      how: "extend",
+      clip: before.id,
+      edit: { op: "clip.trim", args: { clip: before.id, out: tail, snapBounds: { out: outBounds }, ripple: true } },
+    };
   }
   if (after && !cutBetween(center, after.in)) {
-    return { how: "extend", clip: after.id, edit: { op: "clip.trim", args: { clip: after.id, in: head, ripple: true } } };
+    return {
+      how: "extend",
+      clip: after.id,
+      edit: { op: "clip.trim", args: { clip: after.id, in: head, snapBounds: { in: inBounds }, ripple: true } },
+    };
   }
   const anchor = before ?? after;
   if (!anchor) return null;
@@ -234,9 +255,16 @@ export function restoreEdit(view: TimelineView, model: TranscriptModel, key: str
         ...(anchor.muted ? { muted: true } : {}),
         ripple: true,
         snap: true,
+        snapBounds: { in: inBounds, out: outBounds },
       },
     },
   };
+}
+
+/** Whether timeline `view` keeps word `key` (some clip plays its midpoint); false for an unknown key. */
+export function isKept(view: TimelineView, sources: readonly TranscriptSource[], key: string): boolean {
+  const model = buildTranscriptModel(view, sources);
+  return model.assets.some((asset) => asset.words.some((word) => word.key === key && word.placements.length > 0));
 }
 
 /** Source silence that starts a new paragraph, seconds. */
