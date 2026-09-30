@@ -21,7 +21,7 @@ import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
 import { appendJournal, readJournal } from "../history/journal.js";
-import { historyView, planRevert } from "../history/revert.js";
+import { type TimelineRevertFailure, abortConflictError, historyView, planRevert } from "../history/revert.js";
 import {
   type AppliedOperation,
   type ClipTypeInfo,
@@ -96,6 +96,18 @@ export interface RevertCall extends CallContext {
   target: string;
 }
 
+/** Transaction undo across timelines; see {@link TimelineService.revertAll}. */
+export interface RevertAllCall {
+  /** SPEC §6.2 author of the `revert` operations. */
+  author: string;
+  /** Transaction the `revert` operations join. */
+  tx: TxRef;
+  /** Transaction id to undo. */
+  target: string;
+  /** Timelines it changed, in the order to revert and report them. */
+  timelines: { root: string; timeline: string }[];
+}
+
 /**
  * The daemon's timeline files (SPEC §6.1): loads a timeline, runs one
  * operation through the engine with project facts (fps, media probes,
@@ -117,7 +129,7 @@ export class TimelineService {
    */
   apply(call: TimelineCall): Promise<OperationResult> {
     const { root, timeline: id } = call;
-    return this.#exclusive(timelinePath(root, id), async () => {
+    return this.#exclusive([timelinePath(root, id)], async () => {
       const { timeline, fps, snapWindow } = await this.load(root, id);
       const request = normalizeArgs(call);
       const context = this.#context(root, id, fps, request.op, snapWindow);
@@ -132,13 +144,56 @@ export class TimelineService {
    */
   revert(call: RevertCall): Promise<OperationResult> {
     const { root, timeline: id, target } = call;
-    return this.#exclusive(timelinePath(root, id), async () => {
+    return this.#exclusive([timelinePath(root, id)], async () => {
       const { timeline, fps } = await this.load(root, id);
       const restored = planRevert(timeline, await readJournal(root, id), target, id);
       const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
       const applied = await applyOperation(timeline, patch, this.#context(root, id, fps, "revert"));
       return this.#record(call, timeline, applied, "revert", { target });
     });
+  }
+
+  /**
+   * Undo transaction `call.target` on every timeline in `call.timelines`, all
+   * or nothing (SPEC §6.2 `tx.abort`): every timeline is locked and planned
+   * first, and only when none conflicts is each written, as one journaled
+   * `revert` per timeline in `call.tx`. Timelines whose journal holds no
+   * operation of the target (an operation that failed) are skipped. Throws
+   * RevertConflict listing every conflicting timeline, with nothing undone;
+   * other errors (TimelineNotFound, engine errors) also before any write.
+   */
+  revertAll(call: RevertAllCall): Promise<OperationResult[]> {
+    const { timelines, target } = call;
+    return this.#exclusive(
+      timelines.map(({ root, timeline }) => timelinePath(root, timeline)),
+      async () => {
+        const planned: { where: { root: string; timeline: string }; before: Timeline; applied: AppliedOperation }[] = [];
+        const failures: TimelineRevertFailure[] = [];
+        for (const where of timelines) {
+          const { root, timeline: id } = where;
+          const entries = await readJournal(root, id);
+          if (!entries.some((entry) => entry.tx === target)) continue;
+          const { timeline, fps } = await this.load(root, id);
+          let restored: Timeline;
+          try {
+            restored = planRevert(timeline, entries, target, id);
+          } catch (error) {
+            if (!(error instanceof RpcError && error.code === ErrorCode.RevertConflict)) throw error;
+            failures.push({ root, timeline: id, error });
+            continue;
+          }
+          const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
+          planned.push({ where, before: timeline, applied: await applyOperation(timeline, patch, this.#context(root, id, fps, "revert")) });
+        }
+        if (failures.length > 0) throw abortConflictError(target, failures);
+        const results: OperationResult[] = [];
+        for (const { where, before, applied } of planned) {
+          const context = { root: where.root, cwd: where.root, timeline: where.timeline, author: call.author, tx: call.tx };
+          results.push(await this.#record(context, before, applied, "revert", { target }));
+        }
+        return results;
+      },
+    );
   }
 
   /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
@@ -348,13 +403,15 @@ export class TimelineService {
     }
   }
 
-  #exclusive<T>(key: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.#queues.get(key) ?? Promise.resolve();
-    const next = previous.then(work, work);
+  /** Run `work` once every earlier task on any of `keys` settled, holding all of them. Queues are claimed synchronously, so no deadlock. */
+  #exclusive<T>(keys: string[], work: () => Promise<T>): Promise<T> {
+    const unique = [...new Set(keys)];
+    const previous = Promise.all(unique.map((key) => this.#queues.get(key) ?? Promise.resolve()));
+    const next = previous.then(work);
     const settled = next.catch(() => {});
-    this.#queues.set(key, settled);
+    for (const key of unique) this.#queues.set(key, settled);
     void settled.then(() => {
-      if (this.#queues.get(key) === settled) this.#queues.delete(key);
+      for (const key of unique) if (this.#queues.get(key) === settled) this.#queues.delete(key);
     });
     return next;
   }

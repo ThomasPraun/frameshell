@@ -29,7 +29,7 @@ import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
-import { TransactionTracker } from "./history/transactions.js";
+import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -151,7 +151,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
-  const transactions = new TransactionTracker({ idleGapMs: options.txIdleGapMs });
+  const transactions = new TransactionTracker({
+    idleGapMs: options.txIdleGapMs,
+    store: new FileTransactionStore(dirs.dataDir, socketPath),
+  });
+  await transactions.restore();
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
@@ -159,15 +163,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const dir = await root(cwd);
     const author = authorOf(caller);
     const tx = transactions.next(author);
+    await transactions.touching(author, tx, { root: dir, timeline });
     const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
-    transactions.applied(author, tx, { root: dir, timeline });
+    await transactions.applied(author, tx);
     return result;
   };
   /** Revert `target` on one timeline; its own transaction unless an explicit one is open. */
   const revert = async (dir: string, cwd: string, timeline: string, target: string, author: string, standalone: boolean) => {
     const tx = transactions.next(author, { standalone });
+    await transactions.touching(author, tx, { root: dir, timeline });
     const result = await timelines.revert({ root: dir, cwd, timeline, author, tx, target });
-    transactions.applied(author, tx, { root: dir, timeline });
+    await transactions.applied(author, tx);
     return result;
   };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
@@ -266,23 +272,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     cut: (params, caller) => operate("cut", params, caller),
     "tx.begin": async ({ label }, caller) => {
       const author = authorOf(caller);
-      const tx = transactions.begin(author, label);
+      const tx = await transactions.begin(author, label);
       return { tx: tx.id, label, author };
     },
     "tx.commit": async (_params, caller) => {
       const author = authorOf(caller);
-      const { tx, operations } = transactions.end(author);
+      const { tx, operations } = await transactions.end(author);
       return { tx: tx.id, label: tx.label, author, operations };
     },
     "tx.abort": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
-      // A conflict leaves the transaction open: the caller can resolve it or commit instead.
-      const reverted = [];
-      for (const { root: dir, timeline } of touched) {
-        reverted.push(await revert(dir, dir, timeline, tx.id, author, false));
-      }
-      transactions.end(author);
+      // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
+      const reverted = await timelines.revertAll({ author, tx, target: tx.id, timelines: touched });
+      await transactions.end(author);
       return { tx: tx.id, label: tx.label, author, reverted };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),

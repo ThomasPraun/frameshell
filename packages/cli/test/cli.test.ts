@@ -83,9 +83,25 @@ describe("frameshell CLI", () => {
     expect(JSON.parse(status.stdout).caller).toEqual({ client: expect.stringMatching(/^cli\//), session: "term-4f2a" });
   });
 
-  it("reports no session when run outside a Frameshell terminal", () => {
-    const status = frameshell(["status", "--json"], tempDir(), { FRAMESHELL_SESSION: "" });
-    expect(JSON.parse(status.stdout).caller.session).toBeNull();
+  it("generates one session per shell when FRAMESHELL_SESSION is unset", () => {
+    const session = (result: { stdout: string }) => JSON.parse(result.stdout).caller.session as string;
+    const cwd = tempDir();
+    // Calls spawned by this test process share a parent, as calls typed in one shell do.
+    const first = session(frameshell(["status", "--json"], cwd, { FRAMESHELL_SESSION: "" }));
+    expect(first).toMatch(/^sh-\d+(-[0-9a-f]{8})?$/);
+    expect(session(frameshell(["status", "--json"], cwd, { FRAMESHELL_SESSION: "" }))).toBe(first);
+    // A call from another parent process is another shell.
+    const { FRAMESHELL_SESSION: _unset, ...env } = process.env;
+    const relay =
+      "const r = require('node:child_process').spawnSync(process.execPath, process.argv.slice(1), { encoding: 'utf8' });" +
+      "process.stdout.write(r.stdout);";
+    const nested = spawnSync(process.execPath, ["-e", relay, cliBin, "status", "--json"], {
+      cwd,
+      encoding: "utf8",
+      env: { ...env, FRAMESHELL_SOCKET: socketPath, FRAMESHELL_IDLE_TIMEOUT_MS: String(IDLE_MS) },
+    });
+    expect(session(nested)).toMatch(/^sh-/);
+    expect(session(nested)).not.toBe(first);
   });
 
   it("reports daemon errors on stderr with a non-zero exit", () => {
