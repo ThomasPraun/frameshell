@@ -4,6 +4,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
+  type HistoryResult,
+  type JournalEntry,
   type MediaProbe,
   type OperationRecord,
   type OperationResult,
@@ -17,8 +19,18 @@ import { type Timeline, parseTimeline } from "@frameshell/schema";
 import { writeJsonAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
-import { type ClipTypeInfo, type EditContext, type EditPointResolver, type OperationRequest, applyOperation } from "./engine.js";
+import { appendJournal, readJournal } from "../history/journal.js";
+import { historyView, planRevert } from "../history/revert.js";
+import {
+  type AppliedOperation,
+  type ClipTypeInfo,
+  type EditContext,
+  type EditPointResolver,
+  type OperationRequest,
+  applyOperation,
+} from "./engine.js";
 import { FrameGrid } from "./grid.js";
+import { diffTimelines } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
 /** Options for {@link TimelineService}. */
@@ -33,17 +45,35 @@ export interface TimelineServiceOptions {
   resolveEditPoint?: (root: string) => EditPointResolver | undefined;
 }
 
-/** Operation to run: the engine request plus who asked. */
-export interface TimelineCall {
+/** Transaction an operation joins (SPEC §6.2). */
+export interface TxRef {
+  /** `tx_` + 8 hex digits. */
+  id: string;
+  /** Label from `tx.begin`; null for automatic grouping. */
+  label: string | null;
+}
+
+/** Who asks, where, and in which transaction; shared by {@link TimelineCall} and {@link RevertCall}. */
+export interface CallContext {
   /** Project root. */
   root: string;
   /** Caller's directory: relative `asset`/`source` args resolve against it first. */
   cwd: string;
   /** Timeline id (`timelines/<id>.json`). */
   timeline: string;
-  request: OperationRequest;
-  /** SPEC §6.2 author: `ui`, `cli:<session>`, `cli`, … */
+  /** SPEC §6.2 author: `ui`, `cli:<session>`, `cli`, `file`, `plugin:<name>`. */
   author: string;
+  tx: TxRef;
+}
+
+/** Operation to run: the engine request plus who asked. */
+export interface TimelineCall extends CallContext {
+  request: OperationRequest;
+}
+
+/** Revert to run: a tx id (`tx_…`) or op id (`op_…`) from the timeline's journal. */
+export interface RevertCall extends CallContext {
+  target: string;
 }
 
 /**
@@ -61,24 +91,69 @@ export class TimelineService {
     this.#options = options;
   }
 
-  /** Apply one operation. Throws the engine's errors, TimelineNotFound or InvalidProjectFile. */
+  /**
+   * Apply one operation, write the file, then append it to the journal
+   * (SPEC §6.1). Throws the engine's errors, TimelineNotFound or InvalidProjectFile.
+   */
   apply(call: TimelineCall): Promise<OperationResult> {
     const { root, timeline: id } = call;
     return this.#exclusive(timelinePath(root, id), async () => {
       const { timeline, fps } = await this.load(root, id);
       const request = normalizeArgs(call);
-      const applied = await applyOperation(timeline, request, this.#context(root, id, fps, request.op));
-      await writeJsonAtomic(timelinePath(root, id), applied.timeline);
-      const operation: OperationRecord = {
-        op: request.op,
-        args: request.args as Record<string, unknown>,
-        inverse: applied.inverse,
-        author: call.author,
-        tx: null,
-        revisionBefore: timeline.revision,
-      };
-      return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes };
+      const context = this.#context(root, id, fps, request.op);
+      return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args);
     });
+  }
+
+  /**
+   * Undo a transaction or one operation (SPEC §6.2): apply the stored inverses
+   * newest first, as one new journaled `revert` operation. Throws
+   * HistoryNotFound, RevertConflict (see `planRevert`) or the engine's errors.
+   */
+  revert(call: RevertCall): Promise<OperationResult> {
+    const { root, timeline: id, target } = call;
+    return this.#exclusive(timelinePath(root, id), async () => {
+      const { timeline, fps } = await this.#load(root, id);
+      const restored = planRevert(timeline, await readJournal(root, id), target, id);
+      const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
+      const applied = await applyOperation(timeline, patch, this.#context(root, id, fps, "revert"));
+      return this.#record(call, timeline, applied, "revert", { target });
+    });
+  }
+
+  /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
+  async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
+    await this.#load(root, id); // TimelineNotFound for a typo, not an empty history.
+    return historyView(await readJournal(root, id), id, options.since);
+  }
+
+  /** Write the applied result, then journal it. */
+  async #record(
+    call: CallContext,
+    before: Timeline,
+    applied: AppliedOperation,
+    op: string,
+    args: unknown,
+  ): Promise<OperationResult> {
+    const { root, timeline: id } = call;
+    await writeJsonAtomic(timelinePath(root, id), applied.timeline);
+    const operation: OperationRecord = {
+      id: `op_${randomBytes(4).toString("hex")}`,
+      op,
+      args: args as Record<string, unknown>,
+      inverse: applied.inverse,
+      author: call.author,
+      tx: call.tx.id,
+      revisionBefore: before.revision,
+    };
+    const entry: JournalEntry = {
+      ...operation,
+      txLabel: call.tx.label,
+      at: new Date().toISOString(),
+      revision: applied.timeline.revision,
+    };
+    await appendJournal(root, id, entry);
+    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes };
   }
 
   /**

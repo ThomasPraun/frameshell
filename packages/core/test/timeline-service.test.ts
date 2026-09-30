@@ -11,6 +11,9 @@ import { tempDir } from "./helpers.js";
 // Seam under test: TimelineService on a real project directory, with the media
 // probe and plugin host replaced by in-memory adapters.
 
+/** Transaction every call here joins; grouping is tested in history tests. */
+const TX = { id: "tx_00000001", label: null };
+
 const PROBE: MediaProbe = {
   duration: 4,
   format: "mov,mp4",
@@ -71,6 +74,7 @@ describe("TimelineService", () => {
         cwd,
         timeline: "main",
         author: "cli",
+        tx: TX,
         request: { op: "clip.add", args: { track: "t_v", type: "media", asset, start } },
       });
     await call("a.mp4", join(root, "assets", "raw"), 0);
@@ -90,6 +94,7 @@ describe("TimelineService", () => {
         cwd: root,
         timeline: "main",
         author: "cli",
+        tx: TX,
         request: { op: "clip.add", args: { track: "t_v", type: "titles", duration: 2, props } },
       });
     const error = await rejection(add({ title: 7 }));
@@ -108,6 +113,7 @@ describe("TimelineService", () => {
         cwd: root,
         timeline,
         author: "cli",
+        tx: TX,
         request: { op: "clip.add", args: { track: "t_v", type: "timeline", source } },
       });
     await timelines.apply({
@@ -115,6 +121,7 @@ describe("TimelineService", () => {
       cwd: root,
       timeline: "intro",
       author: "cli",
+        tx: TX,
       request: { op: "clip.add", args: { track: "t_v", type: "media", asset: "assets/raw/a.mp4", start: 1 } },
     });
     const nested = await nest("main", "intro");
@@ -133,12 +140,13 @@ describe("TimelineService", () => {
     const root = project();
     const { timelines } = service();
     const run = (request: Parameters<TimelineService["apply"]>[0]["request"]) =>
-      timelines.apply({ root, cwd: root, timeline: "main", author: "cli", request });
+      timelines.apply({ root, cwd: root, timeline: "main", author: "cli", tx: TX, request });
     await timelines.apply({
       root,
       cwd: root,
       timeline: "intro",
       author: "cli",
+        tx: TX,
       request: { op: "clip.add", args: { track: "t_v", type: "media", asset: "assets/raw/a.mp4", start: 0 } },
     });
     const media = (await run({ op: "clip.add", args: { track: "t_v", type: "media", asset: "assets/raw/a.mp4", start: 0 } })).changes.added[0]!;

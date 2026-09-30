@@ -27,6 +27,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
+import { TransactionTracker } from "./history/transactions.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
@@ -61,6 +62,11 @@ export interface DaemonOptions {
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
   renderSegmentSeconds?: number;
+  /**
+   * Operations from one terminal session join one transaction until this long
+   * passes without one (SPEC §6.2). Default {@link DEFAULT_TX_IDLE_GAP_MS}.
+   */
+  txIdleGapMs?: number;
 }
 
 /** Running daemon handle. */
@@ -123,11 +129,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
-  /** Run one timeline operation for `caller`; params minus `cwd`/`timeline` are the op's args. */
+  const transactions = new TransactionTracker({ idleGapMs: options.txIdleGapMs });
+  /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
-    return timelines.apply({ root: await root(cwd), cwd, timeline, request, author: authorOf(caller) });
+    const dir = await root(cwd);
+    const author = authorOf(caller);
+    const tx = transactions.next(author);
+    const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
+    transactions.applied(author, tx, { root: dir, timeline });
+    return result;
+  };
+  /** Revert `target` on one timeline; its own transaction unless an explicit one is open. */
+  const revert = async (dir: string, cwd: string, timeline: string, target: string, author: string, standalone: boolean) => {
+    const tx = transactions.next(author, { standalone });
+    const result = await timelines.revert({ root: dir, cwd, timeline, author, tx, target });
+    transactions.applied(author, tx, { root: dir, timeline });
+    return result;
   };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
@@ -215,6 +234,29 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
+    "tx.begin": async ({ label }, caller) => {
+      const author = authorOf(caller);
+      const tx = transactions.begin(author, label);
+      return { tx: tx.id, label, author };
+    },
+    "tx.commit": async (_params, caller) => {
+      const author = authorOf(caller);
+      const { tx, operations } = transactions.end(author);
+      return { tx: tx.id, label: tx.label, author, operations };
+    },
+    "tx.abort": async (_params, caller) => {
+      const author = authorOf(caller);
+      const { tx, touched } = transactions.peek(author);
+      // A conflict leaves the transaction open: the caller can resolve it or commit instead.
+      const reverted = [];
+      for (const { root: dir, timeline } of touched) {
+        reverted.push(await revert(dir, dir, timeline, tx.id, author, false));
+      }
+      transactions.end(author);
+      return { tx: tx.id, label: tx.label, author, reverted };
+    },
+    history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
+    revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, authorOf(caller), true),
   };
 
   const server: Server = createServer((socket) => {

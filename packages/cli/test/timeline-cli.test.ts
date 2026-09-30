@@ -15,12 +15,14 @@ const socketPath =
     ? `\\\\.\\pipe\\frameshell-timeline-test-${randomUUID().slice(0, 8)}`
     : join(realpathSync(tmpdir()), `fs-tl-${randomUUID().slice(0, 8)}.sock`);
 
-function frameshell(args: string[], cwd = project) {
+function frameshell(args: string[], cwd = project, session?: string) {
+  const { FRAMESHELL_SESSION: _inherited, ...inherited } = process.env;
   const result = spawnSync(process.execPath, [cliBin, ...args], {
     cwd,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...inherited,
+      ...(session ? { FRAMESHELL_SESSION: session } : {}),
       FRAMESHELL_SOCKET: socketPath,
       FRAMESHELL_IDLE_TIMEOUT_MS: "1500",
       FRAMESHELL_DATA_DIR: testBinariesDir(),
@@ -31,8 +33,8 @@ function frameshell(args: string[], cwd = project) {
 }
 
 /** Run and parse `--json` output, failing loudly with stderr. */
-function json<T = Record<string, unknown>>(args: string[]): T {
-  const result = frameshell([...args, "--json"]);
+function json<T = Record<string, unknown>>(args: string[], session?: string): T {
+  const result = frameshell([...args, "--json"], project, session);
   if (result.code !== 0) throw new Error(`frameshell ${args.join(" ")} exited ${result.code}: ${result.stderr}`);
   return JSON.parse(result.stdout) as T;
 }
@@ -72,7 +74,7 @@ describe("frameshell timeline editing", () => {
   it("adds tracks, printing each new revision", () => {
     const added = frameshell(["track", "add", "video", "--name", "Camera"]);
     expect(added.code).toBe(0);
-    expect(added.stdout).toMatch(/^track\.add: added t_[0-9a-f]{6}\nrevision 1\n$/);
+    expect(added.stdout).toMatch(/^track\.add: added t_[0-9a-f]{6}\nrevision 1 · op op_[0-9a-f]{8} · tx tx_[0-9a-f]{8}\n$/);
     audio = json<{ changes: { added: string[] }; revision: number }>(["track", "add", "audio"]).changes.added[0]!;
     const list = json<{ tracks: { id: string; kind: string; name: string | null }[] }>(["track", "list"]);
     expect(list.tracks.map((t) => [t.kind, t.name])).toEqual([
@@ -90,7 +92,7 @@ describe("frameshell timeline editing", () => {
     expect(result.revision).toBe(3);
     clip = result.changes.added[0]!;
     expect(clip).toMatch(/^c_[0-9a-f]{6}$/);
-    expect(result.operation).toMatchObject({ op: "clip.add", author: "cli", tx: null, revisionBefore: 2, inverse: { op: "timeline.patch" } });
+    expect(result.operation).toMatchObject({ op: "clip.add", author: "cli", tx: expect.stringMatching(/^tx_/), revisionBefore: 2, inverse: { op: "timeline.patch" } });
     const track = onDisk().tracks[0];
     expect(track.clips).toEqual([{ id: clip, type: "media", asset: "assets/take.mp4", start: 0, in: 0.5, out: 1.733 }]);
   });
@@ -200,5 +202,46 @@ describe("frameshell timeline editing", () => {
     const badSpeed = frameshell(["clip", "set", "c_x", "--speed", "0"]);
     expect(badSpeed.code).toBe(1);
     expect(badSpeed.stderr).toMatch(/params\.speed/);
+  });
+});
+
+describe("frameshell tx, history and revert", () => {
+  type Op = { revision: number; operation: { id: string; tx: string; author: string } };
+
+  it("groups an agent's labelled transaction, shows a later edit with --since, and reverts the transaction", () => {
+    const names = () => json<{ tracks: { name: string | null }[] }>(["track", "list"]).tracks.map((t) => t.name);
+    const before = names();
+    const begun = frameshell(["tx", "begin", "add overlays"], project, "agent");
+    expect(begun.stdout).toMatch(/^Began (tx_[0-9a-f]{8}) "add overlays"\n$/);
+    const tx = /tx_[0-9a-f]{8}/.exec(begun.stdout)![0];
+    const first = json<Op>(["track", "add", "video", "--name", "Overlay 1"], "agent");
+    json<Op>(["track", "add", "video", "--name", "Overlay 2"], "agent");
+    expect(first.operation).toMatchObject({ tx, author: "cli:agent" });
+    expect(frameshell(["tx", "commit"], project, "agent").stdout).toBe(`Committed ${tx} "add overlays" (2 operations)\n`);
+
+    const human = json<Op>(["track", "add", "audio", "--name", "Music"], "human");
+    const since = json<{ transactions: { author: string; operations: { id: string; op: string }[] }[] }>(["history", "--since", tx]);
+    expect(since.transactions).toEqual([
+      expect.objectContaining({ author: "cli:human", operations: [expect.objectContaining({ id: human.operation.id, op: "track.add" })] }),
+    ]);
+    const listing = frameshell(["history"]).stdout;
+    expect(listing).toContain(`${tx}  cli:agent "add overlays"  2 ops`);
+    expect(listing).toContain(`  ${first.operation.id}  track.add`);
+
+    const reverted = frameshell(["revert", tx], project, "agent");
+    expect(reverted.code).toBe(0);
+    expect(reverted.stdout).toMatch(new RegExp(`^revert: removed t_\\w+, t_\\w+\\nrevision ${human.revision + 1} · op op_\\w+ · tx tx_\\w+\\n$`));
+    expect(names()).toEqual([...before, "Music"]);
+  });
+
+  it("explains that transactions need a session, and rejects unknown ids", () => {
+    const bare = frameshell(["tx", "begin", "x"]);
+    expect(bare.code).toBe(1);
+    expect(bare.stderr).toMatch(/FRAMESHELL_SESSION/);
+    const unknown = frameshell(["revert", "tx_00000000"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/No transaction tx_00000000 in the history of timeline main/);
+    const usage = frameshell(["tx", "commit", "--timeline", "intro"]);
+    expect(usage.code).toBe(2);
   });
 });

@@ -1,11 +1,14 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { HistoryResultSchema, TransactionInfoSchema } from "./history.js";
 import {
+  OpIdSchema,
   OperationResultSchema,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineViewSchema,
   TrackSummarySchema,
+  TxIdSchema,
   operationArgs,
 } from "./timeline.js";
 
@@ -694,6 +697,62 @@ export const methods = {
     params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "tx.begin": {
+    description:
+      "Start an explicit transaction for this terminal session: every following operation (any timeline) joins it until " +
+      "`tx.commit` or `tx.abort`, so `history` lists them under `label` and `revert` can undo them as one. Without it, " +
+      "operations from one session are grouped automatically until an idle gap. Needs a session (`FRAMESHELL_SESSION`, " +
+      "set in app terminals). Example: `{ label: \"remove silences\" }`. Fails with TransactionState when one is already open.",
+    params: z.strictObject({
+      label: z.string().min(1).describe("What the transaction does, shown in the History panel, e.g. `remove silences`."),
+    }),
+    result: TransactionInfoSchema,
+  },
+  "tx.commit": {
+    description:
+      "Close this session's explicit transaction, keeping its changes. `operations` counts them across timelines. " +
+      "Fails with TransactionState when none is open.",
+    params: z.strictObject({}),
+    result: TransactionInfoSchema.extend({
+      operations: z.int().describe("Operations applied in the transaction."),
+    }),
+  },
+  "tx.abort": {
+    description:
+      "Close this session's explicit transaction and undo its changes: on every timeline it touched, its operations' " +
+      "inverses are applied newest first as one `revert` operation inside the transaction. Fails with RevertConflict " +
+      "(transaction stays open) when someone else changed the same clips since; with TransactionState when none is open.",
+    params: z.strictObject({}),
+    result: TransactionInfoSchema.extend({
+      reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed."),
+    }),
+  },
+  history: {
+    description:
+      "List a timeline's journaled operations grouped by transaction, oldest first: op, args, author (`ui`, " +
+      "`cli:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Pass `since` with your last transaction id " +
+      "to see only what happened after it, e.g. what the human changed in the app. Fails with HistoryNotFound when " +
+      "`since` is not in this timeline's journal.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      since: TxIdSchema.optional().describe("Only operations journaled after this transaction's last operation."),
+    }),
+    result: HistoryResultSchema,
+  },
+  revert: {
+    description:
+      "Undo a transaction (`tx_…`) or a single operation (`op_…`) on one timeline by applying the stored inverses, " +
+      "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
+      "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
+      "first. Fails with HistoryNotFound when the id is not in the timeline's journal.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to undo."),
+    }),
+    result: OperationResultSchema,
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -911,6 +970,15 @@ export const ErrorCode = {
   PresetNotFound: -32028,
   /** data: `{ timeline, track?, clip? }`: the timeline is empty or holds what export cannot render yet. */
   ExportUnsupported: -32029,
+  /** data: `{ author, open: { tx, label } | null, hint }`: no session, or a transaction already open / none open. */
+  TransactionState: -32030,
+  /** data: `{ target, timeline }`: the tx or op id is not in that timeline's journal. */
+  HistoryNotFound: -32031,
+  /**
+   * data: `{ target, timeline, conflicts: { id, op, author, tx, ids }[], hint }`: later operations changed tracks or clips
+   * the revert would restore (`ids`); or `conflicts` is empty and the file changed outside the journal.
+   */
+  RevertConflict: -32032,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */
