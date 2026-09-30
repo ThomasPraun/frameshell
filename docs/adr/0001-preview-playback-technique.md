@@ -76,3 +76,9 @@ A1 fails 2, 3, 4, 5 and 6: freeze at 58.5 % of cuts, 0.60 % interior drops, clic
 - Audio at the device: the recorder sees the graph output, not device underruns, and nobody listened to the runs.
 - More than one video track, seeking and scrubbing latency, higher proxy resolutions, Windows and Linux, and decode or draw in a Worker.
 - Run-to-run variance: each configuration ran once on the full list, on a shared machine.
+
+## Addendum (#104): the worklet clock never falls behind `currentFrame`
+
+A processor-owned sample counter alone was not enough. Under load Chromium can render AudioContext quanta without calling a worklet's `process()`, while `currentFrame` keeps advancing; a pure own-count then stays behind the context clock for the rest of playback, so program audio plays up to ~150 ms late and its tail is cut. Threshold 5 does not see this (it measures the scheduled splice, not the heard audio); threshold 4 does, intermittently.
+
+Rule now: each quantum's frame is `max(own count, currentFrame)` (`QuantumClock` in `preview/mixer.ts`, used by the mixer and the probe recorder). A stale `currentFrame` still never repeats a block; skipped quanta can no longer make audio late. Assumption, documented but not measured: a stale `currentFrame` is only ever behind the true frame, never ahead. Details and measurements: `docs/research/preview-playback-measurements.md`.
