@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -211,8 +211,8 @@ const JobSchema = z.object({
 
 /** Render cache state of one generated clip (SPEC §6.5). */
 const ClipRenderSchema = z.object({
-  clip: z.string().describe("Clip id, e.g. `c_0100`."),
-  track: z.string().describe("Track holding the clip."),
+  clip: z.string().describe("Clip id, e.g. `c_0100`; inside a nested timeline `<nested clip>/<clip>`, e.g. `c_0200/c_0100`."),
+  track: z.string().describe("Track of the timeline that shows the clip (for a nested one, the track of its nested clip)."),
   type: z.string().describe("Adapter clip type, e.g. `hyperframes`."),
   source: z.string().nullable().describe("The clip's composition entry (`source`), project-relative; null when it has none."),
   state: z
@@ -728,7 +728,9 @@ export const methods = {
     result: z.object({
       timeline: z.string(),
       revision: z.int().describe("Timeline revision the states refer to."),
-      clips: z.array(ClipRenderSchema).describe("Generated clips on video tracks, in track then time order."),
+      clips: z
+        .array(ClipRenderSchema)
+        .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
     }),
   },
   transcribe: {
