@@ -45,12 +45,17 @@ export function HistoryPanel() {
   const latestView = useRef(view);
   latestView.current = view;
 
-  /** Select `target`: its clips still on the timeline, revealed; its changes highlighted. */
-  const select = useCallback(async (target: string) => {
+  /**
+   * Select `target`: its clips still on the timeline, revealed; its changes
+   * highlighted. `newest`: the operation just applied, whose clips are on the
+   * timeline even when its `timeline.changed` has not reached the view yet.
+   */
+  const select = useCallback(async (target: string, newest = false) => {
     const current = latestView.current;
     try {
       const { clips } = await loadHistoryDiff(TIMELINE, target, current?.revision ?? null);
       const present = new Set((latestView.current ?? current)?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? []);
+      if (newest) for (const mark of clips) if (mark.after) present.add(mark.clip);
       const picked = historySelection(clips, present);
       selection.selectHistory(target, picked.clips, picked.reveal);
     } catch (failure) {
@@ -75,7 +80,7 @@ export function HistoryPanel() {
       }
       setNotice({ target, tone: "info", text: `Reverted as ${outcome.result.operation.id}.`, conflicts: [] });
       // Show what the revert itself changed.
-      void select(outcome.result.operation.tx);
+      void select(outcome.result.operation.tx, true);
     } catch (failure) {
       setNotice({ target, tone: "error", text: (failure as Error).message, conflicts: [] });
     } finally {
