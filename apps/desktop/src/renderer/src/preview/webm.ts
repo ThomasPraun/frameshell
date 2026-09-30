@@ -7,6 +7,12 @@ export interface RenderDecoderConfig {
   codec: string;
   codedWidth: number;
   codedHeight: number;
+  /**
+   * YUV to RGB rules. Renders are usually untagged, which export's ffmpeg
+   * reads as BT.601 limited range; Chromium would guess otherwise, so the
+   * preview says so explicitly (primaries and transfer as the proxies').
+   */
+  colorSpace: { matrix: "bt709" | "smpte170m" | "bt470bg" | "rgb"; primaries: "bt709"; transfer: "bt709"; fullRange: boolean };
 }
 
 /** One encoded picture: the colour frame and, when the render has alpha, the alpha plane's own frame. */
@@ -37,6 +43,9 @@ const ID = {
   video: 0xe0,
   pixelWidth: 0xb0,
   pixelHeight: 0xba,
+  colour: 0x55b0,
+  matrixCoefficients: 0x55b1,
+  range: 0x55b9,
   cluster: 0x1f43b675,
   timecode: 0xe7,
   simpleBlock: 0xa3,
@@ -49,7 +58,7 @@ const ID = {
 } as const;
 
 /** Masters whose children the parser walks; everything else is skipped by size. */
-const MASTERS = new Set<number>([ID.segment, ID.tracks, ID.trackEntry, ID.video, ID.cluster, ID.blockGroup, ID.blockAdditions]);
+const MASTERS = new Set<number>([ID.segment, ID.tracks, ID.trackEntry, ID.video, ID.colour, ID.cluster, ID.blockGroup, ID.blockAdditions]);
 
 interface Element {
   id: number;
@@ -64,6 +73,18 @@ interface Track {
   codec: string;
   width: number;
   height: number;
+  /** Matroska `MatrixCoefficients` (ISO/IEC 23091-4); 2 = unspecified. */
+  matrix: number;
+  /** Matroska `Range`: 2 = full; anything else is limited (broadcast) range. */
+  range: number;
+}
+
+/** Matroska matrix code to WebCodecs; unspecified reads as BT.601, as ffmpeg's default conversion does. */
+function matrixOf(code: number): RenderDecoderConfig["colorSpace"]["matrix"] {
+  if (code === 0) return "rgb";
+  if (code === 1) return "bt709";
+  if (code === 5) return "bt470bg";
+  return "smpte170m";
 }
 
 /**
@@ -84,7 +105,7 @@ export function openWebm(bytes: Uint8Array): RenderIndex {
       at = element.end;
       const { id, start, end } = element;
       if (MASTERS.has(id)) {
-        if (id === ID.trackEntry) tracks.push({ number: 0, video: false, codec: "", width: 0, height: 0 });
+        if (id === ID.trackEntry) tracks.push({ number: 0, video: false, codec: "", width: 0, height: 0, matrix: 2, range: 0 });
         if (id === ID.blockGroup) blocks.push({ track: -1, time: 0, data: new Uint8Array(0), alpha: null });
         walk(start, end, id);
         continue;
@@ -105,6 +126,12 @@ export function openWebm(bytes: Uint8Array): RenderIndex {
           break;
         case ID.pixelHeight:
           if (track) track.height = readUint(bytes, start, end);
+          break;
+        case ID.matrixCoefficients:
+          if (track) track.matrix = readUint(bytes, start, end);
+          break;
+        case ID.range:
+          if (track) track.range = readUint(bytes, start, end);
           break;
         case ID.timecode:
           if (parent === ID.cluster) clusterTime = readUint(bytes, start, end);
@@ -150,7 +177,12 @@ export function openWebm(bytes: Uint8Array): RenderIndex {
   const hasAlpha = frames.some((f) => f.alpha !== null);
   const profile = vp9 ? vp9Profile(frames[0]!.data) : 0;
   return {
-    config: { codec: vp9 ? `vp09.0${profile}.10.${profile >= 2 ? "10" : "08"}` : "vp8", codedWidth: track.width, codedHeight: track.height },
+    config: {
+      codec: vp9 ? `vp09.0${profile}.10.${profile >= 2 ? "10" : "08"}` : "vp8",
+      codedWidth: track.width,
+      codedHeight: track.height,
+      colorSpace: { matrix: matrixOf(track.matrix), primaries: "bt709", transfer: "bt709", fullRange: track.range === 2 },
+    },
     hasAlpha,
     frames,
     table: syncTable(frames.map((f) => f.key && (!hasAlpha || f.alpha?.key === true))),

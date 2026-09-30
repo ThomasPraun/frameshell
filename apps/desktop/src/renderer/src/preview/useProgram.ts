@@ -22,7 +22,7 @@ export function useProgram(): Program | null {
   const assets = useAssets(view?.revision ?? null);
   const resolution = useResolution();
   const nested = useNestedViews(view);
-  const renders = useClipRenders(view);
+  const renders = useClipRenders(view, nested);
   return useMemo(
     () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders }) : null),
     [view, assets, resolution, nested, renders],

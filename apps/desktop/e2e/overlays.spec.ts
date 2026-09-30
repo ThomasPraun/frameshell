@@ -3,8 +3,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { connectToDaemon } from "@frameshell/protocol";
 import { laidOutBox, launch, sandbox } from "./harness.js";
+import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { addBarcodeAsset, waitForIngest } from "./preview-probe.js";
 
@@ -18,6 +18,7 @@ const LOGO = "assets/logo.png";
 /** `frameshell.json` resolution: the preview canvas (540 px short side) and the captured frame are the same size. */
 const W = 960;
 const H = 540;
+const SIZE = { width: W, height: H };
 
 let app: ElectronApplication;
 let page: Page;
@@ -47,49 +48,6 @@ async function addLogo(): Promise<void> {
     ...["-vf", "geq=r=255:g=0:b=0:a='if(lt(X,100),255,0)'", "-frames:v", "1", file],
   ]);
   renameSync(file, join(box.projectDir, LOGO));
-}
-
-/** RGB bytes of what the preview canvas shows, `W`x`H`. */
-async function previewPixels(): Promise<Buffer> {
-  const base64 = await page.evaluate(
-    ([width, height]) => {
-      const canvas = document.querySelector<HTMLCanvasElement>(".preview-canvas")!;
-      const copy = document.createElement("canvas");
-      copy.width = width!;
-      copy.height = height!;
-      const context = copy.getContext("2d")!;
-      context.drawImage(canvas, 0, 0);
-      const rgba = context.getImageData(0, 0, width!, height!).data;
-      let binary = "";
-      for (let i = 0; i < rgba.length; i += 4) binary += String.fromCharCode(rgba[i]!, rgba[i + 1]!, rgba[i + 2]!);
-      return btoa(binary);
-    },
-    [W, H],
-  );
-  return Buffer.from(base64, "base64");
-}
-
-/** RGB bytes of the frame `frameshell frame` captures at `at` (daemon `frame`, the export compiler's path). */
-async function exportedPixels(at: number): Promise<Buffer> {
-  const connection = await connectToDaemon(box.socketPath, { client: "e2e/overlays" });
-  const out = join(box.dataDir, `frame-${at}.png`);
-  try {
-    await connection.request("frame", { cwd: box.projectDir, at, out });
-  } finally {
-    connection.close();
-  }
-  const raw = join(box.dataDir, `frame-${at}.rgb`);
-  await ffmpegRun(await testFfmpeg(), ["-hide_banner", "-loglevel", "error", "-y", "-i", out, "-f", "rawvideo", "-pix_fmt", "rgb24", raw]);
-  return readFileSync(raw);
-}
-
-/** Mean RGB of a block of `pixels` (W x H, RGB): x, y, size in px. */
-function blockMean(pixels: Buffer, x: number, y: number, size: number): [number, number, number] {
-  const sum = [0, 0, 0];
-  for (let row = y; row < y + size; row++) {
-    for (let col = x; col < x + size; col++) for (let c = 0; c < 3; c++) sum[c]! += pixels[(row * W + col) * 3 + c]!;
-  }
-  return sum.map((total) => total / (size * size)) as [number, number, number];
 }
 
 const frame = () => page.getByTestId("preview-frame");
@@ -137,8 +95,8 @@ test("composites every layer where export puts it: the preview frame matches `fr
   // Announced only once every layer (decoded frames, the loaded logo) is drawn.
   await expect(frame()).toHaveAttribute("data-shown", "30");
 
-  const preview = await previewPixels();
-  const exported = await exportedPixels(1);
+  const preview = await previewPixels(page, SIZE);
+  const exported = await exportedPixels(box, 1);
   expect(exported.length).toBe(W * H * 3);
   // Kept with the results: `ffmpeg -f rawvideo -pix_fmt rgb24 -s 960x540 -i <file> out.png` shows them.
   for (const [name, pixels] of [["preview.rgb", preview], ["export.rgb", exported]] as const) {
@@ -146,32 +104,19 @@ test("composites every layer where export puts it: the preview frame matches `fr
   }
 
   // Compared in 16 px blocks: the proxy and the original differ in encoding noise and scaling filters, not in layout.
-  let worst = 0;
-  let worstAt = "";
-  let total = 0;
-  let blocks = 0;
-  for (let y = 0; y + 16 <= H; y += 16) {
-    for (let x = 0; x + 16 <= W; x += 16) {
-      const a = blockMean(preview, x, y, 16);
-      const b = blockMean(exported, x, y, 16);
-      const diff = Math.max(...a.map((value, c) => Math.abs(value - b[c]!)));
-      total += diff;
-      blocks++;
-      if (diff > worst) [worst, worstAt] = [diff, `${x},${y}`];
-    }
-  }
-  test.info().annotations.push({ type: "preview vs export", description: `mean block diff ${(total / blocks).toFixed(2)}, worst ${worst.toFixed(1)} at ${worstAt}` });
+  const { mean, worst, worstAt } = blockDiff(preview, exported, SIZE);
+  test.info().annotations.push({ type: "preview vs export", description: `mean block diff ${mean.toFixed(2)}, worst ${worst.toFixed(1)} at ${worstAt}` });
   // Mean: colour conversion only (macOS ~2; the software decode on Linux and Windows CI runners converts YUV to RGB
   // up to ~15 levels apart per channel, ~7 on average). Worst block: layout; a layer a few px off exceeds it at its edges.
-  expect(total / blocks).toBeLessThan(10);
+  expect(mean).toBeLessThan(10);
   expect(worst, `worst 16 px block at ${worstAt}`).toBeLessThan(32);
 
   // And the layers are really there: the logo's opaque half is red in both, its transparent half is not.
   // Logo: 540 px fitted at 0.3 = 162 px, centered 300 px left and 150 px down of the center: x 99-261, y 339-501.
   const red = ([r, g, b]: [number, number, number]) => r > 200 && Math.max(g, b) < 60;
   for (const pixels of [preview, exported]) {
-    expect(red(blockMean(pixels, 120, 400, 16))).toBe(true);
-    expect(red(blockMean(pixels, 200, 400, 16))).toBe(false);
+    expect(red(blockMean(pixels, SIZE, 120, 400, 16))).toBe(true);
+    expect(red(blockMean(pixels, SIZE, 200, 400, 16))).toBe(false);
   }
 });
 

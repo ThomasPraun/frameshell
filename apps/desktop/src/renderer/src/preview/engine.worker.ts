@@ -1,10 +1,9 @@
-// Preview engine (ADR 0001, SPEC §3.4): decodes proxies with WebCodecs and composites every video layer into an
-// OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one AudioWorklet mixer. Runs in
-// a Worker: main-thread (React) stalls must not freeze the picture.
+// Preview engine (ADR 0001, SPEC §3.4): decodes proxies and cached clip renders with WebCodecs and composites every
+// video layer into an OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one
+// AudioWorklet mixer. Runs in a Worker: main-thread (React) stalls must not freeze the picture.
 import { type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
-import { type DecodeStep, decodeSteps } from "./decode-plan.js";
-import { type ProxyIndex, openProxy, readSamples } from "./demux.js";
+import { type DecodeStep, type SpanTiming, decodeSteps } from "./decode-plan.js";
 import {
   type Anchor,
   type ClockSample,
@@ -16,6 +15,7 @@ import {
   programSample,
 } from "./engine-protocol.js";
 import { type Program, type VideoSpan, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
+import { type EncodedPicture, type VideoSource, openVideoSource } from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
 interface WorkerScope {
@@ -42,12 +42,29 @@ interface Ready {
   from: number;
   to: number;
   frame: VideoFrame;
+  /** Alpha of a render with alpha; null when opaque. */
+  alpha: AlphaPlane | null;
 }
 
+/** The luma plane of a decoded alpha frame: the alpha of the colour frame, one byte per pixel (ADR 0002). */
+interface AlphaPlane {
+  data: Uint8Array;
+  offset: number;
+  stride: number;
+  width: number;
+  height: number;
+}
+
+/** A chunk in the decoders, waiting for its colour (and alpha) frame. */
 interface Pending {
   from: number;
   to: number;
   gen: number;
+  /** An alpha frame is due too. */
+  alpha: boolean;
+  frame: VideoFrame | null;
+  /** Copied out of the alpha decoder's frame (so its pool is freed at once); `failed` when the copy failed (drawn opaque). */
+  alphaPlane: AlphaPlane | "failed" | null;
 }
 
 /** A sidecar read in flight; `limit` (program sample) trims it when a cut or stop overtakes it. */
@@ -55,7 +72,7 @@ interface AudioJob {
   limit: number;
 }
 
-type Step = { step: DecodeStep; proxy: string; index: ProxyIndex; data: Uint8Array };
+type Step = { step: DecodeStep; path: string; source: VideoSource; picture: EncodedPicture };
 
 /** What a {@link LayerDecoder} needs from the engine. */
 interface LayerHost {
@@ -63,24 +80,36 @@ interface LayerHost {
   readonly stats: EngineStats;
   /** Program frame due now (playing) or shown (paused). */
   dueFrame(): number;
-  index(proxy: string): Promise<ProxyIndex>;
-  fetch(path: string, start: number, end: number): Promise<Uint8Array>;
+  source(path: string): Promise<VideoSource>;
   error(message: string): void;
   queueTick(): void;
 }
 
+/** File and timing a span decodes from: a media span's proxy, or a generated span's ready render (one render frame per program frame). */
+function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | null {
+  if (span.kind === "media") return { path: span.proxy, timing: span };
+  if (span.kind === "generated" && span.render?.state === "ready") {
+    return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: 1 } };
+  }
+  return null;
+}
+
 /**
- * The decode pipeline of one video layer: its own `VideoDecoder`, fed the
- * layer's media spans from a program frame on, keeping up to
- * {@link MAX_AHEAD} decoded frames in program order.
+ * The decode pipeline of one video layer: its own `VideoDecoder` (plus one
+ * for the alpha plane of renders with alpha), fed the layer's media and
+ * rendered spans from a program frame on, keeping up to {@link MAX_AHEAD}
+ * decoded frames in program order.
  */
 class LayerDecoder {
   #decoder: VideoDecoder | null = null;
-  /** Proxy the decoder is configured for; null after reset or error. */
+  #alphaDecoder: VideoDecoder | null = null;
+  /** File each decoder is configured for; null after reset or error. */
   #configured: string | null = null;
+  #alphaConfigured: string | null = null;
   /** Bumped on every pipeline restart: outputs and reads of older generations are dropped. */
   #gen = 0;
   #seq = 0;
+  /** In feed order: entries leave it (for `#ready`) in that order, once complete. */
   readonly #pending = new Map<number, Pending>();
   /** Decoded frames in program order. */
   #ready: Ready[] = [];
@@ -88,7 +117,7 @@ class LayerDecoder {
   #pumping = false;
   /** Program frame after the last one handed to the decoder. */
   #fedUntil = 0;
-  /** Proxies that cannot be read: their spans are skipped, never waited for. */
+  /** Files that cannot be read: their spans are skipped, never waited for. */
   readonly failed = new Set<string>();
 
   constructor(
@@ -100,7 +129,7 @@ class LayerDecoder {
   moveTo(frame: number): void {
     const hit = this.#ready.findIndex((r) => r.from <= frame && frame < r.to);
     if (hit >= 0) {
-      for (const stale of this.#ready.splice(0, hit)) stale.frame.close();
+      for (const stale of this.#ready.splice(0, hit)) closeReady(stale);
     } else {
       this.restart(frame, false);
     }
@@ -115,12 +144,13 @@ class LayerDecoder {
       if (keep && ready.from < limit) {
         ready.to = Math.min(ready.to, limit);
         kept.push(ready);
-      } else ready.frame.close();
+      } else closeReady(ready);
     }
     this.#ready = kept;
-    this.#pending.clear();
-    if (this.#decoder && this.#decoder.state === "configured") this.#decoder.reset();
+    this.#clearPending();
+    for (const decoder of [this.#decoder, this.#alphaDecoder]) if (decoder && decoder.state === "configured") decoder.reset();
     this.#configured = null;
+    this.#alphaConfigured = null;
     void this.#feeder?.return(undefined);
     this.#fedUntil = frame;
     const program = this.host.program;
@@ -141,7 +171,7 @@ class LayerDecoder {
 
   /** Close frames that end at or before `want`. */
   dropBefore(want: number): void {
-    while (this.#ready.length > 0 && this.#ready[0]!.to <= want) this.#ready.shift()!.frame.close();
+    while (this.#ready.length > 0 && this.#ready[0]!.to <= want) closeReady(this.#ready.shift()!);
   }
 
   /** Decoded frame covering `want` (after {@link dropBefore}); null when not decoded yet. */
@@ -161,14 +191,20 @@ class LayerDecoder {
         if (gen !== this.#gen) break;
         if (next.done) {
           this.#feeder = null;
+          // Some decoders (VP9 in hardware) hold their last frames until flushed: nothing follows to push them out.
+          for (const decoder of [this.#decoder, this.#alphaDecoder]) if (decoder?.state === "configured") void decoder.flush().catch(() => undefined);
           break;
         }
-        const { step, proxy, index, data } = next.value;
-        const decoder = this.#decoderFor(proxy, index);
+        const { step, path, source, picture } = next.value;
+        const decoder = this.#decoderFor(path, source);
+        const alpha = picture.alpha ? this.#alphaDecoderFor(path, source) : null;
         const timestamp = ++this.#seq;
-        this.#pending.set(timestamp, { from: step.from, to: step.to, gen });
+        this.#pending.set(timestamp, { from: step.from, to: step.to, gen, alpha: alpha !== null, frame: null, alphaPlane: null });
         this.#fedUntil = Math.max(this.#fedUntil, step.to);
-        decoder.decode(new EncodedVideoChunk({ type: step.key ? "key" : "delta", timestamp, data }));
+        decoder.decode(new EncodedVideoChunk({ type: picture.key ? "key" : "delta", timestamp, data: picture.data }));
+        if (alpha && picture.alpha) {
+          alpha.decode(new EncodedVideoChunk({ type: picture.alpha.key ? "key" : "delta", timestamp, data: picture.alpha.data }));
+        }
       }
     } catch (error) {
       if (gen === this.#gen) this.host.error(`Preview decode failed: ${(error as Error).message}`);
@@ -182,71 +218,180 @@ class LayerDecoder {
     this.#gen++;
     void this.#feeder?.return(undefined);
     this.#feeder = null;
-    for (const ready of this.#ready) ready.frame.close();
+    for (const ready of this.#ready) closeReady(ready);
     this.#ready = [];
-    this.#pending.clear();
-    if (this.#decoder && this.#decoder.state !== "closed") this.#decoder.close();
+    this.#clearPending();
+    for (const decoder of [this.#decoder, this.#alphaDecoder]) if (decoder && decoder.state !== "closed") decoder.close();
     this.#decoder = null;
+    this.#alphaDecoder = null;
   }
 
   async *#steps(spans: readonly VideoSpan[], from: number, gen: number): AsyncGenerator<Step> {
     for (const span of spans) {
-      if (span.end <= from || span.kind !== "media") continue;
-      let index: ProxyIndex;
+      const decodable = span.end > from ? decodableOf(span) : null;
+      if (!decodable) continue;
+      const { path, timing } = decodable;
+      let source: VideoSource;
       try {
-        index = await this.host.index(span.proxy);
+        source = await this.host.source(path);
       } catch (error) {
-        this.failed.add(span.proxy);
-        this.host.error(`Cannot read ${span.proxy}: ${(error as Error).message}`);
+        this.failed.add(path);
+        this.host.error(`Cannot read ${path}: ${(error as Error).message}`);
         this.host.queueTick();
         continue;
       }
       if (gen !== this.#gen) return;
-      let block: { start: number; bytes: Uint8Array[] } | null = null;
-      for (const step of decodeSteps(span, from, index.table)) {
-        if (!block || step.sample < block.start || step.sample >= block.start + block.bytes.length) {
-          const bytes = await readSamples(index, step.sample, step.sample + READ_SAMPLES, (start, end) => this.host.fetch(span.proxy, start, end));
+      let block: { start: number; pictures: EncodedPicture[] } | null = null;
+      for (const step of decodeSteps(timing, from, source.table)) {
+        if (!block || step.sample < block.start || step.sample >= block.start + block.pictures.length) {
+          const pictures = await source.read(step.sample, step.sample + READ_SAMPLES);
           if (gen !== this.#gen) return;
-          block = { start: step.sample, bytes };
+          block = { start: step.sample, pictures };
         }
-        yield { step, proxy: span.proxy, index, data: block.bytes[step.sample - block.start]! };
+        yield { step, path, source, picture: block.pictures[step.sample - block.start]! };
       }
     }
   }
 
-  #decoderFor(proxy: string, index: ProxyIndex): VideoDecoder {
+  #decoderFor(path: string, source: VideoSource): VideoDecoder {
     if (!this.#decoder || this.#decoder.state === "closed") {
-      this.#decoder = new VideoDecoder({ output: (frame) => this.#onFrame(frame), error: (error) => this.#onDecoderError(error) });
+      this.#decoder = new VideoDecoder({ output: (frame) => this.#onFrame(frame, false), error: (error) => this.#onDecoderError(error) });
       this.#configured = null;
     }
-    if (this.#configured !== proxy) {
+    if (this.#configured !== path) {
       // `prefer-hardware` means hardware only in Chromium; `no-preference` falls back to software (CI, VMs).
-      this.#decoder.configure({ ...index.config, hardwareAcceleration: "no-preference", optimizeForLatency: true });
-      this.#configured = proxy;
+      this.#decoder.configure({ ...source.config, hardwareAcceleration: "no-preference", optimizeForLatency: true });
+      this.#configured = path;
     }
     return this.#decoder;
   }
 
-  #onFrame(frame: VideoFrame): void {
-    this.host.stats.decoded++;
+  #alphaDecoderFor(path: string, source: VideoSource): VideoDecoder {
+    if (!this.#alphaDecoder || this.#alphaDecoder.state === "closed") {
+      this.#alphaDecoder = new VideoDecoder({ output: (frame) => this.#onFrame(frame, true), error: (error) => this.#onDecoderError(error) });
+      this.#alphaConfigured = null;
+    }
+    if (this.#alphaConfigured !== path) {
+      // Software: frames stay in memory (I420), so the alpha plane is read without a GPU readback.
+      this.#alphaDecoder.configure({ ...source.config, hardwareAcceleration: "prefer-software", optimizeForLatency: true });
+      this.#alphaConfigured = path;
+    }
+    return this.#alphaDecoder;
+  }
+
+  #onFrame(frame: VideoFrame, alpha: boolean): void {
     const pending = this.#pending.get(frame.timestamp);
-    this.#pending.delete(frame.timestamp);
-    if (!pending || pending.gen !== this.#gen || pending.from === pending.to) {
-      this.host.stats.discarded++;
+    if (!pending || (alpha ? pending.alphaPlane : pending.frame)) {
       frame.close();
-    } else {
-      this.#ready.push({ from: pending.from, to: pending.to, frame });
+      return;
+    }
+    if (!alpha) {
+      this.host.stats.decoded++;
+      pending.frame = frame;
+      this.#flush();
+      return;
+    }
+    void copyLuma(frame).then(
+      (plane) => {
+        pending.alphaPlane = plane;
+      },
+      (error: unknown) => {
+        pending.alphaPlane = "failed";
+        this.host.error(`Preview alpha: ${(error as Error).message}`);
+      },
+    ).finally(() => {
+      frame.close();
+      if (this.#pending.get(frame.timestamp) === pending) this.#flush();
+    });
+  }
+
+  /** Move complete entries at the head of `#pending` to `#ready`: colour and alpha finish at their own pace. */
+  #flush(): void {
+    for (const [timestamp, head] of this.#pending) {
+      if (!head.frame || (head.alpha && !head.alphaPlane)) break;
+      this.#pending.delete(timestamp);
+      if (head.gen !== this.#gen || head.from === head.to) {
+        this.host.stats.discarded++;
+        head.frame.close();
+      } else {
+        const alpha = head.alphaPlane && head.alphaPlane !== "failed" ? head.alphaPlane : null;
+        this.#ready.push({ from: head.from, to: head.to, frame: head.frame, alpha });
+      }
     }
     void this.pump();
     this.host.queueTick();
   }
 
+  #clearPending(): void {
+    for (const pending of this.#pending.values()) pending.frame?.close();
+    this.#pending.clear();
+  }
+
   #onDecoderError(error: Error): void {
     this.host.error(`Preview decoder: ${error.message}`);
+    for (const decoder of [this.#decoder, this.#alphaDecoder]) if (decoder && decoder.state !== "closed") decoder.close();
     this.#decoder = null;
-    this.#configured = null;
+    this.#alphaDecoder = null;
     // Start over from what is due: a closed decoder decodes nothing more.
     this.restart(this.host.dueFrame(), false);
+  }
+}
+
+function closeReady(ready: Ready): void {
+  ready.frame.close();
+}
+
+/** The luma plane of `frame` (plane 0 of I420 / NV12, what software VP9 decode gives). */
+async function copyLuma(frame: VideoFrame): Promise<AlphaPlane> {
+  const data = new Uint8Array(frame.allocationSize());
+  const layout = await frame.copyTo(data);
+  const luma = layout[0];
+  if (!luma) throw new Error("decoded alpha frame has no planes");
+  return { data, offset: luma.offset, stride: luma.stride, width: frame.visibleRect?.width ?? frame.codedWidth, height: frame.visibleRect?.height ?? frame.codedHeight };
+}
+
+/**
+ * Draws a colour frame through its alpha frame (ADR 0002: the alpha plane is
+ * the luma of a second VP9 stream). The luma becomes a mask image, scaled
+ * with the picture; export's libvpx decode uses the same values.
+ */
+class AlphaMasker {
+  readonly #mask = new OffscreenCanvas(1, 1);
+  readonly #maskContext = this.#mask.getContext("2d")!;
+  readonly #out = new OffscreenCanvas(1, 1);
+  readonly #outContext = this.#out.getContext("2d")!;
+  #pixels: ImageData | null = null;
+
+  /** `frame` with `alpha` applied, `width` x `height` px (the drawn size). */
+  apply(frame: VideoFrame, alpha: AlphaPlane, width: number, height: number): OffscreenCanvas {
+    const { width: w, height: h } = alpha;
+    if (!this.#pixels || this.#pixels.width !== w || this.#pixels.height !== h) {
+      this.#pixels = new ImageData(w, h);
+      this.#mask.width = w;
+      this.#mask.height = h;
+    }
+    const words = new Uint32Array(this.#pixels.data.buffer);
+    const bytes = alpha.data;
+    // RGBA bytes in memory: white, alpha = luma. Little-endian words put alpha in the top byte.
+    for (let y = 0; y < h; y++) {
+      const row = alpha.offset + y * alpha.stride;
+      const out = y * w;
+      for (let x = 0; x < w; x++) words[out + x] = ((bytes[row + x]! << 24) | 0x00ffffff) >>> 0;
+    }
+    this.#maskContext.putImageData(this.#pixels, 0, 0);
+    const outW = Math.max(1, Math.ceil(width));
+    const outH = Math.max(1, Math.ceil(height));
+    if (this.#out.width !== outW || this.#out.height !== outH) {
+      this.#out.width = outW;
+      this.#out.height = outH;
+    }
+    const context = this.#outContext;
+    context.globalCompositeOperation = "copy";
+    context.drawImage(frame, 0, 0, outW, outH);
+    context.globalCompositeOperation = "destination-in";
+    context.drawImage(this.#mask, 0, 0, outW, outH);
+    context.globalCompositeOperation = "source-over";
+    return this.#out;
   }
 }
 
@@ -256,6 +401,8 @@ type Still = { state: "loading" } | { state: "ready"; bitmap: ImageBitmap } | { 
 /** One picture of a composite: what to draw and where. */
 interface Part {
   image: CanvasImageSource;
+  /** Alpha of `image` (a decoded render with alpha). */
+  alpha: AlphaPlane | null;
   size: Size;
   placement: Placement;
 }
@@ -269,11 +416,13 @@ class Engine implements LayerHost {
   /** Bumped per program: a new program redraws even the same frames (placements may have moved). */
   #programVersion = 0;
 
-  readonly #proxies = new Map<string, Promise<ProxyIndex>>();
+  /** Opened proxies and renders by project path. */
+  readonly #sources = new Map<string, Promise<VideoSource>>();
   /** One decode pipeline per video layer, bottom first. */
   #layers: LayerDecoder[] = [];
   /** Still images by `path#version`. */
   readonly #stills = new Map<string, Still>();
+  readonly #masker = new AlphaMasker();
 
   #anchor: Anchor | null = null;
   #clock: ClockSample | null = null;
@@ -384,7 +533,17 @@ class Engine implements LayerHost {
     this.#program = next;
     this.#programVersion++;
     this.#drawn = "";
-    for (const layer of next.layers) for (const span of layer) if (span.kind === "media") void this.index(span.proxy).catch(() => undefined);
+    const used = new Set<string>();
+    for (const layer of next.layers) {
+      for (const span of layer) {
+        const decodable = decodableOf(span);
+        if (!decodable) continue;
+        used.add(decodable.path);
+        void this.source(decodable.path).catch(() => undefined);
+      }
+    }
+    // Renders are held in memory whole: drop the ones no longer played (proxy indexes are small, kept).
+    for (const path of this.#sources.keys()) if (!used.has(path) && path.toLowerCase().endsWith(".webm")) this.#sources.delete(path);
     this.#forgetStills(next);
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();
@@ -420,8 +579,10 @@ class Engine implements LayerHost {
 
   /** Show program frame `frame` while paused (or as the first frame of a play). */
   #moveTo(frame: number): void {
-    this.#pausedFrame = frame;
-    for (const layer of this.#layers) layer.moveTo(frame);
+    // The program's end (End key, a play that ran out) shows its last frame, as `#wantFrame` does: decode that one.
+    const last = this.#program && this.#program.frames > 0 ? this.#program.frames - 1 : frame;
+    this.#pausedFrame = Math.min(frame, last);
+    for (const layer of this.#layers) layer.moveTo(this.#pausedFrame);
     this.queueTick();
   }
 
@@ -448,7 +609,8 @@ class Engine implements LayerHost {
   /**
    * Composite frame `want` once every layer has its picture: while one is
    * still decoding the canvas keeps what it shows (a starved tick when
-   * playing), so layers never show out of step.
+   * playing), so layers never show out of step. A generated clip whose render
+   * is not ready draws nothing (the page shows its render state).
    */
   #show(want: number, playing: boolean): void {
     const program = this.#program!;
@@ -458,23 +620,25 @@ class Engine implements LayerHost {
     for (const pipeline of this.#layers) {
       pipeline.dropBefore(want);
       const span = programAt(program, want, pipeline.layer);
-      // Generated clips play in a page layer over the canvas (`PreviewLayers`), not through a decoder.
-      if (!span || span.kind === "placeholder" || span.kind === "generated") continue;
+      if (!span || span.kind === "placeholder") continue;
       if (span.kind === "still") {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ image: still.bitmap, size: span.size, placement: span.placement });
+          parts.push({ image: still.bitmap, alpha: null, size: span.size, placement: span.placement });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
       }
+      const decodable = decodableOf(span);
+      if (!decodable) continue;
       const ready = pipeline.frameAt(want);
       if (ready) {
         const { frame } = ready;
-        parts.push({ image: frame, size: span.size ?? { width: frame.displayWidth, height: frame.displayHeight }, placement: span.placement });
+        const size = span.size ?? { width: frame.displayWidth, height: frame.displayHeight };
+        parts.push({ image: frame, alpha: ready.alpha, size, placement: span.placement });
         key += `|f${pipeline.layer}:${ready.from}`;
-      } else if (!pipeline.failed.has(span.proxy)) {
+      } else if (!pipeline.failed.has(decodable.path)) {
         complete = false;
       }
     }
@@ -514,7 +678,12 @@ class Engine implements LayerHost {
     for (const part of parts) {
       const rect = layerRect(part.size, output, project, part.placement);
       context.globalAlpha = part.placement.opacity;
-      context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
+      if (part.alpha && part.image instanceof VideoFrame) {
+        const masked = this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
+        context.drawImage(masked, 0, 0, masked.width, masked.height, rect.left, rect.top, rect.width, rect.height);
+      } else {
+        context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
+      }
     }
     context.globalAlpha = 1;
   }
@@ -620,14 +789,26 @@ class Engine implements LayerHost {
 
   // ---------- media I/O ----------
 
-  index(proxy: string): Promise<ProxyIndex> {
-    let index = this.#proxies.get(proxy);
-    if (!index) {
-      index = openProxy((start, end) => this.fetch(proxy, start, end));
-      index.catch(() => this.#proxies.delete(proxy));
-      this.#proxies.set(proxy, index);
+  /** The proxy or render at `path`, opened once. */
+  source(path: string): Promise<VideoSource> {
+    let source = this.#sources.get(path);
+    if (!source) {
+      source = openVideoSource(
+        path,
+        (start, end) => this.fetch(path, start, end),
+        async () => {
+          const response = await fetch(this.#url(path));
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return new Uint8Array(await response.arrayBuffer());
+        },
+      );
+      const opened = source;
+      source.catch(() => {
+        if (this.#sources.get(path) === opened) this.#sources.delete(path);
+      });
+      this.#sources.set(path, source);
     }
-    return index;
+    return source;
   }
 
   #url(path: string): string {

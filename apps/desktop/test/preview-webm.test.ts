@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { ffmpegRun, testFfmpeg } from "../e2e/media.js";
+import { openVideoSource } from "../src/renderer/src/preview/video-source.js";
 import { openWebm } from "../src/renderer/src/preview/webm.js";
 
 // Seam under test: the preview's WebM demux of cached clip renders (ADR 0002: VP9 with the alpha plane as a second VP9
@@ -29,7 +30,13 @@ beforeAll(async () => {
 describe("openWebm", () => {
   it("lists every frame of a VP9-alpha render in display order, each with its alpha frame, and a VP9 decoder config", () => {
     const render = openWebm(alpha);
-    expect(render.config).toEqual({ codec: "vp09.00.10.08", codedWidth: 64, codedHeight: 36 });
+    // Untagged, like the adapters' renders: read as BT.601 limited range, as export's ffmpeg does.
+    expect(render.config).toEqual({
+      codec: "vp09.00.10.08",
+      codedWidth: 64,
+      codedHeight: 36,
+      colorSpace: { matrix: "smpte170m", primaries: "bt709", transfer: "bt709", fullRange: false },
+    });
     expect(render.hasAlpha).toBe(true);
     expect(render.frames).toHaveLength(60);
     expect(render.table.count).toBe(60);
@@ -55,5 +62,26 @@ describe("openWebm", () => {
   it("fails clearly on bytes that are not WebM", () => {
     expect(() => openWebm(new Uint8Array([0, 1, 2, 3]))).toThrow(/not a WebM file/);
     expect(() => openWebm(alpha.subarray(0, 40))).toThrow(/no video frames/);
+  });
+});
+
+describe("openVideoSource", () => {
+  it("reads a .webm render whole, never by ranges, and serves its pictures clamped to the render", async () => {
+    let whole = 0;
+    const source = await openVideoSource(
+      "assets/../.frameshell/cache/clips/k.WEBM",
+      () => Promise.reject(new Error("a render is never read by ranges")),
+      async () => {
+        whole++;
+        return alpha;
+      },
+    );
+    expect(whole).toBe(1);
+    expect(source.hasAlpha).toBe(true);
+    expect(source.config.codec).toBe("vp09.00.10.08");
+    const pictures = await source.read(58, 70);
+    expect(pictures).toHaveLength(2);
+    expect(pictures[0]!.alpha).not.toBeNull();
+    expect(await source.read(-5, 1)).toHaveLength(1);
   });
 });

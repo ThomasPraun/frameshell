@@ -14,8 +14,8 @@ import { formatTimecode } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { RenderSlates } from "./RenderSlates.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
-import { PreviewLayers } from "./PreviewLayers.js";
 import { sendClipEdit } from "./clip-edits.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
@@ -136,8 +136,8 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           <div className="safe-area title" />
           {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
           {program && <Placeholder program={program} frame={frame} />}
-          {program && <PreviewLayers program={program} frame={frame} time={time} playing={playing} mediaUrl={project.mediaUrl} />}
-          {/* After the generated-clip layers: subtitles read over every picture. Neither takes a click. */}
+          {program && <RenderSlates program={program} frame={frame} />}
+          {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
           {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} />}
           <RegionLayer active={regionTool && !empty} fps={fps} />

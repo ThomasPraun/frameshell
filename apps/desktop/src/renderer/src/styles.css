@@ -914,25 +914,19 @@ code {
   font-size: 11.5px;
 }
 
-/* Generated clips over the picture, bottom track first. */
-.preview-layers {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.preview-layer {
-  position: absolute;
-  object-fit: fill;
-}
-
-/* A layer still rendering: a tally-style slate in the lower third, footage stays visible around it. */
-.preview-layer-pending {
+/* Generated clips still rendering: tally-style slates stacked in the lower third, the picture stays visible around them. */
+.preview-render-slates {
   position: absolute;
   left: 50%;
   bottom: 12%;
   transform: translateX(-50%);
   width: min(72%, 360px);
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.preview-layer-pending {
   display: grid;
   gap: 6px;
   padding: 8px 10px;
