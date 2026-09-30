@@ -60,3 +60,19 @@ A 22-cut run (2 min source) on the same machine also passed all six: freeze p95 
 - Drawing in a Worker removed the cut freezes the spike attributed to main-thread stalls: 0 cuts froze, against 7, and the worst freeze was 9.9 ms, against 112 ms. The React UI kept running during the whole run (timeline repaint and timecode every frame).
 - The A/V offset is about 5 ms later than in the spike, still well within ±20 ms. A frame drawn by the Worker reaches the page's sample at the next page vsync, which the spike's same-thread draw did not pay.
 - Not measured: seeking and scrubbing latency, more than one video track, Windows and Linux (CI runs the functional e2e there, not these thresholds), and a real recording.
+
+## Start-up quanta skipped by Chromium (2026-09-30)
+
+Chromium sometimes renders AudioContext quanta without calling the worklets' `process()`, and `currentFrame` still advances. We saw it at start-up with a second measurement app starting at the same time. The mixer and the recorder counted `process()` calls, so both fell behind the context clock. In two quick runs they were 1,408 and 7,296 frames behind (29 and 152 ms). The program audio then played that much after the picture, and the stop at the program end cut its tail: 298 and 6,281 deviating samples. On PR #102 the full run had 551 deviating samples. When the recorder started after the skip, almost every sample deviated: 97-99 % in three quick runs, like PR #102's second full run. Both worklets now use `QuantumClock` (`preview/mixer.ts`): their own count, but never behind `currentFrame`.
+
+Quick runs with a second app starting at the same time, before the fix: 2 of 6 failed threshold 4. After the fix: 8 of 8 had 0 deviating samples.
+
+Full 200-cut runs after the fix, on a shared machine (load average 2.7 to 8.4):
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| a | FAIL: 1 frame dropped at 1 cut | freeze 0.5 %, p95 8.3, max 32.9 ms | 1/28445 | 0 of 46,155,200 deviate | p5 5.0, p95 16.0 | 0.00 % |
+| b | pass | freeze 0.5 %, p95 8.3, max 16.9 ms | 0/28445 | 0 of 46,155,200 deviate | p5 3.5, p95 16.5 | 0.00 % |
+| c | pass | freeze 0.0 %, p95 8.1, max 9.9 ms | 3/28445 | 0 of 46,155,200 deviate | p5 3.8, p95 15.3 | 0.00 % |
+
+Run a's threshold 1 failure is video: 1 frame dropped at 1 cut, with a 32.9 ms freeze at that cut. The audio fix does not touch that path.

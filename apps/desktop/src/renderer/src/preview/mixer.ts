@@ -24,19 +24,44 @@ interface Queued extends MixChunk {
 }
 
 /**
- * Mixes scheduled chunks into render quanta at exact frames. Keeps its own
- * frame counter, seeded once from the first quantum's global `currentFrame`
- * and advanced by the quantum size after: Chromium's `currentFrame` lags one
- * quantum now and then while the worklet gets messages, and indexing by it
- * repeats a 128-sample block (an audible tick; ADR 0001).
+ * Context frame of each render quantum, as an AudioWorklet should count it.
+ * Chromium's global `currentFrame` is wrong both ways (ADR 0001):
+ * - it lags one quantum now and then while the worklet gets messages;
+ *   indexing by it repeats a 128-sample block (an audible tick);
+ * - the context renders quanta without calling `process()` (seen at start-up
+ *   under load: 57 quanta), so counting calls falls behind it for
+ *   good and everything scheduled on the context clock plays late.
+ * A stale `currentFrame` is never ahead of the true frame, and a count of
+ * calls never is either, so the frame is the later of the two.
+ */
+export class QuantumClock {
+  #next = -1;
+
+  /** Frame after the last quantum counted; -1 before the first. */
+  get next(): number {
+    return this.#next;
+  }
+
+  /** Frame of the quantum being rendered; call once per `process()` with the global `currentFrame`. */
+  tick(currentFrame: number, size = QUANTUM): number {
+    const frame = Math.max(this.#next, currentFrame);
+    this.#next = frame + size;
+    return frame;
+  }
+}
+
+/**
+ * Mixes scheduled chunks into render quanta at exact frames, counted by a
+ * {@link QuantumClock}: a stale `currentFrame` never repeats a block, and
+ * quanta the context skipped never make the program late.
  */
 export class ProgramMixer {
   #queue: Queued[] = [];
-  #position = -1;
+  readonly #clock = new QuantumClock();
 
   /** Context frame of the next quantum; -1 before the first. */
   get position(): number {
-    return this.#position;
+    return this.#clock.next;
   }
 
   /** Chunks not fully played yet. */
@@ -56,7 +81,7 @@ export class ProgramMixer {
    * close to fade) cuts {@link EDGE_FADE_SAMPLES} after the next quantum starts.
    */
   cut(at: number): void {
-    const earliest = Math.max(this.#position, 0) + EDGE_FADE_SAMPLES;
+    const earliest = Math.max(this.#clock.next, 0) + EDGE_FADE_SAMPLES;
     const frame = Math.max(at, earliest);
     for (const chunk of this.#queue) {
       chunk.end = Math.min(chunk.end, frame);
@@ -71,10 +96,9 @@ export class ProgramMixer {
     this.cut(0);
   }
 
-  /** Mix one quantum into `out` (zeroed first). `currentFrame` only seeds the counter. */
+  /** Mix one quantum into `out` (zeroed first); `currentFrame` is the worklet global, see {@link QuantumClock}. */
   render(out: Float32Array, currentFrame: number): void {
-    if (this.#position < 0) this.#position = currentFrame;
-    const f0 = this.#position;
+    const f0 = this.#clock.tick(currentFrame, out.length);
     const f1 = f0 + out.length;
     out.fill(0);
     let finished = false;
@@ -94,6 +118,5 @@ export class ProgramMixer {
       if (chunk.end <= f1) finished = true;
     }
     if (finished) this.#queue = this.#queue.filter((chunk) => chunk.end > f1);
-    this.#position = f1;
   }
 }
