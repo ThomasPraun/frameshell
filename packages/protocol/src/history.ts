@@ -99,3 +99,34 @@ export const RevertConflictSchema = z.object({
 
 /** See {@link RevertConflictSchema}. */
 export type RevertConflict = z.output<typeof RevertConflictSchema>;
+
+/** Where a clip sits: track and timeline seconds. */
+export const ClipPlaceSchema = z.object({
+  track: z.string(),
+  start: z.number(),
+  end: z.number().nullable().describe("Derived end; null when a nested timeline's length cannot be derived."),
+});
+
+/** One clip a transaction or operation changed, as `history.diff` reports it. */
+export const ClipDiffSchema = z.object({
+  clip: z.string(),
+  change: z
+    .enum(["added", "removed", "moved", "changed"])
+    .describe("`moved`: other track or start, same length. `changed`: anything else (trim, speed, gain, props)."),
+  before: ClipPlaceSchema.nullable().describe("Right before the target's first operation on the clip; null when added."),
+  after: ClipPlaceSchema.nullable().describe("Right after the target's last operation on the clip; null when removed."),
+});
+
+/** Result of `history.diff`. */
+export const HistoryDiffResultSchema = z.object({
+  timeline: z.string(),
+  target: z.string().describe("The transaction or operation id asked for."),
+  clips: z.array(ClipDiffSchema).describe("In the order the target first changed them; clips changed and then restored are left out."),
+});
+
+/** See {@link ClipPlaceSchema}. */
+export type ClipPlace = z.output<typeof ClipPlaceSchema>;
+/** See {@link ClipDiffSchema}. */
+export type ClipDiff = z.output<typeof ClipDiffSchema>;
+/** See {@link HistoryDiffResultSchema}. */
+export type HistoryDiffResult = z.output<typeof HistoryDiffResultSchema>;

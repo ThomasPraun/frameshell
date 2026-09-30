@@ -7,7 +7,9 @@ import { useSyncExternalStore } from "react";
  *
  * Why here and not in the timeline: the canvas keeps only view state
  * (scroll, zoom, hover) and has no selection of its own, while selection is
- * read and set by panels that do not draw clips. Timeline editing (#16)
+ * read and set by panels that do not draw clips. The History panel (#18)
+ * selects a transaction or operation here: its clips are selected and the
+ * timeline highlights what it changed. Timeline editing (#16)
  * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Ask agent"
  * (#49) quotes it, and the player (#15) may follow it. Those extend
  * {@link Selection} (words, time range, other timelines) here; never keep a
@@ -18,9 +20,9 @@ import { useSyncExternalStore } from "react";
 /**
  * Who made a selection. Panels react differently to their own selections
  * than to others': the timeline scrolls a clip into view only when it was
- * selected elsewhere (a script heading), never under the user's click.
+ * selected elsewhere (a script heading, a History row), never under the user's click.
  */
-export type SelectionOrigin = "timeline" | "script";
+export type SelectionOrigin = "timeline" | "script" | "history";
 
 /**
  * A request to bring a clip into view, made with a selection from another
@@ -29,8 +31,13 @@ export type SelectionOrigin = "timeline" | "script";
  * never scrolls.
  */
 export interface RevealRequest {
-  /** First clip of the selection when it was made. */
+  /** Clip to bring into view: the first of the selection when it was made. */
   readonly clip: string;
+  /**
+   * Where to look when {@link RevealRequest.clip} is not on the timeline
+   * (a clip a transaction removed): track id and timeline seconds.
+   */
+  readonly place?: { readonly track: string; readonly start: number; readonly end: number | null };
 }
 
 export interface Selection {
@@ -40,12 +47,19 @@ export interface Selection {
   readonly origin: SelectionOrigin | null;
   /** Latest reveal request, kept until the selection is replaced; null when none. */
   readonly reveal: RevealRequest | null;
+  /**
+   * Transaction (`tx_…`) or operation (`op_…`) of {@link SELECTION_TIMELINE}'s
+   * journal picked in the History panel; the timeline highlights its changes.
+   * Null for any other selection. Kept when pruning empties
+   * {@link Selection.clips}: what it removed stays highlighted.
+   */
+  readonly history: string | null;
 }
 
 /** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
 export const SELECTION_TIMELINE = "main";
 
-const EMPTY: Selection = { clips: [], origin: null, reveal: null };
+const EMPTY: Selection = { clips: [], origin: null, reveal: null, history: null };
 let current: Selection = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -66,8 +80,16 @@ export const selection = {
   selectClips(ids: readonly string[], origin: SelectionOrigin, options: { reveal?: boolean } = {}): void {
     const reveal = options.reveal === true && ids.length > 0;
     const same = ids.length === current.clips.length && ids.every((id, i) => id === current.clips[i]);
-    if (!reveal && same && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
-    replace(ids.length === 0 ? EMPTY : { clips: [...ids], origin, reveal: reveal ? { clip: ids[0]! } : null });
+    if (!reveal && same && current.history === null && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
+    replace(ids.length === 0 ? EMPTY : { clips: [...ids], origin, reveal: reveal ? { clip: ids[0]! } : null, history: null });
+  },
+  /**
+   * Select transaction or operation `target` from the History panel, with
+   * `clips` = the ones it changed that the timeline still has (maybe none).
+   * `reveal` becomes a new request every call: a row clicked again scrolls again.
+   */
+  selectHistory(target: string, clips: readonly string[], reveal: RevealRequest | null): void {
+    replace({ clips: [...clips], origin: "history", reveal: reveal ? { ...reveal } : null, history: target });
   },
   /** Add or remove one clip (Shift/Cmd-click). */
   toggleClip(id: string, origin: SelectionOrigin): void {
@@ -88,7 +110,7 @@ export const selection = {
   retainClips(present: ReadonlySet<string>): void {
     const kept = current.clips.filter((id) => present.has(id));
     if (kept.length === current.clips.length) return;
-    replace(kept.length === 0 ? EMPTY : { ...current, clips: kept });
+    replace(kept.length === 0 && current.history === null ? EMPTY : { ...current, clips: kept });
   },
   /** Call `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void {

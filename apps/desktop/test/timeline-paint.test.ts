@@ -194,4 +194,34 @@ describe("paintTimeline", () => {
     expect(free.alphaOf["take-0.mp4"]).toBe(1);
     expect(draw(true).ghosts).toEqual([{ x: 201, color: DEFAULT_THEME.danger }]);
   });
+
+  it("marks what the selected history entry did: removed clips as ghosts, added, moved and changed ones framed", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const ctx = recorder();
+    const frames: { x: number; color: string; dashed: boolean }[] = [];
+    let dashed = false;
+    ctx.setLineDash = (segments: number[]) => void (dashed = segments.length > 0);
+    ctx.strokeRect = (x: number) => {
+      if (ctx.lineWidth === 1.5) frames.push({ x, color: String(ctx.strokeStyle), dashed });
+    };
+    const place = (start: number, end: number | null, track = "t_v") => ({ track, start, end });
+    const diff = [
+      { clip: "c_gone", change: "removed" as const, before: place(20, 22), after: null },
+      { clip: "c_0", change: "added" as const, before: null, after: place(0, 2.5) },
+      { clip: "c_1", change: "moved" as const, before: place(12, 14.5), after: place(3, 5.5) },
+      { clip: "c_2", change: "changed" as const, before: place(6, 9), after: place(6, 8.5) },
+      // On a track the timeline no longer has: nothing to draw it on.
+      { clip: "c_lost", change: "removed" as const, before: place(1, 2, "t_gone"), after: null },
+    ];
+    paintTimeline(ctx, { layout, viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia, diff });
+    // Start s at 20 px/s: 20 s px, plus the half-pixel gap and the stroke's half-pixel.
+    expect(frames).toEqual([
+      { x: 401, color: DEFAULT_THEME.danger, dashed: true },
+      { x: 1, color: DEFAULT_THEME.diffAdded, dashed: false },
+      { x: 241, color: DEFAULT_THEME.diffMoved, dashed: true },
+      { x: 61, color: DEFAULT_THEME.diffMoved, dashed: false },
+      { x: 121, color: DEFAULT_THEME.diffChanged, dashed: true },
+      { x: 121, color: DEFAULT_THEME.diffChanged, dashed: false },
+    ]);
+  });
 });

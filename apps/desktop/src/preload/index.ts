@@ -53,6 +53,11 @@ const api: FrameshellApi = {
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
     redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),
   },
+  history: {
+    list: (timeline) => invokeOutcome(Channel.historyList, timeline),
+    diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
+    revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
+  },
   media: {
     assets: () => invokeOutcome(Channel.mediaAssets),
     read: (path) => invokeOutcome(Channel.mediaRead, path),

@@ -51,7 +51,9 @@ async function setup() {
   const dir = join(work, "talk");
   await app.request("project.init", { dir });
   // Loaded from the terminal: an app save would be a `ui` edit, the first thing undo takes back.
-  await cli.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
+  // Its own session: a `file.write` is journaled under the caller's author and would share the terminal's transaction.
+  const loader = await connect("cli/loader", "loader-1");
+  await loader.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
   const editor = new TimelineEditor((method, params) => app.request(method, params));
   /** Clip start/end as the daemon derives them. */
   const clip = async (id: string) => {
@@ -302,5 +304,35 @@ describe("TimelineEditor undo and redo", () => {
     await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 30 } }]);
     await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 40 });
     await expect(editor.undo(dir, "main")).rejects.toThrow(/c_c|revert/i);
+  });
+});
+
+describe("TimelineEditor.revert (History panel)", () => {
+  it("reverts any author's transaction as a ui revert", async () => {
+    const { dir, cli, editor, clip } = await setup();
+    const moved = await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 30 });
+    const outcome = await editor.revert(dir, "main", moved.operation.tx);
+    expect(outcome).toMatchObject({
+      status: "reverted",
+      result: { operation: { op: "revert", author: "ui", args: { target: moved.operation.tx } } },
+    });
+    expect(await clip("c_c")).toMatchObject({ start: 20 });
+  });
+
+  it("reports a revert conflict as data, naming the later operations to revert first", async () => {
+    const { dir, cli, editor } = await setup();
+    const agent = await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 30 });
+    const human = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 40 } }]);
+    const outcome = await editor.revert(dir, "main", agent.operation.id);
+    expect(outcome).toEqual({
+      status: "conflict",
+      message: expect.stringContaining(human.operation.id),
+      conflicts: [{ id: human.operation.id, op: "clip.move", author: "ui", tx: human.operation.tx, ids: ["c_c"] }],
+    });
+  });
+
+  it("passes other daemon errors through", async () => {
+    const { dir, editor } = await setup();
+    await expect(editor.revert(dir, "main", "tx_ffffffff")).rejects.toThrow(/tx_ffffffff/);
   });
 });

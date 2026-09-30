@@ -376,6 +376,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { tx: tx.id, label: tx.label, author, reverted };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
+    "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
     revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, authorOf(caller), true),
   };
 

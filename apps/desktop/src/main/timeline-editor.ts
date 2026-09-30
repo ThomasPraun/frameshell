@@ -5,9 +5,10 @@ import {
   type MethodParams,
   type MethodResult,
   type OperationResult,
+  type RevertConflict,
   type RpcError,
 } from "@frameshell/protocol";
-import { TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
+import { type RevertOutcome, TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
 
 /** A typed daemon request, e.g. {@link DaemonLink.request} bound to the app's link. */
 export type DaemonRequest = <M extends MethodName>(method: M, params: MethodParams<M>) => Promise<MethodResult<M>>;
@@ -114,6 +115,24 @@ export class TimelineEditor {
   }
 
   /**
+   * Revert `target` (a tx or op id of any author) from the History panel.
+   * RevertConflict naming later operations becomes a `conflict` outcome;
+   * other errors (unknown id, file changed outside the journal) reject.
+   */
+  async revert(cwd: string, timeline: string, target: string): Promise<RevertOutcome> {
+    try {
+      return { status: "reverted", result: await this.request("revert", { cwd, timeline, target }) };
+    } catch (error) {
+      // Duck-typed: the link may rethrow the daemon's error from another copy of the protocol module.
+      const rpc = error as Partial<RpcError>;
+      const conflicts = rpc.code === ErrorCode.RevertConflict ? conflictsOf(rpc) : [];
+      // None named: the file changed outside the journal. Nothing to revert first, so it stays an error.
+      if (conflicts.length === 0) throw error;
+      return { status: "conflict", message: rpc.message ?? "Revert refused", conflicts };
+    }
+  }
+
+  /**
    * Open the batch's transaction. A `ui` transaction still open here was
    * opened by another app process since {@link TimelineEditor.#commitOrphan}
    * ran: commit it rather than fail the edit.
@@ -156,6 +175,11 @@ function batchLabel(edits: readonly TimelineEdit[]): string {
   const [first] = edits;
   const verb = edits.every((edit) => edit.op === first!.op) ? BATCH_VERBS[first!.op] : "Edit";
   return `${verb} ${edits.length} clips`;
+}
+
+function conflictsOf(error: Partial<RpcError>): RevertConflict[] {
+  const data = error.data as { conflicts?: RevertConflict[] } | undefined;
+  return Array.isArray(data?.conflicts) ? data.conflicts : [];
 }
 
 /**

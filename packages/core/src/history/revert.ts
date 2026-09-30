@@ -26,21 +26,22 @@ import { timelineHash } from "./hash.js";
  * when an operation outside the target, journaled after the target's first
  * operation, left a different value on a track or clip the target changed
  * (a later change that was itself reverted cancels out), or when the file
- * changed outside the journal since the target (see `checkUnbroken`).
+ * changed outside the journal since the target (see `journalGap`).
  */
 export function planRevert(current: Timeline, entries: JournalEntry[], target: string, timeline: string): Timeline {
   const inTarget = (entry: JournalEntry) => entry.id === target || entry.tx === target;
   const first = entries.findIndex(inTarget);
-  if (first === -1) {
+  if (first === -1) throw historyNotFound(target, timeline);
+  const tail = entries.slice(first);
+  const gap = journalGap(current, tail);
+  if (gap !== null) {
     throw new RpcError(
-      ErrorCode.HistoryNotFound,
-      `No ${target.startsWith("tx_") ? "transaction" : "operation"} ${target} in the history of timeline ${timeline}. ` +
-        "List ids with `frameshell history` (pass --timeline for another timeline).",
-      { target, timeline },
+      ErrorCode.RevertConflict,
+      `Cannot revert ${target}: timeline ${timeline} changed outside the journal ${gap}. The journal cannot undo ` +
+        "an edit it did not record, and reverting would overwrite it. Edit the timeline forward instead.",
+      { target, timeline, conflicts: [], hint: "Edit forward; the journal cannot undo changes it did not record." },
     );
   }
-  const tail = entries.slice(first);
-  checkUnbroken(current, tail, target, timeline);
 
   const keys = new Set(tail.filter(inTarget).flatMap((entry) => patchKeys(entry.inverse.args)));
   // Walk back from `current`: before each target op, the values its later
@@ -126,32 +127,36 @@ export function historyView(entries: JournalEntry[], timeline: string, since?: s
   return { timeline, revision: entries.at(-1)?.revision ?? null, since: since ?? null, transactions };
 }
 
+/** HistoryNotFound for a tx or op id missing from `timeline`'s journal. */
+export function historyNotFound(target: string, timeline: string): RpcError {
+  return new RpcError(
+    ErrorCode.HistoryNotFound,
+    `No ${target.startsWith("tx_") ? "transaction" : "operation"} ${target} in the history of timeline ${timeline}. ` +
+      "List ids with `frameshell history` (pass --timeline for another timeline).",
+    { target, timeline },
+  );
+}
+
 /**
- * Throws RevertConflict (empty `conflicts`) unless the journal from the
- * target's first entry on accounts for every change up to `current`: each
- * entry applied to what the previous one wrote (hash and revision), and the
- * file is what the last one wrote. A gap is an unjournaled edit (a hand edit
- * made while no daemon watched, a journal append that failed): it has no inverse, so replaying
- * inverses over it would silently drop it.
+ * Where the journal from `tail`'s first entry on fails to account for every
+ * change up to `current`, as a phrase for error messages; null when it does:
+ * each entry applied to what the previous one wrote (hash and revision), and
+ * the file is what the last one wrote. A gap is an unjournaled edit (a hand
+ * edit made while no daemon watched, a journal append that failed): it has
+ * no inverse, so replaying inverses over it would silently drop it.
  */
-function checkUnbroken(current: Timeline, tail: JournalEntry[], target: string, timeline: string): void {
-  const refuse = (where: string) =>
-    new RpcError(
-      ErrorCode.RevertConflict,
-      `Cannot revert ${target}: timeline ${timeline} changed outside the journal ${where}. The journal cannot undo ` +
-        "an edit it did not record, and reverting would overwrite it. Edit the timeline forward instead.",
-      { target, timeline, conflicts: [], hint: "Edit forward; the journal cannot undo changes it did not record." },
-    );
+export function journalGap(current: Timeline, tail: JournalEntry[]): string | null {
   for (let i = 1; i < tail.length; i++) {
     const [previous, entry] = [tail[i - 1]!, tail[i]!];
     if (entry.hashBefore !== previous.hash || entry.revisionBefore !== previous.revision) {
-      throw refuse(`between ${previous.id} (revision ${previous.revision}) and ${entry.id} (revision ${entry.revisionBefore})`);
+      return `between ${previous.id} (revision ${previous.revision}) and ${entry.id} (revision ${entry.revisionBefore})`;
     }
   }
   const last = tail.at(-1)!;
   if (timelineHash(current) !== last.hash || current.revision !== last.revision) {
-    throw refuse(`after ${last.id} (file at revision ${current.revision}, history ends at ${last.revision})`);
+    return `after ${last.id} (file at revision ${current.revision}, history ends at ${last.revision})`;
   }
+  return null;
 }
 
 function patchKeys(patch: TimelinePatch): string[] {

@@ -383,6 +383,69 @@ describe("revert", () => {
   });
 });
 
+describe("history diff", () => {
+  it("lists the clips a transaction added, removed, moved and changed, with where they were before and right after it", async () => {
+    const { root, timelines, add, apply } = setup();
+    await add("ui", "tx_00000001", 0); // c_1, 0-2
+    await add("ui", "tx_00000001", 3); // c_2, 3-5
+    await add("ui", "tx_00000001", 6); // c_3, 6-8
+    const tx = "tx_000000a1";
+    await apply("cli:agent", tx, { op: "clip.remove", args: { clip: "c_1" } });
+    await apply("cli:agent", tx, { op: "clip.move", args: { clip: "c_2", start: 10 } });
+    await apply("cli:agent", tx, { op: "clip.trim", args: { clip: "c_3", out: 1 } });
+    await add("cli:agent", tx, 20); // c_4
+    // Later changes by someone else do not change what the transaction did.
+    await apply("ui", "tx_000000b1", { op: "clip.move", args: { clip: "c_2", start: 14 } });
+
+    const diff = await timelines.diff(root, "main", tx);
+    expect(diff).toEqual({
+      timeline: "main",
+      target: tx,
+      clips: [
+        { clip: "c_1", change: "removed", before: { track: "t_v", start: 0, end: 2 }, after: null },
+        { clip: "c_2", change: "moved", before: { track: "t_v", start: 3, end: 5 }, after: { track: "t_v", start: 10, end: 12 } },
+        { clip: "c_3", change: "changed", before: { track: "t_v", start: 6, end: 8 }, after: { track: "t_v", start: 6, end: 7 } },
+        { clip: "c_4", change: "added", before: null, after: { track: "t_v", start: 20, end: 22 } },
+      ],
+    });
+  });
+
+  it("diffs a single operation, and leaves out clips a transaction changed and then restored", async () => {
+    const { root, timelines, add, apply } = setup();
+    await add("ui", "tx_00000001", 0);
+    const tx = "tx_000000a1";
+    const move = await apply("cli:agent", tx, { op: "clip.move", args: { clip: "c_1", start: 4 } });
+    await apply("cli:agent", tx, { op: "clip.move", args: { clip: "c_1", start: 0 } });
+
+    expect((await timelines.diff(root, "main", tx)).clips).toEqual([]);
+    expect((await timelines.diff(root, "main", move.operation.id)).clips).toEqual([
+      { clip: "c_1", change: "moved", before: { track: "t_v", start: 0, end: 2 }, after: { track: "t_v", start: 4, end: 6 } },
+    ]);
+  });
+
+  it("reports an unknown target with HistoryNotFound", async () => {
+    const { root, timelines, add } = setup();
+    await add("ui", "tx_00000001", 0);
+    const error = await rejection(timelines.diff(root, "main", "tx_ffffffff"));
+    expect(error.code).toBe(ErrorCode.HistoryNotFound);
+  });
+
+  it("refuses with HistoryUnavailable when the file changed outside the journal since the target", async () => {
+    const { root, add } = setup();
+    const added = await add("cli:agent", "tx_000000a1", 0);
+    const path = join(root, "timelines", "main.json");
+    const timeline = JSON.parse(readFileSync(path, "utf8"));
+    timeline.revision += 1;
+    writeFileSync(path, JSON.stringify(timeline));
+    // Without the head snapshot a restart cannot journal the offline edit: the change stays a gap.
+    rmSync(join(root, ".frameshell", "history", "main.head.json"), { force: true });
+    const restarted = new TimelineService({ probe: async () => PROBE, clipTypes: async () => new Map() });
+    const error = await rejection(restarted.diff(root, "main", added.operation.tx));
+    expect(error.code).toBe(ErrorCode.HistoryUnavailable);
+    expect(error.data).toMatchObject({ target: added.operation.tx, timeline: "main" });
+  });
+});
+
 describe("timeline.changed feed (onChanged)", () => {
   it("fires for a revert, with the revert operation's revision, author and changes", async () => {
     const seen: Array<{ revision: number; author: string; changes: unknown }> = [];
