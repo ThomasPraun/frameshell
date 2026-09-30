@@ -31,7 +31,7 @@ import {
   zoomLimits,
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
-import { DEFAULT_THEME, type DragGhost, type TimelineTheme, paintTimeline } from "../timeline/paint.js";
+import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { PanelHeader } from "./PanelHeader.js";
 
@@ -857,6 +857,7 @@ function ClipList({ layout, fps, selected }: { layout: TimelineLayout | null; fp
           <li key={clip.id} data-clip={clip.id} data-selected={selected.has(clip.id) || undefined}>
             {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
             {clip.problem ? `, ${clip.problem}` : ""}
+            {clipBadges(clip).map((badge) => `, ${badge}`).join("")}
             {selected.has(clip.id) ? ", selected" : ""}
           </li>
         )),

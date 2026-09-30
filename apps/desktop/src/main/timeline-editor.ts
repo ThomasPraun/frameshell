@@ -26,6 +26,7 @@ export const BATCH_AUTO_COMMIT_S = 15;
 /** History label verbs of the ops a batch holds. */
 const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "clip.add": "Insert",
+  "clip.set": "Edit",
   "clip.move": "Move",
   "clip.trim": "Trim",
   "clip.split": "Split",

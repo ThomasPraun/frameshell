@@ -19,10 +19,11 @@ import { useSyncExternalStore } from "react";
  */
 /**
  * Who made a selection. Panels react differently to their own selections
- * than to others': the timeline scrolls a clip into view only when it was
- * selected elsewhere (a script heading, a History row), never under the user's click.
+ * than to others': the timeline scrolls a clip into view only on a reveal
+ * request (a script heading, a History row), never under the user's click;
+ * a click on a layer in the preview selects its clip without moving the playhead.
  */
-export type SelectionOrigin = "timeline" | "script" | "history" | "transcript";
+export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "preview";
 
 /** Timeline seconds `[from, to)`. */
 export interface TimeRange {

@@ -44,6 +44,12 @@ export interface ClipBox {
   speed: number;
   /** Why the length is unknown (daemon's message); null when it is known. */
   problem: string | null;
+  /** `audio.gain`, dB; 0 when unset. */
+  gain: number;
+  /** `audio.muted`. */
+  muted: boolean;
+  /** Stored `transform` with defaults filled; null when the clip has none. */
+  transform: { x: number; y: number; scale: number; opacity: number } | null;
 }
 
 /** One lane, in display order. */
@@ -128,6 +134,9 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
   else if (source) name = /^index\.[a-z]+$/i.test(baseName(source)) ? baseName(parentDir(source)) : baseName(source);
   else name = clip.type;
   const end = clip.end ?? Math.max(nextStart ?? clip.start + UNKNOWN_LENGTH_S, clip.start);
+  const audio = (fields["audio"] ?? {}) as { gain?: unknown; muted?: unknown };
+  const transform = fields["transform"] as Record<string, unknown> | undefined;
+  const part = (key: string, fallback: number) => (typeof transform?.[key] === "number" ? (transform[key] as number) : fallback);
   return {
     id: clip.id,
     type: clip.type,
@@ -139,6 +148,9 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     in: num("in", 0),
     speed: num("speed", 1),
     problem: clip.end === null ? (problem ?? "Length unknown") : null,
+    gain: typeof audio.gain === "number" ? audio.gain : 0,
+    muted: audio.muted === true,
+    transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
   };
 }
 

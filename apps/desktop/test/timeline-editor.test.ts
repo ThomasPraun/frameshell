@@ -89,6 +89,19 @@ describe("TimelineEditor.apply", () => {
     expect(await clip("c_c")).toEqual({ track: "v2", start: 20, end: 22 });
   });
 
+  it("sets a clip's transform and gain (inspector, preview handles) as one undoable ui operation", async () => {
+    const { dir, app, editor } = await setup();
+    const set = await editor.apply(dir, "main", [{ op: "clip.set", args: { clip: "c_c", transform: { x: 120, scale: 0.5 }, gain: -6 } }]);
+    expect(set.operation).toMatchObject({ op: "clip.set", author: "ui" });
+    const stored = async () => {
+      const view = await app.request("timeline.show", { cwd: dir, timeline: "main" });
+      return view.tracks[1]!.clips[0]!;
+    };
+    expect(await stored()).toMatchObject({ transform: { x: 120, scale: 0.5 }, audio: { gain: -6 } });
+    await editor.undo(dir, "main");
+    expect(await stored()).not.toHaveProperty("transform");
+  });
+
   it("refuses operations the timeline panel never sends, before reaching the daemon", async () => {
     const { dir, editor } = await setup();
     const sneaky = { op: "track.remove", args: { track: "v1", force: true } } as unknown as TimelineEdit;
