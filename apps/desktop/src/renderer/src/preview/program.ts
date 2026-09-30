@@ -49,14 +49,17 @@ export type VideoSpan =
       placement: Placement;
     }
   | {
-      /** Adapter clip (HyperFrames, …): played from its cached render (SPEC §6.5) in a page layer, not by the engine. */
+      /**
+       * Adapter clip (HyperFrames, …): its cached render (SPEC §6.5, VP9 WebM, alpha kept) decoded and composited by
+       * the engine like footage. Rendered at the project format, so one render frame per program frame.
+       */
       kind: "generated";
       clip: string;
       /** Adapter clip type, e.g. `hyperframes`. */
       type: string;
       start: number;
       end: number;
-      /** Render seconds shown at `start`: the clip's `in` (render time = composition time). */
+      /** Render frame shown at `start`: the clip's `in` in frames (render time = composition time). */
       in: number;
       /** Render cache state; null until known. */
       render: LayerRender | null;
@@ -244,7 +247,11 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
     return x.proxy === y.proxy && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
-  if (x.kind === "generated" && y.kind === "generated") return x.clip === y.clip;
+  if (x.kind === "generated" && y.kind === "generated") {
+    // Not ready yet: nothing drawn either way. Ready: the same file shows the same frames.
+    const file = (s: typeof x) => (s.render?.state === "ready" ? s.render.file : null);
+    return file(x) === file(y) && (file(x) === null ? x.clip === y.clip : x.in - x.start === y.in - y.start);
+  }
   return x.kind === "placeholder" && y.kind === "placeholder" && x.reason === y.reason && x.clip === y.clip;
 }
 
@@ -297,7 +304,7 @@ function pictureOf(
   renders: ReadonlyMap<string, ClipRenderInfo> | undefined,
 ): VideoSpan | null {
   const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: clip.id, start, end, reason, type: clip.type });
-  if (clip.type !== "media" && clip.type !== "timeline") return generatedOf(clip, start, end, renders?.get(clip.id));
+  if (clip.type !== "media" && clip.type !== "timeline") return generatedOf(clip, start, end, fps, renders?.get(clip.id));
   if (!("asset" in clip)) return placeholder("timeline");
   if (!info) return placeholder("unavailable");
   const video = info.media?.video;
@@ -312,7 +319,7 @@ function pictureOf(
   return placeholder("unavailable");
 }
 
-function generatedOf(clip: Clip, start: number, end: number, info: ClipRenderInfo | undefined): VideoSpan {
+function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): VideoSpan {
   const ready = info?.state === "ready" && info.file ? info : null;
   const render: LayerRender | null = ready
     ? { state: "ready", file: ready.file! }
@@ -321,5 +328,5 @@ function generatedOf(clip: Clip, start: number, end: number, info: ClipRenderInf
       : null;
   const size = ready && ready.width && ready.height ? { width: ready.width, height: ready.height } : null;
   const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;
-  return { kind: "generated", clip: clip.id, type: clip.type, start, end, in: clipIn, render, size, placement: placementOf(clip.transform) };
+  return { kind: "generated", clip: clip.id, type: clip.type, start, end, in: Math.round(clipIn * fps), render, size, placement: placementOf(clip.transform) };
 }

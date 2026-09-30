@@ -10,11 +10,11 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type ExportPreset, type Size, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
+import type { ExportPreset, Size, Timeline, Transcript } from "@frameshell/schema";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
-import { readTimelineFile } from "../timeline/service.js";
+import { resolveNested } from "../timeline/nested.js";
 import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type ExportSource,
@@ -295,22 +295,7 @@ export class ExportService {
    */
   async #resolved(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
     const { timeline, fps } = await this.#options.loadTimeline(root, id);
-    const read = this.#options.readNested ?? readNestedFile;
-    const nested = new Map<string, Timeline | null>();
-    const pending = [timeline];
-    // Read every file the nesting reaches once; flattenTimeline itself stops cycles.
-    while (pending.length > 0) {
-      for (const track of pending.pop()!.tracks) {
-        if (track.kind === "subtitles") continue;
-        for (const clip of track.clips) {
-          if (clip.type !== "timeline" || !("source" in clip) || !clip.source || nested.has(clip.source)) continue;
-          const found = await read(root, clip.source);
-          nested.set(clip.source, found);
-          if (found) pending.push(found);
-        }
-      }
-    }
-    return { timeline: flattenTimeline(timeline, (source) => nested.get(source) ?? null), fps };
+    return { timeline: await resolveNested(root, timeline, this.#options.readNested), fps };
   }
 
   /** Transcripts of the assets subtitle tracks follow, by asset; assets without one are absent. */
@@ -364,15 +349,6 @@ const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
 async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
   try {
     return (await resolveTranscript(root, asset)).previous;
-  } catch (error) {
-    if (error instanceof RpcError) return null;
-    throw error;
-  }
-}
-
-async function readNestedFile(root: string, source: string): Promise<Timeline | null> {
-  try {
-    return await readTimelineFile(root, source);
   } catch (error) {
     if (error instanceof RpcError) return null;
     throw error;

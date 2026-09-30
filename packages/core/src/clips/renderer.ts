@@ -8,6 +8,7 @@ import type { AdapterClip, Timeline } from "@frameshell/schema";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
+import { type NestedReader, resolveNested } from "../timeline/nested.js";
 import { clipCacheKey } from "./cache-key.js";
 
 /** Project-relative directory of the clip render cache (SPEC §5.1, §6.5). */
@@ -64,6 +65,8 @@ export interface ClipRendererOptions {
    * missing or invalid.
    */
   peek(root: string, id: string): Promise<Timeline>;
+  /** Nested timeline by clip `source`, for {@link ClipRenderer.status}. Default: read the file. */
+  readNested?: NestedReader;
   /** Project fps and resolution from `frameshell.json`. */
   format(root: string): Promise<ClipFormat>;
   /** Size and length of a finished render (ffprobe). */
@@ -182,10 +185,17 @@ export class ClipRenderer {
     return state.run;
   }
 
-  /** Render state of every generated clip of timeline `id`; queues renders that are due. */
+  /**
+   * Render state of every generated clip timeline `id` shows, nested ones
+   * included under their flattened id (`<nested clip>/<clip>`, as export and
+   * the preview name them) and their root track; queues renders that are due.
+   */
   async status(root: string, id: string): Promise<ClipRendersResult> {
     const { timeline } = await this.#options.load(root, id);
-    const placed = generatedClips(timeline);
+    const hosts = timeline.tracks.map((track) => track.id);
+    // Flattening adds layers `<track>/<n>`: report the root track that shows them.
+    const host = (track: string) => (hosts.includes(track) ? track : (hosts.find((candidate) => track.startsWith(`${candidate}/`)) ?? track));
+    const placed = generatedClips(await resolveNested(root, timeline, this.#options.readNested)).map((p) => ({ ...p, track: host(p.track) }));
     const adapters = placed.length > 0 ? await this.#options.adapters(root) : new Map<string, RegisteredClipType>();
     const format = await this.#options.format(root);
     const clips: ClipRenderInfo[] = [];

@@ -5,23 +5,25 @@ import { type ClipRenders, applyClipJob } from "./clip-renders.js";
 
 const EMPTY: ClipRenders = new Map();
 
+const hasGenerated = (view: TimelineView) =>
+  view.tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.type !== "media" && clip.type !== "timeline"));
+
 /**
- * Render states of `view`'s generated clips, live: re-read on every
- * revision and whenever a render finishes; progress follows `clip` job
- * events. Empty while the timeline has no generated clips (no daemon call).
+ * Render states of the generated clips `view` shows, nested ones included
+ * (by flattened id `<nested clip>/<clip>`, as `clip.renders` reports them),
+ * live: re-read on every revision of `view` or of a timeline it nests, and
+ * whenever a render finishes; progress follows `clip` job events. Empty
+ * while none of them has generated clips (no daemon call).
  */
-export function useClipRenders(view: TimelineView | null): ClipRenders {
+export function useClipRenders(view: TimelineView | null, nested: ReadonlyMap<string, TimelineView>): ClipRenders {
   const [renders, setRenders] = useState<ClipRenders>(EMPTY);
   const [reads, setReads] = useState(0);
   // Events arrive outside React renders: fold them into the newest state, not a stale closure.
   const latest = useRef(renders);
   const timeline = view?.timeline ?? null;
   const revision = view?.revision ?? null;
-  const generated = useMemo(
-    () =>
-      view?.tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.type !== "media" && clip.type !== "timeline")) ?? false,
-    [view],
-  );
+  const nestedRevisions = useMemo(() => [...nested.values()].map((v) => `${v.timeline}@${v.revision}`).join(","), [nested]);
+  const generated = useMemo(() => (view ? hasGenerated(view) || [...nested.values()].some(hasGenerated) : false), [view, nested]);
 
   useEffect(() => {
     if (!timeline || !generated) {
@@ -40,7 +42,7 @@ export function useClipRenders(view: TimelineView | null): ClipRenders {
     return () => {
       disposed = true;
     };
-  }, [timeline, revision, generated, reads]);
+  }, [timeline, revision, nestedRevisions, generated, reads]);
 
   useEffect(() => {
     if (!generated) return;

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/timeline.json",
+  "schemaVersion": 1,
+  "id": "inner",
+  "revision": 0,
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "Nested card",
+      "clips": [{ "id": "c_card", "type": "card", "source": "compositions/cards/nested.json", "start": 0, "duration": 3 }]
+    }
+  ]
+}

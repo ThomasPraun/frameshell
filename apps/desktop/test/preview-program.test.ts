@@ -160,7 +160,7 @@ describe("compileProgram", () => {
     const program = compileProgram(
       view([
         { id: "v1", kind: "video", name: null, follows: null, clips: [clip("c1", 0, 0, 2), generated("g1", 2, 1)] },
-        { id: "v2", kind: "video", name: null, follows: null, clips: [generated("g2", 0.5, 1, { in: 0.25, transform: { x: 40, scale: 0.5 } }), generated("g3", 1.5, 1)] },
+        { id: "v2", kind: "video", name: null, follows: null, clips: [generated("g2", 0.5, 1, { in: 0.5, transform: { x: 40, scale: 0.5 } }), generated("g3", 1.5, 1)] },
       ]),
       assets(asset("assets/a.mp4")),
       {
@@ -177,7 +177,7 @@ describe("compileProgram", () => {
     });
     expect(program.layers[1]).toEqual([
       {
-        kind: "generated", clip: "g2", type: "hyperframes", start: 15, end: 45, in: 0.25,
+        kind: "generated", clip: "g2", type: "hyperframes", start: 15, end: 45, in: 15,
         render: { state: "ready", file: ".frameshell/cache/clips/k2.webm" }, size: HD, placement: { ...IDENTITY, x: 40, scale: 0.5 },
       },
       { kind: "generated", clip: "g3", type: "hyperframes", start: 45, end: 75, in: 0, render: null, size: null, placement: IDENTITY },
@@ -306,6 +306,23 @@ describe("program differences (live timeline changes)", () => {
     expect(firstVideoDifference(one, overlay, 0, 0)).toBe(Infinity);
     expect(firstVideoDifference(one, overlay, 0, 1)).toBe(30);
     expect(firstVideoDifference(overlay, two([clip("o1", 1, 5, 6)]), 0, 1)).toBe(30);
+  });
+
+  it("sees a generated clip's render arriving or changing as a new picture from the clip's start", () => {
+    const card = (start: number, extra: Record<string, unknown> = {}) => ({ id: "g1", type: "card", start, duration: 1, end: start + 1, ...extra });
+    const render = (state: "ready" | "rendering", key = "k1"): ClipRenderInfo => ({
+      clip: "g1", track: "v1", type: "card", source: null, state, key, file: state === "ready" ? `.frameshell/cache/clips/${key}.webm` : null,
+      hasAlpha: state === "ready" ? true : null, width: 64, height: 36, duration: 1, job: null, progress: state === "ready" ? 1 : 0.5, error: null,
+    });
+    const at = (clips: Track["clips"], info: ClipRenderInfo) =>
+      compileProgram(view([{ id: "v1", kind: "video", name: null, follows: null, clips }]), assets(), { renders: new Map([["g1", info]]) });
+    const pending = at([card(2)], render("rendering"));
+    const ready = at([card(2)], render("ready"));
+    expect(firstVideoDifference(pending, ready, 0)).toBe(60);
+    expect(firstVideoDifference(ready, at([card(2)], render("ready", "k2")), 0)).toBe(60);
+    // Same render file and frames: nothing to decode again. Another `in` shows other frames.
+    expect(firstVideoDifference(ready, at([card(2)], render("ready")), 0)).toBe(Infinity);
+    expect(firstVideoDifference(ready, at([card(2, { in: 0.5 })], render("ready")), 0)).toBe(60);
   });
 
   it("sees a clip added later in the program only from its start", () => {

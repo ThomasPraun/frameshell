@@ -197,6 +197,27 @@ describe("clip render cache", () => {
     TIMEOUT,
   );
 
+  it(
+    "reports generated clips inside nested timelines under their composed id (`<nested clip>/<clip>`), from the same cache",
+    async () => {
+      writeCard("inner", { color: "blue", seconds: 3 });
+      const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [] as unknown[] }] };
+      inner.tracks[0]!.clips.push({ id: "c_card", type: "card", source: "compositions/cards/inner.json", start: 0.5, duration: 2 });
+      await conn.request("file.write", { path: join(project, "timelines", "inner.json"), content: JSON.stringify(inner) });
+      const nestTrack = (await conn.request("track.add", { cwd: project, kind: "video" })).changes.added[0]!;
+      const main = JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")) as { tracks: { id: string; clips: unknown[] }[] };
+      main.tracks.find((t) => t.id === nestTrack)!.clips.push({ id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 20, in: 1, duration: 1 });
+      await conn.request("file.write", { path: join(project, "timelines", "main.json"), content: JSON.stringify(main) });
+
+      // The nested file's own clip renders in the background; the root reports it where the nesting shows it.
+      const nested = await until("c_nest/c_card", (info) => info.state === "ready");
+      expect(nested).toMatchObject({ track: nestTrack, type: "card", source: "compositions/cards/inner.json", hasAlpha: true });
+      const own = (await conn.request("clip.renders", { cwd: project, timeline: "inner" })).clips;
+      expect(own).toEqual([expect.objectContaining({ clip: "c_card", track: "t_in", key: nested.key, file: nested.file })]);
+    },
+    TIMEOUT,
+  );
+
   it("reports clips no loaded plugin renders as unavailable, and refuses to export them", async () => {
     const other = tempDir();
     await conn.request("project.init", { dir: other });

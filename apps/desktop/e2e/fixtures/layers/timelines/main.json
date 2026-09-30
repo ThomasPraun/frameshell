@@ -3,5 +3,9 @@
   "schemaVersion": 1,
   "id": "main",
   "revision": 0,
-  "tracks": [{ "id": "v1", "kind": "video", "name": "Titles", "clips": [] }]
+  "tracks": [
+    { "id": "v1", "kind": "video", "name": "Titles", "clips": [] },
+    { "id": "v2", "kind": "video", "name": "Cards", "clips": [] },
+    { "id": "v3", "kind": "video", "name": "Overlay", "clips": [] }
+  ]
 }
