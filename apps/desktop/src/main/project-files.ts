@@ -1,4 +1,6 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { type FSWatcher as FsWatcher, watch as fsWatch } from "node:fs";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import type { FileNode } from "../shared/api.js";
@@ -23,11 +25,16 @@ const MAX_READ_BYTES = 5 * 1024 * 1024;
 const MAX_ENTRIES = 20_000;
 /** Coalesce bursts (git checkout, agent writing many files) into one change event. */
 const DEBOUNCE_MS = 60;
+/** Give up proving the OS watch stream live after this; open still succeeds, as before the handshake. */
+const LIVENESS_TIMEOUT_MS = 5_000;
+/** Probe rewrite period while waiting: writes during the blind window are lost, so keep writing. */
+const PROBE_INTERVAL_MS = 10;
 
 /**
  * Watch `root` and call `onChange` with project-relative, `/`-separated
  * paths each time files or folders are added, changed or removed. Resolves
- * once the watcher is ready, so later disk changes are never missed.
+ * once the watcher is ready and the OS event stream is proven live (see
+ * {@link armWatchStream}), so later disk changes are not missed.
  */
 export async function openProjectFiles(root: string, onChange: (paths: string[]) => void): Promise<ProjectFiles> {
   const toRel = (path: string) => relative(root, path).split(sep).join("/");
@@ -52,6 +59,7 @@ export async function openProjectFiles(root: string, onChange: (paths: string[])
     watcher.once("ready", ready);
     watcher.once("error", fail);
   });
+  const closeProbe = await armWatchStream();
 
   return {
     tree: async () => {
@@ -71,8 +79,50 @@ export async function openProjectFiles(root: string, onChange: (paths: string[])
     close: async () => {
       clearTimeout(timer);
       await watcher.close();
+      await closeProbe();
     },
   };
+}
+
+/**
+ * Wait until this process's directory watches deliver events; returns the probe's closer.
+ *
+ * macOS: libuv feeds every directory `fs.watch` from one shared FSEvents stream and
+ * rebuilds it on a background thread after each new watch. `fs.watch` returns (and
+ * chokidar goes `ready`) before the rebuilt stream exists; changes in that gap are
+ * dropped, not delayed. A probe folder watched after the project folders joins the
+ * stream last, so its first event proves a stream holding the project folders is live.
+ * Probe stays watched until close: closing it would rebuild the stream again.
+ * Linux (inotify) and Windows watches are live on return: first probe write answers.
+ * Probe lives in the OS temp dir: main never writes into the project.
+ * Best effort: temp dir unusable or no event within {@link LIVENESS_TIMEOUT_MS}, open proceeds.
+ */
+async function armWatchStream(): Promise<() => Promise<void>> {
+  let dir: string | undefined;
+  let probeWatcher: FsWatcher | undefined;
+  const closeProbe = async () => {
+    probeWatcher?.close();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  };
+  try {
+    dir = await mkdtemp(join(tmpdir(), "frameshell-watch-probe-"));
+    let live = false;
+    probeWatcher = fsWatch(dir, () => {
+      live = true;
+    });
+    probeWatcher.on("error", () => {}); // Best effort: a broken probe must not crash main.
+    const probe = join(dir, "probe");
+    const deadline = Date.now() + LIVENESS_TIMEOUT_MS;
+    for (let n = 0; !live && Date.now() < deadline; n++) {
+      await writeFile(probe, String(n));
+      await new Promise((settle) => setTimeout(settle, PROBE_INTERVAL_MS));
+    }
+  } catch {
+    // Temp dir unusable: open anyway, without the liveness guarantee.
+    await closeProbe();
+    return async () => {};
+  }
+  return closeProbe;
 }
 
 async function listDir(root: string, rel: string, budget: { left: number }): Promise<FileNode[]> {
