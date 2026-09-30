@@ -62,6 +62,8 @@ Commands:
                                or the preset's)
   script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
+  mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
+                               files as resources. Register: claude mcp add frameshell -- frameshell mcp
   <plugin> <command> [args…]   Run a plugin-provided command
 
 ${TIMELINE_USAGE}
@@ -118,6 +120,10 @@ interface Flags {
  */
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   const firstWord = argv.find((arg) => !arg.startsWith("-"));
+  if (firstWord === "mcp") {
+    io.stderr("`frameshell mcp` serves MCP over the process's own stdin/stdout; run the `frameshell` binary.\n");
+    return 2;
+  }
   let invocation: Invocation;
   let flags: Flags;
   if (firstWord !== undefined && !BUILTINS.has(firstWord)) {

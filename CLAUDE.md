@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`, `plugins/whisper-cpp`, `apps/desktop` (Electron). Node >= 22.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp,plugin-api}`, `plugins/whisper-cpp`, `apps/desktop` (Electron). Node >= 22.
 
 ## Doc map
 
@@ -26,6 +26,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
 | Desktop selection (shared store, extend, never duplicate) | `apps/desktop/src/renderer/src/selection.ts` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
+| MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
 
 ## Rules

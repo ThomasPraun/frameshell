@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@frameshell/core": "workspace:*",
+    "@frameshell/mcp": "workspace:*",
     "@frameshell/protocol": "workspace:*"
   }
 }
