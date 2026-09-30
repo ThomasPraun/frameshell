@@ -34,8 +34,18 @@ export function sandbox(fixture: string): Sandbox {
   };
 }
 
-/** Start the app on the sandbox project, in a laptop-sized window. */
-export async function launch(box: Sandbox): Promise<{ app: ElectronApplication; page: Page }> {
+/**
+ * Daemon cold start plus project open, bounded apart from assertion timeouts: on a starved machine the daemon took
+ * 29 s to listen. Matches the app's own daemon start timeout.
+ */
+const OPEN_TIMEOUT_MS = 60_000;
+
+/**
+ * Start the app on the sandbox project, in a laptop-sized window. Resolves once the startup open settled (the boot
+ * screen gave way to the project, or to the welcome screen), so a spec's first assertion measures what it tests, not
+ * a cold daemon. `settled: false` returns while the boot screen may still show.
+ */
+export async function launch(box: Sandbox, { settled = true } = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
@@ -60,6 +70,7 @@ export async function launch(box: Sandbox): Promise<{ app: ElectronApplication; 
     page.on("console", (message) => {
       if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
     });
+    if (settled) await expect(page.locator(".boot")).toHaveCount(0, { timeout: OPEN_TIMEOUT_MS });
     return { app, page };
   } catch (error) {
     // The caller never gets `app` to close: a leaked app stalls worker teardown and loads the next spec's machine.

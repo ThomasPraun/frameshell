@@ -27,7 +27,7 @@ async function silentDaemon(): Promise<{ server: Server; stop: () => Promise<voi
 
 test("the window loads at once, and opens the project when a slow daemon finally answers", async () => {
   const daemon = await silentDaemon();
-  const { app, page } = await launch(box);
+  const { app, page } = await launch(box, { settled: false });
   try {
     await expect(page.locator(".boot")).toHaveCount(1);
     await expect(page.locator(".welcome")).toHaveCount(0);
