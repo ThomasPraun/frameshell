@@ -118,6 +118,26 @@ describe("transactions", () => {
     await expect(agent.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
   });
 
+  it("refuses to abort a transaction that removed a track after the human added one, naming the human's operation", async () => {
+    const { dir, connect, addTrack, tracks } = await setup();
+    const agent = await connect("cli/test", "agent");
+    const app = await connect("desktop/0.1.0");
+    // Removing the bottom track journals a full `order`: its inverse must put it back under "Kept".
+    const gone = await addTrack(agent, "Gone");
+    await addTrack(agent, "Kept");
+    await sleep(GAP_MS * 2);
+    await agent.request("tx.begin", { label: "cleanup" });
+    await agent.request("track.remove", { cwd: dir, track: gone.changes.added[0]! });
+    const humanOp = await addTrack(app, "Human");
+    await expect(agent.request("tx.abort", {})).rejects.toMatchObject({
+      code: ErrorCode.RevertConflict,
+      data: { conflicts: [expect.objectContaining({ id: humanOp.operation.id, op: "track.add", author: "ui" })] },
+    });
+    await app.request("revert", { cwd: dir, target: humanOp.operation.id });
+    await agent.request("tx.abort", {});
+    expect(await tracks()).toEqual(["Gone", "Kept"]);
+  });
+
   it("shows the agent what the human changed since its last transaction", async () => {
     const { dir, connect, addTrack } = await setup();
     const agent = await connect("cli/test", "agent");

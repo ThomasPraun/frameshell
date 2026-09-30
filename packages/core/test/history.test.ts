@@ -168,6 +168,27 @@ describe("revert", () => {
     expect(tracks()).toEqual(before);
   });
 
+  it("names a later track add or remove as the conflict when the target changed the track order", async () => {
+    const { apply, revert, tracks } = setup();
+    await apply("ui", "tx_000000b0", { op: "track.add", args: { kind: "audio" } });
+    const before = tracks();
+    const removed = await apply("cli:agent", "tx_000000a1", { op: "track.remove", args: { track: "t_v", force: false } });
+    const human = await apply("ui", "tx_000000b1", { op: "track.add", args: { kind: "audio" } });
+
+    const conflict = await rejection(revert("cli:agent", "tx_000000a2", removed.operation.id));
+    expect(conflict.code).toBe(ErrorCode.RevertConflict);
+    expect(conflict.message).toMatch(new RegExp(`${human.operation.id}.*track\\.add.*ui`, "s"));
+    expect(conflict.message).not.toMatch(/no longer matches/);
+    expect(conflict.data).toMatchObject({
+      target: removed.operation.id,
+      conflicts: [{ id: human.operation.id, op: "track.add", author: "ui", tx: "tx_000000b1" }],
+    });
+
+    await revert("cli:agent", "tx_000000a2", human.operation.id);
+    await revert("cli:agent", "tx_000000a3", removed.operation.id);
+    expect(tracks()).toEqual(before);
+  });
+
   it("treats reverting twice as a conflict with the first revert", async () => {
     const { add, revert } = setup();
     const added = await add("cli:agent", "tx_000000a1", 0);

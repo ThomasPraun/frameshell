@@ -67,7 +67,9 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
         conflicts.set(other.id, conflict);
       }
     }
-    restored = rewind(restored, entry, target, timeline);
+    // A conflict discards `restored`. Rewinding it anyway can fail (an `order`
+    // patch misses a later foreign track) and would hide the conflicting op.
+    if (conflicts.size === 0) restored = rewind(restored, entry, target, timeline);
     state = previous;
     anchor = snapshot(state, keys);
     segment = [];
