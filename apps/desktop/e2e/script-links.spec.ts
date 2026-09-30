@@ -111,7 +111,12 @@ test("clicking a clip on the canvas selects it and highlights its scene", async 
   expect(isAccent(await frameColor("c_demo"))).toBe(false);
   await expect(selectedHeadings()).toHaveCount(1);
   const intro = (await line("## Intro").boundingBox())!;
-  expect(Math.abs((await selectedHeadings().boundingBox())!.y - intro.y)).toBeLessThan(2);
+  await expect
+    .poll(async () => {
+      const heading = await selectedHeadings().boundingBox();
+      return heading ? Math.abs(heading.y - intro.y) : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThan(2);
 });
 
 test("Shift-click adds a clip, a click on empty lane clears", async () => {
@@ -132,7 +137,14 @@ test("clicking a scene heading selects its clips on the canvas", async () => {
   await expect.poll(async () => isAccent(await frameColor("c_demo"))).toBe(true);
   expect(isAccent(await frameColor("c_intro"))).toBe(false);
   const demo = (await line("## Demo").boundingBox())!;
-  await expect.poll(async () => Math.abs((await selectedHeadings().boundingBox())!.y - demo.y)).toBeLessThan(2);
+  // Monaco repaints decorations after the store updates: the heading has no box until then (null), so retry.
+  await expect(selectedHeadings()).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const heading = await selectedHeadings().boundingBox();
+      return heading ? Math.abs(heading.y - demo.y) : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThan(2);
 });
 
 test("a clip linked to the whole script highlights every scene", async () => {
