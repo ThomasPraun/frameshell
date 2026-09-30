@@ -45,7 +45,34 @@ describe("method registry JSON Schema", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)
       .map(([name]) => name);
-    expect(internal).toEqual(["handshake", "session.tag", "events.subscribe", "events.unsubscribe"]);
+    expect(internal).toEqual(["handshake", "session.tag", "events.subscribe", "events.unsubscribe", "ui.publish", "ui.reply", "ui.detach"]);
+  });
+});
+
+describe("UI state and navigation methods (SPEC §7b)", () => {
+  const schemas = methodJsonSchemas();
+  const cwd = process.cwd();
+
+  it("declares every model-facing UI method, taking the project from cwd", () => {
+    for (const name of ["ui.state", "ui.seek", "ui.play", "ui.pause", "ui.select", "ui.openFile", "ui.showTxDiff"] as const) {
+      expect(schemas[name].internal, name).toBe(false);
+      expect(schemas[name].mutating, name).toBe(false);
+      expect(schemas[name].params, name).toMatchObject({ required: expect.arrayContaining(["cwd"]) });
+    }
+  });
+
+  it("lets ui.state answer { connected: false } without the app", () => {
+    expect(methods["ui.state"].result.parse({ connected: false })).toEqual({ connected: false });
+  });
+
+  it("defaults ui.select to clearing what is omitted and revealing the first clip", () => {
+    expect(parseParams("ui.select", { cwd, clips: ["c_1"] })).toEqual({ cwd, clips: ["c_1"], words: [], range: null, reveal: true });
+    expect(() => parseParams("ui.select", { cwd, range: { from: 3, to: 2 } })).toThrow(/params\.range\.to/);
+  });
+
+  it("takes ids, not free text, for the History entry to show", () => {
+    expect(parseParams("ui.showTxDiff", { cwd, target: "tx_0000000a" })).toEqual({ cwd, timeline: "main", target: "tx_0000000a" });
+    expect(() => parseParams("ui.showTxDiff", { cwd, target: "latest" })).toThrow(/params\.target/);
   });
 });
 

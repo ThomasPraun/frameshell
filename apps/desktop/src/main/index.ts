@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { TimelineRejection } from "@frameshell/protocol";
+import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
@@ -28,6 +28,7 @@ import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
+import { UiBridge } from "./ui-bridge.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
@@ -41,6 +42,18 @@ const daemon = new DaemonLink({
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
 });
 const editor = new TimelineEditor((method, params) => daemon.request(method, params));
+// SPEC §7b: each window's state to the daemon, the daemon's navigation commands to the window. Window key = webContents id.
+const ui = new UiBridge({
+  request: (method, params) => daemon.request(method, params),
+  deliver: (view, project, message) => {
+    const state = windows.get(Number(view));
+    if (!state || state.project?.dir !== project || state.window.webContents.isDestroyed()) return false;
+    send(state.window.webContents, Channel.uiCommand, message.id, message.command);
+    return true;
+  },
+});
+daemon.on("ui.command", (params) => ui.command(params));
+daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const binDir = join(app.getPath("userData"), "bin");
 const recentFile = join(app.getPath("userData"), "recent.json");
@@ -122,6 +135,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     void state.files?.close();
     for (const subscription of state.daemonEvents) void subscription.unsubscribe();
     if (state.project) mediaRoots.revoke(state.project.mediaUrl);
+    ui.detach(String(contents.id));
     windows.delete(contents.id);
   });
 
@@ -157,6 +171,8 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   };
   await state.files?.close();
   await Promise.all(state.daemonEvents.splice(0).map((subscription) => subscription.unsubscribe()));
+  // The renderer publishes the new project's state once it shows it.
+  ui.detach(String(state.window.webContents.id));
   const contents = state.window.webContents;
   state.files = await openProjectFiles(project.dir, (paths) => send(contents, Channel.filesChanged, paths));
   // Subscribed before the renderer first reads the timeline, so no change falls in between. The daemon
@@ -312,6 +328,13 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.historyRevert, (event, timeline: string, target: string) =>
     outcome(async () => editor.revert(requireProject(stateOf(event.sender)).project.dir, timeline, target)),
+  );
+  ipcMain.on(Channel.uiPublish, (event, view: UiView) => {
+    const { project } = stateOf(event.sender);
+    if (project) ui.publish(String(event.sender.id), project.dir, view);
+  });
+  ipcMain.on(Channel.uiReply, (event, id: string, error: string | null, view: UiView) =>
+    ui.reply(String(event.sender.id), id, error, view),
   );
   ipcMain.handle(Channel.mediaAssets, (event) =>
     outcome(async () => {

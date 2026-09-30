@@ -1,9 +1,9 @@
-import type { EventName, EventParams } from "@frameshell/protocol";
+import type { EventName, EventParams, NotificationName } from "@frameshell/protocol";
 
 /** Where a subscribed connection's notifications go. */
 export interface EventSink {
   /** Send one notification. Must not throw; a closed connection drops it. */
-  notify(method: EventName, params: unknown): void;
+  notify(method: NotificationName, params: unknown): void;
 }
 
 /** One connection's subscription to one project. */

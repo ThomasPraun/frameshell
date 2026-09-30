@@ -36,6 +36,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Ask agent (Cmd/Ctrl+L, context menu, reference format, preview region, `.frameshell/context/`) | `renderer/src/ask/`; main `src/main/context-frames.ts` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
+| MCP UI state + navigation (`ui_*`, broker daemon → app window) | `docs/mcp.md`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
 
 ## Rules

@@ -35,6 +35,7 @@ import {
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { uiLink } from "../ui-link.js";
 import { PanelHeader } from "./PanelHeader.js";
 
 /** Timeline the panel follows: the one selections name, the project's `main` until timelines can be switched. */
@@ -249,6 +250,8 @@ function TimelineCanvas({
     if (heads.current) heads.current.style.transform = `translateY(${-view.scrollTop}px)`;
     // Written per paint, outside React: tests and DevTools see when waveforms or thumbnails arrive.
     element.parentElement?.setAttribute("data-media-drawn", String(mediaDrawn));
+    // Scroll, zoom and resize all repaint: the agent's `ui_state.visible` follows (throttled there).
+    uiLink.changed();
   }, []);
 
   const schedule = useCallback(() => {
@@ -306,6 +309,16 @@ function TimelineCanvas({
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
   }, [layout, revision, selected, range, diff, settle, draw]);
+
+  // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
+  useEffect(() => {
+    uiLink.setViewport(() => {
+      const view = state.current;
+      if (view.width === 0 || view.pxPerSecond <= 0) return null;
+      return { from: view.scrollLeft / view.pxPerSecond, to: (view.scrollLeft + view.width) / view.pxPerSecond };
+    });
+    return () => uiLink.setViewport(null);
+  }, []);
   // The playhead moves every frame while playing: repaint outside React, and page the lanes to keep it in view.
   useEffect(
     () =>
@@ -313,8 +326,9 @@ function TimelineCanvas({
         const { time, playing } = transport.get();
         const view = state.current;
         const x = time * view.pxPerSecond - view.scrollLeft;
-        if (playing && gesture.current?.kind !== "scrub" && view.width > 0 && (x < 0 || x > view.width - 16)) {
-          view.scrollLeft = Math.max(0, time * view.pxPerSecond - view.width * 0.1);
+        // Playing pages ahead; a jump from elsewhere (agent `ui_seek`, preview keys) centers the playhead.
+        if (gesture.current?.kind !== "scrub" && view.width > 0 && (x < 0 || x > view.width - 16)) {
+          view.scrollLeft = Math.max(0, time * view.pxPerSecond - view.width * (playing ? 0.1 : 0.5));
           settle();
         }
         lanesEl.current?.setAttribute("data-playhead", String(time));

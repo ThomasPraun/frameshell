@@ -1,8 +1,8 @@
 import { createConnection, type Socket } from "node:net";
 import { type JsonRpcResponse, readMessages, writeMessage } from "./framing.js";
 import {
-  type EventName,
   type EventParams,
+  type NotificationName,
   type HandshakeResult,
   type MethodName,
   type MethodParams,
@@ -49,11 +49,12 @@ export interface DaemonConnection {
    */
   request<M extends MethodName>(method: M, params: MethodParams<M>, options?: RequestOptions): Promise<MethodResult<M>>;
   /**
-   * Listen to event `event` on this connection. The daemon only sends it after
-   * `events.subscribe`; payloads failing the registry schema are dropped.
-   * Returns the function that removes the listener.
+   * Listen to notification `event` on this connection. Events arrive only
+   * after `events.subscribe`; `ui.command` only after `ui.publish`. Payloads
+   * failing the registry schema are dropped. `progress` goes to the request's
+   * `onProgress` instead. Returns the function that removes the listener.
    */
-  on<E extends EventName>(event: E, listener: (params: EventParams<E>) => void): () => void;
+  on<E extends Exclude<NotificationName, "progress">>(event: E, listener: (params: EventParams<E>) => void): () => void;
   /** Resolves once the connection is closed, by either side. Never rejects. */
   readonly closed: Promise<void>;
   /** End the connection. Pending requests reject. */
@@ -114,7 +115,7 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   const dispatchEvent = (method: string, params: unknown) => {
     const subscribers = listeners.get(method);
     if (!subscribers || subscribers.size === 0 || !Object.hasOwn(notifications, method)) return;
-    const parsed = notifications[method as EventName].params.safeParse(params);
+    const parsed = notifications[method as NotificationName].params.safeParse(params);
     if (!parsed.success) return;
     for (const listener of [...subscribers]) listener(parsed.data as never);
   };

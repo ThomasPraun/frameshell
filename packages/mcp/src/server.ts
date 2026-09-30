@@ -43,7 +43,9 @@ const INSTRUCTIONS =
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
   "group several operations. Look at what you built with `frame_capture` and `frames_strip`. `history` with `since` " +
-  "shows what the human changed after your last transaction. Tools default `cwd` to the project this server runs in.";
+  "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
+  "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
+  "Tools default `cwd` to the project this server runs in.";
 
 /**
  * Stdio-agnostic MCP server over frameshelld (SPEC §7b): every public registry

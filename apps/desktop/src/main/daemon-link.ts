@@ -51,6 +51,10 @@ interface Subscriber {
   handlers: EventHandlers<EventName>;
 }
 
+/** Notifications sent to this connection without `events.subscribe`: `ui.command` follows `ui.publish`. */
+type DirectNotification = "ui.command";
+const DIRECT_NOTIFICATIONS: readonly DirectNotification[] = ["ui.command"];
+
 /** First reconnect delay; doubles per failed attempt up to {@link MAX_RETRY_MS}. */
 const FIRST_RETRY_MS = 50;
 const MAX_RETRY_MS = 2_000;
@@ -70,6 +74,8 @@ export class DaemonLink {
   readonly #subscribers = new Set<Subscriber>();
   /** Terminal session → agent label, as last sent with `session.tag`. */
   readonly #tags = new Map<string, string>();
+  readonly #listeners = new Map<DirectNotification, Set<(params: never) => void>>();
+  readonly #reconnectListeners = new Set<() => void>();
   #closed = false;
   #retryTimer: NodeJS.Timeout | undefined;
 
@@ -125,12 +131,37 @@ export class DaemonLink {
     await this.request("session.tag", { session, agent });
   }
 
+  /**
+   * Deliver notification `name` from any connection this link opens, now or
+   * after a reconnect. Returns the function that removes the listener.
+   */
+  on<N extends DirectNotification>(name: N, listener: (params: EventParams<N>) => void): () => void {
+    let listeners = this.#listeners.get(name);
+    if (!listeners) this.#listeners.set(name, (listeners = new Set()));
+    const entry = listener as (params: never) => void;
+    listeners.add(entry);
+    return () => void listeners.delete(entry);
+  }
+
+  /**
+   * Call `listener` each time a lost connection was re-established (and
+   * subscriptions renewed): per-connection daemon state, such as a
+   * `ui.publish` registration, must be sent again. Only reconnects while an
+   * event subscription exists. Returns the function that removes the listener.
+   */
+  onReconnect(listener: () => void): () => void {
+    this.#reconnectListeners.add(listener);
+    return () => void this.#reconnectListeners.delete(listener);
+  }
+
   /** Close the connection and stop reconnecting. The daemon keeps running until its idle timeout. */
   async close(): Promise<void> {
     this.#closed = true;
     clearTimeout(this.#retryTimer);
     this.#subscribers.clear();
     this.#tags.clear();
+    this.#listeners.clear();
+    this.#reconnectListeners.clear();
     const connection = this.#connection;
     this.#connection = undefined;
     if (connection) (await connection.catch(() => undefined))?.close();
@@ -160,6 +191,11 @@ export class DaemonLink {
         }
       });
     }
+    for (const name of DIRECT_NOTIFICATIONS) {
+      conn.on(name, (params) => {
+        for (const listener of [...(this.#listeners.get(name) ?? [])]) (listener as (params: EventParams<typeof name>) => void)(params);
+      });
+    }
     // Subscriptions die with their connection, whoever closed it.
     void conn.closed.then(() => {
       if (this.#connection === connection) this.#connection = undefined;
@@ -175,6 +211,7 @@ export class DaemonLink {
       void this.#renew().then(
         () => {
           for (const subscriber of [...this.#subscribers]) subscriber.handlers.onResync?.();
+          for (const listener of [...this.#reconnectListeners]) listener();
         },
         () => this.#resubscribe(Math.min(delay * 2, MAX_RETRY_MS)),
       );

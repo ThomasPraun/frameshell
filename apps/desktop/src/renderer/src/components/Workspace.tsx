@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ProjectView } from "../../../shared/api.js";
 import { type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
 import { ContextMenuHost } from "./ContextMenu.js";
+import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { Sidebar } from "./Sidebar.js";
@@ -119,6 +121,28 @@ export function Workspace({ project }: { project: ProjectView }) {
     },
     [openFile],
   );
+
+  // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
+  // so the state the agent gets back already shows the opened tab or panel.
+  const editorState = useRef({ active, tabs });
+  editorState.current = { active, tabs };
+  useEffect(() => uiLink.changed(), [active, tabs]);
+  const host = useMemo<UiHost>(
+    () => ({
+      editor: () => editorState.current,
+      openFile: (path) => flushSync(() => browseFile(path)),
+      showHistory: () =>
+        flushSync(() =>
+          setLayout((current) => {
+            if (!current) return current;
+            const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+            return { ...shown, sidebarView: "history" };
+          }),
+        ),
+    }),
+    [browseFile],
+  );
+  useUiLink(host);
 
   const closeFile = useCallback((path: string) => {
     setTabs((current) => {

@@ -24,7 +24,7 @@ Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it
 
 One tool per public method of the daemon registry (`methods` in `packages/protocol/src/methods.ts`), generated at startup:
 
-- Name: method name with `.` replaced by `_` (`clip.add` → `clip_add`, `tx.begin` → `tx_begin`). `frame` is exposed as `frame_capture`.
+- Name: method name in snake case, `.` replaced by `_` (`clip.add` → `clip_add`, `ui.openFile` → `ui_open_file`). `frame` is exposed as `frame_capture`.
 - Description: the registry's model-facing description; method names in backticks are rewritten to tool names.
 - Input schema: the method's Zod params as JSON Schema. `cwd` is optional and defaults to the server's directory.
 - Output: the method's result as compact JSON. Mutating tools return `revision` and `operation.tx` (and `operation.id`); `inverse` patches are left out, since `revert` takes the tx or op id.
@@ -38,6 +38,20 @@ Observe tools return images:
 |---|---|
 | `frame_capture(timeline, at, preset?, out?)` | The composited frame at `at` seconds, rendered by the daemon with the export compiler (single-frame plan, same as `frameshell frame`), as a PNG image scaled to fit 1280x1280, plus frame index and clip. `out` also keeps the full-size PNG. |
 | `frames_strip(timeline, from, to, count?, preset?)` | `count` (2 to 16, default 6) evenly spaced frames from `from` to `to`, tiled into one contact sheet at most 1280 px wide, plus the time, frame and clip of each tile. |
+
+## UI state and navigation
+
+What the user sees in the app, and a way to take them somewhere (SPEC §7b, decision 20). The app publishes its state to the daemon; navigation is routed daemon → app window. MCP never talks to Electron, and nothing is pixel automation: each tool is one command the app applies to its shared stores (playhead `preview/transport.ts`, selection `selection.ts`, editor tabs, History panel).
+
+| Tool | Does |
+|---|---|
+| `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
+| `ui_seek(at)` / `ui_play` / `ui_pause` | Drive the preview's transport. |
+| `ui_select(clips?, words?, range?, reveal?)` | Replace the selection; unknown clip ids fail. `reveal` scrolls to the first clip. |
+| `ui_open_file(file)` | Open a project file in an active editor tab. |
+| `ui_show_tx_diff(target)` | History panel on a `tx_…`/`op_…`, its changes marked on the timeline. |
+
+Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one that reported last gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach` and the `ui.command` notification carry it.
 
 ## Resources
 
@@ -55,5 +69,4 @@ Subscribed timeline and history resources get `notifications/resources/updated` 
 
 ## Not yet
 
-- UI state and navigation tools (`ui_state`, `ui_seek`…): #33.
 - Change notifications for transcripts written by other clients: they need daemon asset events (#69).

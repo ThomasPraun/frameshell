@@ -192,6 +192,29 @@ describe("selection store", () => {
       expect(selection.get()).toEqual(blank);
     });
   });
+
+  it("an agent selection replaces every kind at once and reveals its first clip, else its range", () => {
+    const word = { transcript: "transcripts/raw.words.json", asset: "assets/raw.mp4", word: "w_000001", text: "hi", start: 1, end: 1.4 };
+    selection.select({ clips: ["c_a"], words: [word], range: { from: 1, to: 2 } }, "agent", { reveal: true });
+    expect(selection.get()).toMatchObject({
+      clips: ["c_a"],
+      words: [word],
+      range: { from: 1, to: 2 },
+      origin: "agent",
+      reveal: { clip: "c_a" },
+      history: null,
+    });
+    selection.select({ range: { from: 3, to: 4 } }, "agent", { reveal: true });
+    expect(selection.get()).toMatchObject({ clips: [], words: [], range: { from: 3, to: 4 }, origin: "agent", reveal: { range: { from: 3, to: 4 } }, history: null });
+    selection.select({}, "agent");
+    expect(selection.get()).toMatchObject({ clips: [], words: [], range: null, origin: null, reveal: null, history: null });
+  });
+
+  it("tags a History selection made by the agent with its origin", () => {
+    selection.selectHistory("tx_0000000d", [], null, "agent");
+    expect(selection.get()).toMatchObject({ origin: "agent", history: "tx_0000000d" });
+    selection.clear();
+  });
 });
 
 describe("revealSeek", () => {
