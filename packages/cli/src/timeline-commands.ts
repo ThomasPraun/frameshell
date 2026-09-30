@@ -8,13 +8,15 @@ import type {
   TimelineView,
   TrackSummary,
 } from "@frameshell/protocol";
+import { resolveSubtitleStyle } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
 mutations print the new revision):
   timeline show [--json]       Tracks and clips with ids, start/end, in/out (--json: compact dump)
   track list                   Tracks in stacking order (first video track = bottom layer)
-  track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n]
+  track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n] [--preset p] [--position pos]
+  track set <track> [--name n | --clear-name] [--follows <track>] [--preset p] [--position pos]
   track remove <track> [--force]
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
@@ -33,6 +35,9 @@ mutations print the new revision):
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
   --ripple (clip add, clip trim) moves later clips on every video and audio track by the length added or
   removed, the inverse of cut: restore removed material without overlapping the next clip.
+  Subtitle tracks (--follows a video or audio track) show the transcript words of that track's clips: cuts
+  update them, text corrections go in the transcript. --preset big-keyword (default: few large words, the
+  spoken one highlighted) or plain; --position top, center or bottom. Preview and export look the same.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -54,7 +59,10 @@ export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "cut", "t
 export const TIMELINE_OPTIONS = {
   timeline: { type: "string" },
   name: { type: "string" },
+  "clear-name": { type: "boolean" },
   follows: { type: "string" },
+  preset: { type: "string" },
+  position: { type: "string" },
   index: { type: "string" },
   force: { type: "boolean" },
   type: { type: "string" },
@@ -106,7 +114,8 @@ export class UsageError extends Error {
 const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
-  "track add": ["name", "follows", "index"],
+  "track add": ["name", "follows", "index", "preset", "position"],
+  "track set": ["name", "clear-name", "follows", "preset", "position"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "snap", "snap-window"],
   "clip move": ["start", "track"],
@@ -127,6 +136,7 @@ const ARITY: Record<string, [number, number]> = {
   "timeline show": [0, 0],
   "track list": [0, 0],
   "track add": [1, 1],
+  "track set": [1, 1],
   "track remove": [1, 1],
   "clip add": [1, 2],
   "clip move": [1, 1],
@@ -193,6 +203,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const t = { x: num("x"), y: num("y"), scale: num("scale"), opacity: num("opacity") };
     return Object.values(t).some((v) => v !== undefined) ? t : undefined;
   };
+  const style = () => {
+    const s = { preset: str("preset"), position: str("position") };
+    return s.preset !== undefined || s.position !== undefined ? s : undefined;
+  };
   const snap = () => {
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
     return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
@@ -210,9 +224,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "track.add";
       const index = num("index");
       if (index !== undefined && (!Number.isInteger(index) || index < 0)) throw new UsageError("--index: expected an integer >= 0.");
-      Object.assign(params, { kind: args[0], name: str("name"), follows: str("follows"), index });
+      Object.assign(params, { kind: args[0], name: str("name"), follows: str("follows"), index, style: style() });
       break;
     }
+    case "track set":
+      method = "track.set";
+      if (str("name") !== undefined && values["clear-name"] === true) throw new UsageError("Pass --name or --clear-name, not both.");
+      Object.assign(params, {
+        track: args[0],
+        name: values["clear-name"] === true ? null : str("name"),
+        follows: str("follows"),
+        style: style(),
+      });
+      break;
     case "track remove":
       method = "track.remove";
       Object.assign(params, { track: args[0], force: values["force"] === true });
@@ -289,6 +313,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   const clean = (value: Record<string, unknown> | undefined) =>
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
+  if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
   return { kind: "timeline", method, params: clean(params)!, withCwd: true };
 }
 
@@ -368,10 +393,17 @@ function formatTracks(result: { timeline: string; revision: number; tracks: Trac
   for (const track of result.tracks) {
     const name = track.name ? ` "${track.name}"` : "";
     const ends = track.end === null ? "end unknown" : `ends ${track.end} s`;
-    const detail = track.kind === "subtitles" ? `follows ${track.follows}` : `${track.clips} clip(s), ${ends}`;
+    const detail = track.kind === "subtitles" ? `follows ${track.follows}, ${styleText(track.style)}` : `${track.clips} clip(s), ${ends}`;
     lines.push(`  ${track.id}  ${track.kind}${name}  ${detail}`);
   }
   return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
+}
+
+/** A subtitle track's look as rendered, e.g. `big-keyword at the bottom`; an unknown preset is named. */
+function styleText(stored: TrackSummary["style"]): string {
+  const { style, unknownPreset } = resolveSubtitleStyle(stored ?? undefined);
+  const preset = unknownPreset ? `${style.preset} (unknown preset "${unknownPreset}")` : style.preset;
+  return `${preset} ${style.position === "center" ? "in the center" : `at the ${style.position}`}`;
 }
 
 /** Clips whose nested timeline is unavailable, with the fix; nothing when none. */

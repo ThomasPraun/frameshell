@@ -1,5 +1,15 @@
 import { z } from "zod";
-import { ClipSchema, MAX_SNAP_WINDOW_S, MIN_SNAP_WINDOW_S, TrackSchema, TransformSchema } from "@frameshell/schema";
+import {
+  ClipSchema,
+  MAX_SNAP_WINDOW_S,
+  MIN_SNAP_WINDOW_S,
+  SUBTITLE_POSITIONS,
+  SUBTITLE_PRESET_IDS,
+  type SubtitlePosition,
+  type SubtitlePresetId,
+  TrackSchema,
+  TransformSchema,
+} from "@frameshell/schema";
 import { AGENT_LABEL_PATTERN } from "./agents.js";
 
 /**
@@ -64,6 +74,23 @@ const snapBoundsArg = z
       "and starting at 3.55: `{ out: 3.53, snapBounds: { out: { min: 3.5, max: 3.55 } } }`.",
   );
 
+/** Subtitle look (SPEC §5.3 `style`): a built-in preset and where the line sits. */
+export const SubtitleStyleArgSchema = z
+  .strictObject({
+    preset: z
+      .enum(SUBTITLE_PRESET_IDS as [SubtitlePresetId, ...SubtitlePresetId[]])
+      .optional()
+      .describe(
+        "`big-keyword` (default): up to three large upper-case words, the word being spoken highlighted, low in the frame. " +
+          "`plain`: sentence-length white lines, no highlight.",
+      ),
+    position: z
+      .enum(SUBTITLE_POSITIONS as [SubtitlePosition, ...SubtitlePosition[]])
+      .optional()
+      .describe("`top`, `center` or `bottom`. Default: the preset's (`bottom`)."),
+  })
+  .describe("Subtitle tracks only. Preview and export render the same style.");
+
 /** Timeline id param: the file is `timelines/<id>.json`. */
 export const TimelineIdSchema = z
   .string()
@@ -88,6 +115,17 @@ export const operationArgs = {
       .nonnegative()
       .optional()
       .describe("Stack position, 0 = bottom layer. Default: on top of every existing track."),
+    style: SubtitleStyleArgSchema.optional(),
+  }),
+  "track.set": z.strictObject({
+    track: TrackRef,
+    name: z.string().min(1).nullable().optional().describe("Display name; null clears it."),
+    follows: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Subtitle tracks only: id of the video or audio track whose clips' transcript words it shows."),
+    style: SubtitleStyleArgSchema.optional().describe("Subtitle tracks only: the fields given change, the others keep their value."),
   }),
   "track.remove": z.strictObject({
     track: TrackRef,
@@ -323,12 +361,19 @@ export const TimelineProblemSchema = z.object({
   message: z.string().describe("What is wrong and how to fix it."),
 });
 
+/** A subtitle track's stored `style`, as `timeline.show` and `track.list` report it. */
+const StoredStyleSchema = z
+  .looseObject({ preset: z.string().optional(), position: z.enum(["top", "center", "bottom"]).optional() })
+  .nullable()
+  .describe("Subtitle tracks: `style` as stored (unset fields use the preset's; no preset = `big-keyword`); null otherwise or when unset.");
+
 /** Compact track summary of `track.list`. */
 export const TrackSummarySchema = z.object({
   id: z.string(),
   kind: z.enum(["video", "audio", "subtitles"]),
   name: z.string().nullable(),
   follows: z.string().nullable().describe("Subtitle tracks: followed track id; null otherwise."),
+  style: StoredStyleSchema,
   clips: z.int().describe("Number of clips; 0 for subtitle tracks."),
   end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
@@ -346,6 +391,7 @@ export const TimelineViewSchema = z.object({
       kind: z.enum(["video", "audio", "subtitles"]),
       name: z.string().nullable(),
       follows: z.string().nullable(),
+      style: StoredStyleSchema,
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),

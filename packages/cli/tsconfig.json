@@ -5,5 +5,5 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "references": [{ "path": "../protocol" }, { "path": "../core" }, { "path": "../mcp" }]
+  "references": [{ "path": "../schema" }, { "path": "../protocol" }, { "path": "../core" }, { "path": "../mcp" }]
 }
