@@ -623,7 +623,7 @@ export class TimelineService {
 
   /** Run `work` after every earlier call on the same timeline file. */
   async #turn<T>(root: string, id: string, work: () => Promise<T>): Promise<T> {
-    return this.#exclusive(await this.#key(root, id), work);
+    return this.#exclusive([await this.#key(root, id)], work);
   }
 
   /** Run `work` once every earlier task on any of `keys` settled, holding all of them. Queues are claimed synchronously, so no deadlock. */

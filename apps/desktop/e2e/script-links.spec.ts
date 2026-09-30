@@ -161,7 +161,7 @@ test("linking a clip on disk clears the scene's flag live", async () => {
   const path = join(box.projectDir, "timelines", "main.json");
   const timeline = JSON.parse(readFileSync(path, "utf8"));
   timeline.tracks[0].clips[2].scriptRef = "scripts/launch.md#outro";
-  timeline.revision += 1;
+  // Direct edit keeps the revision it was read at; the daemon journals it and bumps it (SPEC §6.4).
   writeFileSync(path, JSON.stringify(timeline, null, 2));
   await expect(page.locator(".editor-host .scene-glyph-unlinked")).toHaveCount(0);
   await expect(page.locator(".editor-host .scene-glyph-linked")).toHaveCount(3);
@@ -178,7 +178,6 @@ test("a selected clip removed on disk leaves the selection, and does not come ba
   const original = readFileSync(path, "utf8");
   const timeline = JSON.parse(original);
   timeline.tracks[1].clips = [];
-  timeline.revision += 1;
   writeFileSync(path, JSON.stringify(timeline, null, 2));
   await expect(lanes()).toHaveAttribute("data-clips", "3");
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
@@ -186,7 +185,8 @@ test("a selected clip removed on disk leaves the selection, and does not come ba
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_demo");
   // Undo on disk: the clip is back with its id, but not selected.
   const restored = JSON.parse(original);
-  restored.revision = timeline.revision + 1;
+  // The daemon journaled the removal and bumped the revision on disk: the undo edit starts from that one.
+  restored.revision = JSON.parse(readFileSync(path, "utf8")).revision;
   writeFileSync(path, JSON.stringify(restored, null, 2));
   await expect(lanes()).toHaveAttribute("data-clips", "4");
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_demo");
