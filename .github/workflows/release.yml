@@ -97,6 +97,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The app's manifest points at the ffmpeg mirror as a fallback: never release while it is missing or stale.
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - name: Check binary mirror
+        run: node packages/core/scripts/binaries-mirror.mjs verify ffmpeg
       - uses: actions/download-artifact@v4
         with:
           pattern: frameshell-*
@@ -105,7 +116,7 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
-      # Draft: a maintainer reviews the assets and publishes. No ffmpeg or other GPL binary is attached (SPEC §9).
+      # Draft: a maintainer reviews the assets and publishes. ffmpeg lives in its own mirror release, with its source (SPEC §9).
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -58,6 +58,31 @@ export interface PinnedBuild {
   readonly license: string;
   /** Together they provide every tool of the package. */
   readonly archives: readonly PinnedArchive[];
+  /**
+   * Corresponding source published next to the mirrored binaries (GPL-3.0 §6).
+   * Required when the package has a `mirror`: `planMirror` rejects a mirrored build without it.
+   */
+  readonly sources?: readonly SourceArchive[];
+}
+
+/** Source archive the mirror republishes byte for byte. Never fetched by the daemon. */
+export interface SourceArchive {
+  /** Asset name in the mirror release. Builds sharing a source use the same name. */
+  readonly name: string;
+  readonly url: string;
+  /** Lowercase hex SHA-256; the mirror job aborts on mismatch. */
+  readonly sha256: string;
+  readonly size: number;
+  /** One line for the release notes and the written offer. */
+  readonly description: string;
+}
+
+/** GitHub release that republishes every pinned archive of a package, with its source. */
+export interface BinaryMirror {
+  /** `owner/name` of the repository hosting the release. */
+  readonly repo: string;
+  /** Release tag. Assets are immutable: a re-pin needs a new tag. */
+  readonly tag: string;
 }
 
 /** Set of executables installed and versioned together, e.g. ffmpeg + ffprobe. */
@@ -80,6 +105,8 @@ export interface BinaryPackage {
   readonly onDemand?: boolean;
   /** Arguments that print the version, and a pattern capturing it. Default: ffmpeg's `-version`. */
   readonly versionProbe?: { readonly args: readonly string[]; readonly pattern: RegExp };
+  /** Fallback copy of every archive. Each archive then lists its mirror URL after the canonical one. */
+  readonly mirror?: BinaryMirror;
 }
 
 /** Data file (ML model) downloaded on first use, same for every platform. */
@@ -101,14 +128,70 @@ export interface ManagedModel {
   readonly file: string;
 }
 
+/** Download URL of `asset` in the mirror release. */
+export function mirrorUrl(mirror: BinaryMirror, asset: string): string {
+  return `https://github.com/${mirror.repo}/releases/download/${mirror.tag}/${asset}`;
+}
+
 const MARTIN_RIEDL = "https://ffmpeg.martin-riedl.de";
 const BTBN = "https://github.com/BtbN/FFmpeg-Builds";
 const BTBN_RELEASE = `${BTBN}/releases/download/autobuild-2026-08-31-13-27`;
 const BTBN_BUILD = "ffmpeg-n9.0.1-11-ge47273f4d9";
 
-function riedl(path: string, ffmpeg: [string, number], ffprobe: [string, number]): PinnedBuild {
+/** Frameshell's copy of every ffmpeg archive below, with source. Published by `.github/workflows/binaries-mirror.yml`. */
+const FFMPEG_MIRROR: BinaryMirror = { repo: "ThomasPraun/frameshell", tag: "ffmpeg-mirror-2026-09-29" };
+
+/** Canonical URL first, mirror second: the manager falls back on network error or checksum mismatch. */
+function mirrored(canonical: string, asset: string): readonly string[] {
+  return [canonical, mirrorUrl(FFMPEG_MIRROR, asset)];
+}
+
+// Revisions checked against the builds: Riedl's `versions.txt` matches the `version/` pins of
+// build-script 6a611e1 (develop head when 9.0.2 was built); BtbN tag `autobuild-2026-08-31-13-27`
+// points at FFmpeg-Builds 8267213, and the binaries report FFmpeg e47273f4d9 (release/9.0).
+const RIEDL_SOURCES: readonly SourceArchive[] = [
+  {
+    name: "source-ffmpeg-9.0.2.tar.xz",
+    url: "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+    sha256: "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+    size: 12_040_788,
+    description: "FFmpeg 9.0.2 release source (macOS builds)",
+  },
+  {
+    name: "source-martin-riedl-build-script-6a611e1.tar.gz",
+    url: "https://git.martin-riedl.de/ffmpeg/build-script/archive/6a611e19870e197bc37c6e4c7fccddebd3715466.tar.gz",
+    sha256: "467803813ab9f090052b0913bd12f984dcee888b154eb3644f7b1cbf04b57887",
+    size: 2_610_328,
+    description: "Martin Riedl build scripts at 6a611e1: configure flags and every library version (`version/`)",
+  },
+];
+
+const BTBN_SOURCES: readonly SourceArchive[] = [
+  {
+    name: "source-ffmpeg-e47273f4d9.tar.gz",
+    url: "https://github.com/FFmpeg/FFmpeg/archive/e47273f4d9227152dcbf543cebaf9e2430ddbcc4.tar.gz",
+    sha256: "6491dae95e3cf3cdbac02933b55860e782b0c4f0a6bd8f37cef30fded259283c",
+    size: 17_323_649,
+    description: "FFmpeg source at e47273f4d9 (n9.0.1-11; Linux and Windows builds)",
+  },
+  {
+    name: "source-btbn-ffmpeg-builds-8267213.tar.gz",
+    url: "https://github.com/BtbN/FFmpeg-Builds/archive/8267213e26c1031621e6e1210fe3aa4867214f6a.tar.gz",
+    sha256: "08279484656a586c149e119a20d3853f2596ee08192d97595edd2a5ba3b4fd51",
+    size: 103_067,
+    description: "BtbN FFmpeg-Builds scripts at 8267213: every library repository and commit (`scripts.d/`)",
+  },
+];
+
+function riedl(
+  path: string,
+  platform: PlatformKey,
+  ffmpeg: [string, number],
+  ffprobe: [string, number],
+): PinnedBuild {
   const archive = (tool: string, [sha256, size]: [string, number]): PinnedArchive => ({
-    urls: [`${MARTIN_RIEDL}/download/macos/${path}/${tool}.zip`],
+    // Both macOS builds name their zips `<tool>.zip`: the mirror asset name adds version and platform.
+    urls: mirrored(`${MARTIN_RIEDL}/download/macos/${path}/${tool}.zip`, `ffmpeg-9.0.2-${platform}-${tool}.zip`),
     sha256,
     size,
     files: { [tool]: tool },
@@ -118,6 +201,7 @@ function riedl(path: string, ffmpeg: [string, number], ffprobe: [string, number]
     origin: MARTIN_RIEDL,
     license: "GPL-3.0-or-later",
     archives: [archive("ffmpeg", ffmpeg), archive("ffprobe", ffprobe)],
+    sources: RIEDL_SOURCES,
   };
 }
 
@@ -130,30 +214,34 @@ function btbn(target: string, ext: "tar.xz" | "zip", sha256: string, size: numbe
     license: "GPL-3.0-or-later",
     archives: [
       {
-        urls: [`${BTBN_RELEASE}/${dir}.${ext}`],
+        urls: mirrored(`${BTBN_RELEASE}/${dir}.${ext}`, `${dir}.${ext}`),
         sha256,
         size,
         files: { ffmpeg: `${dir}/bin/ffmpeg${exe}`, ffprobe: `${dir}/bin/ffprobe${exe}` },
       },
     ],
+    sources: BTBN_SOURCES,
   };
 }
 
 /**
  * ffmpeg + ffprobe, GPL static builds with libx264 and libvpx (VP9 encoder and
- * decoder: ADR 0002). Sources, licences and how to re-pin: `docs/binaries.md`.
+ * decoder: ADR 0002). Sources, licences, mirror and how to re-pin: `docs/binaries.md`.
  */
 export const FFMPEG_PACKAGE: BinaryPackage = {
   name: "ffmpeg",
   tools: ["ffmpeg", "ffprobe"],
+  mirror: FFMPEG_MIRROR,
   builds: {
     "darwin-arm64": riedl(
       "arm64/1789931890_9.0.2",
+      "darwin-arm64",
       ["c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924", 28_395_699],
       ["fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6", 28_317_701],
     ),
     "darwin-x64": riedl(
       "amd64/1789931006_9.0.2",
+      "darwin-x64",
       ["7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4", 33_816_391],
       ["2322438ed2f6319a691291b247d09c69dcaa3a982460d1f269a7e1af335cfdfd", 33_719_233],
     ),

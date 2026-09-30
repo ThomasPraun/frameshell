@@ -18,6 +18,8 @@ Each OS job:
 
 The draft release is published by hand after review. A tag with a `-` (for example `v0.1.0-beta.1`) is marked as a prerelease.
 
+Before drafting, the publish job checks the ffmpeg mirror: the GitHub release named in the manifest must exist, and its `SHA256SUMS.txt` must match every pinned archive and source. The app release itself attaches no ffmpeg binary. The mirror is its own release, published by `.github/workflows/binaries-mirror.yml` together with the corresponding source, a written offer and the licence (see `docs/binaries.md`, "Mirror and licence obligations"). If the check fails, run **Actions → Binary mirror → Run workflow** on `main`, then re-run the release.
+
 ### Bundled CLI and daemon
 
 `@frameshell/cli` and `@frameshell/core` are dependencies of the app, so they ship inside `app.asar`. At startup the app writes a `frameshell` shim into `<userData>/bin` that runs the CLI with the app's own executable in Node mode (`ELECTRON_RUN_AS_NODE`). Integrated terminals put that directory first on `PATH`. The daemon is started the same way. The app does not install `frameshell` system-wide.
@@ -116,7 +118,6 @@ Local builds are unsigned unless you export the signing variables above. Output 
 
 ## Not done yet
 
-- **Binary mirror.** SPEC §9 plans a mirror of the managed ffmpeg builds on GitHub Releases. That is redistribution of GPL binaries, so it must be published together with the matching source (FFmpeg and every enabled library at the exact versions, plus build scripts) or a written offer, in the same release. The pipeline attaches no ffmpeg binaries. Add the mirror, the source bundle and the manifest mirror URLs together, in one change (see `docs/binaries.md`).
 - **App icon.** The builds use the default Electron icon until `apps/desktop/build/icon.png` (1024×1024) exists. electron-builder uses that file automatically once it is added.
 - **Linux arm64 and Windows arm64** are not built.
 - **Auto-update** is not set up: no update metadata is published.
