@@ -23,7 +23,7 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
   const history: JobInfo[] = [];
   let listener: ((job: JobInfo) => void) | undefined;
   await conn.request("events.subscribe", { cwd, events: ["job.progress"] });
-  conn.on("job.progress", ({ job }) => (listener ? listener(job) : history.push(job)));
+  conn.on("job.progress", ({ job }) => { process.stderr.write(`[DEBUG-109] ${Date.now()} event ${job.id} ${job.state} ${job.step} ${job.progress}\n`); return listener ? listener(job) : history.push(job); });
 
   return {
     wait: (ids, onChange) =>
@@ -44,6 +44,7 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
         listener = take;
         // Covers jobs that changed before the subscription (a reused queued job); newer than any event read so far.
         conn.request("job.list", { cwd }).then(({ jobs }) => {
+          process.stderr.write(`[DEBUG-109] ${Date.now()} list ${JSON.stringify(jobs.map((j) => [j.id, j.state, j.step, j.progress]))}\n`);
           for (const job of jobs) {
             if (!wanted.has(job.id)) continue;
             const seen = latest.get(job.id);
