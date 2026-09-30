@@ -34,8 +34,18 @@ export function sandbox(fixture: string): Sandbox {
   };
 }
 
-/** Start the app on the sandbox project, in a laptop-sized window. */
-export async function launch(box: Sandbox): Promise<{ app: ElectronApplication; page: Page }> {
+/**
+ * Daemon cold start plus project open, bounded apart from assertion timeouts: on a starved machine the daemon took
+ * 29 s to listen. Matches the app's own daemon start timeout.
+ */
+const OPEN_TIMEOUT_MS = 60_000;
+
+/**
+ * Start the app on the sandbox project, in a laptop-sized window. Resolves once the startup open settled (the boot
+ * screen gave way to the project, or to the welcome screen), so a spec's first assertion measures what it tests, not
+ * a cold daemon. `settled: false` returns while the boot screen may still show.
+ */
+export async function launch(box: Sandbox, { settled = true } = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
@@ -53,13 +63,20 @@ export async function launch(box: Sandbox): Promise<{ app: ElectronApplication; 
       FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
     },
   });
-  const page = await app.firstWindow();
-  // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
-  page.on("console", (message) => {
-    if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
-  });
-  return { app, page };
+  try {
+    const page = await app.firstWindow();
+    // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
+    page.on("console", (message) => {
+      if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
+    });
+    if (settled) await expect(page.locator(".boot")).toHaveCount(0, { timeout: OPEN_TIMEOUT_MS });
+    return { app, page };
+  } catch (error) {
+    // The caller never gets `app` to close: a leaked app stalls worker teardown and loads the next spec's machine.
+    await app.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Visible text of the active terminal's grid, rows joined so soft-wrapped output reads as one line. */
@@ -68,8 +85,23 @@ export async function terminalText(page: Page): Promise<string> {
   return rows.join("");
 }
 
-/** Type a command into the active terminal and press Enter. */
+/**
+ * Type a command into the active terminal and press Enter, once the shell drew its prompt (output non-empty and
+ * unchanged for 300 ms). Keys typed while a login shell still starts are reordered or lost by its line editor.
+ */
 export async function runInTerminal(page: Page, command: string): Promise<void> {
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const text = (await terminalText(page)).trim();
+        const settled = text !== "" && text === last;
+        last = text;
+        return settled;
+      },
+      { timeout: 30_000, intervals: [300] },
+    )
+    .toBe(true);
   await page.locator(".terminal-view:not([hidden])").click();
   await page.keyboard.type(command);
   await page.keyboard.press("Enter");

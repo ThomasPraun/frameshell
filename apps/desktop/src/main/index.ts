@@ -86,6 +86,11 @@ interface WindowState {
    */
   daemonEvents: LinkSubscription[];
   terminals: TerminalManager;
+  /**
+   * The `--project` open started with the window. The page loads meanwhile (a cold daemon can take many seconds)
+   * and `project.current` awaits this, so the renderer shows its boot screen, never a premature welcome screen.
+   */
+  opening: Promise<unknown>;
 }
 const windows = new Map<number, WindowState>();
 
@@ -112,6 +117,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     project: null,
     files: null,
     daemonEvents: [],
+    opening: Promise.resolve(),
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -140,14 +146,15 @@ function createWindow(projectDir?: string): BrowserWindow {
     windows.delete(contents.id);
   });
 
-  const load = async () => {
-    if (projectDir) await openInWindow(state, projectDir);
-    const devUrl = process.env["ELECTRON_RENDERER_URL"];
-    const query: Record<string, string> = PREVIEW_PROBE ? { probe: "1" } : {};
-    if (devUrl) await window.loadURL(`${devUrl}${PREVIEW_PROBE ? "?probe=1" : ""}`);
-    else await window.loadFile(join(import.meta.dirname, "../renderer/index.html"), { query });
-  };
-  load().catch((error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error)));
+  const fail = (error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error));
+  // Open failures show as the welcome screen (outcome `error`); only a throw is unexpected.
+  if (projectDir) state.opening = openInWindow(state, projectDir).catch(fail);
+  const devUrl = process.env["ELECTRON_RENDERER_URL"];
+  const query: Record<string, string> = PREVIEW_PROBE ? { probe: "1" } : {};
+  const load = devUrl
+    ? window.loadURL(`${devUrl}${PREVIEW_PROBE ? "?probe=1" : ""}`)
+    : window.loadFile(join(import.meta.dirname, "../renderer/index.html"), { query });
+  load.catch(fail);
   return window;
 }
 
@@ -246,7 +253,9 @@ function stateOf(sender: WebContents): WindowState {
   return state;
 }
 
-function requireProject(state: WindowState): { project: ProjectView; files: ProjectFiles } {
+/** The window's project, once its startup open settled: the page loads, and may ask, before a cold daemon answers. */
+async function requireProject(state: WindowState): Promise<{ project: ProjectView; files: ProjectFiles }> {
+  await state.opening;
   if (!state.project || !state.files) throw new Error("No project is open in this window");
   return { project: state.project, files: state.files };
 }
@@ -261,7 +270,11 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(Channel.projectCurrent, (event) => stateOf(event.sender).project);
+  ipcMain.handle(Channel.projectCurrent, async (event) => {
+    const state = stateOf(event.sender);
+    await state.opening;
+    return state.project;
+  });
   ipcMain.handle(Channel.projectRecent, () => readRecent());
   ipcMain.handle(Channel.projectOpen, (event, dir: string) => openFromWindow(stateOf(event.sender), dir));
   ipcMain.handle(Channel.projectOpenFolder, async (event): Promise<OpenOutcome> => {
@@ -278,11 +291,13 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
-  ipcMain.handle(Channel.filesTree, (event) => requireProject(stateOf(event.sender)).files.tree());
-  ipcMain.handle(Channel.filesRead, (event, path: string) => requireProject(stateOf(event.sender)).files.read(path));
+  ipcMain.handle(Channel.filesTree, async (event) => (await requireProject(stateOf(event.sender))).files.tree());
+  ipcMain.handle(Channel.filesRead, async (event, path: string) =>
+    (await requireProject(stateOf(event.sender))).files.read(path),
+  );
   ipcMain.handle(Channel.filesWrite, async (event, path: string, content: string) => {
     try {
-      const { project } = requireProject(stateOf(event.sender));
+      const { project } = await requireProject(stateOf(event.sender));
       await daemon.request("file.write", { path: join(project.dir, path), content });
       return {};
     } catch (error) {
@@ -290,9 +305,9 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle(Channel.terminalCreate, (event, size: { cols: number; rows: number }) => {
+  ipcMain.handle(Channel.terminalCreate, async (event, size: { cols: number; rows: number }) => {
     const state = stateOf(event.sender);
-    const { project } = requireProject(state);
+    const { project } = await requireProject(state);
     const session = `term-${randomBytes(4).toString("hex")}`;
     const launch = terminalLaunch({
       platform: process.platform,
@@ -313,29 +328,29 @@ function registerIpc(): void {
 
   ipcMain.handle(Channel.timelineShow, (event, timeline: string) =>
     outcome(async () => {
-      const { project } = requireProject(stateOf(event.sender));
+      const { project } = await requireProject(stateOf(event.sender));
       return daemon.request("timeline.show", { cwd: project.dir, timeline });
     }),
   );
   ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[]) =>
-    outcome(async () => editor.apply(requireProject(stateOf(event.sender)).project.dir, timeline, edits)),
+    outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits)),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
-    outcome(async () => editor.undo(requireProject(stateOf(event.sender)).project.dir, timeline)),
+    outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),
   );
   ipcMain.handle(Channel.timelineRedo, (event, timeline: string) =>
-    outcome(async () => editor.redo(requireProject(stateOf(event.sender)).project.dir, timeline)),
+    outcome(async () => editor.redo((await requireProject(stateOf(event.sender))).project.dir, timeline)),
   );
   ipcMain.handle(Channel.historyList, (event, timeline: string) =>
-    outcome(async () => daemon.request("history", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline })),
+    outcome(async () => daemon.request("history", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
   );
   ipcMain.handle(Channel.historyDiff, (event, timeline: string, target: string) =>
     outcome(async () =>
-      daemon.request("history.diff", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline, target }),
+      daemon.request("history.diff", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, target }),
     ),
   );
   ipcMain.handle(Channel.historyRevert, (event, timeline: string, target: string) =>
-    outcome(async () => editor.revert(requireProject(stateOf(event.sender)).project.dir, timeline, target)),
+    outcome(async () => editor.revert((await requireProject(stateOf(event.sender))).project.dir, timeline, target)),
   );
   ipcMain.on(Channel.uiPublish, (event, view: UiView) => {
     const { project } = stateOf(event.sender);
@@ -346,26 +361,27 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.mediaAssets, (event) =>
     outcome(async () => {
-      const { project } = requireProject(stateOf(event.sender));
+      const { project } = await requireProject(stateOf(event.sender));
       return (await daemon.request("asset.list", { cwd: project.dir })).assets;
     }),
   );
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
-    outcome(async () => daemon.request("clip.renders", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline })),
+    outcome(async () => daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
   );
   ipcMain.handle(Channel.mediaRead, (event, path: string) =>
-    outcome(async () => requireProject(stateOf(event.sender)).files.readMedia(path)),
+    outcome(async () => (await requireProject(stateOf(event.sender))).files.readMedia(path)),
   );
 
   ipcMain.handle(Channel.contextCaptureFrame, (event, at: number) =>
     outcome(async () =>
-      captureContextFrame((method, params) => daemon.request(method, params), requireProject(stateOf(event.sender)).project.dir, at),
+      captureContextFrame((method, params) => daemon.request(method, params), (await requireProject(stateOf(event.sender))).project.dir, at),
     ),
   );
 
-  ipcMain.handle(Channel.layoutLoad, (event): Promise<Layout> => {
-    const { project } = stateOf(event.sender);
-    return project ? layouts.load(project.dir) : Promise.resolve(normalizeLayout(undefined));
+  ipcMain.handle(Channel.layoutLoad, async (event): Promise<Layout> => {
+    const state = stateOf(event.sender);
+    await state.opening;
+    return state.project ? layouts.load(state.project.dir) : normalizeLayout(undefined);
   });
   ipcMain.on(Channel.layoutSave, (event, layout: unknown) => {
     const { project } = stateOf(event.sender);
