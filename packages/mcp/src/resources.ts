@@ -19,6 +19,14 @@ export const transcriptUri = (file: string) => `${SCHEME}transcripts/${encodeURI
 /** URI of a script's outline; `file` is relative to `scripts/`, e.g. `launch.md`. */
 export const outlineUri = (file: string) => `${SCHEME}scripts/${encodeURIComponent(file)}/outline`;
 
+const TIMELINE_TEMPLATE = `${SCHEME}timelines/{timeline}`;
+const HISTORY_TEMPLATE = `${SCHEME}timelines/{timeline}/history`;
+const TRANSCRIPT_TEMPLATE = `${SCHEME}transcripts/{file}`;
+const OUTLINE_TEMPLATE = `${SCHEME}scripts/{file}/outline`;
+
+/** Every resource URI the server can serve, as a URI or template; docs naming others are wrong. */
+export const RESOURCE_TEMPLATES: readonly string[] = [STATUS_URI, TIMELINE_TEMPLATE, HISTORY_TEMPLATE, TRANSCRIPT_TEMPLATE, OUTLINE_TEMPLATE];
+
 const JSON_MIME = "application/json";
 
 /**
@@ -77,12 +85,12 @@ export class ProjectResources {
   /** URI templates, so clients can address resources not listed yet. */
   templates(): ResourceTemplate[] {
     const templates: ResourceTemplate[] = [
-      { uriTemplate: `${SCHEME}timelines/{timeline}`, name: "timeline", description: "Compact dump of a timeline (same as `timeline_show`).", mimeType: JSON_MIME },
-      { uriTemplate: `${SCHEME}timelines/{timeline}/history`, name: "history", description: "A timeline's operations grouped by transaction (same as `history`).", mimeType: JSON_MIME },
-      { uriTemplate: `${SCHEME}transcripts/{file}`, name: "transcript", description: "A transcript file under `transcripts/`, e.g. `raw-01.words.json`: words with ids and source-asset seconds.", mimeType: JSON_MIME },
+      { uriTemplate: TIMELINE_TEMPLATE, name: "timeline", description: "Compact dump of a timeline (same as `timeline_show`).", mimeType: JSON_MIME },
+      { uriTemplate: HISTORY_TEMPLATE, name: "history", description: "A timeline's operations grouped by transaction (same as `history`).", mimeType: JSON_MIME },
+      { uriTemplate: TRANSCRIPT_TEMPLATE, name: "transcript", description: "A transcript file under `transcripts/`, e.g. `raw-01.words.json`: words with ids and source-asset seconds.", mimeType: JSON_MIME },
     ];
     if (this.#hasMethod(OUTLINE_METHOD)) {
-      templates.push({ uriTemplate: `${SCHEME}scripts/{file}/outline`, name: "script outline", description: "Scenes of a Markdown script under `scripts/`.", mimeType: JSON_MIME });
+      templates.push({ uriTemplate: OUTLINE_TEMPLATE, name: "script outline", description: "Scenes of a Markdown script under `scripts/`.", mimeType: JSON_MIME });
     }
     return templates;
   }

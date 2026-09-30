@@ -201,6 +201,12 @@ describe("frameshell CLI", () => {
     expect(again.stderr).toMatch(/already exists/);
   });
 
+  it("rejects a flag the command does not take instead of ignoring it", () => {
+    const result = frameshell(["status", "--from", "3"], tempDir());
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("`frameshell status` does not take --from");
+  });
+
   it("rejects an unknown command with usage", () => {
     const result = frameshell(["frobnicate"], tempDir());
     expect(result.code).toBe(2);

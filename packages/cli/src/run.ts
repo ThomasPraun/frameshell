@@ -25,6 +25,7 @@ import {
   TIMELINE_OPTIONS,
   TIMELINE_USAGE,
   type TimelineInvocation,
+  timelineCommandFlags,
   UsageError,
   executeTimeline,
   parseTimelineCommand,
@@ -78,6 +79,34 @@ Options:
 `;
 
 const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
+
+/** Flags every command accepts. */
+export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
+
+/** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
+const BUILTIN_FLAGS: Record<string, readonly string[]> = {
+  init: ["name", "no-skill"],
+  status: [],
+  doctor: ["install"],
+  import: ["link", "wait"],
+  "plugin install": [],
+  "plugin remove": [],
+  "plugin list": [],
+  transcribe: ["verify", "timeline", "provider", "model", "language"],
+  render: ["preset", "out", "timeline"],
+  frame: ["at", "out", "timeline", "preset"],
+  "script outline": [],
+  mcp: [],
+};
+
+/**
+ * Every built-in command (`status`, `clip add`, …) and the flags it takes
+ * besides {@link GLOBAL_FLAGS}: the CLI surface docs and skills may name.
+ * Plugin commands are not included.
+ */
+export function cliCommands(): ReadonlyMap<string, readonly string[]> {
+  return new Map<string, readonly string[]>([...Object.entries(BUILTIN_FLAGS), ...timelineCommandFlags()]);
+}
 
 /** Process surface the CLI touches; injected so it can run in-process too. */
 export interface CliIo {
@@ -175,6 +204,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     flags = { json: values.json, trust: values.trust, install: values.install };
     let builtin: Invocation | null;
     try {
+      checkBuiltinFlags(positionals, values);
       builtin = TIMELINE_COMMANDS.has(positionals[0]!) ? parseTimelineCommand(positionals, values) : parseBuiltin(positionals, values);
     } catch (error) {
       if (!(error instanceof UsageError)) throw error;
@@ -207,6 +237,18 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   } finally {
     conn?.close();
   }
+}
+
+/** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands check their own. */
+function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
+  const [command, sub] = positionals;
+  const key = command === "plugin" || command === "script" ? `${command} ${sub ?? ""}` : command!;
+  const allowed = BUILTIN_FLAGS[key];
+  if (!allowed) return;
+  const extra = Object.keys(values).filter(
+    (flag) => values[flag] !== undefined && values[flag] !== false && !allowed.includes(flag) && !(GLOBAL_FLAGS as readonly string[]).includes(flag),
+  );
+  if (extra.length > 0) throw new UsageError(`\`frameshell ${key}\` does not take ${extra.map((flag) => `--${flag}`).join(", ")}.`);
 }
 
 function parseBuiltin(
