@@ -43,9 +43,17 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
  * Undo and redo are `revert`s of the journal (SPEC §6.2), so they survive
  * restarts and see edits from every app window, and never touch operations
  * of other authors (the agent's).
+ *
+ * A `ui` transaction this editor did not close (an app that crashed
+ * mid-batch, a commit lost with the connection) would absorb every later
+ * `ui` operation, single edits and undos too, and each would push back its
+ * auto-commit. So the first call after start, and after any lost commit,
+ * commits whatever `ui` transaction is open before doing its work.
  */
 export class TimelineEditor {
   #queue: Promise<unknown> = Promise.resolve();
+  /** A `ui` transaction may be open that this editor did not open or failed to commit. */
+  #orphanPossible = true;
 
   constructor(private readonly request: DaemonRequest) {}
 
@@ -65,6 +73,7 @@ export class TimelineEditor {
       return Promise.reject(new Error(`The timeline panel cannot send ${sent}; it sends ${TIMELINE_EDIT_OPS.join(", ")}.`));
     }
     return this.#serial(async () => {
+      await this.#commitOrphan();
       if (edits.length === 1) return this.#send(cwd, timeline, edits[0]!);
       await this.#begin(batchLabel(edits));
       try {
@@ -72,8 +81,10 @@ export class TimelineEditor {
         for (const edit of edits) last = await this.#send(cwd, timeline, edit);
         return last!;
       } finally {
-        // On failure too: what applied is one step. A lost commit is closed by the auto-commit.
-        await this.request("tx.commit", {}).catch(() => undefined);
+        // On failure too: what applied is one step. A lost commit is retried before the next call.
+        await this.request("tx.commit", {}).catch(() => {
+          this.#orphanPossible = true;
+        });
       }
     });
   }
@@ -81,6 +92,7 @@ export class TimelineEditor {
   /** Revert the latest `ui` transaction not yet undone; null when there is none. */
   undo(cwd: string, timeline: string): Promise<OperationResult | null> {
     return this.#serial(async () => {
+      await this.#commitOrphan();
       const target = uiUndoStacks(await this.request("history", { cwd, timeline })).undo.at(-1);
       return target ? this.request("revert", { cwd, timeline, target }) : null;
     });
@@ -89,6 +101,7 @@ export class TimelineEditor {
   /** Revert the latest undo, re-applying what it undid; null when there is none. */
   redo(cwd: string, timeline: string): Promise<OperationResult | null> {
     return this.#serial(async () => {
+      await this.#commitOrphan();
       const target = uiUndoStacks(await this.request("history", { cwd, timeline })).redo.at(-1);
       return target ? this.request("revert", { cwd, timeline, target }) : null;
     });
@@ -101,9 +114,9 @@ export class TimelineEditor {
   }
 
   /**
-   * Open the batch's transaction. A `ui` transaction still open can only be
-   * a batch of an app that crashed before its commit (this editor never
-   * leaves one open): commit it rather than wait for its auto-commit.
+   * Open the batch's transaction. A `ui` transaction still open here was
+   * opened by another app process since {@link TimelineEditor.#commitOrphan}
+   * ran: commit it rather than fail the edit.
    */
   async #begin(label: string): Promise<void> {
     const begin = () => this.request("tx.begin", { label, autoCommitAfter: BATCH_AUTO_COMMIT_S });
@@ -114,6 +127,21 @@ export class TimelineEditor {
       await this.request("tx.commit", {});
       await begin();
     }
+  }
+
+  /**
+   * Commit a `ui` transaction left open outside this editor's batches, if
+   * {@link TimelineEditor.#orphanPossible}. None open is the usual answer.
+   * Other errors propagate and keep the flag, so the next call retries.
+   */
+  async #commitOrphan(): Promise<void> {
+    if (!this.#orphanPossible) return;
+    try {
+      await this.request("tx.commit", {});
+    } catch (error) {
+      if ((error as RpcError | undefined)?.code !== ErrorCode.TransactionState) throw error;
+    }
+    this.#orphanPossible = false;
   }
 
   #serial<T>(work: () => Promise<T>): Promise<T> {

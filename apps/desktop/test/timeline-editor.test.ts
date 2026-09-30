@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemon } from "@frameshell/core";
-import { type DaemonConnection, connectToDaemon } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import type { TimelineEdit } from "../src/shared/api.js";
 import { TimelineEditor } from "../src/main/timeline-editor.js";
 
@@ -168,6 +168,61 @@ describe("TimelineEditor batches", () => {
     expect(result.operation.tx).not.toBe(orphan.tx);
     const history = await app.request("history", { cwd: dir, timeline: "main" });
     expect(history.transactions.at(-1)).toMatchObject({ tx: result.operation.tx, label: "Split 2 clips" });
+  });
+
+  it("commits a crashed app's ui transaction before a single edit, so later edits and undo never join it", async () => {
+    const { dir, app, editor, clip } = await setup();
+    const orphan = await app.request("tx.begin", { label: "Move 2 clips", autoCommitAfter: 60 });
+    await app.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 25 });
+    const first = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 30 } }]);
+    const second = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 31 } }]);
+    expect(new Set([orphan.tx, first.operation.tx, second.operation.tx]).size).toBe(3);
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+
+    await editor.undo(dir, "main");
+    expect(await clip("c_c")).toMatchObject({ start: 30 });
+    await editor.undo(dir, "main");
+    await editor.undo(dir, "main");
+    expect(await clip("c_c")).toMatchObject({ start: 20 });
+  });
+
+  it("commits a ui transaction left open before an undo, so the revert is a step of its own", async () => {
+    const { dir, app, editor, clip } = await setup();
+    await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 30 } }]);
+    // A fresh editor, as in an app restarted after the crash.
+    const restarted = new TimelineEditor((method, params) => app.request(method, params));
+    const orphan = await app.request("tx.begin", { label: "Move 2 clips", autoCommitAfter: 60 });
+    await app.request("clip.move", { cwd: dir, timeline: "main", clip: "c_a", start: 12 });
+    const undone = await restarted.undo(dir, "main");
+    expect(undone?.operation.tx).not.toBe(orphan.tx);
+    expect(await clip("c_a")).toMatchObject({ start: 0 });
+    expect(await clip("c_c")).toMatchObject({ start: 30 });
+  });
+
+  it("closes a batch whose commit was lost before the next edit, which stays a step of its own", async () => {
+    const { dir, app, clip } = await setup();
+    let loseCommit = false;
+    const editor = new TimelineEditor((method, params) => {
+      if (method === "tx.commit" && loseCommit) {
+        loseCommit = false;
+        return Promise.reject(new Error("Daemon connection closed."));
+      }
+      return app.request(method, params);
+    });
+    await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 30 } }]);
+    loseCommit = true;
+    await editor.apply(dir, "main", splitTwo);
+    const next = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 31 } }]);
+    const history = await app.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions.slice(1).map((tx) => [tx.label, tx.operations.length])).toEqual([
+      [null, 1],
+      ["Split 2 clips", 2],
+      [null, 1],
+    ]);
+    expect(history.transactions.at(-1)?.tx).toBe(next.operation.tx);
+    await editor.undo(dir, "main");
+    expect(await clip("c_c")).toMatchObject({ start: 30 });
+    expect(await clip("c_a")).toMatchObject({ end: 2 });
   });
 
   it("runs batches one after another, so two windows' edits never share a transaction", async () => {
