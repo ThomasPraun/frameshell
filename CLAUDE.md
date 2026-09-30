@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp,plugin-api}`, `plugins/whisper-cpp`, `apps/desktop` (Electron). Node >= 22.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp,plugin-api}`, `plugins/{whisper-cpp,hyperframes}`, `apps/desktop` (Electron). Node >= 22.
 
 ## Doc map
 
@@ -13,13 +13,14 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
-| Managed binaries (ffmpeg, whisper.cpp, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
+| Managed binaries (ffmpeg, whisper.cpp, headless Chrome, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
 | Transcription (transcript file, word ids, audio source, export verify) | `packages/core/src/transcripts/transcriber.ts`, `transcripts/verify.ts` + `align.ts`; provider `plugins/whisper-cpp` |
 | Timeline operations (engine, inverses, invariants, CLI verbs) | `packages/core/src/timeline/engine.ts`, `timeline/service.ts`; ADR 0004 |
 | Export (compiler, presets, render job, frame capture) | `packages/core/src/export/compiler.ts` (pure, golden tests `packages/core/test/golden/`, regen `UPDATE_GOLDEN=1`), `export/service.ts` |
 | History, transactions, revert (journal, grouping, conflicts) | `packages/core/src/history/`; SPEC §6.2 |
 | Direct timeline file edits (watcher, stale/invalid rejection, `.frameshell/rejected/`, offline-edit catch-up) | `TimelineService.reconcile` in `packages/core/src/timeline/service.ts`, `timeline/watcher.ts`, `timeline/rejections.ts`; SPEC §6.4 |
 | Cut snapping to audio energy (pauses, envelope cache) | `packages/core/src/media/energy.ts`, `media/energy-store.ts`, `timeline/snap.ts`; ADR 0003 |
+| Generated clips (render cache, keys, background renders, export layers) | `packages/core/src/clips/renderer.ts`, `clips/cache-key.ts`; adapter `plugins/hyperframes`; SPEC §6.5, ADR 0002 |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
@@ -48,7 +49,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
 - Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media.
-- Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused.
+- Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused. Clip cache entry layout or key recipe changed: bump `CACHE_LAYOUT_VERSION` (`clips/cache-key.ts`).
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
 - Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.

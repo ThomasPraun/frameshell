@@ -914,6 +914,74 @@ code {
   font-size: 11.5px;
 }
 
+/* Generated clips over the picture, bottom track first. */
+.preview-layers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.preview-layer {
+  position: absolute;
+  object-fit: fill;
+}
+
+/* A layer still rendering: a tally-style slate in the lower third, footage stays visible around it. */
+.preview-layer-pending {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  width: min(72%, 360px);
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  background: rgba(29, 30, 32, 0.88);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.preview-layer-pending[data-state="failed"],
+.preview-layer-pending[data-state="unavailable"] {
+  border-left-color: var(--danger);
+}
+
+.preview-layer-pending p {
+  margin: 0;
+}
+
+.preview-layer-title code {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.preview-layer-progress {
+  height: 3px;
+  background: var(--line-soft);
+}
+
+.preview-layer-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+.preview-layer-error {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-layer-progress span {
+    transition: none;
+  }
+}
+
 .preview-transport {
   flex: none;
   height: 32px;

@@ -36,6 +36,21 @@ describe("serveMedia", () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(BYTES);
   });
 
+  it("serves cached clip renders (SPEC §6.5) as WebM, but no symlink escaping the cache", async () => {
+    const { root, roots, base } = project();
+    const clips = join(root, ".frameshell", "cache", "clips");
+    mkdirSync(clips, { recursive: true });
+    writeFileSync(join(clips, "0123abcd.webm"), BYTES);
+    const response = await serveMedia(get(`${base}.frameshell/cache/clips/0123abcd.webm`, { Range: "bytes=0-9" }), roots);
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("video/webm");
+    if (process.platform !== "win32") {
+      symlinkSync(join(root, "frameshell.json"), join(clips, "escape.webm"));
+      expect((await serveMedia(get(`${base}.frameshell/cache/clips/escape.webm`), roots)).status).toBe(403);
+    }
+    expect((await serveMedia(get(`${base}.frameshell/cache/render/x.mp4`), roots)).status).toBe(403);
+  });
+
   it("answers a byte range with 206 and exactly those bytes", async () => {
     const { roots, base } = project();
     const response = await serveMedia(get(`${base}.frameshell/proxies/abc.pcm`, { Range: "bytes=100-199" }), roots);

@@ -15,7 +15,7 @@ const ASSET = "assets/take.mp4";
 let app: ElectronApplication;
 let page: Page;
 
-/** Program: three cuts from one 6 s take, then a rendered clip the preview cannot play yet. Source frames per program frame below. */
+/** Program: three cuts from one 6 s take, then a generated clip no plugin renders here. Source frames per program frame below. */
 const media = (id: string, start: number, inS: number, out: number) => ({ id, type: "media", asset: ASSET, start, in: inS, out });
 const CLIPS = [
   media("c_a", 0, 1, 2), // program frames 0-29 show source 30-59
@@ -144,8 +144,9 @@ test("plays across the cuts on the audio clock: only program frames, in order, t
 
   await expect(frame()).not.toHaveAttribute("data-playing");
   await expect(playhead()).toHaveText("00:00:04:00");
-  await expect(page.getByTestId("preview-placeholder")).toHaveAttribute("data-reason", "generated");
-  await expect(page.getByTestId("preview-placeholder")).toContainText("Rendered clips are not previewed yet");
+  // No plugin renders `hyperframes` here: the layer says why instead of showing a render.
+  await expect(page.getByTestId("preview-layer-pending")).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("preview-layer-pending")).toContainText("frameshell plugin install @frameshell/hyperframes");
 });
 
 test("reflects a timeline change made during playback without restarting it", async () => {

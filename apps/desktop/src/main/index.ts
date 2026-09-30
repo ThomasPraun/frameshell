@@ -80,8 +80,9 @@ interface WindowState {
   project: ProjectView | null;
   files: ProjectFiles | null;
   /**
-   * Daemon `timeline.changed`, `timeline.rejected` and `asset.changed` of the
-   * shown project, forwarded to the renderer: nothing there polls the daemon.
+   * Daemon `timeline.changed`, `timeline.rejected`, `asset.changed` and `clip`
+   * job `job.progress` of the shown project, forwarded to the renderer: nothing
+   * there polls the daemon.
    */
   daemonEvents: LinkSubscription[];
   terminals: TerminalManager;
@@ -190,6 +191,13 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("asset.changed", project.dir, {
       onEvent: ({ path, asset }) => send(contents, Channel.mediaChanged, { path, asset } satisfies AssetChange),
       onResync: () => send(contents, Channel.mediaChanged, { path: null } satisfies AssetChange),
+    }),
+    // Generated clip renders (SPEC §6.5): the preview shows their progress, then plays them.
+    daemon.subscribe("job.progress", project.dir, {
+      onEvent: ({ job }) => {
+        if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+      },
+      onResync: () => send(contents, Channel.clipsJob, null),
     }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.daemonEvents = subscriptions;
@@ -341,6 +349,9 @@ function registerIpc(): void {
       const { project } = requireProject(stateOf(event.sender));
       return (await daemon.request("asset.list", { cwd: project.dir })).assets;
     }),
+  );
+  ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
+    outcome(async () => daemon.request("clip.renders", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline })),
   );
   ipcMain.handle(Channel.mediaRead, (event, path: string) =>
     outcome(async () => requireProject(stateOf(event.sender)).files.readMedia(path)),

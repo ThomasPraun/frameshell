@@ -72,6 +72,10 @@ const api: FrameshellApi = {
   context: {
     captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),
   },
+  clips: {
+    renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),
+    onJob: (listener) => subscribe(Channel.clipsJob, listener),
+  },
 };
 
 contextBridge.exposeInMainWorld("frameshell", api);

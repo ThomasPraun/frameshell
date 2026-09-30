@@ -15,6 +15,7 @@ import { useTimelineView } from "../timeline/useTimelineView.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
+import { PreviewLayers } from "./PreviewLayers.js";
 import { sendClipEdit } from "./clip-edits.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
@@ -25,7 +26,6 @@ const MIN_REGION = 0.01;
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
 const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
-  generated: "Rendered clips are not previewed yet",
   timeline: "Nested timeline cannot be read",
   ingest: "Building the preview proxy",
   unavailable: "No preview for this clip",
@@ -132,11 +132,13 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           aria-label={empty ? "Empty program monitor" : `Program monitor at ${formatTimecode(time, fps)}`}
           onContextMenu={openAskMenu}
         >
-          <SubtitleOverlay size={canvasSize} frame={frame} />
           <div className="safe-area action" />
           <div className="safe-area title" />
           {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
           {program && <Placeholder program={program} frame={frame} />}
+          {program && <PreviewLayers program={program} frame={frame} time={time} playing={playing} mediaUrl={project.mediaUrl} />}
+          {/* After the generated-clip layers: subtitles read over every picture. Neither takes a click. */}
+          <SubtitleOverlay size={canvasSize} frame={frame} />
           {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} />}
           <RegionLayer active={regionTool && !empty} fps={fps} />
         </div>

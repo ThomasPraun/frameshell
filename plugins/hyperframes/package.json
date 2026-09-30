@@ -1,0 +1,30 @@
+{
+  "name": "@frameshell/hyperframes",
+  "version": "0.1.0",
+  "description": "Official Frameshell clip adapter: HyperFrames HTML compositions rendered headlessly to VP9 WebM with alpha.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "frameshell-plugin.json",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@hyperframes/producer": "0.8.92"
+  },
+  "devDependencies": {
+    "@frameshell/core": "workspace:*",
+    "@frameshell/plugin-api": "workspace:*",
+    "@frameshell/schema": "workspace:*"
+  }
+}

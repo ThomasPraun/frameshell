@@ -1,7 +1,9 @@
 import type {
   AssetInfo,
+  ClipRendersResult,
   HistoryDiffResult,
   HistoryResult,
+  JobInfo,
   MethodParams,
   OperationResult,
   RevertConflict,
@@ -195,6 +197,16 @@ export interface FrameshellApi {
      */
     captureFrame(at: number): Promise<string>;
   };
+  clips: {
+    /** `clip.renders` of a timeline of the window's project: render cache state per generated clip. Rejects with the daemon's message. */
+    renders(timeline: string): Promise<ClipRendersResult>;
+    /**
+     * Called on every change of a `clip` render job of the project (daemon
+     * `job.progress`); `null` after a daemon reconnect, when changes may have
+     * been missed. Returns an unsubscribe function.
+     */
+    onJob(listener: (job: JobInfo | null) => void): () => void;
+  };
 }
 
 /** IPC channel names; one place so main and preload cannot drift. */
@@ -233,4 +245,6 @@ export const Channel = {
   mediaRead: "media:read",
   mediaChanged: "media:changed",
   contextCaptureFrame: "context:capture-frame",
+  clipsRenders: "clips:renders",
+  clipsJob: "clips:job",
 } as const;
