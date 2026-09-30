@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type EventName,
@@ -23,6 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
+import { parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -231,6 +233,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     unavailable: (dir, type) => plugins.clipTypeUnavailable(dir, type),
     timelines: (dir) => listTimelineIds(dir),
     load: (dir, id) => timelines.load(dir, id),
+    peek: async (dir, id) => {
+      const parsed = parseTimeline(JSON.parse(await readFile(join(dir, "timelines", `${id}.json`), "utf8")));
+      if (!parsed.ok) throw new Error(parsed.error);
+      return parsed.value;
+    },
     format: async (dir) => {
       const config = (await readEnclosingProject(dir))?.config;
       return { fps: config?.fps ?? 30, width: config?.resolution.width ?? 1920, height: config?.resolution.height ?? 1080 };

@@ -58,6 +58,12 @@ export interface ClipRendererOptions {
   timelines(root: string): Promise<string[]>;
   /** Parsed timeline; see `TimelineService.load`. */
   load(root: string, id: string): Promise<{ timeline: Timeline }>;
+  /**
+   * Timeline file as on disk, read without side effects: background scans
+   * must never race the timeline service taking in a direct edit. Throws when
+   * missing or invalid.
+   */
+  peek(root: string, id: string): Promise<Timeline>;
   /** Project fps and resolution from `frameshell.json`. */
   format(root: string): Promise<ClipFormat>;
   /** Size and length of a finished render (ffprobe). */
@@ -139,7 +145,9 @@ export class ClipRenderer {
     if (this.#options.watch !== false) {
       const watcher = watch(root, {
         ignoreInitial: true,
-        ignored: (path) => IGNORED.has(relative(root, path).split(sep)[0] ?? ""),
+        // Only files and folders: watching a FIFO or socket can block a libuv thread forever.
+        ignored: (path, stats) =>
+          IGNORED.has(relative(root, path).split(sep)[0] ?? "") || (stats !== undefined && !stats.isFile() && !stats.isDirectory()),
       });
       watcher.on("all", () => this.#schedule(root));
       // A vanished project must not crash the daemon.
@@ -298,7 +306,7 @@ export class ClipRenderer {
     const placed: Placed[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
-        placed.push(...generatedClips((await this.#options.load(root, id)).timeline));
+        placed.push(...generatedClips(await this.#options.peek(root, id)));
       } catch {
         // Invalid or vanished timeline: its own errors surface where it is used.
       }
