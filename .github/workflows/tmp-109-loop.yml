@@ -27,14 +27,6 @@ jobs:
         continue-on-error: true
         shell: bash
         run: for i in 1 2 3 4 5; do pnpm exec vitest run packages/core/test/atomic-write.test.ts || echo "ROUND $i RED"; done
-      - name: clip render cache (x5)
-        continue-on-error: true
-        shell: bash
-        run: for i in 1 2 3 4 5; do pnpm exec vitest run packages/core/test/clip-render-cache.test.ts || echo "ROUND $i RED"; done
-      - name: ConPTY kill right after spawn
-        continue-on-error: true
-        working-directory: apps/desktop
-        run: node scripts/tmp-pty-kill-loop.mjs 48
       - run: pnpm --filter @frameshell/desktop exec electron-vite build
       - name: launch.spec repeated
         continue-on-error: true
@@ -45,23 +37,3 @@ jobs:
           name: tmp109-windows
           path: apps/desktop/test-results/
           retention-days: 3
-
-  linux:
-    name: loop ubuntu import
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@v4
-        with:
-          path: .cache/test-binaries
-          key: test-binaries-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/core/src/binaries/manifest.ts') }}
-      - run: pnpm exec tsc -b
-      - name: import-cli (x30)
-        continue-on-error: true
-        run: for i in $(seq 1 30); do pnpm exec vitest run packages/cli/test/import-cli.test.ts > out.txt 2>&1 || { echo "ROUND $i RED"; grep -v "^\s*$" out.txt | tail -80; }; done
