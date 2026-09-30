@@ -1,4 +1,5 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
+import type { ClipDiff } from "@frameshell/protocol";
 import {
   type ClipBox,
   RULER_HEIGHT,
@@ -54,6 +55,10 @@ export interface TimelineTheme {
   video: string;
   audio: string;
   subtitles: string;
+  /** History diff marks (see {@link PaintInput.diff}); removed clips use `danger`. */
+  diffAdded: string;
+  diffMoved: string;
+  diffChanged: string;
   fontUi: string;
   fontMono: string;
 }
@@ -72,6 +77,9 @@ export const DEFAULT_THEME: TimelineTheme = {
   video: "#7092c4",
   audio: "#6fae8b",
   subtitles: "#b48acb",
+  diffAdded: "#79d39a",
+  diffMoved: "#66c2e0",
+  diffChanged: "#d7a8e8",
   fontUi: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   fontMono: "Menlo, Consolas, monospace",
 };
@@ -116,6 +124,13 @@ export interface PaintInput<Img> {
   selected?: ReadonlySet<string>;
   /** Clip being dragged: drawn dimmed in place, with its ghost where it would land. */
   drag?: DragGhost;
+  /**
+   * What the transaction or operation selected in the History panel did
+   * (`history.diff`): removed clips as dashed ghosts where they were, added
+   * ones framed, moved ones framed with a ghost where they came from,
+   * otherwise changed ones framed over a dashed outline of their old extent.
+   */
+  diff?: readonly ClipDiff[];
 }
 
 /** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
@@ -137,6 +152,10 @@ const CLIP_INSET_Y = 3;
 const MIN_LABEL_WIDTH = 28;
 /** A dragged clip stays visible in place, faded, until the daemon applies the move. */
 const DRAGGED_ALPHA = 0.35;
+/** Stand-in length of a diff place whose end is unknown, s (as `layout.ts` does for clips). */
+const DIFF_UNKNOWN_LENGTH_S = 2;
+/** Tag drawn in a diff mark's corner, so marks read without relying on color. */
+const DIFF_GLYPHS: Record<ClipDiff["change"], string> = { added: "+", removed: "\u2212", moved: "\u2194", changed: "~" };
 
 /**
  * Paint one frame. Returns how many clips were drawn (culling is observable)
@@ -180,6 +199,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       clipsDrawn++;
     }
   });
+  if (input.diff) paintDiff(ctx, input, input.diff);
   if (input.drag) paintDrag(ctx, input, input.drag);
   ctx.restore();
 
@@ -275,6 +295,85 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
 
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
   return media;
+}
+
+/** History diff marks, over the clips; see {@link PaintInput.diff}. */
+function paintDiff<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, diff: readonly ClipDiff[]): void {
+  const { theme } = input;
+  const color: Record<ClipDiff["change"], string> = {
+    added: theme.diffAdded,
+    removed: theme.danger,
+    moved: theme.diffMoved,
+    changed: theme.diffChanged,
+  };
+  for (const mark of diff) {
+    const tint = color[mark.change];
+    const { before, after } = mark;
+    const moved = before && after && (before.track !== after.track || before.start !== after.start || before.end !== after.end);
+    if (before && (mark.change === "removed" || moved)) {
+      const box = diffBox(input, before);
+      if (box) {
+        ctx.fillStyle = withAlpha(tint, mark.change === "removed" ? 0.14 : 0.08);
+        ctx.fillRect(box.left, box.y, box.w, box.h);
+        if (mark.change === "removed") paintHatch(ctx, box.left, box.left + box.w, box.y, box.h, withAlpha(tint, 0.22));
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = tint;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(box.left + 0.5, box.y + 0.5, Math.max(0, box.w - 1), box.h - 1);
+        ctx.setLineDash([]);
+        if (mark.change === "removed") paintDiffTag(ctx, input, box, DIFF_GLYPHS.removed, tint);
+      }
+    }
+    if (after) {
+      const box = diffBox(input, after);
+      if (!box) continue;
+      if (mark.change === "added") {
+        ctx.fillStyle = withAlpha(tint, 0.12);
+        ctx.fillRect(box.left, box.y, box.w, box.h);
+      }
+      ctx.strokeStyle = tint;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(box.left + 0.5, box.y + 0.5, Math.max(0, box.w - 1), box.h - 1);
+      paintDiffTag(ctx, input, box, DIFF_GLYPHS[mark.change], tint);
+    }
+  }
+}
+
+/** Clip-sized box of a diff place in view coordinates; null when its track is not shown. */
+function diffBox<Img>(
+  input: PaintInput<Img>,
+  place: NonNullable<ClipDiff["before"]>,
+): { left: number; y: number; w: number; h: number } | null {
+  const row = input.layout.rows.find((candidate) => candidate.id === place.track);
+  if (!row || row.kind === "subtitles") return null;
+  const { pxPerSecond, scrollLeft, scrollTop, width } = input.viewport;
+  const end = place.end ?? place.start + DIFF_UNKNOWN_LENGTH_S;
+  const x0 = place.start * pxPerSecond - scrollLeft + 0.5;
+  const x1 = end * pxPerSecond - scrollLeft - 0.5;
+  const left = Math.max(x0, -2);
+  const right = Math.min(Math.max(x1, x0 + 1), width + 2);
+  return { left, y: row.top - scrollTop + CLIP_INSET_Y, w: right - left, h: row.height - 2 * CLIP_INSET_Y };
+}
+
+/** Small filled tag in the box's bottom-right corner with the change's glyph. */
+function paintDiffTag<Img>(
+  ctx: Paint2D<Img>,
+  input: PaintInput<Img>,
+  box: { left: number; y: number; w: number; h: number },
+  glyph: string,
+  color: string,
+): void {
+  const size = 12;
+  if (box.w < size + 4) return;
+  const x = box.left + box.w - size - 2;
+  const y = box.y + box.h - size - 2;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.font = `700 10px ${input.theme.fontUi}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.fillStyle = input.theme.lane;
+  ctx.fillText(glyph, x + size / 2, y + size / 2 + 0.5);
 }
 
 /** Ghost of a drag: a clip-sized frame on its landing lane, and the snap guide it sits on. */

@@ -1,5 +1,6 @@
 import type { SidebarView } from "../../../shared/layout.js";
 import { Explorer } from "./Explorer.js";
+import { HistoryPanel } from "./HistoryPanel.js";
 import { PanelHeader } from "./PanelHeader.js";
 
 const VIEWS: { id: SidebarView; label: string }[] = [
@@ -41,11 +42,7 @@ export function Sidebar({
       </PanelHeader>
       <div className="panel-body">
         {view === "explorer" && <Explorer onOpenFile={onOpenFile} activeFile={activeFile} />}
-        {view === "history" && (
-          <p className="empty">
-            Transactions from you and the agent will be listed here, with diff and revert, once timeline operations land.
-          </p>
-        )}
+        {view === "history" && <HistoryPanel />}
         {view === "plugins" && (
           <p className="empty">
             No plugins yet. Adapters such as HyperFrames and providers such as whisper.cpp will show up here with their

@@ -1,4 +1,13 @@
-import type { AssetInfo, MethodParams, OperationResult, TimelineRejection, TimelineView } from "@frameshell/protocol";
+import type {
+  AssetInfo,
+  HistoryDiffResult,
+  HistoryResult,
+  MethodParams,
+  OperationResult,
+  RevertConflict,
+  TimelineRejection,
+  TimelineView,
+} from "@frameshell/protocol";
 import type { Layout } from "./layout.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
@@ -60,6 +69,15 @@ export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
  * `cwd` and `timeline`, which main fills in for the window's project.
  */
 export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
+
+/**
+ * Result of a revert asked from the History panel. A refusal because later
+ * operations changed the same clips is data, not an error: the panel lists
+ * `conflicts` so the user can revert those first.
+ */
+export type RevertOutcome =
+  | { status: "reverted"; result: OperationResult }
+  | { status: "conflict"; message: string; conflicts: RevertConflict[] };
 
 /** Reply of a main handler that can fail: Electron would bury a thrown message in IPC noise. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -125,6 +143,17 @@ export interface FrameshellApi {
     /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */
     redo(timeline: string): Promise<OperationResult | null>;
   };
+  history: {
+    /** `history` of one timeline of the window's project: transactions oldest first. Rejects with the daemon's message. */
+    list(timeline: string): Promise<HistoryResult>;
+    /** `history.diff`: what a transaction or operation did to clips. Rejects with the daemon's message. */
+    diff(timeline: string, target: string): Promise<HistoryDiffResult>;
+    /**
+     * Undo a transaction or one operation of any author as a `revert` by `ui`
+     * (SPEC §6.2). Conflicts resolve as {@link RevertOutcome}; other failures reject.
+     */
+    revert(timeline: string, target: string): Promise<RevertOutcome>;
+  };
   media: {
     /** `asset.list` of the window's project: ingest state and derived media paths. */
     assets(): Promise<AssetInfo[]>;
@@ -160,6 +189,9 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
+  historyList: "history:list",
+  historyDiff: "history:diff",
+  historyRevert: "history:revert",
   mediaAssets: "media:assets",
   mediaRead: "media:read",
   mediaChanged: "media:changed",

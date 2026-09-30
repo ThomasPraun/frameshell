@@ -21,6 +21,10 @@
   --track-video: #7092c4;
   --track-audio: #6fae8b;
   --track-sub: #b48acb;
+  /* History diff marks: what a transaction did. Removed uses --danger. */
+  --diff-added: #79d39a;
+  --diff-moved: #66c2e0;
+  --diff-changed: #d7a8e8;
 
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Ubuntu", "Cantarell", "Noto Sans", sans-serif;
   --font-mono: "JetBrains Mono Variable", Menlo, Consolas, "DejaVu Sans Mono", monospace;
@@ -555,6 +559,285 @@ code {
   background: #8fb3c7;
 }
 
+/* ---------- History ---------- */
+
+.history,
+.history-ops,
+.history-conflicts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history {
+  padding: 4px 0 12px;
+}
+
+.history-item + .history-item {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* Two lines per transaction: what it did, then who and how much. Time and Revert on the right. */
+.history-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 40px;
+  padding-right: 8px;
+}
+
+.history-row:hover,
+.history-op:hover {
+  background: var(--bg-hover);
+}
+
+.history-row.is-active,
+.history-op.is-active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.history-expand {
+  flex: none;
+  width: 22px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.history-main,
+.history-op-main {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 5px 0;
+}
+
+.history-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.history-title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.history-author {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The agent and the human read apart at a glance: you in the accent, everything else neutral. */
+.history-author.author-ui {
+  color: var(--accent);
+}
+
+.history-author-detail {
+  margin-left: 5px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.history-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.history-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  padding-left: 8px;
+}
+
+.history-time {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.history-revert {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.history-row:hover .history-revert,
+.history-row.is-active .history-revert,
+.history-op:hover .history-revert,
+.history-op.is-active .history-revert,
+.history-revert:focus-visible {
+  opacity: 1;
+}
+
+.history-revert:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.history-revert:disabled {
+  cursor: default;
+}
+
+.history-ops {
+  padding: 0 0 4px 22px;
+}
+
+.history-op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-right: 8px;
+}
+
+.history-op-main {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0 3px 6px;
+}
+
+.history-op-title {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.history-op-touched {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 2px 8px 6px 22px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+/* Same glyphs and colors as the marks on the timeline lanes (`paint.ts`). */
+.diff-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.diff-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  color: var(--bg-app);
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.diff-added {
+  color: var(--diff-added);
+}
+
+.diff-removed {
+  color: var(--danger);
+}
+
+.diff-moved {
+  color: var(--diff-moved);
+}
+
+.diff-changed {
+  color: var(--diff-changed);
+}
+
+.diff-added .diff-glyph {
+  background: var(--diff-added);
+}
+
+.diff-removed .diff-glyph {
+  background: var(--danger);
+}
+
+.diff-moved .diff-glyph {
+  background: var(--diff-moved);
+}
+
+.diff-changed .diff-glyph {
+  background: var(--diff-changed);
+}
+
+.history-notice {
+  margin: 0 8px 8px 22px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  user-select: text;
+}
+
+.history-notice.is-error {
+  background: rgba(224, 103, 95, 0.12);
+  color: #f0b0aa;
+}
+
+.history-conflicts {
+  margin-top: 4px;
+}
+
+.history-conflicts li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.history-conflict-ids {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
 /* ---------- Preview ---------- */
 
 .timecode {
@@ -1069,6 +1352,7 @@ code {
 
 .timeline-summary {
   margin-left: auto;
+  white-space: nowrap;
 }
 
 /* What the last edit did; amber-free on purpose: the accent marks the playhead and selection, not chatter. */
@@ -1083,6 +1367,17 @@ code {
 
 .timeline-status-error {
   color: var(--danger);
+}
+
+.timeline-diff-legend {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
 }
 
 .snap-toggle.on {

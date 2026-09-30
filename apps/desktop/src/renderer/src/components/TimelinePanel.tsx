@@ -1,4 +1,4 @@
-import type { OperationResult } from "@frameshell/protocol";
+import type { ClipDiff, OperationResult } from "@frameshell/protocol";
 import {
   type KeyboardEvent,
   type PointerEvent,
@@ -11,6 +11,8 @@ import {
   useState,
 } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
+import { diffCounts } from "../history/model.js";
+import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { type DragPreview, type EditCommand, type Grab, commandEdits, dragEdit, dragPreview, grabAt, snapPoints } from "../timeline/edit.js";
@@ -96,6 +98,10 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const empty = layout !== null && layout.clipCount === 0;
   const [status, setStatus] = useState<Status | null>(null);
+  // The History panel's pick, marked on the lanes: what that transaction or operation did.
+  const { history } = useSelection();
+  const { diff } = useHistoryDiff(TIMELINE, history, view?.revision ?? null);
+  const marks = history !== null && diff?.target === history ? diff.clips : null;
 
   useEffect(() => {
     if (!status) return;
@@ -115,6 +121,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
         <span className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
           {status?.text ?? ""}
         </span>
+        {history !== null && <DiffLegend target={history} marks={marks} />}
         {view && layout && (
           <span className="panel-meta timeline-summary">
             {`${layout.clipCount} ${layout.clipCount === 1 ? "clip" : "clips"}, ${formatTimecode(layout.duration, view.fps)}`}
@@ -137,6 +144,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
           layout={layout}
           fps={view?.fps ?? 30}
           revision={view?.revision ?? null}
+          diff={marks}
           onStatus={setStatus}
           overlay={
             error && !view ? (
@@ -164,12 +172,15 @@ function TimelineCanvas({
   layout,
   fps,
   revision,
+  diff,
   overlay,
   onStatus,
 }: {
   layout: TimelineLayout | null;
   fps: number;
   revision: number | null;
+  /** Marks of the history entry selected in the History panel; null when none. */
+  diff: readonly ClipDiff[] | null;
   overlay: ReactNode;
   onStatus: (status: Status | null) => void;
 }) {
@@ -189,8 +200,8 @@ function TimelineCanvas({
   const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
   /** Edits run one after another, in the order they were made. */
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const latest = useRef({ layout, fps, selected, revision, snapping });
-  latest.current = { layout, fps, selected, revision, snapping };
+  const latest = useRef({ layout, fps, selected, revision, snapping, diff });
+  latest.current = { layout, fps, selected, revision, snapping, diff };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
@@ -199,7 +210,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, diff: marks } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -223,6 +234,7 @@ function TimelineCanvas({
       theme: theme.current,
       media: mediaRef.current!,
       selected: chosen,
+      ...(marks ? { diff: marks } : {}),
       ...(drag ? { drag } : {}),
     });
     performance.measure(PAINT_MEASURE, { start: started });
@@ -287,7 +299,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, settle, draw]);
+  }, [layout, revision, selected, diff, settle, draw]);
   // The playhead moves every frame while playing: repaint outside React, and page the lanes to keep it in view.
   useEffect(
     () =>
@@ -310,8 +322,14 @@ function TimelineCanvas({
     const box = scroller.current;
     const current = latest.current.layout;
     if (!reveal || !box || !current) return;
-    const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === reveal.clip));
-    const clip = row?.clips.find((candidate) => candidate.id === reveal.clip);
+    let row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === reveal.clip));
+    let clip: { start: number; end: number } | undefined = row?.clips.find((candidate) => candidate.id === reveal.clip);
+    // Gone from the timeline (a transaction removed it): look where it was.
+    if ((!row || !clip) && reveal.place) {
+      const { place } = reveal;
+      row = current.rows.find((candidate) => candidate.id === place.track);
+      clip = { start: place.start, end: place.end ?? place.start };
+    }
     if (!row || !clip) return;
     // The player follows selections made elsewhere: the playhead jumps to the clip (not while playing).
     if (!transport.get().playing) transport.seek(clip.start);
@@ -344,6 +362,9 @@ function TimelineCanvas({
       video: read("--track-video", DEFAULT_THEME.video),
       audio: read("--track-audio", DEFAULT_THEME.audio),
       subtitles: read("--track-sub", DEFAULT_THEME.subtitles),
+      diffAdded: read("--diff-added", DEFAULT_THEME.diffAdded),
+      diffMoved: read("--diff-moved", DEFAULT_THEME.diffMoved),
+      diffChanged: read("--diff-changed", DEFAULT_THEME.diffChanged),
       fontUi: read("--font-ui", DEFAULT_THEME.fontUi),
       fontMono: read("--font-mono", DEFAULT_THEME.fontMono),
     };
@@ -671,6 +692,7 @@ function TimelineCanvas({
         data-revision={revision ?? undefined}
         data-clips={layout?.clipCount ?? 0}
         data-selected={selectedClips.join(" ")}
+        data-diff={diff?.map((mark) => `${mark.change}:${mark.clip}`).join(" ")}
         ref={lanesEl}
         data-playhead={transport.get().time}
         data-dragging={dragging ? dragging.preview.part : undefined}
@@ -698,6 +720,27 @@ function TimelineCanvas({
         <ClipList layout={layout} fps={fps} selected={selected} />
       </div>
     </div>
+  );
+}
+
+/** Header chip while a history entry's changes are marked on the lanes: counts by kind, and a way out. */
+function DiffLegend({ target, marks }: { target: string; marks: readonly ClipDiff[] | null }) {
+  const counts = marks ? diffCounts(marks) : null;
+  return (
+    <span className="timeline-diff-legend" data-history={target}>
+      <span className="panel-meta" title={`Changes of ${target}`}>
+        {target}
+      </span>
+      {counts &&
+        (["added", "removed", "moved", "changed"] as const)
+          .filter((kind) => counts[kind] > 0)
+          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${kind}`}</span>)}
+      <button className="icon-button" aria-label="Stop showing these changes" title="Stop showing these changes (Esc on the lanes)" onClick={() => selection.clear()}>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      </button>
+    </span>
   );
 }
 

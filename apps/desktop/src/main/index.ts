@@ -296,6 +296,17 @@ function registerIpc(): void {
   ipcMain.handle(Channel.timelineRedo, (event, timeline: string) =>
     outcome(async () => editor.redo(requireProject(stateOf(event.sender)).project.dir, timeline)),
   );
+  ipcMain.handle(Channel.historyList, (event, timeline: string) =>
+    outcome(async () => daemon.request("history", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline })),
+  );
+  ipcMain.handle(Channel.historyDiff, (event, timeline: string, target: string) =>
+    outcome(async () =>
+      daemon.request("history.diff", { cwd: requireProject(stateOf(event.sender)).project.dir, timeline, target }),
+    ),
+  );
+  ipcMain.handle(Channel.historyRevert, (event, timeline: string, target: string) =>
+    outcome(async () => editor.revert(requireProject(stateOf(event.sender)).project.dir, timeline, target)),
+  );
   ipcMain.handle(Channel.mediaAssets, (event) =>
     outcome(async () => {
       const { project } = requireProject(stateOf(event.sender));
