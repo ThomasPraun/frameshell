@@ -116,7 +116,8 @@ describe.skipIf(process.platform === "win32")("frameshell transcribe", () => {
         JSON.stringify({
           schemaVersion: 1,
           id: "main",
-          revision: 1,
+          // Direct edits keep the revision they were read at; the daemon bumps it (SPEC §6.4).
+          revision: JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")).revision,
           tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_0001", type: "media", asset: "assets/raw-01.mp4", start: 0, in: 0, out: 2.2 }] }],
         }),
       );

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
@@ -46,12 +46,14 @@ function writeProject(dir: string): void {
       nextWordId: 5,
     }),
   );
+  // A direct edit keeps the revision it was read at (SPEC §6.4); the daemon journals it and bumps it.
+  const base = JSON.parse(readFileSync(join(dir, "timelines", "main.json"), "utf8")).revision as number;
   writeFileSync(
     join(dir, "timelines", "main.json"),
     JSON.stringify({
       schemaVersion: 1,
       id: "main",
-      revision: 3,
+      revision: base,
       tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_0001", type: "media", asset: "assets/take.mp4", start: 0, in: 0.3, out: 2.75 }] }],
     }),
   );
@@ -89,7 +91,7 @@ describe.skipIf(process.platform === "win32")("transcribe.verify method", () => 
     expect(result).toMatchObject({
       export: join(project, "exports-main.mp4"),
       timeline: "main",
-      revision: 3,
+      revision: 1,
       provider: "whisper-cpp",
       model: "large-v3-turbo-q5_0",
       language: "es",
