@@ -23,7 +23,18 @@ export interface DaemonLinkOptions {
    * `ELECTRON_RUN_AS_NODE=1`: the spawn reuses `process.execPath`, the Electron binary.
    */
   env: NodeJS.ProcessEnv;
+  /** Give up waiting for a spawned daemon to listen after this long. Default {@link DAEMON_START_TIMEOUT_MS}. */
+  startTimeoutMs?: number;
+  /** Script run as frameshelld. Default: the installed `@frameshell/core/frameshelld`. Tests only. */
+  daemonEntry?: string;
 }
+
+/**
+ * Start timeout of the app's daemon, well above the CLI's 10 s: the window shows its boot screen meanwhile, and a
+ * cold daemon on a loaded machine (first launch, a busy CI runner) took 29 s in a synthetic-load run. Giving up early shows an
+ * error, and the link's retry spawns a second daemon that competes for the same CPU.
+ */
+export const DAEMON_START_TIMEOUT_MS = 60_000;
 
 /** Callbacks of one {@link DaemonLink.subscribe} call. */
 export interface EventHandlers<E extends EventName> {
@@ -169,7 +180,7 @@ export class DaemonLink {
 
   #connect(): Promise<DaemonConnection> {
     if (!this.#connection) {
-      const connection = connectOrStartDaemon(this.options);
+      const connection = connectOrStartDaemon({ startTimeoutMs: DAEMON_START_TIMEOUT_MS, ...this.options });
       this.#connection = connection;
       // A failed connect must not be cached: the next request tries again.
       connection.then(

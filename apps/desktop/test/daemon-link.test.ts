@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { type Socket, createConnection, createServer } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +13,8 @@ const socketPath = () =>
   process.platform === "win32"
     ? `\\\\.\\pipe\\frameshell-link-test-${randomUUID().slice(0, 8)}`
     : join(realpathSync(tmpdir()), `fs-link-${randomUUID().slice(0, 8)}.sock`);
+
+const slowDaemon = fileURLToPath(new URL("./fixtures/slow-daemon.mjs", import.meta.url));
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
@@ -50,6 +53,19 @@ describe("DaemonLink", () => {
     daemon = await startDaemon({ socketPath: path });
     const status = await daemonLink.request("status", { cwd });
     expect(status.daemon.uptimeMs).toBeLessThan(5_000);
+  });
+
+  it("waits for a cold daemon slower to listen than two CLI start timeouts (10 s each)", { timeout: 90_000 }, async () => {
+    const path = socketPath();
+    const daemonLink = new DaemonLink({
+      socketPath: path,
+      client: "desktop/test",
+      env: { ...process.env, FRAMESHELL_SOCKET: path, FRAMESHELL_IDLE_TIMEOUT_MS: "2000", FAKE_DAEMON_DELAY_MS: "21000" },
+      daemonEntry: slowDaemon,
+    });
+    cleanups.push(() => daemonLink.close());
+    const status = await daemonLink.request("status", { cwd: realpathSync(tmpdir()) });
+    expect(status.daemon.socketPath).toBe(path);
   });
 
   it("passes daemon errors through without retrying", async () => {
