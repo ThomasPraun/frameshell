@@ -82,6 +82,17 @@ describe("ProjectFiles", () => {
     expect(changes.changed.some((path) => path.startsWith(".frameshell"))).toBe(false);
   });
 
+  // macOS lost the first event after open about 1 in 50 times (#53); repeat to catch a regression.
+  it("reports changes made right after open resolves, every time", async () => {
+    for (let i = 0; i < 20; i++) {
+      const root = fixture();
+      const changes = recorder();
+      await open(root, changes.onChange);
+      writeFileSync(join(root, "scripts", `early-${i}.md`), "x");
+      await expect.poll(() => changes.changed).toContain(`scripts/early-${i}.md`);
+    }
+  });
+
   it("reads project files as text", async () => {
     const files = await open(fixture());
     expect(await files.read("scripts/a.md")).toBe("# A");
