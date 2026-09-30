@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,5 +84,69 @@ describe.skipIf(process.platform === "win32")("frameshell transcribe", () => {
     const result = await frameshell(["transcribe"], project);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("transcribe <asset>");
+  });
+
+  describe("--verify", () => {
+    /**
+     * Source: "Hola mundo. cruel" (0.45, 1.55, 1.95 s). The timeline keeps
+     * 0–2.2 s, cutting inside "cruel" (1.95–2.35, mostly kept). The fake
+     * whisper hears only "Hola mundo." in the export: "cruel" is lost at the cut.
+     */
+    beforeAll(() => {
+      writeFileSync(join(project, "exports.mp4"), "export");
+      writeFileSync(
+        join(project, "transcripts", "raw-01.words.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          asset: "assets/raw-01.mp4",
+          assetHash: `sha256:${createHash("sha256").update("hello").digest("hex")}`,
+          provider: "whisper-cpp",
+          model: "large-v3-turbo-q5_0",
+          language: "es",
+          words: [
+            { id: "w_000001", text: "Hola", start: 0.45, end: 0.8 },
+            { id: "w_000002", text: "mundo.", start: 1.55, end: 1.9 },
+            { id: "w_000003", text: "cruel", start: 1.95, end: 2.35 },
+          ],
+          nextWordId: 4,
+        }),
+      );
+      writeFileSync(
+        join(project, "timelines", "main.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          id: "main",
+          // Direct edits keep the revision they were read at; the daemon bumps it (SPEC §6.4).
+          revision: JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")).revision,
+          tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_0001", type: "media", asset: "assets/raw-01.mp4", start: 0, in: 0, out: 2.2 }] }],
+        }),
+      );
+    });
+
+    it("prints the words lost at cuts with position and clip, and exits 1", async () => {
+      const result = await frameshell(["transcribe", "--verify", "exports.mp4"], project);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toMatch(/^Verified .*exports\.mp4 against timeline main \(revision 1\): 3 words expected, 2 heard/);
+      expect(result.stdout).toMatch(/Lost at cuts \(1\):\n {2}1\.950 s {2}"cruel" {2}clip c_0001 \(track v1\) · out cut at 2\.200 s, clipped · w_000003/);
+    });
+
+    it("--json prints the report for agents", async () => {
+      const result = await frameshell(["transcribe", "--verify", join(project, "exports.mp4"), "--timeline", "main", "--json"], project);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        timeline: "main",
+        expected: 3,
+        heard: 2,
+        lost: [{ word: "w_000003", text: "cruel", clip: "c_0001", at: 1.95, cut: { edge: "out", at: 2.2 }, clipped: true }],
+        uncertain: [],
+      });
+    });
+
+    it("exits 2 when given an asset too", async () => {
+      const result = await frameshell(["transcribe", "raw-01.mp4", "--verify", "exports.mp4"], project);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("--verify <export>");
+    });
   });
 });

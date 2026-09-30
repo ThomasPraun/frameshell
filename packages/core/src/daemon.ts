@@ -38,6 +38,7 @@ import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
+import { verifyExport } from "./transcripts/verify.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -251,6 +252,29 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
         },
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
+        extractAudio: options.extractAudio,
+        progress: request.progress,
+      });
+    },
+    "transcribe.verify": async ({ cwd, export: file, timeline, provider, model, language }, _caller, request) => {
+      await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
+      const { dir, config } = (await readEnclosingProject(cwd))!;
+      const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
+      const overrides = { dir, binaries: config.binaries };
+      return verifyExport({
+        projectDir: dir,
+        exportFile: resolve(cwd, file),
+        timelineId: timeline,
+        timeline: (await timelines.load(dir, timeline)).timeline,
+        providerId,
+        provider: () => plugins.transcriptionProvider(dir, providerId),
+        model: model ?? config.transcription?.model,
+        language: language ?? config.transcription?.language,
+        tools: {
+          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
+          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
+        },
+        assetHash: async (rel) => (await media.derivedAudio(dir, rel)).hash,
         extractAudio: options.extractAudio,
         progress: request.progress,
       });

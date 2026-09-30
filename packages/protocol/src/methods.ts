@@ -18,7 +18,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -264,6 +264,43 @@ const PresetParam = z
     "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
       "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`.",
   );
+
+/** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
+const VerifiedWordSchema = z.object({
+  word: z.string().describe("Word id in the source transcript, e.g. `w_000019`."),
+  text: z.string().describe("Word text, with its human edit applied."),
+  transcript: z.string().describe("Source transcript file, project-relative."),
+  asset: z.string().describe("Source asset, project-relative."),
+  track: z.string().describe("Track holding the clip."),
+  clip: z.string().describe("Clip that keeps the word, e.g. `c_0002`."),
+  at: z.number().describe("Timeline seconds where the word starts (clamped to the clip's first frame when the cut clips its start)."),
+  end: z.number().describe("Timeline seconds where the kept part of the word ends."),
+  source: z.object({ start: z.number(), end: z.number() }).describe("Word span in source-asset seconds, from the transcript."),
+  cut: z
+    .object({
+      edge: z.enum(["in", "out"]).describe("`in`: the clip's first frame; `out`: its last."),
+      at: z.number().describe("Timeline seconds of that edge."),
+    })
+    .nullable()
+    .describe("Nearest cut within 0.5 source seconds of the word, or crossing it; null when the word is away from every cut."),
+  clipped: z.boolean().describe("The cut falls inside the word: part of it was removed."),
+  confidence: z
+    .number()
+    .describe("0..1 that this word really is missing from the export: source word confidence times the run's agreement, lower away from cuts."),
+});
+
+const LostWordSchema = VerifiedWordSchema.describe("A word kept by the timeline, at a cut, of which nothing was heard in the export.");
+
+const UncertainWordSchema = VerifiedWordSchema.extend({
+  reason: z
+    .enum(["repeat", "garbled", "unheard"])
+    .describe(
+      "`repeat`: missing, but repeats the phrase next to it; whisper can collapse repeated phrases (ADR 0003), so check by ear. " +
+        "`garbled`: at a cut, heard as other text (`heardAs`); the cut may have clipped it. " +
+        "`unheard`: missing away from any cut; more likely a transcription miss than a cut.",
+    ),
+  heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
+});
 
 /**
  * Every method frameshelld serves: the single source for client and daemon
@@ -620,6 +657,75 @@ export const methods = {
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
     }),
   },
+  "transcribe.verify": {
+    description:
+      "Check an exported file for words lost at cuts (SPEC §3.5 step 6): re-transcribe the export and compare it, " +
+      "on the timeline clock, with the source transcript words the timeline keeps (each media clip's words inside " +
+      "its `in`/`out`, mapped by `start` and `speed`; a word counts as kept when most of it is inside). Writes no " +
+      "transcript. `lost` lists words at a cut of which nothing was heard: each with its timeline position, clip and " +
+      "the cut. `uncertain` lists the rest that were not confirmed (whisper-collapsed repeats, words at a cut heard " +
+      "as other text, words missing away from cuts). The alignment ignores case, punctuation, accents, onset jitter, " +
+      "split or merged words and close spellings. Clips whose asset has no transcript, or a stale one, are listed in " +
+      "`unchecked`: run `transcribe` on them first. Use the same timeline the export was rendered from. Fails with " +
+      "AssetNotFound (no such export), TimelineNotFound, and the errors of `transcribe`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      export: z
+        .string()
+        .min(1)
+        .describe("Exported file, absolute or relative to `cwd`, e.g. `exports/main-youtube-1080p.mp4`."),
+      timeline: TimelineIdSchema,
+      provider: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Transcription provider id. Default: `transcription.provider` in `frameshell.json`, else `whisper-cpp`."),
+      model: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Provider model id. Default: `transcription.model`, else the model of the source transcripts, else the provider's default."),
+      language: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Spoken language code. Default: `transcription.language`, else the source transcripts' language."),
+    }),
+    result: z.object({
+      export: z.string().describe("Absolute path of the checked export."),
+      timeline: z.string(),
+      revision: z.int().describe("Timeline revision compared against."),
+      provider: z.string(),
+      model: z.string(),
+      language: z.string().nullable(),
+      duration: z.object({
+        export: z.number().nullable().describe("Seconds of export audio; null when unknown."),
+        timeline: z.number().describe("Timeline seconds."),
+      }),
+      expected: z.int().describe("Source words the timeline keeps, in checked clips."),
+      heard: z.int().describe("Of those, words found in the export."),
+      lost: z.array(LostWordSchema).describe("Words lost at a cut, by timeline position. Empty = nothing lost."),
+      uncertain: z.array(UncertainWordSchema).describe("Words not confirmed but not reported lost, by timeline position."),
+      confidence: z
+        .number()
+        .describe(
+          "0..1 agreement of the re-transcription with the sources on words away from cuts. Low (below ~0.8): wrong " +
+            "language or timeline, or a noisy export; treat `lost` with care.",
+        ),
+      unchecked: z
+        .array(
+          z.object({
+            clip: z.string(),
+            track: z.string(),
+            asset: z.string(),
+            reason: z.enum(["no-transcript", "stale-transcript"]).describe("`stale-transcript`: the asset changed after it was transcribed."),
+          }),
+        )
+        .describe("Media clips with sound whose words could not be checked."),
+      warnings: z.array(z.string()).describe("Problems that make the report less reliable, e.g. an export shorter or longer than the timeline."),
+      seconds: z.number().describe("Wall time of the whole call."),
+    }),
+  },
   "file.write": {
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
@@ -927,6 +1033,14 @@ export type Progress = Omit<ProgressParams, "requestId">;
 export type TranscribeParams = MethodParams<"transcribe">;
 /** Result of `transcribe`. */
 export type TranscribeResult = MethodResult<"transcribe">;
+/** `transcribe.verify` params. */
+export type TranscribeVerifyParams = MethodParams<"transcribe.verify">;
+/** Result of `transcribe.verify`. */
+export type TranscribeVerifyResult = MethodResult<"transcribe.verify">;
+/** One word of `transcribe.verify` `lost`. */
+export type LostWord = z.output<typeof LostWordSchema>;
+/** One word of `transcribe.verify` `uncertain`. */
+export type UncertainWord = z.output<typeof UncertainWordSchema>;
 
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
