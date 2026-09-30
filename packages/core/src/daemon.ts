@@ -356,9 +356,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "tx.begin": async ({ label }, caller) => {
+    "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
-      const tx = await transactions.begin(author, label);
+      const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;
+      const tx = await transactions.begin(author, label, { autoCommitMs });
       return { tx: tx.id, label, author };
     },
     "tx.commit": async (_params, caller) => {
@@ -449,6 +450,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   function close(): Promise<void> {
     closing ??= (async () => {
       clearTimeout(idleTimer);
+      transactions.close();
       await new Promise<void>((resolve) => {
         for (const socket of clients) socket.destroy();
         server.close(() => resolve());
