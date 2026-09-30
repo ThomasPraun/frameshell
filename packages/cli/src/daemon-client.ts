@@ -67,7 +67,8 @@ export async function connectOrStartDaemon(options: ConnectOrStartOptions): Prom
               { cause: error },
             );
           }
-          delayMs = Math.min(delayMs * 2, 250);
+          // Capped well below short test idle timeouts (200 ms), so a ready daemon is reached before it stops.
+          delayMs = Math.min(delayMs * 2, 100);
         }
       }
     } finally {

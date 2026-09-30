@@ -46,7 +46,8 @@ const earlyExitDaemon = fileURLToPath(new URL("./fixtures/early-exit-daemon.mjs"
 describe("connectOrStartDaemon", () => {
   it("starts the daemon again when the one it spawned exits cleanly before any client reaches it", async () => {
     const path = socketPath();
-    const { env, starts } = daemonEnv(path, { FAKE_DAEMON_EARLY_EXITS: "1" });
+    // Idle long enough that the real second daemon cannot also stop before it is reached.
+    const { env, starts } = daemonEnv(path, { FAKE_DAEMON_EARLY_EXITS: "1", FRAMESHELL_IDLE_TIMEOUT_MS: "2000" });
     const conn = await connectOrStartDaemon({ socketPath: path, client: "test/dc", env, daemonEntry: earlyExitDaemon });
     try {
       expect(starts()).toBe(2);

@@ -28,6 +28,11 @@ export interface TerminalManagerOptions {
 const FLUSH_MS = 5;
 /** Agents take seconds before their first command: a second's lag in noticing one is harmless. */
 const AGENT_POLL_MS = 1000;
+/**
+ * A foreground found not to be an agent is looked at again for this long: Node CLIs
+ * (Claude Code, Codex, ...) show as `node` until they set their process title.
+ */
+const TITLE_SETTLE_MS = 5000;
 
 interface Entry {
   pty: pty.IPty;
@@ -39,6 +44,8 @@ interface Entry {
   agent: string | null;
   /** Foreground name (node-pty's cheap `process`) the agent was last looked up for. */
   probed: string | null;
+  /** When the {@link Entry.probed} foreground was first looked up, ms since epoch. */
+  probedSince: number;
   poll: NodeJS.Timeout | undefined;
   probing: boolean;
 }
@@ -89,6 +96,7 @@ export class TerminalManager {
       shell,
       agent: null,
       probed: null,
+      probedSince: 0,
       poll: undefined,
       probing: false,
     };
@@ -120,7 +128,7 @@ export class TerminalManager {
     return [...this.#terminals.values()].flatMap(({ session, agent }) => (session && agent ? [{ session, agent }] : []));
   }
 
-  /** Look up the agent when the foreground changed; `ps` runs only then, not every poll. */
+  /** Look up the agent when the foreground changed, and while it settles; `ps` runs only then, not every poll. */
   async #watch(id: string, entry: Entry): Promise<void> {
     if (entry.probing || !this.#detect) return;
     let name: string;
@@ -134,11 +142,13 @@ export class TerminalManager {
       this.#setAgent(id, entry, null);
       return;
     }
-    if (name === entry.probed) return;
+    const now = Date.now();
+    if (name === entry.probed && (entry.agent !== null || now - entry.probedSince >= TITLE_SETTLE_MS)) return;
     entry.probing = true;
     try {
       const agent = await this.#detect(entry.pty.pid);
       if (this.#terminals.get(id) !== entry) return;
+      if (name !== entry.probed) entry.probedSince = now;
       entry.probed = name;
       this.#setAgent(id, entry, agent);
     } finally {
