@@ -50,6 +50,26 @@ function record<E extends EventName>(event: E) {
   return { seen, next };
 }
 
+/**
+ * Resolve once the daemon's `assets/` watcher reports new files from OS events. macOS rebuilds its
+ * shared FSEvents stream after each new directory watch and drops events meanwhile (#53): keep dropping
+ * probe files. The first one shown may come from the initial scan; one written after it cannot.
+ */
+async function watcherLive(assets: ReturnType<typeof record<"asset.changed">>): Promise<void> {
+  let n = 0;
+  const drop = () => writeFileSync(join(project, "assets", `probe-${++n}.txt`), "live?\n");
+  const probe = (path: string) => Number(/^assets\/probe-(\d+)\.txt$/.exec(path)?.[1] ?? 0);
+  drop();
+  const timer = setInterval(drop, 500);
+  try {
+    await assets.next((params) => probe(params.path) > 0);
+    const scanned = n;
+    await assets.next((params) => probe(params.path) > scanned);
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 describe("asset.changed and job.progress notifications", () => {
   it(
     "follow an import from queued to a ready asset with its waveform and thumbnails",
@@ -92,10 +112,12 @@ describe("asset.changed and job.progress notifications", () => {
       await app.request("events.subscribe", { cwd: project, events: ["asset.changed"] });
       const assets = record("asset.changed");
 
+      await watcherLive(assets);
+
       // Dropped straight into assets/: the watcher queues it, so its failure proves the watcher saw the file.
       writeFileSync(join(project, "assets", "notes.txt"), "not media at all\n");
-      const failed = await assets.next((params) => params.asset?.state === "failed");
-      expect(failed).toMatchObject({ path: "assets/notes.txt", asset: { state: "failed", error: expect.stringContaining("notes.txt") } });
+      const failed = await assets.next((params) => params.path === "assets/notes.txt" && params.asset?.state === "failed");
+      expect(failed).toMatchObject({ asset: { state: "failed", error: expect.stringContaining("notes.txt") } });
 
       rmSync(join(project, "assets", "notes.txt"));
       await expect(assets.next((params) => params.asset === null)).resolves.toEqual({ project, path: "assets/notes.txt", asset: null });

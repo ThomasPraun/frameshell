@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { MediaStore, RECIPE_VERSION } from "@frameshell/core";
+import { connectToDaemon } from "@frameshell/protocol";
 import { launch, sandbox } from "./harness.js";
 
-// Asset events (#69): a file dropped into assets/ shows its waveform on the timeline from the daemon's
+// Asset events (#69): an imported file shows its waveform on the timeline from the daemon's
 // `asset.changed`, with no polling and no timeline change. The e2e machines have no ffmpeg, so the ingest
 // is a cache hit: the derived media for these exact bytes is already in the project's media cache.
 const box = sandbox("media");
@@ -35,7 +36,6 @@ test.beforeAll(async () => {
     waveform: { path: waveform, peaksPerSecond: 10 },
     thumbnails: null,
   });
-  mkdirSync(join(box.projectDir, "assets"), { recursive: true });
   ({ app, page } = await launch(box));
 });
 
@@ -49,10 +49,16 @@ test("a waveform appears when its asset finishes ingest, without polling or a ti
   await expect(lanes()).toHaveAttribute("data-clips", "1");
   await expect(lanes()).toHaveAttribute("data-media-drawn", "0");
 
-  // Dot names are never assets: the file appears whole, by rename, like `frameshell import` does it.
-  const temp = join(box.projectDir, "assets", ".voice.wav.part");
-  writeFileSync(temp, bytes);
-  renameSync(temp, join(box.projectDir, "assets", "voice.wav"));
+  // Imported by another client, as the agent would with `frameshell import`.
+  const source = join(box.projectDir, "..", "voice.wav");
+  writeFileSync(source, bytes);
+  const cli = await connectToDaemon(box.socketPath, { client: "cli/e2e" });
+  try {
+    const { imported } = await cli.request("asset.import", { cwd: box.projectDir, files: [source] });
+    expect(imported.map((entry) => entry.asset)).toEqual(["assets/voice.wav"]);
+  } finally {
+    cli.close();
+  }
 
   // Before #69 the panel re-read assets only on a timeline revision or while one was ingesting: never here.
   await expect(lanes()).toHaveAttribute("data-media-drawn", "1");
