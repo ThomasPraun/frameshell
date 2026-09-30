@@ -240,6 +240,9 @@ export const OperationResultSchema = z.object({
   snaps: z
     .array(SnapReportSchema)
     .describe("`cut` and `clip.trim`: edges placed by audio energy, requested vs applied; empty when none was snapped."),
+  warnings: z
+    .array(z.string())
+    .describe("Applied anyway, but worth fixing: e.g. a `scriptRef` naming a script or scene that does not exist. Empty when none."),
 });
 
 /** See {@link OperationResultSchema}. */

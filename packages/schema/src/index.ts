@@ -57,3 +57,13 @@ export {
   wordIdNumber,
   parseTranscript,
 } from "./transcript.js";
+export {
+  ScriptSceneSchema,
+  ScriptMetaSchema,
+  type ScriptScene,
+  type ScriptMeta,
+  type ScriptOutline,
+  parseScript,
+  scriptSlug,
+  splitScriptRef,
+} from "./script.js";

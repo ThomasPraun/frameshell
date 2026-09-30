@@ -22,6 +22,7 @@ import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
 import { appendJournal, readJournal } from "../history/journal.js";
 import { type TimelineRevertFailure, abortConflictError, historyView, planRevert } from "../history/revert.js";
+import { checkScriptRef } from "../scripts/outline.js";
 import {
   type AppliedOperation,
   type ClipTypeInfo,
@@ -127,13 +128,18 @@ export class TimelineService {
    * Apply one operation, write the file, then append it to the journal
    * (SPEC §6.1). Throws the engine's errors, TimelineNotFound or InvalidProjectFile.
    */
-  apply(call: TimelineCall): Promise<OperationResult> {
-    const { root, timeline: id } = call;
+  async apply(call: TimelineCall): Promise<OperationResult> {
+    const { root, timeline: id, request: raw } = call;
+    // Soft check (SPEC §5.5): the script may be written after the clip is placed. Runs before
+    // the queue and the write: it never throws, and a slow script read never holds the timeline.
+    const scriptRef = raw.op === "clip.add" || raw.op === "clip.set" ? raw.args.scriptRef : undefined;
+    const problem = typeof scriptRef === "string" ? await checkScriptRef(root, scriptRef) : null;
+    const warnings = problem ? [problem] : [];
     return this.#exclusive([timelinePath(root, id)], async () => {
       const { timeline, fps, snapWindow } = await this.load(root, id);
       const request = normalizeArgs(call);
       const context = this.#context(root, id, fps, request.op, snapWindow);
-      return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args);
+      return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args, warnings);
     });
   }
 
@@ -213,6 +219,7 @@ export class TimelineService {
     applied: AppliedOperation,
     op: string,
     args: unknown,
+    warnings: string[] = [],
   ): Promise<OperationResult> {
     const { root, timeline: id } = call;
     await writeJsonAtomic(timelinePath(root, id), applied.timeline);
@@ -235,7 +242,7 @@ export class TimelineService {
     };
     await appendJournal(root, id, entry);
     this.#options.onChanged?.({ root, timeline: id, revision: applied.timeline.revision, author: call.author, changes: applied.changes });
-    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps };
+    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings };
   }
 
   /**

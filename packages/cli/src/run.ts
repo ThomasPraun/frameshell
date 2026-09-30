@@ -11,6 +11,7 @@ import {
   type PluginInfo,
   type Progress,
   RpcError,
+  type ScriptOutlineResult,
   type StatusResult,
   type TranscribeResult,
   resolveSocketPath,
@@ -55,6 +56,8 @@ Commands:
   frame --at <s> --out <png> [--timeline id] [--preset p]
                                Write the frame showing at <s> seconds as PNG (project resolution,
                                or the preset's)
+  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
+                               linked clips, frontmatter (title, target_duration, aspect)
   <plugin> <command> [args…]   Run a plugin-provided command
 
 ${TIMELINE_USAGE}
@@ -65,7 +68,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
 
 /** How often `import --wait` polls job progress. */
 const WAIT_POLL_MS = 250;
@@ -95,6 +98,7 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
+  | { kind: "script.outline"; file: string }
   | TimelineInvocation;
 
 interface Flags {
@@ -231,6 +235,7 @@ function parseBuiltin(
       ...(language ? { language } : {}),
     };
   }
+  if (command === "script") return rest.length === 2 && rest[0] === "outline" ? { kind: "script.outline", file: rest[1]! } : null;
   if (command === "init" && rest.length <= 1) return { kind: "init", dir: rest[0], name: options.name };
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
@@ -301,6 +306,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         flags.json ? {} : { onProgress: progressPrinter(io) },
       );
       return flags.json ? json(result) : formatTranscribe(result);
+    }
+    case "script.outline": {
+      const result = await conn.request("script.outline", { cwd, file: inv.file });
+      return flags.json ? json(result) : formatOutline(result);
     }
     case "timeline": {
       // Adapter clips need the project's plugins loaded, which may need a trust decision.
@@ -443,6 +452,35 @@ function formatTranscribe(result: TranscribeResult): string {
     const dropped = result.droppedEdits.length > 0 ? `; dropped ${result.droppedEdits.length} (${result.droppedEdits.join(", ")})` : "";
     lines.push(`  kept ${result.keptEdits} human edit${result.keptEdits === 1 ? "" : "s"}${dropped}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatOutline(outline: ScriptOutlineResult): string {
+  const { meta, scenes } = outline;
+  const header = [
+    outline.path,
+    ...(meta.title !== null ? [`"${meta.title}"`] : []),
+    ...(meta.targetDuration !== null ? [`target ${meta.targetDuration} s`] : []),
+    ...(meta.aspect !== null ? [meta.aspect] : []),
+    `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`,
+  ].join(" · ");
+  const lines = [header];
+  if (scenes.length === 0) lines.push("  (no scenes: add `## ` headings)");
+  const width = (values: string[]) => Math.max(0, ...values.map((value) => value.length));
+  const [slugW, titleW, lineW] = [
+    width(scenes.map((scene) => `#${scene.slug}`)),
+    width(scenes.map((scene) => scene.title)),
+    width(scenes.map((scene) => String(scene.line))),
+  ];
+  for (const scene of scenes) {
+    const clips = scene.clips.length > 0 ? `clips: ${scene.clips.map(({ timeline, clip }) => `${timeline}/${clip}`).join(", ")}` : "no clips";
+    const words = `${scene.words} word${scene.words === 1 ? "" : "s"}`;
+    lines.push(`  ${`#${scene.slug}`.padEnd(slugW)}  ${scene.title.padEnd(titleW)}  line ${String(scene.line).padEnd(lineW)}  ${words}  ${clips}`);
+  }
+  if (outline.unresolved.length > 0) {
+    lines.push("Unresolved refs:", ...outline.unresolved.map(({ timeline, clip, scriptRef }) => `  ${timeline}/${clip} -> ${scriptRef}`));
+  }
+  if (outline.warnings.length > 0) lines.push("Warnings:", ...outline.warnings.map((warning) => `  ${warning}`));
   return `${lines.join("\n")}\n`;
 }
 

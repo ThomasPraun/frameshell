@@ -23,6 +23,8 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
+| Desktop selection (shared store, extend, never duplicate) | `apps/desktop/src/renderer/src/selection.ts` |
+| Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
 
 ## Rules

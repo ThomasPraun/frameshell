@@ -341,7 +341,14 @@ function formatOperation(result: OperationResult): string {
       `snapped ${snap.field}${snap.clip ? ` of ${snap.clip}` : ""} ${snap.requested} -> ${snap.applied} ` +
       (snap.clean ? "(in a pause)" : `(no pause within ±${snap.window} s: quietest frame, speech may be clipped)`),
   );
-  return [`${result.operation.op}: ${parts.join(" · ") || "no change"}`, ...snaps, `revision ${result.revision} · op ${result.operation.id} · tx ${result.operation.tx}`, ""].join("\n");
+  const warnings = result.warnings.map((warning) => `warning: ${warning}`);
+  return [
+    `${result.operation.op}: ${parts.join(" · ") || "no change"}`,
+    ...snaps,
+    `revision ${result.revision} · op ${result.operation.id} · tx ${result.operation.tx}`,
+    ...warnings,
+    "",
+  ].join("\n");
 }
 
 function formatTracks(result: { timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }): string {
