@@ -138,6 +138,28 @@ export const TimelinePatchSchema = z.strictObject({
 /** See {@link TimelinePatchSchema}. */
 export type TimelinePatch = z.output<typeof TimelinePatchSchema>;
 
+/** Transaction id: `tx_` + 8 hex digits. */
+export const TxIdSchema = z
+  .string()
+  .regex(/^tx_[0-9a-f]{8}$/, "must be a transaction id like `tx_1a2b3c4d`")
+  .describe("Transaction id from a mutation result or `history`, e.g. `tx_1a2b3c4d`.");
+
+/** Operation id: `op_` + 8 hex digits. */
+export const OpIdSchema = z
+  .string()
+  .regex(/^op_[0-9a-f]{8}$/, "must be an operation id like `op_1a2b3c4d`")
+  .describe("Operation id from a mutation result or `history`, e.g. `op_1a2b3c4d`.");
+
+/**
+ * SPEC §6.2 author: `ui` (desktop app), `cli:<session>` (terminal session,
+ * `FRAMESHELL_SESSION`), `cli` (terminal without session), `file` (direct
+ * file edit), `plugin:<name>`.
+ */
+export const AuthorSchema = z
+  .string()
+  .regex(/^(ui|cli|file|cli:.+|plugin:.+)$/, "must be `ui`, `cli`, `cli:<session>`, `file` or `plugin:<name>`")
+  .describe("Who made the change: `ui`, `cli:<session>`, `cli`, `file` or `plugin:<name>`.");
+
 /**
  * One applied operation (SPEC §6.1). `inverse` applied to the timeline right
  * after this operation restores it as it was before.
@@ -148,8 +170,9 @@ export const OperationRecordSchema = z.object({
   inverse: z
     .object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema })
     .describe("Undoes this operation when applied right after it."),
-  author: z.string().describe("`ui`, `cli:<session>`, `cli`, `file` or `plugin:<name>`."),
-  tx: z.string().nullable().describe("Transaction id; null until transactions exist."),
+  id: OpIdSchema,
+  author: AuthorSchema,
+  tx: TxIdSchema.describe("Transaction the operation belongs to; `revert` takes it to undo the whole transaction."),
   revisionBefore: z.int().describe("Timeline revision the operation was applied to."),
 });
 
