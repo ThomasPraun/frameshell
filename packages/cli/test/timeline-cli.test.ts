@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeClip } from "../../core/test/media-fixtures.js";
 import { testBinariesDir } from "../../core/test/media-tools.js";
+import { connectOrStartDaemon } from "../src/daemon-client.js";
 
 // Black-box: built CLI, auto-started daemon, a project with one imported synthetic asset.
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
@@ -15,20 +16,21 @@ const socketPath =
     ? `\\\\.\\pipe\\frameshell-timeline-test-${randomUUID().slice(0, 8)}`
     : join(realpathSync(tmpdir()), `fs-tl-${randomUUID().slice(0, 8)}.sock`);
 
-function frameshell(args: string[], cwd = project, session?: string) {
+/** Environment of the CLI and of the daemon it spawns. */
+function cliEnv(session?: string): NodeJS.ProcessEnv {
   const { FRAMESHELL_SESSION: _inherited, ...inherited } = process.env;
-  const result = spawnSync(process.execPath, [cliBin, ...args], {
-    cwd,
-    encoding: "utf8",
-    env: {
-      ...inherited,
-      ...(session ? { FRAMESHELL_SESSION: session } : {}),
-      FRAMESHELL_SOCKET: socketPath,
-      FRAMESHELL_IDLE_TIMEOUT_MS: "1500",
-      FRAMESHELL_DATA_DIR: testBinariesDir(),
-      FRAMESHELL_CONFIG_DIR: testBinariesDir(),
-    },
-  });
+  return {
+    ...inherited,
+    ...(session ? { FRAMESHELL_SESSION: session } : {}),
+    FRAMESHELL_SOCKET: socketPath,
+    FRAMESHELL_IDLE_TIMEOUT_MS: "1500",
+    FRAMESHELL_DATA_DIR: testBinariesDir(),
+    FRAMESHELL_CONFIG_DIR: testBinariesDir(),
+  };
+}
+
+function frameshell(args: string[], cwd = project, session?: string) {
+  const result = spawnSync(process.execPath, [cliBin, ...args], { cwd, encoding: "utf8", env: cliEnv(session) });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -251,22 +253,31 @@ describe("frameshell tx, history and revert", () => {
 
 describe("direct edits of the timeline file", () => {
   it("status reports a stale edit the daemon rejected, and where the edit was kept", async () => {
-    const current = onDisk();
-    writeFileSync(join(project, "timelines", "main.json"), JSON.stringify({ ...current, revision: current.revision - 1, tracks: [] }));
-    type Status = { rejections: { timeline: string; reason: string; preserved: string; revision: number; current: number }[] };
-    let status = json<Status>(["status"]);
-    for (let i = 0; i < 100 && status.rejections.length === 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      status = json<Status>(["status"]);
+    // Only a daemon that read the file before the edit can call it stale. The CLI's daemon exits after 1.5 s
+    // idle, and slow runners (Windows) can pass that between two CLI runs: a fresh daemon would take the
+    // stale file as its first sight. A held connection keeps this daemon alive and makes it read the file.
+    const hold = await connectOrStartDaemon({ socketPath, client: "test/hold", env: cliEnv() });
+    try {
+      await hold.request("timeline.show", { cwd: project, timeline: "main" });
+      const current = onDisk();
+      writeFileSync(join(project, "timelines", "main.json"), JSON.stringify({ ...current, revision: current.revision - 1, tracks: [] }));
+      type Status = { rejections: { timeline: string; reason: string; preserved: string; revision: number; current: number }[] };
+      let status = json<Status>(["status"]);
+      for (let i = 0; i < 100 && status.rejections.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        status = json<Status>(["status"]);
+      }
+      expect(status.rejections).toMatchObject([
+        { timeline: "main", reason: "stale", revision: current.revision - 1, current: current.revision },
+      ]);
+      expect(onDisk()).toEqual(current);
+      const human = frameshell(["status"]).stdout;
+      expect(human).toContain("Rejected direct edits (1):");
+      expect(human).toContain(
+        `main: stale (revision ${current.revision - 1}, current ${current.revision}), kept at ${status.rejections[0]!.preserved}`,
+      );
+    } finally {
+      hold.close();
     }
-    expect(status.rejections).toMatchObject([
-      { timeline: "main", reason: "stale", revision: current.revision - 1, current: current.revision },
-    ]);
-    expect(onDisk()).toEqual(current);
-    const human = frameshell(["status"]).stdout;
-    expect(human).toContain("Rejected direct edits (1):");
-    expect(human).toContain(
-      `main: stale (revision ${current.revision - 1}, current ${current.revision}), kept at ${status.rejections[0]!.preserved}`,
-    );
   });
 });

@@ -28,6 +28,17 @@ export interface JobRequest {
   run: (ctx: JobContext) => Promise<void>;
 }
 
+/** One change of a job, as {@link JobQueue.watch} reports it. */
+export interface JobChange {
+  /** Snapshot after the change. */
+  job: JobInfo;
+  /** True when `state` moved (queued, running, done, failed, canceled); false for step, progress or cache news. */
+  stateChanged: boolean;
+}
+
+/** Default {@link JobQueueOptions.progressIntervalMs}. */
+const PROGRESS_INTERVAL_MS = 200;
+
 /** Options for {@link JobQueue}. */
 export interface JobQueueOptions {
   /** Jobs running at once. ffmpeg already uses every core, so keep it small. */
@@ -36,12 +47,19 @@ export interface JobQueueOptions {
   onBusyChange?: (busy: boolean) => void;
   /** Finished jobs kept for `list`; oldest are dropped first. */
   keepFinished?: number;
+  /**
+   * Minimum gap between two progress-only reports of one job to watchers.
+   * Step and state changes always go out at once. Default 200 ms.
+   */
+  progressIntervalMs?: number;
 }
 
 interface Entry {
   info: JobInfo;
   request: JobRequest;
   abort: AbortController;
+  /** `Date.now()` of the last report to watchers. */
+  reportedAt: number;
 }
 
 /**
@@ -58,6 +76,8 @@ export class JobQueue {
   readonly #keepFinished: number;
   readonly #onBusyChange: (busy: boolean) => void;
   readonly #drainWaiters: (() => void)[] = [];
+  readonly #watchers = new Set<(change: JobChange) => void>();
+  readonly #progressIntervalMs: number;
   #nextId = 1;
   #busy = false;
   #closed = false;
@@ -66,6 +86,18 @@ export class JobQueue {
     this.#concurrency = Math.max(1, options.concurrency ?? 2);
     this.#keepFinished = options.keepFinished ?? 200;
     this.#onBusyChange = options.onBusyChange ?? (() => {});
+    this.#progressIntervalMs = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
+  }
+
+  /**
+   * Call `watcher` on every job change, synchronously and in order: queued,
+   * running, step/progress/cache updates (progress-only ones rate-limited),
+   * then done, failed or canceled. A throwing watcher never breaks the queue.
+   * Returns the function that stops watching.
+   */
+  watch(watcher: (change: JobChange) => void): () => void {
+    this.#watchers.add(watcher);
+    return () => void this.#watchers.delete(watcher);
   }
 
   /** True while any job is queued or running. */
@@ -101,8 +133,9 @@ export class JobQueue {
       startedAt: null,
       finishedAt: null,
     };
-    const entry: Entry = { info, request, abort: new AbortController() };
+    const entry: Entry = { info, request, abort: new AbortController(), reportedAt: 0 };
     this.#entries.set(info.id, entry);
+    this.#report(entry, true);
     if (this.#closed) {
       this.#finish(entry, "canceled", null);
       return { ...info };
@@ -156,13 +189,19 @@ export class JobQueue {
     const { info } = entry;
     info.state = "running";
     info.startedAt = new Date().toISOString();
+    this.#report(entry, true);
     const ctx: JobContext = {
       signal: entry.abort.signal,
       update: (update) => {
         if (info.state !== "running") return;
+        const before = { step: info.step, progress: info.progress, cached: info.cached };
         if (update.step !== undefined) info.step = update.step;
         if (update.progress !== undefined) info.progress = Math.min(1, Math.max(0, update.progress));
         if (update.cached !== undefined) info.cached = update.cached;
+        if (info.step !== before.step || info.cached !== before.cached) this.#report(entry, false);
+        else if (info.progress !== before.progress && Date.now() - entry.reportedAt >= this.#progressIntervalMs) {
+          this.#report(entry, false);
+        }
       },
     };
     try {
@@ -185,7 +224,19 @@ export class JobQueue {
     info.error = error;
     if (state === "done") info.progress = 1;
     info.finishedAt = new Date().toISOString();
+    this.#report(entry, true);
     this.#prune();
+  }
+
+  #report(entry: Entry, stateChanged: boolean): void {
+    entry.reportedAt = Date.now();
+    for (const watcher of [...this.#watchers]) {
+      try {
+        watcher({ job: { ...entry.info }, stateChanged });
+      } catch {
+        // A watcher's bug must not fail the job.
+      }
+    }
   }
 
   /** Drop the oldest finished jobs beyond the retention limit. */

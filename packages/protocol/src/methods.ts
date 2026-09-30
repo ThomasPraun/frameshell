@@ -18,7 +18,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -233,10 +233,12 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
-      "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored.",
+      "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
+      "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
+      "`job.progress`: a background job (ingest, render) was queued, advanced or finished.",
   );
 
 const EventsParams = z.strictObject({
@@ -497,7 +499,7 @@ export const methods = {
       "encoded in segments in parallel and joined; audio is mixed in one continuous pass with a 2 ms fade at every cut, " +
       "`atempo` for clip speed, then two-pass loudness normalization to the target (preset `loudness`, else " +
       "`export.loudness` in `frameshell.json`, else -17 LUFS integrated). Follow the job with `job.list` until it is " +
-      "`done` (the file exists at `output`) or `failed` (`error` says why). Renders from the original assets, not " +
+      "`done` (the file exists at `output`) or `failed` (`error` says why), or subscribe to `job.progress`. Renders from the original assets, not " +
       "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black) and " +
       "the sound of every video and audio track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
       "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
@@ -551,7 +553,8 @@ export const methods = {
   "asset.import": {
     description:
       "Bring media files into the enclosing project's `assets/` and queue their ingest (probe, CFR proxy, PCM sidecar, " +
-      "waveform, thumbnails). Returns at once; follow progress with `job.list` or `status`. Files already under " +
+      "waveform, thumbnails). Returns at once; follow progress with `job.list`, `status`, or the `job.progress` and " +
+      "`asset.changed` events (`events.subscribe`). Files already under " +
       "`assets/` are not copied. A name clash with different content gets a `-2`, `-3`… suffix. Unchanged content " +
       "reuses cached outputs (job `cached: true`). Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
     params: z.strictObject({
@@ -589,8 +592,9 @@ export const methods = {
   },
   "job.list": {
     description:
-      "Background jobs of the enclosing project (ingest), with state and progress. Jobs keep running after the caller " +
-      "disconnects; poll this until every job you care about is `done` or `failed`.",
+      "Background jobs of the enclosing project (ingest, render), with state and progress. Jobs keep running after the " +
+      "caller disconnects. Poll this until every job you care about is `done` or `failed`, or read it once after " +
+      "subscribing to `job.progress` and follow the events instead.",
     params: z.strictObject({
       cwd: CwdParam,
       active: z.boolean().default(false).describe("Only `queued` and `running` jobs. Default false: also finished ones."),
@@ -988,6 +992,30 @@ export const notifications = {
       requestId: z.union([z.int(), z.string()]).describe("`id` of the request in progress."),
       message: z.string().describe("Human line, e.g. `Downloading model ggml-large-v3-turbo-q5_0 (574 MB, one time)`."),
       fraction: z.number().min(0).max(1).optional().describe("0..1 of the current step when known."),
+    }),
+  },
+  "asset.changed": {
+    description:
+      "An asset of the project changed: its ingest started (`processing`), finished (`ready`, derived media paths " +
+      "filled in) or failed, or its file left `assets/` (`asset` null). Sent to connections subscribed with " +
+      "`events.subscribe`, in order per asset. `asset` is exactly what `asset.list` reports for it at that moment, so " +
+      "no re-read is needed. Ingest progress within a state arrives as `job.progress`.",
+    // TODO(#75): the MCP server forwards this (and transcript file changes) as `notifications/resources/list_changed`.
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      path: z.string().describe("Project-relative asset path, e.g. `assets/raw-01.mp4`."),
+      asset: AssetSchema.nullable().describe("The asset as `asset.list` reports it now; null when the file is gone."),
+    }),
+  },
+  "job.progress": {
+    description:
+      "A background job of the project changed: queued, running, a new step or more progress, then `done`, `failed` " +
+      "or `canceled`. Sent to connections subscribed with `events.subscribe`, in order per job; progress-only updates " +
+      "are sent at most every 200 ms per job, state and step changes at once. `job` is the same snapshot `job.list` " +
+      "returns. Replaces polling `job.list`: read it once after subscribing, then follow the events.",
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      job: JobSchema,
     }),
   },
   "timeline.changed": {

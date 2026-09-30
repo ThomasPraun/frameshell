@@ -18,6 +18,7 @@ import {
   resolveSocketPath,
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
+import { type JobFollower, followJobs } from "./job-follower.js";
 import { resolveSession } from "./session.js";
 import {
   TIMELINE_COMMANDS,
@@ -75,9 +76,6 @@ Options:
 `;
 
 const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
-
-/** How often `import --wait` polls job progress. */
-const WAIT_POLL_MS = 250;
 
 /** Process surface the CLI touches; injected so it can run in-process too. */
 export interface CliIo {
@@ -298,9 +296,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
+      const follower = inv.wait ? await followJobs(conn, cwd) : undefined;
       const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy" });
-      if (!inv.wait) return flags.json ? json(result) : formatImport(result);
-      const jobs = await waitForJobs(conn, cwd, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
+      if (!follower) return flags.json ? json(result) : formatImport(result);
+      const jobs = await waitForJobs(follower, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
       const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));
       if (imported.some((entry) => entry.job.state !== "done")) outcome.code = 1;
       return flags.json ? json({ ...result, imported }) : formatImport({ ...result, imported });
@@ -358,6 +357,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       // Plugin presets load only for trusted projects.
       await settleTrust(conn, flags, io);
       const { kind: _kind, out, ...params } = inv;
+      const follower = await followJobs(conn, cwd);
       const result = await conn.request("render", { cwd, ...params, ...(out ? { out: resolve(cwd, out) } : {}) });
       if (!flags.json) {
         io.stderr(
@@ -367,7 +367,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
             result.warnings.map((warning) => `  warning: ${warning}\n`).join(""),
         );
       }
-      const job = (await waitForJobs(conn, cwd, [result.job.id], flags.json ? undefined : io)).get(result.job.id) ?? result.job;
+      const job = (await waitForJobs(follower, [result.job.id], flags.json ? undefined : io)).get(result.job.id) ?? result.job;
       if (job.state !== "done") outcome.code = 1;
       if (flags.json) return json({ ...result, job });
       return job.state === "done" ? `Rendered ${result.output}\n` : `Render failed: ${job.error ?? job.state}\n`;
@@ -415,23 +415,17 @@ async function settleTrust(conn: DaemonConnection, flags: Flags, io: CliIo): Pro
 }
 
 /**
- * Poll `job.list` until every job in `ids` has finished. Progress lines go to
- * stderr when `io` is given. Returns the final state of each job.
+ * Wait until every job in `ids` has finished, following `job.progress`
+ * events. Progress lines go to stderr when `io` is given, one per visible
+ * change. Returns the final state of each job.
  */
-async function waitForJobs(conn: DaemonConnection, cwd: string, ids: string[], io?: CliIo): Promise<Map<string, JobInfo>> {
+async function waitForJobs(follower: JobFollower, ids: string[], io?: CliIo): Promise<Map<string, JobInfo>> {
   const last = new Map<string, string>();
-  for (;;) {
-    const { jobs } = await conn.request("job.list", { cwd });
-    const mine = new Map(jobs.filter((job) => ids.includes(job.id)).map((job) => [job.id, job]));
-    for (const job of mine.values()) {
-      const line = formatJob(job);
-      if (io && last.get(job.id) !== line) io.stderr(`${line}\n`);
-      last.set(job.id, line);
-    }
-    // A job missing from the list was pruned, so it finished long ago.
-    if ([...mine.values()].every((job) => job.state !== "queued" && job.state !== "running")) return mine;
-    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
-  }
+  return follower.wait(ids, (job) => {
+    const line = formatJob(job);
+    if (io && last.get(job.id) !== line) io.stderr(`${line}\n`);
+    last.set(job.id, line);
+  });
 }
 
 function formatImport(result: AssetImportResult): string {

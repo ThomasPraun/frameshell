@@ -41,6 +41,14 @@ export interface TerminalInfo {
  */
 export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
 
+/**
+ * An asset of the window's project changed (daemon `asset.changed`): `asset`
+ * is its `asset.list` entry now, null when the file left `assets/`. With
+ * `path: null` the daemon connection was re-established and any asset may
+ * have changed meanwhile: re-read them all.
+ */
+export type AssetChange = { path: string; asset: AssetInfo | null } | { path: null };
+
 /** Reply of a main handler that can fail: Electron would bury a thrown message in IPC noise. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -98,6 +106,8 @@ export interface FrameshellApi {
     assets(): Promise<AssetInfo[]>;
     /** Bytes of a derived waveform or thumbnail (project-relative path from `assets()`). */
     read(path: string): Promise<Uint8Array>;
+    /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
+    onChanged(listener: (change: AssetChange) => void): () => void;
   };
 }
 
@@ -125,4 +135,5 @@ export const Channel = {
   timelineRejected: "timeline:rejected",
   mediaAssets: "media:assets",
   mediaRead: "media:read",
+  mediaChanged: "media:changed",
 } as const;

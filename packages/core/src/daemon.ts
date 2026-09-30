@@ -3,6 +3,8 @@ import { type Server, type Socket, createServer } from "node:net";
 import { resolve } from "node:path";
 import {
   ErrorCode,
+  type EventName,
+  type EventParams,
   type HandshakeResult,
   type JsonRpcRequest,
   type MethodName,
@@ -118,8 +120,23 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const clients = new Set<Socket>();
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
+  const events = new EventHub();
+  // Hub key of each root as jobs and media name it (the caller's spelling). `events.subscribe` keys by
+  // `canonicalPath`: publishing under the raw root misses subscribers of another spelling (Windows 8.3
+  // `RUNNER~1`, symlinks). One memoized promise per root: its `.then`s run in call order, so events stay ordered.
+  const hubKeys = new Map<string, Promise<string>>();
+  const publishFor = <E extends EventName>(event: E, root: string, params: EventParams<E>): void => {
+    let key = hubKeys.get(root);
+    if (!key) hubKeys.set(root, (key = canonicalPath(root)));
+    void key.then((canonical) => events.publish(event, canonical, params));
+  };
   const jobs = new JobQueue({ concurrency: options.jobConcurrency ?? 2, onBusyChange: () => armIdleTimer() });
-  const media = new MediaService({ binaries, jobs });
+  jobs.watch(({ job }) => publishFor("job.progress", job.project, { project: job.project, job }));
+  const media = new MediaService({
+    binaries,
+    jobs,
+    onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
+  });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
   const projects = new ProjectRegistry({
     onOpen: (dir) => {
@@ -137,7 +154,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     extractAudio: options.extractAudio,
   });
-  const events = new EventHub();
   const transactions = new TransactionTracker({
     idleGapMs: options.txIdleGapMs,
     store: new FileTransactionStore(dirs.dataDir, socketPath),

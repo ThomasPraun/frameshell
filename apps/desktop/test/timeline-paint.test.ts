@@ -74,6 +74,21 @@ describe("paintTimeline", () => {
     expect(ctx.texts).not.toContain("take-14.mp4");
   });
 
+  it("counts the clips drawn with derived media, so its arrival is observable", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const input = { layout, viewport: viewport(60), fps: 30, playhead: 0, theme: DEFAULT_THEME };
+    expect(paintTimeline(recorder(), { ...input, media: noMedia }).mediaDrawn).toBe(0);
+    const media: MediaLookup<string> = {
+      // take-4 is the second audio clip; take-0 the first video clip.
+      waveform: (asset) => (asset === "assets/take-4.mp4" ? { peaksPerSecond: 10, peaks: [[-9, 9]] } : null),
+      thumbnails: (asset) =>
+        asset === "assets/take-0.mp4" ? { interval: 1, count: 3, aspect: 16 / 9, image: (index) => `thumb-${index}` } : null,
+    };
+    const ctx = recorder();
+    expect(paintTimeline(ctx, { ...input, media }).mediaDrawn).toBe(2);
+    expect(ctx.images).toContain("thumb-1");
+  });
+
   it("frames selected clips in the accent color, and only those", () => {
     const layout = layoutTimeline(longTimeline(3));
     const strokes = (selected?: ReadonlySet<string>) => {
