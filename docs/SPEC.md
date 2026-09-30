@@ -128,7 +128,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 1. Resolve timeline (nested timelines flattened, subtitle words resolved).
 2. Ensure every generated clip has a fresh cache entry (render missing ones via adapters).
 3. **Video:** split the timeline into segments at clean boundaries, compile each to an ffmpeg `filter_complex` (`trim`, `setpts`, `scale`, `overlay`, `subtitles`/`ass`), encode segments in parallel, join with the concat demuxer. Every VP9 input with alpha is decoded with `-c:v libvpx-vp9` (the native `vp9` decoder silently drops alpha).
-4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix`, two-pass `loudnorm` to the preset target (default −17 LUFS integrated).
+4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix`, rendered once to a lossless intermediate, then two-pass `loudnorm` reading that file (ADR 0005). Target: preset `loudness`, else project `export.loudness`, else −17 LUFS integrated. Sources whose aspect ratio differs from the preset are letterboxed/pillarboxed by default (crop-to-fill is a later option).
 5. Mux, apply preset (codec, bitrate, resolution, aspect ratio).
 6. Optional: `frameshell transcribe --verify` compares the export against source transcripts and reports lost words.
 
@@ -225,7 +225,8 @@ my-video/
   },
   "transcription": { "provider": "whisper-cpp", "model": "large-v3-turbo-q5_0", "language": "es" },
   "binaries": { "ffmpeg": "managed" },
-  "export": { "defaultPreset": "youtube-1440p", "loudness": -17 }
+  "export": { "defaultPreset": "youtube-1440p", "loudness": -17 },
+  "editing": { "snapWindow": 0.5 }
 }
 ```
 
@@ -315,7 +316,7 @@ Rules:
 Plain Markdown. Optional conventions:
 
 - YAML frontmatter: `title`, `target_duration`, `aspect`.
-- Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`).
+- Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`). A `scriptRef` without `#anchor` refers to the whole script.
 - `frameshell script outline <file> --json` returns parsed scenes. The UI highlights the scene of the selected clip and flags scenes with no clips.
 
 ### 5.6 Schema evolution
@@ -334,7 +335,7 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 
 - Journal: `.frameshell/history/<timeline>.jsonl`.
 - `author`: `ui`, `cli:<session>` (terminal session), `file` (direct edit), `plugin:<name>`.
-- CLI ops from the same terminal session are grouped automatically into a transaction until an idle gap; `frameshell tx begin "<label>"` / `frameshell tx commit` group explicitly.
+- CLI ops from the same terminal session are grouped automatically into a transaction until an idle gap; `frameshell tx begin "<label>"` / `frameshell tx commit` group explicitly. Outside an app terminal the CLI generates a session id when `FRAMESHELL_SESSION` is unset. Open transactions persist on disk (survive daemon restarts); `tx abort` is all-or-nothing across timelines.
 - UI: History panel lists transactions ("agent: remove silences, 180 ops"). Actions: show diff on timeline, revert transaction, revert single op.
 - Revert is itself a new operation (history is append-only).
 - `frameshell history --since <tx> --json`: lets the agent see what the human changed since its last transaction.
@@ -370,7 +371,7 @@ frameshell doctor [--install] [--json]        # binaries, encoders (x264, libvpx
 frameshell import <file…>                     # copy/link into assets/, queue proxies
 frameshell track add|remove|list …
 frameshell clip add|move|trim|split|remove|set …
-frameshell cut [--track <id>…] --from <s> --to <s>  # remove a timeline range (ripple); default: all video and audio tracks
+frameshell cut [--track <id>…] --from <s> --to <s> [--no-snap] [--snap-window <s>]  # ripple cut; default: all video and audio tracks; edges snap to pauses (ADR 0003), window >= 0.5 s, default from editing.snapWindow
 frameshell timeline show [--json]             # compact dump for agents
 
 frameshell transcribe <asset> [--provider p]  # writes transcripts/<asset>.words.json
