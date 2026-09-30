@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { terminalLaunch } from "../src/main/terminal-launch.js";
-import { TerminalManager } from "../src/main/terminals.js";
+import { TerminalManager, type TerminalManagerOptions } from "../src/main/terminals.js";
 
 // Real ptys running the user's real login shell: the same path the app takes.
 const managers: TerminalManager[] = [];
@@ -11,7 +11,7 @@ afterEach(() => {
   for (const manager of managers.splice(0)) manager.killAll();
 });
 
-function setup() {
+function setup(options?: TerminalManagerOptions) {
   const output = new Map<string, string>();
   const exits = new Map<string, number>();
   /** Agent changes per terminal, in order: `[session, agent]`. */
@@ -20,7 +20,7 @@ function setup() {
     onData: (id, data) => output.set(id, (output.get(id) ?? "") + data),
     onExit: (id, code) => exits.set(id, code),
     onAgent: (id, session, agent) => agents.set(id, [...(agents.get(id) ?? []), [session, agent]]),
-  });
+  }, options);
   managers.push(manager);
   const projectDir = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-term-")));
   const launch = (session: string) =>
@@ -85,6 +85,19 @@ describe("TerminalManager", () => {
       ["term-agent", null],
     ]);
     expect(manager.agents()).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("tags an agent that sets its process title after the first look at it", async () => {
+    // A look between exec and `process.title = ...` sees plain `node`: that miss must not stick.
+    let titleSet = false;
+    const { manager, output, agents, launch } = setup({ detectAgent: async () => (titleSet ? "claude" : null), agentPollMs: 50 });
+    const { id } = manager.create(launch("term-late"), { cols: 80, rows: 24 });
+    manager.write(id, `node -e "console.log('agent up'); setTimeout(() => {}, 60000)"\r`);
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("agent up");
+    // Several polls with `node` in the foreground: the watcher has looked at it, before any title.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    titleSet = true;
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 5_000 }).toEqual([["term-late", "claude"]]);
   });
 
   it.skipIf(process.platform === "win32")("untags a terminal closed while its agent runs", async () => {
