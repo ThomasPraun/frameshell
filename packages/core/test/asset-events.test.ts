@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type DaemonConnection, type EventName, type EventParams, connectToDaemon } from "@frameshell/protocol";
@@ -124,6 +124,24 @@ describe("asset.changed and job.progress notifications", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it("reach a connection that subscribed by another spelling of the project", async () => {
+    // Windows CI: tmpdir is `RUNNER~1`, the app subscribes with the long name. A junction stands in elsewhere.
+    const alias = join(tempDir(), "alias");
+    symlinkSync(project, alias, "junction");
+    await app.request("events.subscribe", { cwd: project, events: ["asset.changed", "job.progress"] });
+    const assets = record("asset.changed");
+    const jobs = record("job.progress");
+    writeFileSync(join(alias, "clip.txt"), "x");
+
+    const { imported } = await cli.request("asset.import", { cwd: alias, files: [join(alias, "clip.txt")] });
+    const done = await jobs.next((params) => params.job.id === imported[0]!.job.id && params.job.state === "failed");
+    expect(done.project).toBe(project);
+    await expect(assets.next((params) => params.asset?.state === "failed")).resolves.toMatchObject({
+      project,
+      path: "assets/clip.txt",
+    });
+  }, MEDIA_TIMEOUT);
 
   it("are only sent to connections subscribed to that event", async () => {
     await app.request("events.subscribe", { cwd: project, events: ["job.progress"] });

@@ -19,6 +19,8 @@ function frameshell(args: string[], cwd: string) {
   const result = spawnSync(process.execPath, [cliBin, ...args], {
     cwd,
     encoding: "utf8",
+    // spawnSync blocks the worker, so vitest's own timeout cannot fire: a CLI that never exits fails here instead.
+    timeout: 100_000,
     env: {
       ...process.env,
       FRAMESHELL_SOCKET: socketPath,
@@ -27,6 +29,7 @@ function frameshell(args: string[], cwd: string) {
       FRAMESHELL_CONFIG_DIR: testBinariesDir(),
     },
   });
+  if (result.error) throw new Error(`frameshell ${args.join(" ")}: ${result.error.message}\n${result.stderr}`);
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
