@@ -10,11 +10,12 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type ExportPreset, type Size, type Timeline, flattenTimeline } from "@frameshell/schema";
+import { type ExportPreset, type Size, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { readTimelineFile } from "../timeline/service.js";
+import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type ExportSource,
   LOUDNESS_STATS_FILE,
@@ -26,6 +27,7 @@ import {
   muxStep,
   parseLoudnessStats,
 } from "./compiler.js";
+import { writeFonts } from "./fonts.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
 
 /** Options for {@link executeRender}. */
@@ -69,6 +71,7 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
   try {
     await mkdir(workDir, { recursive: true });
     await writeFiles(workDir, plan.files);
+    await writeFonts(workDir, plan.fonts);
     const mix = mixStep(plan);
     const analysis = loudnessAnalysis(plan);
     for (const step of [mix, analysis]) if (step) await writeFiles(workDir, step.files);
@@ -119,6 +122,11 @@ export interface ExportServiceOptions {
    * clip); null when missing or invalid. Default: read the file.
    */
   readNested?(root: string, source: string): Promise<Timeline | null>;
+  /**
+   * Transcript of a project-relative asset (subtitle words); null when it
+   * has none or it cannot be read. Default: `transcripts/<asset>.words.json`.
+   */
+  readTranscript?(root: string, asset: string): Promise<Transcript | null>;
   /** Presets contributed by the project's loaded plugins; see `PluginHost.presets`. */
   pluginPresets(root: string): Promise<ExportPresetInfo[]>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
@@ -160,6 +168,7 @@ export class ExportService {
       resolution: config?.resolution ?? DEFAULT_RESOLUTION,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
+      transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     });
     const output = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
@@ -205,6 +214,7 @@ export class ExportService {
       timeline,
       fps,
       sources: await this.#sources(root, timeline),
+      transcripts: await this.#transcripts(root, timeline),
       resolution,
       width: size.width,
       height: size.height,
@@ -212,12 +222,18 @@ export class ExportService {
       output: partial,
     });
     const ffmpeg = await this.#options.ffmpeg(root);
+    // Scratch cwd for the subtitle script and fonts the args name relatively.
+    const workDir = join(root, ".frameshell", "cache", "frame", randomBytes(6).toString("hex"));
     await mkdir(dirname(params.out), { recursive: true });
     try {
-      await runTool(ffmpeg, plan.args, { cwd: dirname(params.out) });
+      await mkdir(workDir, { recursive: true });
+      await writeFiles(workDir, plan.files);
+      await writeFonts(workDir, plan.fonts);
+      await runTool(ffmpeg, plan.args, { cwd: workDir });
       await rename(partial, params.out);
     } finally {
       await rm(partial, { force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
     return {
       path: params.out,
@@ -270,6 +286,22 @@ export class ExportService {
     return { timeline: flattenTimeline(timeline, (source) => nested.get(source) ?? null), fps };
   }
 
+  /** Transcripts of the assets subtitle tracks follow, by asset; assets without one are absent. */
+  async #transcripts(root: string, timeline: Timeline): Promise<Map<string, Transcript>> {
+    const read = this.#options.readTranscript ?? readTranscriptFile;
+    const found = new Map<string, Transcript>();
+    const followed = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [track.follows] : [])));
+    for (const track of timeline.tracks) {
+      if (track.kind === "subtitles" || !followed.has(track.id)) continue;
+      for (const clip of track.clips) {
+        if (clip.type !== "media" || !("asset" in clip) || found.has(clip.asset)) continue;
+        const transcript = await read(root, clip.asset);
+        if (transcript) found.set(clip.asset, transcript);
+      }
+    }
+    return found;
+  }
+
   /** Probe every asset the timeline's media clips use. Throws AssetNotFound for a missing one. */
   async #sources(root: string, timeline: Timeline): Promise<Map<string, ExportSource>> {
     const sources = new Map<string, ExportSource>();
@@ -293,6 +325,16 @@ export class ExportService {
 
 /** Frame size when `frameshell.json` has none (SPEC §5.2 default). */
 const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
+
+/** The asset's transcript file (the one `transcribe` writes); null when missing, broken or owned by another asset. */
+async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
+  try {
+    return (await resolveTranscript(root, asset)).previous;
+  } catch (error) {
+    if (error instanceof RpcError) return null;
+    throw error;
+  }
+}
 
 async function readNestedFile(root: string, source: string): Promise<Timeline | null> {
   try {

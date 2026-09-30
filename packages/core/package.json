@@ -21,6 +21,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
+    "@expo-google-fonts/archivo-black": "0.4.1",
     "@frameshell/plugin-api": "workspace:*",
     "@frameshell/protocol": "workspace:*",
     "@frameshell/schema": "workspace:*",

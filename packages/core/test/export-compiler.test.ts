@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import type { Timeline } from "@frameshell/schema";
+import type { Timeline, Transcript } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
+  assCentiseconds,
   compileFrame,
   compileRender,
   loudnessAnalysis,
@@ -65,8 +66,33 @@ const timeline: Timeline = {
 
 const MEASURED = { input_i: "-23.10", input_tp: "-6.20", input_lra: "4.30", input_thresh: "-33.40", target_offset: "0.40" };
 
+/**
+ * Words of talk.mp4 (source seconds). c_talk1 plays 3.2-6.2 from 0 s, c_talk2 plays 10-12.3 at 1.15x from 3 s:
+ * "silencios" (midpoint 6.3) and "ayer" (7.0) fall in the cut, "rápido" plays at 3.174-3.522 s.
+ */
+const talkWords: [string, number, number][] = [
+  ["Hola", 3.3, 3.6],
+  ["a", 3.7, 3.8],
+  ["todos.", 3.9, 4.4],
+  ["Hoy", 5.0, 5.3],
+  ["cortamos", 5.4, 5.9],
+  ["silencios", 6.0, 6.6],
+  ["ayer", 6.8, 7.2],
+  ["rápido", 10.2, 10.6],
+];
+const talkTranscript: Transcript = {
+  schemaVersion: 1,
+  asset: "assets/talk.mp4",
+  assetHash: `sha256:${"a".repeat(64)}`,
+  provider: "whisper-cpp",
+  model: "large-v3-turbo-q5_0",
+  words: talkWords.map(([text, start, end], i) => ({ id: `w_${String(i + 1).padStart(6, "0")}`, text, start, end })),
+  edits: {},
+};
+const transcripts = new Map([["assets/talk.mp4", talkTranscript]]);
+
 describe("export compiler", () => {
-  const plan = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 });
+  const plan = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4 });
 
   it("compiles a cut list to segments, one audio pass and a mux (golden)", () => {
     golden("render-plan", {
@@ -110,8 +136,52 @@ describe("export compiler", () => {
     expect(graph.match(/afade=t=in:ss=0:ns=96,/g)).toHaveLength(3);
   });
 
-  it("reports what export v1 skips", () => {
-    expect(plan.warnings).toEqual(["Subtitle track s1 is not burned into exports yet; it was skipped."]);
+  it("burns the subtitle track: the followed clips' words on the frames they play, cut words gone (golden)", () => {
+    expect(plan.warnings).toEqual([]);
+    expect(plan.fonts).toEqual(["ArchivoBlack-Regular.ttf"]);
+    const ass = plan.files["subtitles.ass"]!;
+    expect(ass).toContain("PlayResX: 1920\nPlayResY: 1080");
+    // big-keyword at 1080p: 70 px em (0.065 of the short side) = ASS size 70 * 1.347, 6.3 px outline, white on black.
+    expect(ass).toContain("Style: t0,Archivo Black,94.29,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,0,0,0,0,100,100,0,0,1,6.3,0,2,0,0,0,1");
+    const events = ass.split("\n").filter((line) => line.startsWith("Dialogue:")).map((line) => line.split(",").slice(1, 3).join("-") + " " + line.slice(line.indexOf("}") + 1));
+    // Hola 3.3 → 0.1 s (frame 3); a 3.7 → frame 15; todos. 3.9 → frame 21, until its end 4.4 → frame 36, a sentence end.
+    // rápido: 3 + 0.2 / 1.15 = 3.174 s = frame 95, written as 3.16 s: ffmpeg sees frame 95 at 3166 ms, frame 94 at 3133 ms.
+    expect(events).toEqual([
+      "0:00:00.10-0:00:00.50 {\\c&H0026D4FF&}HOLA{\\c&H00FFFFFF&} A TODOS.",
+      "0:00:00.50-0:00:00.70 HOLA {\\c&H0026D4FF&}A{\\c&H00FFFFFF&} TODOS.",
+      "0:00:00.70-0:00:01.20 HOLA A {\\c&H0026D4FF&}TODOS.{\\c&H00FFFFFF&}",
+      "0:00:01.80-0:00:02.20 {\\c&H0026D4FF&}HOY{\\c&H00FFFFFF&} CORTAMOS",
+      "0:00:02.20-0:00:02.70 HOY {\\c&H0026D4FF&}CORTAMOS{\\c&H00FFFFFF&}",
+      "0:00:03.16-0:00:03.53 {\\c&H0026D4FF&}RÁPIDO{\\c&H00FFFFFF&}",
+    ]);
+    // Bottom of the line box 12 % above the frame's bottom edge.
+    expect(ass).toContain("{\\an2\\pos(960,950.4)}");
+    // Burned in the segments showing cues, on timeline time; the last segment (7-8 s) shows none.
+    expect(plan.files["seg-0001.filter"]).toContain(",ass=filename=subtitles.ass:fontsdir=fonts[v]");
+    expect(plan.files["seg-0002.filter"]).toContain(",setpts=PTS+3/TB,ass=filename=subtitles.ass:fontsdir=fonts,setpts=PTS-STARTPTS[v]");
+    expect(plan.files["seg-0003.filter"]).not.toContain("ass=");
+  });
+
+  it("writes cue edges so ffmpeg's truncated millisecond clock shows each cue on exactly its frames", () => {
+    for (const fps of [24, 25, 30000 / 1001, 30, 50, 60]) {
+      for (let frame = 1; frame < 5000; frame++) {
+        const edge = assCentiseconds(frame, fps) * 10;
+        // ffmpeg's ass filter: t = trunc(pts * 1000 / fps) ms; shown when start <= t < end.
+        expect(Math.trunc((frame * 1000) / fps + 1e-6)).toBeGreaterThanOrEqual(edge);
+        expect(Math.trunc(((frame - 1) * 1000) / fps + 1e-6)).toBeLessThan(edge);
+      }
+    }
+  });
+
+  it("warns when a followed clip with sound has no transcript, or a track names an unknown preset", () => {
+    const styled: Timeline = { ...timeline, tracks: timeline.tracks.map((t) => (t.kind === "subtitles" ? { ...t, style: { preset: "neon" } } : t)) };
+    const bare = compileRender({ timeline: styled, fps: 30, preset: youtube1080, loudness: -17, sources, resolution });
+    expect(bare.warnings).toEqual([
+      'Subtitle track s1 names unknown style preset "neon"; it was rendered as big-keyword.',
+      "Subtitle track s1 shows no words for assets/talk.mp4: no transcript. Run `frameshell transcribe <asset>` first.",
+    ]);
+    expect(bare.files).not.toHaveProperty("subtitles.ass");
+    expect(bare.fonts).toEqual([]);
   });
 
   it("composites upper video tracks over the base with each clip's transform (golden)", () => {
@@ -135,7 +205,7 @@ describe("export compiler", () => {
     const frame = (at: number) => compileFrame({ timeline: overlays, fps: 30, sources, resolution, width: 1280, height: 720, at, output: "/out/frame.png" });
     golden("overlay-plan", { segments: overlayPlan.segments, files: overlayPlan.files, frames: { logo: frame(2), title: frame(4.5), none: frame(3.5) } });
 
-    expect(overlayPlan.warnings).toEqual(["Subtitle track s1 is not burned into exports yet; it was skipped."]);
+    expect(overlayPlan.warnings).toEqual(["Subtitle track s1 shows no words for assets/talk.mp4: no transcript. Run `frameshell transcribe <asset>` first."]);
     const first = overlayPlan.files["seg-0001.filter"]!;
     // Pillarboxed 1080x1080 at 0.25 = 270 px, centered 600 px right and 300 px up; starts 30 frames into the segment.
     expect(first).toContain("scale=270:270,setsar=1,format=rgba,colorchannelmixer=aa=0.8,tpad=start=30:color=black@0[o0]");
@@ -196,12 +266,17 @@ describe("export compiler", () => {
     expect(muxStep(silentPlan, null, "/out/x.mp4").args).toContain("anullsrc=r=48000:cl=stereo,atrim=end_sample=384000[a]");
   });
 
-  it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still (golden)", () => {
+  it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still, subtitles burned (golden)", () => {
     const frame = (at: number) =>
-      compileFrame({ timeline, fps: 30, sources, resolution, width: 1280, height: 720, at, output: "/out/frame.png" });
+      compileFrame({ timeline, fps: 30, sources, resolution, transcripts, width: 1280, height: 720, at, output: "/out/frame.png" });
     golden("frame-plans", { cut: frame(1), speed: frame(3.5), gap: frame(5.5), still: frame(7.5) });
-    expect(frame(3.5)).toMatchObject({ frame: 105, at: 3.5, clip: "c_talk2" });
-    expect(frame(5.5)).toMatchObject({ frame: 165, clip: null });
+    expect(frame(3.5)).toMatchObject({ frame: 105, at: 3.5, clip: "c_talk2", fonts: ["ArchivoBlack-Regular.ttf"] });
+    // At 3.5 s "RÁPIDO" shows: the one frame is moved to its timeline time for the ass filter, laid out at 1280x720.
+    const graph = frame(3.5).args[frame(3.5).args.indexOf("-filter_complex") + 1]!;
+    expect(graph).toMatch(/,setpts=PTS\+3\.5\/TB,ass=filename=subtitles\.ass:fontsdir=fonts,setpts=PTS-STARTPTS\[v\]$/);
+    expect(frame(3.5).files["subtitles.ass"]).toContain("PlayResX: 1280");
+    // No cue at 5.5 s: nothing burned.
+    expect(frame(5.5)).toMatchObject({ frame: 165, clip: null, files: {}, fonts: [] });
     // 3-decimal times name the frame they were rounded from: 0.033 is frame 1 at 30 fps.
     expect(frame(0.033).frame).toBe(1);
   });

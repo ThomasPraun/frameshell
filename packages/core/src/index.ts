@@ -103,11 +103,15 @@ export {
   compileFrame,
   compileRender,
   MIX_FILE,
+  SUBTITLES_FILE,
+  FONTS_DIR,
   loudnessAnalysis,
   mixStep,
   muxStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
+export { assSubtitles, assCentiseconds } from "./export/ass.js";
+export { fontSource, writeFonts } from "./export/fonts.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
 export { type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
 export {
