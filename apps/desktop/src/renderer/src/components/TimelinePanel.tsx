@@ -316,6 +316,9 @@ function TimelineCanvas({
     // The player follows selections made elsewhere: the playhead jumps to the clip (not while playing).
     if (!transport.get().playing) transport.seek(clip.start);
     const view = state.current;
+    // The DOM is the truth: a scroll made just before (wheel, script) may not have reached `state` (its event is async).
+    view.scrollLeft = box.scrollLeft;
+    view.scrollTop = box.scrollTop;
     const x0 = clip.start * view.pxPerSecond;
     const x1 = clip.end * view.pxPerSecond;
     if (x0 < view.scrollLeft || x1 > view.scrollLeft + view.width) view.scrollLeft = Math.max(0, x0 - view.width / 4);
