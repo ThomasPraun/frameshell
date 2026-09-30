@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import type { JobStep } from "@frameshell/protocol";
-import { writeJsonAtomic } from "../fs-util.js";
+import { renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import type { JobContext } from "../jobs/queue.js";
 import { ToolError, probeMedia, runTool } from "./ffmpeg.js";
 import {
@@ -125,7 +125,7 @@ async function build(
       const temp = `${store.abs(proxy)}.${partial}`;
       temps.push(temp);
       await runTool(tools.ffmpeg, proxyArgs(source, temp, fps), { signal, onProgress: progressOf("proxy") });
-      await rename(temp, store.abs(proxy));
+      await renameRetrying(temp, store.abs(proxy));
       manifest.proxy = proxy;
     }
 
@@ -135,7 +135,7 @@ async function build(
       const temp = `${store.abs(sidecar)}.${partial}`;
       temps.push(temp);
       await runTool(tools.ffmpeg, sidecarArgs(source, temp), { signal, onProgress: progressOf("sidecar") });
-      await rename(temp, store.abs(sidecar));
+      await renameRetrying(temp, store.abs(sidecar));
       manifest.sidecar = { path: sidecar, format: "s16le", sampleRate: SIDECAR_SAMPLE_RATE, channels: SIDECAR_CHANNELS };
 
       report("waveform");
@@ -160,7 +160,7 @@ async function build(
       });
       const count = (await readdir(temp)).filter((name) => name.endsWith(".jpg")).length;
       await rm(store.abs(dir), { recursive: true, force: true });
-      await rename(temp, store.abs(dir));
+      await renameRetrying(temp, store.abs(dir));
       manifest.thumbnails = { dir, count, interval: interval ?? 0 };
     }
 

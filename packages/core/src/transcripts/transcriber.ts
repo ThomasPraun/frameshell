@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plugin-api";
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
-import { exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
+import { exists, readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 
@@ -108,7 +108,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     try {
       await mkdir(dirname(audio), { recursive: true });
       await extractAudio(input, temp, () => tools.ensureBinary("ffmpeg", progress));
-      await rename(temp, audio);
+      await renameRetrying(temp, audio);
     } catch (error) {
       await rm(temp, { force: true });
       failed(error);

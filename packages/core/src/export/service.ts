@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -30,6 +30,7 @@ import {
 } from "./compiler.js";
 import { writeFonts } from "./fonts.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
+import { renameRetrying } from "../fs-util.js";
 
 /** Options for {@link executeRender}. */
 export interface ExecuteRenderOptions {
@@ -101,7 +102,7 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     await writeFiles(workDir, mux.files);
     await mkdir(dirname(output), { recursive: true });
     await run(mux.args, (seconds) => report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * Math.min(1, seconds / plan.duration) }));
-    await rename(partial, output);
+    await renameRetrying(partial, output);
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
     await rm(partial, { force: true });
@@ -257,7 +258,7 @@ export class ExportService {
       await writeFiles(workDir, plan.files);
       await writeFonts(workDir, plan.fonts);
       await runTool(ffmpeg, plan.args, { cwd: workDir });
-      await rename(partial, params.out);
+      await renameRetrying(partial, params.out);
     } finally {
       await rm(partial, { force: true });
       await rm(workDir, { recursive: true, force: true });

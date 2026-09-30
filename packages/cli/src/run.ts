@@ -223,7 +223,6 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 
   let conn: DaemonConnection | undefined;
   try {
-    process.stderr.write(`[DEBUG-109] ${Date.now()} connecting\n`);
     conn = await connectOrStartDaemon({
       socketPath: resolveSocketPath(io.env),
       client: `cli/${CLI_VERSION}`,
@@ -231,7 +230,6 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       agent: resolveAgent(io.env),
       env: io.env,
     });
-    process.stderr.write(`[DEBUG-109] ${Date.now()} connected\n`);
     const outcome = { code: 0 };
     const text = await execute(conn, invocation, flags, io, outcome);
     io.stdout(text);
@@ -367,9 +365,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
       const follower = inv.wait ? await followJobs(conn, cwd) : undefined;
-      process.stderr.write(`[DEBUG-109] ${Date.now()} subscribed\n`);
       const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy" });
-      process.stderr.write(`[DEBUG-109] ${Date.now()} imported ${JSON.stringify(result.imported.map((e) => e.job))}\n`);
       if (!follower) return flags.json ? json(result) : formatImport(result);
       const jobs = await waitForJobs(follower, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
       const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));

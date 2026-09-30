@@ -13,6 +13,8 @@ export interface JobFollower {
 }
 
 const active = (job: JobInfo) => job.state === "queued" || job.state === "running";
+/** Job states only move forward: queued, running, then one final state. */
+const stage = (job: JobInfo) => (job.state === "queued" ? 0 : job.state === "running" ? 1 : 2);
 
 /**
  * Subscribe to `job.progress` of the project enclosing `cwd`. Call it before
@@ -23,7 +25,7 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
   const history: JobInfo[] = [];
   let listener: ((job: JobInfo) => void) | undefined;
   await conn.request("events.subscribe", { cwd, events: ["job.progress"] });
-  conn.on("job.progress", ({ job }) => { process.stderr.write(`[DEBUG-109] ${Date.now()} event ${job.id} ${job.state} ${job.step} ${job.progress}\n`); return listener ? listener(job) : history.push(job); });
+  conn.on("job.progress", ({ job }) => (listener ? listener(job) : history.push(job)));
 
   return {
     wait: (ids, onChange) =>
@@ -42,12 +44,13 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
         };
         for (const job of history.splice(0)) take(job);
         listener = take;
-        // Covers jobs that changed before the subscription (a reused queued job); newer than any event read so far.
+        // Covers jobs that changed before the subscription (a reused queued job). The reply may be older than
+        // events already read: a job finishing while the daemon writes it sends `done` first. Never step back.
         conn.request("job.list", { cwd }).then(({ jobs }) => {
-          process.stderr.write(`[DEBUG-109] ${Date.now()} list ${JSON.stringify(jobs.map((j) => [j.id, j.state, j.step, j.progress]))}\n`);
           for (const job of jobs) {
             if (!wanted.has(job.id)) continue;
             const seen = latest.get(job.id);
+            if (seen && stage(job) < stage(seen)) continue;
             if (!seen || seen.state !== job.state || seen.step !== job.step || seen.progress !== job.progress) take(job);
           }
           snapshotTaken = true;

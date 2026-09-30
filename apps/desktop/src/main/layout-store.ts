@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeJsonAtomic } from "@frameshell/core/fs-util";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 
 /**
@@ -21,13 +22,9 @@ export class LayoutStore {
     }
   }
 
-  /** Persist atomically; a crash mid-write never leaves a half file. */
+  /** Persist atomically; a crash mid-write never leaves a half file. Saves may overlap: the last to land wins. */
   async save(projectDir: string, layout: Layout): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
-    const file = this.fileFor(projectDir);
-    const temp = `${file}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify({ projectDir, layout: normalizeLayout(layout) }, null, 2));
-    await rename(temp, file);
+    await writeJsonAtomic(this.fileFor(projectDir), { projectDir, layout: normalizeLayout(layout) });
   }
 
   /** Hashed name: project paths may hold characters invalid in file names. */

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, link, mkdir, readdir, realpath, rename, rm, stat, symlink } from "node:fs/promises";
+import { copyFile, link, mkdir, readdir, realpath, rm, stat, symlink } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import {
@@ -17,6 +17,7 @@ import { readEnclosingProject } from "../projects.js";
 import { probeMedia } from "./ffmpeg.js";
 import { type MediaTools, ingestAsset } from "./ingest.js";
 import { MediaStore, hashFile } from "./store.js";
+import { renameRetrying } from "../fs-util.js";
 
 /** Project-relative directory the watcher and import own. */
 const ASSETS_DIR = "assets";
@@ -312,7 +313,7 @@ export class MediaService {
         try {
           // Clone on APFS/Btrfs/ReFS: instant and no extra space; plain copy elsewhere.
           await copyFile(source, temp, constants.COPYFILE_FICLONE);
-          await rename(temp, target);
+          await renameRetrying(temp, target);
         } finally {
           await rm(temp, { force: true });
         }
