@@ -1,0 +1,41 @@
+# Downloads each platform's pinned ffmpeg/ffprobe for real, verifies the checksum,
+# then runs them (encode + probe). Catches pins that vanish, rot or do not execute.
+name: Real binaries
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packages/core/src/binaries/**
+      - packages/core/test/manifest.test.ts
+      - .github/workflows/real-binaries.yml
+
+concurrency:
+  group: real-binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  download:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per pin: macos-latest is arm64, macos-15-intel is x64.
+        os: [macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b
+      - name: Download, verify and run the pinned build
+        run: pnpm exec vitest run packages/core/test/manifest.test.ts
+        env:
+          FRAMESHELL_TEST_REAL_DOWNLOAD: "1"

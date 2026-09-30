@@ -1,18 +1,26 @@
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
-/** Per-user machine-local directories of Frameshell (never inside a project). */
+/**
+ * Per-user machine-local directories of Frameshell (never inside a project).
+ * The one place daemon, CLI and desktop app learn where user-level state lives.
+ */
 export interface AppDirs {
-  /** Large regenerable data: managed binaries, models. */
+  /** Large or regenerable state: managed binaries, downloads, caches, desktop app data. Never roams. */
   dataDir: string;
-  /** Global `config.json`. */
+  /** Small user decisions: global `config.json`, project trust (`trust.json`). */
   configDir: string;
 }
 
 /**
- * OS-conventional app directories. `FRAMESHELL_DATA_DIR` / `FRAMESHELL_CONFIG_DIR`
- * override (tests, portable installs). Windows data goes to Local, not Roaming:
- * binaries must not sync across machines.
+ * OS-conventional app directories.
+ *
+ * - macOS: both in `~/Library/Application Support/Frameshell`.
+ * - Linux: `$XDG_DATA_HOME/frameshell` (default `~/.local/share`) and `$XDG_CONFIG_HOME/frameshell` (default `~/.config`).
+ * - Windows: data in `%LOCALAPPDATA%\Frameshell` (binaries must not roam), config in `%APPDATA%\Frameshell`.
+ *
+ * `FRAMESHELL_DATA_DIR` / `FRAMESHELL_CONFIG_DIR` override each (tests, portable installs).
+ * They are the only overrides.
  */
 export function resolveAppDirs(
   env: NodeJS.ProcessEnv = process.env,

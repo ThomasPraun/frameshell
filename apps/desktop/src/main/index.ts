@@ -1,12 +1,12 @@
 // Electron main: windows, IPC, terminals, explorer watcher, daemon link (SPEC §3.2).
-// Env: FRAMESHELL_USER_DATA_DIR isolates app data (tests); FRAMESHELL_SOCKET picks the daemon.
+// Env: FRAMESHELL_DATA_DIR / FRAMESHELL_CONFIG_DIR isolate user dirs (tests); FRAMESHELL_SOCKET picks the daemon.
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, shell } from "electron";
-import { resolveSocketPath } from "@frameshell/protocol";
+import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import { Channel, type OpenOutcome, type ProjectView } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
@@ -16,8 +16,8 @@ import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { TerminalManager } from "./terminals.js";
 
-const userDataOverride = process.env["FRAMESHELL_USER_DATA_DIR"];
-if (userDataOverride) app.setPath("userData", userDataOverride);
+// One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
+app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 
 const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);

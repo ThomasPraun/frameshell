@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- One user-directory resolver, `resolveAppDirs()` (now in `@frameshell/protocol`), for the binary manager, the plugin trust store and the desktop app. Data (binaries, downloads, caches, desktop app data under `<dataDir>/desktop`) and config (global `config.json`, `trust.json`) follow OS conventions; overrides are `FRAMESHELL_DATA_DIR` and `FRAMESHELL_CONFIG_DIR` only (`FRAMESHELL_APP_DATA`, `FRAMESHELL_USER_DATA_DIR` and `resolveAppDataDir` removed). Linux trust decisions stored in the data dir by earlier builds are still found and move to the config dir on the next decision. `startDaemon` takes `dirs` instead of `appDataDir`. New "Real binaries" CI workflow downloads and runs every pinned ffmpeg/ffprobe build (weekly, on dispatch, and on PRs touching the binary manager); the opt-in real-download test now encodes and probes H.264 and VP9-with-alpha clips.
+
 ### Added
 
 - Desktop app (`apps/desktop`, Electron + electron-vite + React): opens a project folder, auto-starts or reconnects to `frameshelld`, and lays out explorer/history/plugins, preview and editor tabs, timeline and a full-height terminal panel (SPEC §10). Explorer updates live from a file watcher. Markdown and JSON open in Monaco, with the project JSON Schemas; saves go through the daemon. Terminals are real login shells (node-pty + xterm.js) with `FRAMESHELL_SOCKET`, `FRAMESHELL_PROJECT`, `FRAMESHELL_SESSION` and a bundled `frameshell` on `PATH`. Panels resize and collapse; layout is saved per project. Playwright smoke test of the built app in CI.

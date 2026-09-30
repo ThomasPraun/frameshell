@@ -8,21 +8,20 @@ import { runCli } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "../../core/test/helpers.js";
 import { type GitPlugin, gitPluginFixture } from "../../core/test/plugin-fixture.js";
 
-// Black-box: the built CLI against in-process daemons, so each test picks its user (app data).
+// Black-box: the built CLI against in-process daemons, so each test picks its user (app dirs).
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
 const NPM_TIMEOUT = 120_000;
 
 interface User {
   socketPath: string;
-  appDataDir: string;
   daemon: Daemon;
 }
 const users: User[] = [];
 
 async function newUser(): Promise<User> {
   const socketPath = uniqueSocketPath();
-  const appDataDir = tempDir();
-  const user = { socketPath, appDataDir, daemon: await startDaemon({ socketPath, appDataDir }) };
+  const dirs = { dataDir: tempDir(), configDir: tempDir() };
+  const user = { socketPath, daemon: await startDaemon({ socketPath, dirs }) };
   users.push(user);
   return user;
 }
@@ -31,7 +30,7 @@ async function newUser(): Promise<User> {
 function frameshell(user: User, args: string[], cwd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const child = spawn(process.execPath, [cliBin, ...args], {
     cwd,
-    env: { ...process.env, FRAMESHELL_SOCKET: user.socketPath, FRAMESHELL_APP_DATA: user.appDataDir },
+    env: { ...process.env, FRAMESHELL_SOCKET: user.socketPath },
   });
   let stdout = "";
   let stderr = "";
@@ -52,7 +51,7 @@ async function frameshellInteractive(user: User, args: string[], cwd: string, an
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
     cwd,
-    env: { ...process.env, FRAMESHELL_SOCKET: user.socketPath, FRAMESHELL_APP_DATA: user.appDataDir },
+    env: { ...process.env, FRAMESHELL_SOCKET: user.socketPath },
     prompt: async (question) => {
       questions.push(question);
       return answer;
