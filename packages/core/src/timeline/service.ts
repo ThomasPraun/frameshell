@@ -4,6 +4,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
+  type ClipPlace,
+  type HistoryDiffResult,
   type HistoryResult,
   type JournalEntry,
   type MediaProbe,
@@ -23,6 +25,7 @@ import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
+import { type PlacedClip, planDiff } from "../history/diff.js";
 import { appendJournal, readHead, readJournal, writeHead } from "../history/journal.js";
 import { type TimelineRevertFailure, abortConflictError, historyView, planRevert } from "../history/revert.js";
 import { checkScriptRef } from "../scripts/outline.js";
@@ -309,6 +312,32 @@ export class TimelineService {
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
     await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
     return historyView(await readJournal(root, id), id, options.since);
+  }
+
+  /** What a transaction or operation did to clips (`history.diff`); see `planDiff`. Ends are derived like `show`'s. */
+  diff(root: string, id: string, target: string): Promise<HistoryDiffResult> {
+    return this.#turn(root, id, async () => {
+      const { timeline, fps } = await this.#current(root, id);
+      const changes = planDiff(timeline, await readJournal(root, id), target, id);
+      const grid = new FrameGrid(fps);
+      const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
+      const place = async (placed: PlacedClip | null): Promise<ClipPlace | null> => {
+        if (!placed) return null;
+        let end: number | null;
+        try {
+          end = await clipEnd(placed.clip, grid, nested);
+        } catch (error) {
+          if (!(error instanceof NestedTimelineError)) throw error;
+          end = null;
+        }
+        return { track: placed.track, start: placed.clip.start, end };
+      };
+      const clips = [];
+      for (const change of changes) {
+        clips.push({ clip: change.clip, change: change.change, before: await place(change.before), after: await place(change.after) });
+      }
+      return { timeline: id, target, clips };
+    });
   }
 
   /**

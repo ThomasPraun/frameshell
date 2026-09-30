@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
+import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   OpIdSchema,
@@ -19,7 +19,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1008,6 +1008,20 @@ export const methods = {
     }),
     result: HistoryResultSchema,
   },
+  "history.diff": {
+    description:
+      "What a transaction (`tx_…`) or a single operation (`op_…`) did to a timeline's clips: each clip it added, removed, " +
+      "moved (other track or start, same length) or otherwise changed (trim, speed, gain, props), with its track, start " +
+      "and end right before and right after the target. Later operations do not change the answer. Use it to see what " +
+      "a transaction from `history` changed before you `revert` it. Fails with HistoryNotFound when the id is not in " +
+      "the timeline's journal, HistoryUnavailable when the file changed outside the journal after the target.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to diff."),
+    }),
+    result: HistoryDiffResultSchema,
+  },
   revert: {
     mutating: true,
     description:
@@ -1351,6 +1365,11 @@ export const ErrorCode = {
    * `current`. Re-read the file, reapply the edit, write again.
    */
   StaleRevision: -32034,
+  /**
+   * data: `{ target, timeline, hint }`: the timeline file changed outside the journal after the target, so its
+   * states cannot be replayed (`history.diff`).
+   */
+  HistoryUnavailable: -32035,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */
