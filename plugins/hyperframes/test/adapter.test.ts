@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RenderContext, RenderProgress } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
@@ -99,6 +99,36 @@ describe("hyperframes adapter", () => {
     expect(process.env["PRODUCER_HEADLESS_SHELL_PATH"]).toBe("/managed/chrome-headless-shell");
     expect(progress).toContainEqual({ fraction: 0.4, message: "Capturing frames" });
     expect(progress.at(-1)).toEqual({ fraction: 1, message: "Done" });
+  });
+
+  it("refuses a source outside the project: never lists, copies or renders foreign files", async () => {
+    const outside = join(project, "..", `${basename(project)}-secret`);
+    mkdirSync(outside);
+    writeFileSync(join(outside, "index.html"), "<html></html>");
+    writeFileSync(join(outside, "id_rsa"), "key");
+    symlinkSync(outside, join(project, "compositions", "linked"), process.platform === "win32" ? "junction" : "dir");
+    const { producer, calls } = fakeProducer();
+    const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+    const sources = [
+      `../${basename(outside)}/index.html`,
+      "compositions/../../x/index.html",
+      "../../../../../../../../index.html",
+      join(outside, "index.html").split("\\").join("/"),
+      "C:/Users/index.html",
+      "compositions\\..\\..\\x\\index.html",
+      "compositions/linked/index.html",
+    ];
+    for (const source of sources) {
+      await expect(adapter.inputs!({ id: "c_1", source }), source).rejects.toThrow(/outside the project/);
+      const out = tempDir();
+      await expect(adapter.render({ id: "c_1", source, duration: 2 }, context(out).ctx), source).rejects.toThrow(/outside the project/);
+      expect(readdirSync(out), source).toEqual([]);
+    }
+    expect(calls).toEqual([]);
+    // Normalizing inside the project stays allowed.
+    expect(await adapter.inputs!({ id: "c_1", source: "compositions/x/../hyperframes/intro/index.html" })).toContain(
+      "compositions/hyperframes/intro/index.html",
+    );
   });
 
   it("refuses a clip without an HTML source, saying how to make one", async () => {

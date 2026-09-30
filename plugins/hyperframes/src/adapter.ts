@@ -1,5 +1,5 @@
-import { cp, readdir } from "node:fs/promises";
-import { basename, dirname, extname, join, posix } from "node:path";
+import { cp, readdir, realpath } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ClipAdapter, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
 
 /** Clip type this adapter registers. */
@@ -75,8 +75,8 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
     async inputs(clip) {
       const { source } = clip as HyperframesClip;
       if (!source) return [];
-      const dir = posix.dirname(source);
-      return (await listFiles(join(projectDir, ...dir.split("/")))).map((file) => (dir === "." ? file : `${dir}/${file}`));
+      const dir = await compositionDir(projectDir, clip as HyperframesClip & { source: string });
+      return (await listFiles(dir.path)).map((file) => (dir.rel === "" ? file : `${dir.rel}/${file}`));
     },
     async render(clip, ctx: RenderContext) {
       const { id, source, props } = clip as HyperframesClip;
@@ -86,6 +86,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
             "(create one with `frameshell hyperframes new intro`).",
         );
       }
+      const dir = await compositionDir(projectDir, { id, source });
       const [ffmpeg, ffprobe, chrome] = await Promise.all([
         ctx.ensureBinary("ffmpeg"),
         ctx.ensureBinary("ffprobe"),
@@ -97,7 +98,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       process.env["PRODUCER_HEADLESS_SHELL_PATH"] = chrome;
       // Render a copy: the producer may write scratch files next to the entry, which would count as composition edits.
       const composition = join(ctx.outDir, "composition");
-      await cp(join(projectDir, ...dirname(source).split("/")), composition, { recursive: true });
+      await cp(dir.path, composition, { recursive: true });
       const output = join(ctx.outDir, "render.webm");
       const producer = await loadProducer();
       ctx.progress({ fraction: 0, message: "Starting headless Chrome" });
@@ -128,6 +129,35 @@ function isPlainJson(value: unknown): boolean {
   if (typeof value !== "object") return false;
   const proto = Object.getPrototypeOf(value) as unknown;
   return (proto === Object.prototype || proto === null) && Object.values(value).every(isPlainJson);
+}
+
+/**
+ * Composition directory of `clip.source`: absolute `path` and project-relative,
+ * `/`-separated `rel` (`""` = project root). Throws when the source is absolute,
+ * contains `\`, or resolves (lexically or through symlinks) outside `projectDir`:
+ * the whole directory is walked and copied, and the renderer never hashes
+ * outside inputs, so such a clip would read foreign files and never re-render.
+ */
+async function compositionDir(projectDir: string, clip: { id: string; source: string }): Promise<{ path: string; rel: string }> {
+  const { id, source } = clip;
+  const refuse = (): never => {
+    throw new Error(
+      `hyperframes clip ${id} has source ${source}, outside the project ${projectDir}. ` +
+        "Use a project-relative path, e.g. compositions/hyperframes/intro/index.html.",
+    );
+  };
+  if (source.includes("\\") || posix.isAbsolute(source) || win32.isAbsolute(source)) refuse();
+  const path = resolve(projectDir, ...posix.dirname(source).split("/"));
+  const rel = relative(projectDir, path);
+  if (escapes(rel)) refuse();
+  const real = await realpath(path).catch(() => null);
+  if (real !== null && escapes(relative(await realpath(projectDir), real))) refuse();
+  return { path, rel: rel.split(sep).join("/") };
+}
+
+/** True when a `relative()` result leaves its base. */
+function escapes(rel: string): boolean {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }
 
 /** Files under `dir`, `/`-separated and sorted, skipping dot entries and {@link SKIPPED_DIRS}; [] when missing. */
