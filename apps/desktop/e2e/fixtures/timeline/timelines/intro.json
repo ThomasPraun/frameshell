@@ -1,0 +1,13 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/timeline.json",
+  "schemaVersion": 1,
+  "id": "intro",
+  "revision": 0,
+  "tracks": [
+    {
+      "id": "t_intro",
+      "kind": "video",
+      "clips": [{ "id": "c_intro", "type": "media", "asset": "assets/intro.mp4", "start": 0, "in": 0, "out": 4 }]
+    }
+  ]
+}
