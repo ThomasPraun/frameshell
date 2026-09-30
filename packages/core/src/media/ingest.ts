@@ -16,7 +16,7 @@ import {
 } from "./recipe.js";
 import { DERIVED_DIRS, type Manifest, type MediaStore } from "./store.js";
 
-type IngestStep = Exclude<JobStep, "video" | "mux">;
+type IngestStep = Exclude<JobStep, "clips" | "video" | "mux" | "render">;
 
 /** Resolved executables. */
 export interface MediaTools {

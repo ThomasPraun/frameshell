@@ -1,0 +1,8 @@
+{
+  "name": "card-plugin",
+  "version": "0.1.0",
+  "description": "Frameshell test plugin: a clip adapter rendering flat colour cards with ffmpeg.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js"
+}

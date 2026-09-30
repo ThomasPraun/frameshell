@@ -254,6 +254,39 @@ describe("BinaryManager support files", () => {
     expect(readFileSync(join(alpha, "..", "libalpha.so.1"), "utf8")).toBe("lib-bytes");
     expect(readFileSync(join(alpha, "..", "LICENSE"), "utf8")).toBe("MIT");
   });
+
+  it("installs a whole directory when the pin names a tree, from a deflated zip on every platform (headless Chrome)", async () => {
+    // Chrome for Testing layout: one top directory, the executable beside its data files, zip only (also on Linux).
+    const archive = zip(
+      {
+        [`shell-x/shell${exe}`]: { content: "shell-bin" },
+        "shell-x/headless_lib_data.pak": { content: "pak", mode: 0o644 },
+        "shell-x/locales/en-US.pak": { content: "strings", mode: 0o644 },
+        "README.txt": { content: "outside the tree", mode: 0o644 },
+      },
+      { deflate: true },
+    );
+    const path = `/${Math.random().toString(36).slice(2)}/shell.zip`;
+    files.set(path, archive);
+    const pkg: BinaryPackage = {
+      name: "shell",
+      tools: ["shell"],
+      builds: {
+        [currentPlatform()]: {
+          version: "154.0.1",
+          origin: "https://example.test",
+          license: "BSD-3-Clause",
+          archives: [{ urls: [`${base}${path}`], sha256: sha256(archive), size: archive.length, tree: "shell-x", files: { shell: `shell-x/shell${exe}` } }],
+        },
+      },
+    };
+    const shell = await manager(pkg).ensure("shell");
+    const dir = join(shell, "..");
+    expect(tree(dir)).toEqual([`shell${exe}`, "headless_lib_data.pak", "install.json", join("locales", "en-US.pak")].sort());
+    expect(readFileSync(join(dir, "locales", "en-US.pak"), "utf8")).toBe("strings");
+    expect(readFileSync(shell, "utf8")).toBe("shell-bin");
+    if (process.platform !== "win32") expect(statSync(shell).mode & 0o111).not.toBe(0);
+  });
 });
 
 describe("BinaryManager GPU candidates", () => {

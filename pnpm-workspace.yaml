@@ -9,5 +9,14 @@ allowBuilds:
   node-pty: true
   # Squirrel.Windows helper pulled in by electron-builder; releases use NSIS, never Squirrel.
   electron-winstaller: false
+  # Its postinstall downloads Chrome into ~/.cache; HyperFrames renders with the managed headless Chrome instead (ADR 0002).
+  puppeteer: false
 minimumReleaseAgeExclude:
   - electron@44.5.0
+  # @hyperframes/producer 0.8.92, the version ADR 0002 measured, and its sibling packages: the project moves daily.
+  - '@hyperframes/core@0.8.92'
+  - '@hyperframes/engine@0.8.92'
+  - '@hyperframes/lint@0.8.92'
+  - '@hyperframes/parsers@0.8.92'
+  - '@hyperframes/producer@0.8.92'
+  - '@hyperframes/studio-server@0.8.92'

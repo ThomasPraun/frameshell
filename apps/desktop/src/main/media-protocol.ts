@@ -9,17 +9,19 @@ import { Readable } from "node:stream";
 export const MEDIA_SCHEME = "frameshell-media";
 
 /**
- * What is served: daemon-derived proxies and sidecars (SPEC §5.1), and still
- * images under `assets/` (no proxy is built for stills; the preview draws
- * the file). `types` limits a folder to those extensions; null allows any.
+ * What is served: daemon-derived proxies and sidecars (SPEC §5.1), cached
+ * renders of generated clips (§6.5), and still images under `assets/` (no
+ * proxy is built for stills; the preview draws the file). `types` limits a folder to those extensions; null allows any.
  */
 const SERVED: readonly { dir: string; types: ReadonlySet<string> | null }[] = [
   { dir: ".frameshell/proxies/", types: null },
+  { dir: ".frameshell/cache/clips/", types: new Set(["webm", "mp4"]) },
   { dir: "assets/", types: new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]) },
 ];
 
 const TYPES: Record<string, string> = {
   mp4: "video/mp4",
+  webm: "video/webm",
   pcm: "application/octet-stream",
   png: "image/png",
   jpg: "image/jpeg",

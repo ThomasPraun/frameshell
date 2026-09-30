@@ -18,6 +18,7 @@ import { readTimelineFile } from "../timeline/service.js";
 import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type ExportSource,
+  type GeneratedSource,
   LOUDNESS_STATS_FILE,
   type RenderPlan,
   compileFrame,
@@ -129,6 +130,15 @@ export interface ExportServiceOptions {
   readTranscript?(root: string, asset: string): Promise<Transcript | null>;
   /** Presets contributed by the project's loaded plugins; see `PluginHost.presets`. */
   pluginPresets(root: string): Promise<ExportPresetInfo[]>;
+  /**
+   * Clip render cache (SPEC §3.5 step 2): `check` fails fast when a generated
+   * clip has no adapter; `ensure` renders what is missing and returns every
+   * render by clip id. Absent: timelines with generated clips cannot export.
+   */
+  clips?: {
+    check(root: string, timeline: Timeline): Promise<void>;
+    ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void): Promise<ReadonlyMap<string, GeneratedSource>>;
+  };
   /** See {@link ExecuteRenderOptions.parallelism}. */
   parallelism?: number;
   /** Video segment length in seconds; see {@link RenderInput.segmentSeconds}. */
@@ -161,16 +171,24 @@ export class ExportService {
     const config = (await readEnclosingProject(root))?.config;
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
     const { timeline, fps } = await this.#resolved(root, params.timeline);
-    const plan = compileRender({
+    const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
+    const layered = generatedClipIds(timeline);
+    if (layered.length > 0) await this.#options.clips?.check(root, timeline);
+    const input = {
       timeline,
       fps,
       preset,
-      resolution: config?.resolution ?? DEFAULT_RESOLUTION,
+      resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
       transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
-    });
+    };
+    // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
+    const standIn = this.#options.clips
+      ? new Map(layered.map((id) => [id, { path: "", hasAlpha: true, ...resolution }]))
+      : new Map<string, GeneratedSource>();
+    const plan = compileRender({ ...input, generated: standIn });
     const output = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
     const job = this.#options.jobs.enqueue({
       kind: "render",
@@ -178,7 +196,13 @@ export class ExportService {
       asset: `timelines/${params.timeline}.json`,
       output,
       run: async (ctx) => {
-        await executeRender(plan, {
+        let final = plan;
+        if (layered.length > 0 && this.#options.clips) {
+          ctx.update({ step: "clips", progress: 0 });
+          const generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }));
+          final = compileRender({ ...input, generated });
+        }
+        await executeRender(final, {
           ffmpeg: await this.#options.ffmpeg(root),
           workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
           output,
@@ -210,12 +234,15 @@ export class ExportService {
     const size = params.preset ? (await this.#preset(root, params.preset)).video : resolution;
     const { timeline, fps } = await this.#resolved(root, params.timeline);
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
+    const generated =
+      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline) : new Map();
     const plan = compileFrame({
       timeline,
       fps,
       sources: await this.#sources(root, timeline),
       transcripts: await this.#transcripts(root, timeline),
       resolution,
+      generated,
       width: size.width,
       height: size.height,
       at: params.at,
@@ -321,6 +348,13 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** Ids of the generated (adapter) clips on video tracks: each needs a cached render to export. */
+function generatedClipIds(timeline: Timeline): string[] {
+  return timeline.tracks.flatMap((track) =>
+    track.kind === "video" ? track.clips.filter((clip) => clip.type !== "media" && clip.type !== "timeline").map((clip) => clip.id) : [],
+  );
 }
 
 /** Frame size when `frameshell.json` has none (SPEC §5.2 default). */

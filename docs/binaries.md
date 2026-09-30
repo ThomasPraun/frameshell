@@ -9,7 +9,8 @@ frameshelld downloads native tools on first use instead of bundling them (SPEC ย
 - An optional candidate's executables must answer the package's version probe (`whisper-cli --version`) before the install is published. If one does not start (runtime library or C library too old), the manager writes `<platform>-<accelerator>.failed.json` (with the error) next to its install dir, reports it as progress, and installs the next candidate. That candidate is skipped until the file is deleted. A download or checksum failure never falls back.
 - Install location: `<dataDir>/binaries/<package>/<version>/<platform>/`, with an `install.json` recording the source URL, checksum and licence. See [User directories](#user-directories) for `dataDir`.
 - Install steps: download to a private staging directory while hashing, abort on checksum mismatch, extract only the pinned members with the system `tar`, then publish with one directory rename. A failed install leaves nothing behind. Concurrent requests share one download.
-- Extraction uses the system `tar`: bsdtar on macOS and Windows (`%SystemRoot%\System32\tar.exe`) reads zip and tar; GNU tar on Linux needs `xz` for `.tar.xz`. So Linux pins must be tar archives.
+- Extraction uses the system `tar`: bsdtar on macOS and Windows (`%SystemRoot%\System32\tar.exe`) reads zip and tar; GNU tar on Linux needs `xz` for `.tar.xz`. GNU tar reads no zip, so zip archives on Linux go through Frameshell's own reader (`binaries/unzip.ts`: stored and deflate, unix modes, no zip64).
+- A pin may name a `tree`: a directory of the archive installed whole, keeping sub-paths, for tools that load data files from their own directory (headless Chrome).
 - `support` members (shared libraries, licences) are placed next to the tools under the name the pin gives them, so shared libraries sit under their SONAME and no symlinks are needed.
 - Every pin is a prebuilt download (SPEC ยง9). Nothing is compiled on the user's machine.
 - Models (`<dataDir>/models/<id>/<revision>/<file>`) are single files pinned by URL, revision and SHA-256, downloaded on first use the same way.
@@ -160,6 +161,24 @@ Re-pin whisper.cpp:
 3. For the Windows CUDA asset, read `ggml-cuda.dll`'s imports again and update the shipped CUDA DLL names.
 4. Frameshell builds: hash `https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/<commit>` into `WHISPER_SOURCE`, bump `WHISPER_FRAMESHELL_TAG` (a published release is never changed), and set each `WHISPER_FRAMESHELL_BUILDS` hash to 64 zeros and size 0. Push a PR: the `whisper.cpp release builds` workflow builds every asset and fails, printing each asset's SHA-256 and size. Pin those and push again: the next run rebuilds and must match, which proves the build reproducible. A changed toolchain (runner image, Xcode, apt packages) changes the bytes the same way: re-pin. After merge, the workflow publishes the release from `main`.
 5. Run `FRAMESHELL_TEST_REAL_WHISPER=1 pnpm test` on each platform you can reach (`FRAMESHELL_TEST_DATA_DIR=<dir>` keeps the 574 MB model between runs).
+
+## Headless Chrome (`chrome-headless-shell`)
+
+Used by the official `@frameshell/hyperframes` plugin: `@hyperframes/producer` renders compositions in it, found through `PRODUCER_HEADLESS_SHELL_PATH` (ADR 0002). On demand: the first HyperFrames render installs it; `doctor` lists it but never reports it missing.
+
+Pin: **Chrome for Testing 154.0.8037.57**, the build ADR 0002 measured, from Google's `chrome-for-testing-public` bucket. Each archive is a zip with one top directory (`chrome-headless-shell-<target>/`), installed whole (`tree`): the executable loads its `.pak`, ICU and SwiftShader files from beside it.
+
+| Platform | Target | Size | SHA-256 |
+|---|---|---|---|
+| darwin-arm64 | `mac-arm64` | 99.5 MB | `9ba4d8a9732bd7e431ce9009d1bbe1ccf7f8c5de2a9781054f500a9fe898124d` |
+| darwin-x64 | `mac-x64` | 104.7 MB | `b3f9551d90c9ff0f4c7c231a4dbf226b3c64faba8ced1ab61a5ef9d430d0e996` |
+| linux-x64 | `linux64` | 120.5 MB | `5a6979d0ab7cf952ea575d35164e7bdce4872b2ced8f8a215c8f8e8eda00ee09` |
+| win32-x64 | `win64` | 120.9 MB | `bcc91b4d0f83a5457fc6ca7941fd65f2349775523d961be88526c6a66560dc75` |
+
+- Google publishes no Linux arm64 or Windows arm64 build: set `binaries.chrome-headless-shell` to a local Chromium headless shell there.
+- Licence: Chromium's BSD-3-Clause plus the third-party notices in `LICENSE.headless_shell`; the binary is Google's, under the Chrome terms. Frameshell never redistributes it: the user's machine downloads it from Google, as puppeteer does. No mirror.
+- Verified when pinning (2026-09-30): each archive's MD5 matched the `x-goog-hash` Google's bucket publishes, each was listed (16 files on macOS, 287 on Linux, 288 on Windows, all under the one top directory), the darwin-arm64 executable printed `Google Chrome for Testing 154.0.8037.57` from a manager install, and the Linux zip extracted by `extractZip` matched `unzip` byte for byte. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs and runs the pin; `FRAMESHELL_TEST_REAL_HYPERFRAMES=1` renders a composition with it.
+- Re-pin: pick a Chrome for Testing version (`https://googlechromelabs.github.io/chrome-for-testing/known-good-versions.json`), download each `chrome-headless-shell-<target>.zip`, record size and SHA-256 (check the MD5 against the bucket's `x-goog-hash` header), then run the two opt-in tests above.
 
 ## Re-pinning ffmpeg
 

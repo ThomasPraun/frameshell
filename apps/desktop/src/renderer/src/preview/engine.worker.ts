@@ -458,7 +458,8 @@ class Engine implements LayerHost {
     for (const pipeline of this.#layers) {
       pipeline.dropBefore(want);
       const span = programAt(program, want, pipeline.layer);
-      if (!span || span.kind === "placeholder") continue;
+      // Generated clips play in a page layer over the canvas (`PreviewLayers`), not through a decoder.
+      if (!span || span.kind === "placeholder" || span.kind === "generated") continue;
       if (span.kind === "still") {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;

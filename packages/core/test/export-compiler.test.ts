@@ -249,6 +249,71 @@ describe("export compiler", () => {
     );
   });
 
+  describe("generated clips (SPEC §3.5 step 2, ADR 0002)", () => {
+    const layered: Timeline = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 3,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_talk", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 7.2 },
+            // Over the black gap after the footage, opaque render.
+            { id: "c_end", type: "hyperframes", source: "compositions/end/index.html", start: 4, duration: 1 },
+          ],
+        },
+        {
+          id: "v2",
+          kind: "video",
+          clips: [
+            {
+              id: "c_title",
+              type: "hyperframes",
+              source: "compositions/title/index.html",
+              start: 1,
+              in: 0.5,
+              duration: 2,
+              transform: { x: 100, y: -50, scale: 0.5, opacity: 0.8 },
+            },
+          ],
+        },
+      ],
+    };
+    const generated = new Map([
+      ["c_title", { path: "/project/.frameshell/cache/clips/aaaa.webm", hasAlpha: true, width: 1920, height: 1080 }],
+      ["c_end", { path: "/project/.frameshell/cache/clips/bbbb.mp4", hasAlpha: false, width: 1920, height: 1080 }],
+    ]);
+    const input = { timeline: layered, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, generated, segmentSeconds: 4 };
+    const layeredPlan = compileRender(input);
+
+    it("composites cached renders like footage: stacked by track, transformed, from the clip's in (golden)", () => {
+      golden("generated-plan", {
+        segments: layeredPlan.segments,
+        files: layeredPlan.files,
+        frame: compileFrame({ ...input, width: 1280, height: 720, at: 2, output: "/out/frame.png" }),
+      });
+      expect(layeredPlan).toMatchObject({ frames: 150, duration: 5 });
+    });
+
+    it("decodes alpha renders with libvpx from the clip's in point, opaque ones natively", () => {
+      const [first, second] = layeredPlan.segments;
+      const title = first!.args.indexOf("/project/.frameshell/cache/clips/aaaa.webm");
+      // Render time 0.5 s shows at timeline 1 s: seeked 1 s of pre-roll back, clamped at 0.
+      expect(first!.args.slice(title - 7, title + 1)).toEqual(["-c:v", "libvpx-vp9", "-ss", "0", "-t", "3.5", "-i", "/project/.frameshell/cache/clips/aaaa.webm"]);
+      expect(layeredPlan.files["seg-0001.filter"]).toContain("colorchannelmixer=aa=0.8");
+      const end = second!.args.indexOf("/project/.frameshell/cache/clips/bbbb.mp4");
+      expect(end).toBeGreaterThan(0);
+      expect(second!.args.slice(0, end)).not.toContain("libvpx-vp9");
+    });
+
+    it("counts generated clips in the timeline length; they add no sound", () => {
+      expect(layeredPlan.audio.tracks).toHaveLength(1);
+      expect(layeredPlan.audio.tracks[0]!.reduce((sum, item) => sum + item.samples, 0)).toBe(240_000);
+    });
+  });
+
   it("refuses an empty timeline", () => {
     const empty: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [] }] };
     expect(() => compileRender({ timeline: empty, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(

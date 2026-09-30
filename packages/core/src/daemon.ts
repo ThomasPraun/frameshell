@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type EventName,
@@ -23,6 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
+import { parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -32,6 +34,8 @@ import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
+import { probeMedia } from "./media/ffmpeg.js";
+import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -139,6 +143,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   };
   const jobs = new JobQueue({ concurrency: options.jobConcurrency ?? 2, onBusyChange: () => armIdleTimer() });
   jobs.watch(({ job }) => publishFor("job.progress", job.project, { project: job.project, job }));
+  // Own queue: an export job waits for clip renders, which must never wait for its slot. One at a time: headless Chrome is heavy.
+  const clipJobs = new JobQueue({ concurrency: 1, idPrefix: "j_c", onBusyChange: () => armIdleTimer() });
+  clipJobs.watch(({ job }) => publishFor("job.progress", job.project, { project: job.project, job }));
+  /** Jobs of both queues, oldest first. */
+  const listJobs = (filter: { project: string; active?: boolean }) =>
+    [...jobs.list(filter), ...clipJobs.list(filter)].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  const projectBinaries = async (dir: string) => {
+    const project = await readEnclosingProject(dir);
+    return project ? { dir: project.dir, binaries: project.config.binaries } : undefined;
+  };
+  /** Root spelled as the project was opened, by canonical path: timeline events carry canonical roots. */
+  const openedRoots = new Map<string, string>();
   const media = new MediaService({
     binaries,
     jobs,
@@ -149,6 +165,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     onOpen: (dir) => {
       media.attach(dir);
       timelineWatcher.attach(dir);
+      const key = canonicalPathSync(dir);
+      if (!openedRoots.has(key)) openedRoots.set(key, dir);
+      clips.attach(openedRoots.get(key)!);
     },
     writeTimeline: async (dir, id, content, author = "file") => {
       // The saver's transaction, like any operation of theirs (SPEC §6.2).
@@ -183,8 +202,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         profile: (asset) => energy.profile(dir, asset),
       }),
     // `root` is canonical, the hub's key; each connection gets `project` spelled as it subscribed.
-    onChanged: ({ root, timeline, revision, author, changes }) =>
-      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes }),
+    onChanged: ({ root, timeline, revision, author, changes }) => {
+      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes });
+      // A new or changed generated clip renders in the background (SPEC §6.5).
+      const opened = openedRoots.get(root);
+      if (opened) void clips.refresh(opened).catch(() => {});
+    },
     onRejected: ({ root, ...rejection }) => events.publish("timeline.rejected", root, { project: root, ...rejection }),
     fileTx: () => transactions.next("file"),
   });
@@ -197,9 +220,40 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
     loadTimeline: (dir, id) => timelines.load(dir, id),
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
+    clips: {
+      check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
+      ensure: (dir, timeline, onProgress) => clips.ensure(clipRoot(dir), timeline, onProgress),
+    },
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
+  const clips = new ClipRenderer({
+    jobs: clipJobs,
+    adapters: (dir) => plugins.clipAdapters(dir),
+    unavailable: (dir, type) => plugins.clipTypeUnavailable(dir, type),
+    timelines: (dir) => listTimelineIds(dir),
+    load: (dir, id) => timelines.load(dir, id),
+    peek: async (dir, id) => {
+      const parsed = parseTimeline(JSON.parse(await readFile(join(dir, "timelines", `${id}.json`), "utf8")));
+      if (!parsed.ok) throw new Error(parsed.error);
+      return parsed.value;
+    },
+    format: async (dir) => {
+      const config = (await readEnclosingProject(dir))?.config;
+      return { fps: config?.fps ?? 30, width: config?.resolution.width ?? 1920, height: config?.resolution.height ?? 1080 };
+    },
+    probe: async (dir, file, signal) => {
+      const probe = await probeMedia(await binaries.ensure("ffprobe", await projectBinaries(dir)), file, signal);
+      return { width: probe.video?.width ?? 0, height: probe.video?.height ?? 0, duration: probe.duration };
+    },
+    ensureBinary: async (dir, name) => binaries.ensure(name, await projectBinaries(dir)),
+  });
+  /** One spelling per project for the clip renderer, whatever spelling the caller used: its jobs and cache state are keyed by it. */
+  const clipRoot = (dir: string): string => {
+    const key = canonicalPathSync(dir);
+    if (!openedRoots.has(key)) openedRoots.set(key, dir);
+    return openedRoots.get(key)!;
+  };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
@@ -291,7 +345,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         trust,
         openProjects: projects.list(),
         rejections: project ? await timelines.rejections(project.dir) : [],
-        jobs: project ? jobs.list({ project: project.dir }) : [],
+        jobs: project ? listJobs({ project: project.dir }) : [],
         transactions: project ? await openTransactions(project.dir) : [],
         caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
@@ -360,9 +414,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, assets: await media.list(dir) };
     },
+    "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
-      return { dir, jobs: jobs.list({ project: dir, active }) };
+      return { dir, jobs: listJobs({ project: dir, active }) };
     },
     "events.subscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
@@ -504,7 +559,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   function armIdleTimer() {
     clearTimeout(idleTimer);
-    if (clients.size > 0 || jobs.busy || closing || !Number.isFinite(idleTimeoutMs)) return;
+    if (clients.size > 0 || jobs.busy || clipJobs.busy || closing || !Number.isFinite(idleTimeoutMs)) return;
     idleTimer = setTimeout(() => void close(), idleTimeoutMs);
     idleTimer.unref?.();
   }
@@ -520,6 +575,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // Canceled jobs are found again from disk when the project next opens.
       await media.close();
       await timelineWatcher.close();
+      await clips.close();
+      await clipJobs.close();
       await jobs.close();
     })().then(resolveClosed);
     return closing;

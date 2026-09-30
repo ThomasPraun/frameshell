@@ -1,4 +1,4 @@
-import { crc32, gzipSync } from "node:zlib";
+import { crc32, deflateRawSync, gzipSync } from "node:zlib";
 
 /** One archive member: content and unix mode. */
 export interface ArchiveEntry {
@@ -30,29 +30,36 @@ export function tarGz(entries: Record<string, ArchiveEntry>): Buffer {
   return gzipSync(Buffer.concat(blocks));
 }
 
-/** Minimal stored (uncompressed) zip writer with unix modes, like real ffmpeg zips. */
-export function zip(entries: Record<string, ArchiveEntry>): Buffer {
+/**
+ * Minimal zip writer with unix modes, like real ffmpeg and Chrome for Testing
+ * zips: stored by default, deflated with `deflate` (Chrome's layout).
+ */
+export function zip(entries: Record<string, ArchiveEntry>, options: { deflate?: boolean } = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, { content, mode = 0o755 }] of Object.entries(entries)) {
-    const data = Buffer.from(content);
+    const raw = Buffer.from(content);
+    const data = options.deflate ? deflateRawSync(raw) : raw;
+    const method = options.deflate ? 8 : 0;
     const nameBytes = Buffer.from(name);
-    const crc = crc32(data);
+    const crc = crc32(raw);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
+    local.writeUInt32LE(raw.length, 22);
     local.writeUInt16LE(nameBytes.length, 26);
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE((3 << 8) | 20, 4); // Made by unix: external attrs carry the mode.
     central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
+    central.writeUInt32LE(raw.length, 24);
     central.writeUInt16LE(nameBytes.length, 28);
     central.writeUInt32LE(((0o100000 | mode) << 16) >>> 0, 38);
     central.writeUInt32LE(offset, 42);

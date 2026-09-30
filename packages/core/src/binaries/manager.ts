@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, mkdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { type CommandRunner, runCommand } from "./command-runner.js";
+import { extractZip, isZip } from "./unzip.js";
 import {
   type BinaryPackage,
   DEFAULT_MODELS,
@@ -354,10 +355,16 @@ export class BinaryManager {
         const extracted = join(staging, `extract-${index}`);
         await mkdir(extracted);
         const support = archive.support ?? {};
-        await extract(file, extracted, [...Object.values(archive.files), ...Object.values(support)], requestedBy, url);
+        const members = archive.tree ? [archive.tree] : [...Object.values(archive.files), ...Object.values(support)];
+        await extract(file, extracted, members, requestedBy, url);
+        if (archive.tree) {
+          const tree = join(extracted, ...archive.tree.split("/"));
+          for (const name of await readdir(tree)) await rename(join(tree, name), join(out, name));
+        }
         for (const [tool, member] of Object.entries(archive.files)) {
           const target = join(out, executable(tool, this.platform));
-          await rename(join(extracted, ...member.split("/")), target);
+          const source = archive.tree ? join(out, ...member.slice(archive.tree.length + 1).split("/")) : join(extracted, ...member.split("/"));
+          if (source !== target) await rename(source, target);
           if (!this.platform.startsWith("win32")) await chmod(target, 0o755);
         }
         for (const [name, member] of Object.entries(support)) {
@@ -510,8 +517,19 @@ async function download(
 
 const execFileAsync = promisify(execFile);
 
-/** System tar: bsdtar on macOS and Windows reads zip and tar; GNU tar on Linux reads tar.xz via `xz`. */
+/**
+ * System tar: bsdtar on macOS and Windows reads zip and tar; GNU tar on Linux
+ * reads tar.xz via `xz` but no zip, so Linux zips go through {@link extractZip}.
+ */
 async function extract(archive: string, dest: string, members: string[], binary: string, url: string): Promise<void> {
+  if (process.platform === "linux" && (await isZip(archive))) {
+    try {
+      await extractZip(archive, dest, members);
+    } catch (error) {
+      throw installFailed(binary, url, `could not extract ${members.join(", ")}: ${(error as Error).message}`);
+    }
+    return;
+  }
   // Absolute path: a GNU tar earlier on PATH (Git for Windows) cannot read zip and misparses `C:`.
   const tar = process.platform === "win32" ? join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe") : "tar";
   try {

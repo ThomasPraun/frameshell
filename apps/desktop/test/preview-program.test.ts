@@ -1,4 +1,4 @@
-import type { AssetInfo, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { EDGE_FADE_SAMPLES } from "../src/renderer/src/preview/mixer.js";
 import { compileProgram, firstAudioDifference, firstVideoDifference, programAt } from "../src/renderer/src/preview/program.js";
@@ -101,7 +101,7 @@ describe("compileProgram", () => {
     expect(program.audio[0]).toMatchObject({ start: 0, end: 96000, in: 480000, speed: 1.5 });
   });
 
-  it("shows a placeholder for what it cannot play yet: generated clips, unreadable nested timelines, proxies still ingesting; stills draw as images", () => {
+  it("shows a placeholder for what it cannot play yet: unreadable nested timelines, proxies still ingesting; stills draw as images", () => {
     const program = compileProgram(
       view([
         {
@@ -110,7 +110,6 @@ describe("compileProgram", () => {
           name: null,
           follows: null,
           clips: [
-            { id: "g1", type: "hyperframes", start: 0, end: 2, source: "compositions/hyperframes/intro/index.html", duration: 2 },
             { id: "n1", type: "timeline", start: 2, end: 4, source: "timelines/intro.json" },
             { ...clip("s1", 4, 0, 1), asset: "assets/logo.png" },
             { ...clip("p1", 5, 0, 1), asset: "assets/new.mp4" },
@@ -123,13 +122,66 @@ describe("compileProgram", () => {
       ),
     );
     expect(program.layers[0]!.map(({ kind, clip, start, end, ...rest }) => ({ kind, clip, start, end, reason: "reason" in rest ? rest.reason : null }))).toEqual([
-      { kind: "placeholder", clip: "g1", start: 0, end: 60, reason: "generated" },
       { kind: "placeholder", clip: "n1", start: 60, end: 120, reason: "timeline" },
       { kind: "still", clip: "s1", start: 120, end: 150, reason: null },
       { kind: "placeholder", clip: "p1", start: 150, end: 180, reason: "ingest" },
     ]);
-    expect(program.layers[0]![2]).toMatchObject({ image: "assets/logo.png", version: "sha256:assetslogopng", size: { width: 10, height: 10 } });
+    expect(program.layers[0]![1]).toMatchObject({ image: "assets/logo.png", version: "sha256:assetslogopng", size: { width: 10, height: 10 } });
     expect(program.audio).toEqual([]);
+  });
+
+  it("plays generated clips from their cached renders on their own layer, with render state until ready (SPEC §6.5)", () => {
+    const generated = (id: string, start: number, duration: number, extra: Record<string, unknown> = {}) => ({
+      id,
+      type: "hyperframes",
+      source: `compositions/hyperframes/${id}/index.html`,
+      start,
+      duration,
+      end: start + duration,
+      ...extra,
+    });
+    const ready: ClipRenderInfo = {
+      clip: "g2",
+      track: "v2",
+      type: "hyperframes",
+      source: null,
+      state: "ready",
+      key: "k2",
+      file: ".frameshell/cache/clips/k2.webm",
+      hasAlpha: true,
+      width: 1920,
+      height: 1080,
+      duration: 3,
+      job: null,
+      progress: 1,
+      error: null,
+    };
+    const rendering: ClipRenderInfo = { ...ready, clip: "g1", track: "v1", state: "rendering", key: "k1", file: null, hasAlpha: null, width: null, height: null, job: "j_c1", progress: 0.4 };
+    const program = compileProgram(
+      view([
+        { id: "v1", kind: "video", name: null, follows: null, clips: [clip("c1", 0, 0, 2), generated("g1", 2, 1)] },
+        { id: "v2", kind: "video", name: null, follows: null, clips: [generated("g2", 0.5, 1, { in: 0.25, transform: { x: 40, scale: 0.5 } }), generated("g3", 1.5, 1)] },
+      ]),
+      assets(asset("assets/a.mp4")),
+      {
+        renders: new Map([
+          ["g1", rendering],
+          ["g2", ready],
+        ]),
+      },
+    );
+    expect(program.frames).toBe(90);
+    expect(program.layers[0]![1]).toEqual({
+      kind: "generated", clip: "g1", type: "hyperframes", start: 60, end: 90, in: 0,
+      render: { state: "rendering", progress: 0.4, error: null }, size: null, placement: IDENTITY,
+    });
+    expect(program.layers[1]).toEqual([
+      {
+        kind: "generated", clip: "g2", type: "hyperframes", start: 15, end: 45, in: 0.25,
+        render: { state: "ready", file: ".frameshell/cache/clips/k2.webm" }, size: HD, placement: { ...IDENTITY, x: 40, scale: 0.5 },
+      },
+      { kind: "generated", clip: "g3", type: "hyperframes", start: 45, end: 75, in: 0, render: null, size: null, placement: IDENTITY },
+    ]);
   });
 
   it("stacks every video track as a layer, bottom first, each clip with its placement (#17)", () => {

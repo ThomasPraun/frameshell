@@ -16,10 +16,16 @@ export interface PinnedArchive {
   readonly size: number;
   /**
    * Tool name to the `/`-separated path of its executable inside the archive.
-   * Extracted by the system `tar`: zip needs bsdtar (macOS, Windows), so Linux
-   * builds must be tar archives.
+   * Extracted by the system `tar` (bsdtar reads zip on macOS and Windows); zip
+   * archives on Linux are extracted by Frameshell's own reader.
    */
   readonly files: Readonly<Record<string, string>>;
+  /**
+   * Directory inside the archive installed whole: its files land in the
+   * install directory keeping their sub-paths, for tools that load data files
+   * next to them (headless Chrome). Each `files` entry must sit directly in it.
+   */
+  readonly tree?: string;
   /**
    * Install name to archive member for non-executables placed next to the
    * tools: shared libraries the tools load (renamed to their SONAME, so no
@@ -534,8 +540,51 @@ function isCandidateList(builds: PinnedBuild | readonly PinnedBuild[]): builds i
   return Array.isArray(builds);
 }
 
-/** Every package the daemon manages. Headless Chrome joins here. */
-export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE];
+const CHROME_FOR_TESTING = "https://googlechromelabs.github.io/chrome-for-testing/";
+/** Same build ADR 0002 measured HyperFrames alpha renders with. */
+const CHROME_VERSION = "154.0.8037.57";
+
+function chromeHeadlessShell(target: "mac-arm64" | "mac-x64" | "linux64" | "win64", sha256: string, size: number): PinnedBuild {
+  const dir = `chrome-headless-shell-${target}`;
+  const exe = target === "win64" ? ".exe" : "";
+  return {
+    version: CHROME_VERSION,
+    origin: CHROME_FOR_TESTING,
+    license: "BSD-3-Clause AND LicenseRef-Google-Chrome-Terms",
+    archives: [
+      {
+        urls: [`https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${target}/${dir}.zip`],
+        sha256,
+        size,
+        // Loads its .pak, ICU and SwiftShader files from its own directory.
+        tree: dir,
+        files: { "chrome-headless-shell": `${dir}/chrome-headless-shell${exe}` },
+      },
+    ],
+  };
+}
+
+/**
+ * Chrome for Testing's headless shell: the browser HTML clip engines render
+ * in (ADR 0002; the HyperFrames plugin passes it as
+ * `PRODUCER_HEADLESS_SHELL_PATH`). Downloaded from Google on first render,
+ * never mirrored. Google ships no Linux or Windows arm64 build.
+ */
+export const CHROME_HEADLESS_SHELL_PACKAGE: BinaryPackage = {
+  name: "chrome-headless-shell",
+  tools: ["chrome-headless-shell"],
+  onDemand: true,
+  versionProbe: { args: ["--version"], pattern: /Chrome for Testing (\S+)/ },
+  builds: {
+    "darwin-arm64": chromeHeadlessShell("mac-arm64", "9ba4d8a9732bd7e431ce9009d1bbe1ccf7f8c5de2a9781054f500a9fe898124d", 99_499_017),
+    "darwin-x64": chromeHeadlessShell("mac-x64", "b3f9551d90c9ff0f4c7c231a4dbf226b3c64faba8ced1ab61a5ef9d430d0e996", 104_704_330),
+    "linux-x64": chromeHeadlessShell("linux64", "5a6979d0ab7cf952ea575d35164e7bdce4872b2ced8f8a215c8f8e8eda00ee09", 120_504_312),
+    "win32-x64": chromeHeadlessShell("win64", "bcc91b4d0f83a5457fc6ca7941fd65f2349775523d961be88526c6a66560dc75", 120_933_079),
+  },
+};
+
+/** Every package the daemon manages. */
+export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE, CHROME_HEADLESS_SHELL_PACKAGE];
 
 /** Every model the daemon manages. */
 export const DEFAULT_MODELS: readonly ManagedModel[] = WHISPER_MODELS;

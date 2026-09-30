@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
 import { type Program, compileProgram } from "./program.js";
+import { useClipRenders } from "./useClipRenders.js";
 
 /** Poll `asset.list` this often while an asset is still ingesting (until daemon asset events, #69). */
 const INGEST_POLL_MS = 2_000;
@@ -21,9 +22,10 @@ export function useProgram(): Program | null {
   const assets = useAssets(view?.revision ?? null);
   const resolution = useResolution();
   const nested = useNestedViews(view);
+  const renders = useClipRenders(view);
   return useMemo(
-    () => (view && assets ? compileProgram(view, assets, { resolution, nested }) : null),
-    [view, assets, resolution, nested],
+    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders }) : null),
+    [view, assets, resolution, nested, renders],
   );
 }
 

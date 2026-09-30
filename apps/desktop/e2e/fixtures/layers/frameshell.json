@@ -1,0 +1,15 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/project.json",
+  "schemaVersion": 1,
+  "name": "Layers demo",
+  "fps": 30,
+  "resolution": {
+    "width": 640,
+    "height": 360
+  },
+  "sampleRate": 48000,
+  "main": "timelines/main.json",
+  "plugins": {
+    "card-plugin": "file:card-plugin"
+  }
+}

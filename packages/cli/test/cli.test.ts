@@ -223,7 +223,7 @@ describe("frameshell doctor", () => {
     FRAMESHELL_CONFIG_DIR: configDir,
   });
 
-  it("--json lists managed ffmpeg, ffprobe and whisper-cli as not installed, without downloading, and exits 1", () => {
+  it("--json lists managed ffmpeg, ffprobe, whisper-cli and headless Chrome as not installed, without downloading, and exits 1", () => {
     const env = isolated();
     const result = frameshell(["doctor", "--json"], tempDir(), env);
     expect(result.stderr).toBe("");
@@ -234,10 +234,11 @@ describe("frameshell doctor", () => {
       ["ffmpeg", "managed", false],
       ["ffprobe", "managed", false],
       ["whisper-cli", "managed", false],
+      ["chrome-headless-shell", "managed", false],
     ]);
     expect(report.problems.join("\n")).toMatch(/doctor --install|No managed ffmpeg build/);
-    // whisper.cpp installs on first transcription: never a problem here.
-    expect(report.problems.join("\n")).not.toMatch(/whisper/);
+    // whisper.cpp installs on first transcription, headless Chrome on first HyperFrames render: never a problem here.
+    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome/);
   });
 
   // A shell-script ffmpeg needs a unix exec; Windows cannot run it without a shell.

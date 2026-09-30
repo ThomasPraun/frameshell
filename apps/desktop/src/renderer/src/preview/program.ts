@@ -1,5 +1,5 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
-import type { AssetInfo, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { Clip, Timeline, Track } from "@frameshell/schema";
 import { type Placement, type Size, flattenTimeline, placementOf } from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
@@ -12,8 +12,6 @@ const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
 
 /** Why a stretch of a layer shows a placeholder instead of footage. */
 export type PlaceholderReason =
-  /** Adapter clip (HyperFrames, Remotion): played from its render cache once #24 lands. */
-  | "generated"
   /** Nested timeline clip whose file cannot be read (missing, invalid, nesting itself). */
   | "timeline"
   /** Proxy not built yet: ingest pending or running. */
@@ -50,7 +48,28 @@ export type VideoSpan =
       size: Size;
       placement: Placement;
     }
+  | {
+      /** Adapter clip (HyperFrames, …): played from its cached render (SPEC §6.5) in a page layer, not by the engine. */
+      kind: "generated";
+      clip: string;
+      /** Adapter clip type, e.g. `hyperframes`. */
+      type: string;
+      start: number;
+      end: number;
+      /** Render seconds shown at `start`: the clip's `in` (render time = composition time). */
+      in: number;
+      /** Render cache state; null until known. */
+      render: LayerRender | null;
+      /** Rendered size once ready (placement uses it, as export does); null before. */
+      size: Size | null;
+      placement: Placement;
+    }
   | { kind: "placeholder"; clip: string; start: number; end: number; reason: PlaceholderReason; type: string };
+
+/** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
+export type LayerRender =
+  | { state: "ready"; file: string }
+  | { state: "queued" | "rendering" | "failed" | "unavailable"; progress: number; error: string | null };
 
 /** Sound of one media clip, program samples `[start, end)` at {@link PROGRAM_SAMPLE_RATE}. */
 export interface AudioSpan {
@@ -98,6 +117,8 @@ export interface ProgramOptions {
   resolution?: Size;
   /** Nested timelines by clip `source` (`timelines/<id>.json`); absent ones show a placeholder. */
   nested?: ReadonlyMap<string, TimelineView>;
+  /** Render cache states of generated clips by clip id (`clip.renders`); absent ones are not known yet. */
+  renders?: ReadonlyMap<string, ClipRenderInfo>;
 }
 
 /** Build the {@link Program} of `view`; `assets` by project-relative path. */
@@ -131,7 +152,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
       if (track.kind === "video") {
-        const span = pictureOf(clip, info, start, end, fps);
+        const span = pictureOf(clip, info, start, end, fps, options.renders);
         if (span) layer.push(span);
       }
       if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) continue;
@@ -223,6 +244,7 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
     return x.proxy === y.proxy && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
+  if (x.kind === "generated" && y.kind === "generated") return x.clip === y.clip;
   return x.kind === "placeholder" && y.kind === "placeholder" && x.reason === y.reason && x.clip === y.clip;
 }
 
@@ -266,9 +288,17 @@ function endOf(clip: Clip): number | null {
   return typeof derived === "number" ? derived : null;
 }
 
-function pictureOf(clip: Clip, info: AssetInfo | undefined, start: number, end: number, fps: number): VideoSpan | null {
+function pictureOf(
+  clip: Clip,
+  info: AssetInfo | undefined,
+  start: number,
+  end: number,
+  fps: number,
+  renders: ReadonlyMap<string, ClipRenderInfo> | undefined,
+): VideoSpan | null {
   const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: clip.id, start, end, reason, type: clip.type });
-  if (!("asset" in clip)) return placeholder(clip.type === "timeline" ? "timeline" : "generated");
+  if (clip.type !== "media" && clip.type !== "timeline") return generatedOf(clip, start, end, renders?.get(clip.id));
+  if (!("asset" in clip)) return placeholder("timeline");
   if (!info) return placeholder("unavailable");
   const video = info.media?.video;
   const placement = placementOf(clip.transform);
@@ -280,4 +310,16 @@ function pictureOf(clip: Clip, info: AssetInfo | undefined, start: number, end: 
   if (info.state === "pending" || info.state === "processing") return placeholder("ingest");
   if (info.state === "ready" && info.media && !info.media.video) return null; // Audio only: black picture, as in export.
   return placeholder("unavailable");
+}
+
+function generatedOf(clip: Clip, start: number, end: number, info: ClipRenderInfo | undefined): VideoSpan {
+  const ready = info?.state === "ready" && info.file ? info : null;
+  const render: LayerRender | null = ready
+    ? { state: "ready", file: ready.file! }
+    : info && info.state !== "ready"
+      ? { state: info.state, progress: info.progress, error: info.error }
+      : null;
+  const size = ready && ready.width && ready.height ? { width: ready.width, height: ready.height } : null;
+  const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;
+  return { kind: "generated", clip: clip.id, type: clip.type, start, end, in: clipIn, render, size, placement: placementOf(clip.transform) };
 }

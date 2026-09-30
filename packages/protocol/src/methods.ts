@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -166,29 +166,37 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render"])
+    .enum(["ingest", "render", "clip"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
-        "`render`: export a timeline to a video file (`render` method).",
+        "`render`: export a timeline to a video file (`render` method). " +
+        "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
     .string()
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
-        "`render` (e.g. `timelines/main.json`).",
+        "`render` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
     ),
-  output: z.string().nullable().describe("`render`: absolute path of the file being written. Null for `ingest`."),
+  output: z
+    .string()
+    .nullable()
+    .describe(
+      "`render`: absolute path of the file being written. `clip`: absolute cache entry without extension, " +
+        "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). Null for `ingest`.",
+    ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; it is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "video", "mux"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
-        "order. `render`: video (segments encoded in parallel, loudness measured alongside), then mux (joins segments, " +
-        "normalizes and encodes audio).",
+        "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
+        "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
+        "`clip`: render (the adapter plugin renders the composition).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -199,6 +207,43 @@ const JobSchema = z.object({
   createdAt: z.string().describe("ISO 8601 time the job was queued."),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
+});
+
+/** Render cache state of one generated clip (SPEC §6.5). */
+const ClipRenderSchema = z.object({
+  clip: z.string().describe("Clip id, e.g. `c_0100`."),
+  track: z.string().describe("Track holding the clip."),
+  type: z.string().describe("Adapter clip type, e.g. `hyperframes`."),
+  source: z.string().nullable().describe("The clip's composition entry (`source`), project-relative; null when it has none."),
+  state: z
+    .enum(["ready", "queued", "rendering", "failed", "unavailable"])
+    .describe(
+      "`ready`: `file` holds the render for the clip as it is now. `queued` / `rendering`: a background `clip` job is " +
+        "on it (`job`, `progress`). `failed`: the last render failed (`error`); it is retried when the composition, " +
+        "props or project format change, or when an export needs it. `unavailable`: no loaded plugin renders this " +
+        "type (not installed, or the project's plugins are not trusted); `error` says which.",
+    ),
+  key: z
+    .string()
+    .nullable()
+    .describe(
+      "Cache key: hash of adapter name and version, clip `source` and `props`, the content of every input file the " +
+        "adapter declares, and project fps and resolution. Moving or trimming a clip keeps it. Null when unavailable.",
+    ),
+  file: z
+    .string()
+    .nullable()
+    .describe(
+      "Project-relative cached render, `.frameshell/cache/clips/<key>.webm` (VP9 with alpha) or `.mp4` (opaque); " +
+        "null until ready. File time t shows composition time t: the clip plays from its `in`.",
+    ),
+  hasAlpha: z.boolean().nullable().describe("True when `file` carries alpha (VP9 `alpha_mode=1`); null until ready."),
+  width: z.int().nullable().describe("Rendered width in pixels; null until ready."),
+  height: z.int().nullable().describe("Rendered height in pixels; null until ready."),
+  duration: z.number().nullable().describe("Rendered seconds; null until ready or unknown."),
+  job: z.string().nullable().describe("Id of the `clip` job rendering it now (`job.list`, `job.progress`); null otherwise."),
+  progress: z.number().min(0).max(1).describe("0..1 of the running render; 1 when ready, 0 otherwise."),
+  error: z.string().nullable().describe("Why the render failed or is unavailable; null otherwise."),
 });
 
 const ProbeSchema = z.object({
@@ -267,7 +312,7 @@ const EventNameSchema = z
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
-      "`job.progress`: a background job (ingest, render) was queued, advanced or finished.",
+      "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
 
 const EventsParams = z.strictObject({
@@ -669,6 +714,21 @@ export const methods = {
     result: z.object({
       dir: z.string().describe("Project root."),
       jobs: z.array(JobSchema).describe("Oldest first."),
+    }),
+  },
+  "clip.renders": {
+    description:
+      "Render cache state of every generated clip (adapter clips such as `hyperframes`) on a timeline (SPEC §6.5). The " +
+      "daemon renders these clips in the background whenever one is added, its props change, or a file its composition " +
+      "uses changes; unchanged clips reuse the cache. Use it after `clip.add` of a generated clip to learn when its " +
+      "render is ready (`state: \"ready\"`), or follow `job.progress` events of kind `clip`. `render` waits for " +
+      "pending clip renders itself. A `failed` clip carries the adapter's `error`: fix the composition, then check " +
+      "again. Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int().describe("Timeline revision the states refer to."),
+      clips: z.array(ClipRenderSchema).describe("Generated clips on video tracks, in track then time order."),
     }),
   },
   transcribe: {
@@ -1371,6 +1431,10 @@ export type FileWriteResult = MethodResult<"file.write">;
 export type JobInfo = z.output<typeof JobSchema>;
 /** Step of a running {@link JobInfo}. */
 export type JobStep = NonNullable<JobInfo["step"]>;
+/** Result of `clip.renders`. */
+export type ClipRendersResult = MethodResult<"clip.renders">;
+/** Render cache state of one generated clip, as `clip.renders` reports it. */
+export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** ffprobe summary of an asset. */
 export type MediaProbe = z.output<typeof ProbeSchema>;
 /** One asset as reported by `asset.list`. */
@@ -1552,6 +1616,8 @@ export const ErrorCode = {
   UiNotConnected: -32036,
   /** data: `{ command, reason }`: the app refused the navigation command or did not answer in time. */
   UiCommandFailed: -32037,
+  /** data: `{ clip, type, timeline, details }`: a generated clip could not be rendered (adapter error, or no plugin renders its type). */
+  ClipRenderFailed: -32038,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

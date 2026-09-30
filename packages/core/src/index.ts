@@ -14,6 +14,7 @@ export {
   type BinaryPackage,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
+  CHROME_HEADLESS_SHELL_PACKAGE,
   FFMPEG_PACKAGE,
   type MachineProbe,
   type ManagedModel,
@@ -96,6 +97,7 @@ export {
   type FfmpegStep,
   type FrameInput,
   type FramePlan,
+  type GeneratedSource,
   type LoudnessMeasurement,
   type RenderInput,
   type RenderPlan,
@@ -131,3 +133,13 @@ export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy
 export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, proxyArgs, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
+export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
+export {
+  CLIP_CACHE_DIR,
+  ClipRenderer,
+  type ClipFormat,
+  type ClipRendererOptions,
+  type RegisteredClipType,
+  type RenderProbe,
+  type RenderedClip,
+} from "./clips/renderer.js";

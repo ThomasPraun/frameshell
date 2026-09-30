@@ -40,3 +40,22 @@ export function commitFixture(dir: string): GitPlugin {
   git("commit", "-q", "-m", "fixture");
   return { spec: `git+${pathToFileURL(dir).href}`, sha: git("rev-parse", "HEAD"), dir };
 }
+
+/**
+ * Place a plugin directory into `project` as if `frameshell plugin install`
+ * had installed it, without npm: pin it in `frameshell.json` and mark the
+ * install directory synced. The project still needs `project.trust`.
+ */
+export function installLocalPlugin(project: string, pluginDir: string, name: string): void {
+  const pins = { [name]: `file:${name}` };
+  const configPath = join(project, "frameshell.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  writeFileSync(configPath, `${JSON.stringify({ ...config, plugins: pins }, null, 2)}\n`);
+  const store = join(project, ".frameshell", "plugins");
+  cpSync(pluginDir, join(store, "node_modules", ...name.split("/")), { recursive: true });
+  writeFileSync(join(store, "package.json"), JSON.stringify({ name: "frameshell-project-plugins", private: true, dependencies: pins }));
+  writeFileSync(join(store, ".frameshell-pins.json"), JSON.stringify(pins));
+}
+
+/** Directory of the `card` clip adapter fixture: flat colour cards rendered by ffmpeg. */
+export const CARD_PLUGIN = fileURLToPath(new URL("./fixtures/card-plugin/", import.meta.url));
