@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./composite": {
+      "types": "./dist/composite.d.ts",
+      "default": "./dist/composite.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

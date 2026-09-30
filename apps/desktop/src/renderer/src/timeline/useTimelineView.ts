@@ -84,34 +84,43 @@ function follow(timeline: string, feed: Feed): () => void {
 }
 
 /**
+ * Follow `timeline` on its shared feed outside a component (a hook that
+ * follows a changing set of timelines); `listener` runs after each change.
+ * Returns the unsubscribe function; the feed stops with its last follower.
+ */
+export function watchTimeline(timeline: string, listener: () => void): () => void {
+  let feed = feeds.get(timeline);
+  if (!feed) {
+    const created: Feed = { state: INITIAL, listeners: new Set(), stop: () => undefined };
+    feeds.set(timeline, created);
+    created.stop = follow(timeline, created);
+    feed = created;
+  }
+  feed.listeners.add(listener);
+  const current = feed;
+  return () => {
+    current.listeners.delete(listener);
+    if (current.listeners.size === 0) {
+      current.stop();
+      if (feeds.get(timeline) === current) feeds.delete(timeline);
+    }
+  };
+}
+
+/** Latest state of a followed timeline's feed; empty when nobody follows it. */
+export function timelineState(timeline: string): TimelineState {
+  return feeds.get(timeline)?.state ?? INITIAL;
+}
+
+/**
  * The latest `timeline.show` of one timeline of the window's project, live.
  * Every caller of the same timeline shares one feed (one read per change):
- * the timeline panel and the script editor's scene links see the same
- * revision. Each revision of {@link SELECTION_TIMELINE} first prunes the
- * selection to clips it still has, and re-places selected words. The feed stops when its last caller
- * unmounts.
+ * the timeline panel, the preview and the script editor's scene links see
+ * the same revision. Each revision of {@link SELECTION_TIMELINE} first
+ * prunes the selection to clips it still has, and re-places selected words.
+ * The feed stops when its last caller unmounts.
  */
 export function useTimelineView(timeline: string): TimelineState {
-  const subscribe = useCallback(
-    (listener: () => void) => {
-      let feed = feeds.get(timeline);
-      if (!feed) {
-        const created: Feed = { state: INITIAL, listeners: new Set(), stop: () => undefined };
-        feeds.set(timeline, created);
-        created.stop = follow(timeline, created);
-        feed = created;
-      }
-      feed.listeners.add(listener);
-      const current = feed;
-      return () => {
-        current.listeners.delete(listener);
-        if (current.listeners.size === 0) {
-          current.stop();
-          feeds.delete(timeline);
-        }
-      };
-    },
-    [timeline],
-  );
-  return useSyncExternalStore(subscribe, () => feeds.get(timeline)?.state ?? INITIAL);
+  const subscribe = useCallback((listener: () => void) => watchTimeline(timeline, listener), [timeline]);
+  return useSyncExternalStore(subscribe, () => timelineState(timeline));
 }
