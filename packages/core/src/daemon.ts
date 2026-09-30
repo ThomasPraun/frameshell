@@ -21,6 +21,7 @@ import {
 } from "@frameshell/protocol";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
+import { EventHub, type EventSink } from "./events.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -89,6 +90,8 @@ interface Caller {
 /** Per-request services. `progress` sends `progress` notifications for this request; no-op for notifications. */
 interface RequestContext {
   progress(update: Progress): void;
+  /** This connection, as the target of its event subscriptions. */
+  sink: EventSink;
 }
 
 /** One handler per registry method; params arrive already validated. */
@@ -123,6 +126,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     extractAudio: options.extractAudio,
   });
+  const events = new EventHub();
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
@@ -132,6 +136,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
         profile: (asset) => energy.profile(dir, asset),
       }),
+    onChanged: ({ root, timeline, revision, author, changes }) =>
+      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes }),
   });
   const exports = new ExportService({
     jobs,
@@ -239,6 +245,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, jobs: jobs.list({ project: dir, active }) };
     },
+    "events.subscribe": async ({ cwd, events: names }, _caller, request) => {
+      const dir = await root(cwd);
+      return { dir, events: events.subscribe(request.sink, dir, names) };
+    },
+    "events.unsubscribe": async ({ cwd, events: names }, _caller, request) => {
+      const dir = await root(cwd);
+      return { dir, events: events.unsubscribe(request.sink, dir, names) };
+    },
     "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),
     "track.list": async ({ cwd, timeline }) => timelines.tracks(await root(cwd), timeline),
     "track.add": (params, caller) => operate("track.add", params, caller),
@@ -280,8 +294,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     armIdleTimer();
     let handshaken = false;
     const caller: Caller = { client: "", session: null };
+    const sink: EventSink = { notify: (method, params) => writeMessage(socket, { jsonrpc: "2.0", method, params }) };
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
+      events.drop(sink);
       clients.delete(socket);
       armIdleTimer();
     });
@@ -319,6 +335,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           progress: (update) => {
             if (request.id !== undefined) writeMessage(socket, { jsonrpc: "2.0", method: "progress", params: { requestId: request.id, ...update } });
           },
+          sink,
         };
         const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
         const result = await handler(params, caller, context);

@@ -44,6 +44,25 @@ export interface TimelineServiceOptions {
   newId?: (prefix: "c" | "t") => string;
   /** Cut/trim edge adjustment per project and fps (#12 energy snapping). Default: none, edges stay. */
   resolveEditPoint?: (root: string, fps: number) => EditPointResolver | undefined;
+  /**
+   * Called after each applied operation (including `revert`) is written and
+   * journaled, before the next operation on the same file starts: calls are in
+   * revision order per timeline.
+   */
+  onChanged?: (change: TimelineChange) => void;
+}
+
+/** One applied operation, as reported to {@link TimelineServiceOptions.onChanged}. */
+export interface TimelineChange {
+  /** Project root. */
+  root: string;
+  /** Timeline id. */
+  timeline: string;
+  /** Revision after the operation. */
+  revision: number;
+  /** SPEC §6.2 author. */
+  author: string;
+  changes: OperationResult["changes"];
 }
 
 /** Transaction an operation joins (SPEC §6.2). */
@@ -160,6 +179,7 @@ export class TimelineService {
       hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
+    this.#options.onChanged?.({ root, timeline: id, revision: applied.timeline.revision, author: call.author, changes: applied.changes });
     return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps };
   }
 

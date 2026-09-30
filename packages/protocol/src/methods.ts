@@ -16,7 +16,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -227,6 +227,16 @@ const AssetSchema = z.object({
       interval: z.number().describe("Seconds between thumbnails; thumbnail n (1-based) shows time (n - 1) * interval."),
     })
     .nullable(),
+});
+
+/** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
+const EventNameSchema = z
+  .enum(["timeline.changed"])
+  .describe("`timeline.changed`: a timeline file of the project was changed by an operation (any client).");
+
+const EventsParams = z.strictObject({
+  cwd: CwdParam,
+  events: z.array(EventNameSchema).min(1).describe("Events to (un)subscribe, e.g. `[\"timeline.changed\"]`."),
 });
 
 const ExportPresetResultSchema = z.looseObject({
@@ -607,6 +617,26 @@ export const methods = {
       path: z.string().describe("Written file, project-relative and `/`-separated."),
     }),
   },
+  "events.subscribe": {
+    description:
+      "Receive the given events of the enclosing project as notifications on this connection until it closes or " +
+      "`events.unsubscribe`. Idempotent. Used by the app and the MCP server to follow changes made by other clients.",
+    internal: true,
+    params: EventsParams,
+    result: z.object({
+      dir: z.string().describe("Project root the subscription is scoped to; notifications carry it as `project`."),
+      events: z.array(EventNameSchema).describe("Every event this connection now receives for `dir`."),
+    }),
+  },
+  "events.unsubscribe": {
+    description: "Stop receiving the given events of the enclosing project on this connection. Unknown subscriptions are ignored.",
+    internal: true,
+    params: EventsParams,
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      events: z.array(EventNameSchema).describe("Events this connection still receives for `dir`."),
+    }),
+  },
   "timeline.show": {
     description:
       "Compact dump of a timeline for agents: revision, project fps, derived duration, and every track with its clips " +
@@ -791,7 +821,29 @@ export const notifications = {
       fraction: z.number().min(0).max(1).optional().describe("0..1 of the current step when known."),
     }),
   },
+  "timeline.changed": {
+    description:
+      "A timeline file was changed by an applied operation, from any client. Sent to connections subscribed with " +
+      "`events.subscribe` on the project, after the file is written, in revision order per timeline. Re-read with " +
+      "`timeline.show` when `revision` is newer than the one you hold; `changes` says what to re-read.",
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      timeline: z.string().describe("Timeline id; the file is `timelines/<id>.json`."),
+      revision: z.int().describe("Revision after the change."),
+      author: z.string().describe("`ui`, `cli:<session>`, `cli`, `file` or `plugin:<name>`."),
+      changes: OperationResultSchema.shape.changes,
+    }),
+  },
 } as const satisfies Record<string, { description: string; params: z.ZodType }>;
+
+/** Name of a subscribable event. */
+export type EventName = z.output<typeof EventNameSchema>;
+
+/** Every subscribable event name, for runtime checks. */
+export const EVENT_NAMES: readonly EventName[] = EventNameSchema.options;
+
+/** Params of notification `E`, as the daemon sends them. */
+export type EventParams<E extends keyof typeof notifications> = z.output<(typeof notifications)[E]["params"]>;
 
 /** Params of the `progress` notification. */
 export type ProgressParams = z.output<(typeof notifications)["progress"]["params"]>;
