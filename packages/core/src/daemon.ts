@@ -26,6 +26,8 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
+import type { OperationRequest } from "./timeline/engine.js";
+import { TimelineService } from "./timeline/service.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
 
@@ -100,6 +102,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const media = new MediaService({ binaries, jobs });
   const projects = new ProjectRegistry({ onOpen: (dir) => media.attach(dir) });
   const plugins = new PluginHost({ dirs, pins: projects });
+  const timelines = new TimelineService({
+    probe: (dir, asset) => media.probe(dir, asset),
+    clipTypes: (dir) => plugins.clipTypes(dir),
+  });
+  /** Run one timeline operation for `caller`; params minus `cwd`/`timeline` are the op's args. */
+  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
+    const { cwd, timeline, ...args } = params;
+    const request = { op, args } as OperationRequest;
+    return timelines.apply({ root: await root(cwd), cwd, timeline, request, author: authorOf(caller) });
+  };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
 
@@ -173,6 +185,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, jobs: jobs.list({ project: dir, active }) };
     },
+    "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),
+    "track.list": async ({ cwd, timeline }) => timelines.tracks(await root(cwd), timeline),
+    "track.add": (params, caller) => operate("track.add", params, caller),
+    "track.remove": (params, caller) => operate("track.remove", params, caller),
+    "clip.add": (params, caller) => operate("clip.add", params, caller),
+    "clip.move": (params, caller) => operate("clip.move", params, caller),
+    "clip.trim": (params, caller) => operate("clip.trim", params, caller),
+    "clip.split": (params, caller) => operate("clip.split", params, caller),
+    "clip.remove": (params, caller) => operate("clip.remove", params, caller),
+    "clip.set": (params, caller) => operate("clip.set", params, caller),
+    cut: (params, caller) => operate("cut", params, caller),
   };
 
   const server: Server = createServer((socket) => {
@@ -255,6 +278,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   await listenCleaningStaleSocket(server, socketPath);
   armIdleTimer();
   return { socketPath, closed, close };
+}
+
+/** SPEC §6.2 author of a connection's operations: the app is `ui`, a Frameshell terminal `cli:<session>`. */
+function authorOf(caller: Caller): string {
+  if (caller.client.startsWith("desktop/")) return "ui";
+  return caller.session ? `cli:${caller.session}` : "cli";
 }
 
 function isRequest(message: unknown): message is JsonRpcRequest {

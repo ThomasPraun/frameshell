@@ -16,6 +16,15 @@ import {
   resolveSocketPath,
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
+import {
+  TIMELINE_COMMANDS,
+  TIMELINE_OPTIONS,
+  TIMELINE_USAGE,
+  type TimelineInvocation,
+  UsageError,
+  executeTimeline,
+  parseTimelineCommand,
+} from "./timeline-commands.js";
 
 /** CLI package version, used in `--version` and the handshake client id. */
 export const CLI_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
@@ -40,6 +49,7 @@ Commands:
                                First run downloads the engine and model (minutes, once)
   <plugin> <command> [args…]   Run a plugin-provided command
 
+${TIMELINE_USAGE}
 Options:
   --json       Machine-readable output
   --trust      Trust this project's plugins without asking. Plugins run with full access to your machine.
@@ -47,7 +57,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe"]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", ...TIMELINE_COMMANDS]);
 
 /** How often `import --wait` polls job progress. */
 const WAIT_POLL_MS = 250;
@@ -74,7 +84,8 @@ type Invocation =
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
-  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string };
+  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
+  | TimelineInvocation;
 
 interface Flags {
   json: boolean;
@@ -106,6 +117,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         args: argv,
         allowPositionals: true,
         options: {
+          ...TIMELINE_OPTIONS,
           json: { type: "boolean", default: false },
           trust: { type: "boolean", default: false },
           install: { type: "boolean", default: false },
@@ -133,7 +145,14 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       return values.help ? 0 : 2;
     }
     flags = { json: values.json, trust: values.trust, install: values.install };
-    const builtin = parseBuiltin(positionals, values);
+    let builtin: Invocation | null;
+    try {
+      builtin = TIMELINE_COMMANDS.has(positionals[0]!) ? parseTimelineCommand(positionals, values) : parseBuiltin(positionals, values);
+    } catch (error) {
+      if (!(error instanceof UsageError)) throw error;
+      io.stderr(`${error.message}\n\n${USAGE}`);
+      return 2;
+    }
     if (!builtin) {
       io.stderr(`Unknown command or wrong arguments: ${positionals.join(" ")}\n\n${USAGE}`);
       return 2;
@@ -255,6 +274,14 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         flags.json ? {} : { onProgress: progressPrinter(io) },
       );
       return flags.json ? json(result) : formatTranscribe(result);
+    }
+    case "timeline": {
+      // Adapter clips need the project's plugins loaded, which may need a trust decision.
+      const { type, props } = inv.params;
+      if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
+        await settleTrust(conn, flags, io);
+      }
+      return executeTimeline(conn, inv, cwd, flags.json);
     }
     case "plugin.run": {
       await settleTrust(conn, flags, io);

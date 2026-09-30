@@ -1,5 +1,5 @@
 import { ErrorCode, RpcError, parseParams } from "@frameshell/protocol";
-import { type Clip, type Timeline, createTimeline, parseTimeline } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type Timeline, createTimeline, parseTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import {
   type EditContext,
@@ -341,8 +341,8 @@ function prng(seed: number) {
 
 function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { name: OperationRequest["op"]; args: Record<string, unknown> } {
   const tracks = timeline.tracks;
-  const clipTracks = tracks.filter((t) => t.kind !== "subtitles");
-  const clips = clipTracks.flatMap((t) => (t.kind === "subtitles" ? [] : t.clips));
+  const clipTracks = tracks.filter((t): t is ClipTrack => t.kind !== "subtitles");
+  const clips = clipTracks.flatMap((t) => t.clips);
   const trackId = () => (tracks.length > 0 ? rand.pick(tracks).id : "t_none");
   const clipTrackId = () => (clipTracks.length > 0 ? rand.pick(clipTracks).id : "t_none");
   const clipId = () => (clips.length > 0 ? rand.pick(clips).id : "c_none");

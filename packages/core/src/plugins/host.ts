@@ -8,7 +8,7 @@ import {
   RpcError,
   type TrustState,
 } from "@frameshell/protocol";
-import type { TranscriptionProvider } from "@frameshell/plugin-api";
+import type { ClipAdapter, TranscriptionProvider } from "@frameshell/plugin-api";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
 import { parsePluginSpec } from "./spec.js";
 import { NpmError, PluginStore } from "./store.js";
@@ -209,6 +209,16 @@ export class PluginHost {
         hint,
       { provider: id, available },
     );
+  }
+
+  /**
+   * Clip adapters of the project's loaded plugins, by clip type. Empty when
+   * the project's plugins are untrusted: timelines stay editable, only
+   * adapter clips cannot be created or have their props changed.
+   */
+  async clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>> {
+    const { loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    return new Map((loaded ?? []).flatMap((p) => [...p.clipTypes]));
   }
 
   /** Export presets contributed by the project's loaded plugins. */
