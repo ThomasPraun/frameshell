@@ -27,7 +27,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
 | Clip inspector, preview layer handles | `renderer/src/components/ClipInspector.tsx`, `renderer/src/preview/transform-edit.ts` |
-| Preview player (program, engine worker, audio worklet, playhead store) | `apps/desktop/src/renderer/src/preview/`; ADR 0001; media URLs `apps/desktop/src/main/media-protocol.ts` |
+| Preview player (program, engine worker, audio worklet, playhead store, clip render decode) | `apps/desktop/src/renderer/src/preview/` (`video-source.ts` = proxy or render); ADR 0001, 0002; media URLs `apps/desktop/src/main/media-protocol.ts` |
 | Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
 | Desktop selection (shared store, extend, never duplicate); playhead = `preview/transport.ts` | `apps/desktop/src/renderer/src/selection.ts` |
 | Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
