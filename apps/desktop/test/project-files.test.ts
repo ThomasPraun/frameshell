@@ -102,4 +102,22 @@ describe("ProjectFiles", () => {
     const files = await open(fixture());
     await expect(files.read("../../etc/passwd")).rejects.toThrow(/outside the project/);
   });
+
+  it("reads derived waveforms and thumbnails as bytes", async () => {
+    const root = fixture();
+    mkdirSync(join(root, ".frameshell", "thumbs", "k1"), { recursive: true });
+    writeFileSync(join(root, ".frameshell", "thumbs", "k1", "0001.jpg"), Buffer.from([0xff, 0xd8, 0xff]));
+    const files = await open(root);
+    expect([...(await files.readMedia(".frameshell/thumbs/k1/0001.jpg"))]).toEqual([0xff, 0xd8, 0xff]);
+  });
+
+  it("reads no other file as media", async () => {
+    const root = fixture();
+    mkdirSync(join(root, ".frameshell", "proxies"), { recursive: true });
+    writeFileSync(join(root, ".frameshell", "proxies", "a.mp4"), "x");
+    const files = await open(root);
+    for (const path of ["frameshell.json", ".frameshell/proxies/a.mp4", ".frameshell/thumbs/../../frameshell.json", "/etc/hosts"]) {
+      await expect(files.readMedia(path), path).rejects.toThrow(/not derived media/);
+    }
+  });
 });

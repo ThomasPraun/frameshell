@@ -1,3 +1,4 @@
+import type { AssetInfo, TimelineView } from "@frameshell/protocol";
 import type { Layout } from "./layout.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
@@ -26,6 +27,16 @@ export interface TerminalInfo {
   /** Shell executable name for the tab title, e.g. `zsh`. */
   shell: string;
 }
+
+/**
+ * A timeline of the window's project changed (daemon `timeline.changed`), or,
+ * with `timeline: null`, the daemon connection was re-established and any
+ * timeline may have changed meanwhile.
+ */
+export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
+
+/** Reply of a main handler that can fail: Electron would bury a thrown message in IPC noise. */
+export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -64,6 +75,18 @@ export interface FrameshellApi {
     load(): Promise<Layout>;
     save(layout: Layout): void;
   };
+  timeline: {
+    /** `timeline.show` of the window's project. Rejects with the daemon's message. */
+    show(timeline: string): Promise<TimelineView>;
+    /** Called on every change of the project's timelines; see {@link TimelineChange}. Returns an unsubscribe function. */
+    onChanged(listener: (change: TimelineChange) => void): () => void;
+  };
+  media: {
+    /** `asset.list` of the window's project: ingest state and derived media paths. */
+    assets(): Promise<AssetInfo[]>;
+    /** Bytes of a derived waveform or thumbnail (project-relative path from `assets()`). */
+    read(path: string): Promise<Uint8Array>;
+  };
 }
 
 /** IPC channel names; one place so main and preload cannot drift. */
@@ -85,4 +108,8 @@ export const Channel = {
   terminalExit: "terminal:exit",
   layoutLoad: "layout:load",
   layoutSave: "layout:save",
+  timelineShow: "timeline:show",
+  timelineChanged: "timeline:changed",
+  mediaAssets: "media:assets",
+  mediaRead: "media:read",
 } as const;

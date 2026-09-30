@@ -1,6 +1,8 @@
 import { createConnection, type Socket } from "node:net";
 import { type JsonRpcResponse, readMessages, writeMessage } from "./framing.js";
 import {
+  type EventName,
+  type EventParams,
   type HandshakeResult,
   type MethodName,
   type MethodParams,
@@ -8,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   type Progress,
   RpcError,
+  notifications,
 } from "./methods.js";
 import { assertSocketPathFits } from "./socket-path.js";
 
@@ -35,6 +38,14 @@ export interface DaemonConnection {
    * `onProgress` receives the daemon's `progress` notifications for this call.
    */
   request<M extends MethodName>(method: M, params: MethodParams<M>, options?: RequestOptions): Promise<MethodResult<M>>;
+  /**
+   * Listen to event `event` on this connection. The daemon only sends it after
+   * `events.subscribe`; payloads failing the registry schema are dropped.
+   * Returns the function that removes the listener.
+   */
+  on<E extends EventName>(event: E, listener: (params: EventParams<E>) => void): () => void;
+  /** Resolves once the connection is closed, by either side. Never rejects. */
+  readonly closed: Promise<void>;
   /** End the connection. Pending requests reject. */
   close(): void;
 }
@@ -54,6 +65,9 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
     { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: ((progress: Progress) => void) | undefined }
   >();
   let nextId = 1;
+  const listeners = new Map<string, Set<(params: never) => void>>();
+  let markClosed!: () => void;
+  const closed = new Promise<void>((resolve) => (markClosed = resolve));
 
   const failAll = (error: Error) => {
     for (const { reject } of pending.values()) reject(error);
@@ -70,8 +84,12 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
       }
       return;
     }
+    if (typeof note.method === "string") {
+      dispatchEvent(note.method, note.params);
+      return;
+    }
     const response = message as JsonRpcResponse;
-    if (typeof response.id !== "number") return; // Other notifications: no subscribers yet.
+    if (typeof response.id !== "number") return;
     const entry = pending.get(response.id);
     if (!entry) return;
     pending.delete(response.id);
@@ -81,7 +99,18 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
       entry.resolve(response.result);
     }
   });
-  socket.on("close", () => failAll(new Error("frameshelld closed the connection")));
+  const dispatchEvent = (method: string, params: unknown) => {
+    const subscribers = listeners.get(method);
+    if (!subscribers || subscribers.size === 0 || !Object.hasOwn(notifications, method)) return;
+    const parsed = notifications[method as EventName].params.safeParse(params);
+    if (!parsed.success) return;
+    for (const listener of [...subscribers]) listener(parsed.data as never);
+  };
+
+  socket.on("close", () => {
+    failAll(new Error("frameshelld closed the connection"));
+    markClosed();
+  });
   socket.on("error", (error) => failAll(error));
 
   const call = (method: string, params: unknown, onProgress?: (progress: Progress) => void): Promise<unknown> =>
@@ -110,6 +139,14 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   return {
     daemon,
     request: (method, params, options) => call(method, params, options?.onProgress) as never,
+    on: (event, listener) => {
+      let subscribers = listeners.get(event);
+      if (!subscribers) listeners.set(event, (subscribers = new Set()));
+      const entry = listener as (params: never) => void;
+      subscribers.add(entry);
+      return () => void subscribers.delete(entry);
+    },
+    closed,
     close: () => {
       socket.end();
     },

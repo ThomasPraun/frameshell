@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, shell } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import { Channel, type OpenOutcome, type ProjectView } from "../shared/api.js";
+import { Channel, type OpenOutcome, type Outcome, type ProjectView, type TimelineChange } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
-import { DaemonLink } from "./daemon-link.js";
+import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { LayoutStore } from "./layout-store.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
@@ -37,6 +37,8 @@ interface WindowState {
   window: BrowserWindow;
   project: ProjectView | null;
   files: ProjectFiles | null;
+  /** Daemon `timeline.changed` of the shown project, forwarded to the renderer. */
+  timelineEvents: LinkSubscription | null;
   terminals: TerminalManager;
 }
 const windows = new Map<number, WindowState>();
@@ -63,6 +65,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     window,
     project: null,
     files: null,
+    timelineEvents: null,
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -80,6 +83,7 @@ function createWindow(projectDir?: string): BrowserWindow {
   window.on("closed", () => {
     state.terminals.killAll();
     void state.files?.close();
+    void state.timelineEvents?.unsubscribe();
     windows.delete(contents.id);
   });
 
@@ -112,8 +116,17 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon: { version: status.daemon.daemonVersion, pid: status.daemon.pid, socketPath: status.daemon.socketPath },
   };
   await state.files?.close();
+  await state.timelineEvents?.unsubscribe();
   const contents = state.window.webContents;
   state.files = await openProjectFiles(project.dir, (paths) => send(contents, Channel.filesChanged, paths));
+  // Subscribed before the renderer first reads the timeline, so no change falls in between.
+  state.timelineEvents = await daemon
+    .subscribe("timeline.changed", project.dir, {
+      onEvent: ({ timeline, revision, author }) =>
+        send(contents, Channel.timelineChanged, { timeline, revision, author } satisfies TimelineChange),
+      onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
+    })
+    .catch(() => null); // Daemon unreachable: the timeline still follows file changes.
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
   await rememberRecent(project.dir);
@@ -161,6 +174,15 @@ function stateOf(sender: WebContents): WindowState {
 function requireProject(state: WindowState): { project: ProjectView; files: ProjectFiles } {
   if (!state.project || !state.files) throw new Error("No project is open in this window");
   return { project: state.project, files: state.files };
+}
+
+/** Run `work`, turning a throw into `{ ok: false, error }` for the renderer. */
+async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
+  try {
+    return { ok: true, value: await work() };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message ?? String(error) };
+  }
 }
 
 function registerIpc(): void {
@@ -213,6 +235,22 @@ function registerIpc(): void {
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
   ipcMain.on(Channel.terminalKill, (event, id: string) => stateOf(event.sender).terminals.kill(id));
+
+  ipcMain.handle(Channel.timelineShow, (event, timeline: string) =>
+    outcome(async () => {
+      const { project } = requireProject(stateOf(event.sender));
+      return daemon.request("timeline.show", { cwd: project.dir, timeline });
+    }),
+  );
+  ipcMain.handle(Channel.mediaAssets, (event) =>
+    outcome(async () => {
+      const { project } = requireProject(stateOf(event.sender));
+      return (await daemon.request("asset.list", { cwd: project.dir })).assets;
+    }),
+  );
+  ipcMain.handle(Channel.mediaRead, (event, path: string) =>
+    outcome(async () => requireProject(stateOf(event.sender)).files.readMedia(path)),
+  );
 
   ipcMain.handle(Channel.layoutLoad, (event): Promise<Layout> => {
     const { project } = stateOf(event.sender);

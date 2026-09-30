@@ -1,11 +1,18 @@
 // Bridge: the only surface the sandboxed renderer gets. Mirrors `FrameshellApi`.
 import { type IpcRendererEvent, contextBridge, ipcRenderer } from "electron";
-import { Channel, type FrameshellApi } from "../shared/api.js";
+import { Channel, type FrameshellApi, type Outcome } from "../shared/api.js";
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
   const handler = (_event: IpcRendererEvent, ...args: unknown[]) => listener(...(args as A));
   ipcRenderer.on(channel, handler);
   return () => ipcRenderer.off(channel, handler);
+}
+
+/** Invoke a handler replying {@link Outcome}; rethrow its message as a plain Error. */
+async function invokeOutcome<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const reply = (await ipcRenderer.invoke(channel, ...args)) as Outcome<T>;
+  if (!reply.ok) throw new Error(reply.error);
+  return reply.value;
 }
 
 const api: FrameshellApi = {
@@ -37,6 +44,14 @@ const api: FrameshellApi = {
   layout: {
     load: () => ipcRenderer.invoke(Channel.layoutLoad),
     save: (layout) => ipcRenderer.send(Channel.layoutSave, layout),
+  },
+  timeline: {
+    show: (timeline) => invokeOutcome(Channel.timelineShow, timeline),
+    onChanged: (listener) => subscribe(Channel.timelineChanged, listener),
+  },
+  media: {
+    assets: () => invokeOutcome(Channel.mediaAssets),
+    read: (path) => invokeOutcome(Channel.mediaRead, path),
   },
 };
 

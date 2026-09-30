@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "@frameshell/core";
-import { ErrorCode } from "@frameshell/protocol";
+import { type EventParams, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import { DaemonLink } from "../src/main/daemon-link.js";
 
 const socketPath = () =>
@@ -59,5 +59,80 @@ describe("DaemonLink", () => {
     await expect(link(path).request("file.write", { path: outside, content: "" })).rejects.toMatchObject({
       code: ErrorCode.OutsideProject,
     });
+  });
+});
+
+describe("DaemonLink event subscriptions", () => {
+  type Change = EventParams<"timeline.changed">;
+
+  /** Daemon + a project + a CLI-like connection that edits it. */
+  async function setup() {
+    const path = socketPath();
+    const daemon = await startDaemon({ socketPath: path });
+    cleanups.push(() => daemon.close());
+    const cli = await connectToDaemon(path, { client: "cli/test" });
+    cleanups.push(() => cli.close());
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-link-"))), "talk");
+    await cli.request("project.init", { dir });
+    return { path, daemon, cli, dir };
+  }
+
+  /** Listener recording changes; `next()` resolves on the next one. */
+  function recorder() {
+    const seen: Change[] = [];
+    let waiter: ((change: Change) => void) | undefined;
+    return {
+      seen,
+      onEvent: (change: Change) => {
+        seen.push(change);
+        waiter?.(change);
+      },
+      next: () => new Promise<Change>((resolve) => (waiter = resolve)),
+    };
+  }
+
+  it("forwards changes another client makes to the subscribed project", async () => {
+    const { path, cli, dir } = await setup();
+    const events = recorder();
+    const subscription = await link(path).subscribe("timeline.changed", dir, events);
+    expect(subscription.dir).toBe(dir);
+
+    const next = events.next();
+    const result = await cli.request("track.add", { cwd: dir, kind: "video" });
+    expect(await next).toMatchObject({ project: dir, timeline: "main", revision: result.revision, author: "cli" });
+  });
+
+  it("restarts a lost daemon, resubscribes and asks listeners to resync", async () => {
+    const { path, daemon, dir } = await setup();
+    const events = recorder();
+    let resynced!: () => void;
+    const resync = new Promise<void>((resolve) => (resynced = resolve));
+    const daemonLink = link(path, { FRAMESHELL_IDLE_TIMEOUT_MS: "1000" });
+    await daemonLink.subscribe("timeline.changed", dir, { onEvent: events.onEvent, onResync: resynced });
+
+    // No request pending: the link notices the loss itself and starts a daemon of its own.
+    await daemon.close();
+    await resync;
+
+    const cli = await connectToDaemon(path, { client: "cli/test" });
+    cleanups.push(() => cli.close());
+    const next = events.next();
+    await cli.request("track.add", { cwd: dir, kind: "audio" });
+    expect(await next).toMatchObject({ project: dir, revision: 1 });
+  });
+
+  it("keeps delivering to the remaining subscriber when another one of the same project unsubscribes", async () => {
+    const { path, cli, dir } = await setup();
+    const daemonLink = link(path);
+    const first = recorder();
+    const second = recorder();
+    const subscription = await daemonLink.subscribe("timeline.changed", dir, first);
+    await daemonLink.subscribe("timeline.changed", dir, second);
+
+    await subscription.unsubscribe();
+    const next = second.next();
+    await cli.request("track.add", { cwd: dir, kind: "video" });
+    await next;
+    expect(first.seen).toEqual([]);
   });
 });

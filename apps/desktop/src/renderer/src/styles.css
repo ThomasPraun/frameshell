@@ -783,19 +783,34 @@ code {
 .timeline-heads {
   flex: none;
   width: 124px;
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--line-soft);
 }
 
-.ruler-spacer,
-.ruler {
+.ruler-spacer {
+  flex: none;
   height: 22px;
   border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
 }
 
-.track-head,
-.lane {
-  height: 34px;
-  border-bottom: 1px solid var(--line-soft);
+.timeline-zoom {
+  display: flex;
+  gap: 2px;
+}
+
+.timeline-zoom .icon-button {
+  width: 20px;
+  height: 18px;
+}
+
+.timeline-heads-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .track-head {
@@ -803,7 +818,10 @@ code {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
+  border-bottom: 1px solid var(--line-soft);
   box-shadow: inset 3px 0 0 var(--track-color);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .track-video {
@@ -814,7 +832,7 @@ code {
   --track-color: var(--track-audio);
 }
 
-.track-subtitle {
+.track-subtitles {
   --track-color: var(--track-sub);
 }
 
@@ -822,11 +840,14 @@ code {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--track-color);
-  width: 20px;
+  width: 22px;
+  flex: none;
 }
 
 .track-label {
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .timeline-lanes {
@@ -836,43 +857,28 @@ code {
   background: #1f2023;
 }
 
-.ruler {
-  position: relative;
-  background: var(--bg-panel);
-}
-
-.tick {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  padding: 3px 0 0 4px;
-  border-left: 1px solid var(--line);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.lane:nth-child(even) {
-  background: rgba(255, 255, 255, 0.012);
-}
-
-.playhead {
+.timeline-canvas {
   position: absolute;
   left: 0;
   top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--accent);
+  pointer-events: none;
 }
 
-.playhead::before {
-  content: "";
+/* Native scrolling over the canvas: momentum, scrollbars and keyboard for free; the sizer sets the range. */
+.timeline-scroller {
   position: absolute;
-  top: 0;
-  left: -5px;
-  border: 5px solid transparent;
-  border-top: 7px solid var(--accent);
+  inset: 0;
+  overflow: auto;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+.timeline-scroller:focus-visible {
+  outline-offset: -2px;
+}
+
+.timeline-sizer {
+  pointer-events: none;
 }
 
 .timeline-empty {
@@ -890,6 +896,63 @@ code {
   margin: 0;
   padding: 4px 10px;
   background: #1f2023;
+  max-width: 60ch;
+}
+
+.timeline-empty .timeline-error {
+  color: var(--danger);
+  white-space: pre-wrap;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  user-select: text;
+}
+
+.clip-tooltip {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 320px;
+  padding: 6px 9px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-tooltip strong {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-tooltip span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.clip-tooltip .clip-tooltip-faint {
+  color: var(--text-faint);
+}
+
+.timeline-summary {
+  margin-left: auto;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- Terminal ---------- */

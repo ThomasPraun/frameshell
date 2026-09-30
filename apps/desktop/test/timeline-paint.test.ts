@@ -1,0 +1,137 @@
+import type { TimelineView } from "@frameshell/protocol";
+import { describe, expect, it } from "vitest";
+import { layoutTimeline } from "../src/renderer/src/timeline/layout.js";
+import { DEFAULT_THEME, type MediaLookup, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
+
+// Seam under test: `paintTimeline` against a recording 2D context, the way the panel calls it each frame.
+
+/** Records what a canvas would draw; no pixels. */
+function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rects: number } {
+  const noop = () => {};
+  const ctx = {
+    texts: [] as string[],
+    images: [] as string[],
+    rects: 0,
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    globalAlpha: 1,
+    font: "",
+    textBaseline: "alphabetic",
+    textAlign: "start",
+    save: noop,
+    restore: noop,
+    beginPath: noop,
+    closePath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    rect: noop,
+    roundRect: noop,
+    clip: noop,
+    fill: noop,
+    stroke: noop,
+    setLineDash: noop,
+    setTransform: noop,
+    clearRect: noop,
+    strokeRect: noop,
+    fillRect: () => void ctx.rects++,
+    fillText: (text: string) => void ctx.texts.push(text),
+    measureText: (text: string) => ({ width: text.length * 6 }),
+    drawImage: (image: string) => void ctx.images.push(image),
+  };
+  return ctx;
+}
+
+const noMedia: MediaLookup<string> = { waveform: () => null, thumbnails: () => null };
+
+function longTimeline(clips: number): TimelineView {
+  const at = (i: number) => ({ id: `c_${i}`, type: "media", asset: `assets/take-${i}.mp4`, start: i * 3, end: i * 3 + 2.5, in: 0, out: 2.5 });
+  return {
+    timeline: "main",
+    path: "timelines/main.json",
+    revision: 1,
+    fps: 30,
+    duration: clips * 3,
+    tracks: [
+      { id: "t_v", kind: "video", name: null, follows: null, clips: Array.from({ length: clips }, (_, i) => at(i)) },
+      { id: "t_a", kind: "audio", name: null, follows: null, clips: Array.from({ length: clips }, (_, i) => at(i + clips)).map((clip, i) => ({ ...clip, start: i * 3, end: i * 3 + 2.5 })) },
+    ],
+    problems: [],
+  };
+}
+
+const viewport = (pxPerSecond: number, scrollLeft = 0) => ({ pxPerSecond, scrollLeft, scrollTop: 0, width: 600, height: 200 });
+
+describe("paintTimeline", () => {
+  it("draws only the clips inside the viewport, however long the timeline", () => {
+    const layout = layoutTimeline(longTimeline(250));
+    const ctx = recorder();
+    // 600 px at 60 px/s from 30 s: 30..40 s, clips 10..13 on each track.
+    const stats = paintTimeline(ctx, { layout, viewport: viewport(60, 1800), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+    expect(stats.clipsDrawn).toBe(8);
+    expect(ctx.texts).toEqual(expect.arrayContaining(["take-10.mp4", "take-13.mp4", "2.5s"]));
+    expect(ctx.texts).not.toContain("take-9.mp4");
+    expect(ctx.texts).not.toContain("take-14.mp4");
+  });
+
+  it("labels the ruler with timecodes of the visible range", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const ctx = recorder();
+    paintTimeline(ctx, { layout, viewport: viewport(20, 200), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+    expect(ctx.texts).toEqual(expect.arrayContaining(["00:00:10", "00:00:15", "00:00:35"]));
+    expect(ctx.texts).not.toContain("00:00:05");
+  });
+
+  it("fills video clips with the thumbnails of the source times they show", () => {
+    const layout = layoutTimeline(longTimeline(1));
+    const ctx = recorder();
+    const media: MediaLookup<string> = {
+      waveform: () => null,
+      // One thumbnail per second of source.
+      thumbnails: (asset) => ({ interval: 1, count: 3, image: (index) => `${asset}#${index}`, aspect: 16 / 9 }),
+    };
+    paintTimeline(ctx, { layout, viewport: viewport(100), fps: 30, playhead: 0, theme: DEFAULT_THEME, media });
+    // 38 px high clip body, 16:9 tiles about 68 px wide: 250 px of clip takes 4, starting at source 0, 0.68, 1.35, 2.03 s.
+    expect(ctx.images).toEqual(["assets/take-0.mp4#1", "assets/take-0.mp4#1", "assets/take-0.mp4#2", "assets/take-0.mp4#3"]);
+  });
+
+  it("draws a waveform for audio clips when peaks are known", () => {
+    const layout = layoutTimeline(longTimeline(1));
+    const without = recorder();
+    paintTimeline(without, { layout, viewport: viewport(100), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+    const withPeaks = recorder();
+    const peaks: [number, number][] = Array.from({ length: 250 }, (_, i) => [-(i % 100), i % 100]);
+    paintTimeline(withPeaks, {
+      layout,
+      viewport: viewport(100),
+      fps: 30,
+      playhead: 0,
+      theme: DEFAULT_THEME,
+      media: { waveform: () => ({ peaksPerSecond: 100, peaks }), thumbnails: () => null },
+    });
+    // One bar per pixel column of the 250 px audio clip.
+    expect(withPeaks.rects - without.rects).toBeGreaterThanOrEqual(240);
+  });
+
+  it("stays cheap with 250 clips on screen", () => {
+    const layout = layoutTimeline(longTimeline(250));
+    const ctx = recorder();
+    const zoomedOut = { ...viewport(0.8), width: 1200 };
+    const input = { layout, viewport: zoomedOut, fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia };
+    expect(paintTimeline(ctx, input).clipsDrawn).toBe(500);
+    const started = performance.now();
+    for (let i = 0; i < 20; i++) paintTimeline(recorder(), input);
+    expect((performance.now() - started) / 20).toBeLessThan(8);
+  });
+
+  it("marks clips whose length is unknown", () => {
+    const layout = layoutTimeline({
+      ...longTimeline(0),
+      tracks: [{ id: "t_v", kind: "video", name: null, follows: null, clips: [{ id: "c_1", type: "timeline", source: "timelines/gone.json", start: 0, end: null }] }],
+      problems: [{ clip: "c_1", track: "t_v", source: "timelines/gone.json", message: "timelines/gone.json does not exist" }],
+    });
+    const ctx = recorder();
+    paintTimeline(ctx, { layout, viewport: viewport(100), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+    expect(ctx.texts).toEqual(expect.arrayContaining(["gone", "length unknown"]));
+  });
+});

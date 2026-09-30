@@ -1,5 +1,5 @@
 import { type FSWatcher as FsWatcher, watch as fsWatch } from "node:fs";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
@@ -13,6 +13,12 @@ export interface ProjectFiles {
   tree(): Promise<FileNode[]>;
   /** UTF-8 content of a project-relative file. Rejects paths leaving the project and files over 5 MB. */
   read(path: string): Promise<string>;
+  /**
+   * Bytes of derived media for the timeline: waveform JSON under
+   * `.frameshell/waveforms/`, thumbnails under `.frameshell/thumbs/`
+   * (project-relative, as `asset.list` reports them). Rejects any other path.
+   */
+  readMedia(path: string): Promise<Buffer>;
   /** Stop watching. */
   close(): Promise<void>;
 }
@@ -21,6 +27,8 @@ export interface ProjectFiles {
 const HIDDEN = new Set([".git", "node_modules", ".frameshell", ".DS_Store"]);
 /** Editors are for scripts and JSON, not media: refuse to pull huge files into the renderer. */
 const MAX_READ_BYTES = 5 * 1024 * 1024;
+/** Only these daemon-derived folders are readable as media; proxies go through a streaming protocol later. */
+const MEDIA_DIRS = [".frameshell/waveforms/", ".frameshell/thumbs/"];
 /** Stop listing past this many entries so a stray huge folder cannot freeze the UI. */
 const MAX_ENTRIES = 20_000;
 /** Coalesce bursts (git checkout, agent writing many files) into one change event. */
@@ -75,6 +83,17 @@ export async function openProjectFiles(root: string, onChange: (paths: string[])
       const { size } = await stat(target);
       if (size > MAX_READ_BYTES) throw new Error(`${path} is too large to open in the editor (${size} bytes)`);
       return readFile(target, "utf8");
+    },
+    readMedia: async (path) => {
+      const normal = path.split(/[\\/]+/).filter((part) => part !== "" && part !== ".");
+      const rel = normal.join("/");
+      if (isAbsolute(path) || normal.includes("..") || !MEDIA_DIRS.some((dir) => rel.startsWith(dir))) {
+        throw new Error(`${path} is not derived media`);
+      }
+      // A symlink inside `.frameshell/` must not lead out of the project.
+      const target = await realpath(join(root, ...normal));
+      if (relative(await realpath(root), target).startsWith("..")) throw new Error(`${path} is not derived media`);
+      return readFile(target);
     },
     close: async () => {
       clearTimeout(timer);

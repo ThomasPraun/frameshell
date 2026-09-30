@@ -1,23 +1,12 @@
-import { cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { type ElectronApplication, type Page, _electron as electron, expect, test } from "@playwright/test";
+import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
+import { isWindows, launch as launchApp, runInTerminal as run, sandbox, terminalText as textOf } from "./harness.js";
 
 // Smoke test of the built app: real daemon, real login shell, real file system.
-// FRAMESHELL_E2E_APP: run against a packaged app executable instead (release pipeline).
-const packagedApp = process.env["FRAMESHELL_E2E_APP"];
-const mainEntry = join(import.meta.dirname, "..", "out", "main", "index.js");
-const fixture = join(import.meta.dirname, "fixtures", "demo");
-const isWindows = process.platform === "win32";
+const box = sandbox("demo");
+const { projectDir } = box;
 const mod = process.platform === "darwin" ? "Meta" : "Control";
-
-const workDir = realpathSync(mkdtempSync(join(tmpdir(), "fs-e2e-")));
-const projectDir = join(workDir, "demo");
-const dataDir = join(workDir, "data");
-const configDir = join(workDir, "config");
-// Isolated daemon for this run; exits on idle after the app closes.
-const socketPath = isWindows ? `\\\\.\\pipe\\frameshell-e2e-${randomUUID().slice(0, 8)}` : join(workDir, "d.sock");
 
 test.describe.configure({ mode: "serial" });
 
@@ -25,45 +14,13 @@ let app: ElectronApplication;
 let page: Page;
 
 async function launch(): Promise<void> {
-  app = await electron.launch({
-    ...(packagedApp ? { executablePath: packagedApp } : {}),
-    // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
-    args: [
-      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-      ...(packagedApp ? [] : [mainEntry]),
-      "--project",
-      projectDir,
-    ],
-    env: {
-      ...process.env,
-      FRAMESHELL_SOCKET: socketPath,
-      FRAMESHELL_DATA_DIR: dataDir,
-      FRAMESHELL_CONFIG_DIR: configDir,
-      FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
-    },
-  });
-  page = await app.firstWindow();
-  // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
-  page.on("console", (message) => {
-    if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
-  });
+  ({ app, page } = await launchApp(box));
 }
 
-/** Visible text of the active terminal's grid, rows joined so soft-wrapped output reads as one line. */
-async function terminalText(): Promise<string> {
-  const rows = await page.locator(".terminal-view:not([hidden]) .xterm-rows > div").allInnerTexts();
-  return rows.join("");
-}
-
-async function runInTerminal(command: string): Promise<void> {
-  await page.locator(".terminal-view:not([hidden])").click();
-  await page.keyboard.type(command);
-  await page.keyboard.press("Enter");
-}
+const terminalText = () => textOf(page);
+const runInTerminal = (command: string) => run(page, command);
 
 test.beforeAll(async () => {
-  cpSync(fixture, projectDir, { recursive: true });
   await launch();
 });
 
