@@ -49,6 +49,9 @@ const api: FrameshellApi = {
     show: (timeline) => invokeOutcome(Channel.timelineShow, timeline),
     onChanged: (listener) => subscribe(Channel.timelineChanged, listener),
     onRejected: (listener) => subscribe(Channel.timelineRejected, listener),
+    edit: (timeline, edit) => invokeOutcome(Channel.timelineEdit, timeline, edit),
+    undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
+    redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),
   },
   media: {
     assets: () => invokeOutcome(Channel.mediaAssets),

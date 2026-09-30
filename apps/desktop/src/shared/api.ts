@@ -1,4 +1,4 @@
-import type { AssetInfo, TimelineRejection, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, MethodParams, OperationResult, TimelineRejection, TimelineView } from "@frameshell/protocol";
 import type { Layout } from "./layout.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
@@ -48,6 +48,18 @@ export type TimelineChange = { timeline: string; revision: number; author: strin
  * have changed meanwhile: re-read them all.
  */
 export type AssetChange = { path: string; asset: AssetInfo | null } | { path: null };
+
+/** Timeline operations the timeline panel sends (SPEC §10: move, trim, split, delete, ripple delete). */
+export const TIMELINE_EDIT_OPS = ["clip.move", "clip.trim", "clip.split", "clip.remove", "cut"] as const;
+
+/** One of {@link TIMELINE_EDIT_OPS}. */
+export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
+
+/**
+ * One edit from the timeline panel: a daemon operation with its params minus
+ * `cwd` and `timeline`, which main fills in for the window's project.
+ */
+export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
 
 /** Reply of a main handler that can fail: Electron would bury a thrown message in IPC noise. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -100,6 +112,16 @@ export interface FrameshellApi {
      * version again, the edit is kept at `preserved`. Returns an unsubscribe function.
      */
     onRejected(listener: (rejection: TimelineRejection) => void): () => void;
+    /**
+     * Apply one edit as a daemon operation by `ui`: validated, saved and
+     * journaled at once (no unsaved state). Rejects with the daemon's message
+     * (overlap, bounds) and nothing changes.
+     */
+    edit(timeline: string, edit: TimelineEdit): Promise<OperationResult>;
+    /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
+    undo(timeline: string): Promise<OperationResult | null>;
+    /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */
+    redo(timeline: string): Promise<OperationResult | null>;
   };
   media: {
     /** `asset.list` of the window's project: ingest state and derived media paths. */
@@ -133,6 +155,9 @@ export const Channel = {
   timelineShow: "timeline:show",
   timelineChanged: "timeline:changed",
   timelineRejected: "timeline:rejected",
+  timelineEdit: "timeline:edit",
+  timelineUndo: "timeline:undo",
+  timelineRedo: "timeline:redo",
   mediaAssets: "media:assets",
   mediaRead: "media:read",
   mediaChanged: "media:changed",
