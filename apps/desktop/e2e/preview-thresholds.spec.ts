@@ -44,7 +44,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
   if (Number.isFinite(CUTS)) segments = segments.slice(0, CUTS + 1);
   const mainFile = join(projectDir, "timelines", "main.json");
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
-  timeline.revision += 1;
+  // Current revision: the daemon journals the edit as author `file` (SPEC §6.4).
   timeline.tracks = [
     {
       id: "v1",

@@ -29,7 +29,7 @@ const expected = (frame: number, cClipIn = 75) =>
 
 function writeTimeline(clips: unknown[]): void {
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
-  timeline.revision += 1;
+  // Current revision: the daemon journals the edit as author `file` (SPEC §6.4).
   timeline.tracks[0].clips = clips;
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
 }

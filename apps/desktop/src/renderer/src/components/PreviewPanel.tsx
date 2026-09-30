@@ -178,8 +178,15 @@ function TransportBar({ playing, disabled, notice }: { playing: boolean; disable
   );
 }
 
-/** Typing targets keep their keys: Monaco and xterm type into textareas. */
+/** Typing targets keep their keys. Monaco may type through an EditContext on a plain div, so its whole subtree counts. */
 function editable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.closest(".monaco-editor, .xterm") !== null ||
+    ("editContext" in target && (target as { editContext?: unknown }).editContext != null)
+  );
 }
