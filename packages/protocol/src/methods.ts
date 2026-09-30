@@ -5,7 +5,7 @@ import { z } from "zod";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -114,6 +114,88 @@ const PluginInfoSchema = z.object({
     .describe("Declared contributions; null unless the manifest was read."),
 });
 
+const JobSchema = z.object({
+  id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
+  kind: z.enum(["ingest"]).describe("`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails."),
+  project: z.string().describe("Absolute root of the project the job belongs to."),
+  asset: z.string().describe("Asset path, project-relative and `/`-separated, e.g. `assets/raw-01.mp4`."),
+  state: z
+    .enum(["queued", "running", "done", "failed", "canceled"])
+    .describe("`canceled`: the daemon stopped before the job finished; it is queued again when the project reopens."),
+  step: z
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails"])
+    .nullable()
+    .describe("Step running now (ingest runs them in this order); null when not running."),
+  progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
+  cached: z
+    .boolean()
+    .nullable()
+    .describe("True when unchanged content reused existing outputs and nothing was re-encoded; null until known."),
+  error: z.string().nullable().describe("Why the job failed; null otherwise."),
+  createdAt: z.string().describe("ISO 8601 time the job was queued."),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+
+const ProbeSchema = z.object({
+  duration: z.number().nullable().describe("Container duration in seconds; null when unknown (still images)."),
+  format: z.string().describe("ffprobe container name, e.g. `mov,mp4,m4a,3gp,3g2,mj2`."),
+  video: z
+    .object({
+      codec: z.string(),
+      width: z.int(),
+      height: z.int(),
+      fps: z.number().nullable().describe("Average frame rate of the source; null for still images."),
+      vfr: z.boolean().describe("Variable frame rate source (phones, OBS); the proxy is CFR at project fps anyway."),
+      still: z.boolean().describe("Single image, not a moving stream: no proxy is built."),
+    })
+    .nullable()
+    .describe("First video stream; null for audio-only files."),
+  audio: z
+    .object({ codec: z.string(), sampleRate: z.int(), channels: z.int() })
+    .nullable()
+    .describe("First audio stream; null when silent."),
+});
+
+const AssetSchema = z.object({
+  path: z.string().describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
+  hash: z.string().nullable().describe("Content hash `sha256:<hex>`; null until hashed. Transcripts carry it as `assetHash`."),
+  state: z
+    .enum(["pending", "processing", "ready", "failed"])
+    .describe("`ready`: every output below exists for the current content. `pending`: not ingested yet."),
+  error: z.string().nullable().describe("Why the last ingest failed; null otherwise."),
+  media: ProbeSchema.nullable().describe("ffprobe summary; null until probed."),
+  proxy: z
+    .string()
+    .nullable()
+    .describe(
+      "Project-relative CFR proxy: H.264 at project fps, GOP 15, no B-frames (frame index = sample index), faststart, " +
+        "short side at most 540 px. Null for audio-only, still images, or before ingest.",
+    ),
+  sidecar: z
+    .object({
+      path: z.string().describe("Project-relative raw PCM file, no header."),
+      format: z.literal("s16le"),
+      sampleRate: z.int(),
+      channels: z.int(),
+    })
+    .nullable()
+    .describe("Preview audio: signed 16-bit little-endian PCM starting at source time 0. Null when the asset has no audio."),
+  waveform: z
+    .object({
+      path: z.string().describe("Project-relative JSON: `{ peaksPerSecond, peaks }`, `peaks` = [min, max] pairs in -128..127."),
+      peaksPerSecond: z.int(),
+    })
+    .nullable(),
+  thumbnails: z
+    .object({
+      dir: z.string().describe("Project-relative directory of JPEGs `0001.jpg`, `0002.jpg`, …"),
+      count: z.int(),
+      interval: z.number().describe("Seconds between thumbnails; thumbnail n (1-based) shows time (n - 1) * interval."),
+    })
+    .nullable(),
+});
+
 const ExportPresetResultSchema = z.looseObject({
   id: z.string(),
   label: z.string().optional(),
@@ -163,6 +245,9 @@ export const methods = {
         .nullable()
         .describe("Plugin trust of `project`; null when there is no project."),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
+      jobs: z
+        .array(JobSchema)
+        .describe("Background jobs of `project` in this daemon run, oldest first; empty when there is no project."),
       caller: z
         .object({
           client: z.string().describe("Client id the caller sent in its handshake."),
@@ -296,6 +381,58 @@ export const methods = {
         .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
     }),
   },
+  "asset.import": {
+    description:
+      "Bring media files into the enclosing project's `assets/` and queue their ingest (probe, CFR proxy, PCM sidecar, " +
+      "waveform, thumbnails). Returns at once; follow progress with `job.list` or `status`. Files already under " +
+      "`assets/` are not copied. A name clash with different content gets a `-2`, `-3`… suffix. Unchanged content " +
+      "reuses cached outputs (job `cached: true`). Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      files: z
+        .array(AbsolutePath)
+        .min(1)
+        .describe("Absolute paths of the files to import, e.g. `/home/ana/Movies/raw-01.mp4`."),
+      mode: z
+        .enum(["copy", "link"])
+        .default("copy")
+        .describe("`copy` (default) duplicates the file. `link` hard-links it, or symlinks across volumes: no copy, but the source must stay."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      imported: z.array(
+        z.object({
+          source: z.string().describe("Absolute path given."),
+          asset: z.string().describe("Project-relative asset path, e.g. `assets/raw-01.mp4`."),
+          copied: z.boolean().describe("False when the file already was in `assets/` (as-is or with identical content)."),
+          job: JobSchema,
+        }),
+      ),
+    }),
+  },
+  "asset.list": {
+    description:
+      "List the files under the enclosing project's `assets/` with their ingest state and derived files: CFR proxy, " +
+      "PCM sidecar, waveform, thumbnails (all project-relative, all regenerable under `.frameshell/`).",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      assets: z.array(AssetSchema).describe("Sorted by path."),
+    }),
+  },
+  "job.list": {
+    description:
+      "Background jobs of the enclosing project (ingest), with state and progress. Jobs keep running after the caller " +
+      "disconnects; poll this until every job you care about is `done` or `failed`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      active: z.boolean().default(false).describe("Only `queued` and `running` jobs. Default false: also finished ones."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      jobs: z.array(JobSchema).describe("Oldest first."),
+    }),
+  },
   "file.write": {
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
@@ -359,6 +496,18 @@ export type PluginPins = Record<string, string>;
 export type FileWriteParams = MethodParams<"file.write">;
 /** Result of `file.write`. */
 export type FileWriteResult = MethodResult<"file.write">;
+/** Background job as reported by `status` and `job.list`. */
+export type JobInfo = z.output<typeof JobSchema>;
+/** Ingest step of a {@link JobInfo}. */
+export type JobStep = NonNullable<JobInfo["step"]>;
+/** ffprobe summary of an asset. */
+export type MediaProbe = z.output<typeof ProbeSchema>;
+/** One asset as reported by `asset.list`. */
+export type AssetInfo = z.output<typeof AssetSchema>;
+/** `asset.import` params. */
+export type AssetImportParams = MethodParams<"asset.import">;
+/** Result of `asset.import`. */
+export type AssetImportResult = MethodResult<"asset.import">;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 
@@ -451,6 +600,8 @@ export const ErrorCode = {
   PluginCommandFailed: -32017,
   /** data: `{ path }` of the refused file */
   OutsideProject: -32018,
+  /** data: `{ path }` of the missing or non-file source */
+  AssetNotFound: -32019,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

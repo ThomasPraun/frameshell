@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type DaemonConnection,
+  type AssetImportResult,
   type DoctorResult,
   ErrorCode,
+  type JobInfo,
   type MethodResult,
   type PluginInfo,
   RpcError,
@@ -23,6 +25,10 @@ Commands:
   status [--json]              Show daemon and the project enclosing the current directory
   doctor [--install] [--json]  Check ffmpeg/ffprobe, versions and encoders; exit 1 on problems.
                                --install downloads missing managed binaries first
+  import <file…> [--link] [--wait]
+                               Copy files into assets/ and queue proxies, waveforms, thumbnails.
+                               --link hard-links instead of copying; --wait blocks until done
+                               (exit 1 if any failed). Progress: \`frameshell status\`
   plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
                                or an npm name[@version]
   plugin remove <name>         Unpin and uninstall a plugin
@@ -36,7 +42,10 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "plugin"]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin"]);
+
+/** How often `import --wait` polls job progress. */
+const WAIT_POLL_MS = 250;
 
 /** Process surface the CLI touches; injected so it can run in-process too. */
 export interface CliIo {
@@ -55,6 +64,7 @@ type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean }
+  | { kind: "import"; files: string[]; link: boolean; wait: boolean }
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
@@ -93,6 +103,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           json: { type: "boolean", default: false },
           trust: { type: "boolean", default: false },
           install: { type: "boolean", default: false },
+          link: { type: "boolean", default: false },
+          wait: { type: "boolean", default: false },
           name: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
@@ -112,7 +124,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       return values.help ? 0 : 2;
     }
     flags = { json: values.json, trust: values.trust, install: values.install };
-    const builtin = parseBuiltin(positionals, values.name, values.install);
+    const builtin = parseBuiltin(positionals, values);
     if (!builtin) {
       io.stderr(`Unknown command or wrong arguments: ${positionals.join(" ")}\n\n${USAGE}`);
       return 2;
@@ -140,11 +152,15 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   }
 }
 
-function parseBuiltin(positionals: string[], name: string | undefined, install: boolean): Invocation | null {
+function parseBuiltin(
+  positionals: string[],
+  options: { name?: string | undefined; install: boolean; link: boolean; wait: boolean },
+): Invocation | null {
   const [command, ...rest] = positionals;
-  if (command === "init" && rest.length <= 1) return { kind: "init", dir: rest[0], name };
+  if (command === "init" && rest.length <= 1) return { kind: "init", dir: rest[0], name: options.name };
   if (command === "status" && rest.length === 0) return { kind: "status" };
-  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install };
+  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
+  if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
   if (command !== "plugin") return null;
   const [sub, arg, ...extra] = rest;
   if (extra.length > 0) return null;
@@ -176,6 +192,15 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const report = await conn.request("doctor", { cwd, install: inv.install });
       if (report.problems.length > 0) outcome.code = 1;
       return flags.json ? json(report) : formatDoctor(report);
+    }
+    case "import": {
+      const files = inv.files.map((file) => resolve(cwd, file));
+      const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy" });
+      if (!inv.wait) return flags.json ? json(result) : formatImport(result);
+      const jobs = await waitForJobs(conn, cwd, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
+      const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));
+      if (imported.some((entry) => entry.job.state !== "done")) outcome.code = 1;
+      return flags.json ? json({ ...result, imported }) : formatImport({ ...result, imported });
     }
     case "plugin.install": {
       await settleTrust(conn, flags, io);
@@ -228,6 +253,49 @@ async function settleTrust(conn: DaemonConnection, flags: Flags, io: CliIo): Pro
   await conn.request("project.trust", { cwd: io.cwd, decision });
 }
 
+/**
+ * Poll `job.list` until every job in `ids` has finished. Progress lines go to
+ * stderr when `io` is given. Returns the final state of each job.
+ */
+async function waitForJobs(conn: DaemonConnection, cwd: string, ids: string[], io?: CliIo): Promise<Map<string, JobInfo>> {
+  const last = new Map<string, string>();
+  for (;;) {
+    const { jobs } = await conn.request("job.list", { cwd });
+    const mine = new Map(jobs.filter((job) => ids.includes(job.id)).map((job) => [job.id, job]));
+    for (const job of mine.values()) {
+      const line = formatJob(job);
+      if (io && last.get(job.id) !== line) io.stderr(`${line}\n`);
+      last.set(job.id, line);
+    }
+    // A job missing from the list was pruned, so it finished long ago.
+    if ([...mine.values()].every((job) => job.state !== "queued" && job.state !== "running")) return mine;
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+  }
+}
+
+function formatImport(result: AssetImportResult): string {
+  return result.imported
+    .map(({ source, asset, copied, job }) => {
+      const how = copied ? `imported from ${source}` : "already in assets/";
+      return `${asset}  ${how}\n  ${formatJob(job)}\n`;
+    })
+    .join("");
+}
+
+function formatJob(job: JobInfo): string {
+  const what = `${job.kind} ${job.asset}`;
+  switch (job.state) {
+    case "running":
+      return `${what}: ${job.step ?? "starting"} ${Math.round(job.progress * 100)}% (${job.id})`;
+    case "done":
+      return `${what}: done${job.cached ? " (cached, nothing re-encoded)" : ""} (${job.id})`;
+    case "failed":
+      return `${what}: failed: ${job.error ?? "unknown error"} (${job.id})`;
+    default:
+      return `${what}: ${job.state} (${job.id})`;
+  }
+}
+
 function formatStatus(status: StatusResult, cwd: string): string {
   const { daemon, project, trust } = status;
   const lines = [
@@ -240,6 +308,13 @@ function formatStatus(status: StatusResult, cwd: string): string {
   if (trust && trust.state !== "not-required") {
     const count = Object.keys(trust.plugins).length;
     lines.push(`Plugins: ${count} declared, ${trustLabel(trust.state)}`);
+  }
+  // Active jobs and failures matter; finished ones are noise.
+  const shown = status.jobs.filter((job) => job.state !== "done" && job.state !== "canceled");
+  const active = status.jobs.filter((job) => job.state === "queued" || job.state === "running").length;
+  if (status.jobs.length > 0) {
+    lines.push(`Jobs: ${active} active, ${status.jobs.length - active} finished`);
+    for (const job of shown) lines.push(`  ${formatJob(job)}`);
   }
   return `${lines.join("\n")}\n`;
 }

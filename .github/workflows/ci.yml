@@ -26,6 +26,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Pinned ffmpeg for media tests (60-170 MB); re-downloaded only when the pins change.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/test-binaries
+          key: test-binaries-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/core/src/binaries/manifest.ts') }}
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test

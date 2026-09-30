@@ -19,7 +19,9 @@ import {
 } from "@frameshell/protocol";
 import { runDoctor } from "./binaries/doctor.js";
 import { BinaryManager } from "./binaries/manager.js";
+import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
+import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 
@@ -35,14 +37,17 @@ export interface DaemonOptions {
   /** Unix socket path or Windows pipe name; see `resolveSocketPath`. */
   socketPath: string;
   /**
-   * Exit after this long with no connected clients. Counted from start and
-   * from each last disconnect. `Infinity` disables.
+   * Exit after this long with no connected clients and no queued or running
+   * jobs. Counted from start, from each last disconnect and from the end of
+   * the last job. `Infinity` disables.
    */
   idleTimeoutMs?: number;
   /** Per-user directories: binaries, global config, trust. Defaults to `resolveAppDirs()`. */
   dirs?: AppDirs;
   /** Native binaries. Defaults to a manager over {@link DaemonOptions.dirs} and the pinned manifest. */
   binaries?: BinaryManager;
+  /** Background jobs (ingest) run at once. Default 2: each ffmpeg already uses every core. */
+  jobConcurrency?: number;
 }
 
 /** Running daemon handle. */
@@ -76,9 +81,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   const clients = new Set<Socket>();
-  const projects = new ProjectRegistry();
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
+  const jobs = new JobQueue({ concurrency: options.jobConcurrency ?? 2, onBusyChange: () => armIdleTimer() });
+  const media = new MediaService({ binaries, jobs });
+  const projects = new ProjectRegistry({ onOpen: (dir) => media.attach(dir) });
   const plugins = new PluginHost({ dirs, pins: projects });
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
@@ -106,6 +113,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         project,
         trust,
         openProjects: projects.list(),
+        jobs: project ? jobs.list({ project: project.dir }) : [],
         caller: { ...caller },
       };
     },
@@ -122,6 +130,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => plugins.presets(await root(cwd)),
     "file.write": ({ path, content }) => projects.writeFile(path, content),
+    "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
+    "asset.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, assets: await media.list(dir) };
+    },
+    "job.list": async ({ cwd, active }) => {
+      const dir = await root(cwd);
+      return { dir, jobs: jobs.list({ project: dir, active }) };
+    },
   };
 
   const server: Server = createServer((socket) => {
@@ -176,17 +193,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   function armIdleTimer() {
     clearTimeout(idleTimer);
-    if (clients.size > 0 || !Number.isFinite(idleTimeoutMs)) return;
+    if (clients.size > 0 || jobs.busy || closing || !Number.isFinite(idleTimeoutMs)) return;
     idleTimer = setTimeout(() => void close(), idleTimeoutMs);
     idleTimer.unref?.();
   }
 
   function close(): Promise<void> {
-    closing ??= new Promise<void>((resolve) => {
+    closing ??= (async () => {
       clearTimeout(idleTimer);
-      for (const socket of clients) socket.destroy();
-      server.close(() => resolve());
-    }).then(resolveClosed);
+      await new Promise<void>((resolve) => {
+        for (const socket of clients) socket.destroy();
+        server.close(() => resolve());
+      });
+      // Canceled jobs are found again from disk when the project next opens.
+      await media.close();
+      await jobs.close();
+    })().then(resolveClosed);
     return closing;
   }
 

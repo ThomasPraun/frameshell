@@ -14,7 +14,9 @@
   "bin": {
     "frameshelld": "./dist/bin/frameshelld.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.12"
   },
@@ -22,6 +24,7 @@
     "@frameshell/plugin-api": "workspace:*",
     "@frameshell/protocol": "workspace:*",
     "@frameshell/schema": "workspace:*",
+    "chokidar": "^5.0.0",
     "zod": "^4.6.5"
   }
 }
