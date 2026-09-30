@@ -91,6 +91,7 @@ if (!existsSync(jfk)) {
 if (createHash("sha256").update(readFileSync(jfk)).digest("hex") !== JFK_SHA256) fail(`${jfk} does not match its pinned hash; delete it`);
 
 const footage = join(work, "footage", "talk.mp4");
+const footageSeconds = 11 + SPLITS.length * SILENCE_S;
 mkdirSync(join(work, "footage"));
 const [a, b] = SPLITS;
 const graph =
@@ -101,9 +102,9 @@ const graph =
 execFileSync(ffmpeg, [
   "-hide_banner", "-loglevel", "error", "-i", jfk, "-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30",
   "-filter_complex", graph, "-map", "1:v", "-map", "[a]", "-shortest",
-  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", footage,
+  // Picture exactly as long as the sound: a silent tail would invite an unsnapped cut.
+  "-t", String(footageSeconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", footage,
 ]);
-const footageSeconds = 11 + SPLITS.length * SILENCE_S;
 
 // The whisper-cpp plugin from this checkout, installable as a local git repo (npm cannot resolve workspace deps).
 const pluginSrc = join(repo, "plugins", "whisper-cpp");
