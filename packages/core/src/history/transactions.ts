@@ -1,5 +1,9 @@
-import { randomBytes } from "node:crypto";
-import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { createHash, randomBytes } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import { AuthorSchema, ErrorCode, RpcError, TxIdSchema } from "@frameshell/protocol";
+import { z } from "zod";
+import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { TxRef } from "../timeline/service.js";
 
 /** Ten seconds: an agent's burst of CLI calls for one intent fits; a pause to think starts a new transaction. */
@@ -11,12 +15,31 @@ export interface TouchedTimeline {
   timeline: string;
 }
 
+/** An explicit transaction as persisted by a {@link TransactionStore}. */
+export interface StoredTransaction {
+  author: string;
+  tx: { id: string; label: string };
+  operations: number;
+  touched: TouchedTimeline[];
+}
+
+/**
+ * Durable home of open explicit transactions (SPEC §6.2), so they survive a
+ * daemon restart. `save` receives every open one and replaces what was stored.
+ */
+export interface TransactionStore {
+  load(): Promise<StoredTransaction[]>;
+  save(open: StoredTransaction[]): Promise<void>;
+}
+
 /** Options for {@link TransactionTracker}. */
 export interface TransactionTrackerOptions {
   /** Automatic grouping ends after this long without an operation from the session. */
   idleGapMs?: number | undefined;
   /** Clock in ms. Default `Date.now`. */
   now?: () => number;
+  /** Where explicit transactions persist. Default: memory only. */
+  store?: TransactionStore | undefined;
 }
 
 interface Open {
@@ -28,9 +51,11 @@ interface Open {
 }
 
 /**
- * Which transaction each operation joins (SPEC §6.2), per author, in daemon
- * memory. `cli:<session>` operations group automatically until an idle gap;
- * `tx.begin` opens an explicit one that lasts until commit or abort. Other
+ * Which transaction each operation joins (SPEC §6.2), per author.
+ * `cli:<session>` operations group automatically until an idle gap (daemon
+ * memory only). `tx.begin` opens an explicit one that lasts until commit or
+ * abort and is kept in the {@link TransactionStore}, so a restarted daemon
+ * resumes it with its label, operation count and touched timelines. Other
  * authors (`ui`, `cli` without session, `file`, `plugin:<name>`) get one
  * transaction per operation unless they begin one explicitly (`cli` cannot:
  * without a session, each CLI call is a new connection).
@@ -38,17 +63,36 @@ interface Open {
 export class TransactionTracker {
   readonly #idleGapMs: number;
   readonly #now: () => number;
+  readonly #store: TransactionStore | undefined;
   readonly #open = new Map<string, Open>();
+  /** Saves run one at a time, each writing the state current when it starts. */
+  #saving: Promise<void> = Promise.resolve();
 
   constructor(options: TransactionTrackerOptions = {}) {
     this.#idleGapMs = options.idleGapMs ?? DEFAULT_TX_IDLE_GAP_MS;
     this.#now = options.now ?? Date.now;
+    this.#store = options.store;
+  }
+
+  /** Reopen the explicit transactions the store holds. Call once, before the first operation. */
+  async restore(): Promise<void> {
+    if (!this.#store) return;
+    for (const stored of await this.#store.load()) {
+      this.#open.set(stored.author, {
+        tx: stored.tx,
+        explicit: true,
+        lastAt: this.#now(),
+        operations: stored.operations,
+        touched: new Map(stored.touched.map((where) => [touchKey(where), where])),
+      });
+    }
   }
 
   /**
-   * Transaction for `author`'s next operation. Call {@link TransactionTracker.applied}
-   * once it succeeds. `standalone` (reverts) never joins an automatic group
-   * and ends the current one; it still joins an explicit transaction.
+   * Transaction for `author`'s next operation. Call {@link TransactionTracker.touching}
+   * before running it and {@link TransactionTracker.applied} once it succeeds.
+   * `standalone` (reverts) never joins an automatic group and ends the current
+   * one; it still joins an explicit transaction.
    */
   next(author: string, options: { standalone?: boolean } = {}): TxRef {
     const now = this.#now();
@@ -65,21 +109,34 @@ export class TransactionTracker {
     return tx;
   }
 
-  /** Record a successful operation of `tx` on `where`. */
-  applied(author: string, tx: TxRef, where: TouchedTimeline): void {
+  /**
+   * Record that `tx` is about to change `where`. Persisted before the change,
+   * so a crash between write and bookkeeping never hides a timeline from `tx.abort`.
+   */
+  async touching(author: string, tx: TxRef, where: TouchedTimeline): Promise<void> {
+    const open = this.#open.get(author);
+    if (open?.tx.id !== tx.id || open.touched.has(touchKey(where))) return;
+    open.touched.set(touchKey(where), where);
+    if (open.explicit) await this.#persist();
+  }
+
+  /** Count a successful operation of `tx`. */
+  async applied(author: string, tx: TxRef): Promise<void> {
     const open = this.#open.get(author);
     if (open?.tx.id !== tx.id) return;
     open.operations++;
     open.lastAt = this.#now();
-    open.touched.set(`${where.root}\0${where.timeline}`, where);
+    // The count is informational: a lost save must not fail an operation already applied.
+    if (open.explicit) await this.#persist().catch(() => {});
   }
 
   /** Open an explicit transaction. Throws TransactionState without a session or when one is open. */
-  begin(author: string, label: string): TxRef {
+  async begin(author: string, label: string): Promise<TxRef> {
     if (author === "cli") {
       throw new RpcError(
         ErrorCode.TransactionState,
-        "Transactions need a terminal session: run in a Frameshell app terminal, or set one, e.g. `export FRAMESHELL_SESSION=agent`.",
+        "Transactions need a terminal session. The frameshell CLI sends one per shell; other clients must pass `session` " +
+          "in the handshake, e.g. from `FRAMESHELL_SESSION=agent`.",
         { author, open: null, hint: "Set FRAMESHELL_SESSION." },
       );
     }
@@ -93,13 +150,21 @@ export class TransactionTracker {
     }
     const tx = { id: newTxId(), label };
     this.#open.set(author, { tx, explicit: true, lastAt: this.#now(), operations: 0, touched: new Map() });
+    try {
+      await this.#persist();
+    } catch (error) {
+      // Not durable means not begun.
+      this.#open.delete(author);
+      throw error;
+    }
     return tx;
   }
 
   /** Close `author`'s explicit transaction and return what it did. Throws TransactionState when none is open. */
-  end(author: string): ExplicitTransaction {
+  async end(author: string): Promise<ExplicitTransaction> {
     const open = this.#explicit(author);
     this.#open.delete(author);
+    await this.#persist();
     return summary(open);
   }
 
@@ -117,6 +182,18 @@ export class TransactionTracker {
       hint: '`frameshell tx begin "<label>"`.',
     });
   }
+
+  #persist(): Promise<void> {
+    const store = this.#store;
+    if (!store) return Promise.resolve();
+    const run = this.#saving.then(() =>
+      store.save(
+        [...this.#open].filter(([, open]) => open.explicit).map(([author, open]) => ({ author, ...summary(open) })),
+      ),
+    );
+    this.#saving = run.catch(() => {});
+    return run;
+  }
 }
 
 /** An explicit transaction and what it did so far. */
@@ -127,8 +204,55 @@ export interface ExplicitTransaction {
   touched: TouchedTimeline[];
 }
 
+const StoredFileSchema = z.object({
+  version: z.literal(1),
+  open: z.array(
+    z.object({
+      author: AuthorSchema,
+      tx: z.object({ id: TxIdSchema, label: z.string() }),
+      operations: z.int().nonnegative(),
+      touched: z.array(z.object({ root: z.string(), timeline: z.string() })),
+    }),
+  ),
+});
+
+/**
+ * {@link TransactionStore} in one JSON file per daemon endpoint:
+ * `<dataDir>/transactions/<hash of socket path>.json`, so daemons on other
+ * sockets (tests, a second install) never share state. Removed when nothing
+ * is open. A missing or unreadable file means no open transactions.
+ */
+export class FileTransactionStore implements TransactionStore {
+  readonly path: string;
+
+  constructor(dataDir: string, socketPath: string) {
+    const key = createHash("sha256").update(socketPath).digest("hex").slice(0, 16);
+    this.path = join(dataDir, "transactions", `${key}.json`);
+  }
+
+  async load(): Promise<StoredTransaction[]> {
+    let value: unknown;
+    try {
+      value = await readJsonIfExists(this.path);
+    } catch {
+      return [];
+    }
+    const parsed = StoredFileSchema.safeParse(value);
+    return parsed.success ? parsed.data.open : [];
+  }
+
+  async save(open: StoredTransaction[]): Promise<void> {
+    if (open.length === 0) await rm(this.path, { force: true });
+    else await writeJsonAtomic(this.path, { version: 1, open });
+  }
+}
+
 function summary(open: Open): ExplicitTransaction {
   return { tx: { id: open.tx.id, label: open.tx.label ?? "" }, operations: open.operations, touched: [...open.touched.values()] };
+}
+
+function touchKey(where: TouchedTimeline): string {
+  return `${where.root}\0${where.timeline}`;
 }
 
 function newTxId(): string {

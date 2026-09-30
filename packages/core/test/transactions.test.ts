@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
+import { type AppDirs, type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -20,7 +20,10 @@ afterEach(async () => {
 });
 
 async function setup() {
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), txIdleGapMs: GAP_MS });
+  // Own app dirs: open transactions persist under `dataDir`.
+  const dirs: AppDirs = { dataDir: tempDir(), configDir: tempDir() };
+  const socketPath = uniqueSocketPath();
+  daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS });
   const dir = join(tempDir(), "talk");
   const connect = async (client: string, session?: string) => {
     const conn = await connectToDaemon(daemon!.socketPath, { client, session });
@@ -31,7 +34,17 @@ async function setup() {
   await admin.request("project.init", { dir });
   const addTrack = (conn: DaemonConnection, name: string) => conn.request("track.add", { cwd: dir, kind: "video", name });
   const tracks = async () => (await admin.request("track.list", { cwd: dir })).tracks.map((track) => track.name);
-  return { dir, connect, admin, addTrack, tracks };
+  /** Stop the daemon (dropping every connection) and start a fresh one on the same socket and app dirs. */
+  const restart = async () => {
+    for (const conn of connections.splice(0)) conn.close();
+    await daemon!.close();
+    daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS });
+  };
+  return { dir, connect, admin, addTrack, tracks, restart };
+}
+
+async function tracksAfterRestart(connect: (client: string, session?: string) => Promise<DaemonConnection>, dir: string) {
+  return (await (await connect("cli/test")).request("track.list", { cwd: dir })).tracks.map((track) => track.name);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -148,6 +161,50 @@ describe("transactions", () => {
     expect(since.transactions).toEqual([
       expect.objectContaining({ author: "ui", operations: [expect.objectContaining({ id: humanOp.operation.id, op: "track.add" })] }),
     ]);
+  });
+
+  it("keeps an open transaction, its label and grouping across a daemon restart", async () => {
+    const { dir, connect, addTrack, restart } = await setup();
+    const agent = await connect("cli/test", "agent");
+    await addTrack(agent, "Keep");
+    await sleep(GAP_MS * 1.5);
+    const begun = await agent.request("tx.begin", { label: "rough cut" });
+    const before = await addTrack(agent, "Drop1");
+    expect(before.operation.tx).toBe(begun.tx);
+
+    await restart();
+    const again = await connect("cli/test", "agent");
+    await expect(again.request("tx.begin", { label: "other" })).rejects.toMatchObject({
+      code: ErrorCode.TransactionState,
+      data: { open: { tx: begun.tx, label: "rough cut" } },
+    });
+    const after = await addTrack(again, "Drop2");
+    expect(after.operation.tx).toBe(begun.tx);
+    const admin = await connect("cli/test");
+    const history = await admin.request("history", { cwd: dir });
+    expect(history.transactions.map((t) => [t.tx, t.label, t.operations.length])).toEqual([
+      [expect.any(String), null, 1],
+      [begun.tx, "rough cut", 2],
+    ]);
+
+    // Abort after a second restart still knows every timeline the transaction touched.
+    await restart();
+    const aborted = await (await connect("cli/test", "agent")).request("tx.abort", {});
+    expect(aborted).toMatchObject({ tx: begun.tx, label: "rough cut", author: "cli:agent" });
+    expect(await tracksAfterRestart(connect, dir)).toEqual(["Keep"]);
+  });
+
+  it("does not resume a committed transaction after a restart", async () => {
+    const { connect, addTrack, restart } = await setup();
+    const agent = await connect("cli/test", "agent");
+    const begun = await agent.request("tx.begin", { label: "done" });
+    await addTrack(agent, "A1");
+    expect(await agent.request("tx.commit", {})).toMatchObject({ tx: begun.tx, operations: 1 });
+    await restart();
+    const again = await connect("cli/test", "agent");
+    await expect(again.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+    const next = await addTrack(again, "A2");
+    expect(next.operation.tx).not.toBe(begun.tx);
   });
 
   it("reverts through the daemon in a transaction of its own", async () => {
