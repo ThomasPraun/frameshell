@@ -40,6 +40,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | MCP UI state + navigation (`ui_*`, broker daemon → app window) | `docs/mcp.md`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
+| Agent skill (content, bundle into core, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/`, `core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 
 ## Rules
 
@@ -57,6 +58,8 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
 - New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
 - Wire change: bump `PROTOCOL_VERSION`.
+- `skills/frameshell/` changed: run `pnpm gen:skill`, commit `packages/core/src/skills/core-skill.ts`. Drift test fails otherwise.
+- CLI command, flag or MCP tool added or renamed: update skill. `skill-docs.test.ts` fails on names that do not exist or commands skill misses.
 - Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*`.
 - User-level storage: only via `resolveAppDirs()` (`packages/protocol/src/app-dirs.ts`). Downloads, caches, app state = `dataDir`; user decisions, global config = `configDir`. Overrides: `FRAMESHELL_DATA_DIR`, `FRAMESHELL_CONFIG_DIR` only.
 
