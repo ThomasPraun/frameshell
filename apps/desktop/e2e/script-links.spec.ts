@@ -234,7 +234,7 @@ test("a script selection losing its first clip never moves the timeline", async 
   const path = join(box.projectDir, "timelines", "main.json");
   const timeline = JSON.parse(readFileSync(path, "utf8"));
   timeline.tracks[0].clips.find((clip: { id: string }) => clip.id === "c_spare").scriptRef = "scripts/launch.md#intro";
-  timeline.revision += 1;
+  // Direct edits keep the revision they were read at (SPEC §6.4).
   writeFileSync(path, JSON.stringify(timeline, null, 2));
   await expect(page.locator(".editor-host .scene-glyph-unlinked")).toHaveCount(1);
   await line("## Intro").click();
@@ -248,9 +248,10 @@ test("a script selection losing its first clip never moves the timeline", async 
   const before = (await lanesBox()).scrollLeft;
   expect(before).toBeGreaterThan(13 * pxPerSecond);
 
-  timeline.tracks[0].clips = timeline.tracks[0].clips.filter((clip: { id: string }) => clip.id !== "c_intro");
-  timeline.revision += 1;
-  writeFileSync(path, JSON.stringify(timeline, null, 2));
+  // The daemon journaled the link and bumped the revision on disk: this edit starts from that one.
+  const linked = JSON.parse(readFileSync(path, "utf8"));
+  linked.tracks[0].clips = linked.tracks[0].clips.filter((clip: { id: string }) => clip.id !== "c_intro");
+  writeFileSync(path, JSON.stringify(linked, null, 2));
   await expect(lanes()).toHaveAttribute("data-selected", "c_spare");
   // Let any scroll the pruning might cause land before looking.
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));

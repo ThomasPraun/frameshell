@@ -70,7 +70,8 @@ describe("TimelineEditor.apply", () => {
     const saved = JSON.parse(readFileSync(join(dir, "timelines", "main.json"), "utf8"));
     expect(saved.revision).toBe(result.revision);
     const history = await app.request("history", { cwd: dir, timeline: "main" });
-    expect(history.transactions.map((tx) => [tx.author, tx.operations.map((op) => op.op)])).toEqual([["ui", ["clip.move"]]]);
+    // Before it: the fixture's file.write, journaled as a direct edit (SPEC §6.4).
+    expect(history.transactions.slice(1).map((tx) => [tx.author, tx.operations.map((op) => op.op)])).toEqual([["ui", ["clip.move"]]]);
   });
 
   it("covers trim, split and ripple delete (a cut of one track, exact)", async () => {
