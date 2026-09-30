@@ -24,9 +24,10 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
-| Desktop selection (shared store, extend, never duplicate) | `apps/desktop/src/renderer/src/selection.ts` |
 | Preview player (program, engine worker, audio worklet, playhead store) | `apps/desktop/src/renderer/src/preview/`; ADR 0001; media URLs `apps/desktop/src/main/media-protocol.ts` |
 | Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
+| Desktop selection (shared store, extend, never duplicate); playhead = `preview/transport.ts` | `apps/desktop/src/renderer/src/selection.ts` |
+| Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |

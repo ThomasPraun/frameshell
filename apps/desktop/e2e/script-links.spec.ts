@@ -215,3 +215,44 @@ test("clicking a clip never scrolls the timeline, even with focus elsewhere", as
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
   await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(before);
 });
+
+test("clicking the same scene heading again brings its clip back into view", async () => {
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  const { pxPerSecond } = await lanesBox();
+  // Scrolled away from c_intro (0 to 4 s); the selection stays as it was.
+  await page.locator(".timeline-scroller").evaluate((element, left) => {
+    element.scrollLeft = left;
+  }, Math.round(6 * pxPerSecond));
+  const away = (await lanesBox()).scrollLeft;
+  expect(away).toBeGreaterThan(4 * pxPerSecond);
+  await line("## Intro").click();
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(away);
+});
+
+test("a script selection losing its first clip never moves the timeline", async () => {
+  const path = join(box.projectDir, "timelines", "main.json");
+  const timeline = JSON.parse(readFileSync(path, "utf8"));
+  timeline.tracks[0].clips.find((clip: { id: string }) => clip.id === "c_spare").scriptRef = "scripts/launch.md#intro";
+  timeline.revision += 1;
+  writeFileSync(path, JSON.stringify(timeline, null, 2));
+  await expect(page.locator(".editor-host .scene-glyph-unlinked")).toHaveCount(1);
+  await line("## Intro").click();
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_spare");
+
+  // Both clips (0 to 4 s, 10 to 13 s) off-screen to the left.
+  const { pxPerSecond } = await lanesBox();
+  await page.locator(".timeline-scroller").evaluate((element, left) => {
+    element.scrollLeft = left;
+  }, Math.round(30 * pxPerSecond));
+  const before = (await lanesBox()).scrollLeft;
+  expect(before).toBeGreaterThan(13 * pxPerSecond);
+
+  timeline.tracks[0].clips = timeline.tracks[0].clips.filter((clip: { id: string }) => clip.id !== "c_intro");
+  timeline.revision += 1;
+  writeFileSync(path, JSON.stringify(timeline, null, 2));
+  await expect(lanes()).toHaveAttribute("data-selected", "c_spare");
+  // Let any scroll the pruning might cause land before looking.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect((await lanesBox()).scrollLeft).toBe(before);
+});

@@ -167,4 +167,31 @@ describe("paintTimeline", () => {
     paintTimeline(ctx, { layout, viewport: viewport(100), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
     expect(ctx.texts).toEqual(expect.arrayContaining(["gone", "length unknown"]));
   });
+
+  it("draws a dragged clip's ghost where it would land, dims the original and marks the snap line", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const draw = (blocked: boolean) => {
+      const ctx = recorder();
+      const ghosts: { x: number; color: string }[] = [];
+      const lines: number[] = [];
+      const alphaOf: Record<string, number> = {};
+      ctx.strokeRect = (x: number) => {
+        if (ctx.lineWidth === 1.5) ghosts.push({ x, color: String(ctx.strokeStyle) });
+      };
+      ctx.fillRect = (x: number, y: number, w: number) => {
+        if (ctx.fillStyle === DEFAULT_THEME.accent && y === 22 && w === 1) lines.push(x);
+      };
+      ctx.fillText = (text: string) => void (alphaOf[text] = ctx.globalAlpha);
+      const drag = { clip: "c_1", row: "t_v", start: 10, end: 12.5, blocked, guide: 10 };
+      paintTimeline(ctx, { layout, viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia, drag });
+      return { ghosts, lines, alphaOf };
+    };
+    const free = draw(false);
+    // 10 s at 20 px/s: 200 px, plus the half-pixel gap and the stroke's half-pixel.
+    expect(free.ghosts).toEqual([{ x: 201, color: DEFAULT_THEME.accent }]);
+    expect(free.lines).toEqual([200]);
+    expect(free.alphaOf["take-1.mp4"]).toBeLessThan(1);
+    expect(free.alphaOf["take-0.mp4"]).toBe(1);
+    expect(draw(true).ghosts).toEqual([{ x: 201, color: DEFAULT_THEME.danger }]);
+  });
 });

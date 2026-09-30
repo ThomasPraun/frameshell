@@ -1,3 +1,4 @@
+import type { OperationResult } from "@frameshell/protocol";
 import {
   type KeyboardEvent,
   type PointerEvent,
@@ -9,13 +10,16 @@ import {
   useRef,
   useState,
 } from "react";
+import type { TimelineEdit } from "../../../shared/api.js";
+import { transport } from "../preview/transport.js";
+import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { type DragPreview, type EditCommand, type Grab, commandEdits, dragEdit, dragPreview, grabAt, snapPoints } from "../timeline/edit.js";
 import {
   type ClipBox,
   RULER_HEIGHT,
   type TimelineLayout,
   type TrackRow,
   clampScroll,
-  clipAt,
   contentWidth,
   fitZoom,
   formatDuration,
@@ -25,9 +29,7 @@ import {
   zoomLimits,
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
-import { DEFAULT_THEME, type TimelineTheme, paintTimeline } from "../timeline/paint.js";
-import { transport } from "../preview/transport.js";
-import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { DEFAULT_THEME, type DragGhost, type TimelineTheme, paintTimeline } from "../timeline/paint.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { PanelHeader } from "./PanelHeader.js";
 
@@ -37,6 +39,13 @@ const TIMELINE = SELECTION_TIMELINE;
 const ZOOM_STEP = 1.5;
 /** User Timing entry of one paint; read by the performance e2e test and DevTools. */
 const PAINT_MEASURE = "timeline-paint";
+/** A press becomes a drag past this many px: a click on a clip never nudges it. */
+const DRAG_THRESHOLD_PX = 3;
+/** Edges snap to targets within this many px. */
+const SNAP_PX = 8;
+/** Status line messages fade after this long. */
+const STATUS_MS = 6_000;
+const isMac = navigator.userAgent.includes("Mac");
 
 /** Scroll and zoom, kept outside React state: they change every frame while scrolling. */
 interface ViewState {
@@ -49,20 +58,50 @@ interface ViewState {
   height: number;
 }
 
+/** Pointer gesture in progress on the lanes. */
+type Gesture =
+  | { kind: "scrub"; pointer: number }
+  | {
+      kind: "clip";
+      pointer: number;
+      grab: Grab;
+      /** Timeline time and client px under the press. */
+      time: number;
+      clientX: number;
+      clientY: number;
+      /** Past the drag threshold: a ghost is shown and release sends an edit. */
+      moving: boolean;
+      preview: DragPreview | null;
+    };
+
+/** One line of feedback in the header: what an edit did, or why the daemon refused it. */
+interface Status {
+  text: string;
+  tone: "info" | "error";
+}
+
 /**
  * Canvas timeline of the project's main timeline (SPEC §10): tracks and clips
- * from the daemon, redrawn live as the agent edits from the terminal. Zoom
- * with Ctrl/Cmd + wheel, pinch or `+`/`-`/`0`; scroll natively. Click a clip
- * to select it (Shift/Cmd/Ctrl-click toggles, Esc or a click on empty lane
- * clears) in the shared selection store, which the script editor also
- * reads and sets (scene links, SPEC §5.5). The playhead is the shared
- * transport's: it moves while the preview plays (the lanes follow it), and
- * clicking or dragging on the ruler moves it (scrubbing).
+ * from the daemon, redrawn live as the agent edits from the terminal, and
+ * edited in place. Every edit is one daemon operation by `ui`, saved at once;
+ * drags show a ghost and send on release. Clicks select in the shared
+ * selection store, which the script editor also reads and sets (scene links,
+ * SPEC §5.5); the ruler moves the shared playhead. Keys are listed in
+ * {@link KEYS_LABEL}.
+ * The playhead is the shared transport's (preview/transport.ts): it moves while the preview
+ * plays (the lanes follow it), and the ruler scrubs it.
  */
 export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const empty = layout !== null && layout.clipCount === 0;
+  const [status, setStatus] = useState<Status | null>(null);
+
+  useEffect(() => {
+    if (!status) return;
+    const timer = setTimeout(() => setStatus(null), STATUS_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
 
   return (
     <>
@@ -73,6 +112,9 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
       >
         <span className="panel-title">Timeline</span>
         <span className="panel-meta">{TIMELINE}</span>
+        <span className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
+          {status?.text ?? ""}
+        </span>
         {view && layout && (
           <span className="panel-meta timeline-summary">
             {`${layout.clipCount} ${layout.clipCount === 1 ? "clip" : "clips"}, ${formatTimecode(layout.duration, view.fps)}`}
@@ -95,6 +137,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
           layout={layout}
           fps={view?.fps ?? 30}
           revision={view?.revision ?? null}
+          onStatus={setStatus}
           overlay={
             error && !view ? (
               <p className="timeline-error">{error}</p>
@@ -110,16 +153,25 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
   );
 }
 
+/** Screen-reader summary of the lanes' mouse and keyboard controls. */
+const KEYS_LABEL =
+  "Timeline lanes. Click selects a clip, drag moves it, drag an edge to trim; the ruler moves the playhead. " +
+  "S splits at the playhead, [ and ] trim to it, comma and period nudge a frame, Delete removes, Shift+Delete ripple deletes, " +
+  "arrows move the playhead, N toggles snapping, Escape clears. Plus and minus zoom, 0 fits the timeline. " +
+  `${isMac ? "Command" : "Control"}+Z undoes, ${isMac ? "Command+Shift+Z" : "Control+Y"} redoes.`;
+
 function TimelineCanvas({
   layout,
   fps,
   revision,
   overlay,
+  onStatus,
 }: {
   layout: TimelineLayout | null;
   fps: number;
   revision: number | null;
   overlay: ReactNode;
+  onStatus: (status: Status | null) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -129,15 +181,19 @@ function TimelineCanvas({
   const frame = useRef(0);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, origin } = useSelection();
+  const { clips: selectedClips, reveal } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
-  /** Clip to bring into view: only for selections made elsewhere (a script heading), never under the user's click. */
-  const revealClip = origin === "script" ? selectedClips[0] : undefined;
-  const latest = useRef({ layout, fps, selected });
-  latest.current = { layout, fps, selected };
-  /** Pointer id while scrubbing on the ruler. */
-  const scrubbing = useRef<number | null>(null);
+  const [snapping, setSnapping] = useState(true);
+  const gesture = useRef<Gesture | null>(null);
+  /** Ghost drawn from a drag until the daemon's new revision shows the clip there. */
+  const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
+  /** Edits run one after another, in the order they were made. */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef({ layout, fps, selected, revision, snapping });
+  latest.current = { layout, fps, selected, revision, snapping };
+  const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
 
   const draw = useCallback(() => {
     frame.current = 0;
@@ -158,6 +214,7 @@ function TimelineCanvas({
     }
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     const started = performance.now();
+    const drag = ghost.current?.drag;
     const { mediaDrawn } = paintTimeline(context, {
       layout: current ?? { rows: [], duration: 0, height: RULER_HEIGHT, clipCount: 0 },
       viewport: view,
@@ -166,6 +223,7 @@ function TimelineCanvas({
       theme: theme.current,
       media: mediaRef.current!,
       selected: chosen,
+      ...(drag ? { drag } : {}),
     });
     performance.measure(PAINT_MEASURE, { start: started });
     // User Timing buffers are unbounded: keep only recent paints.
@@ -223,11 +281,13 @@ function TimelineCanvas({
 
   // Redraw synchronously on a new timeline: the change shows in the same frame as the DOM update.
   useLayoutEffect(() => {
+    // A revision at or past the one a drag produced shows the clip where its ghost was.
+    const pending = ghost.current;
+    if (pending?.until != null && revision !== null && revision >= pending.until) ghost.current = null;
     settle();
     if (frame.current) cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, selected, settle, draw]);
-
+  }, [layout, revision, selected, settle, draw]);
   // The playhead moves every frame while playing: repaint outside React, and page the lanes to keep it in view.
   useEffect(
     () =>
@@ -235,23 +295,23 @@ function TimelineCanvas({
         const { time, playing } = transport.get();
         const view = state.current;
         const x = time * view.pxPerSecond - view.scrollLeft;
-        if (playing && scrubbing.current === null && view.width > 0 && (x < 0 || x > view.width - 16)) {
+        if (playing && gesture.current?.kind !== "scrub" && view.width > 0 && (x < 0 || x > view.width - 16)) {
           view.scrollLeft = Math.max(0, time * view.pxPerSecond - view.width * 0.1);
           settle();
         }
+        lanesEl.current?.setAttribute("data-playhead", String(time));
         schedule();
       }),
     [schedule, settle],
   );
 
-  // Keyed on the clip, not the selection: pruning other clips must not move the view.
+  // Keyed on the request, not the selection: the same heading clicked again scrolls again, pruning never scrolls.
   useEffect(() => {
-    const first = revealClip;
     const box = scroller.current;
     const current = latest.current.layout;
-    if (!first || !box || !current) return;
-    const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === first));
-    const clip = row?.clips.find((candidate) => candidate.id === first);
+    if (!reveal || !box || !current) return;
+    const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === reveal.clip));
+    const clip = row?.clips.find((candidate) => candidate.id === reveal.clip);
     if (!row || !clip) return;
     // The player follows selections made elsewhere: the playhead jumps to the clip (not while playing).
     if (!transport.get().playing) transport.seek(clip.start);
@@ -263,7 +323,7 @@ function TimelineCanvas({
     const top = row.top - RULER_HEIGHT;
     if (top < view.scrollTop || top + row.height > view.scrollTop + lanes) view.scrollTop = Math.max(0, top);
     settle();
-  }, [revealClip, settle]);
+  }, [reveal, settle]);
 
   useEffect(() => {
     const style = getComputedStyle(document.documentElement);
@@ -327,6 +387,69 @@ function TimelineCanvas({
     return off;
   }, []);
 
+  /**
+   * Queue daemon operations, one at a time; the first refusal stops the rest
+   * and shows the daemon's message. Resolves with the last result, or null.
+   */
+  const run = useCallback(
+    (work: () => Promise<OperationResult | null>, done?: (result: OperationResult | null) => void) => {
+      queue.current = queue.current.then(async () => {
+        try {
+          const result = await work();
+          onStatus(result ? describe(result, latest.current.fps) : null);
+          done?.(result);
+        } catch (error) {
+          onStatus({ tone: "error", text: (error as Error).message });
+          done?.(null);
+        }
+      });
+    },
+    [onStatus],
+  );
+
+  const send = useCallback(
+    (edits: TimelineEdit[], done?: (result: OperationResult | null) => void) => {
+      if (edits.length === 0) {
+        done?.(null);
+        return;
+      }
+      run(async () => {
+        let last: OperationResult | null = null;
+        for (const edit of edits) last = await window.frameshell.timeline.edit(TIMELINE, edit);
+        return last;
+      }, done);
+    },
+    [run],
+  );
+
+  const command = (kind: EditCommand) => {
+    const current = latest.current;
+    if (!current.layout) return;
+    const edits = commandEdits(kind, { layout: current.layout, selected: selectedClips, playhead: transport.get().time, fps: current.fps });
+    if (edits.length === 0) onStatus({ tone: "info", text: nothingToDo(kind, selectedClips.length > 0) });
+    else send(edits);
+  };
+
+  const history = (direction: "undo" | "redo") =>
+    run(async () => {
+      const result = await window.frameshell.timeline[direction](TIMELINE);
+      if (!result) onStatus({ tone: "info", text: direction === "undo" ? "Nothing to undo" : "Nothing to redo" });
+      return result;
+    });
+
+  /** Move the playhead, scrolling it into view when a key took it off screen. */
+  const seek = (seconds: number, reveal: boolean) => {
+    const rate = latest.current.fps;
+    const time = Math.max(0, Math.round(seconds * rate) / rate);
+    transport.seek(time);
+    const view = state.current;
+    const x = time * view.pxPerSecond;
+    if (reveal && (x < view.scrollLeft || x > view.scrollLeft + view.width)) {
+      view.scrollLeft = Math.max(0, x - view.width / 2);
+      settle();
+    }
+  };
+
   const onScroll = () => {
     const box = scroller.current!;
     state.current.scrollLeft = box.scrollLeft;
@@ -334,65 +457,175 @@ function TimelineCanvas({
     schedule();
   };
 
+  const cancelDrag = (): boolean => {
+    const current = gesture.current;
+    gesture.current = null;
+    setDragging(null);
+    if (current?.kind === "clip" && current.moving) {
+      ghost.current = null;
+      schedule();
+      return true;
+    }
+    return false;
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === "=" || event.key === "+") zoom(ZOOM_STEP);
+    const mod = isMac ? event.metaKey : event.ctrlKey;
+    const frames = event.shiftKey ? 10 : 1;
+    if (mod && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === "z") history(event.shiftKey ? "redo" : "undo");
+      else if (key === "y" && !isMac) history("redo");
+      else if (key === "k") command({ kind: "split" });
+      else return;
+    } else if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    } else if (event.key === "=" || event.key === "+") zoom(ZOOM_STEP);
     else if (event.key === "-") zoom(1 / ZOOM_STEP);
     else if (event.key === "0") fit();
-    else if (event.key === "Escape") selection.clear();
+    else if (event.key === "Escape") {
+      if (!cancelDrag()) selection.clear();
+    } else if (event.code === "KeyS" && !event.shiftKey) command({ kind: "split" });
+    else if (event.code === "BracketLeft") command({ kind: "trim", side: "head" });
+    else if (event.code === "BracketRight") command({ kind: "trim", side: "tail" });
+    else if (event.code === "Comma") command({ kind: "nudge", frames: -frames });
+    else if (event.code === "Period") command({ kind: "nudge", frames });
+    else if (event.key === "Delete" || event.key === "Backspace") command({ kind: "delete", ripple: event.shiftKey });
+    else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const step = event.shiftKey ? 1 : 1 / latest.current.fps;
+      seek(transport.get().time + (event.key === "ArrowLeft" ? -step : step), true);
+    } else if (event.key === "Home") seek(0, true);
+    else if (event.key === "End") seek(latest.current.layout?.duration ?? 0, true);
+    else if (event.code === "KeyN") setSnapping((on) => !on);
     else return;
     event.preventDefault();
   };
 
-  /** Playhead to the time under the pointer. */
-  const scrubTo = (clientX: number) => {
-    const box = scroller.current!;
-    const x = Math.min(box.clientWidth, Math.max(0, clientX - box.getBoundingClientRect().left));
-    transport.seek((x + state.current.scrollLeft) / state.current.pxPerSecond);
-  };
-
-  /**
-   * On the ruler: move the playhead there and scrub while dragging (playback
-   * pauses). On a lane: select the clip under the pointer. Scrollbars are left alone.
-   */
-  const onPointerDown = (event: PointerEvent) => {
+  /** Pointer position in the scroller's box, or null over its scrollbars. */
+  const locate = (event: PointerEvent) => {
     const box = scroller.current!;
     const rect = box.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    if (event.button !== 0 || x >= box.clientWidth || y >= box.clientHeight) return;
-    if (y < RULER_HEIGHT) {
+    return x >= box.clientWidth || y >= box.clientHeight ? null : { x, y };
+  };
+
+  const timeAt = (x: number) => (x + state.current.scrollLeft) / state.current.pxPerSecond;
+
+  /**
+   * Press on the lanes: the ruler scrubs the playhead; a clip is selected
+   * (Shift/Cmd/Ctrl toggles) and may be dragged; empty lane clears.
+   */
+  const onPointerDown = (event: PointerEvent) => {
+    const at = locate(event);
+    if (event.button !== 0 || !layout || !at) return;
+    const box = scroller.current!;
+    if (at.y < RULER_HEIGHT) {
       transport.pause();
-      scrubbing.current = event.pointerId;
+      gesture.current = { kind: "scrub", pointer: event.pointerId };
       box.setPointerCapture(event.pointerId);
-      scrubTo(event.clientX);
+      seek(timeAt(at.x), false);
       return;
     }
-    if (!layout) return;
-    const hit = clipAt(layout, state.current, x, y);
-    if (!hit) selection.clear();
-    else if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleClip(hit.clip.id, "timeline");
-    else selection.selectClips([hit.clip.id], "timeline");
+    const grab = grabAt(layout, state.current, at.x, at.y);
+    if (!grab) {
+      selection.clear();
+      return;
+    }
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      selection.toggleClip(grab.clip.id, "timeline");
+      return;
+    }
+    // Pressing a selected clip keeps the others selected until release: the press may start a drag.
+    if (!selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    gesture.current = {
+      kind: "clip",
+      pointer: event.pointerId,
+      grab,
+      time: timeAt(at.x),
+      clientX: event.clientX,
+      clientY: event.clientY,
+      moving: false,
+      preview: null,
+    };
+    box.setPointerCapture(event.pointerId);
+    setHover(null);
   };
 
   const onPointerMove = (event: PointerEvent) => {
-    if (scrubbing.current === event.pointerId) {
-      scrubTo(event.clientX);
-      return;
-    }
     if (!layout) return;
     const rect = scroller.current!.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const hit = clipAt(layout, state.current, x, y);
-    setHover((current) => (hit ? { ...hit, x, y } : current ? null : current));
+    const current = gesture.current;
+    if (current?.kind === "scrub") {
+      seek(timeAt(x), false);
+      return;
+    }
+    if (current?.kind === "clip") {
+      const travel = Math.max(Math.abs(event.clientX - current.clientX), Math.abs(event.clientY - current.clientY));
+      if (!current.moving && travel < DRAG_THRESHOLD_PX) return;
+      current.moving = true;
+      const view = state.current;
+      // Alt inverts snapping for this drag position.
+      const snap = latest.current.snapping !== event.altKey;
+      const preview = dragPreview({
+        layout,
+        grab: current.grab,
+        delta: timeAt(x) - current.time,
+        y: y + view.scrollTop,
+        fps: latest.current.fps,
+        snap: snap
+          ? { points: snapPoints(layout, transport.get().time, new Set([current.grab.clip.id])), tolerance: SNAP_PX / view.pxPerSecond }
+          : null,
+      });
+      current.preview = preview;
+      ghost.current = { drag: toGhost(preview), until: null };
+      setDragging({ preview, x, y });
+      schedule();
+      return;
+    }
+    const grab = grabAt(layout, state.current, x, y);
+    scroller.current!.style.cursor = grab ? (grab.part === "body" ? "grab" : "ew-resize") : "";
+    setHover((was) => (grab ? { row: grab.row, clip: grab.clip, x, y } : was ? null : was));
+  };
+
+  const onPointerUp = (event: PointerEvent) => {
+    const current = gesture.current;
+    if (!current || current.pointer !== event.pointerId) return;
+    gesture.current = null;
+    setDragging(null);
+    if (current.kind !== "clip") return;
+    if (!current.moving) {
+      // A click (no drag) on a clip of a multi-selection selects just it.
+      if (!event.shiftKey && !event.metaKey && !event.ctrlKey) selection.selectClips([current.grab.clip.id], "timeline");
+      return;
+    }
+    const edit = current.preview ? dragEdit(current.preview) : null;
+    if (!edit) {
+      ghost.current = null;
+      schedule();
+      return;
+    }
+    const drawn = ghost.current;
+    send([edit], (result) => {
+      if (ghost.current !== drawn || !drawn) return;
+      // Keep the ghost until the feed shows the result; drop it at once when refused or already shown.
+      if (result && (latest.current.revision ?? -1) < result.revision) drawn.until = result.revision;
+      else ghost.current = null;
+      schedule();
+    });
+  };
+
+  const onPointerCancel = () => {
+    if (gesture.current) cancelDrag();
   };
 
   return (
     <div className="timeline-body">
       <div className="timeline-heads">
         <div className="ruler-spacer">
-          <div className="timeline-zoom" role="group" aria-label="Timeline zoom">
+          <div className="timeline-zoom" role="group" aria-label="Timeline zoom and snapping">
             <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" onClick={() => zoom(1 / ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -406,6 +639,17 @@ function TimelineCanvas({
             <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" onClick={() => zoom(ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8M8 4v8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </button>
+            <button
+              className={`icon-button snap-toggle${snapping ? " on" : ""}`}
+              aria-label="Snapping"
+              aria-pressed={snapping}
+              title={`Snap to clip edges and the playhead (N; hold ${isMac ? "Option" : "Alt"} to invert)`}
+              onClick={() => setSnapping((on) => !on)}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 2.5v6a4 4 0 0 0 8 0v-6M4 5.5h2.5M9.5 5.5H12" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
           </div>
@@ -427,6 +671,9 @@ function TimelineCanvas({
         data-revision={revision ?? undefined}
         data-clips={layout?.clipCount ?? 0}
         data-selected={selectedClips.join(" ")}
+        ref={lanesEl}
+        data-playhead={transport.get().time}
+        data-dragging={dragging ? dragging.preview.part : undefined}
       >
         <canvas ref={canvas} className="timeline-canvas" aria-hidden="true" />
         <div
@@ -434,25 +681,71 @@ function TimelineCanvas({
           className="timeline-scroller"
           tabIndex={0}
           role="region"
-          aria-label="Timeline lanes. Click the ruler to move the playhead, drag it to scrub. Click selects a clip, Escape clears. Plus and minus zoom, 0 fits the timeline."
+          aria-label={KEYS_LABEL}
           onScroll={onScroll}
           onKeyDown={onKeyDown}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
-          onPointerUp={(event) => {
-            if (scrubbing.current === event.pointerId) scrubbing.current = null;
-          }}
-          onPointerCancel={() => (scrubbing.current = null)}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onLostPointerCapture={onPointerCancel}
           onPointerLeave={() => setHover(null)}
         >
           <div ref={sizer} className="timeline-sizer" />
         </div>
         {overlay && <div className="timeline-empty">{overlay}</div>}
-        {hover && <ClipTooltip hover={hover} fps={fps} />}
+        {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} />}
         <ClipList layout={layout} fps={fps} selected={selected} />
       </div>
     </div>
   );
+}
+
+/** Ghost of a drag preview, as the painter draws it. */
+function toGhost(preview: DragPreview): DragGhost {
+  return {
+    clip: preview.clip.id,
+    row: preview.row.id,
+    start: preview.start,
+    end: preview.end,
+    blocked: preview.blocked,
+    guide: preview.snapped?.time ?? null,
+  };
+}
+
+/** Header line for an applied edit: energy snapping news (ADR 0003), else what was done. */
+function describe(result: OperationResult, fps: number): Status {
+  const rough = result.snaps.find((snap) => !snap.clean);
+  if (rough) {
+    return {
+      tone: "error",
+      text: `No pause within ${rough.window} s of ${formatTimecode(rough.applied, fps)}: speech may be clipped there`,
+    };
+  }
+  const moved = result.snaps.find((snap) => Math.abs(snap.applied - snap.requested) >= 0.0005);
+  if (moved) return { tone: "info", text: `Edge snapped ${formatDuration(Math.abs(moved.applied - moved.requested))} into a pause` };
+  return { tone: "info", text: `${OP_LABELS[result.operation.op] ?? result.operation.op} saved` };
+}
+
+const OP_LABELS: Record<string, string> = {
+  "clip.move": "Move",
+  "clip.trim": "Trim",
+  "clip.split": "Split",
+  "clip.remove": "Delete",
+  cut: "Ripple delete",
+  revert: "Undo",
+};
+
+/** Why a key did nothing, in the header. */
+function nothingToDo(command: EditCommand, anySelected: boolean): string {
+  switch (command.kind) {
+    case "split":
+    case "trim":
+      return anySelected ? "No selected clip under the playhead" : "No clip under the playhead";
+    case "nudge":
+    case "delete":
+      return anySelected ? "Nothing to change" : "Select a clip first";
+  }
 }
 
 function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x: number; y: number }; fps: number }) {
@@ -467,6 +760,29 @@ function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x:
         {clip.problem ? clip.problem : `${formatDuration(clip.end - clip.start)} on ${row.label}, ${clip.type}`}
       </span>
       <span className="clip-tooltip-faint">{clip.id}</span>
+    </div>
+  );
+}
+
+/** Where the dragged clip or edge would land, next to the pointer. */
+function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; y: number; fps: number }) {
+  const { part, clip, row } = preview;
+  const title = part === "body" ? `Move ${clip.name}` : `Trim ${part === "head" ? "start" : "end"} of ${clip.name}`;
+  const time = part === "tail" ? preview.end : preview.start;
+  return (
+    <div className="clip-tooltip drag-tooltip" style={{ left: x + 12, top: y + 14 }} role="tooltip">
+      <strong>{title}</strong>
+      <span>
+        {formatTimecode(time, fps)}
+        {part === "body" && row.id !== preview.from.id ? ` on ${row.label}` : ""}
+      </span>
+      <span className={preview.blocked ? "clip-tooltip-danger" : "clip-tooltip-faint"}>
+        {preview.blocked
+          ? "Overlaps a clip: will be refused"
+          : preview.snapped
+            ? `Snapped to ${preview.snapped.kind === "playhead" ? "the playhead" : "a clip edge"}`
+            : formatDuration(preview.end - preview.start)}
+      </span>
     </div>
   );
 }

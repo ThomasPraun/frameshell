@@ -114,12 +114,29 @@ export interface PaintInput<Img> {
   media: MediaLookup<Img>;
   /** Ids of selected clips (shared selection store), outlined in the accent color; none when absent. */
   selected?: ReadonlySet<string>;
+  /** Clip being dragged: drawn dimmed in place, with its ghost where it would land. */
+  drag?: DragGhost;
+}
+
+/** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
+export interface DragGhost {
+  clip: string;
+  /** Track id the ghost is on. */
+  row: string;
+  start: number;
+  end: number;
+  /** The daemon would refuse it (overlap): drawn in the danger color. */
+  blocked: boolean;
+  /** Snap target the ghost's edge sits on, seconds: a guide line across the lanes; null when free. */
+  guide: number | null;
 }
 
 /** Clip body inset from its lane, px. */
 const CLIP_INSET_Y = 3;
 /** Labels need this much clip width, px. */
 const MIN_LABEL_WIDTH = 28;
+/** A dragged clip stays visible in place, faded, until the daemon applies the move. */
+const DRAGGED_ALPHA = 0.35;
 
 /**
  * Paint one frame. Returns how many clips were drawn (culling is observable)
@@ -156,10 +173,14 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       return;
     }
     for (const clip of visibleClips(row.clips, t0, t1)) {
+      const dragged = input.drag?.clip === clip.id;
+      if (dragged) ctx.globalAlpha = DRAGGED_ALPHA;
       if (paintClip(ctx, input, row, clip, top, colors)) mediaDrawn++;
+      if (dragged) ctx.globalAlpha = 1;
       clipsDrawn++;
     }
   });
+  if (input.drag) paintDrag(ctx, input, input.drag);
   ctx.restore();
 
   paintRuler(ctx, input);
@@ -254,6 +275,31 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
 
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
   return media;
+}
+
+/** Ghost of a drag: a clip-sized frame on its landing lane, and the snap guide it sits on. */
+function paintDrag<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, drag: DragGhost): void {
+  const { layout, theme } = input;
+  const { pxPerSecond, scrollLeft, scrollTop, width, height } = input.viewport;
+  const row = layout.rows.find((candidate) => candidate.id === drag.row);
+  if (row) {
+    const x0 = drag.start * pxPerSecond - scrollLeft + 0.5;
+    const x1 = drag.end * pxPerSecond - scrollLeft - 0.5;
+    const left = Math.max(x0, -2);
+    const right = Math.min(Math.max(x1, x0 + 1), width + 2);
+    const y = row.top - scrollTop + CLIP_INSET_Y;
+    const h = row.height - 2 * CLIP_INSET_Y;
+    const color = drag.blocked ? theme.danger : theme.accent;
+    ctx.fillStyle = withAlpha(color, 0.16);
+    ctx.fillRect(left, y, right - left, h);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, right - left - 1), h - 1);
+  }
+  if (drag.guide !== null) {
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(Math.round(drag.guide * pxPerSecond - scrollLeft), RULER_HEIGHT, 1, height - RULER_HEIGHT);
+  }
 }
 
 /** Name, then length (or why it is unknown) while it fits; sticks to the left edge of the view. */
