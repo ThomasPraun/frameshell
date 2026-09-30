@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { connectOrStartDaemon } from "../src/daemon-client.js";
 
@@ -24,7 +25,48 @@ async function exited(pid: number): Promise<void> {
   }
 }
 
+/** Env for a spawned daemon: private socket, dirs and start counter. */
+function daemonEnv(path: string, extra: Record<string, string> = {}) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-dc-")));
+  const starts = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-dc-starts-")));
+  const env = {
+    ...process.env,
+    FRAMESHELL_SOCKET: path,
+    FRAMESHELL_IDLE_TIMEOUT_MS: "200",
+    FRAMESHELL_DATA_DIR: dir,
+    FRAMESHELL_CONFIG_DIR: dir,
+    FAKE_DAEMON_STARTS_DIR: starts,
+    ...extra,
+  };
+  return { env, starts: () => readdirSync(starts).length };
+}
+
+const earlyExitDaemon = fileURLToPath(new URL("./fixtures/early-exit-daemon.mjs", import.meta.url));
+
 describe("connectOrStartDaemon", () => {
+  it("starts the daemon again when the one it spawned exits cleanly before any client reaches it", async () => {
+    const path = socketPath();
+    const { env, starts } = daemonEnv(path, { FAKE_DAEMON_EARLY_EXITS: "1" });
+    const conn = await connectOrStartDaemon({ socketPath: path, client: "test/dc", env, daemonEntry: earlyExitDaemon });
+    try {
+      expect(starts()).toBe(2);
+    } finally {
+      conn.close();
+      await exited(conn.daemon.pid);
+    }
+  });
+
+  it("gives up well before the start timeout when every daemon it spawns exits cleanly unreached", async () => {
+    const path = socketPath();
+    const { env, starts } = daemonEnv(path, { FAKE_DAEMON_EARLY_EXITS: "1000" });
+    const began = Date.now();
+    await expect(
+      connectOrStartDaemon({ socketPath: path, client: "test/dc", env, daemonEntry: earlyExitDaemon, startTimeoutMs: 60_000 }),
+    ).rejects.toThrow(/exited before accepting a connection/);
+    expect(Date.now() - began).toBeLessThan(30_000);
+    expect(starts()).toBe(3);
+  });
+
   it("starts a fresh daemon when the one it reached stops on its idle timeout mid-handshake", async () => {
     const path = socketPath();
     // Stand-in for a daemon whose idle timer fires as the client connects: it drops the connection
@@ -35,14 +77,7 @@ describe("connectOrStartDaemon", () => {
     });
     await new Promise<void>((resolve) => dying.listen(path, resolve));
 
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-dc-")));
-    const env = {
-      ...process.env,
-      FRAMESHELL_SOCKET: path,
-      FRAMESHELL_IDLE_TIMEOUT_MS: "200",
-      FRAMESHELL_DATA_DIR: dir,
-      FRAMESHELL_CONFIG_DIR: dir,
-    };
+    const { env } = daemonEnv(path);
     const conn = await connectOrStartDaemon({ socketPath: path, client: "test/dc", env });
     try {
       expect(conn.daemon.pid).not.toBe(process.pid);
