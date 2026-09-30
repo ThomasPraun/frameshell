@@ -32,12 +32,18 @@ export function fpsRational(fps: number): string {
 }
 
 /**
+ * Audio filter putting samples on the source clock at `sampleRate`.
  * Timestamps start at source time 0 in every output: ffmpeg subtracts the
  * container start time from all streams alike, `first_pts=0` pads audio that
  * starts late, and `async=1` fills gaps VFR recorders leave, so the sidecar
- * sample index and the proxy frame index share one clock.
+ * sample index and the proxy frame index share one clock. Transcription audio
+ * extracted from a source file uses it too, so word times match the sidecar.
  */
-const AUDIO_FILTER = `aresample=${SIDECAR_SAMPLE_RATE}:async=1:first_pts=0`;
+export function alignedAudioFilter(sampleRate: number): string {
+  return `aresample=${sampleRate}:async=1:first_pts=0`;
+}
+
+const AUDIO_FILTER = alignedAudioFilter(SIDECAR_SAMPLE_RATE);
 
 /** Common flags: quiet, overwrite, machine-readable progress on stdout. */
 const BASE = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"];

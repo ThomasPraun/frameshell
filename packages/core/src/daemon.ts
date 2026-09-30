@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
+import { resolve } from "node:path";
 import {
   ErrorCode,
   type HandshakeResult,
@@ -7,6 +8,7 @@ import {
   type MethodName,
   type MethodResult,
   PROTOCOL_VERSION,
+  type Progress,
   RpcError,
   type ValidatedParams,
   type AppDirs,
@@ -24,6 +26,8 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
+import type { AudioExtractor } from "./transcripts/audio.js";
+import { transcribeAsset } from "./transcripts/transcriber.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -48,6 +52,8 @@ export interface DaemonOptions {
   binaries?: BinaryManager;
   /** Background jobs (ingest) run at once. Default 2: each ffmpeg already uses every core. */
   jobConcurrency?: number;
+  /** Audio extraction for `transcribe`. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
+  extractAudio?: AudioExtractor;
 }
 
 /** Running daemon handle. */
@@ -65,8 +71,15 @@ interface Caller {
   session: string | null;
 }
 
+/** Per-request services. `progress` sends `progress` notifications for this request; no-op for notifications. */
+interface RequestContext {
+  progress(update: Progress): void;
+}
+
 /** One handler per registry method; params arrive already validated. */
-type Handlers = { [M in MethodName]: (params: ValidatedParams<M>, caller: Caller) => Promise<MethodResult<M>> };
+type Handlers = {
+  [M in MethodName]: (params: ValidatedParams<M>, caller: Caller, request: RequestContext) => Promise<MethodResult<M>>;
+};
 
 /**
  * Start frameshelld on `socketPath`.
@@ -129,6 +142,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => plugins.presets(await root(cwd)),
+    transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
+      await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
+      const { dir, config } = (await readEnclosingProject(cwd))!;
+      const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
+      const overrides = { dir, binaries: config.binaries };
+      return transcribeAsset({
+        projectDir: dir,
+        asset: resolve(cwd, asset),
+        providerId,
+        provider: () => plugins.transcriptionProvider(dir, providerId),
+        model: model ?? config.transcription?.model,
+        language: language ?? config.transcription?.language,
+        tools: {
+          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
+          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
+        },
+        media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
+        extractAudio: options.extractAudio,
+        progress: request.progress,
+      });
+    },
     "file.write": ({ path, content }) => projects.writeFile(path, content),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
@@ -181,7 +215,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         // Set before the await: a request pipelined behind the handshake is dispatched
         // while the handshake handler is still pending. Invalid params never get here.
         if (method === "handshake") handshaken = true;
-        const result = await (handlers[method] as (p: typeof params, c: Caller) => Promise<unknown>)(params, caller);
+        const context: RequestContext = {
+          progress: (update) => {
+            if (request.id !== undefined) writeMessage(socket, { jsonrpc: "2.0", method: "progress", params: { requestId: request.id, ...update } });
+          },
+        };
+        const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
+        const result = await handler(params, caller, context);
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;

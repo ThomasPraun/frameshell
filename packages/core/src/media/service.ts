@@ -143,6 +143,24 @@ export class MediaService {
     return assets;
   }
 
+  /**
+   * Content hash of `rel` (reusing the index while size and mtime match) and
+   * the PCM sidecar of a complete ingest of that content at the project fps.
+   * `sidecar` is null when no complete manifest exists or the asset has no
+   * audio. Never queues or awaits ingest.
+   */
+  async derivedAudio(
+    root: string,
+    rel: string,
+    onProgress?: (fraction: number) => void,
+  ): Promise<{ hash: string; sidecar: AssetInfo["sidecar"] }> {
+    const { store } = this.#attached(root);
+    const hash = await store.hash(rel, onProgress);
+    const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
+    const manifest = await store.manifest(store.key(hash, fps));
+    return { hash, sidecar: manifest?.sidecar ?? null };
+  }
+
   /** Stop watching. Running jobs are the queue's to stop. */
   async close(): Promise<void> {
     this.#closed = true;

@@ -106,10 +106,20 @@ export async function probeFfmpeg(path: string, exec: Exec = execProcess): Promi
   return { version: parseVersion(version.stdout), codecs, problems };
 }
 
-/** Version token of `<tool> -version` (`ffmpeg version 9.0.2-… Copyright`), or null. */
-export async function probeVersion(path: string, exec: Exec = execProcess): Promise<string | null> {
+/**
+ * Version token printed by the tool, or null. Default probe: `<tool> -version`
+ * (`ffmpeg version 9.0.2-… Copyright`); `probe` overrides args and pattern
+ * (first capture group). Both stdout and stderr are searched.
+ */
+export async function probeVersion(
+  path: string,
+  exec: Exec = execProcess,
+  probe?: { readonly args: readonly string[]; readonly pattern: RegExp },
+): Promise<string | null> {
   try {
-    return parseVersion((await exec(path, ["-hide_banner", "-version"])).stdout);
+    if (!probe) return parseVersion((await exec(path, ["-hide_banner", "-version"])).stdout);
+    const result = await exec(path, [...probe.args]);
+    return probe.pattern.exec(`${result.stdout}\n${result.stderr}`)?.[1] ?? null;
   } catch {
     return null;
   }

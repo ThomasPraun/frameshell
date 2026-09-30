@@ -83,21 +83,72 @@ export interface RenderContext {
   readonly height: number;
 }
 
-/** Transcription provider contract (SPEC §8.2). */
+/**
+ * Transcription provider contract (SPEC §8.2). The host extracts the audio,
+ * assigns word ids, hashes the asset and writes the transcript file; the
+ * provider only turns audio into timed words.
+ */
 export interface TranscriptionProvider {
-  /** Name used by `frameshell transcribe --provider`. */
+  /** Name used by `frameshell transcribe --provider` and `transcription.provider` in `frameshell.json`. */
   readonly id: string;
-  /** Word-level transcript of `file`; times in source seconds. */
-  transcribe(file: string, options: { language?: string; model?: string }): Promise<TranscriptWord[]>;
+  /**
+   * Transcribe `audio`: a 16 kHz mono 16-bit PCM WAV the host extracted from
+   * the asset (from its PCM sidecar when ingested). Seconds in this file are
+   * source-asset seconds. Throw to fail; the message reaches the user.
+   */
+  transcribe(audio: string, options: TranscribeOptions, context: TranscribeContext): Promise<TranscriptionResult>;
 }
 
-/** One word in core transcript format (SPEC §5.4). */
+/** What the user asked for; both optional, the provider picks defaults. */
+export interface TranscribeOptions {
+  /** BCP-47-ish language code (`es`, `en`); absent = provider default or auto-detect. */
+  language?: string;
+  /** Provider-specific model id; absent = provider default. */
+  model?: string;
+}
+
+/** Host services for one transcription. Valid only until `transcribe` settles. */
+export interface TranscribeContext {
+  /**
+   * Absolute path of a native tool the host manages (SPEC §9), e.g.
+   * `whisper-cli`: the user's `binaries` override, or the pinned build,
+   * installed first when missing. Rejects for tools the host does not know.
+   */
+  ensureBinary(name: string): Promise<string>;
+  /** Absolute path of a model file the host manages by id, downloaded and checksum-verified first when missing. */
+  ensureModel(id: string): Promise<string>;
+  /** Report progress to whoever waits (CLI stderr, app). Cheap; call freely. */
+  progress(update: TranscriptionProgress): void;
+}
+
+/** One progress report. */
+export interface TranscriptionProgress {
+  /** Human line, e.g. `Transcribing`. */
+  message: string;
+  /** 0..1 of the current step when known. */
+  fraction?: number;
+}
+
+/** What a provider returns. */
+export interface TranscriptionResult {
+  /** Model actually used; written to the transcript. */
+  model: string;
+  /** Language actually used or detected. */
+  language?: string;
+  /** In time order. */
+  words: TranscriptWord[];
+  /** Compute device used, e.g. `metal`, `cuda`, `cpu`; for reports only. */
+  device?: string;
+}
+
+/** One word in core transcript format (SPEC §5.4), before the host assigns its id. */
 export interface TranscriptWord {
   text: string;
-  /** Onset, seconds. */
+  /** Onset, source seconds. */
   start: number;
-  /** End, seconds. */
+  /** End, source seconds; >= start. */
   end: number;
+  /** 0..1 */
   confidence?: number;
 }
 

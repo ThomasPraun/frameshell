@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PLUGIN_MANIFEST_SCHEMA_URL, PluginManifestSchema } from "./plugin.js";
 import { PROJECT_SCHEMA_URL, ProjectConfigSchema } from "./project.js";
 import { TIMELINE_SCHEMA_URL, TimelineSchema } from "./timeline.js";
+import { TRANSCRIPT_SCHEMA_URL, TranscriptSchema } from "./transcript.js";
 
 /**
  * JSON Schema (draft 2020-12) for every published file type, keyed by file
@@ -17,5 +18,6 @@ export function generateJsonSchemas(): Record<string, object> {
     "project.json": toJson(ProjectConfigSchema, PROJECT_SCHEMA_URL),
     "timeline.json": toJson(TimelineSchema, TIMELINE_SCHEMA_URL),
     "plugin.json": toJson(PluginManifestSchema, PLUGIN_MANIFEST_SCHEMA_URL),
+    "transcript.json": toJson(TranscriptSchema, TRANSCRIPT_SCHEMA_URL),
   };
 }

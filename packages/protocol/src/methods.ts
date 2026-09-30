@@ -5,7 +5,7 @@ import { z } from "zod";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -57,9 +57,16 @@ const BinaryReportSchema = z.object({
       version: z.string(),
       origin: z.string().describe("Who builds it (homepage)."),
       license: z.string().describe("SPDX licence of the build."),
+      accelerator: z
+        .enum(["metal", "cuda", "vulkan"])
+        .nullable()
+        .describe("GPU backend of the build; null = CPU only."),
     })
     .nullable()
-    .describe("Managed build pinned for this platform; null when none."),
+    .describe(
+      "Managed build chosen for this machine; null when none is pinned. GPU builds are chosen when the GPU and " +
+        "toolchain are detected, else the CPU build.",
+    ),
 });
 
 const CodecReportSchema = z.object({
@@ -433,10 +440,67 @@ export const methods = {
       jobs: z.array(JobSchema).describe("Oldest first."),
     }),
   },
+  transcribe: {
+    description:
+      "Transcribe one asset to word level and write `transcripts/<asset minus extension>.words.json` (SPEC §5.4; " +
+      "`transcripts/<asset>.words.json`, extension kept, when another asset with the same base name owns the first " +
+      "name): every word with a " +
+      "stable id, text, `start`/`end` in source-asset seconds (3 decimals) and confidence, plus the asset's SHA-256, " +
+      "provider and model. Audio comes from the asset's PCM sidecar when its ingest is complete (see `asset.list`), " +
+        "else from the asset itself; transcription never waits for ingest. Re-transcribing reuses word ids " +
+      "where the same word is found again (same text, start within 0.5 s) and keeps the human `edits` of those ids; " +
+      "other words get ids never used before in that file. " +
+      "The first run downloads the engine and model (whisper.cpp default: 574 MB) and may take minutes; progress " +
+      "arrives as `progress` notifications. Fails with ProjectNotTrusted when the project's plugins are not trusted, " +
+      "TranscriptionProviderNotFound when no loaded plugin provides the provider, TranscriptionFailed when the engine fails, " +
+      "TranscriptNameTaken when both transcript names belong to other assets.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z
+        .string()
+        .min(1)
+        .describe("Media file inside the project, absolute or relative to `cwd`, e.g. `assets/raw-01.mp4`."),
+      provider: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Transcription provider id. Default: `transcription.provider` in `frameshell.json`, else `whisper-cpp`."),
+      model: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Provider model id, e.g. `large-v3-turbo-q5_0`. Default: `transcription.model`, else the provider's default."),
+      language: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Spoken language code, e.g. `es`. Default: `transcription.language`, else auto-detect."),
+    }),
+    result: z.object({
+      transcript: z.string().describe("Written transcript file, project-relative, e.g. `transcripts/raw-01.words.json`."),
+      asset: z.string().describe("Transcribed asset, project-relative."),
+      assetHash: z.string().describe("`sha256:<hex>` of the asset bytes."),
+      audioSource: z
+        .string()
+        .describe(
+          "Project-relative file the audio was taken from: the asset's PCM sidecar under `.frameshell/proxies/` (same as " +
+            "`asset.list` `sidecar.path`), or the asset itself when no complete ingest exists.",
+        ),
+      provider: z.string(),
+      model: z.string(),
+      language: z.string().nullable().describe("Language used or detected; null when the provider did not say."),
+      device: z.string().nullable().describe("Compute device the engine used (`metal`, `cuda`, `cpu`); null when unknown."),
+      words: z.int().describe("Number of words written."),
+      reusedIds: z.int().describe("Words that kept the id they had in the previous transcript."),
+      keptEdits: z.int().describe("Human edits carried over from the previous transcript."),
+      droppedEdits: z.array(z.string()).describe("Ids of human edits dropped because their word was not found again."),
+      seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
+    }),
+  },
   "file.write": {
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json` and `timelines/*.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json` and `transcripts/**/*.words.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. " +
       "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
@@ -465,6 +529,34 @@ export type MethodResult<M extends MethodName> = z.output<(typeof methods)[M]["r
 
 /** Method name to params and result, derived from {@link methods}. */
 export type Methods = { [M in MethodName]: { params: MethodParams<M>; result: MethodResult<M> } };
+
+/**
+ * Notifications the daemon sends (JSON-RPC requests without `id`). Same
+ * contract as {@link methods}: Zod params, model-facing description.
+ */
+export const notifications = {
+  progress: {
+    description:
+      "Progress of a long request on this connection (downloads, builds, transcription). `requestId` is the `id` of " +
+      "the request it belongs to; the final reply still arrives as that request's response.",
+    params: z.object({
+      requestId: z.union([z.int(), z.string()]).describe("`id` of the request in progress."),
+      message: z.string().describe("Human line, e.g. `Downloading model ggml-large-v3-turbo-q5_0 (574 MB, one time)`."),
+      fraction: z.number().min(0).max(1).optional().describe("0..1 of the current step when known."),
+    }),
+  },
+} as const satisfies Record<string, { description: string; params: z.ZodType }>;
+
+/** Params of the `progress` notification. */
+export type ProgressParams = z.output<(typeof notifications)["progress"]["params"]>;
+
+/** One progress report as a request's caller sees it. */
+export type Progress = Omit<ProgressParams, "requestId">;
+
+/** `transcribe` params. */
+export type TranscribeParams = MethodParams<"transcribe">;
+/** Result of `transcribe`. */
+export type TranscribeResult = MethodResult<"transcribe">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -602,6 +694,12 @@ export const ErrorCode = {
   OutsideProject: -32018,
   /** data: `{ path }` of the missing or non-file source */
   AssetNotFound: -32019,
+  /** data: `{ provider, available: string[] }` */
+  TranscriptionProviderNotFound: -32020,
+  /** data: `{ provider, asset, details }` */
+  TranscriptionFailed: -32021,
+  /** data: `{ asset, transcripts: { path, asset }[] }`: every transcript name for the asset belongs to another asset */
+  TranscriptNameTaken: -32022,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

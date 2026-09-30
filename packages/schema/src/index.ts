@@ -26,3 +26,12 @@ export {
   type ExportPreset,
   parseExportPreset,
 } from "./plugin.js";
+export {
+  TRANSCRIPT_SCHEMA_URL,
+  TranscriptSchema,
+  type Transcript,
+  type TranscriptFileWord,
+  WordIdSchema,
+  wordIdNumber,
+  parseTranscript,
+} from "./transcript.js";

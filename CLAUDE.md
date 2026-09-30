@@ -1,7 +1,7 @@
 # Frameshell
 
 IDE for video. Agent edits project from terminal, human corrects in timeline. Open source, Apache 2.0.
-Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`, `apps/desktop` (Electron). Node >= 22.
+Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plugin-api}`, `plugins/whisper-cpp`, `apps/desktop` (Electron). Node >= 22.
 
 ## Doc map
 
@@ -12,8 +12,9 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
-| Managed binaries (ffmpeg pins, sources, licences, re-pin) | `docs/binaries.md` |
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
+| Managed binaries (ffmpeg, whisper.cpp, models: pins, sources, licences, re-pin) | `docs/binaries.md` |
+| Transcription (transcript file, word ids, audio source) | `packages/core/src/transcripts/transcriber.ts`; provider `plugins/whisper-cpp` |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 

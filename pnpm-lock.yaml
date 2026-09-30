@@ -139,6 +139,12 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  plugins/whisper-cpp:
+    devDependencies:
+      '@frameshell/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
 packages:
 
   '@babel/code-frame@7.29.7':

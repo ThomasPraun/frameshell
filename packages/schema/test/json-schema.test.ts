@@ -6,8 +6,8 @@ const committed = (file: string): unknown =>
   JSON.parse(readFileSync(new URL(`../json-schema/${file}`, import.meta.url), "utf8"));
 
 describe("published JSON Schema", () => {
-  it("is generated for project, timeline and plugin manifest files", () => {
-    expect(Object.keys(generateJsonSchemas()).sort()).toEqual(["plugin.json", "project.json", "timeline.json"]);
+  it("is generated for project, timeline, plugin manifest and transcript files", () => {
+    expect(Object.keys(generateJsonSchemas()).sort()).toEqual(["plugin.json", "project.json", "timeline.json", "transcript.json"]);
   });
 
   it("carries the $id that project files reference in $schema", () => {

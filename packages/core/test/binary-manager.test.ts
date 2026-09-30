@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type BinaryPackage, BinaryManager, currentPlatform } from "../src/index.js";
+import { type BinaryPackage, BinaryManager, type PinnedBuild, buildCandidates, currentPlatform } from "../src/index.js";
 import { tarGz, zip } from "./archives.js";
 import { tempDir } from "./helpers.js";
 
@@ -127,7 +127,7 @@ describe("BinaryManager managed install", () => {
   it("falls back to the next mirror when one fails", async () => {
     const archive = goodArchive();
     const good = pinned(archive);
-    const goodUrl = good.builds[currentPlatform()]!.archives[0]!.urls[0]!;
+    const goodUrl = buildCandidates(good, currentPlatform())[0]!.archives[0]!.urls[0]!;
     const pkg = pinned(archive, { urls: [`${base}/missing.tar.gz`, goodUrl] });
     expect(readFileSync(await manager(pkg).ensure("alpha"), "utf8")).toBe("alpha-bin");
   });
@@ -228,5 +228,190 @@ describe("BinaryManager overrides", () => {
       code: ErrorCode.InvalidGlobalConfig,
       message: expect.stringContaining("config.json"),
     });
+  });
+});
+
+describe("BinaryManager support files", () => {
+  it("places pinned libraries and licences next to the tools under their install names", async () => {
+    const archive = tarGz({
+      [`pkg/bin/alpha${exe}`]: { content: "alpha-bin" },
+      [`pkg/bin/beta${exe}`]: { content: "beta-bin" },
+      "pkg/lib/libalpha.so.1.2.3": { content: "lib-bytes" },
+      "pkg/LICENSE": { content: "MIT" },
+    });
+    const pkg = pinned(archive);
+    const build = buildCandidates(pkg, currentPlatform())[0]!;
+    const withSupport: BinaryPackage = {
+      ...pkg,
+      builds: {
+        [currentPlatform()]: {
+          ...build,
+          archives: [{ ...build.archives[0]!, support: { "libalpha.so.1": "pkg/lib/libalpha.so.1.2.3", LICENSE: "pkg/LICENSE" } }],
+        },
+      },
+    };
+    const alpha = await manager(withSupport).ensure("alpha");
+    expect(readFileSync(join(alpha, "..", "libalpha.so.1"), "utf8")).toBe("lib-bytes");
+    expect(readFileSync(join(alpha, "..", "LICENSE"), "utf8")).toBe("MIT");
+  });
+});
+
+describe("BinaryManager GPU candidates", () => {
+  const gpuArchive = () => tarGz({ [`gpu/alpha${exe}`]: { content: "cuda-alpha" }, [`gpu/beta${exe}`]: { content: "cuda-beta" } });
+
+  /** Prebuilt CUDA archive requiring `nvidia-smi` and `nvcc`, then the CPU download as fallback. */
+  function gpuThenCpu(options: { gpuSha256?: string } = {}): BinaryPackage {
+    const archive = gpuArchive();
+    const path = `/${Math.random().toString(36).slice(2)}/gpu.tar.gz`;
+    files.set(path, archive);
+    const cpu = buildCandidates(pinned(goodArchive()), currentPlatform())[0]!;
+    const gpu: PinnedBuild = {
+      version: "1.2.3",
+      origin: "https://example.test",
+      license: "MIT",
+      accelerator: "cuda",
+      requires: [
+        { command: "nvidia-smi", args: ["-L"], proves: "an NVIDIA GPU" },
+        { command: "nvcc", args: ["--version"], proves: "the CUDA toolkit" },
+      ],
+      archives: [
+        {
+          urls: [`${base}${path}`],
+          sha256: options.gpuSha256 ?? sha256(archive),
+          size: archive.length,
+          files: { alpha: `gpu/alpha${exe}`, beta: `gpu/beta${exe}` },
+        },
+      ],
+    };
+    return { name: "tools", tools: ["alpha", "beta"], versionProbe: { args: ["--version"], pattern: /(\S+)/ }, builds: { [currentPlatform()]: [gpu, cpu] } };
+  }
+
+  /** Fake machine: `present` commands pass their probe; an installed executable run by absolute path starts unless `failStart`. */
+  function fakeMachine(options: { present: string[]; failStart?: string }) {
+    const calls: string[][] = [];
+    const run = async (command: string, args: readonly string[], { cwd }: { cwd: string }) => {
+      calls.push([command, ...args]);
+      // Like spawn: a missing working directory fails the command.
+      if (!existsSync(cwd)) throw Object.assign(new Error(`spawn ${command} ENOENT (cwd ${cwd})`), { code: "ENOENT" });
+      if (isAbsolute(command)) {
+        expect(existsSync(command)).toBe(true);
+        if (options.failStart) throw new Error(options.failStart);
+        return;
+      }
+      if (!options.present.includes(command)) throw Object.assign(new Error(`${command} not found on PATH`), { code: "ENOENT" });
+    };
+    return { run, calls };
+  }
+
+  const gpuManager = (pkg: BinaryPackage, run: ReturnType<typeof fakeMachine>["run"], dataDir = tempDir()) =>
+    new BinaryManager({ dataDir, configDir: tempDir(), packages: [pkg], commandRunner: run });
+
+  it("installs the GPU candidate when its probes pass, beside the CPU build, after checking it starts", async () => {
+    const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"] });
+    // First run on the machine: the data dir does not exist yet.
+    const binaries = gpuManager(gpuThenCpu(), machine.run, join(tempDir(), "fresh"));
+
+    expect((await binaries.locate("alpha")).pinned).toMatchObject({ accelerator: "cuda" });
+    const alpha = await binaries.ensure("alpha");
+    expect(readFileSync(alpha, "utf8")).toBe("cuda-alpha");
+    expect(alpha).toContain(join("binaries", "tools", "1.2.3", `${currentPlatform()}-cuda`));
+    expect(JSON.parse(readFileSync(join(alpha, "..", "install.json"), "utf8"))).toMatchObject({ accelerator: "cuda" });
+    // Start check of each installed tool, with the package's version arguments.
+    expect(machine.calls.filter(([command]) => isAbsolute(command!)).map((call) => call.slice(1))).toEqual([["--version"], ["--version"]]);
+    // Probes run once per manager, not per lookup.
+    expect(machine.calls.filter(([command]) => command === "nvidia-smi")).toHaveLength(1);
+  });
+
+  it("takes the CPU build without downloading the GPU one when a probe fails, and never start-checks it", async () => {
+    const machine = fakeMachine({ present: ["nvidia-smi"] });
+    const binaries = gpuManager(gpuThenCpu(), machine.run);
+
+    expect((await binaries.locate("alpha")).pinned?.accelerator).toBeUndefined();
+    const alpha = await binaries.ensure("alpha");
+    expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
+    expect(alpha).toContain(join("binaries", "tools", "1.2.3", currentPlatform()));
+    expect([...hits.keys()].some((url) => url.endsWith("/gpu.tar.gz"))).toBe(false);
+    expect(machine.calls.some(([command]) => isAbsolute(command!))).toBe(false);
+  });
+
+  it("falls back to the CPU build when the GPU executable does not start, and skips it afterwards until the marker is deleted", async () => {
+    const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"], failStart: "libcudart.so.12: cannot open shared object file" });
+    const dataDir = tempDir();
+    const progress: string[] = [];
+    const alpha = await gpuManager(gpuThenCpu(), machine.run, dataDir).ensure("alpha", undefined, { onProgress: (p) => progress.push(p.message) });
+
+    expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
+    const marker = join(dataDir, "binaries", "tools", "1.2.3", `${currentPlatform()}-cuda.failed.json`);
+    expect(JSON.parse(readFileSync(marker, "utf8")).error).toMatch(/libcudart\.so\.12/);
+    expect(progress).toContainEqual(expect.stringMatching(/cuda build does not start here, using the next build .*failed\.json/));
+    // Nothing of the failed build is left in its install dir.
+    expect(existsSync(join(dataDir, "binaries", "tools", "1.2.3", `${currentPlatform()}-cuda`))).toBe(false);
+
+    // A new daemon neither probes nor installs the failed candidate again.
+    const again = fakeMachine({ present: ["nvidia-smi", "nvcc"] });
+    expect((await gpuManager(gpuThenCpu(), again.run, dataDir).locate("alpha")).pinned?.accelerator).toBeUndefined();
+    expect(again.calls).toEqual([]);
+
+    rmSync(marker);
+    expect((await gpuManager(gpuThenCpu(), again.run, dataDir).locate("alpha")).pinned?.accelerator).toBe("cuda");
+  });
+
+  it("never falls back on a checksum mismatch of the GPU build", async () => {
+    const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"] });
+    const binaries = gpuManager(gpuThenCpu({ gpuSha256: "0".repeat(64) }), machine.run);
+    await expect(binaries.ensure("alpha")).rejects.toMatchObject({ code: ErrorCode.BinaryChecksumMismatch });
+    expect(tree(binaries.dataDir)).toEqual([]);
+  });
+
+  it("does not start-check the CPU fallback: it has no probes to be wrong about", async () => {
+    const machine = fakeMachine({ present: [], failStart: "would fail" });
+    const alpha = await gpuManager(gpuThenCpu(), machine.run).ensure("alpha");
+    expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
+  });
+});
+
+describe("BinaryManager models", () => {
+  const modelBytes = Buffer.from("ggml-model-bytes".repeat(1000));
+
+  function model(bytes: Buffer, digest = sha256(bytes)) {
+    const path = `/${Math.random().toString(36).slice(2)}/model.bin`;
+    files.set(path, bytes);
+    return {
+      id: "ggml-test",
+      version: "abc123",
+      origin: "https://example.test",
+      license: "MIT",
+      urls: [`${base}${path}`],
+      sha256: digest,
+      size: bytes.length,
+      file: "ggml-test.bin",
+    };
+  }
+
+  const modelManager = (m: ReturnType<typeof model>) =>
+    new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [], models: [m] });
+
+  it("downloads a pinned model once, verified, and reports download progress", async () => {
+    const binaries = modelManager(model(modelBytes));
+    expect(await binaries.locateModel("ggml-test")).toMatchObject({ installed: false });
+    const progress: { message: string; fraction?: number }[] = [];
+    const path = await binaries.ensureModel("ggml-test", { onProgress: (p) => progress.push(p) });
+
+    expect(readFileSync(path).equals(modelBytes)).toBe(true);
+    expect(path).toContain(join("models", "ggml-test", "abc123"));
+    expect(progress.at(-1)).toMatchObject({ message: expect.stringContaining("ggml-test"), fraction: 1 });
+    hits.clear();
+    expect(await binaries.ensureModel("ggml-test")).toBe(path);
+    expect(hits.size).toBe(0);
+  });
+
+  it("rejects a model whose checksum does not match and keeps nothing", async () => {
+    const binaries = modelManager(model(modelBytes, "0".repeat(64)));
+    await expect(binaries.ensureModel("ggml-test")).rejects.toMatchObject({ code: ErrorCode.BinaryChecksumMismatch });
+    expect(tree(binaries.dataDir)).toEqual([]);
+  });
+
+  it("names the known models when asked for an unknown one", async () => {
+    await expect(modelManager(model(modelBytes)).ensureModel("ggml-nope")).rejects.toThrow(/ggml-nope.*ggml-test/);
   });
 });
