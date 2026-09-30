@@ -2,8 +2,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TerminalInfo } from "../../../shared/api.js";
+import { agentInput } from "../ask/reference.js";
 import { PanelHeader } from "./PanelHeader.js";
 
 /** A tab before its pty exists has no `info` yet. */
@@ -65,20 +66,76 @@ function useTerminalRouter() {
   }, []);
 }
 
+/** What "Ask agent" needs of the terminals: type into the active one. */
+export interface AgentTerminal {
+  /**
+   * Focus the active terminal and type `lines` at its prompt without
+   * pressing Enter (see `agentInput`). A tab still starting gets them once
+   * its shell is up; with no live tab, a new one is opened for them.
+   */
+  type(lines: readonly string[]): void;
+}
+
+/** A started xterm, as the panel drives it. */
+interface ViewHandle {
+  type(lines: readonly string[]): void;
+}
+
 /** Right column: tabs of real shells. Stays mounted while collapsed so agents keep running. */
 export function TerminalPanel({
   visible,
   onCollapse,
   onActiveSession,
+  ref,
 }: {
   visible: boolean;
   onCollapse: () => void;
   onActiveSession: (session: string | null) => void;
+  ref?: Ref<AgentTerminal>;
 }) {
   const nextKey = useRef(1);
   const [tabs, setTabs] = useState<Tab[]>(() => [{ key: 0, info: null, exitCode: null }]);
   const [active, setActive] = useState(0);
   const route = useTerminalRouter();
+  /** Started views by tab key. */
+  const views = useRef(new Map<number, ViewHandle>());
+  /** Lines waiting for a starting tab's shell. */
+  const pending = useRef(new Map<number, readonly string[]>());
+  const latest = useRef({ tabs, active });
+  latest.current = { tabs, active };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      type(lines) {
+        const { tabs: current, active: key } = latest.current;
+        const tab = current.find((candidate) => candidate.key === key);
+        const view = views.current.get(key);
+        if (tab && tab.exitCode === null && view) return view.type(lines);
+        if (tab && tab.exitCode === null) {
+          pending.current.set(key, lines);
+          return;
+        }
+        const added = nextKey.current++;
+        pending.current.set(added, lines);
+        setTabs((was) => [...was, { key: added, info: null, exitCode: null }]);
+        setActive(added);
+      },
+    }),
+    [],
+  );
+
+  const registerView = useCallback((key: number, view: ViewHandle | null) => {
+    if (!view) {
+      views.current.delete(key);
+      pending.current.delete(key);
+      return;
+    }
+    views.current.set(key, view);
+    const lines = pending.current.get(key);
+    pending.current.delete(key);
+    if (lines) view.type(lines);
+  }, []);
 
   useEffect(
     () =>
@@ -142,6 +199,8 @@ export function TerminalPanel({
         {tabs.map((tab) => (
           <TerminalView
             key={tab.key}
+            tabKey={tab.key}
+            register={registerView}
             active={visible && tab.key === active}
             exitCode={tab.exitCode}
             route={route}
@@ -164,11 +223,16 @@ export function TerminalPanel({
 
 /** One xterm bound to one pty. Refits on every size change so TUIs redraw at the right grid. */
 function TerminalView({
+  tabKey,
+  register,
   active,
   exitCode,
   route,
   onReady,
 }: {
+  tabKey: number;
+  /** Called with the started view, and with null when it goes away. */
+  register: (key: number, view: ViewHandle | null) => void;
   active: boolean;
   exitCode: number | null;
   route: (id: string, sink: ((data: string) => void) | null) => void;
@@ -219,6 +283,13 @@ function TerminalView({
       xterm.onResize(({ cols, rows }) => window.frameshell.terminals.resize(info.id, cols, rows));
       onReadyRef.current(info);
       xterm.focus();
+      register(tabKey, {
+        type(lines) {
+          // paste(): what a user's paste does, wrapped in bracketed-paste marks when the program asked for them.
+          xterm.paste(agentInput(lines, xterm.modes.bracketedPasteMode));
+          xterm.focus();
+        },
+      });
     };
     void start();
 
@@ -234,6 +305,7 @@ function TerminalView({
 
     return () => {
       disposed = true;
+      register(tabKey, null);
       observer.disconnect();
       cancelAnimationFrame(frame);
       if (idRef.current) {
@@ -242,7 +314,7 @@ function TerminalView({
       }
       xterm.dispose();
     };
-  }, [route]);
+  }, [route, register, tabKey]);
 
   useEffect(() => {
     if (!active) return;

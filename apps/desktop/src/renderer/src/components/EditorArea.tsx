@@ -1,6 +1,7 @@
 import { isScriptPath, parseScript } from "@frameshell/schema";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
+import { askAgent } from "../ask/ask-agent.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -24,7 +25,9 @@ interface OpenDoc {
  * linked or not, the scene of a selected clip is highlighted (the whole
  * script for a clip whose `scriptRef` has no `#anchor`), clicking a scene
  * heading selects its clips, and clicking the whole-script flag on line 1
- * selects the clips linked to the whole script.
+ * selects the clips linked to the whole script. "Ask agent" (Cmd/Ctrl+L or
+ * the editor's context menu) in a script first selects the scene under the
+ * caret; elsewhere it asks about the current selection.
  *
  * The {@link TRANSCRIPT_TAB} tab shows the transcript view instead of a file.
  */
@@ -92,14 +95,30 @@ export function EditorArea({
       model: null,
     });
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void save());
+    const ask = instance.addAction({
+      id: "frameshell.askAgent",
+      label: "Ask agent",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 0,
+      run: () => {
+        const path = activeRef.current;
+        const line = instance.getPosition()?.lineNumber;
+        const script = path && line ? links.current.get(path) : undefined;
+        // The scene holding the caret: the last heading at or above it.
+        const scene = script && line ? script.scenes.filter((link) => link.line <= line).at(-1) : undefined;
+        if (path && scene) selection.selectScene({ script: path, slug: scene.slug, title: scene.title }, scene.clips);
+        askAgent.run();
+      },
+    });
     const onEdit = instance.onDidChangeModelContent(() => rerender());
     const onClick = instance.onMouseDown((event) => {
       const path = activeRef.current;
       const line = event.target.position?.lineNumber;
       const script = path && line ? links.current.get(path) : undefined;
-      if (!script || !line) return;
+      if (!path || !script || !line) return;
       const scene = script.scenes.find((link) => link.line === line);
-      if (scene) selection.selectClips(scene.clips, "script", { reveal: true });
+      if (scene) selection.selectScene({ script: path, slug: scene.slug, title: scene.title }, scene.clips, { reveal: true });
       else if (line === 1 && script.wholeClips.length > 0 && event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
         selection.selectClips(script.wholeClips, "script", { reveal: true });
       }
@@ -107,6 +126,7 @@ export function EditorArea({
     editor.current = instance;
     const open = docs.current;
     return () => {
+      ask.dispose();
       onEdit.dispose();
       onClick.dispose();
       instance.dispose();

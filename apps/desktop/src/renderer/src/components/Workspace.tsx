@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
+import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
+import { ContextMenuHost } from "./ContextMenu.js";
 import { EditorArea } from "./EditorArea.js";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { Sidebar } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { StatusBar } from "./StatusBar.js";
-import { TerminalPanel } from "./TerminalPanel.js";
+import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
 import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
 import { isTranscriptPath } from "../transcript/useTranscripts.js";
 
 const SAVE_DELAY_MS = 300;
+/** How long an "Ask agent" notice stays in the status bar, ms. */
+const NOTICE_MS = 5000;
 const isMac = navigator.userAgent.includes("Mac");
 
 /** Keyboard toggles; Mod = Cmd on macOS, Ctrl elsewhere. */
@@ -26,8 +30,12 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [active, setActive] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const dragBase = useRef<Layout | null>(null);
   const centerRow = useRef<HTMLDivElement>(null);
+  const terminals = useRef<AgentTerminal>(null);
+  const terminalCollapsed = useRef(false);
+  terminalCollapsed.current = layout?.panels.terminal.collapsed ?? false;
 
   useEffect(() => {
     void window.frameshell.layout.load().then(setLayout);
@@ -53,8 +61,40 @@ export function Workspace({ project }: { project: ProjectView }) {
   const toggle = useCallback((id: PanelId) => setLayout((current) => current && togglePanel(current, id)), []);
 
   useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // "Ask agent" (SPEC decision 21): type the selection's reference into the active terminal, unsent.
+  useEffect(() => {
+    let asking = false;
+    return askAgent.install(() => {
+      if (asking) return;
+      asking = true;
+      void composeReference()
+        .then(({ lines, warning }) => {
+          if (lines.length === 0) {
+            setNotice("Select clips, words, a time range, a file, a scene or a preview region to ask the agent about.");
+            return;
+          }
+          if (terminalCollapsed.current) toggle("terminal");
+          terminals.current?.type(lines);
+          setNotice(warning);
+        })
+        .finally(() => (asking = false));
+    });
+  }, [toggle]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(isMac ? event.metaKey : event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() === "l" && askKeyApplies(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        askAgent.run();
+        return;
+      }
       const panel = SHORTCUTS[event.key.toLowerCase()];
       if (!panel) return;
       event.preventDefault();
@@ -168,6 +208,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}
         >
           <TerminalPanel
+            ref={terminals}
             visible={!terminal.collapsed}
             onCollapse={() => toggle("terminal")}
             onActiveSession={setActiveSession}
@@ -175,9 +216,26 @@ export function Workspace({ project }: { project: ProjectView }) {
         </div>
       </div>
 
-      <StatusBar project={project} activeFile={active === TRANSCRIPT_TAB ? "Transcript" : active} session={activeSession} />
+      <StatusBar
+        project={project}
+        activeFile={active === TRANSCRIPT_TAB ? "Transcript" : active}
+        session={activeSession}
+        notice={notice}
+      />
+      <ContextMenuHost />
     </div>
   );
+}
+
+/**
+ * Whether Cmd/Ctrl+L at `target` is "Ask agent". Monaco runs it as its own
+ * action (it knows the scene under the caret); in a terminal on Linux and
+ * Windows, Ctrl+L stays the shell's clear-screen.
+ */
+function askKeyApplies(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true;
+  if (target.closest(".monaco-editor")) return false;
+  return isMac || !target.closest(".xterm");
 }
 
 function CollapsedRail({ side, label, onExpand }: { side: "left" | "right"; label: string; onExpand: () => void }) {

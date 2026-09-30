@@ -1,12 +1,13 @@
 import type { Placement } from "@frameshell/schema/composite";
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
+import { openAskMenu } from "../ask/ask-agent.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type Program, programAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useResolution } from "../preview/useProgram.js";
-import { selection, useSelection } from "../selection.js";
+import { type SelectedRegion, selection, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { PanelHeader } from "./PanelHeader.js";
@@ -14,6 +15,8 @@ import { sendClipEdit } from "./clip-edits.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
+/** Smallest region side, as a fraction of the frame: a click is not a region. */
+const MIN_REGION = 0.01;
 /** `FRAMESHELL_PREVIEW_PROBE=1` (main adds `?probe=1`): expose measurement hooks (ADR 0001 harness). */
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
@@ -31,7 +34,9 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * frame (Shift: a second), Home/End jump to the ends. Clips it cannot play
  * yet show a placeholder. A click on a layer selects its clip; the selected
  * clip gets handles to move and scale it, and the inspector below sets its
- * placement and sound.
+ * placement and sound. The region tool draws a rectangle on the frame for
+ * "Ask agent" (SPEC §10): it becomes the shared selection, with the
+ * playhead's time; Escape clears it. Right-click opens "Ask agent".
  */
 export function PreviewPanel({ project }: { project: ProjectView }) {
   const program = useProgram();
@@ -40,6 +45,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
   const frameBox = useRef<HTMLDivElement>(null);
   const player = useRef<PreviewPlayer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [regionTool, setRegionTool] = useState(false);
 
   useEffect(() => {
     const box = frameBox.current!;
@@ -86,6 +92,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
       else if (event.key === "ArrowRight") transport.step(event.shiftKey ? second : 1);
       else if (event.key === "Home") transport.seek(0);
       else if (event.key === "End") transport.seek(Infinity);
+      else if (event.key === "Escape" && selection.get().region) selection.clear();
       else return;
       event.preventDefault();
     };
@@ -115,17 +122,95 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           data-playing={playing || undefined}
           role="img"
           aria-label={empty ? "Empty program monitor" : `Program monitor at ${formatTimecode(time, fps)}`}
+          onContextMenu={openAskMenu}
         >
           <div className="safe-area action" />
           <div className="safe-area title" />
           {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
           {program && <Placeholder program={program} frame={frame} />}
           {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} />}
+          <RegionLayer active={regionTool && !empty} fps={fps} />
         </div>
       </div>
       <ClipInspector />
-      <TransportBar playing={playing} disabled={frames === 0} notice={notice} />
+      <TransportBar
+        playing={playing}
+        disabled={frames === 0}
+        notice={notice}
+        regionTool={regionTool}
+        onRegionTool={() => setRegionTool((on) => !on)}
+      />
     </>
+  );
+}
+
+/**
+ * Region tool surface over the frame: while `active`, a drag draws a
+ * rectangle that becomes the shared selection on release. The selected
+ * region stays drawn (dimming the rest) whether or not the tool is on;
+ * with the tool off, presses fall through to the layer handles below.
+ */
+function RegionLayer({ active, fps }: { active: boolean; fps: number }) {
+  const { region } = useSelection();
+  const layer = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState<{ pointer: number; x: number; y: number; rect: SelectedRegion | null } | null>(null);
+
+  /** Pointer position as fractions of the frame, clamped to it. */
+  const point = (event: PointerEvent) => {
+    const box = layer.current!.getBoundingClientRect();
+    const clamp = (n: number) => Math.min(1, Math.max(0, n));
+    return { x: clamp((event.clientX - box.left) / box.width), y: clamp((event.clientY - box.top) / box.height) };
+  };
+  const spanning = (a: { x: number; y: number }, b: { x: number; y: number }): SelectedRegion => ({
+    x0: Math.min(a.x, b.x),
+    y0: Math.min(a.y, b.y),
+    x1: Math.max(a.x, b.x),
+    y1: Math.max(a.y, b.y),
+    at: transport.get().time,
+  });
+
+  const shown = draft?.rect ?? region;
+  return (
+    <div
+      ref={layer}
+      className={`preview-region-layer${active ? " is-active" : ""}`}
+      data-testid="preview-region-layer"
+      onPointerDown={(event) => {
+        if (!active || event.button !== 0) return;
+        event.preventDefault();
+        transport.pause();
+        layer.current!.setPointerCapture(event.pointerId);
+        setDraft({ pointer: event.pointerId, ...point(event), rect: null });
+      }}
+      onPointerMove={(event) => {
+        if (!draft || draft.pointer !== event.pointerId) return;
+        setDraft({ ...draft, rect: spanning(draft, point(event)) });
+      }}
+      onPointerUp={(event) => {
+        if (!draft || draft.pointer !== event.pointerId) return;
+        const rect = spanning(draft, point(event));
+        setDraft(null);
+        if (rect.x1 - rect.x0 >= MIN_REGION && rect.y1 - rect.y0 >= MIN_REGION) selection.selectRegion(rect, "preview");
+        else if (selection.get().region) selection.clear();
+      }}
+      onPointerCancel={() => setDraft(null)}
+    >
+      {shown && (
+        <div
+          className={`preview-region${draft ? " is-drawing" : ""}`}
+          data-testid="preview-region"
+          data-region={`${shown.x0.toFixed(3)},${shown.y0.toFixed(3)},${shown.x1.toFixed(3)},${shown.y1.toFixed(3)}`}
+          style={{
+            left: `${shown.x0 * 100}%`,
+            top: `${shown.y0 * 100}%`,
+            width: `${(shown.x1 - shown.x0) * 100}%`,
+            height: `${(shown.y1 - shown.y0) * 100}%`,
+          }}
+        >
+          {!draft && <span className="preview-region-time">{formatTimecode(shown.at, fps)}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -262,9 +347,34 @@ function samePlacement(a: Placement, b: Placement): boolean {
   return a.x === b.x && a.y === b.y && a.scale === b.scale && a.opacity === b.opacity;
 }
 
-function TransportBar({ playing, disabled, notice }: { playing: boolean; disabled: boolean; notice: string | null }) {
+function TransportBar({
+  playing,
+  disabled,
+  notice,
+  regionTool,
+  onRegionTool,
+}: {
+  playing: boolean;
+  disabled: boolean;
+  notice: string | null;
+  regionTool: boolean;
+  onRegionTool: () => void;
+}) {
   return (
     <div className="preview-transport" role="toolbar" aria-label="Transport">
+      <button
+        className={`icon-button region-toggle${regionTool ? " on" : ""}`}
+        aria-label="Select region"
+        aria-pressed={regionTool}
+        title="Select a region of the frame to ask the agent about"
+        disabled={disabled}
+        onClick={onRegionTool}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M8 6v4M6 8h4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      </button>
       <div className="preview-transport-buttons">
         <button className="icon-button" aria-label="Go to start" title="Go to start (Home)" disabled={disabled} onClick={() => transport.seek(0)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">

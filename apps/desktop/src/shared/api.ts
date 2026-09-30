@@ -167,6 +167,15 @@ export interface FrameshellApi {
     /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
     onChanged(listener: (change: AssetChange) => void): () => void;
   };
+  context: {
+    /**
+     * Capture the main timeline's frame at `at` (timeline seconds) for an
+     * "Ask agent" region reference (SPEC §10), rendered by the daemon's
+     * `frame` method under `.frameshell/context/`. Resolves with its
+     * project-relative path. Rejects with the daemon's message.
+     */
+    captureFrame(at: number): Promise<string>;
+  };
 }
 
 /** IPC channel names; one place so main and preload cannot drift. */
@@ -200,4 +209,5 @@ export const Channel = {
   mediaAssets: "media:assets",
   mediaRead: "media:read",
   mediaChanged: "media:changed",
+  contextCaptureFrame: "context:capture-frame",
 } as const;

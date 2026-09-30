@@ -1,6 +1,7 @@
 import type { ClipDiff, OperationResult } from "@frameshell/protocol";
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactNode,
   useCallback,
@@ -11,6 +12,7 @@ import {
   useState,
 } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
+import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
@@ -63,6 +65,8 @@ interface ViewState {
 /** Pointer gesture in progress on the lanes. */
 type Gesture =
   | { kind: "scrub"; pointer: number }
+  /** Drag over empty lane space: selects the time range swept. */
+  | { kind: "range"; pointer: number; time: number; clientX: number; moving: boolean }
   | {
       kind: "clip";
       pointer: number;
@@ -163,7 +167,8 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
 
 /** Screen-reader summary of the lanes' mouse and keyboard controls. */
 const KEYS_LABEL =
-  "Timeline lanes. Click selects a clip, drag moves it, drag an edge to trim; the ruler moves the playhead. " +
+  "Timeline lanes. Click selects a clip, drag moves it, drag an edge to trim; drag over empty space selects a time range; " +
+  "the ruler moves the playhead. " +
   "S splits at the playhead, [ and ] trim to it, comma and period nudge a frame, Delete removes, Shift+Delete ripple deletes, " +
   "arrows move the playhead, N toggles snapping, Escape clears. Plus and minus zoom, 0 fits the timeline. " +
   `${isMac ? "Command" : "Control"}+Z undoes, ${isMac ? "Command+Shift+Z" : "Control+Y"} redoes.`;
@@ -550,7 +555,8 @@ function TimelineCanvas({
 
   /**
    * Press on the lanes: the ruler scrubs the playhead; a clip is selected
-   * (Shift/Cmd/Ctrl toggles) and may be dragged; empty lane clears.
+   * (Shift/Cmd/Ctrl toggles) and may be dragged; empty lane clears, and a
+   * drag from there selects the time range it sweeps.
    */
   const onPointerDown = (event: PointerEvent) => {
     const at = locate(event);
@@ -566,6 +572,8 @@ function TimelineCanvas({
     const grab = grabAt(layout, state.current, at.x, at.y);
     if (!grab) {
       selection.clear();
+      gesture.current = { kind: "range", pointer: event.pointerId, time: timeAt(at.x), clientX: event.clientX, moving: false };
+      box.setPointerCapture(event.pointerId);
       return;
     }
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
@@ -596,6 +604,16 @@ function TimelineCanvas({
     const current = gesture.current;
     if (current?.kind === "scrub") {
       seek(timeAt(x), false);
+      return;
+    }
+    if (current?.kind === "range") {
+      if (!current.moving && Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX) return;
+      current.moving = true;
+      // Frame grid, inside the timeline: a range names frames the agent can address.
+      const rate = latest.current.fps;
+      const onGrid = (time: number) => Math.min(layout.duration, Math.max(0, Math.round(time * rate) / rate));
+      const [a, b] = [onGrid(current.time), onGrid(timeAt(x))];
+      selection.selectRange({ from: Math.min(a, b), to: Math.max(a, b) }, "timeline");
       return;
     }
     if (current?.kind === "clip") {
@@ -655,6 +673,17 @@ function TimelineCanvas({
 
   const onPointerCancel = () => {
     if (gesture.current) cancelDrag();
+  };
+
+  /** Right-click: a clip not yet selected becomes the selection, then "Ask agent" opens on it. */
+  const onContextMenu = (event: MouseEvent) => {
+    const box = scroller.current!;
+    const rect = box.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const grab = layout && y >= RULER_HEIGHT ? grabAt(layout, state.current, x, y) : null;
+    if (grab && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    openAskMenu(event);
   };
 
   return (
@@ -727,6 +756,7 @@ function TimelineCanvas({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
           onLostPointerCapture={onPointerCancel}
+          onContextMenu={onContextMenu}
           onPointerLeave={() => setHover(null)}
         >
           <div ref={sizer} className="timeline-sizer" />

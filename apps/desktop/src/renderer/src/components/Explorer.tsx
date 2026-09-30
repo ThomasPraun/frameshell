@@ -1,17 +1,39 @@
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import type { FileNode } from "../../../shared/api.js";
+import { openAskMenu } from "../ask/ask-agent.js";
+import { selection, useSelection } from "../selection.js";
 
 /** Folders a fresh project shows open: where the agent writes first. */
 const INITIALLY_OPEN = new Set(["scripts", "timelines"]);
 
-/** Project tree, refreshed live from the main-process watcher. */
+/** Media under here has no editor: a click selects it (for "Ask agent") as well as opening it. */
+const ASSETS_DIR = "assets/";
+
+/** Every file path of a tree. */
+function filePaths(nodes: readonly FileNode[]): string[] {
+  return nodes.flatMap((node) => (node.kind === "dir" ? filePaths(node.children) : [node.path]));
+}
+
+/**
+ * Project tree, refreshed live from the main-process watcher. Files are
+ * selectable in the shared selection store for "Ask agent": a click on an
+ * asset, Cmd/Ctrl-click on any file (toggles, without opening), or a
+ * right-click, which opens the "Ask agent" menu. Deleted files leave the selection.
+ */
 export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string) => void; activeFile: string | null }) {
   const [tree, setTree] = useState<FileNode[] | null>(null);
   const [open, setOpen] = useState<Set<string>>(INITIALLY_OPEN);
+  const { files } = useSelection();
+  const picked = useMemo(() => new Set(files), [files]);
 
   useEffect(() => {
     let live = true;
-    const refresh = () => void window.frameshell.files.tree().then((nodes) => live && setTree(nodes));
+    const refresh = () =>
+      void window.frameshell.files.tree().then((nodes) => {
+        if (!live) return;
+        selection.retainFiles(new Set(filePaths(nodes)));
+        setTree(nodes);
+      });
     refresh();
     const unsubscribe = window.frameshell.files.onChanged(refresh);
     return () => {
@@ -33,7 +55,7 @@ export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string
 
   return (
     <ul className="tree" role="tree" aria-label="Project files">
-      <Nodes nodes={tree} depth={0} open={open} onToggle={toggle} onOpenFile={onOpenFile} activeFile={activeFile} />
+      <Nodes nodes={tree} depth={0} open={open} onToggle={toggle} onOpenFile={onOpenFile} activeFile={activeFile} picked={picked} />
     </ul>
   );
 }
@@ -45,6 +67,7 @@ function Nodes({
   onToggle,
   onOpenFile,
   activeFile,
+  picked,
 }: {
   nodes: FileNode[];
   depth: number;
@@ -52,7 +75,20 @@ function Nodes({
   onToggle: (path: string) => void;
   onOpenFile: (path: string) => void;
   activeFile: string | null;
+  /** Files in the shared selection. */
+  picked: ReadonlySet<string>;
 }) {
+  const onClick = (event: MouseEvent, node: FileNode) => {
+    if (node.kind === "dir") return onToggle(node.path);
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return selection.toggleFile(node.path, "explorer");
+    if (node.path.startsWith(ASSETS_DIR)) selection.selectFiles([node.path], "explorer");
+    onOpenFile(node.path);
+  };
+  const onContextMenu = (event: MouseEvent, node: FileNode) => {
+    if (node.kind === "dir") return;
+    if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
+    openAskMenu(event);
+  };
   return (
     <>
       {nodes.map((node) => {
@@ -66,10 +102,12 @@ function Nodes({
             aria-selected={node.path === activeFile}
           >
             <button
-              className={`tree-row${node.path === activeFile ? " is-active" : ""}`}
+              className={`tree-row${node.path === activeFile ? " is-active" : ""}${picked.has(node.path) ? " is-picked" : ""}`}
               style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => (node.kind === "dir" ? onToggle(node.path) : onOpenFile(node.path))}
+              onClick={(event) => onClick(event, node)}
+              onContextMenu={(event) => onContextMenu(event, node)}
               title={node.path}
+              data-picked={picked.has(node.path) || undefined}
             >
               <span className={`tree-glyph ${node.kind === "dir" ? (isOpen ? "dir-open" : "dir") : fileKind(node.name)}`} />
               <span className="tree-name">{node.name}</span>
@@ -83,6 +121,7 @@ function Nodes({
                   onToggle={onToggle}
                   onOpenFile={onOpenFile}
                   activeFile={activeFile}
+                  picked={picked}
                 />
               </ul>
             )}
