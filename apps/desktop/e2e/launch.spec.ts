@@ -26,7 +26,6 @@ async function silentDaemon(): Promise<{ server: Server; stop: () => Promise<voi
 }
 
 test("the window loads at once, and opens the project when a slow daemon finally answers", async () => {
-  (await import("node:fs")).rmSync(`${box.dataDir}/debug109.log`, { force: true });
   const daemon = await silentDaemon();
   const { app, page } = await launch(box, { settled: false });
   try {
@@ -43,31 +42,6 @@ test("the window loads at once, and opens the project when a slow daemon finally
     await expect(page.locator(".titlebar-project")).toHaveText("Smoke demo");
     await expect(page.locator(".boot")).toHaveCount(0);
   } finally {
-    // [DEBUG-109] which processes keep the app's close pending.
-    const pid = app.process().pid;
-    const started = Date.now();
-    const closing = app.close();
-    const stalled = await Promise.race([closing.then(() => false), new Promise((r) => setTimeout(() => r(true), 15_000))]);
-    console.log(`[DEBUG-109] close after ${Date.now() - started} ms, stalled=${stalled}, electron pid ${pid}`);
-    if (stalled) {
-      const { readFileSync } = await import("node:fs");
-      try {
-        console.log(`[DEBUG-109] main log at stall:\n${readFileSync(`${box.dataDir}/debug109.log`, "utf8")}`);
-      } catch {
-        console.log("[DEBUG-109] no main log at stall");
-      }
-    }
-    if (stalled && process.platform === "win32") {
-      const { execFileSync } = await import("node:child_process");
-      const ps = "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'electron|node|powershell|conhost|OpenConsole' } | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine | Format-List | Out-String -Width 400";
-      console.log(`[DEBUG-109] processes:\n${execFileSync("powershell.exe", ["-NoProfile", "-Command", ps], { encoding: "utf8" })}`);
-    }
-    await closing;
-    const { readFileSync } = await import("node:fs");
-    try {
-      console.log(readFileSync(`${box.dataDir}/debug109.log`, "utf8"));
-    } catch {
-      console.log("[DEBUG-109] no main log");
-    }
+    await app.close();
   }
 });

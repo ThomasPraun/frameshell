@@ -45,7 +45,7 @@ export async function writeTextAtomic(path: string, content: string | Uint8Array
 
 /** Windows codes for a rename blocked by another open handle on the source or the target. */
 const BUSY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
-/** Longest a rename keeps retrying: readers hold a handle for milliseconds, an antivirus scan for up to about a second. */
+/** Longest a rename keeps retrying: a reader holds its handle for milliseconds, an antivirus scan longer. */
 const RENAME_RETRY_MS = 3_000;
 
 /**
