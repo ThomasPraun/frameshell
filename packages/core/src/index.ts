@@ -70,6 +70,8 @@ export {
   resolveTranscript,
   transcriptPathsFor,
 } from "./transcripts/transcriber.js";
+export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
+export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
 export { type AudioExtractor, type AudioInput, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 export {
   type AppliedOperation,

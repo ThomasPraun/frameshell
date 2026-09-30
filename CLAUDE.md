@@ -14,7 +14,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
 | Managed binaries (ffmpeg, whisper.cpp, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
-| Transcription (transcript file, word ids, audio source) | `packages/core/src/transcripts/transcriber.ts`; provider `plugins/whisper-cpp` |
+| Transcription (transcript file, word ids, audio source, export verify) | `packages/core/src/transcripts/transcriber.ts`, `transcripts/verify.ts` + `align.ts`; provider `plugins/whisper-cpp` |
 | Timeline operations (engine, inverses, invariants, CLI verbs) | `packages/core/src/timeline/engine.ts`, `timeline/service.ts`; ADR 0004 |
 | Export (compiler, presets, render job, frame capture) | `packages/core/src/export/compiler.ts` (pure, golden tests `packages/core/test/golden/`, regen `UPDATE_GOLDEN=1`), `export/service.ts` |
 | History, transactions, revert (journal, grouping, conflicts) | `packages/core/src/history/`; SPEC §6.2 |

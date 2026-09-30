@@ -14,6 +14,7 @@ import {
   type ScriptOutlineResult,
   type StatusResult,
   type TranscribeResult,
+  type TranscribeVerifyResult,
   resolveSocketPath,
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
@@ -49,6 +50,9 @@ Commands:
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
              [--provider p] [--model m] [--language l]
                                First run downloads the engine and model (minutes, once)
+  transcribe --verify <export> [--timeline id] [--provider p] [--model m] [--language l]
+                               Re-transcribe an export and list the source words lost at cuts,
+                               with timeline position and clip; exit 1 if any was lost
   render [--preset p] [--out file] [--timeline id]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
@@ -96,6 +100,7 @@ type Invocation =
   | { kind: "plugin.list" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
+  | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
   | { kind: "script.outline"; file: string }
@@ -141,6 +146,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           provider: { type: "string" },
           model: { type: "string" },
           language: { type: "string" },
+          verify: { type: "string" },
           preset: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
@@ -205,6 +211,7 @@ function parseBuiltin(
     provider?: string | undefined;
     model?: string | undefined;
     language?: string | undefined;
+    verify?: string | undefined;
     preset?: string | undefined;
     timeline?: string | undefined;
     out?: string | undefined;
@@ -225,8 +232,19 @@ function parseBuiltin(
     return { kind: "frame", at, out, ...common };
   }
   if (command === "transcribe") {
-    if (rest.length !== 1) return null;
     const { provider, model, language } = options;
+    if (options.verify !== undefined) {
+      if (rest.length > 0) throw new UsageError("`frameshell transcribe --verify <export>` takes no asset: it checks the export against every clip.");
+      return {
+        kind: "transcribe.verify",
+        export: options.verify,
+        ...(options.timeline ? { timeline: options.timeline } : {}),
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        ...(language ? { language } : {}),
+      };
+    }
+    if (rest.length !== 1) return null;
     return {
       kind: "transcribe",
       asset: rest[0]!,
@@ -310,6 +328,17 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });
       return flags.json ? json(result) : formatOutline(result);
+    }
+    case "transcribe.verify": {
+      await settleTrust(conn, flags, io);
+      const { kind: _kind, export: file, ...params } = inv;
+      const result = await conn.request(
+        "transcribe.verify",
+        { cwd, export: resolve(cwd, file), ...params },
+        flags.json ? {} : { onProgress: progressPrinter(io) },
+      );
+      if (result.lost.length > 0) outcome.code = 1;
+      return flags.json ? json(result) : formatVerify(result);
     }
     case "timeline": {
       // Adapter clips need the project's plugins loaded, which may need a trust decision.
@@ -482,6 +511,33 @@ function formatOutline(outline: ScriptOutlineResult): string {
     lines.push("Unresolved refs:", ...outline.unresolved.map(({ timeline, clip, scriptRef }) => `  ${timeline}/${clip} -> ${scriptRef}`));
   }
   if (outline.warnings.length > 0) lines.push("Warnings:", ...outline.warnings.map((warning) => `  ${warning}`));
+  return `${lines.join("\n")}\n`;
+}
+
+function formatVerify(result: TranscribeVerifyResult): string {
+  const seconds = (value: number) => `${value.toFixed(3)} s`;
+  const where = (word: TranscribeVerifyResult["lost"][number]) => {
+    const cut = word.cut ? ` · ${word.cut.edge} cut at ${seconds(word.cut.at)}${word.clipped ? ", clipped" : ""}` : "";
+    return `  ${seconds(word.at)}  "${word.text}"  clip ${word.clip} (track ${word.track})${cut} · ${word.word} · confidence ${word.confidence.toFixed(2)}`;
+  };
+  const lines = [
+    `Verified ${result.export} against timeline ${result.timeline} (revision ${result.revision}): ` +
+      `${result.expected} words expected, ${result.heard} heard, agreement ${result.confidence.toFixed(2)}`,
+    `  ${result.provider} ${result.model}${result.language ? ` · ${result.language}` : ""} · ${result.seconds.toFixed(1)} s`,
+  ];
+  lines.push(result.lost.length === 0 ? "No words lost at cuts." : `Lost at cuts (${result.lost.length}):`);
+  for (const word of result.lost) lines.push(where(word));
+  if (result.uncertain.length > 0) {
+    lines.push(`Uncertain, check by ear (${result.uncertain.length}):`);
+    for (const word of result.uncertain) {
+      lines.push(`${where(word)} · ${word.reason}${word.heardAs === null ? "" : ` (heard "${word.heardAs}")`}`);
+    }
+  }
+  for (const clip of result.unchecked) {
+    const why = clip.reason === "no-transcript" ? "no transcript" : "transcript is stale";
+    lines.push(`Not checked: clip ${clip.clip} (${clip.asset}): ${why}; run \`frameshell transcribe ${clip.asset}\``);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
 }
 
