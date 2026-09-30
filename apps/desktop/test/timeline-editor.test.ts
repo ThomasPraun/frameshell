@@ -50,7 +50,8 @@ async function setup() {
   const cli = await connect("cli/test", "term-1");
   const dir = join(work, "talk");
   await app.request("project.init", { dir });
-  await app.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
+  // Loaded from the terminal: an app save would be a `ui` edit, the first thing undo takes back.
+  await cli.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
   const editor = new TimelineEditor((method, params) => app.request(method, params));
   /** Clip start/end as the daemon derives them. */
   const clip = async (id: string) => {
@@ -70,7 +71,7 @@ describe("TimelineEditor.apply", () => {
     const saved = JSON.parse(readFileSync(join(dir, "timelines", "main.json"), "utf8"));
     expect(saved.revision).toBe(result.revision);
     const history = await app.request("history", { cwd: dir, timeline: "main" });
-    // Before it: the fixture's file.write, journaled as a direct edit (SPEC §6.4).
+    // Before it: the fixture's file.write from the terminal connection.
     expect(history.transactions.slice(1).map((tx) => [tx.author, tx.operations.map((op) => op.op)])).toEqual([["ui", ["clip.move"]]]);
   });
 
@@ -119,6 +120,18 @@ describe("TimelineEditor undo and redo", () => {
     await editor.redo(dir, "main");
     expect(await clip("c_b")).toMatchObject({ end: 8 });
     expect(await editor.redo(dir, "main")).toBeNull();
+  });
+
+  it("undo takes back a save of the timeline file from the app's editor, a `ui` edit like any other", async () => {
+    const { dir, app, editor, clip } = await setup();
+    const path = join(dir, "timelines", "main.json");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    saved.tracks[1].clips[0].start = 25;
+    await app.request("file.write", { path, content: JSON.stringify(saved) });
+    expect(await clip("c_c")).toMatchObject({ start: 25 });
+
+    expect((await editor.undo(dir, "main"))?.operation.author).toBe("ui");
+    expect(await clip("c_c")).toMatchObject({ start: 20 });
   });
 
   it("a new edit after an undo drops the redo", async () => {
