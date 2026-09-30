@@ -325,12 +325,12 @@ describe("cut (ripple)", () => {
     let t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
     const cut = await apply(t, "cut", { from: 2, to: 3 }, ctx);
     expect(cut.snaps).toEqual([
-      { field: "from", clip: null, requested: 2, applied: 2.0, clean: true },
-      { field: "to", clip: null, requested: 3, applied: 3.0, clean: false },
+      { field: "from", clip: null, requested: 2, applied: 2.0, clean: true, window: 0.5 },
+      { field: "to", clip: null, requested: 3, applied: 3.0, clean: false, window: 0.5 },
     ]);
     t = cut.timeline;
     const trim = await apply(t, "clip.trim", { clip: "c_0001", end: 1.5 }, ctx);
-    expect(trim.snaps).toEqual([{ field: "end", clip: "c_0001", requested: 1.5, applied: 1.5, clean: true }]);
+    expect(trim.snaps).toEqual([{ field: "end", clip: "c_0001", requested: 1.5, applied: 1.5, clean: true, window: 0.5 }]);
     const plain = await apply(t, "clip.set", { clip: "c_0001", gain: -3 }, ctx);
     expect(plain.snaps).toEqual([]);
   });
@@ -351,6 +351,26 @@ describe("cut (ripple)", () => {
     await apply(t, "clip.trim", { clip: "c_0001", in: 1, snapWindow: 2 }, ctx);
     expect(seen.map((p) => p.window)).toEqual([2]);
     expect((await rejection(apply(t, "cut", { from: 2, to: 3, snapWindow: 0.2 }, ctx))).message).toMatch(/snapWindow/);
+  });
+
+  it("searches the project default window unless the operation passes snapWindow, and reports the window used", async () => {
+    const seen: number[] = [];
+    const ctx = context({
+      snapWindow: 1.5,
+      resolveEditPoint: (point) => {
+        seen.push(point.window);
+        return { time: point.time, clean: false };
+      },
+    });
+    const t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    const cut = await apply(t, "cut", { from: 2, to: 3 }, ctx);
+    const trim = await apply(t, "clip.trim", { clip: "c_0001", out: 4 }, ctx);
+    const overridden = await apply(t, "cut", { from: 2, to: 3, snapWindow: 0.5 }, ctx);
+    const trimOverridden = await apply(t, "clip.trim", { clip: "c_0001", in: 1, snapWindow: 3 }, ctx);
+    expect(seen).toEqual([1.5, 1.5, 1.5, 0.5, 0.5, 3]);
+    expect([cut, trim, overridden, trimOverridden].map((r) => r.snaps.map((s) => s.window))).toEqual([[1.5, 1.5], [1.5], [0.5, 0.5], [3]]);
+    // Without a project default the ADR 0003 minimum applies.
+    expect((await apply(t, "cut", { from: 2, to: 3 }, context({ resolveEditPoint: (p) => ({ time: p.time, clean: true }) }))).snaps.map((s) => s.window)).toEqual([0.5, 0.5]);
   });
 
   it("gives cut edges the clips of the cut tracks, and keeps edges the resolver declines", async () => {

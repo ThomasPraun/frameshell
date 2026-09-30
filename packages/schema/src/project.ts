@@ -4,6 +4,13 @@ import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 /** Canonical `$schema` URL for `frameshell.json`, matching the generated JSON Schema `$id`. */
 export const PROJECT_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/project.json`;
 
+/** Smallest snap search half-width, seconds: DTW onset error reaches ±500 ms (ADR 0003). */
+export const MIN_SNAP_WINDOW_S = 0.5;
+/** Largest snap search half-width, seconds; wider reaches into neighbouring sentences. */
+export const MAX_SNAP_WINDOW_S = 10;
+
+const snapWindowFix = `Use ${MIN_SNAP_WINDOW_S} to ${MAX_SNAP_WINDOW_S}, or remove \`editing.snapWindow\` for the default ${MIN_SNAP_WINDOW_S}.`;
+
 /**
  * Zod model of `frameshell.json` (SPEC §5.2). Source of truth: the published
  * JSON Schema is generated from it. Unknown keys are rejected so typos surface.
@@ -36,6 +43,25 @@ export const ProjectConfigSchema = z
         defaultPreset: z.string().optional(),
         /** Integrated loudness target in LUFS. */
         loudness: z.number().optional(),
+      })
+      .optional(),
+    editing: z
+      .strictObject({
+        /** Default cut/trim snap half-width, seconds; per-operation `snapWindow` overrides. */
+        snapWindow: z
+          .number()
+          .min(MIN_SNAP_WINDOW_S, {
+            error: (issue) =>
+              `snap window ${String(issue.input)} s is below the ${MIN_SNAP_WINDOW_S} s minimum (word timestamps can be off by 500 ms, ADR 0003). ${snapWindowFix}`,
+          })
+          .max(MAX_SNAP_WINDOW_S, {
+            error: (issue) => `snap window ${String(issue.input)} s is above the ${MAX_SNAP_WINDOW_S} s maximum. ${snapWindowFix}`,
+          })
+          .optional()
+          .describe(
+            "Default search half-width for moving cut and trim edges into audio pauses, seconds, 0.5 to 10. " +
+              "Default 0.5. A `snapWindow` passed to an operation (CLI `--snap-window`) overrides it.",
+          ),
       })
       .optional(),
   })

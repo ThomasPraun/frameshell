@@ -17,6 +17,7 @@ const specExample = {
   transcription: { provider: "whisper-cpp", model: "large-v3-turbo", language: "es" },
   binaries: { ffmpeg: "managed" },
   export: { defaultPreset: "youtube-1440p", loudness: -17 },
+  editing: { snapWindow: 0.5 },
 };
 
 describe("project config (frameshell.json)", () => {
@@ -41,5 +42,28 @@ describe("project config (frameshell.json)", () => {
     const result = parseProjectConfig({ ...specExample, fps: 0 });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/fps/);
+  });
+
+  it("takes editing.snapWindow as the project default snap window", () => {
+    const result = parseProjectConfig({ ...specExample, editing: { snapWindow: 1.25 } });
+    expect(result.ok && result.value.editing?.snapWindow).toBe(1.25);
+    expect(parseProjectConfig({ ...specExample, editing: {} }).ok).toBe(true);
+  });
+
+  it("rejects a snap window below 0.5 s with a fix", () => {
+    const result = parseProjectConfig({ ...specExample, editing: { snapWindow: 0.2 } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/^editing\.snapWindow: /);
+      expect(result.error).toMatch(/0\.5/);
+      expect(result.error).toMatch(/0\.2/);
+      expect(result.error).toMatch(/remove/i);
+    }
+  });
+
+  it("rejects a snap window above 10 s and unknown editing keys", () => {
+    expect(parseProjectConfig({ ...specExample, editing: { snapWindow: 11 } }).ok).toBe(false);
+    const typo = parseProjectConfig({ ...specExample, editing: { snapWindow: 1, snapWindw: 1 } });
+    expect(typo.ok).toBe(false);
   });
 });

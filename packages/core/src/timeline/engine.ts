@@ -47,7 +47,7 @@ export interface EditPoint {
   clock: "timeline" | "source";
   /** `start`: first kept frame after removed material; `end`: removed material follows. */
   edge: "start" | "end";
-  /** Search half-width, seconds (`snapWindow`, default {@link DEFAULT_SNAP_WINDOW_S}). */
+  /** Search half-width, seconds: op `snapWindow`, else {@link EditContext.snapWindow}, else {@link DEFAULT_SNAP_WINDOW_S}. */
   window: number;
   /** Clip being trimmed; absent for `cut`, which spans tracks. */
   clip?: Clip;
@@ -86,6 +86,8 @@ export interface EditContext {
   newId(prefix: "c" | "t"): string;
   /** Edge adjustment seam for `cut` and `clip.trim` (#12). Absent: edges stay. */
   resolveEditPoint?: EditPointResolver;
+  /** Project default snap half-width, seconds (`editing.snapWindow`); an op's `snapWindow` overrides it. */
+  snapWindow?: number;
 }
 
 /** Args of a public operation after param validation. */
@@ -136,7 +138,7 @@ class Edit {
   readonly grid: FrameGrid;
   readonly #spans = new Map<string, Promise<number>>();
   readonly snaps: SnapReport[] = [];
-  #pending: EditPointResolution | null = null;
+  #pending: Pick<SnapReport, "clean" | "window"> | null = null;
 
   constructor(
     readonly before: Timeline,
@@ -333,7 +335,7 @@ class Edit {
     const head = args.in !== undefined || args.start !== undefined;
     const tail = args.out !== undefined || args.end !== undefined;
     if (!head && !tail) throw this.invalid("nothing to trim.", { hint: "Pass `in`/`start` (head) and/or `out`/`end` (tail)." });
-    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
+    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
     const edge = (time: number, clock: EditPoint["clock"], side: EditPoint["edge"]) =>
       this.resolve(snap.enabled, { time, clock, edge: side, window: snap.window, clip: structuredClone(clip) });
     const span = await this.span(clip);
@@ -474,7 +476,7 @@ class Edit {
         valid: { min: g.seconds(g.frame(args.from) + 1), max: Number.MAX_SAFE_INTEGER },
       });
     }
-    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
+    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
     const clips = tracks.flatMap((track) => structuredClone(track.clips));
     const resolve = (time: number, edge: EditPoint["edge"]) =>
       this.resolve(snap.enabled, { time, clock: "timeline", edge, window: snap.window, clips });
@@ -740,13 +742,13 @@ class Edit {
     if (!enabled || !this.context.resolveEditPoint) return point.time;
     const resolution = await this.context.resolveEditPoint(point);
     if (!resolution) return point.time;
-    this.#pending = resolution;
+    this.#pending = { clean: resolution.clean, window: point.window };
     return resolution.time;
   }
 
   /** Record the last resolved edge as a snap of `field`; returns `applied`. */
   report(field: SnapReport["field"], clip: Clip | null, requested: number, applied: number): number {
-    if (this.#pending) this.snaps.push({ field, clip: clip?.id ?? null, requested, applied, clean: this.#pending.clean });
+    if (this.#pending) this.snaps.push({ field, clip: clip?.id ?? null, requested, applied, ...this.#pending });
     this.#pending = null;
     return applied;
   }

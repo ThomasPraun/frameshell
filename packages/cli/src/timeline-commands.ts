@@ -27,8 +27,9 @@ mutations print the new revision):
            [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
-  cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, --snap-window up to 10);
-  the output lists requested vs applied times. --no-snap uses the exact times.
+  cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
+  editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
+  --no-snap uses the exact times.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session, FRAMESHELL_SESSION; mutations print their op and tx ids):
@@ -331,11 +332,10 @@ function formatOperation(result: OperationResult): string {
     ...(removed.length > 0 ? [`removed ${removed.join(", ")}`] : []),
     ...(range ? [`${range.from}–${range.to ?? "?"} s`] : []),
   ];
-  const window = (result.operation.args["snapWindow"] as number | undefined) ?? 0.5;
   const snaps = result.snaps.map(
     (snap) =>
       `snapped ${snap.field}${snap.clip ? ` of ${snap.clip}` : ""} ${snap.requested} -> ${snap.applied} ` +
-      (snap.clean ? "(in a pause)" : `(no pause within ±${window} s: quietest frame, speech may be clipped)`),
+      (snap.clean ? "(in a pause)" : `(no pause within ±${snap.window} s: quietest frame, speech may be clipped)`),
   );
   return [`${result.operation.op}: ${parts.join(" · ") || "no change"}`, ...snaps, `revision ${result.revision} · op ${result.operation.id} · tx ${result.operation.tx}`, ""].join("\n");
 }
