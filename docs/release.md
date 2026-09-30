@@ -118,6 +118,5 @@ Local builds are unsigned unless you export the signing variables above. Output 
 
 ## Not done yet
 
-- **App icon.** The builds use the default Electron icon until `apps/desktop/build/icon.png` (1024×1024) exists. electron-builder uses that file automatically once it is added.
 - **Linux arm64 and Windows arm64** are not built.
 - **Auto-update** is not set up: no update metadata is published.

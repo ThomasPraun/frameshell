@@ -23,6 +23,7 @@ mac:
     - target: dmg
       arch: [arm64, x64]
   category: public.app-category.video
+  icon: build/icon.png
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
@@ -36,6 +37,7 @@ linux:
     - target: deb
       arch: [x64]
   executableName: frameshell
+  icon: build/icon.png
   category: AudioVideo
   synopsis: IDE for video
   description: Agent edits the project from the terminal, human corrects in the timeline.
@@ -43,6 +45,7 @@ linux:
   vendor: Frameshell
 
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
