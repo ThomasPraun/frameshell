@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
+import { selection } from "../selection.js";
 import { EditorArea } from "./EditorArea.js";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { Sidebar } from "./Sidebar.js";
@@ -26,6 +27,12 @@ export function Workspace({ project }: { project: ProjectView }) {
 
   useEffect(() => {
     void window.frameshell.layout.load().then(setLayout);
+  }, [project.dir]);
+
+  // Clip ids belong to one project: another project starts with nothing selected, and so does leaving this one.
+  useEffect(() => {
+    selection.clear();
+    return () => selection.clear();
   }, [project.dir]);
 
   // Persist after the user stops changing things.

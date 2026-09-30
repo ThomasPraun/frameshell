@@ -771,6 +771,52 @@ code {
   margin-top: 6px;
 }
 
+/* Script scenes: gutter flag per `##` heading, highlight for the selected clip's scene. */
+.scene-glyph-linked,
+.scene-glyph-unlinked,
+.script-glyph-linked {
+  cursor: pointer;
+}
+
+.scene-glyph-linked::before,
+.scene-glyph-unlinked::before,
+.script-glyph-linked::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.scene-glyph-linked::before {
+  background: var(--track-video);
+}
+
+/* Square on line 1: clips linked to the whole script (`scriptRef` without `#anchor`). */
+.script-glyph-linked::before {
+  border-radius: 2px;
+  background: var(--track-video);
+}
+
+/* Hollow warning ring: this scene has no clip yet. */
+.scene-glyph-unlinked::before {
+  border: 1.5px solid var(--accent);
+}
+
+.scene-heading-selected {
+  background: rgba(227, 165, 60, 0.22);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.scene-selected,
+.script-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 /* ---------- Timeline ---------- */
 
 .timeline-body {

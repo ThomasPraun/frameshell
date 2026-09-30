@@ -30,6 +30,7 @@ import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
+import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -259,6 +260,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, events: events.unsubscribe(request.sink, dir, names) };
     },
+    "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
     "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),
     "track.list": async ({ cwd, timeline }) => timelines.tracks(await root(cwd), timeline),
     "track.add": (params, caller) => operate("track.add", params, caller),

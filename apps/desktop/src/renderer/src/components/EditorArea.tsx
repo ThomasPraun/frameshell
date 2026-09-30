@@ -1,5 +1,9 @@
+import { parseScript } from "@frameshell/schema";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type SceneLink, type ScriptLinks, isScriptPath, linkScenes } from "../../../shared/script-links.js";
 import { languageFor, monaco } from "../monaco.js";
+import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { useTimelineView } from "../timeline/useTimelineView.js";
 
 /** One open file. `savedVersion` is Monaco's alternative version id at last load or save: differs = dirty. */
 interface OpenDoc {
@@ -8,9 +12,19 @@ interface OpenDoc {
   /** Set when the file changed on disk while it had unsaved edits, or vanished. */
   diskNotice: "changed" | "deleted" | null;
   error: string | null;
+  /** Scene and whole-script decoration ids on `model` (scripts only). */
+  decorations: string[];
 }
 
-/** Editor tabs over one Monaco instance; one model per file keeps each tab's undo history. */
+/**
+ * Editor tabs over one Monaco instance; one model per file keeps each tab's
+ * undo history. Scripts (`scripts/**.md`) link scenes and clips of the
+ * timeline panel's timeline both ways: the gutter flags each `##` scene as
+ * linked or not, the scene of a selected clip is highlighted (the whole
+ * script for a clip whose `scriptRef` has no `#anchor`), clicking a scene
+ * heading selects its clips, and clicking the whole-script flag on line 1
+ * selects the clips linked to the whole script.
+ */
 export function EditorArea({
   tabs,
   active,
@@ -26,8 +40,12 @@ export function EditorArea({
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const docs = useRef(new Map<string, OpenDoc>());
   const activeRef = useRef(active);
-  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const [edits, rerender] = useReducer((n: number) => n + 1, 0);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** Scene links per open script path, as last decorated. */
+  const links = useRef(new Map<string, ScriptLinks>());
+  const { view: timeline } = useTimelineView(SELECTION_TIMELINE);
+  const { clips: selected } = useSelection();
   activeRef.current = active;
 
   const isDirty = (doc: OpenDoc | undefined) => !!doc?.model && doc.model.getAlternativeVersionId() !== doc.savedVersion;
@@ -66,10 +84,22 @@ export function EditorArea({
     });
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void save());
     const onEdit = instance.onDidChangeModelContent(() => rerender());
+    const onClick = instance.onMouseDown((event) => {
+      const path = activeRef.current;
+      const line = event.target.position?.lineNumber;
+      const script = path && line ? links.current.get(path) : undefined;
+      if (!script || !line) return;
+      const scene = script.scenes.find((link) => link.line === line);
+      if (scene) selection.selectClips(scene.clips, "script");
+      else if (line === 1 && script.wholeClips.length > 0 && event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+        selection.selectClips(script.wholeClips, "script");
+      }
+    });
     editor.current = instance;
     const open = docs.current;
     return () => {
       onEdit.dispose();
+      onClick.dispose();
       instance.dispose();
       for (const doc of open.values()) doc.model?.dispose();
       open.clear();
@@ -95,7 +125,7 @@ export function EditorArea({
       return;
     }
     const language = languageFor(active);
-    const doc: OpenDoc = { model: null, savedVersion: 0, diskNotice: null, error: null };
+    const doc: OpenDoc = { model: null, savedVersion: 0, diskNotice: null, error: null, decorations: [] };
     docs.current.set(active, doc);
     if (!language) {
       doc.error = "This file type has no editor. Media plays in the preview.";
@@ -121,6 +151,33 @@ export function EditorArea({
       },
     );
   }, [tabs, active]);
+
+  useEffect(() => {
+    editor.current?.updateOptions({ glyphMargin: !!active && isScriptPath(active) });
+  }, [active]);
+
+  // Scene links follow script edits, timeline changes and the selection.
+  useEffect(() => {
+    const clips = (timeline?.tracks ?? []).flatMap((track) =>
+      track.clips.map((clip) => ({ id: clip.id, scriptRef: typeof clip["scriptRef"] === "string" ? clip["scriptRef"] : undefined })),
+    );
+    links.current.clear();
+    for (const [path, doc] of docs.current) {
+      if (!doc.model || !isScriptPath(path)) continue;
+      const script = linkScenes(path, parseScript(doc.model.getValue()).scenes, clips, selected);
+      links.current.set(path, script);
+      doc.decorations = doc.model.deltaDecorations(doc.decorations, scriptDecorations(script, doc.model.getLineCount()));
+    }
+  }, [timeline, selected, edits, tabs]);
+
+  // Bring the selected clip's scene into view when the selection changes.
+  useEffect(() => {
+    const path = activeRef.current;
+    const script = path ? links.current.get(path) : undefined;
+    const scene = script?.scenes.find((link) => link.selected);
+    if (scene) editor.current?.revealLineInCenterIfOutsideViewport(scene.line);
+    else if (script?.wholeSelected) editor.current?.revealLineInCenterIfOutsideViewport(1);
+  }, [selected]);
 
   // Files change under the editor when the agent writes them: reload clean tabs, flag dirty ones.
   useEffect(
@@ -228,4 +285,48 @@ export function EditorArea({
       {activeDoc?.error && <div className="empty editor-empty">{activeDoc.error}</div>}
     </div>
   );
+}
+
+/**
+ * Decorations of one linked script: a gutter flag per scene heading, the
+ * selected scenes highlighted, or every line when a clip linked to the
+ * whole script is selected; a flag on line 1 when such clips exist.
+ */
+function scriptDecorations(script: ScriptLinks, lineCount: number): monaco.editor.IModelDeltaDecoration[] {
+  const whole = script.wholeClips.length;
+  const decorations = script.scenes.flatMap((scene) => sceneDecorations(scene, script.wholeSelected));
+  if (whole > 0) {
+    const hover = `${whole} clip${whole === 1 ? "" : "s"} linked to the whole script (${script.wholeClips.join(", ")}). Click to select ${whole === 1 ? "it" : "them"}.`;
+    decorations.push({
+      range: new monaco.Range(1, 1, 1, 1),
+      options: { glyphMarginClassName: "script-glyph-linked", glyphMarginHoverMessage: { value: hover } },
+    });
+  }
+  if (script.wholeSelected) {
+    decorations.push({ range: new monaco.Range(1, 1, lineCount, 1), options: { isWholeLine: true, className: "script-selected" } });
+  }
+  return decorations;
+}
+
+/** Gutter flag on a scene heading; highlight over a scene holding a selected clip, or every heading while the whole script is. */
+function sceneDecorations(scene: SceneLink, wholeSelected: boolean): monaco.editor.IModelDeltaDecoration[] {
+  const count = scene.clips.length;
+  const hover =
+    count > 0
+      ? `Scene \`#${scene.slug}\`: ${count} clip${count === 1 ? "" : "s"} (${scene.clips.join(", ")}). Click the heading to select ${count === 1 ? "it" : "them"}.`
+      : `Scene \`#${scene.slug}\` has no clips yet. Link one with \`frameshell clip set <clip> --script-ref <script>#${scene.slug}\`.`;
+  const heading: monaco.editor.IModelDeltaDecoration = {
+    range: new monaco.Range(scene.line, 1, scene.line, 1),
+    options: {
+      isWholeLine: true,
+      glyphMarginClassName: count > 0 ? "scene-glyph-linked" : "scene-glyph-unlinked",
+      glyphMarginHoverMessage: { value: hover },
+      ...(scene.selected || wholeSelected ? { className: "scene-heading-selected" } : {}),
+    },
+  };
+  if (!scene.selected || scene.endLine <= scene.line) return [heading];
+  return [
+    heading,
+    { range: new monaco.Range(scene.line + 1, 1, scene.endLine, 1), options: { isWholeLine: true, className: "scene-selected" } },
+  ];
 }

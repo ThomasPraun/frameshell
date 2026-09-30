@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { HistoryResultSchema, TransactionInfoSchema } from "./history.js";
+import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   OpIdSchema,
   OperationResultSchema,
@@ -16,7 +17,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -237,6 +238,12 @@ const EventNameSchema = z
 const EventsParams = z.strictObject({
   cwd: CwdParam,
   events: z.array(EventNameSchema).min(1).describe("Events to (un)subscribe, e.g. `[\"timeline.changed\"]`."),
+});
+
+/** A clip in some timeline file, as `script.outline` links it. */
+const ClipLocationSchema = z.object({
+  timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
+  clip: z.string().describe("Clip id."),
 });
 
 const ExportPresetResultSchema = z.looseObject({
@@ -639,6 +646,42 @@ export const methods = {
       events: z.array(EventNameSchema).describe("Events this connection still receives for `dir`."),
     }),
   },
+  "script.outline": {
+    description:
+      "Outline a Markdown script (SPEC §5.5): frontmatter (`title`, `target_duration` in seconds, `aspect`) and its " +
+      "scenes, one per `## ` heading, each with the `ref` to put in a clip's `scriptRef` (`scripts/launch.md#intro`, set " +
+      "with `clip.set`) and the clips of every timeline already linked to it. Scenes with empty `clips` still need " +
+      "footage or a composition. Top-level `clips` are linked to the whole script (`scriptRef` is the path without " +
+      "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
+      "or removed heading). Never fails on content: bad frontmatter or duplicate headings become `warnings`. Fails with " +
+      "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z
+        .string()
+        .min(1)
+        .describe("Markdown file inside the project, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch.md`."),
+    }),
+    result: z.object({
+      path: z.string().describe("Script file, project-relative and `/`-separated."),
+      meta: ScriptMetaSchema,
+      clips: z
+        .array(ClipLocationSchema)
+        .describe("Clips whose `scriptRef` is `path` without `#anchor` (the whole script), any timeline; empty when none."),
+      scenes: z
+        .array(
+          ScriptSceneSchema.extend({
+            ref: z.string().describe("`scriptRef` value for this scene: `<path>#<slug>`."),
+            clips: z.array(ClipLocationSchema).describe("Clips whose `scriptRef` is `ref`, any timeline; empty when none."),
+          }),
+        )
+        .describe("In file order."),
+      unresolved: z
+        .array(ClipLocationSchema.extend({ scriptRef: z.string() }))
+        .describe("Clips referencing this file at an anchor with no scene; fix with `clip.set` `scriptRef`."),
+      warnings: z.array(z.string()).describe("Frontmatter problems, duplicate headings, unreadable timelines skipped."),
+    }),
+  },
   "timeline.show": {
     description:
       "Compact dump of a timeline for agents: revision, project fps, derived duration, and every track with its clips " +
@@ -718,7 +761,10 @@ export const methods = {
   "clip.set": {
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
-      "`props` (adapter clips; replaced), `scriptRef` (null clears). Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
+      "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
+      "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
+      "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
+      "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -860,6 +906,9 @@ export type Progress = Omit<ProgressParams, "requestId">;
 export type TranscribeParams = MethodParams<"transcribe">;
 /** Result of `transcribe`. */
 export type TranscribeResult = MethodResult<"transcribe">;
+
+/** Result of `script.outline`. */
+export type ScriptOutlineResult = MethodResult<"script.outline">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -1043,6 +1092,8 @@ export const ErrorCode = {
    * also `timelines: { root, timeline, conflicts, hint }[]`, one per refused timeline; `timeline` is the first of them.
    */
   RevertConflict: -32032,
+  /** data: `{ path, available: string[] }`: project-relative script asked for, and the `scripts/**\/*.md` there are. */
+  ScriptNotFound: -32033,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */
