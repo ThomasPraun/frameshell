@@ -137,6 +137,24 @@ test("clicking a word moves the playhead to it, and playback marks each word as 
   await page.getByRole("button", { name: "Pause" }).click();
 });
 
+test("clicking a word while playing seeks to it and plays on", async () => {
+  const playhead = async () => Number(await lanes().getAttribute("data-playhead"));
+  await page.getByRole("button", { name: "Go to start" }).click();
+  await expect(lanes()).toHaveAttribute("data-playhead", "0");
+  await page.getByRole("button", { name: "Play" }).click();
+  // Well past "one" (0.2–0.7 s), with 4 s of the 6.5 s program still to play.
+  await expect.poll(playhead, { timeout: 15_000 }).toBeGreaterThan(2.5);
+  const one = await middle(0);
+  await page.mouse.click(one.x, one.y);
+  // Playing on from 2.5 s never brings the playhead back below 2 s: only the seek to 0.2 s does.
+  await expect.poll(playhead, { timeout: 5_000 }).toBeLessThan(2);
+  await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+  await expect(word(0)).toHaveClass(/is-selected/);
+  const seeked = await playhead();
+  await expect.poll(playhead, { timeout: 15_000 }).toBeGreaterThan(seeked);
+  await page.getByRole("button", { name: "Pause" }).click();
+});
+
 test("dragging across words selects them and their timeline range, skipping the cut word", async () => {
   const two = await middle(1);
   const five = await middle(4);

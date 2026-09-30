@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SelectedWord, selection } from "../src/renderer/src/selection.js";
+import { type SelectedWord, revealSeek, selection } from "../src/renderer/src/selection.js";
 
 // Seam under test: the renderer's one selection store, as panels call it.
 
@@ -191,5 +191,23 @@ describe("selection store", () => {
       selection.clear();
       expect(selection.get()).toEqual(blank);
     });
+  });
+});
+
+describe("revealSeek", () => {
+  const paused = { playing: false, fps: 30 };
+  const playing = { playing: true, fps: 30 };
+
+  it("moves the playhead to the first frame inside revealed words, even while playing", () => {
+    expect(revealSeek({ range: { from: 1.2, to: 1.7 } }, null, paused)).toBe(1.2);
+    expect(revealSeek({ range: { from: 1.2, to: 1.7 } }, null, playing)).toBe(1.2);
+    // 1.21 s lies inside frame 36 (1.2 s): the next frame is the first inside the words.
+    expect(revealSeek({ range: { from: 1.21, to: 1.7 } }, null, playing)).toBeCloseTo(37 / 30, 9);
+  });
+
+  it("moves the playhead to a revealed clip's start only while paused", () => {
+    expect(revealSeek({ clip: "c_a" }, { start: 4 }, paused)).toBe(4);
+    expect(revealSeek({ clip: "c_a" }, { start: 4 }, playing)).toBeNull();
+    expect(revealSeek({ clip: "c_gone" }, null, paused)).toBeNull();
   });
 });

@@ -101,6 +101,11 @@ function createWindow(projectDir?: string): BrowserWindow {
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
+      onAgent: (id, session, agent) => {
+        send(contents, Channel.terminalAgent, id, agent);
+        // History names the agent (SPEC §6.2). Daemon unreachable: the link tags again once it reconnects.
+        if (session) daemon.tagSession(session, agent).catch(() => undefined);
+      },
     }),
   };
   windows.set(contents.id, state);

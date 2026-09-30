@@ -9,6 +9,8 @@ export interface ConnectOrStartOptions {
   client: string;
   /** Terminal session to attribute operations to; see `ConnectOptions.session`. */
   session?: string | undefined;
+  /** Agent label to journal operations under; see `ConnectOptions.agent`. */
+  agent?: string | null | undefined;
   /** Environment for a spawned daemon; carries FRAMESHELL_SOCKET and idle timeout. */
   env: NodeJS.ProcessEnv;
   /** Give up waiting for a freshly spawned daemon after this long. */
@@ -23,9 +25,9 @@ export interface ConnectOrStartOptions {
  * error before listening, instead of waiting out the start timeout.
  */
 export async function connectOrStartDaemon(options: ConnectOrStartOptions): Promise<DaemonConnection> {
-  const { socketPath, client, session } = options;
+  const { socketPath, client, session, agent } = options;
   try {
-    return await connectToDaemon(socketPath, { client, session });
+    return await connectToDaemon(socketPath, { client, session, agent });
   } catch (error) {
     if (!isDaemonUnavailable(error)) throw error;
   }
@@ -39,7 +41,7 @@ export async function connectOrStartDaemon(options: ConnectOrStartOptions): Prom
       const failure = await Promise.race([daemon.failure, sleep(delayMs)]);
       if (failure) throw failure;
       try {
-        return await connectToDaemon(socketPath, { client, session });
+        return await connectToDaemon(socketPath, { client, session, agent });
       } catch (error) {
         if (!isDaemonUnavailable(error)) throw error;
         if (Date.now() > deadline) {

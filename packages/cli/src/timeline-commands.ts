@@ -37,7 +37,8 @@ mutations print the new revision):
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
-new shell per command should export FRAMESHELL_SESSION to group across commands.
+new shell per command should export FRAMESHELL_SESSION to group across commands. History names the agent CLI
+the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<label> names it yourself, empty = none.
   tx begin "<label>"           Group the following operations until commit/abort (else grouped until ~10 s idle).
                                Survives daemon restarts
   tx commit | tx abort         Keep, or undo, the open transaction's changes. Abort undoes every timeline or,

@@ -16,7 +16,7 @@ import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
-import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { SELECTION_TIMELINE, revealSeek, selection, useSelection } from "../selection.js";
 import { type DragPreview, type EditCommand, type Grab, commandEdits, dragEdit, dragPreview, grabAt, snapPoints } from "../timeline/edit.js";
 import {
   type ClipBox,
@@ -328,12 +328,14 @@ function TimelineCanvas({
     const box = scroller.current;
     const current = latest.current.layout;
     if (!reveal || !box || !current) return;
+    const follow = (clip: { start: number } | null) => {
+      const time = revealSeek(reveal, clip, { playing: transport.get().playing, fps: latest.current.fps });
+      if (time !== null) transport.seek(time);
+    };
     if (reveal.range) {
-      // Selected words (transcript): the playhead goes to their start (not while playing), the lanes scroll to them.
+      // Selected words (transcript): the playhead goes to their start, even while playing; the lanes scroll to them.
       const { from, to } = reveal.range;
-      // First frame inside the range: the transport floors to a frame, which could land before the first word.
-      const rate = latest.current.fps;
-      if (!transport.get().playing) transport.seek(Math.ceil(from * rate - 1e-6) / rate);
+      follow(null);
       const view = state.current;
       view.scrollLeft = box.scrollLeft;
       if (from * view.pxPerSecond < view.scrollLeft || to * view.pxPerSecond > view.scrollLeft + view.width) {
@@ -352,7 +354,7 @@ function TimelineCanvas({
     }
     if (!row || !clip) return;
     // The player follows selections made elsewhere: the playhead jumps to the clip (not while playing).
-    if (!transport.get().playing) transport.seek(clip.start);
+    follow(clip);
     const view = state.current;
     // The DOM is the truth: a scroll made just before (wheel, script) may not have reached `state` (its event is async).
     view.scrollLeft = box.scrollLeft;

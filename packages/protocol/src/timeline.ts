@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ClipSchema, MAX_SNAP_WINDOW_S, MIN_SNAP_WINDOW_S, TrackSchema, TransformSchema } from "@frameshell/schema";
+import { AGENT_LABEL_PATTERN } from "./agents.js";
 
 /**
  * Timeline operations (SPEC §6.1): the args of every mutating timeline verb,
@@ -225,8 +226,14 @@ export const OpIdSchema = z
  */
 export const AuthorSchema = z
   .string()
-  .regex(/^(ui|cli|file|cli:.+|plugin:.+)$/, "must be `ui`, `cli`, `cli:<session>`, `file` or `plugin:<name>`")
-  .describe("Who made the change: `ui`, `cli:<session>`, `cli`, `file` or `plugin:<name>`.");
+  .regex(
+    new RegExp(`^(ui|cli|file|cli:.+|plugin:.+|agent:${AGENT_LABEL_PATTERN}(:.+)?)$`),
+    "must be `ui`, `cli`, `cli:<session>`, `agent:<label>:<session>`, `file` or `plugin:<name>`",
+  )
+  .describe(
+    "Who made the change: `ui`, `cli:<session>`, `cli`, `agent:<label>:<session>` (an agent CLI such as `claude` " +
+      "ran it in that terminal session), `file` or `plugin:<name>`.",
+  );
 
 /**
  * One applied operation (SPEC §6.1). `inverse` applied to the timeline right

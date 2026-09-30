@@ -96,6 +96,8 @@ export function TerminalPanel({
   const nextKey = useRef(1);
   const [tabs, setTabs] = useState<Tab[]>(() => [{ key: 0, info: null, exitCode: null }]);
   const [active, setActive] = useState(0);
+  /** Agent CLI running in each terminal, by terminal id; absent when none. */
+  const [agents, setAgents] = useState<ReadonlyMap<string, string>>(() => new Map());
   const route = useTerminalRouter();
   /** Started views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -139,6 +141,19 @@ export function TerminalPanel({
 
   useEffect(
     () =>
+      window.frameshell.terminals.onAgent((id, agent) =>
+        setAgents((current) => {
+          const next = new Map(current);
+          if (agent) next.set(id, agent);
+          else next.delete(id);
+          return next;
+        }),
+      ),
+    [],
+  );
+
+  useEffect(
+    () =>
       window.frameshell.terminals.onExit((id, exitCode) =>
         setTabs((current) => current.map((tab) => (tab.info?.id === id ? { ...tab, exitCode } : tab))),
       ),
@@ -167,27 +182,31 @@ export function TerminalPanel({
     <>
       <PanelHeader onCollapse={onCollapse} collapseLabel="Hide terminal" collapseSide="right">
         <div className="terminal-tabs" role="tablist" aria-label="Terminals">
-          {tabs.map((tab, index) => (
-            <div
-              key={tab.key}
-              role="tab"
-              aria-selected={tab.key === active}
-              data-session={tab.info?.session}
-              className={`terminal-tab${tab.key === active ? " is-active" : ""}${tab.exitCode !== null ? " has-exited" : ""}`}
-              title={tab.info ? `Session ${tab.info.session}` : undefined}
-              onClick={() => setActive(tab.key)}
-            >
-              <span>{tab.info ? `${tab.info.shell} ${index + 1}` : "starting…"}</span>
-              <button
-                className="terminal-tab-close"
-                aria-label="Close terminal"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  close(tab.key);
-                }}
-              />
-            </div>
-          ))}
+          {tabs.map((tab, index) => {
+            const agent = tab.info ? agents.get(tab.info.id) : undefined;
+            return (
+              <div
+                key={tab.key}
+                role="tab"
+                aria-selected={tab.key === active}
+                data-session={tab.info?.session}
+                data-agent={agent}
+                className={`terminal-tab${tab.key === active ? " is-active" : ""}${tab.exitCode !== null ? " has-exited" : ""}${agent ? " is-agent" : ""}`}
+                title={tab.info ? `${agent ? `Agent ${agent} in session` : "Session"} ${tab.info.session}` : undefined}
+                onClick={() => setActive(tab.key)}
+              >
+                <span>{tab.info ? `${agent ?? tab.info.shell} ${index + 1}` : "starting…"}</span>
+                <button
+                  className="terminal-tab-close"
+                  aria-label="Close terminal"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    close(tab.key);
+                  }}
+                />
+              </div>
+            );
+          })}
           <button className="icon-button" aria-label="New terminal" title="New terminal" onClick={add}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.5" />

@@ -119,6 +119,11 @@ export interface FrameshellApi {
     kill(id: string): void;
     onData(listener: (id: string, data: string) => void): () => void;
     onExit(listener: (id: string, exitCode: number) => void): () => void;
+    /**
+     * The agent CLI running in a terminal changed (detected from its
+     * foreground process): its label, e.g. `claude`, or null once it quit.
+     */
+    onAgent(listener: (id: string, agent: string | null) => void): () => void;
   };
   layout: {
     load(): Promise<Layout>;
@@ -195,6 +200,7 @@ export const Channel = {
   terminalKill: "terminal:kill",
   terminalData: "terminal:data",
   terminalExit: "terminal:exit",
+  terminalAgent: "terminal:agent",
   layoutLoad: "layout:load",
   layoutSave: "layout:save",
   timelineShow: "timeline:show",

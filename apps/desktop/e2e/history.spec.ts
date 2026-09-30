@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
+import { isWindows, laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 
 // History panel (#18) in the built app: the agent edits from the integrated terminal in a labeled transaction, a
 // direct file edit follows; the panel lists both live, marks a selected entry's changes on the timeline, and reverts
@@ -143,4 +143,32 @@ test("Escape in the panel stops marking changes", async () => {
   await page.keyboard.press("Escape");
   await expect(lanes()).not.toHaveAttribute("data-diff", /.+/);
   await expect(page.locator(".timeline-diff-legend")).toHaveCount(0);
+});
+
+/**
+ * A stand-in agent CLI: a Node process titled `claude`, as Claude Code titles itself, that runs one frameshell
+ * command, the way an agent's shell tool does, once it reads a line. Unix only: the app reads the terminal's
+ * foreground process with `ps`.
+ */
+const FAKE_AGENT =
+  `node -e "process.title='claude'; process.stdin.once('data', () => { ` +
+  `require('child_process').execSync('frameshell track add audio --name Voice', { stdio: 'inherit' }); process.exit(0); })"`;
+
+test("names the agent CLI that ran commands in a terminal, on its tab and in History", async () => {
+  const tab = page.locator(".terminal-tab").first();
+  if (isWindows) {
+    // No foreground process groups to read: the agent names itself.
+    await runInTerminal(page, "$env:FRAMESHELL_AGENT='claude'; frameshell track add audio --name Voice; Remove-Item Env:FRAMESHELL_AGENT");
+  } else {
+    await runInTerminal(page, FAKE_AGENT);
+    await expect(tab).toHaveAttribute("data-agent", "claude", { timeout: 30_000 });
+    await expect(tab.locator("span")).toHaveText(/^claude \d$/);
+    await page.keyboard.press("Enter");
+  }
+  await expect(lanes()).toHaveAttribute("data-revision", "6", { timeout: 30_000 });
+  const added = row("Add track");
+  await expect(added.locator(".history-author")).toContainText(/^agent: claude\s*term-/);
+  expect(journaled().at(-1)).toEqual({ op: "track.add", author: expect.stringMatching(/^agent:claude:term-/) });
+  // The agent quit: the tab names the shell again.
+  if (!isWindows) await expect(tab).not.toHaveAttribute("data-agent", /.*/, { timeout: 30_000 });
 });

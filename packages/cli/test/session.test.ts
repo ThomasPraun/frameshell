@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ShellProbe, resolveSession } from "../src/session.js";
+import { type ShellProbe, resolveAgent, resolveSession } from "../src/session.js";
 
 // Seam: the pure resolver, with the parent shell's pid and start time injected.
 const shell = (ppid: number, started: string | null): ShellProbe => ({ ppid, startTime: () => started });
@@ -24,5 +24,21 @@ describe("resolveSession", () => {
 
   it("falls back to the pid alone when the start time is unknown", () => {
     expect(resolveSession({}, shell(4242, null))).toBe("sh-4242");
+  });
+});
+
+describe("resolveAgent", () => {
+  it("names no agent when FRAMESHELL_AGENT is unset, leaving it to the app", () => {
+    expect(resolveAgent({})).toBeUndefined();
+  });
+
+  it("turns FRAMESHELL_AGENT into a label", () => {
+    expect(resolveAgent({ FRAMESHELL_AGENT: "claude" })).toBe("claude");
+    expect(resolveAgent({ FRAMESHELL_AGENT: "Gemini CLI" })).toBe("gemini-cli");
+  });
+
+  it("reads an empty FRAMESHELL_AGENT as no agent, overriding detection", () => {
+    expect(resolveAgent({ FRAMESHELL_AGENT: "" })).toBeNull();
+    expect(resolveAgent({ FRAMESHELL_AGENT: " / " })).toBeNull();
   });
 });

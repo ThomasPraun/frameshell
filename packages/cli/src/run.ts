@@ -19,7 +19,7 @@ import {
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
-import { resolveSession } from "./session.js";
+import { resolveAgent, resolveSession } from "./session.js";
 import {
   TIMELINE_COMMANDS,
   TIMELINE_OPTIONS,
@@ -191,6 +191,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       socketPath: resolveSocketPath(io.env),
       client: `cli/${CLI_VERSION}`,
       session: resolveSession(io.env),
+      agent: resolveAgent(io.env),
       env: io.env,
     });
     const outcome = { code: 0 };

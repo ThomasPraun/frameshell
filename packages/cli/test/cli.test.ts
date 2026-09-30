@@ -121,7 +121,13 @@ describe("frameshell CLI", () => {
   it("attributes a call to the terminal session named by FRAMESHELL_SESSION", () => {
     const status = frameshell(["status", "--json"], tempDir(), { FRAMESHELL_SESSION: "term-4f2a" });
     expect(status.code).toBe(0);
-    expect(JSON.parse(status.stdout).caller).toEqual({ client: expect.stringMatching(/^cli\//), session: "term-4f2a" });
+    expect(JSON.parse(status.stdout).caller).toEqual({ client: expect.stringMatching(/^cli\//), session: "term-4f2a", agent: null });
+  });
+
+  it("names the agent FRAMESHELL_AGENT gives", () => {
+    const status = frameshell(["status", "--json"], tempDir(), { FRAMESHELL_SESSION: "term-4f2a", FRAMESHELL_AGENT: "Claude" });
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout).caller).toMatchObject({ session: "term-4f2a", agent: "claude" });
   });
 
   it("generates one session per shell when FRAMESHELL_SESSION is unset", () => {

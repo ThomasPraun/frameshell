@@ -4,18 +4,23 @@ import type { RevealRequest } from "../selection.js";
 
 /** SPEC §6.2 author, split for display. */
 export interface AuthorView {
-  kind: "ui" | "cli" | "file" | "plugin";
-  /** Who, in words: `You`, `Terminal`, `File` (direct edit), `Plugin`. */
+  kind: "ui" | "cli" | "agent" | "file" | "plugin";
+  /** Who, in words: `You`, `Terminal`, `agent: <label>` (an agent CLI), `File` (direct edit), `Plugin`. */
   name: string;
   /** Terminal session or plugin name; null when the author has none. */
   detail: string | null;
 }
 
-/** Display form of an `author` string (`ui`, `cli`, `cli:<session>`, `file`, `plugin:<name>`). */
+/**
+ * Display form of an `author` string (`ui`, `cli`, `cli:<session>`,
+ * `agent:<label>:<session>`, `file`, `plugin:<name>`).
+ */
 export function authorOf(author: string): AuthorView {
   if (author === "ui") return { kind: "ui", name: "You", detail: null };
   if (author === "file") return { kind: "file", name: "File", detail: null };
   if (author.startsWith("plugin:")) return { kind: "plugin", name: "Plugin", detail: author.slice("plugin:".length) };
+  const agent = /^agent:([^:]+)(?::(.+))?$/.exec(author);
+  if (agent) return { kind: "agent", name: `agent: ${agent[1]}`, detail: agent[2] ?? null };
   const session = author.startsWith("cli:") ? author.slice("cli:".length) : null;
   return { kind: "cli", name: "Terminal", detail: session };
 }

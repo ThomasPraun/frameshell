@@ -18,7 +18,7 @@ claude mcp add frameshell -- node /path/to/frameshell/packages/cli/dist/bin/fram
 
 Other clients (Codex, Cursor…) take the same command: `frameshell mcp`, stdio transport.
 
-Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
+Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. They are journaled as `agent:<label>:<session>` when `FRAMESHELL_AGENT` names the agent, or when the app detected one in its terminal. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
 
 ## Tools
 

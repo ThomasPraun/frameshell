@@ -652,6 +652,11 @@ code {
   color: var(--accent);
 }
 
+/* A named agent reads stronger than a bare terminal, still neutral. */
+.history-author.author-agent {
+  color: var(--text);
+}
+
 .history-author-detail {
   margin-left: 5px;
   color: var(--text-faint);
@@ -1807,6 +1812,18 @@ code {
 
 .terminal-tab.is-active {
   color: var(--text);
+}
+
+/* An agent CLI runs in this terminal: its name replaces the shell's, after a dot. */
+.terminal-tab.is-agent span::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
 }
 
 .terminal-tab.has-exited span {

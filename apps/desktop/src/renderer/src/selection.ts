@@ -149,6 +149,23 @@ function replace(next: Selection): void {
 
 const sameRange = (a: TimeRange | null, b: TimeRange | null) => a === b || (!!a && !!b && a.from === b.from && a.to === b.to);
 
+/**
+ * Where the player follows a reveal request: the playhead time, or null to
+ * leave it. Words go to the first frame inside their range, even while
+ * playing (click a word to hear it, as in text-based editors). A clip (script
+ * heading, History row) goes to `clip.start` only while paused, so selecting
+ * elsewhere never jumps playback; `clip` is null when it is nowhere to be found.
+ */
+export function revealSeek(
+  reveal: RevealRequest,
+  clip: { readonly start: number } | null,
+  transport: { readonly playing: boolean; readonly fps: number },
+): number | null {
+  // The transport floors to a frame, which could land before the first word.
+  if (reveal.range) return Math.ceil(reveal.range.from * transport.fps - 1e-6) / transport.fps;
+  return clip && !transport.playing ? clip.start : null;
+}
+
 /** Smallest range holding every range; null for none. */
 export function unionRange(ranges: readonly (TimeRange | null)[]): TimeRange | null {
   let from = Infinity;
