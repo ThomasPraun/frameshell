@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   BinaryManager,
   FFMPEG_PACKAGE,
-  type PinnedBuild,
+  WHISPER_FRAMESHELL_BUILDS,
+  WHISPER_FRAMESHELL_TAG,
   WHISPER_MODELS,
   WHISPER_PACKAGE,
+  WHISPER_SOURCE,
   buildCandidates,
+  frameshellWhisperUrl,
   currentPlatform,
   execProcess,
   runDoctor,
@@ -53,6 +56,8 @@ describe("pinned whisper.cpp manifest", () => {
       if (build.requires) expect(build.accelerator).toBeDefined();
       for (const archive of build.archives) {
         expect(archive.sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(archive.sha256).not.toBe("0".repeat(64));
+        expect(archive.size).toBeGreaterThan(1_000_000);
         for (const url of archive.urls) expect(url).toMatch(/^https:\/\//);
       }
     }
@@ -65,7 +70,6 @@ describe("pinned whisper.cpp manifest", () => {
     (platform) => {
       const build = cpuOf(platform);
       expect(build.accelerator).toBeUndefined();
-      expect(build.build).toBeUndefined();
       const [archive] = build.archives;
       expect(archive!.urls).toEqual([expect.stringMatching(/^https:\/\/github\.com\/ggml-org\/whisper\.cpp\/releases\/download\/b5130\//)]);
       expect(Object.keys(archive!.files)).toEqual(["whisper-cli"]);
@@ -73,13 +77,33 @@ describe("pinned whisper.cpp manifest", () => {
     },
   );
 
-  it.each(["darwin-arm64", "darwin-x64"] as const)("%s builds the same commit from source with Metal", (platform) => {
+  it.each(["darwin-arm64", "darwin-x64"] as const)("%s downloads Frameshell's prebuilt Metal build of the pinned commit", (platform) => {
     const [build, ...others] = candidates(platform);
     expect(others).toEqual([]);
     expect(build!.accelerator).toBe("metal");
-    expect(build!.archives[0]!.urls[0]).toContain("927cfce34f31707e17f2bff35c349632fb9e2c3a");
-    expect(build!.build?.configure).toEqual(expect.arrayContaining(["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DBUILD_SHARED_LIBS=OFF"]));
-    expect(build!.build?.files).toEqual({ "whisper-cli": "bin/whisper-cli" });
+    expect(build!.requires).toBeUndefined();
+    const [archive] = build!.archives;
+    expect(archive!.urls).toEqual([
+      `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/whisper-cli-1.9.4-${platform}-metal.tar`,
+    ]);
+    expect(archive).toMatchObject({ files: { "whisper-cli": "whisper-cli" }, support: { LICENSE: "LICENSE" } });
+    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform)!;
+    expect(recipe.configure).toEqual(
+      expect.arrayContaining(["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DBUILD_SHARED_LIBS=OFF"]),
+    );
+    expect(archive).toMatchObject({ sha256: recipe.sha256, size: recipe.size });
+  });
+
+  it("builds every Frameshell asset from the pinned v1.9.4 commit, with no machine-specific tuning", () => {
+    expect(WHISPER_SOURCE.url).toContain("927cfce34f31707e17f2bff35c349632fb9e2c3a");
+    expect(WHISPER_SOURCE.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(WHISPER_FRAMESHELL_BUILDS.map((build) => build.platform).sort()).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
+    for (const build of WHISPER_FRAMESHELL_BUILDS) {
+      expect(build.asset).toMatch(/^whisper-cli-1\.9\.4-.+\.tar$/);
+      // Native tuning would make the bytes depend on the CI machine's CPU.
+      if (build.platform !== "darwin-arm64") expect(build.configure).toContain("-DGGML_NATIVE=OFF");
+      expect(frameshellWhisperUrl(build)).toMatch(/^https:\/\/github\.com\/ThomasPraun\/frameshell\/releases\/download\//);
+    }
   });
 
   it("win32-x64 takes upstream's self-contained CUDA 12.4 build when an NVIDIA driver answers", () => {
@@ -97,18 +121,18 @@ describe("pinned whisper.cpp manifest", () => {
     expect(Object.keys(archive!.support!)).toEqual(expect.arrayContaining(cpuDlls));
   });
 
-  it.each(["linux-x64", "linux-arm64"] as const)("%s builds the pinned commit with CUDA, else Vulkan, when GPU and toolchain answer", (platform) => {
-    const probes = (build: PinnedBuild) => build.requires?.map((probe) => probe.command);
-    expect(candidates(platform).map((build) => build.accelerator ?? "cpu")).toEqual(["cuda", "vulkan", "cpu"]);
-    const cuda = byAccelerator(platform, "cuda")!;
+  it.each(["linux-x64", "linux-arm64"] as const)("%s downloads Frameshell's prebuilt Vulkan build when a Vulkan driver answers, else CPU", (platform) => {
+    expect(candidates(platform).map((build) => build.accelerator ?? "cpu")).toEqual(["vulkan", "cpu"]);
     const vulkan = byAccelerator(platform, "vulkan")!;
-    expect(probes(cuda)).toEqual(["nvidia-smi", "nvcc", "cmake"]);
-    expect(probes(vulkan)).toEqual(["vulkaninfo", "glslc", "cmake"]);
-    for (const [build, flag] of [[cuda, "-DGGML_CUDA=ON"], [vulkan, "-DGGML_VULKAN=ON"]] as const) {
-      expect(build.archives[0]!.urls[0]).toContain("927cfce34f31707e17f2bff35c349632fb9e2c3a");
-      expect(build.build?.configure).toEqual(expect.arrayContaining([flag, "-DBUILD_SHARED_LIBS=OFF"]));
-      expect(build.build?.files).toEqual({ "whisper-cli": "bin/whisper-cli" });
-    }
+    const probes = vulkan.requires!.map((probe) => [probe.command, ...probe.args]);
+    expect(probes[0]).toEqual(["vulkaninfo", "--summary"]);
+    // ggml's x64 build without native tuning uses AVX2.
+    if (platform === "linux-x64") expect(probes).toContainEqual(["grep", "-qw", "avx2", "/proc/cpuinfo"]);
+    expect(vulkan.archives[0]!.urls[0]).toBe(
+      `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/whisper-cli-1.9.4-${platform}-vulkan.tar`,
+    );
+    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform)!;
+    expect(recipe.configure).toEqual(expect.arrayContaining(["-DGGML_VULKAN=ON", "-DBUILD_SHARED_LIBS=OFF"]));
   });
 
   it("is installed on demand, not by doctor --install", () => {

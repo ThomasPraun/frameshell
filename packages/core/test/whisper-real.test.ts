@@ -6,8 +6,8 @@ import { createWhisperProvider } from "../../../plugins/whisper-cpp/src/index.js
 import { BinaryManager, currentPlatform, transcribeAsset } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 
-// Opt-in: installs the real pinned whisper.cpp for this platform (macOS: builds it, needs CMake and the
-// Xcode Command Line Tools), downloads the 574 MB default model, and transcribes 11 s of public-domain
+// Opt-in: installs the real pinned whisper.cpp for this platform (macOS, Linux with Vulkan: Frameshell's
+// release build), downloads the 574 MB default model, and transcribes 11 s of public-domain
 // speech (JFK inaugural address, whisper.cpp's own sample). Run with FRAMESHELL_TEST_REAL_WHISPER=1 pnpm test.
 // FRAMESHELL_TEST_DATA_DIR reuses installs between runs.
 const JFK_URL = "https://raw.githubusercontent.com/ggml-org/whisper.cpp/927cfce34f31707e17f2bff35c349632fb9e2c3a/samples/jfk.wav";

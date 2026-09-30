@@ -28,25 +28,6 @@ export interface PinnedArchive {
   readonly support?: Readonly<Record<string, string>>;
 }
 
-/**
- * Compile the tools on the user's machine from a pinned source archive
- * (`archives[0]`, `files` empty) with CMake. For platforms where upstream
- * ships no executable. Needs CMake and a C/C++ toolchain.
- */
-export interface SourceBuild {
-  /** `/`-separated source tree directory inside the archive. */
-  readonly root: string;
-  /** Extra `cmake` configure arguments; `CMAKE_BUILD_TYPE=Release` is always set. */
-  readonly configure: readonly string[];
-  readonly targets: readonly string[];
-  /** Tool name to its built executable, `/`-separated, relative to the build directory. */
-  readonly files: Readonly<Record<string, string>>;
-  /** How to get the toolchain; shown when `cmake` is missing or the build fails. */
-  readonly toolchainHint: string;
-  /** Expected build time shown while building, e.g. "about a minute". */
-  readonly duration?: string;
-}
-
 /** GPU backend a build is compiled with. */
 export type Accelerator = "metal" | "cuda" | "vulkan";
 
@@ -67,16 +48,16 @@ export interface PinnedBuild {
    * Makes this an optional candidate: chosen only when every probe exits 0,
    * else the next candidate for the platform is tried. Needs `accelerator`,
    * which also names its install directory (`<platform>-<accelerator>`).
+   * Its executables must answer the package's version probe before the
+   * install is published; if they do not, the next candidate installs.
    */
   readonly requires?: readonly MachineProbe[];
   /** Who builds it (homepage), shown by `doctor`. */
   readonly origin: string;
   /** SPDX licence of the build as distributed. */
   readonly license: string;
-  /** Together they provide every tool of the package; with `build`, the one source archive. */
+  /** Together they provide every tool of the package. */
   readonly archives: readonly PinnedArchive[];
-  /** Set when this platform builds from source instead of downloading executables. */
-  readonly build?: SourceBuild;
 }
 
 /** Set of executables installed and versioned together, e.g. ffmpeg + ffprobe. */
@@ -243,95 +224,134 @@ function whisperWindows(
   };
 }
 
-const CMAKE_PROBE: MachineProbe = { command: "cmake", args: ["--version"], proves: "CMake" };
 const NVIDIA_PROBE: MachineProbe = { command: "nvidia-smi", args: ["-L"], proves: "an NVIDIA GPU and driver" };
+
+/** Pinned whisper.cpp source: tag v1.9.4 as GitHub's generated tarball. Input of every Frameshell build. */
+export const WHISPER_SOURCE = {
+  url: `https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/${WHISPER_COMMIT}`,
+  sha256: "41b664fee09e79176ac277b5237debec34f8d74af3c7d71f333f1ec67989ecde",
+  size: 9_357_755,
+  /** Top directory of the tarball. */
+  root: `whisper.cpp-${WHISPER_COMMIT}`,
+} as const;
+
+/**
+ * whisper.cpp build Frameshell compiles in CI from {@link WHISPER_SOURCE} and
+ * publishes on its GitHub release {@link WHISPER_FRAMESHELL_TAG}, for targets
+ * upstream ships no executable for. The build is reproducible: CI rebuilds it
+ * and refuses to publish bytes that differ from the pin
+ * (`packages/core/scripts/whisper-cpp-build.mjs`).
+ */
+export interface FrameshellWhisperBuild {
+  readonly platform: PlatformKey;
+  readonly accelerator: Accelerator;
+  /** Release asset: uncompressed tar holding `whisper-cli` and `LICENSE`. */
+  readonly asset: string;
+  readonly sha256: string;
+  readonly size: number;
+  /** CMake configure arguments; `CMAKE_BUILD_TYPE=Release` and path remapping are added by the build script. */
+  readonly configure: readonly string[];
+  /** GitHub Actions runner that builds it; a toolchain change changes the bytes. */
+  readonly runner: string;
+}
+
+/** Frameshell release holding the {@link WHISPER_FRAMESHELL_BUILDS}. A published release is never changed: a re-pin takes a new tag. */
+export const WHISPER_FRAMESHELL_TAG = "whisper-cpp-1.9.4-fs1";
 
 /** Only the `whisper-cli` target, statically linked: nothing to place next to it. */
 const WHISPER_CLI_ONLY = ["-DBUILD_SHARED_LIBS=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF", "-DWHISPER_SDL2=OFF"];
 
-/** Local CMake build of the pinned commit (source tarball) with backend flags. */
-function whisperSource(
-  configure: readonly string[],
-  recipe: Pick<SourceBuild, "toolchainHint" | "duration">,
-  gpu: Pick<PinnedBuild, "accelerator" | "requires">,
-): PinnedBuild {
+/** Metal with its shader source embedded: one static executable. */
+const MACOS_METAL = [...WHISPER_CLI_ONLY, "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.3"];
+
+/**
+ * `GGML_NATIVE=OFF`: never tune for the build machine (not reproducible, and
+ * `-march=native` breaks the CPU backend with some compiler/CPU pairs). On
+ * x64 ggml then targets AVX2/FMA/F16C, hence the AVX2 probe. OpenMP off: no
+ * `libgomp` needed at run time.
+ */
+const LINUX_VULKAN = [...WHISPER_CLI_ONLY, "-DGGML_NATIVE=OFF", "-DGGML_OPENMP=OFF", "-DGGML_VULKAN=ON"];
+
+/** Every Frameshell-built whisper.cpp asset. Hashes come from CI; `docs/binaries.md` says how to re-pin. */
+export const WHISPER_FRAMESHELL_BUILDS: readonly FrameshellWhisperBuild[] = [
+  {
+    platform: "darwin-arm64",
+    accelerator: "metal",
+    asset: `whisper-cli-${WHISPER_VERSION}-darwin-arm64-metal.tar`,
+    sha256: "cb53212783b46b6c4d02fea56bc9040a08363c0e056f6299090cb53180dd7cd9",
+    size: 4_587_520,
+    configure: [...MACOS_METAL, "-DCMAKE_OSX_ARCHITECTURES=arm64"],
+    runner: "macos-15",
+  },
+  {
+    platform: "darwin-x64",
+    accelerator: "metal",
+    asset: `whisper-cli-${WHISPER_VERSION}-darwin-x64-metal.tar`,
+    sha256: "49dfaaebde59cb00e91946bca501c3a183e8d016cfc1cad310c3494af2465be8",
+    size: 5_062_656,
+    // Cross-compiled on Apple silicon. Every Intel Mac that runs macOS 13 has AVX2.
+    configure: [
+      ...MACOS_METAL,
+      "-DCMAKE_OSX_ARCHITECTURES=x86_64",
+      "-DGGML_NATIVE=OFF",
+      "-DGGML_AVX=ON",
+      "-DGGML_AVX2=ON",
+      "-DGGML_FMA=ON",
+      "-DGGML_F16C=ON",
+    ],
+    runner: "macos-15",
+  },
+  {
+    platform: "linux-x64",
+    accelerator: "vulkan",
+    asset: `whisper-cli-${WHISPER_VERSION}-linux-x64-vulkan.tar`,
+    sha256: "d87263b1e62a1b6a29c50c676d80b0ba82b3083f9f4ae865ec0ce9a9bc715a05",
+    size: 47_318_016,
+    configure: LINUX_VULKAN,
+    runner: "ubuntu-24.04",
+  },
+  {
+    platform: "linux-arm64",
+    accelerator: "vulkan",
+    asset: `whisper-cli-${WHISPER_VERSION}-linux-arm64-vulkan.tar`,
+    sha256: "fecf9cd0b0e1cdd2efe5504e98955c69a2e349ced7cc90658b85bca623cc3a38",
+    size: 46_953_472,
+    configure: LINUX_VULKAN,
+    runner: "ubuntu-24.04-arm",
+  },
+];
+
+/** Download URL of a Frameshell-built asset. */
+export function frameshellWhisperUrl(build: Pick<FrameshellWhisperBuild, "asset">): string {
+  return `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/${build.asset}`;
+}
+
+function frameshellWhisper(platform: PlatformKey, gpu: Pick<PinnedBuild, "requires"> = {}): PinnedBuild {
+  const build = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform);
+  if (!build) throw new Error(`No Frameshell whisper.cpp build for ${platform}`);
   return {
     version: WHISPER_VERSION,
-    origin: WHISPER_CPP,
-    license: "MIT",
+    accelerator: build.accelerator,
     ...gpu,
+    origin: "https://github.com/ThomasPraun/frameshell",
+    license: "MIT",
     archives: [
       {
-        urls: [`https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/${WHISPER_COMMIT}`],
-        sha256: "41b664fee09e79176ac277b5237debec34f8d74af3c7d71f333f1ec67989ecde",
-        size: 9_357_755,
-        files: {},
+        urls: [frameshellWhisperUrl(build)],
+        sha256: build.sha256,
+        size: build.size,
+        files: { "whisper-cli": "whisper-cli" },
+        support: { LICENSE: "LICENSE" },
       },
     ],
-    build: {
-      root: `whisper.cpp-${WHISPER_COMMIT}`,
-      configure: [...WHISPER_CLI_ONLY, ...configure],
-      targets: ["whisper-cli"],
-      files: { "whisper-cli": "bin/whisper-cli" },
-      ...recipe,
-    },
   };
 }
 
-/** Upstream publishes no macOS CLI: built locally with Metal, shaders embedded, one static executable. */
-function whisperMacos(): PinnedBuild {
-  return whisperSource(
-    ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"],
-    {
-      toolchainHint:
-        "Building whisper.cpp needs the Xcode Command Line Tools (`xcode-select --install`) and CMake " +
-        "(`brew install cmake`, or https://cmake.org/download/)",
-      duration: "about a minute",
-    },
-    { accelerator: "metal" },
-  );
-}
-
-/**
- * Linux GPU candidates. Upstream publishes Linux CPU builds only, so the
- * pinned commit is built locally when the GPU and its toolchain are present.
- * `GGML_NATIVE=OFF`: `-march=native` breaks the CPU backend on some
- * compiler/CPU pairs (gcc 12 in an arm64 VM), and CUDA then covers ggml's
- * default architecture list, not only the GPU present at build time.
- * A failed build falls back to the next candidate.
- */
-function whisperLinuxGpu(): PinnedBuild[] {
-  return [
-    whisperSource(
-      ["-DGGML_NATIVE=OFF", "-DGGML_CUDA=ON"],
-      {
-        toolchainHint: "Building whisper.cpp with CUDA needs the NVIDIA driver, the CUDA toolkit (`nvcc`), a C++ compiler and CMake",
-        duration: "10 to 30 minutes",
-      },
-      {
-        accelerator: "cuda",
-        requires: [NVIDIA_PROBE, { command: "nvcc", args: ["--version"], proves: "the CUDA toolkit (nvcc)" }, CMAKE_PROBE],
-      },
-    ),
-    whisperSource(
-      ["-DGGML_NATIVE=OFF", "-DGGML_VULKAN=ON"],
-      {
-        toolchainHint:
-          "Building whisper.cpp with Vulkan needs a Vulkan driver, the Vulkan loader and headers (`libvulkan-dev`), " +
-          "SPIR-V headers (`spirv-headers`), `glslc`, a C++ compiler and CMake",
-        duration: "a few minutes",
-      },
-      {
-        accelerator: "vulkan",
-        requires: [
-          { command: "vulkaninfo", args: ["--summary"], proves: "a Vulkan driver (vulkaninfo, from vulkan-tools)" },
-          { command: "glslc", args: ["--version"], proves: "the Vulkan shader compiler (glslc)" },
-          CMAKE_PROBE,
-        ],
-      },
-    ),
-  ];
-}
+const VULKAN_PROBE: MachineProbe = {
+  command: "vulkaninfo",
+  args: ["--summary"],
+  proves: "a Vulkan driver and loader (vulkaninfo, from vulkan-tools)",
+};
 
 const X64_CPU_LIBS = [
   "alderlake", "cannonlake", "cascadelake", "cooperlake", "haswell", "icelake", "ivybridge",
@@ -346,11 +366,12 @@ const WIN_X64_DLLS = ["whisper.dll", "ggml.dll", "ggml-base.dll", ...WIN_X64_CPU
 
 /**
  * whisper.cpp `whisper-cli`, pinned: DTW and VAD behaviour change between
- * commits (ADR 0003). GPU first, CPU last: macOS builds the commit with
- * Metal; Windows x64 takes upstream's CUDA 12.4 build when an NVIDIA driver
- * is present; Linux builds the commit with CUDA or Vulkan when GPU and
- * toolchain are present; otherwise upstream CPU builds. ggml falls back to
- * CPU at run time when no GPU device initialises. Details: `docs/binaries.md`.
+ * commits (ADR 0003). Prebuilt for every platform, GPU first, CPU last:
+ * macOS takes Frameshell's Metal build (upstream ships no macOS CLI);
+ * Windows x64 takes upstream's CUDA 12.4 build when an NVIDIA driver answers;
+ * Linux takes Frameshell's Vulkan build when a Vulkan driver answers;
+ * otherwise upstream CPU builds. ggml falls back to CPU at run time when no
+ * GPU device initialises. Details: `docs/binaries.md`.
  */
 export const WHISPER_PACKAGE: BinaryPackage = {
   name: "whisper-cpp",
@@ -358,14 +379,17 @@ export const WHISPER_PACKAGE: BinaryPackage = {
   onDemand: true,
   versionProbe: { args: ["--version"], pattern: /whisper\.cpp version: (\S+)/ },
   builds: {
-    "darwin-arm64": whisperMacos(),
-    "darwin-x64": whisperMacos(),
+    // Metal builds also carry ggml's CPU backend: the provider's `-ng` retry runs on CPU.
+    "darwin-arm64": frameshellWhisper("darwin-arm64"),
+    "darwin-x64": frameshellWhisper("darwin-x64"),
     "linux-x64": [
-      ...whisperLinuxGpu(),
+      frameshellWhisper("linux-x64", {
+        requires: [VULKAN_PROBE, { command: "grep", args: ["-qw", "avx2", "/proc/cpuinfo"], proves: "an AVX2 CPU" }],
+      }),
       whisperLinux("x64", "53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32", 9_793_438, X64_CPU_LIBS),
     ],
     "linux-arm64": [
-      ...whisperLinuxGpu(),
+      frameshellWhisper("linux-arm64", { requires: [VULKAN_PROBE] }),
       whisperLinux("arm64", "93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6", 4_605_905, ["libggml-cpu.so"]),
     ],
     "win32-x64": [

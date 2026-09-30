@@ -1,0 +1,140 @@
+# Frameshell's whisper.cpp builds (SPEC §9: prebuilt, pinned). Upstream ships
+# no macOS CLI and no Linux GPU build, so CI builds the pinned tag for those
+# targets and publishes them on a GitHub release the binary manager downloads.
+#
+# Every run rebuilds each asset and fails unless the bytes equal the pin in
+# packages/core/src/binaries/manifest.ts (the builds are reproducible). PRs
+# only build and check. On main, the release is created once, from those
+# checked bytes; an existing release is never changed, only verified.
+# Re-pin: docs/binaries.md.
+name: whisper.cpp release builds
+
+on:
+  pull_request:
+    paths:
+      - packages/core/src/binaries/manifest.ts
+      - packages/core/src/binaries/reproducible-tar.ts
+      - packages/core/scripts/whisper-cpp-build.mjs
+      - .github/workflows/whisper-cpp-release.yml
+  push:
+    branches: [main]
+    paths:
+      - packages/core/src/binaries/manifest.ts
+      - packages/core/src/binaries/reproducible-tar.ts
+      - packages/core/scripts/whisper-cpp-build.mjs
+      - .github/workflows/whisper-cpp-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whisper-cpp-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The toolchain is part of the recipe: changing it changes the bytes.
+  XCODE: /Applications/Xcode_16.4.app
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      builds: ${{ steps.matrix.outputs.builds }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - id: matrix
+        run: echo "builds=$(node packages/core/scripts/whisper-cpp-build.mjs matrix)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    name: build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.builds) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          # darwin-x64 is cross-compiled; its start check runs through Rosetta.
+          sudo softwareupdate --install-rosetta --agree-to-license
+          cmake --version
+      - name: Toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan-dev glslc spirv-headers
+          cmake --version
+          gcc --version
+          glslc --version
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - run: node packages/core/scripts/whisper-cpp-build.mjs build ${{ matrix.platform }} whisper-assets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whisper-${{ matrix.platform }}
+          path: whisper-assets/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: whisper-*
+          path: whisper-assets
+          merge-multiple: true
+      - name: Publish or verify the release
+        run: |
+          set -euo pipefail
+          node packages/core/scripts/whisper-cpp-build.mjs release > release.txt
+          tag=$(head -n 1 release.txt)
+          tail -n +2 release.txt > whisper-assets/SHA256SUMS.txt
+          cd whisper-assets
+          # Only pinned bytes are ever published.
+          sha256sum --check --strict SHA256SUMS.txt
+          if gh release view "$tag" > /dev/null 2>&1; then
+            mkdir published
+            gh release download "$tag" --dir published --pattern '*.tar'
+            (cd published && sha256sum --check --strict ../SHA256SUMS.txt)
+            echo "Release $tag already published and matches the pins."
+            exit 0
+          fi
+          cat > notes.md <<EOF
+          whisper.cpp ${tag#whisper-cpp-} built by Frameshell CI from the pinned upstream source (WHISPER_SOURCE), for targets upstream publishes no executable for. MIT licence: LICENSE inside each archive. Recipes and pins: packages/core/src/binaries/manifest.ts. Build: packages/core/scripts/whisper-cpp-build.mjs at ${GITHUB_SHA}.
+          EOF
+          gh release create "$tag" --draft --title "$tag" --notes-file notes.md --target "$GITHUB_SHA" ./*.tar SHA256SUMS.txt
+          gh release edit "$tag" --draft=false

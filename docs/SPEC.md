@@ -459,7 +459,7 @@ Design rules:
 - Sources: pinned URLs + SHA-256 (sources and licences in `docs/binaries.md`). A mirror on Frameshell GitHub Releases is redistribution of GPL binaries: it ships only together with the matching source code (or a written offer), published in the same release.
 - ffmpeg: GPL build (x264/x265, libvpx encoder and decoder) downloaded by the user at first run; not redistributed inside the installer. `doctor` checks libvpx.
 - Headless Chrome for HTML engines (HyperFrames): managed like other binaries and passed via `PRODUCER_HEADLESS_SHELL_PATH`.
-- whisper.cpp: pinned version, GPU build where available (Metal on macOS; CUDA/Vulkan where available; CPU fallback). Upstream prebuilt assets where they exist (Windows CUDA, Linux/Windows CPU); otherwise the pinned commit is built on the user's machine with CMake (macOS Metal; Linux CUDA/Vulkan when GPU and toolchain are detected) until Frameshell release builds replace them (#27). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
+- whisper.cpp: pinned version, prebuilt per platform (Metal on macOS; CUDA/Vulkan where available; CPU fallback). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
 
 ---

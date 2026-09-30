@@ -256,103 +256,14 @@ describe("BinaryManager support files", () => {
   });
 });
 
-describe("BinaryManager source builds", () => {
-  const sourceArchive = () => tarGz({ "src-1.2.3/CMakeLists.txt": { content: "project(alpha)" } });
-
-  /** Package building `alpha` and `beta` from a served source archive. */
-  function fromSource(archive: Buffer): BinaryPackage {
-    const path = `/${Math.random().toString(36).slice(2)}/src.tar.gz`;
-    files.set(path, archive);
-    return {
-      name: "tools",
-      tools: ["alpha", "beta"],
-      builds: {
-        [currentPlatform()]: {
-          version: "1.2.3",
-          origin: "https://example.test",
-          license: "MIT",
-          archives: [{ urls: [`${base}${path}`], sha256: sha256(archive), size: archive.length, files: {} }],
-          build: {
-            root: "src-1.2.3",
-            configure: ["-DFAST=ON"],
-            targets: ["alpha", "beta"],
-            files: { alpha: `bin/alpha${exe}`, beta: `bin/beta${exe}` },
-            toolchainHint: "Install CMake",
-          },
-        },
-      },
-    };
-  }
-
-  /** Fake CMake: records calls; `--build` writes the executables into the build dir. */
-  function fakeCmake(fail?: { on: "version" | "configure" | "build"; error: Error }) {
-    const calls: string[][] = [];
-    const run = async (command: string, args: readonly string[]) => {
-      calls.push([command, ...args]);
-      const step = args[0] === "--version" ? "version" : args[0] === "--build" ? "build" : "configure";
-      if (fail?.on === step) throw fail.error;
-      if (step === "configure") {
-        expect(readFileSync(join(args[args.indexOf("-S") + 1]!, "CMakeLists.txt"), "utf8")).toBe("project(alpha)");
-      }
-      if (step === "build") {
-        const dir = args[1]!;
-        mkdirSync(join(dir, "bin"), { recursive: true });
-        for (const tool of ["alpha", "beta"]) writeFileSync(join(dir, "bin", `${tool}${exe}`), `built-${tool}`);
-      }
-    };
-    return { run, calls };
-  }
-
-  const sourceManager = (pkg: BinaryPackage, run: ReturnType<typeof fakeCmake>["run"]) =>
-    new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [pkg], buildRunner: run });
-
-  it("downloads the pinned source, configures and builds with CMake, and installs the built tools", async () => {
-    const cmake = fakeCmake();
-    const binaries = sourceManager(fromSource(sourceArchive()), cmake.run);
-    const progress: string[] = [];
-    const alpha = await binaries.ensure("alpha", undefined, { onProgress: (p) => progress.push(p.message) });
-
-    expect(readFileSync(alpha, "utf8")).toBe("built-alpha");
-    expect(readFileSync((await binaries.locate("beta")).path!, "utf8")).toBe("built-beta");
-    expect(alpha).toContain(join("binaries", "tools", "1.2.3", currentPlatform()));
-    const [version, configure, build] = cmake.calls;
-    expect(version).toEqual(["cmake", "--version"]);
-    expect(configure).toEqual(expect.arrayContaining(["cmake", "-S", "-B", "-DCMAKE_BUILD_TYPE=Release", "-DFAST=ON"]));
-    expect(build).toEqual(expect.arrayContaining(["cmake", "--build", "--config", "Release", "--target", "alpha", "beta"]));
-    expect(progress).toEqual(expect.arrayContaining([expect.stringMatching(/^Building tools 1\.2\.3/)]));
-    // Only the built tools and install.json are kept: no sources, no build tree.
-    expect(tree(join(alpha, ".."))).toEqual([`alpha${exe}`, `beta${exe}`, "install.json"].sort());
-  });
-
-  it("fails before downloading when CMake is missing, naming the toolchain to install", async () => {
-    const missing = Object.assign(new Error("spawn cmake ENOENT"), { code: "ENOENT" });
-    const cmake = fakeCmake({ on: "version", error: missing });
-    await expect(sourceManager(fromSource(sourceArchive()), cmake.run).ensure("alpha")).rejects.toMatchObject({
-      code: ErrorCode.BinaryInstallFailed,
-      message: expect.stringMatching(/Install CMake.*binaries/s),
-    });
-    expect(hits.size).toBe(0);
-  });
-
-  it("reports a failed build with the compiler output and installs nothing", async () => {
-    const cmake = fakeCmake({ on: "build", error: new Error("error: metal.h not found") });
-    const binaries = sourceManager(fromSource(sourceArchive()), cmake.run);
-    await expect(binaries.ensure("alpha")).rejects.toMatchObject({
-      code: ErrorCode.BinaryInstallFailed,
-      message: expect.stringMatching(/metal\.h not found.*Install CMake/s),
-    });
-    expect(tree(binaries.dataDir)).toEqual([]);
-  });
-});
-
 describe("BinaryManager GPU candidates", () => {
-  const sourceArchive = () => tarGz({ "src-1.2.3/CMakeLists.txt": { content: "project(alpha)" } });
+  const gpuArchive = () => tarGz({ [`gpu/alpha${exe}`]: { content: "cuda-alpha" }, [`gpu/beta${exe}`]: { content: "cuda-beta" } });
 
-  /** CUDA source build requiring `nvidia-smi` and `nvcc`, then the CPU download as fallback. */
+  /** Prebuilt CUDA archive requiring `nvidia-smi` and `nvcc`, then the CPU download as fallback. */
   function gpuThenCpu(options: { gpuSha256?: string } = {}): BinaryPackage {
-    const source = sourceArchive();
-    const path = `/${Math.random().toString(36).slice(2)}/src.tar.gz`;
-    files.set(path, source);
+    const archive = gpuArchive();
+    const path = `/${Math.random().toString(36).slice(2)}/gpu.tar.gz`;
+    files.set(path, archive);
     const cpu = buildCandidates(pinned(goodArchive()), currentPlatform())[0]!;
     const gpu: PinnedBuild = {
       version: "1.2.3",
@@ -363,49 +274,39 @@ describe("BinaryManager GPU candidates", () => {
         { command: "nvidia-smi", args: ["-L"], proves: "an NVIDIA GPU" },
         { command: "nvcc", args: ["--version"], proves: "the CUDA toolkit" },
       ],
-      archives: [{ urls: [`${base}${path}`], sha256: options.gpuSha256 ?? sha256(source), size: source.length, files: {} }],
-      build: {
-        root: "src-1.2.3",
-        configure: ["-DGGML_CUDA=ON"],
-        targets: ["alpha", "beta"],
-        files: { alpha: `bin/alpha${exe}`, beta: `bin/beta${exe}` },
-        toolchainHint: "Install the CUDA toolkit",
-      },
+      archives: [
+        {
+          urls: [`${base}${path}`],
+          sha256: options.gpuSha256 ?? sha256(archive),
+          size: archive.length,
+          files: { alpha: `gpu/alpha${exe}`, beta: `gpu/beta${exe}` },
+        },
+      ],
     };
     return { name: "tools", tools: ["alpha", "beta"], versionProbe: { args: ["--version"], pattern: /(\S+)/ }, builds: { [currentPlatform()]: [gpu, cpu] } };
   }
 
-  /**
-   * Fake machine: `present` commands pass their probe; cmake builds (or fails
-   * with `failBuild`); a built executable run by absolute path starts unless
-   * `failStart`.
-   */
-  function fakeMachine(options: { present: string[]; failBuild?: string; failStart?: string }) {
+  /** Fake machine: `present` commands pass their probe; an installed executable run by absolute path starts unless `failStart`. */
+  function fakeMachine(options: { present: string[]; failStart?: string }) {
     const calls: string[][] = [];
     const run = async (command: string, args: readonly string[], { cwd }: { cwd: string }) => {
       calls.push([command, ...args]);
       // Like spawn: a missing working directory fails the command.
       if (!existsSync(cwd)) throw Object.assign(new Error(`spawn ${command} ENOENT (cwd ${cwd})`), { code: "ENOENT" });
       if (isAbsolute(command)) {
+        expect(existsSync(command)).toBe(true);
         if (options.failStart) throw new Error(options.failStart);
         return;
       }
-      if (command !== "cmake") {
-        if (!options.present.includes(command)) throw Object.assign(new Error(`${command} not found on PATH`), { code: "ENOENT" });
-        return;
-      }
-      if (args[0] !== "--build") return;
-      if (options.failBuild) throw new Error(options.failBuild);
-      mkdirSync(join(args[1]!, "bin"), { recursive: true });
-      for (const tool of ["alpha", "beta"]) writeFileSync(join(args[1]!, "bin", `${tool}${exe}`), `cuda-${tool}`);
+      if (!options.present.includes(command)) throw Object.assign(new Error(`${command} not found on PATH`), { code: "ENOENT" });
     };
     return { run, calls };
   }
 
   const gpuManager = (pkg: BinaryPackage, run: ReturnType<typeof fakeMachine>["run"], dataDir = tempDir()) =>
-    new BinaryManager({ dataDir, configDir: tempDir(), packages: [pkg], buildRunner: run });
+    new BinaryManager({ dataDir, configDir: tempDir(), packages: [pkg], commandRunner: run });
 
-  it("builds the GPU candidate when its probes pass, installs it beside the CPU build and checks it starts", async () => {
+  it("installs the GPU candidate when its probes pass, beside the CPU build, after checking it starts", async () => {
     const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"] });
     // First run on the machine: the data dir does not exist yet.
     const binaries = gpuManager(gpuThenCpu(), machine.run, join(tempDir(), "fresh"));
@@ -414,15 +315,14 @@ describe("BinaryManager GPU candidates", () => {
     const alpha = await binaries.ensure("alpha");
     expect(readFileSync(alpha, "utf8")).toBe("cuda-alpha");
     expect(alpha).toContain(join("binaries", "tools", "1.2.3", `${currentPlatform()}-cuda`));
-    expect(JSON.parse(readFileSync(join(alpha, "..", "install.json"), "utf8"))).toMatchObject({ accelerator: "cuda", builtFromSource: true });
-    expect(machine.calls).toContainEqual(expect.arrayContaining(["cmake", "-DGGML_CUDA=ON"]));
-    // Start check of each built tool, with the package's version arguments.
+    expect(JSON.parse(readFileSync(join(alpha, "..", "install.json"), "utf8"))).toMatchObject({ accelerator: "cuda" });
+    // Start check of each installed tool, with the package's version arguments.
     expect(machine.calls.filter(([command]) => isAbsolute(command!)).map((call) => call.slice(1))).toEqual([["--version"], ["--version"]]);
     // Probes run once per manager, not per lookup.
     expect(machine.calls.filter(([command]) => command === "nvidia-smi")).toHaveLength(1);
   });
 
-  it("takes the CPU build without building anything when a probe fails", async () => {
+  it("takes the CPU build without downloading the GPU one when a probe fails, and never start-checks it", async () => {
     const machine = fakeMachine({ present: ["nvidia-smi"] });
     const binaries = gpuManager(gpuThenCpu(), machine.run);
 
@@ -430,26 +330,24 @@ describe("BinaryManager GPU candidates", () => {
     const alpha = await binaries.ensure("alpha");
     expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
     expect(alpha).toContain(join("binaries", "tools", "1.2.3", currentPlatform()));
-    expect(machine.calls.some(([command]) => command === "cmake")).toBe(false);
+    expect([...hits.keys()].some((url) => url.endsWith("/gpu.tar.gz"))).toBe(false);
+    expect(machine.calls.some(([command]) => isAbsolute(command!))).toBe(false);
   });
 
-  it.each([
-    ["the build fails", { failBuild: "nvcc fatal: unsupported gpu architecture" }, /unsupported gpu architecture/],
-    ["the built executable does not start", { failStart: "libcudart.so.12: cannot open shared object file" }, /libcudart\.so\.12/],
-  ])("falls back to the CPU build when %s, and skips the GPU build afterwards until the marker is deleted", async (_, failure, reason) => {
-    const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"], ...failure });
+  it("falls back to the CPU build when the GPU executable does not start, and skips it afterwards until the marker is deleted", async () => {
+    const machine = fakeMachine({ present: ["nvidia-smi", "nvcc"], failStart: "libcudart.so.12: cannot open shared object file" });
     const dataDir = tempDir();
     const progress: string[] = [];
     const alpha = await gpuManager(gpuThenCpu(), machine.run, dataDir).ensure("alpha", undefined, { onProgress: (p) => progress.push(p.message) });
 
     expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
     const marker = join(dataDir, "binaries", "tools", "1.2.3", `${currentPlatform()}-cuda.failed.json`);
-    expect(JSON.parse(readFileSync(marker, "utf8")).error).toMatch(reason);
-    expect(progress).toContainEqual(expect.stringMatching(/cuda build failed, using the next build .*failed\.json/));
+    expect(JSON.parse(readFileSync(marker, "utf8")).error).toMatch(/libcudart\.so\.12/);
+    expect(progress).toContainEqual(expect.stringMatching(/cuda build does not start here, using the next build .*failed\.json/));
     // Nothing of the failed build is left in its install dir.
     expect(existsSync(join(dataDir, "binaries", "tools", "1.2.3", `${currentPlatform()}-cuda`))).toBe(false);
 
-    // A new daemon neither probes nor builds the failed candidate again.
+    // A new daemon neither probes nor installs the failed candidate again.
     const again = fakeMachine({ present: ["nvidia-smi", "nvcc"] });
     expect((await gpuManager(gpuThenCpu(), again.run, dataDir).locate("alpha")).pinned?.accelerator).toBeUndefined();
     expect(again.calls).toEqual([]);
@@ -463,6 +361,12 @@ describe("BinaryManager GPU candidates", () => {
     const binaries = gpuManager(gpuThenCpu({ gpuSha256: "0".repeat(64) }), machine.run);
     await expect(binaries.ensure("alpha")).rejects.toMatchObject({ code: ErrorCode.BinaryChecksumMismatch });
     expect(tree(binaries.dataDir)).toEqual([]);
+  });
+
+  it("does not start-check the CPU fallback: it has no probes to be wrong about", async () => {
+    const machine = fakeMachine({ present: [], failStart: "would fail" });
+    const alpha = await gpuManager(gpuThenCpu(), machine.run).ensure("alpha");
+    expect(readFileSync(alpha, "utf8")).toBe("alpha-bin");
   });
 });
 

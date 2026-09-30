@@ -232,7 +232,7 @@ describe("transcribeAsset", () => {
       code: ErrorCode.TranscriptionFailed,
       message: expect.stringMatching(/raw-01\.mp4.*fake.*engine exploded/),
     });
-    const binary = new RpcError(ErrorCode.BinaryInstallFailed, "no cmake");
+    const binary = new RpcError(ErrorCode.BinaryInstallFailed, "download failed");
     await expect(run(dir, failing(binary))).rejects.toBe(binary);
     expect(existsSync(join(dir, "transcripts", "raw-01.words.json"))).toBe(false);
   });

@@ -18,7 +18,11 @@ export {
   type PinnedArchive,
   type PinnedBuild,
   type PlatformKey,
-  type SourceBuild,
+  type FrameshellWhisperBuild,
+  WHISPER_FRAMESHELL_BUILDS,
+  WHISPER_FRAMESHELL_TAG,
+  WHISPER_SOURCE,
+  frameshellWhisperUrl,
   WHISPER_MODELS,
   WHISPER_PACKAGE,
   buildCandidates,
@@ -34,7 +38,8 @@ export {
   type ModelLocation,
   type ProjectBinaries,
 } from "./binaries/manager.js";
-export { type BuildRunner, runBuildTool } from "./binaries/build-runner.js";
+export { type CommandRunner, runCommand } from "./binaries/command-runner.js";
+export { type TarEntry, packTar } from "./binaries/reproducible-tar.js";
 export {
   type Exec,
   type ExecResult,
