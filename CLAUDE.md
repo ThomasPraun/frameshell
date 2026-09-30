@@ -18,6 +18,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Timeline operations (engine, inverses, invariants, CLI verbs) | `packages/core/src/timeline/engine.ts`, `timeline/service.ts`; ADR 0004 |
 | Export (compiler, presets, render job, frame capture) | `packages/core/src/export/compiler.ts` (pure, golden tests `packages/core/test/golden/`, regen `UPDATE_GOLDEN=1`), `export/service.ts` |
 | History, transactions, revert (journal, grouping, conflicts) | `packages/core/src/history/`; SPEC §6.2 |
+| Cut snapping to audio energy (pauses, envelope cache) | `packages/core/src/media/energy.ts`, `media/energy-store.ts`, `timeline/snap.ts`; ADR 0003 |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |

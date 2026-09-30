@@ -5,7 +5,7 @@ import { createProjectConfig, createTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import { ProjectRegistry } from "../src/projects.js";
 import type { OperationRequest } from "../src/timeline/engine.js";
-import { TimelineService } from "../src/timeline/service.js";
+import { TimelineService, type TimelineServiceOptions } from "../src/timeline/service.js";
 import { tempDir } from "./helpers.js";
 
 // Seam under test: TimelineService (apply, history, revert) on a real project
@@ -30,13 +30,14 @@ function project(): string {
   return root;
 }
 
-function setup() {
+function setup(resolveEditPoint?: TimelineServiceOptions["resolveEditPoint"]) {
   const root = project();
   let next = 0;
   const timelines = new TimelineService({
     probe: async () => PROBE,
     clipTypes: async () => new Map(),
     newId: (prefix) => `${prefix}_${++next}`,
+    ...(resolveEditPoint ? { resolveEditPoint } : {}),
   });
   const apply = (author: string, tx: string, request: OperationRequest, label: string | null = null) =>
     timelines.apply({ root, cwd: root, timeline: "main", author, tx: { id: tx, label }, request });
@@ -277,5 +278,29 @@ describe("revert", () => {
     const { revert } = setup();
     const error = await rejection(revert("ui", "tx_000000b1", "op_00000000"));
     expect(error.code).toBe(ErrorCode.HistoryNotFound);
+  });
+
+  it("journals a snapped cut with the applied times, its author, and an inverse that restores the unsnapped timeline", async () => {
+    // Stub resolver: every edge moves 0.2 s later, as if a pause lay there.
+    const { root, add, apply, revert, tracks } = setup((_root, _fps) => (point) => ({ time: point.time + 0.2, clean: true }));
+    await add("cli:agent", "tx_000000a1", 0);
+    const before = tracks();
+    const cut = await apply("cli:agent", "tx_000000a2", { op: "cut", args: { from: 0.5, to: 1 } });
+
+    expect(cut.snaps.map((s) => [s.field, s.requested, s.applied])).toEqual([
+      ["from", 0.5, 0.7],
+      ["to", 1, 1.2],
+    ]);
+    const entries = readFileSync(join(root, ".frameshell", "history", "main.jsonl"), "utf8")
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(entries[1]).toMatchObject({ op: "cut", author: "cli:agent", tx: "tx_000000a2", id: cut.operation.id, revisionBefore: 1, revision: 2 });
+    expect(entries[1].inverse.op).toBe("timeline.patch");
+    // Snapped result: kept [0, 0.7] and [1.2, 2] shifted to start at 0.7.
+    expect(tracks()).not.toEqual(before);
+
+    await revert("cli:agent", "tx_000000a3", cut.operation.id);
+    expect(tracks()).toEqual(before);
   });
 });

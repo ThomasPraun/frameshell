@@ -16,7 +16,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -665,7 +665,9 @@ export const methods = {
     description:
       "Trim or extend a clip's head and/or tail. By source time: `{ clip, in: 4.0 }` drops source before 4.0 s, the kept " +
       "frames stay where they were on the timeline (start moves right). By timeline time: `{ clip, end: 20.0 }`. Does not " +
-      "ripple: use `cut` to close gaps. Fails with InvalidOperation giving the valid range.",
+      "ripple: use `cut` to close gaps. Media clips with audio: each edge snaps into the nearest audio pause within " +
+      "±`snapWindow` (default 0.5 s); `snaps` reports requested vs applied and `clean: false` when no pause was in " +
+      "reach. `snap: false` trims exactly. Fails with InvalidOperation giving the valid range.",
     params: operationArgs["clip.trim"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -693,7 +695,9 @@ export const methods = {
       "Remove the timeline range [from, to) and close the gap (ripple): clips inside are removed, clips crossing an edge " +
       "are trimmed or split, later clips move left by `to - from`. Applies to every video and audio track unless " +
       "`tracks` is given (cutting only some tracks shifts them against the rest). Example: `{ from: 12.4, to: 13.1 }` " +
-      "removes a 0.7 s silence.",
+      "removes a 0.7 s silence. Where media clips with audio lie under an edge, it snaps into the nearest audio pause " +
+      "within ±`snapWindow` (default 0.5 s) so no word is clipped; `snaps` reports requested vs applied and " +
+      "`clean: false` when no pause was in reach (speech may be clipped there). `snap: false` cuts exactly.",
     params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

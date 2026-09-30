@@ -76,6 +76,7 @@ export {
   type ClipTypeInfo,
   type EditContext,
   type EditPoint,
+  type EditPointResolution,
   type EditPointResolver,
   type OperationArgs,
   type OperationRequest,
@@ -107,3 +108,18 @@ export {
 } from "./export/compiler.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
 export { type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export {
+  DEFAULT_SNAP_WINDOW_S,
+  ENERGY_HOP_S,
+  type EnergyProfile,
+  EnvelopeBuilder,
+  PAUSE_MIN_S,
+  type SnapRequest,
+  type SnapResult,
+  energyEnvelope,
+  energyProfile,
+  profileLevel,
+  snapToPause,
+} from "./media/energy.js";
+export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";

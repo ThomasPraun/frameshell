@@ -12,6 +12,23 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
 
+/** Snapping args shared by `cut` and `clip.trim` (ADR 0003). */
+const snapArgs = {
+  snap: z
+    .boolean()
+    .optional()
+    .describe(
+      "Move each edge into the nearest audio pause (>= 200 ms quiet) so no word is clipped; media clips with audio only. " +
+        "Default true. Pass false to cut exactly at the given times.",
+    ),
+  snapWindow: z
+    .number()
+    .min(0.5)
+    .max(10)
+    .optional()
+    .describe("Search half-width for a pause, seconds, 0.5 to 10. Default 0.5 (±500 ms)."),
+};
+
 /** Timeline id param: the file is `timelines/<id>.json`. */
 export const TimelineIdSchema = z
   .string()
@@ -84,6 +101,7 @@ export const operationArgs = {
     out: Seconds("New source time just after the last frame (tail trim).").optional(),
     start: Seconds("Head trim by timeline time: the clip's new left edge. Alternative to `in`.").optional(),
     end: Seconds("Tail trim by timeline time: the clip's new right edge. Alternative to `out`.").optional(),
+    ...snapArgs,
   }),
   "clip.split": z.strictObject({
     clip: ClipRef,
@@ -107,6 +125,7 @@ export const operationArgs = {
       .min(1)
       .optional()
       .describe("Tracks to cut. Default: every video and audio track, which keeps them in sync."),
+    ...snapArgs,
   }),
 } as const;
 
@@ -179,6 +198,20 @@ export const OperationRecordSchema = z.object({
 /** See {@link OperationRecordSchema}. */
 export type OperationRecord = z.output<typeof OperationRecordSchema>;
 
+/** One edge moved by energy snapping (ADR 0003). */
+export const SnapReportSchema = z.object({
+  field: z.enum(["from", "to", "in", "out", "start", "end"]).describe("Arg the edge came from."),
+  clip: z.string().nullable().describe("Trimmed clip; null for `cut`."),
+  requested: z.number().describe("Time asked for, seconds, same clock as the arg."),
+  applied: z.number().describe("Time used, on the frame grid."),
+  clean: z
+    .boolean()
+    .describe("True: inside an audio pause. False: no pause within the window, cut at the quietest frame; speech may be clipped."),
+});
+
+/** See {@link SnapReportSchema}. */
+export type SnapReport = z.output<typeof SnapReportSchema>;
+
 /** Result of every mutating timeline method. */
 export const OperationResultSchema = z.object({
   timeline: z.string().describe("Timeline id."),
@@ -201,6 +234,9 @@ export const OperationResultSchema = z.object({
         .describe("Timeline seconds touched, before or after; null when no clip changed."),
     })
     .describe("What changed, for the caller to re-read only that."),
+  snaps: z
+    .array(SnapReportSchema)
+    .describe("`cut` and `clip.trim`: edges placed by audio energy, requested vs applied; empty when none was snapped."),
 });
 
 /** See {@link OperationResultSchema}. */
