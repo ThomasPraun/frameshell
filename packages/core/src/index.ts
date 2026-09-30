@@ -49,6 +49,7 @@ export {
   type TranscribeAssetOptions,
   type TranscriberTools,
   transcribeAsset,
-  transcriptPathFor,
+  resolveTranscript,
+  transcriptPathsFor,
 } from "./transcripts/transcriber.js";
 export { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";

@@ -1,5 +1,5 @@
 import type { TranscriptWord } from "@frameshell/plugin-api";
-import type { Transcript, TranscriptFileWord } from "@frameshell/schema";
+import { type Transcript, type TranscriptFileWord, wordIdNumber } from "@frameshell/schema";
 
 /** A re-found word may move this far (seconds) and keep its id. */
 const SAME_WORD_WINDOW = 0.5;
@@ -10,17 +10,25 @@ export interface AssignedWords {
   edits: Transcript["edits"];
   reusedIds: number;
   droppedEdits: string[];
+  /** High-water mark to persist as the transcript's `nextWordId`. */
+  nextWordId: number;
 }
 
 /**
  * Give fresh engine words stable ids. A word found again in the previous
  * transcript (same normalized text, start within 0.5 s, in order) keeps its
- * id and its human edit; other words get ids above every id used before, so
- * a dropped id is never reused for a different word.
+ * id and its human edit; other words get new ids from the previous
+ * `nextWordId`, so an id dropped by any earlier run is never handed out again.
+ * Without `nextWordId` (hand-written file), new ids start above every word
+ * and edit id in it.
  */
 export function assignWordIds(fresh: readonly TranscriptWord[], previous: Transcript | null): AssignedWords {
   const old = previous?.words ?? [];
-  let next = old.reduce((max, word) => Math.max(max, Number(word.id.slice(2))), 0) + 1;
+  // reduce, not Math.max(...ids): long transcripts would overflow the argument list.
+  let next = [...old.map((word) => word.id), ...Object.keys(previous?.edits ?? {})].reduce(
+    (max, id) => Math.max(max, wordIdNumber(id) + 1),
+    previous?.nextWordId ?? 1,
+  );
   let cursor = 0;
   let reusedIds = 0;
   const words = fresh.map((word): TranscriptFileWord => {
@@ -50,7 +58,7 @@ export function assignWordIds(fresh: readonly TranscriptWord[], previous: Transc
     if (ids.has(id)) edits[id] = edit;
     else droppedEdits.push(id);
   }
-  return { words, edits, reusedIds, droppedEdits };
+  return { words, edits, reusedIds, droppedEdits, nextWordId: next };
 }
 
 /** Case and punctuation differ between runs ("Hola," vs "hola"); the word does not. */

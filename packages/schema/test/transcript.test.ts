@@ -45,6 +45,18 @@ describe("transcript (transcripts/*.words.json)", () => {
     if (!result.ok) expect(result.error).toMatch(/w_000001/);
   });
 
+  it("accepts nextWordId above every word and edit id, and rejects one that is not", () => {
+    expect(parseTranscript({ ...specExample, nextWordId: 3 }).ok).toBe(true);
+    const wordAtMark = parseTranscript({ ...specExample, nextWordId: 2 });
+    expect(wordAtMark.ok).toBe(false);
+    if (!wordAtMark.ok) expect(wordAtMark.error).toMatch(/w_000002.*nextWordId 2/);
+    const editAbove = parseTranscript({ ...specExample, nextWordId: 3, edits: { w_000009: { text: "x" } } });
+    expect(editAbove.ok).toBe(false);
+    if (!editAbove.ok) expect(editAbove.error).toMatch(/w_000009/);
+    expect(parseTranscript({ ...specExample, nextWordId: 0 }).ok).toBe(false);
+    expect(parseTranscript({ ...specExample, nextWordId: 2.5 }).ok).toBe(false);
+  });
+
   it("rejects an asset hash that is not sha256", () => {
     expect(parseTranscript({ ...specExample, assetHash: "md5:abc" }).ok).toBe(false);
   });

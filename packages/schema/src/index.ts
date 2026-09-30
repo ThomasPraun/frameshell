@@ -32,5 +32,6 @@ export {
   type Transcript,
   type TranscriptFileWord,
   WordIdSchema,
+  wordIdNumber,
   parseTranscript,
 } from "./transcript.js";

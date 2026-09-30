@@ -442,13 +442,17 @@ export const methods = {
   },
   transcribe: {
     description:
-      "Transcribe one asset to word level and write `transcripts/<asset>.words.json` (SPEC §5.4): every word with a " +
+      "Transcribe one asset to word level and write `transcripts/<asset minus extension>.words.json` (SPEC §5.4; " +
+      "`transcripts/<asset>.words.json`, extension kept, when another asset with the same base name owns the first " +
+      "name): every word with a " +
       "stable id, text, `start`/`end` in source-asset seconds (3 decimals) and confidence, plus the asset's SHA-256, " +
       "provider and model. Audio comes from the asset's CFR proxy when one exists. Re-transcribing reuses word ids " +
-      "where the same word is found again (same text, start within 0.5 s) and keeps the human `edits` of those ids. " +
+      "where the same word is found again (same text, start within 0.5 s) and keeps the human `edits` of those ids; " +
+      "other words get ids never used before in that file. " +
       "The first run downloads the engine and model (whisper.cpp default: 574 MB) and may take minutes; progress " +
       "arrives as `progress` notifications. Fails with ProjectNotTrusted when the project's plugins are not trusted, " +
-      "TranscriptionProviderNotFound when no loaded plugin provides the provider, TranscriptionFailed when the engine fails.",
+      "TranscriptionProviderNotFound when no loaded plugin provides the provider, TranscriptionFailed when the engine fails, " +
+      "TranscriptNameTaken when both transcript names belong to other assets.",
     params: z.strictObject({
       cwd: CwdParam,
       asset: z
@@ -690,6 +694,8 @@ export const ErrorCode = {
   TranscriptionProviderNotFound: -32020,
   /** data: `{ provider, asset, details }` */
   TranscriptionFailed: -32021,
+  /** data: `{ asset, transcripts: { path, asset }[] }`: every transcript name for the asset belongs to another asset */
+  TranscriptNameTaken: -32022,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

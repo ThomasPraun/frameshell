@@ -7,6 +7,11 @@ export const TRANSCRIPT_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VE
 /** Stable word id, e.g. `w_000001`. Opaque: never reorder or reuse. */
 export const WordIdSchema = z.string().regex(/^w_\d{6,}$/, "must look like `w_000001`");
 
+/** Number part of a {@link WordIdSchema} id (`w_000042` → 42). */
+export function wordIdNumber(id: string): number {
+  return Number(id.slice(2));
+}
+
 const WordSchema = z
   .strictObject({
     id: WordIdSchema,
@@ -41,13 +46,28 @@ export const TranscriptSchema = z
     language: z.string().optional(),
     words: z.array(WordSchema),
     edits: z.record(WordIdSchema, WordEditSchema).default({}),
+    /**
+     * Number of the next word id to hand out (`5` → `w_000005`). Every id
+     * below it was used once, maybe by a word a later run dropped, so it is
+     * never handed out again. Written by the daemon, never lowered. Absent
+     * (hand-written file): ids above every word and edit id are free.
+     */
+    nextWordId: z.number().int().positive().optional(),
   })
   .superRefine((transcript, ctx) => {
     const seen = new Set<string>();
+    const next = transcript.nextWordId;
     transcript.words.forEach((word, index) => {
       if (seen.has(word.id)) ctx.addIssue({ code: "custom", message: `duplicate word id ${word.id}`, path: ["words", index, "id"] });
       seen.add(word.id);
+      if (next !== undefined && wordIdNumber(word.id) >= next) {
+        ctx.addIssue({ code: "custom", message: `word id ${word.id} is not below nextWordId ${next}`, path: ["words", index, "id"] });
+      }
     });
+    if (next === undefined) return;
+    for (const id of Object.keys(transcript.edits)) {
+      if (wordIdNumber(id) >= next) ctx.addIssue({ code: "custom", message: `edit id ${id} is not below nextWordId ${next}`, path: ["edits", id] });
+    }
   });
 
 /** Validated transcript file content. */

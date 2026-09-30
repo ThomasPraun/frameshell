@@ -79,6 +79,7 @@ describe("transcribeAsset", () => {
         { id: "w_000002", text: "a", start: 0.81, end: 0.88 },
       ],
       edits: {},
+      nextWordId: 3,
     });
     expect(result).toMatchObject({
       transcript: "transcripts/raw-01.words.json",
@@ -133,6 +134,43 @@ describe("transcribeAsset", () => {
     ]);
     expect(second.edits).toEqual({ w_000001: { text: "Hola," } });
     expect(result).toMatchObject({ reusedIds: 2, keptEdits: 1, droppedEdits: ["w_000003"] });
+  });
+
+  it("never hands out an id dropped by an earlier run, across any number of runs", async () => {
+    const dir = project();
+    await run(dir, fakeProvider(words(["hola", 0.5, 0.8], ["mundo", 0.9, 1.3])).provider);
+    const first = readTranscript(dir);
+    writeFileSync(join(dir, "transcripts", "raw-01.words.json"), JSON.stringify({ ...first, edits: { w_000002: { text: "Mundo" } } }));
+
+    // Run 2 loses "mundo": w_000002 and its edit are gone from the file.
+    const second = await run(dir, fakeProvider(words(["hola", 0.5, 0.8])).provider);
+    expect(second.droppedEdits).toEqual(["w_000002"]);
+    expect(readTranscript(dir)).toMatchObject({ words: [{ id: "w_000001" }], edits: {}, nextWordId: 3 });
+
+    // Run 3 finds a new word: it must not become w_000002, which agents may still hold for "mundo".
+    await run(dir, fakeProvider(words(["hola", 0.5, 0.8], ["gente", 0.9, 1.3])).provider);
+    const third = readTranscript(dir);
+    expect(third.words.map((w: { id: string; text: string }) => [w.id, w.text])).toEqual([
+      ["w_000001", "hola"],
+      ["w_000003", "gente"],
+    ]);
+    expect(third.nextWordId).toBe(4);
+    expect(parseTranscript(third).ok).toBe(true);
+  });
+
+  it("starts new ids above every word and edit id of a transcript without nextWordId", async () => {
+    const dir = project();
+    await run(dir, fakeProvider(words(["hola", 0.5, 0.8])).provider);
+    const { nextWordId: _omit, ...handWritten } = readTranscript(dir);
+    writeFileSync(
+      join(dir, "transcripts", "raw-01.words.json"),
+      JSON.stringify({ ...handWritten, edits: { w_000007: { text: "stale" } } }),
+    );
+    await run(dir, fakeProvider(words(["hola", 0.5, 0.8], ["gente", 0.9, 1.3])).provider);
+    expect(readTranscript(dir)).toMatchObject({
+      words: [{ id: "w_000001" }, { id: "w_000008", text: "gente" }],
+      nextWordId: 9,
+    });
   });
 
   it("does not match a word that moved more than half a second", async () => {
@@ -213,6 +251,76 @@ describe("transcribeAsset", () => {
     const outside = join(tempDir(), "x.mp4");
     writeFileSync(outside, "x");
     await expect(run(dir, provider, { asset: outside })).rejects.toMatchObject({ code: ErrorCode.OutsideProject });
+  });
+
+  it("never overwrites the transcript of a same-name asset: keeps the extension instead", async () => {
+    const dir = project();
+    writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
+    await run(dir, fakeProvider(words(["hola", 0.5, 0.8])).provider);
+    const video = readTranscript(dir);
+    const edited = { ...video, edits: { w_000001: { text: "Hola," } } };
+    writeFileSync(join(dir, "transcripts", "raw-01.words.json"), JSON.stringify(edited));
+
+    // Same speech, same times: without the ownership check, the video's edit would land on the recorder's words.
+    const wav = await run(dir, fakeProvider(words(["hola", 0.5, 0.8])).provider, { asset: join(dir, "assets", "raw-01.wav") });
+    expect(wav).toMatchObject({ transcript: "transcripts/raw-01.wav.words.json", reusedIds: 0, keptEdits: 0 });
+    const recorder = JSON.parse(readFileSync(join(dir, "transcripts", "raw-01.wav.words.json"), "utf8"));
+    expect(recorder).toMatchObject({ asset: "assets/raw-01.wav", edits: {} });
+    expect(readTranscript(dir)).toEqual(edited);
+
+    // Each asset keeps finding its own file on re-transcription.
+    const again = await run(dir, fakeProvider(words(["hola", 0.5, 0.8])).provider);
+    expect(again).toMatchObject({ transcript: "transcripts/raw-01.words.json", keptEdits: 1 });
+    const wavAgain = await run(dir, fakeProvider([]).provider, { asset: join(dir, "assets", "raw-01.wav") });
+    expect(wavAgain.transcript).toBe("transcripts/raw-01.wav.words.json");
+  });
+
+  it("refuses before any work when every transcript name belongs to another asset", async () => {
+    const dir = project();
+    writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
+    await run(dir, fakeProvider([]).provider);
+    // A hand-made transcript for a third asset sits on the fallback name.
+    const other = { ...readTranscript(dir), asset: "assets/elsewhere.wav" };
+    writeFileSync(join(dir, "transcripts", "raw-01.wav.words.json"), JSON.stringify(other));
+
+    const fake = fakeProvider([]);
+    await expect(run(dir, fake.provider, { asset: join(dir, "assets", "raw-01.wav") })).rejects.toMatchObject({
+      code: ErrorCode.TranscriptNameTaken,
+      data: {
+        asset: "assets/raw-01.wav",
+        transcripts: [
+          { path: "transcripts/raw-01.words.json", asset: "assets/raw-01.mp4" },
+          { path: "transcripts/raw-01.wav.words.json", asset: "assets/elsewhere.wav" },
+        ],
+      },
+    });
+    expect(fake.calls).toEqual([]);
+    expect(JSON.parse(readFileSync(join(dir, "transcripts", "raw-01.wav.words.json"), "utf8"))).toEqual(other);
+  });
+
+  it("does not overwrite a transcript another asset wrote under the same name while the engine ran", async () => {
+    const dir = project();
+    const intruder: TranscriptionProvider = {
+      id: "fake",
+      async transcribe() {
+        await run(dir, fakeProvider(words(["other", 0, 1])).provider, { asset: join(dir, "assets", "raw-01.wav") });
+        return { model: "m", words: words(["hola", 0.5, 0.8]) };
+      },
+    };
+    writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
+    await expect(run(dir, intruder)).rejects.toMatchObject({ code: ErrorCode.TranscriptNameTaken });
+    expect(readTranscript(dir)).toMatchObject({ asset: "assets/raw-01.wav", words: [{ text: "other" }] });
+  });
+
+  it("does not take audio from the proxy when a same-name sibling could own it", async () => {
+    const dir = project();
+    writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
+    mkdirSync(join(dir, ".frameshell", "proxies", "assets"), { recursive: true });
+    writeFileSync(join(dir, ".frameshell", "proxies", "assets", "raw-01.mp4"), "proxy-bytes");
+    const fake = fakeProvider([]);
+    const result = await run(dir, fake.provider, { asset: join(dir, "assets", "raw-01.wav") });
+    expect(fake.calls[0]!.audioBytes).toBe("wav-of:recorder track");
+    expect(result.audioSource).toBe("assets/raw-01.wav");
   });
 
   it("names transcripts after the asset path under assets/", async () => {
