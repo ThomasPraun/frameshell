@@ -63,6 +63,7 @@ export {
   type ScriptScene,
   type ScriptMeta,
   type ScriptOutline,
+  isScriptPath,
   parseScript,
   scriptRefPathProblem,
   scriptSlug,

@@ -22,17 +22,30 @@ import { useSyncExternalStore } from "react";
  */
 export type SelectionOrigin = "timeline" | "script";
 
+/**
+ * A request to bring a clip into view, made with a selection from another
+ * panel. Compared by identity: each request is a new object, so the same
+ * heading clicked twice scrolls twice, while pruning keeps the object and
+ * never scrolls.
+ */
+export interface RevealRequest {
+  /** First clip of the selection when it was made. */
+  readonly clip: string;
+}
+
 export interface Selection {
   /** Selected clip ids, in selection order; empty when nothing is selected. */
   readonly clips: readonly string[];
   /** Panel that made this selection; null when empty or pruned to nothing. */
   readonly origin: SelectionOrigin | null;
+  /** Latest reveal request, kept until the selection is replaced; null when none. */
+  readonly reveal: RevealRequest | null;
 }
 
 /** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
 export const SELECTION_TIMELINE = "main";
 
-const EMPTY: Selection = { clips: [], origin: null };
+const EMPTY: Selection = { clips: [], origin: null, reveal: null };
 let current: Selection = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -45,11 +58,16 @@ function replace(next: Selection): void {
 export const selection = {
   /** Current selection; the same object until it changes. */
   get: (): Selection => current,
-  /** Replace the selected clips; no-op (no re-render) when clips and origin are unchanged. */
-  selectClips(ids: readonly string[], origin: SelectionOrigin): void {
+  /**
+   * Replace the selected clips; no-op (no re-render) when clips and origin
+   * are unchanged. `reveal` asks panels to bring the first clip into view,
+   * as a new {@link RevealRequest} even when nothing else changed.
+   */
+  selectClips(ids: readonly string[], origin: SelectionOrigin, options: { reveal?: boolean } = {}): void {
+    const reveal = options.reveal === true && ids.length > 0;
     const same = ids.length === current.clips.length && ids.every((id, i) => id === current.clips[i]);
-    if (same && (ids.length === 0 || origin === current.origin)) return;
-    replace(ids.length === 0 ? EMPTY : { clips: [...ids], origin });
+    if (!reveal && same && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
+    replace(ids.length === 0 ? EMPTY : { clips: [...ids], origin, reveal: reveal ? { clip: ids[0]! } : null });
   },
   /** Add or remove one clip (Shift/Cmd-click). */
   toggleClip(id: string, origin: SelectionOrigin): void {
@@ -64,12 +82,13 @@ export const selection = {
    * Drop selected clips that are no longer in {@link SELECTION_TIMELINE}
    * (`present` = its clip ids now). Call on every new revision: a removed
    * clip must not stay selected, nor come back selected when an undo
-   * restores its id. Keeps the origin; no-op when nothing was dropped.
+   * restores its id. Keeps the origin and the reveal request (same object:
+   * pruning never moves a view); no-op when nothing was dropped.
    */
   retainClips(present: ReadonlySet<string>): void {
     const kept = current.clips.filter((id) => present.has(id));
     if (kept.length === current.clips.length) return;
-    replace(kept.length === 0 ? EMPTY : { clips: kept, origin: current.origin });
+    replace(kept.length === 0 ? EMPTY : { ...current, clips: kept });
   },
   /** Call `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void {

@@ -16,6 +16,7 @@ import {
   type Outcome,
   type ProjectView,
   type TimelineChange,
+  type TimelineEdit,
 } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
@@ -24,6 +25,7 @@ import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
+import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
@@ -37,6 +39,7 @@ const daemon = new DaemonLink({
   client: `desktop/${APP_VERSION}`,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
 });
+const editor = new TimelineEditor((method, params) => daemon.request(method, params));
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const binDir = join(app.getPath("userData"), "bin");
 const recentFile = join(app.getPath("userData"), "recent.json");
@@ -283,6 +286,15 @@ function registerIpc(): void {
       const { project } = requireProject(stateOf(event.sender));
       return daemon.request("timeline.show", { cwd: project.dir, timeline });
     }),
+  );
+  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edit: TimelineEdit) =>
+    outcome(async () => editor.apply(requireProject(stateOf(event.sender)).project.dir, timeline, edit)),
+  );
+  ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
+    outcome(async () => editor.undo(requireProject(stateOf(event.sender)).project.dir, timeline)),
+  );
+  ipcMain.handle(Channel.timelineRedo, (event, timeline: string) =>
+    outcome(async () => editor.redo(requireProject(stateOf(event.sender)).project.dir, timeline)),
   );
   ipcMain.handle(Channel.mediaAssets, (event) =>
     outcome(async () => {

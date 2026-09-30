@@ -1063,8 +1063,34 @@ code {
   color: var(--text-faint);
 }
 
+.clip-tooltip .clip-tooltip-danger {
+  color: var(--danger);
+}
+
 .timeline-summary {
   margin-left: auto;
+}
+
+/* What the last edit did; amber-free on purpose: the accent marks the playhead and selection, not chatter. */
+.timeline-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.timeline-status-error {
+  color: var(--danger);
+}
+
+.snap-toggle.on {
+  color: var(--accent);
+}
+
+.timeline-zoom .snap-toggle {
+  margin-left: 4px;
 }
 
 .sr-only {

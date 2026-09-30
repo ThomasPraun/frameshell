@@ -215,3 +215,48 @@ test("clicking a clip never scrolls the timeline, even with focus elsewhere", as
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
   await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(before);
 });
+
+test("clicking the same scene heading again brings its clip back into view", async () => {
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  const { pxPerSecond } = await lanesBox();
+  // Scrolled away from c_intro (0 to 4 s); the selection stays as it was.
+  await page.locator(".timeline-scroller").evaluate((element, left) => {
+    element.scrollLeft = left;
+  }, Math.round(6 * pxPerSecond));
+  const away = (await lanesBox()).scrollLeft;
+  expect(away).toBeGreaterThan(4 * pxPerSecond);
+  // Let the timeline see the scroll (its scroll event and next paint) before the click that must undo it.
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  // Left end of the heading: the editor's caret already sits mid-line from the earlier click, and a click through it is retried by Playwright.
+  await line("## Intro").click({ position: { x: 4, y: 10 } });
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(away);
+});
+
+test("a script selection losing its first clip never moves the timeline", async () => {
+  const path = join(box.projectDir, "timelines", "main.json");
+  const timeline = JSON.parse(readFileSync(path, "utf8"));
+  timeline.tracks[0].clips.find((clip: { id: string }) => clip.id === "c_spare").scriptRef = "scripts/launch.md#intro";
+  // Direct edits keep the revision they were read at (SPEC §6.4).
+  writeFileSync(path, JSON.stringify(timeline, null, 2));
+  await expect(page.locator(".editor-host .scene-glyph-unlinked")).toHaveCount(1);
+  await line("## Intro").click();
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_spare");
+
+  // Both clips (0 to 4 s, 10 to 13 s) off-screen to the left.
+  const { pxPerSecond } = await lanesBox();
+  await page.locator(".timeline-scroller").evaluate((element, left) => {
+    element.scrollLeft = left;
+  }, Math.round(30 * pxPerSecond));
+  const before = (await lanesBox()).scrollLeft;
+  expect(before).toBeGreaterThan(13 * pxPerSecond);
+
+  // The daemon journaled the link and bumped the revision on disk: this edit starts from that one.
+  const linked = JSON.parse(readFileSync(path, "utf8"));
+  linked.tracks[0].clips = linked.tracks[0].clips.filter((clip: { id: string }) => clip.id !== "c_intro");
+  writeFileSync(path, JSON.stringify(linked, null, 2));
+  await expect(lanes()).toHaveAttribute("data-selected", "c_spare");
+  // Let any scroll the pruning might cause land before looking.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect((await lanesBox()).scrollLeft).toBe(before);
+});

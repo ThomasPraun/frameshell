@@ -72,7 +72,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || editable(event.target)) return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editable(event.target)) return;
       const second = transport.get().fps;
       if (event.key === " " && !(event.target instanceof HTMLButtonElement)) transport.toggle();
       else if (event.key === "ArrowLeft") transport.step(event.shiftKey ? -second : -1);
