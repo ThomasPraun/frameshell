@@ -1,11 +1,12 @@
 // Electron main: windows, IPC, terminals, explorer watcher, daemon link (SPEC §3.2).
-// Env: FRAMESHELL_DATA_DIR / FRAMESHELL_CONFIG_DIR isolate user dirs (tests); FRAMESHELL_SOCKET picks the daemon.
+// Env: FRAMESHELL_DATA_DIR / FRAMESHELL_CONFIG_DIR isolate user dirs (tests); FRAMESHELL_SOCKET picks the daemon;
+// FRAMESHELL_PREVIEW_PROBE=1 exposes preview measurement hooks (ADR 0001 harness) and keeps hidden windows at full rate.
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection } from "@frameshell/protocol";
 import { Channel, type OpenOutcome, type Outcome, type ProjectView, type TimelineChange } from "../shared/api.js";
@@ -13,6 +14,7 @@ import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { LayoutStore } from "./layout-store.js";
+import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { TerminalManager } from "./terminals.js";
@@ -32,6 +34,21 @@ const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const binDir = join(app.getPath("userData"), "bin");
 const recentFile = join(app.getPath("userData"), "recent.json");
 const MAX_RECENT = 10;
+/** Preview measurement mode: the renderer gets `?probe=1`. */
+const PREVIEW_PROBE = process.env["FRAMESHELL_PREVIEW_PROBE"] === "1";
+if (PREVIEW_PROBE) {
+  // Real-time measurements: timers, rAF and audio must not slow down when the window loses focus.
+  app.commandLine.appendSwitch("disable-background-timer-throttling");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+}
+/** Base URLs of `frameshell-media://`, one per project shown in a window. */
+const mediaRoots = new MediaRoots();
+
+// Before ready: fetch() from renderer workers, range streaming and CORS need a privileged scheme.
+protocol.registerSchemesAsPrivileged([
+  { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+]);
 
 /** Per-window state; a window shows at most one project. */
 interface WindowState {
@@ -85,14 +102,16 @@ function createWindow(projectDir?: string): BrowserWindow {
     state.terminals.killAll();
     void state.files?.close();
     for (const subscription of state.timelineEvents) void subscription.unsubscribe();
+    if (state.project) mediaRoots.revoke(state.project.mediaUrl);
     windows.delete(contents.id);
   });
 
   const load = async () => {
     if (projectDir) await openInWindow(state, projectDir);
     const devUrl = process.env["ELECTRON_RENDERER_URL"];
-    if (devUrl) await window.loadURL(devUrl);
-    else await window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
+    const query: Record<string, string> = PREVIEW_PROBE ? { probe: "1" } : {};
+    if (devUrl) await window.loadURL(`${devUrl}${PREVIEW_PROBE ? "?probe=1" : ""}`);
+    else await window.loadFile(join(import.meta.dirname, "../renderer/index.html"), { query });
   };
   load().catch((error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error)));
   return window;
@@ -115,6 +134,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     dir: status.project.dir,
     name: status.project.name,
     daemon: { version: status.daemon.daemonVersion, pid: status.daemon.pid, socketPath: status.daemon.socketPath },
+    mediaUrl: mediaRoots.issue(status.project.dir),
   };
   await state.files?.close();
   await Promise.all(state.timelineEvents.splice(0).map((subscription) => subscription.unsubscribe()));
@@ -134,6 +154,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.timelineEvents = subscriptions;
+  if (state.project) mediaRoots.revoke(state.project.mediaUrl);
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
   await rememberRecent(project.dir);
@@ -308,6 +329,7 @@ function projectArg(argv: string[]): string | undefined {
 app.whenReady().then(async () => {
   const cliEntry = fileURLToPath(import.meta.resolve("@frameshell/cli/frameshell"));
   await writeCliShim(binDir, { runtime: process.execPath, cliEntry });
+  protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   registerIpc();
   buildMenu();
   createWindow(projectArg(process.argv));

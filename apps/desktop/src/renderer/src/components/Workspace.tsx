@@ -112,7 +112,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         <div className="center-column">
           <div className="center-row" ref={centerRow}>
             <div className="panel preview" style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
-              <PreviewPanel />
+              <PreviewPanel project={project} />
             </div>
             <Splitter
               orientation="vertical"

@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { launch, sandbox } from "./harness.js";
+import { laidOutBox, launch, sandbox } from "./harness.js";
 
 // Scene <-> clip linking (SPEC §5.5) in the built app, against the canvas timeline (#14):
 // real daemon, fixture timeline with scene and whole-script scriptRefs, clicks on canvas pixels.
@@ -97,8 +97,8 @@ test("opens the script with scenes without clips flagged in the gutter", async (
   await expect(page.locator(".editor-host .scene-glyph-unlinked")).toHaveCount(1);
   // The whole-script clip covers no scene, but gets its own flag on line 1.
   await expect(page.locator(".editor-host .script-glyph-linked")).toHaveCount(1);
-  const flag = (await page.locator(".editor-host .scene-glyph-unlinked").boundingBox())!;
-  const outro = (await line("## Outro").boundingBox())!;
+  const flag = await laidOutBox(page.locator(".editor-host .scene-glyph-unlinked"));
+  const outro = await laidOutBox(line("## Outro"));
   expect(Math.abs(flag.y - outro.y)).toBeLessThan(2);
 });
 
@@ -110,7 +110,7 @@ test("clicking a clip on the canvas selects it and highlights its scene", async 
   await expect.poll(async () => isAccent(await frameColor("c_intro"))).toBe(true);
   expect(isAccent(await frameColor("c_demo"))).toBe(false);
   await expect(selectedHeadings()).toHaveCount(1);
-  const intro = (await line("## Intro").boundingBox())!;
+  const intro = await laidOutBox(line("## Intro"));
   await expect
     .poll(async () => {
       const heading = await selectedHeadings().boundingBox();
@@ -124,7 +124,7 @@ test("Shift-click adds a clip, a click on empty lane clears", async () => {
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_demo");
   await expect(selectedHeadings()).toHaveCount(2);
   const { pxPerSecond } = await clipGeometry("c_spare");
-  const scroller = (await page.locator(".timeline-scroller").boundingBox())!;
+  const scroller = await laidOutBox(page.locator(".timeline-scroller"));
   // V1 lane at 30 s: past every clip.
   await page.mouse.click(scroller.x + 30 * pxPerSecond, scroller.y + ROW_TOP.v1 + LANE / 2);
   await expect(lanes()).toHaveAttribute("data-selected", "");
@@ -136,7 +136,7 @@ test("clicking a scene heading selects its clips on the canvas", async () => {
   await expect(lanes()).toHaveAttribute("data-selected", "c_demo");
   await expect.poll(async () => isAccent(await frameColor("c_demo"))).toBe(true);
   expect(isAccent(await frameColor("c_intro"))).toBe(false);
-  const demo = (await line("## Demo").boundingBox())!;
+  const demo = await laidOutBox(line("## Demo"));
   // Monaco repaints decorations after the store updates: the heading has no box until then (null), so retry.
   await expect(selectedHeadings()).toHaveCount(1);
   await expect

@@ -3,7 +3,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { launch, runInTerminal, sandbox, terminalText } from "./harness.js";
+import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 
 // Live timeline (#14): the panel follows the daemon while the CLI edits the project from the integrated terminal.
 const box = sandbox("timeline");
@@ -105,7 +105,7 @@ test("stays smooth with 250 clips per track while scrolling and zooming", async 
   // Fitted: every clip on screen at once, the heaviest frame.
   await page.getByRole("button", { name: "Zoom to fit" }).click();
   // Selected clips take the extra accent-frame paint: measure with some. The tooltip says when the pointer is on a clip.
-  const scroller = (await page.locator(".timeline-scroller").boundingBox())!;
+  const scroller = await laidOutBox(page.locator(".timeline-scroller"));
   for (let x = 4, picked = 0; picked < 3 && x < scroller.width; x += 3) {
     // Over the ruler first: no tooltip left over from the previous position.
     await page.mouse.move(scroller.x + x, scroller.y + 8);

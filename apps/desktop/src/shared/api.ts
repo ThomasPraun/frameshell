@@ -11,6 +11,12 @@ export interface ProjectView {
   dir: string;
   name: string;
   daemon: { version: string; pid: number; socketPath: string };
+  /**
+   * Base URL (`frameshell-media://<token>/`, trailing slash) serving this
+   * project's proxies and PCM sidecars with range support; append the
+   * project-relative paths `asset.list` reports. Valid while the window shows the project.
+   */
+  mediaUrl: string;
 }
 
 /** Outcome of opening a folder. `not-a-project` lets the UI offer `project.init`. */
