@@ -67,6 +67,27 @@ export const TransactionInfoSchema = z.object({
   author: AuthorSchema,
 });
 
+/** An explicit transaction still open (`tx begin` without commit or abort), as `status` lists it. */
+export const OpenTransactionSchema = z.object({
+  tx: TxIdSchema,
+  label: z.string(),
+  author: AuthorSchema,
+  session: z
+    .string()
+    .nullable()
+    .describe(
+      "Terminal session of a `cli:<session>` author; null for other authors. A shell that closed with it open " +
+        "can still end it: `FRAMESHELL_SESSION=<session> frameshell tx commit` (or `tx abort`).",
+    ),
+  operations: z.int().describe("Operations applied in it so far, every timeline."),
+  timelines: z.array(z.string()).describe("Ids of the project's timelines it changed, e.g. `main`."),
+  openedAt: z.string().nullable().describe("ISO 8601 time of `tx begin`; null when not recorded (opened by an older daemon)."),
+  ageMs: z.number().nullable().describe("Milliseconds since `openedAt`; null when unknown."),
+});
+
+/** See {@link OpenTransactionSchema}. */
+export type OpenTransaction = z.output<typeof OpenTransactionSchema>;
+
 /** An operation that blocks a revert: it came later and changed what the revert would restore. */
 export const RevertConflictSchema = z.object({
   id: OpIdSchema,

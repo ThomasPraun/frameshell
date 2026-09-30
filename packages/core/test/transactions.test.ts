@@ -262,6 +262,36 @@ describe("transactions", () => {
     expect(await tracksAfterRestart(connect, dir)).toEqual(["Keep"]);
   });
 
+  it("lists open transactions in status, across a restart, until committed", async () => {
+    const { dir, connect, addTrack, restart } = await setup();
+    const agent = await connect("cli/test", "agent");
+    const begun = await agent.request("tx.begin", { label: "rough cut" });
+    await addTrack(agent, "A1");
+    const listed = {
+      tx: begun.tx,
+      label: "rough cut",
+      author: "cli:agent",
+      session: "agent",
+      operations: 1,
+      timelines: ["main"],
+      openedAt: expect.any(String),
+      ageMs: expect.any(Number),
+    };
+    const status = await (await connect("cli/test", "other")).request("status", { cwd: dir });
+    expect(status.transactions).toEqual([listed]);
+    const { openedAt } = status.transactions[0]!;
+    expect(Date.now() - Date.parse(openedAt!)).toBeGreaterThanOrEqual(0);
+
+    await restart();
+    await sleep(20);
+    const after = await (await connect("cli/test")).request("status", { cwd: dir });
+    expect(after.transactions).toEqual([{ ...listed, openedAt }]);
+    expect(after.transactions[0]!.ageMs).toBeGreaterThanOrEqual(20);
+
+    await (await connect("cli/test", "agent")).request("tx.commit", {});
+    expect((await (await connect("cli/test")).request("status", { cwd: dir })).transactions).toEqual([]);
+  });
+
   it("does not resume a committed transaction after a restart", async () => {
     const { connect, addTrack, restart } = await setup();
     const agent = await connect("cli/test", "agent");

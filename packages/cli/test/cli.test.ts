@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -68,6 +68,47 @@ describe("frameshell CLI", () => {
     expect(json.daemon.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(json.daemon.pid).not.toBe(process.pid);
     daemonPids.add(json.daemon.pid);
+  });
+
+  it("status and status --json show rejected edits on disk and open transactions", () => {
+    const dir = join(tempDir(), "talk");
+    expect(frameshell(["init", dir], tempDir()).code).toBe(0);
+    const rejected = join(dir, ".frameshell", "rejected");
+    mkdirSync(rejected, { recursive: true });
+    // Kept by an earlier daemon run: one with recorded details, one without.
+    const recorded = {
+      timeline: "main",
+      reason: "stale",
+      message: "timelines/main.json was edited at revision 0, but timeline main is at revision 3.",
+      preserved: ".frameshell/rejected/2026-02-01T10-00-00-000Z-main.json",
+      revision: 0,
+      current: 3,
+      at: "2026-02-01T10:00:00.000Z",
+    };
+    writeFileSync(join(dir, recorded.preserved), '{"revision":0}');
+    writeFileSync(join(dir, ".frameshell", "rejected.jsonl"), `${JSON.stringify(recorded)}\n`);
+    writeFileSync(join(rejected, "2026-01-01T09-00-00-000Z-main.json"), '{"revision":1}');
+    const begun = frameshell(["tx", "begin", "rough cut"], dir, { FRAMESHELL_SESSION: "sh-42-closed" });
+    expect(begun.code).toBe(0);
+
+    const json = JSON.parse(frameshell(["status", "--json"], dir).stdout);
+    daemonPids.add(json.daemon.pid);
+    expect(json.rejections).toEqual([
+      recorded,
+      expect.objectContaining({ reason: "unknown", revision: 1, current: null, at: "2026-01-01T09:00:00.000Z" }),
+    ]);
+    expect(json.transactions).toEqual([
+      expect.objectContaining({ label: "rough cut", author: "cli:sh-42-closed", session: "sh-42-closed", operations: 0, timelines: [] }),
+    ]);
+
+    const text = frameshell(["status"], dir).stdout;
+    expect(text).toMatch(/Rejected direct edits \(2\):/);
+    expect(text).toMatch(/main: stale \(revision 0, current 3\), kept at \.frameshell\/rejected\/2026-02-01T10-00-00-000Z-main\.json/);
+    expect(text).toMatch(/main: unknown reason \(revision 1\), kept at \.frameshell\/rejected\/2026-01-01T09-00-00-000Z-main\.json/);
+    expect(text).toMatch(/Open transactions \(1\):/);
+    expect(text).toMatch(/tx_[0-9a-f]{8} "rough cut" · cli:sh-42-closed · 0 operations · open \d+s/);
+    expect(text).toMatch(/FRAMESHELL_SESSION=<session> frameshell tx commit/);
+    expect(frameshell(["tx", "abort"], dir, { FRAMESHELL_SESSION: "sh-42-closed" }).code).toBe(0);
   });
 
   it("status prints a human summary and points to init outside a project", () => {

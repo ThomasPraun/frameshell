@@ -204,8 +204,9 @@ my-video/
     ├── cache/clips/           # rendered generated clips (regenerable)
     ├── proxies/               # CFR preview proxies (regenerable)
     ├── waveforms/, thumbs/    # regenerable
-    ├── history/               # local operation journal (not shared; loss = loss of undo only)
-    └── rejected/              # stale direct edits kept for recovery
+    ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
+    ├── rejected/              # refused direct edits kept for recovery
+    └── rejected.jsonl         # why each was refused (listed by `status`)
 ```
 
 ### 5.2 `frameshell.json`
@@ -333,9 +334,9 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 
 ### 6.2 History and transactions
 
-- Journal: `.frameshell/history/<timeline>.jsonl`.
-- `author`: `ui`, `cli:<session>` (terminal session), `file` (direct edit), `plugin:<name>`.
-- CLI ops from the same terminal session are grouped automatically into a transaction until an idle gap; `frameshell tx begin "<label>"` / `frameshell tx commit` group explicitly. Outside an app terminal the CLI generates a session id when `FRAMESHELL_SESSION` is unset: `sh-<pid>-<hash>` from its parent shell's pid and start time, stable for every call from that shell. Open transactions persist on disk (survive daemon restarts); `tx abort` is all-or-nothing across timelines.
+- Journal: `.frameshell/history/<timeline>.jsonl`, plus `<timeline>.head.json`, the timeline as the last entry wrote it. When a project opens, a timeline file that differs from it (edited while no daemon ran) is journaled as one `file` operation on top of it, so `revert` has no gap; content breaking a timeline rule is rejected as in §6.4. Without a matching snapshot the change stays a gap `revert` refuses to cross.
+- `author`: `ui`, `cli:<session>` (terminal session), `file` (direct edit), `plugin:<name>`. A save through `file.write` is the caller's (the desktop editor's is `ui`); only edits the watcher finds on disk are `file`.
+- CLI ops from the same terminal session are grouped automatically into a transaction until an idle gap; `frameshell tx begin "<label>"` / `frameshell tx commit` group explicitly. Outside an app terminal the CLI generates a session id when `FRAMESHELL_SESSION` is unset: `sh-<pid>-<hash>` from its parent shell's pid and start time, stable for every call from that shell. Open transactions persist on disk (survive daemon restarts) and `status` lists them with label, session and age, so one left by a closed shell can be ended with `FRAMESHELL_SESSION=<session> frameshell tx commit|abort`; `tx abort` is all-or-nothing across timelines.
 - UI: History panel lists transactions ("agent: remove silences, 180 ops"). Actions: show diff on timeline, revert transaction, revert single op.
 - Revert is itself a new operation (history is append-only).
 - `frameshell history --since <tx> --json`: lets the agent see what the human changed since its last transaction.
@@ -349,7 +350,7 @@ Watcher detects new or changed files under `assets/`. The job queue then probes 
 The watcher sees a timeline file change that the daemon did not write:
 
 - **`revision` equals current:** schema-validate, diff against in-memory state, record as ops with author `file`, bump revision. Invalid content is rejected with a precise error.
-- **`revision` is stale:** reject. Restore the daemon's version, save the incoming file to `.frameshell/rejected/<timestamp>-<timeline>.json`, emit an event (shown in UI and returned by `frameshell doctor`/`status`).
+- **`revision` is stale:** reject. Restore the daemon's version, save the incoming file to `.frameshell/rejected/<timestamp>-<timeline>.json`, emit an event (shown in UI and returned by `frameshell doctor`/`status`). `status` reads rejections back from disk, so they survive restarts, until the kept file is deleted.
 
 ### 6.5 Clip render cache
 
@@ -365,7 +366,7 @@ On first open of a project that declares plugins, the UI and CLI ask for trust b
 
 ```
 frameshell init [dir]                         # scaffold project
-frameshell status [--json]                    # project, daemon, jobs, rejected edits
+frameshell status [--json]                    # project, daemon, jobs, rejected edits, open transactions
 frameshell doctor [--install] [--json]        # binaries, encoders (x264, libvpx, VideoToolbox, NVENC, VAAPI), whisper accel; downloads only with --install
 
 frameshell import <file…>                     # copy/link into assets/, queue proxies

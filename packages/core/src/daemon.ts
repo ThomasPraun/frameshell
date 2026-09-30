@@ -9,6 +9,7 @@ import {
   type JsonRpcRequest,
   type MethodName,
   type MethodResult,
+  type OpenTransaction,
   PROTOCOL_VERSION,
   type Progress,
   RpcError,
@@ -213,6 +214,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return result;
   };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
+  /** Open explicit transactions that changed project `dir` (however its root was spelled) or nothing yet. */
+  const openTransactions = async (dir: string): Promise<OpenTransaction[]> => {
+    const real = await canonicalPath(dir);
+    const listed: OpenTransaction[] = [];
+    for (const { author, tx, operations, touched, openedAt } of transactions.list()) {
+      const here = [];
+      for (const where of touched) if ((await canonicalPath(where.root)) === real) here.push(where.timeline);
+      if (touched.length > 0 && here.length === 0) continue;
+      listed.push({
+        tx: tx.id,
+        label: tx.label,
+        author,
+        session: author.startsWith("cli:") ? author.slice("cli:".length) : null,
+        operations,
+        timelines: here,
+        openedAt,
+        ageMs: openedAt === null ? null : Math.max(0, Date.now() - Date.parse(openedAt)),
+      });
+    }
+    return listed;
+  };
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
 
   let idleTimer: NodeJS.Timeout | undefined;
@@ -240,6 +262,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         openProjects: projects.list(),
         rejections: project ? await timelines.rejections(project.dir) : [],
         jobs: project ? jobs.list({ project: project.dir }) : [],
+        transactions: project ? await openTransactions(project.dir) : [],
         caller: { ...caller },
       };
     },

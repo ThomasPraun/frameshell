@@ -37,7 +37,7 @@ const USAGE = `Usage: frameshell <command> [options]
 
 Commands:
   init [dir] [--name <name>]   Scaffold a project in dir (default: current directory)
-  status [--json]              Show daemon and the project enclosing the current directory
+  status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
   doctor [--install] [--json]  Check ffmpeg/ffprobe, versions and encoders; exit 1 on problems.
                                --install downloads missing managed binaries first
   import <file…> [--link] [--wait]
@@ -437,6 +437,15 @@ function formatImport(result: AssetImportResult): string {
     .join("");
 }
 
+/** `42s`, `5m 3s`, `2h 10m`, `3d 4h`: coarse, for ages. */
+function duration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86_400)}d ${Math.floor((s % 86_400) / 3600)}h`;
+}
+
 function formatJob(job: JobInfo): string {
   const what = `${job.kind} ${job.asset}`;
   switch (job.state) {
@@ -564,10 +573,23 @@ function formatStatus(status: StatusResult, cwd: string): string {
   if (status.rejections.length > 0) {
     lines.push(`Rejected direct edits (${status.rejections.length}):`);
     for (const r of status.rejections) {
-      const revision = r.revision === null ? "unreadable revision" : `revision ${r.revision}`;
-      lines.push(`  ${r.at}  ${r.timeline}: ${r.reason} (${revision}, current ${r.current}), kept at ${r.preserved}`);
+      const revisions = [r.revision === null ? "unreadable revision" : `revision ${r.revision}`];
+      if (r.current !== null) revisions.push(`current ${r.current}`);
+      const reason = r.reason === "unknown" ? "unknown reason" : r.reason;
+      lines.push(`  ${r.at}  ${r.timeline}: ${reason} (${revisions.join(", ")}), kept at ${r.preserved}`);
       if (r.reason === "invalid") lines.push(`    ${r.message.split("\n").join("\n    ")}`);
     }
+    lines.push("  Delete a kept file once handled to drop it from this list.");
+  }
+  if (status.transactions.length > 0) {
+    lines.push(`Open transactions (${status.transactions.length}):`);
+    for (const t of status.transactions) {
+      const age = t.ageMs === null ? "open since unknown" : `open ${duration(t.ageMs)}`;
+      const where = t.timelines.length > 0 ? ` · timelines ${t.timelines.join(", ")}` : "";
+      const ops = `${t.operations} operation${t.operations === 1 ? "" : "s"}`;
+      lines.push(`  ${t.tx} ${JSON.stringify(t.label)} · ${t.author} · ${ops} · ${age}${where}`);
+    }
+    lines.push("  End one left by a closed shell: FRAMESHELL_SESSION=<session> frameshell tx commit (or tx abort).");
   }
   return `${lines.join("\n")}\n`;
 }

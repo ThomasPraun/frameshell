@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { HistoryResultSchema, TransactionInfoSchema } from "./history.js";
+import { HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   OpIdSchema,
@@ -333,8 +333,9 @@ export const methods = {
   },
   status: {
     description:
-      "Report daemon state and the Frameshell project enclosing a directory, searching upwards from it. " +
-      "Opens that project in the daemon. `project` is null when the directory is in no project.",
+      "Report daemon state and the Frameshell project enclosing a directory, searching upwards from it: its jobs, " +
+      "refused direct edits and open transactions. Opens that project in the daemon. `project` is null when the " +
+      "directory is in no project.",
     params: z.strictObject({
       cwd: AbsolutePath.describe("Absolute directory to resolve the project from, e.g. `/home/ana/videos/launch/assets`."),
     }),
@@ -360,6 +361,13 @@ export const methods = {
       jobs: z
         .array(JobSchema)
         .describe("Background jobs of `project` in this daemon run, oldest first; empty when there is no project."),
+      transactions: z
+        .array(OpenTransactionSchema)
+        .describe(
+          "Explicit transactions still open that changed `project` or nothing yet, from any session, oldest first. " +
+            "One left by a closed shell keeps grouping that session's operations: commit or abort it from that " +
+            "session. Empty when none or no project.",
+        ),
       caller: z
         .object({
           client: z.string().describe("Client id the caller sent in its handshake."),
