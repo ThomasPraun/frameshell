@@ -34,6 +34,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - name: Stress flaky tests (temporary, #97)
+        shell: bash
+        run: for i in $(seq 1 30); do echo "round $i"; npx vitest run packages/cli/test/daemon-client.test.ts apps/desktop/test/terminals.test.ts || exit 1; done
       - run: pnpm build
 
   # Drives the built Electron app: real daemon, real login shell, real pty.
