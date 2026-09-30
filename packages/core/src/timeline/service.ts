@@ -802,7 +802,7 @@ function invalidFile(path: string, details: string): RpcError {
 }
 
 /** Parse a project-relative timeline file. Throws TimelineNotFound (missing) or InvalidProjectFile. */
-async function readTimelineFile(root: string, rel: string): Promise<Timeline> {
+export async function readTimelineFile(root: string, rel: string): Promise<Timeline> {
   const path = join(root, ...rel.split("/"));
   let text: string;
   try {

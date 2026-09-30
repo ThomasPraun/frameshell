@@ -123,4 +123,40 @@ describe("render and frame methods", () => {
       data: { op: "frame", valid: { min: 0, max: 0.967 } },
     });
   });
+
+  it(
+    "flattens nested timelines: a timeline clip exports the clips it plays",
+    async () => {
+      const main = await conn.request("timeline.show", { cwd: project });
+      const inner = main.tracks[0]!.clips[0]!.id;
+      // Plays main from 0.5 s for 0.4 s, half size, from 0.2 s.
+      const outer = {
+        schemaVersion: 1,
+        id: "outer",
+        revision: 0,
+        tracks: [
+          {
+            id: "v1",
+            kind: "video",
+            clips: [{ id: "c_nest", type: "timeline", source: "timelines/main.json", start: 0.2, in: 0.5, duration: 0.4, transform: { scale: 0.5 } }],
+          },
+        ],
+      };
+      await conn.request("file.write", { path: join(project, "timelines", "outer.json"), content: JSON.stringify(outer) });
+      const shot = await conn.request("frame", { cwd: project, timeline: "outer", at: 0.3, out: join(tempDir(), "nested.png") });
+      // The nested clip's clips land on its track, renamed after it.
+      expect(shot).toMatchObject({ frame: 9, clip: `c_nest/${inner}` });
+      const result = await conn.request("render", { cwd: project, timeline: "outer" });
+      expect(result).toMatchObject({ duration: 0.6, timeline: "outer" });
+      expect((await finished(result.job.id)).state).toBe("done");
+
+      outer.tracks[0]!.clips[0]!.source = "timelines/gone.json";
+      await conn.request("file.write", { path: join(project, "timelines", "outer.json"), content: JSON.stringify(outer) });
+      await expect(conn.request("render", { cwd: project, timeline: "outer" })).rejects.toMatchObject({
+        code: ErrorCode.ExportUnsupported,
+        message: expect.stringContaining("timelines/gone.json"),
+      });
+    },
+    MEDIA_TIMEOUT,
+  );
 });
