@@ -59,6 +59,11 @@ const api: FrameshellApi = {
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
   },
+  ui: {
+    publish: (state) => ipcRenderer.send(Channel.uiPublish, state),
+    onCommand: (listener) => subscribe(Channel.uiCommand, listener),
+    reply: (id, error, state) => ipcRenderer.send(Channel.uiReply, id, error, state),
+  },
   media: {
     assets: () => invokeOutcome(Channel.mediaAssets),
     read: (path) => invokeOutcome(Channel.mediaRead, path),

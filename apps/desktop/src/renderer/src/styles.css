@@ -1898,9 +1898,36 @@ code {
   font-family: var(--font-mono);
 }
 
+/* Last MCP navigation: the agent's hand on the view, in the playhead's color, fading in once. */
+.status-agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--accent);
+  animation: status-agent-in 180ms ease-out;
+}
+
+.status-agent::before {
+  content: "";
+  flex: none;
+  width: 2px;
+  height: 10px;
+  background: var(--accent);
+}
+
+@keyframes status-agent-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+
+  .status-agent {
+    animation: none;
   }
 }
 

@@ -1,14 +1,7 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
-import { useCallback, useRef, useState } from "react";
-import {
-  authorOf,
-  diffCounts,
-  historySelection,
-  newestFirst,
-  operationTitle,
-  transactionTitle,
-} from "../history/model.js";
-import { loadHistoryDiff, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
+import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 
@@ -37,27 +30,24 @@ interface Notice {
 export function HistoryPanel() {
   const { history, error } = useTimelineHistory(TIMELINE);
   const { view } = useTimelineView(TIMELINE);
-  const { history: selected } = useSelection();
+  const { history: selected, origin } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, selected, view?.revision ?? null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const latestView = useRef(view);
-  latestView.current = view;
+  const list = useRef<HTMLUListElement>(null);
 
-  /**
-   * Select `target`: its clips still on the timeline, revealed; its changes
-   * highlighted. `newest`: the operation just applied, whose clips are on the
-   * timeline even when its `timeline.changed` has not reached the view yet.
-   */
-  const select = useCallback(async (target: string, newest = false) => {
-    const current = latestView.current;
+  // An entry the agent shows (`ui_show_tx_diff`) may be far down the list: bring its row into view.
+  useEffect(() => {
+    if (origin !== "agent" || !selected) return;
+    const attribute = selected.startsWith("op_") ? "data-op" : "data-tx";
+    list.current?.querySelector(`[${attribute}="${selected}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [origin, selected, history]);
+
+  /** Select `target`: its clips still on the timeline, revealed; its changes highlighted. */
+  const select = useCallback(async (target: string, revision?: number) => {
     try {
-      const { clips } = await loadHistoryDiff(TIMELINE, target, current?.revision ?? null);
-      const present = new Set((latestView.current ?? current)?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? []);
-      if (newest) for (const mark of clips) if (mark.after) present.add(mark.clip);
-      const picked = historySelection(clips, present);
-      selection.selectHistory(target, picked.clips, picked.reveal);
+      await selectHistoryEntry(TIMELINE, target, "history", revision === undefined ? {} : { revision });
     } catch (failure) {
       selection.selectHistory(target, [], null);
       setNotice({ target, tone: "error", text: (failure as Error).message, conflicts: [] });
@@ -80,7 +70,7 @@ export function HistoryPanel() {
       }
       setNotice({ target, tone: "info", text: `Reverted as ${outcome.result.operation.id}.`, conflicts: [] });
       // Show what the revert itself changed.
-      void select(outcome.result.operation.tx, true);
+      void select(outcome.result.operation.tx, outcome.result.revision);
     } catch (failure) {
       setNotice({ target, tone: "error", text: (failure as Error).message, conflicts: [] });
     } finally {
@@ -108,6 +98,7 @@ export function HistoryPanel() {
     : undefined;
   return (
     <ul
+      ref={list}
       className="history"
       aria-label={`History of timeline ${TIMELINE}`}
       onKeyDown={(event) => {

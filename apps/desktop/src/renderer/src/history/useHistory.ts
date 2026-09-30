@@ -1,6 +1,8 @@
-import type { HistoryDiffResult, HistoryResult } from "@frameshell/protocol";
+import type { HistoryDiffResult, HistoryResult, TimelineView } from "@frameshell/protocol";
 import { useEffect, useState } from "react";
-import { useTimelineView } from "../timeline/useTimelineView.js";
+import { type SelectionOrigin, selection } from "../selection.js";
+import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
+import { historySelection } from "./model.js";
 
 /** Diffs asked for, by timeline, target and the revision asked at; both panels asking share one request. */
 const diffs = new Map<string, Promise<HistoryDiffResult>>();
@@ -22,6 +24,52 @@ export function loadHistoryDiff(timeline: string, target: string, revision: numb
     if (diffs.size > MAX_DIFFS) diffs.delete(diffs.keys().next().value!);
   }
   return pending;
+}
+
+/**
+ * Select History entry `target` (`tx_…` or `op_…`) of `timeline` in the
+ * shared selection: the clips it changed that the timeline still has,
+ * revealed, and its changes marked. Rejects with the daemon's message (e.g.
+ * an id not in the journal), leaving the selection as it was. `revision`:
+ * the target produced it (a revert just made), so which clips it left is
+ * read from that revision once the shared feed has it.
+ */
+export async function selectHistoryEntry(
+  timeline: string,
+  target: string,
+  origin: SelectionOrigin,
+  options: { revision?: number } = {},
+): Promise<void> {
+  const asked = timelineState(timeline).view;
+  const [{ clips }, shown] = await Promise.all([
+    loadHistoryDiff(timeline, target, asked?.revision ?? null),
+    feedAt(timeline, options.revision ?? -1),
+  ]);
+  // A revision that landed during the request decides which clips are still there.
+  const view = timelineState(timeline).view ?? shown ?? asked;
+  const present = new Set(view?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? []);
+  const picked = historySelection(clips, present);
+  selection.selectHistory(target, picked.clips, picked.reveal, origin);
+}
+
+/** How long {@link feedAt} waits for a revision: the feed follows the daemon's event, normally within milliseconds. */
+const FEED_WAIT_MS = 2_000;
+
+/** The shared feed's view once it shows `revision` or later; whatever it shows after {@link FEED_WAIT_MS}. */
+function feedAt(timeline: string, revision: number): Promise<TimelineView | null> {
+  const now = timelineState(timeline).view;
+  if (now && now.revision >= revision) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve(timelineState(timeline).view);
+    };
+    const timer = setTimeout(done, FEED_WAIT_MS);
+    const off = watchTimeline(timeline, () => {
+      if ((timelineState(timeline).view?.revision ?? -1) >= revision) done();
+    });
+  });
 }
 
 /**

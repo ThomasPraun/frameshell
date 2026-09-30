@@ -7,6 +7,8 @@ import type {
   RevertConflict,
   TimelineRejection,
   TimelineView,
+  UiCommand,
+  UiView,
 } from "@frameshell/protocol";
 import type { Layout } from "./layout.js";
 
@@ -164,6 +166,17 @@ export interface FrameshellApi {
      */
     revert(timeline: string, target: string): Promise<RevertOutcome>;
   };
+  ui: {
+    /**
+     * Report what this window shows (SPEC §7b `ui_state`). Fire and forget:
+     * main keeps one report in flight and sends the newest after it.
+     */
+    publish(state: UiView): void;
+    /** Called with each navigation command the daemon routes to this window. Returns an unsubscribe function. */
+    onCommand(listener: (id: string, command: UiCommand) => void): () => void;
+    /** Answer command `id`: `error` null when applied, else why not; `state` is the window's state after it. */
+    reply(id: string, error: string | null, state: UiView): void;
+  };
   media: {
     /** `asset.list` of the window's project: ingest state and derived media paths. */
     assets(): Promise<AssetInfo[]>;
@@ -212,6 +225,9 @@ export const Channel = {
   historyList: "history:list",
   historyDiff: "history:diff",
   historyRevert: "history:revert",
+  uiPublish: "ui:publish",
+  uiCommand: "ui:command",
+  uiReply: "ui:reply",
   mediaAssets: "media:assets",
   mediaRead: "media:read",
   mediaChanged: "media:changed",

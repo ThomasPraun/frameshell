@@ -7,9 +7,9 @@ const RENAMED: Partial<Record<MethodName, string>> = {
   frame: "frame_capture",
 };
 
-/** MCP tool name of a registry method: `clip.add` → `clip_add`. */
+/** MCP tool name of a registry method, snake case: `clip.add` → `clip_add`, `ui.openFile` → `ui_open_file`. */
 export function toolName(method: string): string {
-  return RENAMED[method as MethodName] ?? method.replaceAll(".", "_");
+  return RENAMED[method as MethodName] ?? method.replaceAll(".", "_").replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
 /** One tool the server lists. `method` is the daemon method it calls; absent for composed tools. */

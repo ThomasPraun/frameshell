@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type EventName,
@@ -44,6 +44,7 @@ import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
+import { UiBroker } from "./ui/broker.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -255,6 +256,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
     return listed;
   };
+  const ui = new UiBroker();
+  /** Hub key of the project enclosing `cwd`, as `ui.publish` registers windows under. */
+  const projectKey = async (cwd: string) => canonicalPath(await root(cwd));
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
 
   let idleTimer: NodeJS.Timeout | undefined;
@@ -402,6 +406,36 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
     revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, caller),
+    "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
+    "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
+    "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
+    "ui.pause": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "pause" }),
+    "ui.select": async ({ cwd, clips, words, range, reveal }) =>
+      ui.command(await projectKey(cwd), { kind: "select", clips, words, range, reveal }),
+    "ui.openFile": async ({ cwd, file }) => {
+      const dir = await root(cwd);
+      return ui.command(await canonicalPath(dir), { kind: "openFile", path: projectRelative(dir, file) });
+    },
+    "ui.showTxDiff": async ({ cwd, timeline, target }) => ui.command(await projectKey(cwd), { kind: "showTxDiff", timeline, target }),
+    "ui.publish": async ({ cwd, view, state }, _caller, request) => {
+      // Sent on every change: resolve the project once per window and cwd, not per playhead move.
+      const known = ui.registered(request.sink, view);
+      if (known?.cwd === cwd) {
+        ui.publish(request.sink, view, known, state);
+        return { dir: known.dir };
+      }
+      const dir = await root(cwd);
+      ui.publish(request.sink, view, { key: await canonicalPath(dir), dir, cwd }, state);
+      return { dir };
+    },
+    "ui.reply": async ({ view, id, error, state }, _caller, request) => {
+      ui.reply(request.sink, view, id, error, state);
+      return {};
+    },
+    "ui.detach": async ({ view }, _caller, request) => {
+      ui.detach(request.sink, view);
+      return {};
+    },
   };
 
   const server: Server = createServer((socket) => {
@@ -414,6 +448,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     socket.on("close", () => {
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
+      ui.drop(sink);
       clients.delete(socket);
       armIdleTimer();
     });
@@ -509,6 +544,15 @@ function transactionKey(author: string): string {
   const match = /^agent:[^:]+(?::(.+))?$/.exec(author);
   if (!match) return author;
   return match[1] ? `cli:${match[1]}` : "cli";
+}
+
+/** `file` (absolute, or relative to the project root) as a project-relative `/`-separated path; OutsideProject beyond `root`. */
+function projectRelative(root: string, file: string): string {
+  const rel = relative(root, resolve(root, file));
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new RpcError(ErrorCode.OutsideProject, `${file} is not a file inside the project ${root}.`, { path: file });
+  }
+  return rel.split(sep).join("/");
 }
 
 function isRequest(message: unknown): message is JsonRpcRequest {

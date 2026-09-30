@@ -24,7 +24,7 @@ import { useSyncExternalStore } from "react";
  * request (a script heading, a History row), never under the user's click;
  * a click on a layer in the preview selects its clip without moving the playhead.
  */
-export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "explorer" | "preview";
+export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "explorer" | "preview" | "agent";
 
 /** Timeline seconds `[from, to)`. */
 export interface TimeRange {
@@ -205,8 +205,28 @@ export const selection = {
    * `clips` = the ones it changed that the timeline still has (maybe none).
    * `reveal` becomes a new request every call: a row clicked again scrolls again.
    */
-  selectHistory(target: string, clips: readonly string[], reveal: RevealRequest | null): void {
-    replace({ ...EMPTY, clips: [...clips], origin: "history", reveal: reveal ? { ...reveal } : null, history: target });
+  selectHistory(target: string, clips: readonly string[], reveal: RevealRequest | null, origin: SelectionOrigin = "history"): void {
+    replace({ ...EMPTY, clips: [...clips], origin, reveal: reveal ? { ...reveal } : null, history: target });
+  },
+  /**
+   * Replace the whole selection at once (`ui_select`): omitted kinds become
+   * empty, nothing given clears it. `reveal` brings the first clip, else the
+   * range, into view.
+   */
+  select(
+    parts: { clips?: readonly string[]; words?: readonly SelectedWord[]; range?: TimeRange | null },
+    origin: SelectionOrigin,
+    options: { reveal?: boolean } = {},
+  ): void {
+    const clips = [...(parts.clips ?? [])];
+    const words = [...(parts.words ?? [])];
+    const range = parts.range ? { from: parts.range.from, to: parts.range.to } : null;
+    if (clips.length === 0 && words.length === 0 && range === null) {
+      selection.clear();
+      return;
+    }
+    const reveal: RevealRequest | null = !options.reveal ? null : clips.length > 0 ? { clip: clips[0]! } : range ? { range } : null;
+    replace({ ...EMPTY, clips, words, range, origin, reveal });
   },
   /** Add or remove one clip (Shift/Cmd-click). */
   toggleClip(id: string, origin: SelectionOrigin): void {
@@ -290,7 +310,8 @@ export const selection = {
   retainClips(present: ReadonlySet<string>): void {
     const kept = current.clips.filter((id) => present.has(id));
     if (kept.length === current.clips.length) return;
-    replace(kept.length === 0 && current.history === null && current.scene === null ? EMPTY : { ...current, clips: kept });
+    const rest = current.history !== null || current.scene !== null || current.words.length > 0 || current.range !== null;
+    replace(kept.length === 0 && !rest ? EMPTY : { ...current, clips: kept });
   },
   /**
    * Re-place selected words on a new revision of {@link SELECTION_TIMELINE}:
@@ -303,7 +324,9 @@ export const selection = {
     const placed = current.words.map((word) => ({ word, range: place(word) })).filter((entry) => entry.range !== null);
     const range = unionRange(placed.map((entry) => entry.range));
     if (placed.length === current.words.length && sameRange(range, current.range)) return;
-    replace(placed.length === 0 || !range ? EMPTY : { ...current, words: placed.map((entry) => entry.word), range });
+    // Clips selected with the words (`ui_select`) stay when every word is cut.
+    if ((placed.length === 0 || !range) && current.clips.length === 0) replace(EMPTY);
+    else replace({ ...current, words: placed.map((entry) => entry.word), range });
   },
   /** Call `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void {

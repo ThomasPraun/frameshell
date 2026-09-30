@@ -15,12 +15,20 @@ import {
   TxIdSchema,
   operationArgs,
 } from "./timeline.js";
+import {
+  TimeRangeSchema,
+  UiCommandSchema,
+  UiStateSchema,
+  UiViewIdSchema,
+  UiViewSchema,
+  WordRefSchema,
+} from "./ui.js";
 
 /**
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1066,6 +1074,119 @@ export const methods = {
     }),
     result: OperationResultSchema,
   },
+  "ui.state": {
+    description:
+      "What the user sees in the Frameshell app for this project: the playhead and whether it plays, the selection " +
+      "(clip ids, transcript words, a time range, and the History entry whose changes the timeline marks), the " +
+      "editor tabs and the timeline seconds visible in the timeline panel. Read it to resolve \"this clip\", \"here\" " +
+      "or \"the selected words\" before acting. The app reports every change within 200 ms. `connected: false` (and " +
+      "no other field) when no app window shows the project; the other `ui.*` tools then fail with UiNotConnected.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      connected: z.boolean().describe("True when an app window shows the project; every other field is absent otherwise."),
+      ...UiStateSchema.partial().shape,
+    }),
+  },
+  "ui.seek": {
+    description:
+      "Move the app's playhead to timeline second `at` so the preview shows that frame (snapped to the frame, clamped " +
+      "to the timeline; playback continues from there if it was playing). Example: `{ at: 12.5 }`. Returns `ui.state` " +
+      "after the move. Fails with UiNotConnected when no app window shows the project.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`."),
+    }),
+    result: UiStateSchema,
+  },
+  "ui.play": {
+    description:
+      "Start playback in the app's preview from the playhead (from the start when it is at the end). Returns " +
+      "`ui.state`. Fails with UiNotConnected when no app window shows the project.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: UiStateSchema,
+  },
+  "ui.pause": {
+    description:
+      "Pause playback in the app's preview; the playhead stays where it stopped. Returns `ui.state`. Fails with " +
+      "UiNotConnected when no app window shows the project.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: UiStateSchema,
+  },
+  "ui.select": {
+    description:
+      "Replace the user's selection in the app, to point at what you mean: clips (ids of the timeline `ui.state` " +
+      "names, from `timeline.show`), transcript words, and/or a time range. Omitted parts are cleared; nothing given " +
+      "clears the selection. With `reveal` (default true) the timeline scrolls to the first clip and, unless playing, " +
+      "the playhead moves to its start. Examples: `{ clips: [\"c_1a2b3c\"] }`, `{ range: { from: 12.4, to: 13.1 } }`. " +
+      "Returns `ui.state`. Fails with UiCommandFailed naming clip ids the timeline does not have, UiNotConnected.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      clips: z.array(z.string().min(1)).default([]).describe("Clip ids to select, e.g. `[\"c_1a2b3c\"]`. Default none."),
+      words: z
+        .array(WordRefSchema)
+        .default([])
+        .describe("Transcript words to select, e.g. `[{ transcript: \"transcripts/raw-01.words.json\", word: \"w_000123\" }]`. Default none."),
+      range: TimeRangeSchema.nullable()
+        .default(null)
+        .describe("Timeline seconds to select, `{ from, to }` with `to` greater than `from`. Default none."),
+      reveal: z.boolean().default(true).describe("Scroll the timeline to the first clip and move the playhead there. Default true."),
+    }),
+    result: UiStateSchema,
+  },
+  "ui.openFile": {
+    description:
+      "Open a project file in an app editor tab and make it the active tab, e.g. the script `scripts/launch.md` or " +
+      "`timelines/main.json`. Returns `ui.state`. Fails with OutsideProject for a path outside the project, " +
+      "UiCommandFailed when the app cannot read the file, UiNotConnected.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z
+        .string()
+        .min(1)
+        .describe("File relative to the project root, or absolute inside the project, e.g. `scripts/launch.md`."),
+    }),
+    result: UiStateSchema,
+  },
+  "ui.showTxDiff": {
+    description:
+      "Show the user what a transaction (`tx_…`) or operation (`op_…`) from `history` changed: the app opens its " +
+      "History panel on that entry, selects the clips it left and marks every added, removed, moved and changed clip " +
+      "on the timeline. Use it to walk the user through your changes. The app shows the `main` timeline only. " +
+      "Returns `ui.state` (`selection.history` is the target). Fails with UiCommandFailed when the id is not in the " +
+      "timeline's journal, UiNotConnected.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to show."),
+    }),
+    result: UiStateSchema,
+  },
+  "ui.publish": {
+    description:
+      "App window reports what it shows for the project enclosing `cwd`: registers the window (`view`) as that " +
+      "project's UI, so `ui.state` answers from it and navigation commands reach it as `ui.command`. Send on every change.",
+    internal: true,
+    params: z.strictObject({ cwd: CwdParam, view: UiViewIdSchema, state: UiViewSchema }),
+    result: z.object({ dir: z.string().describe("Project root the window is registered for.") }),
+  },
+  "ui.reply": {
+    description:
+      "App window answers `ui.command` `id`: `error` null when done, else why not; `state` is its state after the command.",
+    internal: true,
+    params: z.strictObject({
+      view: UiViewIdSchema,
+      id: z.string().min(1).describe("`id` of the `ui.command` answered."),
+      error: z.string().nullable(),
+      state: UiViewSchema,
+    }),
+    result: z.object({}),
+  },
+  "ui.detach": {
+    description: "App window stops showing its project (closed, or another project opened). Unknown windows are ignored.",
+    internal: true,
+    params: z.strictObject({ view: UiViewIdSchema }),
+    result: z.object({}),
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -1146,6 +1267,17 @@ export const notifications = {
       project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
     }),
   },
+  "ui.command": {
+    description:
+      "Navigation command for one app window (`view`, as it registered with `ui.publish`). Not subscribable: sent to " +
+      "the window that last reported for the project. The window answers with `ui.reply` carrying `id`.",
+    params: z.object({
+      project: z.string().describe("Absolute project root the window registered for."),
+      view: UiViewIdSchema,
+      id: z.string().describe("Command id to answer with `ui.reply`."),
+      command: UiCommandSchema,
+    }),
+  },
 } as const satisfies Record<string, { description: string; params: z.ZodType }>;
 
 /** Name of a subscribable event. */
@@ -1156,6 +1288,9 @@ export const EVENT_NAMES: readonly EventName[] = EventNameSchema.options;
 
 /** Params of notification `E`, as the daemon sends them. */
 export type EventParams<E extends keyof typeof notifications> = z.output<(typeof notifications)[E]["params"]>;
+
+/** Any notification the daemon sends. */
+export type NotificationName = keyof typeof notifications;
 
 /** Params of the `progress` notification. */
 export type ProgressParams = z.output<(typeof notifications)["progress"]["params"]>;
@@ -1400,6 +1535,10 @@ export const ErrorCode = {
    * states cannot be replayed (`history.diff`).
    */
   HistoryUnavailable: -32035,
+  /** data: `{ project, hint }`: no app window shows the project (`ui.*` navigation). */
+  UiNotConnected: -32036,
+  /** data: `{ command, reason }`: the app refused the navigation command or did not answer in time. */
+  UiCommandFailed: -32037,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

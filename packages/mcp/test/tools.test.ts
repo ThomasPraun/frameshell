@@ -31,7 +31,7 @@ describe("MCP tool catalog", () => {
     const expected: Record<string, string> = {};
     for (const [method, schema] of Object.entries(methodJsonSchemas())) {
       if (schema.internal) continue;
-      const name = method === "frame" ? "frame_capture" : method.replaceAll(".", "_");
+      const name = method === "frame" ? "frame_capture" : method.replaceAll(".", "_").replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
       expected[name] = method;
       const tool = byName.get(name);
       expect(tool, `no tool for ${method}`).toBeDefined();
@@ -41,6 +41,7 @@ describe("MCP tool catalog", () => {
     }
     expect(byName.has("handshake")).toBe(false);
     expect(byName.has("events_subscribe")).toBe(false);
+    expect(byName.has("ui_publish")).toBe(false);
     expect([...byName.keys()].sort()).toEqual([...Object.keys(expected), "frames_strip"].sort());
     for (const name of byName.keys()) expect(name).toMatch(/^[a-z][a-z0-9_]*$/);
   });
@@ -61,6 +62,25 @@ describe("MCP tool catalog", () => {
     const txBegin = tools.find((tool) => tool.name === "tx_begin")!;
     expect(txBegin.inputSchema).toMatchObject({ required: ["label"] });
     expect(txBegin.inputSchema.properties).not.toHaveProperty("cwd");
+  });
+
+  it("exposes the SPEC §7b UI state and navigation tools, each defaulting cwd", async () => {
+    const { tools } = await (await connect()).listTools();
+    const names = ["ui_state", "ui_seek", "ui_play", "ui_pause", "ui_select", "ui_open_file", "ui_show_tx_diff"];
+    for (const name of names) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.inputSchema.properties, name).toHaveProperty("cwd");
+      expect(tool!.inputSchema.required ?? [], name).not.toContain("cwd");
+    }
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    expect(byName.get("ui_state")!.description).toContain("`connected: false`");
+    expect(byName.get("ui_seek")!.inputSchema.required).toEqual(["at"]);
+    expect(byName.get("ui_show_tx_diff")!.inputSchema.required).toEqual(["target"]);
+    expect(byName.get("ui_open_file")!.inputSchema.required).toEqual(["file"]);
+    expect(byName.get("ui_select")!.inputSchema.required).toBeUndefined();
+    // Cross-references name tools: `ui.state` in a description becomes `ui_state`.
+    expect(byName.get("ui_seek")!.description).toContain("`ui_state`");
   });
 
   it("names tools, not methods, inside descriptions", async () => {

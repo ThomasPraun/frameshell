@@ -175,4 +175,11 @@ describe("frameshell mcp", () => {
     const invalid = (await client.callTool({ name: "cut", arguments: { from: "soon" } })) as CallToolResult;
     expect((invalid.content[0] as { text: string }).text).toMatch(/^InvalidParams: Invalid params for `cut`/);
   });
+
+  it("answers ui_state without the app, and fails navigation with a hint to open it", async () => {
+    expect(json(await call("ui_state"))).toEqual({ connected: false });
+    const seek = (await client.callTool({ name: "ui_seek", arguments: { at: 1 } })) as CallToolResult;
+    expect(seek.isError).toBe(true);
+    expect((seek.content[0] as { text: string }).text).toMatch(/^UiNotConnected: .*\ndata: .*open the project in the Frameshell app/s);
+  });
 });
