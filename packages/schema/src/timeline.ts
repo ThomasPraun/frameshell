@@ -33,7 +33,7 @@ export const ClipAudioSchema = z.strictObject({
 const clipBase = {
   id: Id.describe("Stable, core-generated (`c_…`); reference clips by it."),
   start: Seconds.describe("Timeline seconds of the first frame."),
-  scriptRef: z.string().min(1).optional().describe("Script scene this clip realizes: `scripts/<file>.md#<anchor>`."),
+  scriptRef: z.string().min(1).optional().describe("Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script."),
   transform: TransformSchema.optional(),
   audio: ClipAudioSchema.optional(),
 };

@@ -90,7 +90,7 @@ export const operationArgs = {
     transform: TransformSchema.optional(),
     gain: z.number().optional().describe("Audio gain in dB, e.g. -18. Default 0."),
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
-    scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`."),
+    scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
   }),
   "clip.move": z.strictObject({
     clip: ClipRef,
@@ -117,7 +117,7 @@ export const operationArgs = {
     muted: z.boolean().optional(),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
-    scriptRef: z.string().min(1).nullable().optional().describe("Script scene; null clears it."),
+    scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
   }),
   cut: z.strictObject({
     from: Seconds("Start of the timeline range to remove."),

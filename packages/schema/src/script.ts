@@ -4,7 +4,8 @@ import { z } from "zod";
 /**
  * Scripts (`scripts/*.md`, SPEC §5.5, decision 14): plain Markdown with
  * optional conventions. Each level-2 ATX heading (`## Title`) is a scene; its
- * slug is the anchor clips use in `scriptRef` (`scripts/script.md#intro`).
+ * slug is the anchor clips use in `scriptRef` (`scripts/script.md#intro`);
+ * a `scriptRef` without `#anchor` refers to the whole script.
  * Optional YAML frontmatter carries `title`, `target_duration`, `aspect`.
  * Parsing never fails: problems become `warnings`.
  */
@@ -115,7 +116,8 @@ export function scriptSlug(heading: string): string {
 
 /**
  * Split a `scriptRef` at its last `#` into a `/`-separated project-relative
- * path (leading `./` dropped) and an anchor; `anchor` is null when missing.
+ * path (leading `./` dropped) and an anchor; `anchor` is null when missing
+ * or empty, meaning the whole script.
  */
 export function splitScriptRef(ref: string): { path: string; anchor: string | null } {
   const hash = ref.lastIndexOf("#");

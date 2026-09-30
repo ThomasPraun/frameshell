@@ -899,7 +899,7 @@ class Edit {
     if (problem) {
       throw this.invalid(`scriptRef "${ref}" ${problem}.`, {
         field: "scriptRef",
-        hint: "Use a project-relative script path plus scene, e.g. `scripts/script.md#intro` (see `frameshell script outline`).",
+        hint: "Use a project-relative script path, plus `#scene` for one scene, e.g. `scripts/script.md#intro` (see `frameshell script outline`).",
       });
     }
   }

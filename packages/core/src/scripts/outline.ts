@@ -15,7 +15,8 @@ export const MAX_SCRIPT_BYTES = 1024 * 1024;
 
 /**
  * Outline `file` (absolute, or relative to `cwd`, then to `root`) with the
- * clips of every `timelines/*.json` linked to each scene. Throws
+ * clips of every `timelines/*.json` linked to each scene, and those linked
+ * to the whole script (`scriptRef` without `#anchor`). Throws
  * `OutsideProject` or `ScriptNotFound`.
  */
 export async function outlineScript(root: string, cwd: string, file: string): Promise<ScriptOutlineResult> {
@@ -24,20 +25,27 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
   const { refs, warnings } = await clipRefs(root);
   const scenes = outline.scenes.map((scene) => ({ ...scene, ref: `${path}#${scene.slug}`, clips: [] as { timeline: string; clip: string }[] }));
   const bySlug = new Map(scenes.map((scene) => [scene.slug, scene]));
+  const clips: ScriptOutlineResult["clips"] = [];
   const unresolved: ScriptOutlineResult["unresolved"] = [];
   for (const ref of refs) {
     const { path: target, anchor } = splitScriptRef(ref.scriptRef);
     if (target !== path) continue;
-    const scene = anchor === null ? undefined : bySlug.get(anchor);
-    if (scene) scene.clips.push({ timeline: ref.timeline, clip: ref.clip });
+    const location = { timeline: ref.timeline, clip: ref.clip };
+    if (anchor === null) {
+      clips.push(location);
+      continue;
+    }
+    const scene = bySlug.get(anchor);
+    if (scene) scene.clips.push(location);
     else unresolved.push(ref);
   }
-  return { path, meta: outline.meta, scenes, unresolved, warnings: [...outline.warnings, ...warnings] };
+  return { path, meta: outline.meta, clips, scenes, unresolved, warnings: [...outline.warnings, ...warnings] };
 }
 
 /**
- * Why `ref` points nowhere (bad path, no anchor, missing or unreadable
- * script, missing scene), or null when it names an existing scene. Never
+ * Why `ref` points nowhere (bad path, missing or unreadable script, missing
+ * scene), or null when it names an existing scene, or an existing script
+ * when it has no `#anchor` (whole script, SPEC §5.5). Never
  * throws and never blocks: only regular files inside the project (after
  * symlinks) up to {@link MAX_SCRIPT_BYTES} are read, any read error becomes
  * the returned warning. The operation stores the ref anyway (the script may
@@ -46,17 +54,16 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
 export async function checkScriptRef(root: string, ref: string): Promise<string | null> {
   const { path, anchor } = splitScriptRef(ref);
   const shape = scriptRefPathProblem(path);
-  if (shape) return `scriptRef "${ref}" ${shape}; use a project-relative script path plus scene, e.g. \`scripts/script.md#intro\`.`;
+  if (shape) return `scriptRef "${ref}" ${shape}; use a project-relative script path, plus \`#scene\` to name one scene, e.g. \`scripts/script.md#intro\`.`;
   const read = await readScript(root, path);
   if (!read.ok) {
     return read.missing
       ? `scriptRef "${ref}": ${path} does not exist. Stored anyway; create the script or fix the ref.`
       : `scriptRef "${ref}": ${path} ${read.reason}. Stored anyway; fix the script or the ref.`;
   }
+  if (anchor === null) return null;
   const parsed: ScriptOutline = parseScript(read.text);
-  const outline = `\`frameshell script outline ${path}\``;
   const slugs = parsed.scenes.map((scene) => scene.slug);
-  if (anchor === null) return `scriptRef "${ref}" has no \`#scene\` anchor; use \`${path}#<scene>\` (scenes: see ${outline}).`;
   if (slugs.includes(anchor)) return null;
   const known = slugs.length > 0 ? slugs.join(", ") : "none (add `## ` headings)";
   return `scriptRef "${ref}": no scene "${anchor}" in ${path}; scenes: ${known}. Stored anyway.`;

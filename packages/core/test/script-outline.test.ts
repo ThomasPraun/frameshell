@@ -40,6 +40,7 @@ beforeEach(async () => {
           titleClip("c_b", 2, "scripts/launch.md#intro"),
           titleClip("c_gone", 4, "scripts/launch.md#cut-scene"),
           titleClip("c_free", 6),
+          titleClip("c_whole", 8, "scripts/launch.md"),
         ],
       },
     ],
@@ -66,6 +67,7 @@ describe("script.outline", () => {
       { slug: "demo", ref: "scripts/launch.md#demo", line: 8, clips: [{ timeline: "intro", clip: "c_n" }] },
       { slug: "outro", ref: "scripts/launch.md#outro", line: 10, clips: [] },
     ]);
+    expect(outline.clips).toEqual([{ timeline: "main", clip: "c_whole" }]);
     expect(outline.unresolved).toEqual([{ timeline: "main", clip: "c_gone", scriptRef: "scripts/launch.md#cut-scene" }]);
     expect(outline.warnings).toEqual([]);
   });
@@ -109,11 +111,24 @@ describe("scriptRef on clip operations", () => {
     const missingFile = await set("scripts/later.md#intro");
     expect(missingFile.warnings).toEqual([expect.stringMatching(/scripts\/later\.md does not exist/)]);
 
-    const noAnchor = await set("scripts/launch.md");
-    expect(noAnchor.warnings).toEqual([expect.stringMatching(/no `#scene` anchor/)]);
-
     const view = await conn.request("timeline.show", { cwd: root });
-    expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).toMatchObject({ scriptRef: "scripts/launch.md" });
+    expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).toMatchObject({ scriptRef: "scripts/later.md#intro" });
+  });
+
+  it("takes a ref without anchor as the whole script: no warning when the file exists, a warning when it is missing", async () => {
+    const whole = await set("./scripts/launch.md");
+    expect(whole.warnings).toEqual([]);
+    const outline = await conn.request("script.outline", { cwd: root, file: "scripts/launch.md" });
+    expect(outline.clips).toEqual([
+      { timeline: "main", clip: "c_free" },
+      { timeline: "main", clip: "c_whole" },
+    ]);
+    expect(outline.unresolved.map(({ clip }) => clip)).toEqual(["c_gone"]);
+
+    const missing = await set("scripts/later.md");
+    expect(missing.warnings).toEqual([expect.stringMatching(/scripts\/later\.md does not exist/)]);
+    const view = await conn.request("timeline.show", { cwd: root });
+    expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).toMatchObject({ scriptRef: "scripts/later.md" });
   });
 
   it("checks refs given to clip.add and never warns when clearing", async () => {

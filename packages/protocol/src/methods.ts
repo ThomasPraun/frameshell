@@ -651,7 +651,8 @@ export const methods = {
       "Outline a Markdown script (SPEC §5.5): frontmatter (`title`, `target_duration` in seconds, `aspect`) and its " +
       "scenes, one per `## ` heading, each with the `ref` to put in a clip's `scriptRef` (`scripts/launch.md#intro`, set " +
       "with `clip.set`) and the clips of every timeline already linked to it. Scenes with empty `clips` still need " +
-      "footage or a composition. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
+      "footage or a composition. Top-level `clips` are linked to the whole script (`scriptRef` is the path without " +
+      "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
       "or removed heading). Never fails on content: bad frontmatter or duplicate headings become `warnings`. Fails with " +
       "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
     params: z.strictObject({
@@ -664,6 +665,9 @@ export const methods = {
     result: z.object({
       path: z.string().describe("Script file, project-relative and `/`-separated."),
       meta: ScriptMetaSchema,
+      clips: z
+        .array(ClipLocationSchema)
+        .describe("Clips whose `scriptRef` is `path` without `#anchor` (the whole script), any timeline; empty when none."),
       scenes: z
         .array(
           ScriptSceneSchema.extend({
@@ -757,8 +761,8 @@ export const methods = {
   "clip.set": {
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
-      "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`; null clears). " +
-      "A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
+      "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
+      "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),

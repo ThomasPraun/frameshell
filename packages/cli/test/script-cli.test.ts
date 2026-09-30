@@ -117,4 +117,16 @@ describe("frameshell clip set --script-ref", () => {
     expect(outline.unresolved).toEqual([{ timeline: "main", clip: "c_free", scriptRef: "scripts/promo.md#outro" }]);
     expect(frameshell(["script", "outline", "scripts/promo.md"]).stdout).toMatch(/Unresolved refs:\n {2}main\/c_free -> scripts\/promo\.md#outro\n/);
   });
+
+  it("links a clip to the whole script when the ref has no anchor", () => {
+    const whole = frameshell(["clip", "set", "c_free", "--script-ref", "scripts/promo.md"]);
+    expect(whole.code).toBe(0);
+    expect(whole.stdout).not.toMatch(/warning/);
+    expect(frameshell(["script", "outline", "scripts/promo.md"]).stdout).toMatch(/^ {2}whole script {2}clips: main\/c_free$/m);
+    expect(JSON.parse(frameshell(["script", "outline", "scripts/promo.md", "--json"]).stdout).clips).toEqual([{ timeline: "main", clip: "c_free" }]);
+
+    const missing = frameshell(["clip", "set", "c_free", "--script-ref", "scripts/later.md"]);
+    expect(missing.code).toBe(0);
+    expect(missing.stdout).toMatch(/^warning: scriptRef "scripts\/later\.md": scripts\/later\.md does not exist/m);
+  });
 });

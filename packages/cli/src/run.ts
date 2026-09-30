@@ -465,6 +465,7 @@ function formatOutline(outline: ScriptOutlineResult): string {
     `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`,
   ].join(" · ");
   const lines = [header];
+  if (outline.clips.length > 0) lines.push(`  whole script  clips: ${outline.clips.map(({ timeline, clip }) => `${timeline}/${clip}`).join(", ")}`);
   if (scenes.length === 0) lines.push("  (no scenes: add `## ` headings)");
   const width = (values: string[]) => Math.max(0, ...values.map((value) => value.length));
   const [slugW, titleW, lineW] = [

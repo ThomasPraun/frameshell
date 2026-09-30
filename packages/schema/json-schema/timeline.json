@@ -59,7 +59,7 @@
                           "description": "Timeline seconds of the first frame."
                         },
                         "scriptRef": {
-                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -152,7 +152,7 @@
                           "description": "Timeline seconds of the first frame."
                         },
                         "scriptRef": {
-                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -238,7 +238,7 @@
                           "description": "Timeline seconds of the first frame."
                         },
                         "scriptRef": {
-                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
                           "type": "string",
                           "minLength": 1
                         },
