@@ -8,8 +8,12 @@ on:
 
 jobs:
   windows:
-    name: loop windows
+    name: loop windows ${{ matrix.shard }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -30,10 +34,10 @@ jobs:
       - run: pnpm --filter @frameshell/desktop exec electron-vite build
       - name: launch.spec repeated
         continue-on-error: true
-        run: pnpm --filter @frameshell/desktop exec playwright test launch.spec --repeat-each 30 --retries 0 --reporter list
+        run: pnpm --filter @frameshell/desktop exec playwright test launch.spec --repeat-each 40 --retries 0 --reporter list
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: tmp109-windows
+          name: tmp109-windows-${{ matrix.shard }}
           path: apps/desktop/test-results/
           retention-days: 3
