@@ -118,6 +118,8 @@
     "frame": 60,
     "at": 2,
     "clip": "c_talk",
+    "files": {},
+    "fonts": [],
     "args": [
       "-hide_banner",
       "-nostdin",
