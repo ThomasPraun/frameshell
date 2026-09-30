@@ -55,7 +55,14 @@ export interface EditPoint {
   clip?: Clip;
   /** `cut` only: clips of the tracks being cut, as before the operation. */
   clips?: Clip[];
+  /** Earliest allowed result, same clock (op `snapBounds`). The engine clamps a result outside. */
+  min?: number;
+  /** Latest allowed result, same clock (op `snapBounds`). */
+  max?: number;
 }
+
+/** A `snapBounds` range; both ends optional. */
+type SnapRange = { min?: number | undefined; max?: number | undefined };
 
 /** Where a resolver put an edge. */
 export interface EditPointResolution {
@@ -236,6 +243,12 @@ class Edit {
         : {}),
       ...(args.scriptRef ? { scriptRef: args.scriptRef } : {}),
     };
+    if (args.snap === true && type !== "media") {
+      throw this.invalid(`only media clips take \`snap\`; ${type} clips have no audio to snap to.`, { field: "snap" });
+    }
+    if (args.snapBounds !== undefined && args.snap !== true) {
+      throw this.invalid("`snapBounds` needs `snap: true`.", { field: "snapBounds" });
+    }
     const start = args.start === undefined ? await this.trackEnd(track) : this.grid.snap(args.start);
     const id = this.newId("c");
     let clip: Clip;
@@ -269,7 +282,9 @@ class Edit {
       } else {
         out = maxOut;
       }
-      clip = { id, type, asset: args.asset, start, in: clipIn, out, ...(speed !== 1 ? { speed } : {}), ...extras };
+      const media: MediaClip = { id, type, asset: args.asset, start, in: clipIn, out, ...(speed !== 1 ? { speed } : {}), ...extras };
+      if (args.snap === true) await this.snapNewClip(media, info, args, out);
+      clip = media;
     } else if (type === "timeline") {
       this.refuse(args, ["asset", "out", "speed", "props"], "timeline clips");
       if (!args.source) throw this.invalid("timeline clips need `source`, e.g. `timelines/intro.json`.", { field: "source" });
@@ -306,7 +321,34 @@ class Edit {
         ...extras,
       };
     }
+    if (args.ripple === true) {
+      // Room first, so the new clip is never compared with a clip it pushes away.
+      const length = this.grid.snap((await this.span(clip)).end - clip.start);
+      const from = this.grid.frame(clip.start);
+      for (const other of this.clipTracks().flatMap((t) => t.clips)) {
+        if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
+      }
+    }
     track.clips.push(clip);
+  }
+
+  /**
+   * `clip.add` with `snap`: move a new media clip's `in` and `out` into audio
+   * pauses, on its own source clock, each inside its `snapBounds` range.
+   */
+  async snapNewClip(clip: MediaClip, info: SourceInfo, args: OperationArgs<"clip.add">, requestedOut: number): Promise<void> {
+    const window = args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S;
+    const bounds = this.snapBounds(args.snapBounds, { in: args.in ?? 0, out: args.out ?? requestedOut });
+    const edge = (time: number, side: EditPoint["edge"], range: SnapRange) =>
+      this.resolve(true, { time, clock: "source", edge: side, window, clip: structuredClone(clip) }, range);
+    clip.in = this.report("in", clip, args.in ?? 0, this.grid.snap(Math.max(0, await edge(clip.in, "start", bounds.in))));
+    clip.out = this.report("out", clip, requestedOut, this.boundOut(await edge(clip.out, "end", bounds.out), clip.in, info, clip.asset));
+    if (clip.out <= clip.in) {
+      throw this.invalid(`in and out snapped into the same pause (in ${clip.in}, out ${clip.out}).`, {
+        field: "snap",
+        hint: "Take a range that spans speech, or add it without `snap`.",
+      });
+    }
   }
 
   clipMove(args: OperationArgs<"clip.move">): void {
@@ -333,14 +375,49 @@ class Edit {
 
   async clipTrim(args: OperationArgs<"clip.trim">): Promise<void> {
     const { clip } = this.clip(args.clip);
+    const before = { start: clip.start, end: args.ripple === true ? (await this.span(clip)).end : 0 };
+    await this.trimEdges(clip, args);
+    if (args.ripple === true) await this.rippleTrim(clip, before);
+  }
+
+  /**
+   * `clip.trim` with `ripple`: put the clip back at its old left edge, then
+   * move clips of every clip track by what the trim added or removed: those
+   * starting at or after the old end by the whole change, those starting
+   * inside the old clip by the head change only (they stay with its old
+   * first frame). Clips crossing either point stay.
+   */
+  async rippleTrim(clip: Clip, before: { start: number; end: number }): Promise<void> {
+    const g = this.grid;
+    const head = g.snap(before.start - clip.start);
+    clip.start = before.start;
+    const total = g.snap((await this.span(clip)).end - before.end);
+    const [first, last] = [g.frame(before.start), g.frame(before.end)];
+    for (const other of this.clipTracks().flatMap((track) => track.clips)) {
+      if (other === clip) continue;
+      const at = g.frame(other.start);
+      if (at >= last) other.start = g.snap(other.start + total);
+      else if (at >= first) other.start = g.snap(other.start + head);
+    }
+  }
+
+  /** Move the edges `args` names; with `ripple` the left edge may pass timeline 0, {@link Edit.rippleTrim} puts it back. */
+  async trimEdges(clip: Clip, args: OperationArgs<"clip.trim">): Promise<void> {
+    const ripple = args.ripple === true;
     if (args.in !== undefined && args.start !== undefined) throw this.invalid("pass `in` or `start`, not both.", { field: "start" });
     if (args.out !== undefined && args.end !== undefined) throw this.invalid("pass `out` or `end`, not both.", { field: "end" });
     const head = args.in !== undefined || args.start !== undefined;
     const tail = args.out !== undefined || args.end !== undefined;
     if (!head && !tail) throw this.invalid("nothing to trim.", { hint: "Pass `in`/`start` (head) and/or `out`/`end` (tail)." });
     const snap = { enabled: args.snap !== false, window: args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
+    const bounds = this.snapBounds(args.snapBounds, { in: args.in, out: args.out });
+    // Bounds are source seconds: only `in` and `out` edges take them.
     const edge = (time: number, clock: EditPoint["clock"], side: EditPoint["edge"]) =>
-      this.resolve(snap.enabled, { time, clock, edge: side, window: snap.window, clip: structuredClone(clip) });
+      this.resolve(
+        snap.enabled,
+        { time, clock, edge: side, window: snap.window, clip: structuredClone(clip) },
+        clock === "source" ? (side === "start" ? bounds.in : bounds.out) : {},
+      );
     const span = await this.span(clip);
 
     if (isMedia(clip)) {
@@ -360,7 +437,7 @@ class Edit {
         const end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
         out = this.boundOut(this.grid.floor(clip.in + (end - clip.start) * speed), clipIn, info, clip.asset, "end");
       }
-      if (clipIn < 0 || start < 0) throw this.headLimit(clip, speed, args.in !== undefined, span.end, out);
+      if (clipIn < 0 || (start < 0 && !ripple)) throw this.headLimit(clip, speed, args.in !== undefined, span.end, out);
       if (out <= clipIn) {
         throw this.invalid(`the clip would be empty (in ${clipIn}, out ${out}).`, {
           field: head ? (args.in !== undefined ? "in" : "start") : args.out !== undefined ? "out" : "end",
@@ -389,7 +466,7 @@ class Edit {
     } else if (args.end !== undefined) {
       end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
     }
-    if (clipIn < 0 || start < 0) throw this.headLimit(clip, 1, args.in !== undefined, span.end, oldIn + (span.end - clip.start));
+    if (clipIn < 0 || (start < 0 && !ripple)) throw this.headLimit(clip, 1, args.in !== undefined, span.end, oldIn + (span.end - clip.start));
     const duration = this.grid.snap(end - start);
     if (this.grid.frame(duration) < 1) {
       throw this.invalid("the clip would be shorter than one frame.", { hint: "Remove it with `clip.remove` instead." });
@@ -741,13 +818,53 @@ class Edit {
    * resolution waits in `#pending` until {@link Edit.report} pairs it with
    * the final grid time.
    */
-  async resolve(enabled: boolean, point: EditPoint): Promise<number> {
+  async resolve(enabled: boolean, point: EditPoint, bounds: SnapRange = {}): Promise<number> {
     this.#pending = null;
     if (!enabled || !this.context.resolveEditPoint) return point.time;
-    const resolution = await this.context.resolveEditPoint(point);
+    const resolution = await this.context.resolveEditPoint({
+      ...point,
+      ...(bounds.min !== undefined ? { min: bounds.min } : {}),
+      ...(bounds.max !== undefined ? { max: bounds.max } : {}),
+    });
     if (!resolution) return point.time;
     this.#pending = { clean: resolution.clean, window: point.window };
-    return resolution.time;
+    return this.clampToGrid(resolution.time, bounds);
+  }
+
+  /**
+   * `time` on the frame grid inside `bounds`: the nearest in-range frame when
+   * the resolver ignored them. A range narrower than a frame keeps `min`.
+   */
+  clampToGrid(time: number, bounds: SnapRange): number {
+    const g = this.grid;
+    if (bounds.min === undefined && bounds.max === undefined) return time;
+    let value = g.snap(time);
+    if (bounds.max !== undefined && value > bounds.max + 1e-9) value = g.floor(bounds.max);
+    if (bounds.min !== undefined && value < bounds.min - 1e-9) value = g.ceil(bounds.min);
+    return value;
+  }
+
+  /**
+   * Check op `snapBounds` against the edges requested: a range needs its
+   * edge, `min <= max`, and the requested time inside it.
+   */
+  snapBounds(
+    bounds: { in?: SnapRange | undefined; out?: SnapRange | undefined } | undefined,
+    requested: { in: number | undefined; out: number | undefined },
+  ): { in: SnapRange; out: SnapRange } {
+    for (const field of ["in", "out"] as const) {
+      const range = bounds?.[field];
+      if (!range) continue;
+      const time = requested[field];
+      if (time === undefined) throw this.invalid(`\`snapBounds.${field}\` needs \`${field}\`.`, { field: "snapBounds" });
+      const min = range.min ?? 0;
+      const max = range.max ?? Number.POSITIVE_INFINITY;
+      if (min > max) throw this.invalid(`\`snapBounds.${field}\` has min ${min} past max ${max}.`, { field: "snapBounds" });
+      if (time < min - 1e-9 || time > max + 1e-9) {
+        throw this.invalid(`${field} ${time} lies outside its \`snapBounds\`.`, { field: "snapBounds", valid: { min, max } });
+      }
+    }
+    return { in: bounds?.in ?? {}, out: bounds?.out ?? {} };
   }
 
   /** Record the last resolved edge as a snap of `field`; returns `applied`. */

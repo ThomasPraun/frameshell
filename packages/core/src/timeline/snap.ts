@@ -27,6 +27,7 @@ interface Heard {
  * (#12, ADR 0003). Trims use the trimmed clip's audio. Cuts use every
  * audible media clip of the cut tracks under the window: a timeline point is
  * quiet only when all of them are, and a gap with no clip is silence.
+ * Source-clock edges stay inside the point's `min`/`max` (op `snapBounds`).
  * Declines (null) when no audible audio lies under the edge: video-only,
  * muted and generated clips keep exact edges.
  */
@@ -55,7 +56,9 @@ export function energySnapper(options: EnergySnapperOptions): EditPointResolver 
       const profile = await load(clip.asset);
       const duration = profile.db.length * ENERGY_HOP_S;
       if (point.clock === "source") {
-        return snapToPause({ time, window, grid, level: (t) => profileLevel(profile, t), min: 0, max: duration });
+        const min = Math.max(0, point.min ?? 0);
+        const max = Math.min(duration, point.max ?? duration);
+        return snapToPause({ time, window, grid, level: (t) => profileLevel(profile, t), min, max });
       }
       const speed = clip.speed ?? 1;
       return snapToPause({

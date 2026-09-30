@@ -19,8 +19,9 @@ mutations print the new revision):
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
            [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
+           [--ripple] [--snap] [--snap-window s]
   clip move <clip> [--start s] [--track <track>]
-  clip trim <clip> [--in s | --start s] [--out s | --end s] [--no-snap] [--snap-window s]
+  clip trim <clip> [--in s | --start s] [--out s | --end s] [--ripple] [--no-snap] [--snap-window s]
   clip split <clip> --at s
   clip remove <clip>
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
@@ -29,7 +30,9 @@ mutations print the new revision):
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
-  --no-snap uses the exact times.
+  --no-snap uses the exact times. clip add snaps media in/out only with --snap.
+  --ripple (clip add, clip trim) moves later clips on every video and audio track by the length added or
+  removed, the inverse of cut: restore removed material without overlapping the next clip.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -77,6 +80,8 @@ export const TIMELINE_OPTIONS = {
   to: { type: "string" },
   since: { type: "string" },
   "no-snap": { type: "boolean" },
+  snap: { type: "boolean" },
+  ripple: { type: "boolean" },
   "snap-window": { type: "string" },
 } as const;
 
@@ -102,9 +107,9 @@ const ALLOWED: Record<string, string[]> = {
   "track list": [],
   "track add": ["name", "follows", "index"],
   "track remove": ["force"],
-  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref"],
+  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "snap", "snap-window"],
   "clip move": ["start", "track"],
-  "clip trim": ["in", "out", "start", "end", "no-snap", "snap-window"],
+  "clip trim": ["in", "out", "start", "end", "ripple", "no-snap", "snap-window"],
   "clip split": ["at"],
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
@@ -228,6 +233,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         transform: transform(),
         props: json("props"),
         scriptRef: str("script-ref"),
+        ripple: values["ripple"] === true ? true : undefined,
+        snap: values["snap"] === true ? true : undefined,
+        snapWindow: num("snap-window"),
       });
       break;
     case "clip move":
@@ -236,7 +244,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "clip trim":
       method = "clip.trim";
-      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap() });
+      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap(), ripple: values["ripple"] === true ? true : undefined });
       break;
     case "clip split":
       method = "clip.split";

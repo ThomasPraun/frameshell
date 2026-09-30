@@ -397,6 +397,143 @@ describe("cut (ripple)", () => {
   });
 });
 
+describe("ripple trim and insert (restoring cut material)", () => {
+  /** t_v: c_0001 0–2 (source 0–2), c_0002 2–4 (source 3–5); t_a: c_0003 0–1.5, c_0004 at 2, c_0005 1–5 spans 2. */
+  async function cutTake(): Promise<Timeline> {
+    let t = base();
+    t.tracks.push({ id: "t_m", kind: "audio", clips: [] });
+    t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0, in: 0, out: 2 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 2, in: 3, out: 5 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_a", asset: "assets/music.wav", start: 0, in: 0, out: 1.5 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_a", asset: "assets/music.wav", start: 2, in: 10, out: 11 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_m", asset: "assets/music.wav", start: 1, in: 0, out: 4 })).timeline;
+    return t;
+  }
+
+  it("a rippled tail extension opens room: clips at or after the old end move right on every clip track", async () => {
+    const { timeline, changes } = await apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.6, ripple: true });
+    expect(clipsOf(timeline, "t_v")).toEqual([
+      { id: "c_0001", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 2.6 },
+      { id: "c_0002", type: "media", asset: "assets/talk.mp4", start: 2.6, in: 3, out: 5 },
+    ]);
+    expect(clipsOf(timeline, "t_a").map((c) => c.start)).toEqual([0, 2.6]);
+    // Crossing the insertion point: stays where it is.
+    expect(clipsOf(timeline, "t_m").map((c) => c.start)).toEqual([1]);
+    expect(changes.updated.sort()).toEqual(["c_0001", "c_0002", "c_0004"]);
+  });
+
+  it("without ripple the same extension is refused as an overlap", async () => {
+    const error = await rejection(apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.6 }));
+    expect(error.message).toMatch(/overlap/);
+  });
+
+  it("a rippled head extension keeps the clip's left edge and pushes what follows", async () => {
+    const { timeline } = await apply(await cutTake(), "clip.trim", { clip: "c_0002", in: 2.4, ripple: true });
+    expect(clipsOf(timeline, "t_v")).toEqual([
+      { id: "c_0001", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 2 },
+      { id: "c_0002", type: "media", asset: "assets/talk.mp4", start: 2, in: 2.4, out: 5 },
+    ]);
+    // c_0004 started with c_0002: it stays in sync with c_0002's old first frame.
+    expect(clipsOf(timeline, "t_a").map((c) => c.start)).toEqual([0, 2.6]);
+  });
+
+  it("a rippled trim reports the snapped edge and shifts by the snapped growth", async () => {
+    const ctx = context({ resolveEditPoint: (point) => ({ time: point.time + 0.1, clean: true }) });
+    const { timeline, snaps } = await apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.5, ripple: true }, ctx);
+    expect(snaps).toEqual([{ field: "out", clip: "c_0001", requested: 2.5, applied: 2.6, clean: true, window: 0.5 }]);
+    expect(clipsOf(timeline, "t_v").map((c) => c.start)).toEqual([0, 2.6]);
+  });
+
+  it("a rippled insert places the clip and moves clips at or after its start on every clip track", async () => {
+    const { timeline, changes } = await apply(await cutTake(), "clip.add", {
+      track: "t_v",
+      asset: "assets/talk.mp4",
+      start: 2,
+      in: 2.2,
+      out: 2.7,
+      ripple: true,
+    });
+    expect(clipsOf(timeline, "t_v")).toEqual([
+      { id: "c_0001", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 2 },
+      { id: "c_0006", type: "media", asset: "assets/talk.mp4", start: 2, in: 2.2, out: 2.7 },
+      { id: "c_0002", type: "media", asset: "assets/talk.mp4", start: 2.5, in: 3, out: 5 },
+    ]);
+    expect(clipsOf(timeline, "t_a").map((c) => c.start)).toEqual([0, 2.5]);
+    expect(clipsOf(timeline, "t_m").map((c) => c.start)).toEqual([1]);
+    expect(changes.added).toEqual(["c_0006"]);
+  });
+
+  it("an insert snaps its in and out into pauses only when asked, on the source clock of the new clip", async () => {
+    const seen: EditPoint[] = [];
+    const ctx = context({
+      resolveEditPoint: (point) => {
+        seen.push(point);
+        return { time: point.edge === "start" ? point.time - 0.1 : point.time + 0.1, clean: point.edge === "start" };
+      },
+    });
+    const args = { track: "t_v", asset: "assets/talk.mp4", start: 6, in: 2.2, out: 2.7 };
+    const exact = await apply(await cutTake(), "clip.add", args, ctx);
+    expect(seen).toEqual([]);
+    expect(clipsOf(exact.timeline, "t_v").at(-1)).toMatchObject({ in: 2.2, out: 2.7 });
+    const snapped = await apply(await cutTake(), "clip.add", { ...args, snap: true }, ctx);
+    expect(seen.map((p) => [p.clock, p.edge, (p.clip as { asset?: string } | undefined)?.asset])).toEqual([
+      ["source", "start", "assets/talk.mp4"],
+      ["source", "end", "assets/talk.mp4"],
+    ]);
+    expect(clipsOf(snapped.timeline, "t_v").at(-1)).toMatchObject({ in: 2.1, out: 2.8 });
+    const added = snapped.changes.added[0];
+    expect(snapped.snaps).toEqual([
+      { field: "in", clip: added, requested: 2.2, applied: 2.1, clean: true, window: 0.5 },
+      { field: "out", clip: added, requested: 2.7, applied: 2.8, clean: false, window: 0.5 },
+    ]);
+  });
+
+  it("snapBounds fence snapped in/out edges: the resolver sees them, and a result outside is clamped to the nearest in-range frame", async () => {
+    const seen: EditPoint[] = [];
+    // A resolver that jumps to a pause 0.4 s back, past the word being restored.
+    const ctx = context({
+      resolveEditPoint: (point) => {
+        seen.push(point);
+        return { time: point.time - 0.4, clean: true };
+      },
+    });
+    const trimmed = await apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.5, max: 2.9 } }, ripple: true }, ctx);
+    expect(seen.map((p) => [p.min, p.max])).toEqual([[2.5, 2.9]]);
+    expect(clipsOf(trimmed.timeline, "t_v")[0]).toMatchObject({ out: 2.5 });
+    expect(trimmed.snaps).toEqual([{ field: "out", clip: "c_0001", requested: 2.6, applied: 2.5, clean: true, window: 0.5 }]);
+
+    seen.length = 0;
+    const added = await apply(
+      await cutTake(),
+      "clip.add",
+      { track: "t_v", asset: "assets/talk.mp4", start: 6, in: 2.2, out: 2.7, snap: true, snapBounds: { in: { min: 2.1, max: 2.25 }, out: { min: 2.65 } } },
+      ctx,
+    );
+    expect(seen.map((p) => [p.edge, p.min, p.max])).toEqual([
+      ["start", 2.1, 2.25],
+      ["end", 2.65, undefined],
+    ]);
+    // in: 1.8 clamps up to 2.1; out: 2.3 clamps up to 2.667 (first frame at or after 2.65).
+    expect(clipsOf(added.timeline, "t_v").at(-1)).toMatchObject({ in: 2.1, out: 2.667 });
+  });
+
+  it("snapBounds is refused without its edge, outside the requested time, inverted, or without snap on clip.add", async () => {
+    const t = await cutTake();
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { in: { max: 1 } } }))).message).toMatch(/snapBounds\.in.*needs `in`/);
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.7 } } }))).message).toMatch(/outside/);
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, snapBounds: { out: { min: 2.9, max: 2.5 } } }))).message).toMatch(/past max/);
+    const add = { track: "t_v", asset: "assets/talk.mp4", start: 6, in: 2.2, out: 2.7, snapBounds: { out: { min: 2.6 } } };
+    expect((await rejection(apply(t, "clip.add", add))).message).toMatch(/needs `snap: true`/);
+  });
+
+  it("ripple and snap on clip.add apply to media clips only", async () => {
+    const error = await rejection(
+      apply(await cutTake(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, props: { title: "x" }, snap: true }),
+    );
+    expect(error.message).toMatch(/snap/);
+  });
+});
+
 // Property-style: random operation sequences from a seeded PRNG (no dependency).
 
 function prng(seed: number) {
@@ -444,6 +581,7 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
           ...(rand.chance(0.6) ? { in: rand.float(5) } : {}),
           ...(rand.chance(0.5) ? { out: rand.float(12) } : { duration: rand.float(4) + 0.05 }),
           ...(rand.chance(0.3) ? { speed: rand.pick([0.5, 1.15, 2]) } : {}),
+          ...(rand.chance(0.3) ? { ripple: true } : {}),
         },
       };
     }
@@ -453,6 +591,7 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
       const args: Record<string, unknown> = { clip: clipId() };
       if (rand.chance(0.5)) args[rand.pick(["in", "start"])] = rand.chance(0.5) ? rand.float(6) : time();
       if (rand.chance(0.6)) args[rand.pick(["out", "end"])] = rand.chance(0.5) ? rand.float(12) : time();
+      if (rand.chance(0.3)) args["ripple"] = true;
       return { name: "clip.trim", args };
     }
     case 6:
