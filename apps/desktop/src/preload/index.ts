@@ -63,6 +63,9 @@ const api: FrameshellApi = {
     read: (path) => invokeOutcome(Channel.mediaRead, path),
     onChanged: (listener) => subscribe(Channel.mediaChanged, listener),
   },
+  context: {
+    captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),
+  },
 };
 
 contextBridge.exposeInMainWorld("frameshell", api);

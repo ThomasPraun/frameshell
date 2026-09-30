@@ -20,6 +20,7 @@ import {
 } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
+import { captureContextFrame } from "./context-frames.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
@@ -315,6 +316,12 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.mediaRead, (event, path: string) =>
     outcome(async () => requireProject(stateOf(event.sender)).files.readMedia(path)),
+  );
+
+  ipcMain.handle(Channel.contextCaptureFrame, (event, at: number) =>
+    outcome(async () =>
+      captureContextFrame((method, params) => daemon.request(method, params), requireProject(stateOf(event.sender)).project.dir, at),
+    ),
   );
 
   ipcMain.handle(Channel.layoutLoad, (event): Promise<Layout> => {

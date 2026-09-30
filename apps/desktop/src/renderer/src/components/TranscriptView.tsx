@@ -1,4 +1,5 @@
-import { type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { openAskMenu } from "../ask/ask-agent.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, selection, unionRange, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
@@ -33,7 +34,8 @@ interface Press {
  * it as a `ui` operation (rippled trim or insert, snapped to pauses; see
  * `restoreEdit`). Clicking or dragging over kept words selects them in the
  * shared selection store with their timeline range, which the timeline
- * highlights and the playhead jumps to.
+ * highlights and the playhead jumps to. Right-click opens "Ask agent" on
+ * the selection (a kept word outside it is selected first).
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);
@@ -129,6 +131,12 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     selectRange(asset, current.anchor, index, false);
   };
 
+  const onContextMenu = (event: MouseEvent, asset: AssetTranscript, index: number) => {
+    const word = asset.words[index]!;
+    if (word.placements.length > 0 && !selected.has(word.key)) selectRange(asset, index, index, false);
+    openAskMenu(event);
+  };
+
   const fps = view?.fps ?? 30;
   let body: ReactNode;
   if (!model) {
@@ -154,6 +162,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             onOpenFile={onOpenFile}
             onPointerDown={onPointerDown}
             onPointerEnter={onPointerEnter}
+            onContextMenu={onContextMenu}
             onRestore={(word) => void restore(word.key, word)}
           />
         ))}
@@ -195,6 +204,9 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
         onKeyDown={(event) => {
           if (event.key === "Escape") selection.clear();
         }}
+        onContextMenu={(event) => {
+          if (!event.defaultPrevented) openAskMenu(event);
+        }}
         onPointerUp={() => (press.current = press.current ? { ...press.current, pointer: -1 } : null)}
       >
         {body}
@@ -212,6 +224,7 @@ function AssetSection({
   onOpenFile,
   onPointerDown,
   onPointerEnter,
+  onContextMenu,
   onRestore,
 }: {
   asset: AssetTranscript;
@@ -222,6 +235,7 @@ function AssetSection({
   onOpenFile: (path: string) => void;
   onPointerDown: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
   onPointerEnter: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
+  onContextMenu: (event: MouseEvent, asset: AssetTranscript, index: number) => void;
   onRestore: (word: TranscriptWord) => void;
 }) {
   const index = useMemo(() => new Map(asset.words.map((word, i) => [word.key, i])), [asset]);
@@ -262,6 +276,7 @@ function AssetSection({
                       title={struck ? "Cut from the timeline. Click to restore." : formatTimecode(word.placements[0]!.from, fps)}
                       onPointerDown={(event) => onPointerDown(event, asset, i)}
                       onPointerEnter={(event) => onPointerEnter(event, asset, i)}
+                      onContextMenu={(event) => onContextMenu(event, asset, i)}
                       onClick={struck ? () => onRestore(word) : undefined}
                     >
                       {word.text}

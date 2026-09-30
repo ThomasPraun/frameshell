@@ -124,3 +124,12 @@ export function useTimelineView(timeline: string): TimelineState {
   const subscribe = useCallback((listener: () => void) => watchTimeline(timeline, listener), [timeline]);
   return useSyncExternalStore(subscribe, () => timelineState(timeline));
 }
+
+/**
+ * Latest revision of `timeline` a mounted {@link useTimelineView} caller
+ * follows, for code outside React (commands, event handlers); null when
+ * nothing follows it or it is not read yet. Never starts a feed.
+ */
+export function timelineSnapshot(timeline: string): TimelineView | null {
+  return feeds.get(timeline)?.state.view ?? null;
+}

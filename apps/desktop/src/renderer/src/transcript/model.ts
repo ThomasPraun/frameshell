@@ -161,10 +161,15 @@ export function wordAt(model: TranscriptModel, time: number): string | null {
   return null;
 }
 
+/** Earliest place a selected word plays on this revision, with its clip; null when cut. */
+export function wordPlacement(view: TimelineView, word: SelectedWord): Placement | null {
+  const clips = mediaSpans(view).filter((span) => span.asset === word.asset);
+  return place(clips, word.start, word.end)[0] ?? null;
+}
+
 /** Timeline range of a selected word on this revision (its earliest placement); null when cut. */
 export function placeWord(view: TimelineView, word: SelectedWord): TimeRange | null {
-  const clips = mediaSpans(view).filter((span) => span.asset === word.asset);
-  const [first] = place(clips, word.start, word.end);
+  const first = wordPlacement(view, word);
   return first ? { from: first.from, to: first.to } : null;
 }
 

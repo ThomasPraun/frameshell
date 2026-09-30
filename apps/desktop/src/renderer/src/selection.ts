@@ -4,7 +4,8 @@ import { useSyncExternalStore } from "react";
  * What the user has selected, app-wide (SPEC §10). The one selection store
  * of the renderer: the canvas timeline (#14) marks and sets selected clips,
  * the script editor highlights their scenes and selects a scene's clips, the
- * transcript view (#21) selects words and with them a timeline range.
+ * transcript view (#21) selects words and with them a timeline range, the
+ * timeline a bare time range, the explorer files, the preview a region.
  *
  * Why here and not in the timeline: the canvas keeps only view state
  * (scroll, zoom, hover) and has no selection of its own, while selection is
@@ -23,7 +24,7 @@ import { useSyncExternalStore } from "react";
  * request (a script heading, a History row), never under the user's click;
  * a click on a layer in the preview selects its clip without moving the playhead.
  */
-export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "preview";
+export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "explorer" | "preview";
 
 /** Timeline seconds `[from, to)`. */
 export interface TimeRange {
@@ -47,6 +48,29 @@ export interface SelectedWord {
   /** Source-asset seconds. */
   readonly start: number;
   readonly end: number;
+}
+
+/** A script scene (SPEC §5.5) picked in the script editor. */
+export interface SelectedScene {
+  /** Project-relative script, e.g. `scripts/script.md`. */
+  readonly script: string;
+  /** Heading slug: the `#anchor` of a `scriptRef`. */
+  readonly slug: string;
+  /** Heading text. */
+  readonly title: string;
+}
+
+/**
+ * A rectangle drawn on the preview. Corners are normalized to the frame
+ * (0,0 top left, 1,1 bottom right), `x0 <= x1`, `y0 <= y1`.
+ */
+export interface SelectedRegion {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  /** Timeline seconds of the frame it was drawn on. */
+  readonly at: number;
 }
 
 /**
@@ -74,7 +98,10 @@ export interface Selection {
   readonly clips: readonly string[];
   /** Selected words, in transcript order; empty unless words are selected. */
   readonly words: readonly SelectedWord[];
-  /** Timeline range the selected words play in; null unless words are selected. */
+  /**
+   * Timeline range the selected words play in; with no words, a time range
+   * selected on the timeline itself. Null otherwise.
+   */
   readonly range: TimeRange | null;
   /** Panel that made this selection; null when empty or pruned to nothing. */
   readonly origin: SelectionOrigin | null;
@@ -87,12 +114,31 @@ export interface Selection {
    * {@link Selection.clips}: what it removed stays highlighted.
    */
   readonly history: string | null;
+  /** Project files picked in the explorer (`assets/…` and others), in selection order. */
+  readonly files: readonly string[];
+  /**
+   * Script scene whose clips {@link Selection.clips} are; null otherwise. Kept
+   * when pruning empties the clips: the scene is still in the script.
+   */
+  readonly scene: SelectedScene | null;
+  /** Rectangle drawn on the preview; null otherwise. */
+  readonly region: SelectedRegion | null;
 }
 
 /** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
 export const SELECTION_TIMELINE = "main";
 
-const EMPTY: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null };
+const EMPTY: Selection = {
+  clips: [],
+  words: [],
+  range: null,
+  origin: null,
+  reveal: null,
+  history: null,
+  files: [],
+  scene: null,
+  region: null,
+};
 let current: Selection = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -126,8 +172,15 @@ export const selection = {
    */
   selectClips(ids: readonly string[], origin: SelectionOrigin, options: { reveal?: boolean } = {}): void {
     const reveal = options.reveal === true && ids.length > 0;
-    const same = current.words.length === 0 && ids.length === current.clips.length && ids.every((id, i) => id === current.clips[i]);
-    if (!reveal && same && current.history === null && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
+    const onlyClips =
+      current.words.length === 0 &&
+      current.range === null &&
+      current.history === null &&
+      current.files.length === 0 &&
+      current.scene === null &&
+      current.region === null;
+    const same = onlyClips && ids.length === current.clips.length && ids.every((id, i) => id === current.clips[i]);
+    if (!reveal && same && (ids.length === 0 || (origin === current.origin && current.reveal === null))) return;
     replace(ids.length === 0 ? EMPTY : { ...EMPTY, clips: [...ids], origin, reveal: reveal ? { clip: ids[0]! } : null });
   },
   /**
@@ -160,6 +213,51 @@ export const selection = {
     if (same && !options.reveal && origin === current.origin && current.reveal === null) return;
     replace({ ...EMPTY, words: [...words], range, origin, reveal: options.reveal ? { range } : null });
   },
+  /** Replace the selection with a bare timeline range; an empty range selects nothing. */
+  selectRange(range: TimeRange, origin: SelectionOrigin): void {
+    if (!(range.to > range.from)) {
+      selection.clear();
+      return;
+    }
+    if (current.words.length === 0 && current.clips.length === 0 && sameRange(range, current.range) && origin === current.origin) return;
+    replace({ ...EMPTY, range: { from: range.from, to: range.to }, origin });
+  },
+  /** Replace the selection with project files (explorer); none selects nothing. */
+  selectFiles(paths: readonly string[], origin: SelectionOrigin): void {
+    if (paths.length === 0) {
+      selection.clear();
+      return;
+    }
+    if (origin === current.origin && paths.length === current.files.length && paths.every((path, i) => path === current.files[i])) return;
+    replace({ ...EMPTY, files: [...paths], origin });
+  },
+  /** Add or remove one file (Shift/Cmd-click in the explorer). */
+  toggleFile(path: string, origin: SelectionOrigin): void {
+    const { files } = current;
+    selection.selectFiles(files.includes(path) ? files.filter((file) => file !== path) : [...files, path], origin);
+  },
+  /**
+   * Select script scene `scene` with `clips`, the ones realizing it (maybe
+   * none). `reveal` asks panels to bring the first clip into view, a new
+   * request every call: a heading clicked again scrolls again.
+   */
+  selectScene(scene: SelectedScene, clips: readonly string[], options: { reveal?: boolean } = {}): void {
+    const reveal = options.reveal === true && clips.length > 0 ? { clip: clips[0]! } : null;
+    replace({ ...EMPTY, clips: [...clips], origin: "script", reveal, scene: { ...scene } });
+  },
+  /** Replace the selection with a rectangle drawn on the preview. */
+  selectRegion(region: SelectedRegion, origin: SelectionOrigin): void {
+    replace({ ...EMPTY, region: { ...region }, origin });
+  },
+  /**
+   * Drop selected files that no longer exist (`present` = every project
+   * file now); no-op when nothing was dropped.
+   */
+  retainFiles(present: ReadonlySet<string>): void {
+    const kept = current.files.filter((path) => present.has(path));
+    if (kept.length === current.files.length) return;
+    replace(kept.length === 0 ? EMPTY : { ...current, files: kept });
+  },
   /** Select nothing (Esc, another project opened). */
   clear(): void {
     if (current !== EMPTY) replace(EMPTY);
@@ -169,12 +267,13 @@ export const selection = {
    * (`present` = its clip ids now). Call on every new revision: a removed
    * clip must not stay selected, nor come back selected when an undo
    * restores its id. Keeps the origin and the reveal request (same object:
-   * pruning never moves a view); no-op when nothing was dropped.
+   * pruning never moves a view), and a History or scene pick whose clips are
+   * all gone; no-op when nothing was dropped.
    */
   retainClips(present: ReadonlySet<string>): void {
     const kept = current.clips.filter((id) => present.has(id));
     if (kept.length === current.clips.length) return;
-    replace(kept.length === 0 && current.history === null ? EMPTY : { ...current, clips: kept });
+    replace(kept.length === 0 && current.history === null && current.scene === null ? EMPTY : { ...current, clips: kept });
   },
   /**
    * Re-place selected words on a new revision of {@link SELECTION_TIMELINE}:
