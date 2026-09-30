@@ -7,7 +7,10 @@
     "declaration": false,
     "sourceMap": false,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    // Release scripts are plain .mjs (node runs them directly); JSDoc types are checked.
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src/main", "src/preload", "src/shared", "test", "e2e", "electron.vite.config.ts", "playwright.config.ts"]
+  "include": ["scripts/release", "src/main", "src/preload", "src/shared", "test", "e2e", "electron.vite.config.ts", "playwright.config.ts"]
 }

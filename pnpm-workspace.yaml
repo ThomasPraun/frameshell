@@ -7,5 +7,7 @@ packages:
 allowBuilds:
   esbuild: true
   node-pty: true
+  # Squirrel.Windows helper pulled in by electron-builder; releases use NSIS, never Squirrel.
+  electron-winstaller: false
 minimumReleaseAgeExclude:
   - electron@44.5.0

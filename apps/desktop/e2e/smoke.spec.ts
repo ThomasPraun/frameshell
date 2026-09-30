@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { type ElectronApplication, type Page, _electron as electron, expect, test } from "@playwright/test";
 
 // Smoke test of the built app: real daemon, real login shell, real file system.
+// FRAMESHELL_E2E_APP: run against a packaged app executable instead (release pipeline).
+const packagedApp = process.env["FRAMESHELL_E2E_APP"];
 const mainEntry = join(import.meta.dirname, "..", "out", "main", "index.js");
 const fixture = join(import.meta.dirname, "fixtures", "demo");
 const isWindows = process.platform === "win32";
@@ -24,8 +26,14 @@ let page: Page;
 
 async function launch(): Promise<void> {
   app = await electron.launch({
+    ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
-    args: [...(process.platform === "linux" ? ["--no-sandbox"] : []), mainEntry, "--project", projectDir],
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      ...(packagedApp ? [] : [mainEntry]),
+      "--project",
+      projectDir,
+    ],
     env: {
       ...process.env,
       FRAMESHELL_SOCKET: socketPath,

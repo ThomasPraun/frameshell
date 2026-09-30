@@ -6,6 +6,7 @@ dist/
 coverage/
 # Desktop app build output and Playwright artifacts.
 apps/desktop/out/
+apps/desktop/release/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
 # Pinned ffmpeg downloaded for media tests.

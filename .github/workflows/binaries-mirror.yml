@@ -1,0 +1,85 @@
+name: Binary mirror
+
+# Republishes every pinned ffmpeg archive, with its source, as the GitHub release named by
+# `FFMPEG_MIRROR.tag` in packages/core/src/binaries/manifest.ts. The daemon falls back to it (SPEC §9).
+# Push to main that changes the pins, or Actions -> Binary mirror -> Run workflow on main: publish if missing.
+# Pull requests that change the pins: download and verify everything, publish nothing.
+# How it works and how to re-pin: docs/binaries.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/binaries-mirror.yml
+      - packages/core/src/binaries/manifest.ts
+      - packages/core/src/binaries/mirror.ts
+      - packages/core/scripts/binaries-mirror.mjs
+  pull_request:
+    paths:
+      - .github/workflows/binaries-mirror.yml
+      - packages/core/src/binaries/manifest.ts
+      - packages/core/src/binaries/mirror.ts
+      - packages/core/scripts/binaries-mirror.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binaries-mirror-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  mirror:
+    name: ffmpeg mirror
+    runs-on: ubuntu-latest
+    permissions:
+      # Only used by the publish steps, which never run on pull requests or outside main.
+      contents: write
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - name: Mirror tag
+        id: tag
+        run: echo "tag=$(node packages/core/scripts/binaries-mirror.mjs tag ffmpeg)" >> "$GITHUB_OUTPUT"
+      - name: Release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          echo "release=$draft" >> "$GITHUB_OUTPUT"
+          echo "Mirror release \`$TAG\`: $([ "$draft" = false ] && echo published || echo "$draft")" >> "$GITHUB_STEP_SUMMARY"
+      # Pull requests always stage: that downloads and checks every pinned file and source.
+      - name: Stage
+        if: env.PUBLISH != 'true' || steps.state.outputs.release != 'false'
+        run: node packages/core/scripts/binaries-mirror.mjs stage ffmpeg "$RUNNER_TEMP/mirror" "$RUNNER_TEMP/notes.md"
+      # A draft is a failed earlier upload: start over. Drafts create no tag.
+      - name: Publish
+        if: env.PUBLISH == 'true' && steps.state.outputs.release != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          STATE: ${{ steps.state.outputs.release }}
+        run: |
+          if [ "$STATE" = true ]; then gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes; fi
+          gh release create "$TAG" "$RUNNER_TEMP"/mirror/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ffmpeg mirror ($TAG)" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest=false \
+            --draft
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+      # A published mirror is immutable: if the pins changed without a new tag, this fails.
+      - name: Verify published mirror
+        if: env.PUBLISH == 'true'
+        run: node packages/core/scripts/binaries-mirror.mjs verify ffmpeg

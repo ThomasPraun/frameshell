@@ -1,0 +1,132 @@
+name: Release
+
+# Tag v<semver> -> build, smoke-test and attach installers to a DRAFT GitHub release (publish it by hand).
+# workflow_dispatch and pull requests touching packaging -> same build and smoke test, nothing published.
+# Secrets and the release checklist: docs/release.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - apps/desktop/electron-builder.yml
+      - apps/desktop/build/**
+      - apps/desktop/scripts/release/**
+      - pnpm-lock.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: package ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Package
+        id: package
+        run: node apps/desktop/scripts/release/package.mjs
+        env:
+          # Only macOS signs. Pull requests never see signing secrets: they always build unsigned.
+          MACOS_CERTIFICATE_P12_BASE64: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_P8_BASE64: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8_BASE64 || '' }}
+          APPLE_API_KEY_ID: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+      # The packaged app, not the dev build: bundled CLI and daemon, asar, native modules.
+      - name: Smoke test packaged app (xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @frameshell/desktop exec playwright test
+        env:
+          FRAMESHELL_E2E_APP: ${{ steps.package.outputs.executable }}
+      - name: Smoke test packaged app
+        if: runner.os != 'Linux'
+        run: pnpm --filter @frameshell/desktop exec playwright test
+        env:
+          FRAMESHELL_E2E_APP: ${{ steps.package.outputs.executable }}
+      - name: Check notarization
+        if: runner.os == 'macOS' && steps.package.outputs.signing == 'notarized'
+        run: |
+          for app in apps/desktop/release/mac*/Frameshell.app; do
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frameshell-${{ runner.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-release-${{ matrix.os }}
+          path: |
+            apps/desktop/test-results/
+            apps/desktop/playwright-report/
+          retention-days: 7
+
+  publish:
+    name: draft release
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The app's manifest points at the ffmpeg mirror as a fallback: never release while it is missing or stale.
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/core
+      - name: Check binary mirror
+        run: node packages/core/scripts/binaries-mirror.mjs verify ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: frameshell-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      # Draft: a maintainer reviews the assets and publishes. ffmpeg lives in its own mirror release, with its source (SPEC §9).
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=""
+          if [[ "$TAG" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft $prerelease \
+            --verify-tag \
+            --title "Frameshell ${TAG#v}" \
+            --generate-notes

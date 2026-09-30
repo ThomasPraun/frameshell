@@ -1,0 +1,56 @@
+# Release packaging (SPEC §4). Run through scripts/release/package.mjs: it sets version, signing and --publish never.
+# Signing secrets and the release process: docs/release.md.
+appId: dev.frameshell.app
+productName: Frameshell
+copyright: Copyright © Frameshell contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  # Workspace packages ship their build output only.
+  - "!node_modules/@frameshell/*/{src,test,scripts,tsconfig.json,*.tsbuildinfo}"
+  - "!node_modules/@frameshell/*/{src,test,scripts}/**"
+# node-pty is N-API: one prebuilt binary serves Electron. No electron-rebuild (see scripts/prepare-native.mjs).
+npmRebuild: false
+# The bundled CLI and daemon run as `Frameshell --run-as-node` (ELECTRON_RUN_AS_NODE). Keep the RunAsNode fuse
+# enabled: disabling it breaks `frameshell` in the terminal and daemon auto-start.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.video
+  icon: build/icon.png
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+dmg:
+  writeUpdateInfo: false
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  executableName: frameshell
+  icon: build/icon.png
+  category: AudioVideo
+  synopsis: IDE for video
+  description: Agent edits the project from the terminal, human corrects in the timeline.
+  maintainer: Frameshell <92462502+ThomasPraun@users.noreply.github.com>
+  vendor: Frameshell
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  differentialPackage: false

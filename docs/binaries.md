@@ -4,7 +4,7 @@ frameshelld downloads native tools on first use instead of bundling them (SPEC �
 
 ## How it works
 
-- Pins are per platform (`<os>-<arch>`): version, URLs (first one is canonical, later ones are mirrors), SHA-256, size, and the path of each executable inside the archive.
+- Pins are per platform (`<os>-<arch>`): version, URLs (the builder's canonical URL first, then Frameshell's mirror; the manager tries the next URL on a network error or a checksum mismatch), SHA-256, size, and the path of each executable inside the archive.
 - A platform can pin several candidates in preference order (GPU first). An optional candidate names its `accelerator` and `requires` machine probes (commands that must exit 0, e.g. `nvidia-smi -L`). The manager takes the first candidate whose probes all pass. The last candidate has no probes: it is the CPU fallback. Probes run once per daemon. Optional candidates install beside the default one, in `<platform>-<accelerator>/`.
 - An optional candidate's executables must answer the package's version probe (`whisper-cli --version`) before the install is published. If one does not start (runtime library or C library too old), the manager writes `<platform>-<accelerator>.failed.json` (with the error) next to its install dir, reports it as progress, and installs the next candidate. That candidate is skipped until the file is deleted. A download or checksum failure never falls back.
 - Install location: `<dataDir>/binaries/<package>/<version>/<platform>/`, with an `install.json` recording the source URL, checksum and licence. See [User directories](#user-directories) for `dataDir`.
@@ -67,9 +67,40 @@ Why these builders:
 
 Verified when pinning (2026-09-29): every SHA-256 matched the published value, each archive layout was listed, the configure line of each Linux and Windows `ffmpeg` was read from the binary, and the darwin-arm64 build was run (`-encoders` and `-decoders` list libx264, libvpx-vp9 encode and decode, and VideoToolbox; its outputs are the test fixtures in `packages/core/test/fixtures/`). Since then the Real binaries workflow downloads and runs every pin (see [Re-pinning](#re-pinning)).
 
-### Licence obligations
+### Mirror and licence obligations
 
-We do not redistribute these binaries: the user's machine downloads them from the builder. SPEC §9 plans a mirror on Frameshell GitHub Releases. Mirroring is redistribution, so under GPL-3.0 the mirror must also offer the corresponding source (FFmpeg plus every enabled library at the exact versions, and the build scripts), or a written offer for it. Set that up before adding a mirror URL.
+The user's machine downloads from the builder first. Every archive also lists a mirror URL: the GitHub release `ffmpeg-mirror-2026-09-29` in this repository (`FFMPEG_MIRROR` in the manifest). It holds the same bytes, so the pinned SHA-256 still applies.
+
+Mirroring is redistribution of GPL-3.0 binaries, so the same release also carries (SPEC §9):
+
+| Asset | Content |
+|---|---|
+| `source-ffmpeg-9.0.2.tar.xz` | FFmpeg 9.0.2 release source, for the macOS builds |
+| `source-martin-riedl-build-script-6a611e1.tar.gz` | Martin Riedl's build scripts at `6a611e1`: configure flags, and every library version under `version/` |
+| `source-ffmpeg-e47273f4d9.tar.gz` | FFmpeg at commit `e47273f4d9` (`n9.0.1-11`), for the Linux and Windows builds |
+| `source-btbn-ffmpeg-builds-8267213.tar.gz` | BtbN FFmpeg-Builds at `8267213` (the commit of tag `autobuild-2026-08-31-13-27`): every library repository and commit under `scripts.d/` |
+| `SOURCE-OFFER.txt` | Written offer, valid at least three years, for the complete corresponding source of every linked library. Requests arrive as issues titled `Source request: <tag>`. |
+| `COPYING.GPLv3` | Licence text, taken from the FFmpeg source |
+| `SHA256SUMS.txt` | SHA-256 of every file above and of every binary |
+
+The source pins are `sources` of each build in the manifest, with SHA-256. How the revisions were matched: Riedl's `versions.txt` lists the same library versions as the `version/` files at `6a611e1`, which was the head of his `develop` branch when the 9.0.2 builds ran (2026-09-20). BtbN tags each autobuild on the commit it built, and its binaries report FFmpeg `e47273f4d9`.
+
+A source request must be answered: the build scripts say where each library comes from and at which version.
+
+`.github/workflows/binaries-mirror.yml` publishes the release:
+
+- Pull request that changes the pins or the mirror code: downloads every binary and source, checks sizes and SHA-256, and publishes nothing.
+- Push to `main` with such a change, or **Actions → Binary mirror → Run workflow** on `main`: if the tag has no published release, it stages the files and creates the release (as a draft first, published once every upload finished). Then it checks the published `SHA256SUMS.txt` against the manifest and that every mirror URL resolves.
+- A published mirror is never changed. If the pins change while the tag stays the same, the check fails.
+
+The release workflow runs the same check before it drafts an app release, so an app is never released while its mirror URLs are missing or stale.
+
+Run it locally (needs `pnpm build`, downloads about 560 MB):
+
+```sh
+node packages/core/scripts/binaries-mirror.mjs stage ffmpeg /tmp/mirror /tmp/notes.md
+node packages/core/scripts/binaries-mirror.mjs verify ffmpeg
+```
 
 ## whisper.cpp (`whisper-cli`) and its models
 
@@ -136,5 +167,7 @@ Re-pin whisper.cpp:
 2. Record the size and SHA-256 of each archive: Martin Riedl publishes `<file>.sha256`, and for BtbN run `gh release view <tag> -R BtbN/FFmpeg-Builds --json assets`. Check them against your own download.
 3. Check the configure line (`versions.txt`, or `strings ffmpeg | grep -- --enable-gpl`): it must have `--enable-gpl`, `--enable-libx264` and `--enable-libvpx`, and must not have `--enable-nonfree`.
 4. List the archive (`tar -tf`) and update the member paths in `files`.
-5. Update the manifest and this table, then run `FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test` on each platform you can reach. This opt-in test downloads the real pin, checks the version and the required codecs, then runs the binaries: it encodes H.264 and VP9-with-alpha clips, reads them back with `ffprobe`, and checks that the libvpx decoder keeps the alpha.
-6. Open the PR. The [Real binaries](../.github/workflows/real-binaries.yml) workflow runs the same test on every pinned platform (macOS arm64 and x64, Linux x64 and arm64, Windows x64) for any PR that touches `packages/core/src/binaries/`. It also runs weekly, to catch a builder pruning a pinned asset, and on manual dispatch.
+5. Pin the corresponding source (`sources`): the FFmpeg source at the exact revision and the builder's build scripts at the commit that produced the build, with size and SHA-256. Check that the scripts' library versions match the build (`versions.txt`, or the configure line).
+6. Give `FFMPEG_MIRROR` a new `tag` (a published mirror is immutable), and keep mirror asset names unique: `planMirror` and `packages/core/test/mirror.test.ts` reject a build without source or an asset name used for two files.
+7. Update the manifest and this table, then run `FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test` on each platform you can reach. This opt-in test downloads the real pin, checks the version and the required codecs, then runs the binaries: it encodes H.264 and VP9-with-alpha clips, reads them back with `ffprobe`, and checks that the libvpx decoder keeps the alpha.
+8. Open the PR. The [Real binaries](../.github/workflows/real-binaries.yml) workflow runs the same test on every pinned platform (macOS arm64 and x64, Linux x64 and arm64, Windows x64) for any PR that touches `packages/core/src/binaries/`. It also runs weekly, to catch a builder pruning a pinned asset, and on manual dispatch.

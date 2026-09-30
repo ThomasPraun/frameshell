@@ -9,6 +9,7 @@ export { PROJECT_FILE } from "./projects.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
   type Accelerator,
+  type BinaryMirror,
   type BinaryPackage,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
@@ -26,8 +27,18 @@ export {
   WHISPER_MODELS,
   WHISPER_PACKAGE,
   buildCandidates,
+  type SourceArchive,
   currentPlatform,
+  mirrorUrl,
 } from "./binaries/manifest.js";
+export {
+  MIRROR_GENERATED_FILES,
+  type MirrorAsset,
+  type MirrorPlan,
+  checkMirrorSums,
+  parseSha256Sums,
+  planMirror,
+} from "./binaries/mirror.js";
 export {
   type BinaryLocation,
   BinaryManager,
