@@ -25,6 +25,7 @@ Your AI agent (Claude Code, Codex, Gemini CLI…) runs in Frameshell's integrate
 ## Documentation
 
 - [Specification](docs/SPEC.md): vision, decisions, architecture, data model, MVP and roadmap.
+- [MCP server](docs/mcp.md): drive a project from Claude Code or any MCP client (`claude mcp add frameshell -- frameshell mcp`).
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 

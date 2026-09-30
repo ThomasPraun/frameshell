@@ -1,0 +1,8 @@
+{
+  "name": "fake-transcriber",
+  "version": "0.1.0",
+  "description": "Test plugin: a transcription provider returning fixed words, no engine or model.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js"
+}

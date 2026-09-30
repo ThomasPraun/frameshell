@@ -1,0 +1,22 @@
+{
+  "name": "@frameshell/mcp",
+  "version": "0.0.0",
+  "description": "frameshell mcp: stdio MCP server exposing the daemon's methods as typed tools and resources.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@frameshell/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^4.6.5"
+  }
+}

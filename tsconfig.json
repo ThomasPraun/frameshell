@@ -5,6 +5,7 @@
     { "path": "packages/plugin-api" },
     { "path": "packages/protocol" },
     { "path": "packages/core" },
+    { "path": "packages/mcp" },
     { "path": "packages/cli" },
     { "path": "plugins/whisper-cpp" }
   ]
