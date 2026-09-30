@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CLI calls could fail with "frameshelld closed the connection" (or `EPIPE`) when they reached the daemon as its idle timeout stopped it (flaky `snap-cli` and `timeline-cli` tests, #79): the stopping daemon resets connections still in its accept backlog, unanswered. `connectToDaemon` now rejects a drop before the handshake reply with code `ECONNRESET`, which `isDaemonUnavailable` accepts, so `connectOrStartDaemon` (CLI, MCP server, desktop app) starts a fresh daemon and retries. The handshake is idempotent.
+- `frameshell import --wait` could print ingest steps twice (an extra `starting`, `hash` pair, #79): the daemon sent a project's first `job.progress` and `asset.changed` events only after an async `realpath`, so a `job.list` reply could overtake them. The event key is now resolved synchronously (memoized per project): each event is written in the same tick as its change, before any reply that shows the change.
 - Desktop explorer on macOS could miss a file change made right after a project opened (about 1 in 50 opens under load; flaky test #53). libuv rebuilds its shared FSEvents stream asynchronously after each new directory watch, so the watcher reported ready before the OS delivered events. Opening a project now waits until a probe folder in the OS temp dir, watched after the project folders, gets an event (best effort, 5 s cap; immediate on Linux and Windows).
 
 ### Changed

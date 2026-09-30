@@ -1,4 +1,5 @@
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** True when `path` exists (file or directory). */
@@ -46,4 +47,16 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
  */
 export async function canonicalPath(path: string): Promise<string> {
   return realpath(path).catch(() => path);
+}
+
+/**
+ * {@link canonicalPath}, synchronously: same native realpath, so both agree on every key.
+ * Blocks on disk: only for a result that must be ready in the same tick, and memoize it.
+ */
+export function canonicalPathSync(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
 }

@@ -4,7 +4,7 @@ import { type Server, type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PROTOCOL_VERSION, connectToDaemon, readMessages, writeMessage } from "../src/index.js";
+import { PROTOCOL_VERSION, connectToDaemon, isDaemonUnavailable, readMessages, writeMessage } from "../src/index.js";
 
 // Seam under test: the typed client against a scripted daemon speaking raw JSON-RPC lines.
 
@@ -13,12 +13,14 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise((resolve) => server.close(resolve));
 });
 
+const endpoint = () =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\frameshell-client-${randomUUID().slice(0, 8)}`
+    : join(realpathSync(tmpdir()), `fs-client-${randomUUID().slice(0, 8)}.sock`);
+
 /** Daemon stand-in: answers the handshake, then hands the socket to the test. */
 async function fakeDaemon(): Promise<{ path: string; connected: Promise<Socket> }> {
-  const path =
-    process.platform === "win32"
-      ? `\\\\.\\pipe\\frameshell-client-${randomUUID().slice(0, 8)}`
-      : join(realpathSync(tmpdir()), `fs-client-${randomUUID().slice(0, 8)}.sock`);
+  const path = endpoint();
   let accept!: (socket: Socket) => void;
   const connected = new Promise<Socket>((resolve) => (accept = resolve));
   const server = createServer((socket) => {
@@ -87,5 +89,19 @@ describe("DaemonConnection events", () => {
     const conn = await connectToDaemon(path, { client: "test" });
     (await connected).destroy();
     await expect(conn.closed).resolves.toBeUndefined();
+  });
+});
+
+describe("connectToDaemon", () => {
+  it("reports a daemon that drops the connection before the handshake reply as unavailable", async () => {
+    // What a daemon exiting on its idle timeout does to a client that connected at that instant.
+    const path = endpoint();
+    const server = createServer((socket) => socket.destroy());
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+
+    const error = await connectToDaemon(path, { client: "test" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(isDaemonUnavailable(error)).toBe(true);
   });
 });
