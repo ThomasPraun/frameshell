@@ -114,7 +114,7 @@ export class TimelineService {
   revert(call: RevertCall): Promise<OperationResult> {
     const { root, timeline: id, target } = call;
     return this.#exclusive(timelinePath(root, id), async () => {
-      const { timeline, fps } = await this.#load(root, id);
+      const { timeline, fps } = await this.load(root, id);
       const restored = planRevert(timeline, await readJournal(root, id), target, id);
       const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
       const applied = await applyOperation(timeline, patch, this.#context(root, id, fps, "revert"));
@@ -124,7 +124,7 @@ export class TimelineService {
 
   /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
-    await this.#load(root, id); // TimelineNotFound for a typo, not an empty history.
+    await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
     return historyView(await readJournal(root, id), id, options.since);
   }
 
