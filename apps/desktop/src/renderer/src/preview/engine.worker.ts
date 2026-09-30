@@ -15,6 +15,7 @@ import {
   programSample,
 } from "./engine-protocol.js";
 import { type Program, type VideoSpan, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
+import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
 import { type EncodedPicture, type VideoSource, openVideoSource } from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
@@ -29,6 +30,11 @@ const scope = self as unknown as WorkerScope;
 const MAX_AHEAD = 12;
 /** Proxy samples fetched per ranged read: two GOPs. */
 const READ_SAMPLES = 30;
+/**
+ * Encoded pictures read ahead of the decoder per layer (~3 s; ~0.4 MB of the ADR 0001 fixture's proxy). Covers a
+ * ranged read the main process answers late on a loaded machine, also across a cut (#105).
+ */
+const READ_AHEAD = 90;
 /** Audio scheduled this far ahead of what is heard. */
 const AUDIO_HORIZON_S = 2;
 /** Program samples per audio chunk sent to the mixer (0.5 s). */
@@ -226,7 +232,21 @@ class LayerDecoder {
     this.#alphaDecoder = null;
   }
 
+  /** Decode steps from `from` on, their pictures read ahead of the decoder (spans after a cut included). */
   async *#steps(spans: readonly VideoSpan[], from: number, gen: number): AsyncGenerator<Step> {
+    const reads = readAhead(this.#reads(spans, from, gen), (read) => read.source.read(read.block.start, read.block.end), {
+      weight: (read) => read.block.steps.length,
+      budget: READ_AHEAD,
+    });
+    for await (const { job, value: pictures } of reads) {
+      if (gen !== this.#gen) return;
+      const { path, source, block } = job;
+      for (const step of block.steps) yield { step, path, source, picture: pictures[step.sample - block.start]! };
+    }
+  }
+
+  /** The ranged reads of the layer's spans from `from` on; unreadable files are skipped (and reported). */
+  async *#reads(spans: readonly VideoSpan[], from: number, gen: number): AsyncGenerator<{ path: string; source: VideoSource; block: ReadBlock }> {
     for (const span of spans) {
       const decodable = span.end > from ? decodableOf(span) : null;
       if (!decodable) continue;
@@ -241,15 +261,7 @@ class LayerDecoder {
         continue;
       }
       if (gen !== this.#gen) return;
-      let block: { start: number; pictures: EncodedPicture[] } | null = null;
-      for (const step of decodeSteps(timing, from, source.table)) {
-        if (!block || step.sample < block.start || step.sample >= block.start + block.pictures.length) {
-          const pictures = await source.read(step.sample, step.sample + READ_SAMPLES);
-          if (gen !== this.#gen) return;
-          block = { start: step.sample, pictures };
-        }
-        yield { step, path, source, picture: block.pictures[step.sample - block.start]! };
-      }
+      for (const block of readBlocks(decodeSteps(timing, from, source.table), READ_SAMPLES)) yield { path, source, block };
     }
   }
 
