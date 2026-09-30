@@ -53,8 +53,10 @@ export interface DaemonConnection {
 /**
  * Connect and perform the protocol handshake.
  *
- * Rejects with the raw socket error when nobody listens (see
- * {@link isDaemonUnavailable}), with code `ENAMETOOLONG` or `ENOTSOCK` and an
+ * Rejects with the raw socket error when nobody listens, or with code
+ * `ECONNRESET` when the daemon drops the connection before answering the
+ * handshake (it was shutting down); both satisfy {@link isDaemonUnavailable}.
+ * Rejects with code `ENAMETOOLONG` or `ENOTSOCK` and an
  * actionable message when the endpoint path is unusable, or with {@link RpcError} code
  * `IncompatibleProtocol` when versions differ; the socket is closed in both cases.
  */
@@ -133,7 +135,12 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
     })) as HandshakeResult;
   } catch (error) {
     socket.destroy();
-    throw error;
+    if (error instanceof RpcError) throw error;
+    // Accepted, then dropped unanswered: a daemon stopping on its idle timeout resets connections still in
+    // its backlog. Same remedy as nobody listening: start a daemon and retry. Handshake is idempotent.
+    throw Object.assign(new Error("frameshelld closed the connection during the handshake", { cause: error }), {
+      code: "ECONNRESET",
+    });
   }
 
   return {
@@ -153,10 +160,10 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   };
 }
 
-/** True when the error means "no daemon listening": start one and retry. */
+/** True when a {@link connectToDaemon} error means "no daemon serving": start one and retry. */
 export function isDaemonUnavailable(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return code === "ENOENT" || code === "ECONNREFUSED";
+  return code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET";
 }
 
 function openSocket(socketPath: string): Promise<Socket> {

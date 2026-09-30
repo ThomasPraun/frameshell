@@ -1,7 +1,16 @@
 import { rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type DaemonConnection, type EventName, type EventParams, connectToDaemon } from "@frameshell/protocol";
+import { createConnection } from "node:net";
+import {
+  type DaemonConnection,
+  type EventName,
+  type EventParams,
+  PROTOCOL_VERSION,
+  connectToDaemon,
+  readMessages,
+  writeMessage,
+} from "@frameshell/protocol";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
@@ -142,6 +151,41 @@ describe("asset.changed and job.progress notifications", () => {
       path: "assets/clip.txt",
     });
   }, MEDIA_TIMEOUT);
+
+  it("reach the subscriber before any reply that already shows their change", async () => {
+    // `frameshell import --wait` prints each job event, then reads `job.list` for jobs it may have missed:
+    // a reply overtaking older events made it print steps twice (#79). Raw lines keep the arrival order.
+    const socket = createConnection(daemon.socketPath);
+    await new Promise<void>((resolve, reject) => socket.once("connect", resolve).once("error", reject));
+    const arrived: { id?: number; method?: string; result?: unknown; params?: { job?: { id: string } } }[] = [];
+    const replies = new Map<number, () => void>();
+    readMessages(socket, (message) => {
+      const line = message as (typeof arrived)[number];
+      arrived.push(line);
+      if (line.id !== undefined) replies.get(line.id)?.();
+    });
+    let nextId = 1;
+    const call = (method: string, params: unknown) =>
+      new Promise<number>((resolve) => {
+        const id = nextId++;
+        replies.set(id, () => resolve(id));
+        writeMessage(socket, { jsonrpc: "2.0", id, method, params });
+      });
+    try {
+      await call("handshake", { protocolVersion: PROTOCOL_VERSION, client: "cli/test" });
+      await call("events.subscribe", { cwd: project, events: ["job.progress"] });
+      writeFileSync(join(project, "clip.txt"), "x");
+
+      const importId = await call("asset.import", { cwd: project, files: [join(project, "clip.txt")] });
+      const reply = arrived.findIndex((line) => line.id === importId);
+      const { imported } = arrived[reply]!.result as { imported: { job: { id: string } }[] };
+      const jobEvent = arrived.findIndex((line) => line.method === "job.progress" && line.params?.job?.id === imported[0]!.job.id);
+      expect(jobEvent).toBeGreaterThanOrEqual(0);
+      expect(jobEvent).toBeLessThan(reply);
+    } finally {
+      socket.destroy();
+    }
+  });
 
   it("are only sent to connections subscribed to that event", async () => {
     await app.request("events.subscribe", { cwd: project, events: ["job.progress"] });

@@ -24,7 +24,7 @@ import {
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
-import { canonicalPath } from "./fs-util.js";
+import { canonicalPath, canonicalPathSync } from "./fs-util.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -123,12 +123,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const events = new EventHub();
   // Hub key of each root as jobs and media name it (the caller's spelling). `events.subscribe` keys by
   // `canonicalPath`: publishing under the raw root misses subscribers of another spelling (Windows 8.3
-  // `RUNNER~1`, symlinks). One memoized promise per root: its `.then`s run in call order, so events stay ordered.
-  const hubKeys = new Map<string, Promise<string>>();
+  // `RUNNER~1`, symlinks). Resolved synchronously, memoized per root: an event is written in the same tick as
+  // its change, so no reply snapshotting a later state can overtake it (#79).
+  const hubKeys = new Map<string, string>();
   const publishFor = <E extends EventName>(event: E, root: string, params: EventParams<E>): void => {
     let key = hubKeys.get(root);
-    if (!key) hubKeys.set(root, (key = canonicalPath(root)));
-    void key.then((canonical) => events.publish(event, canonical, params));
+    if (key === undefined) hubKeys.set(root, (key = canonicalPathSync(root)));
+    events.publish(event, key, params);
   };
   const jobs = new JobQueue({ concurrency: options.jobConcurrency ?? 2, onBusyChange: () => armIdleTimer() });
   jobs.watch(({ job }) => publishFor("job.progress", job.project, { project: job.project, job }));
