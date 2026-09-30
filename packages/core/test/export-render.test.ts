@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { ExportPreset, MediaClip, Timeline } from "@frameshell/schema";
+import type { ExportPreset, MediaClip, Timeline, Transcript } from "@frameshell/schema";
 import { type ExportSource, compileFrame, compileRender, executeRender } from "../src/index.js";
 import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
@@ -242,6 +242,69 @@ describe("export render (real ffmpeg)", () => {
         if (frame >= 3 && frame < 21) expect(r, `frame ${frame}`).toBeCloseTo((255 + base) / 2, -1.2);
         else expect(Math.abs(r - base), `frame ${frame}`).toBeLessThan(6);
       });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "burns subtitles with the bundled font on exactly their frames, the spoken word highlighted, across a segment join",
+    async () => {
+      const W = 320;
+      const H = 180;
+      const dark = join(dir, "dark.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=0x202020:s=${W}x${H}:r=30:d=2`],
+        ...["-f", "lavfi", "-i", "sine=f=440:r=48000:d=2", "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", dark],
+      ]);
+      const sources = new Map([["assets/dark.mp4", { path: dark, video: { codec: "h264", still: false, width: W, height: H }, audio: true }]]);
+      const timeline: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [{ id: "c", type: "media", asset: "assets/dark.mp4", start: 0, in: 0, out: 1.2 }] },
+          { id: "s1", kind: "subtitles", follows: "v1", style: { preset: "big-keyword" } },
+        ],
+      };
+      // "uno" at frames 6-15, "dos" at 18-27: one cue "UNO DOS" from frame 6 to 27; "UNO" highlighted 6-17, "DOS" 18-26.
+      const transcript: Transcript = {
+        schemaVersion: 1,
+        asset: "assets/dark.mp4",
+        assetHash: `sha256:${"b".repeat(64)}`,
+        provider: "test",
+        model: "test",
+        words: [
+          { id: "w_000001", text: "uno", start: 0.2, end: 0.5 },
+          { id: "w_000002", text: "dos", start: 0.6, end: 0.9 },
+        ],
+        edits: {},
+      };
+      const transcripts = new Map([[transcript.asset, transcript]]);
+      const preset: ExportPreset = { ...TINY, video: { ...TINY.video, width: W, height: H } };
+      // Half-second segments: a join at frame 15, inside the cue.
+      const plan = compileRender({ timeline, fps: 30, preset, loudness: -17, sources, resolution: { width: W, height: H }, transcripts, segmentSeconds: 0.5 });
+      const output = join(dir, "subtitles.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-subtitles"), output });
+
+      const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+      const size = W * H * 3;
+      const seen: string[] = [];
+      for (let offset = 0; offset + size <= raw.length; offset += size) {
+        let white = 0;
+        let yellowLeft = 0;
+        let yellowRight = 0;
+        for (let i = offset; i < offset + size; i += 3) {
+          const [r, g, b] = [raw[i]!, raw[i + 1]!, raw[i + 2]!];
+          const x = ((i - offset) / 3) % W;
+          if (r > 200 && g > 200 && b > 200) white++;
+          if (r > 200 && g > 160 && b < 110) {
+            if (x < W / 2) yellowLeft++;
+            else yellowRight++;
+          }
+        }
+        seen.push(yellowLeft > 10 ? "left" : yellowRight > 10 ? "right" : white > 10 ? "white" : "none");
+      }
+      expect(seen).toEqual(Array.from({ length: 36 }, (_, frame) => (frame < 6 || frame >= 27 ? "none" : frame < 18 ? "left" : "right")));
     },
     MEDIA_TIMEOUT,
   );

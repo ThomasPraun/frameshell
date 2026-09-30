@@ -377,6 +377,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "track.list": async ({ cwd, timeline }) => timelines.tracks(await root(cwd), timeline),
     "track.add": (params, caller) => operate("track.add", params, caller),
     "track.remove": (params, caller) => operate("track.remove", params, caller),
+    "track.set": (params, caller) => operate("track.set", params, caller),
     "clip.add": (params, caller) => operate("clip.add", params, caller),
     "clip.move": (params, caller) => operate("clip.move", params, caller),
     "clip.trim": (params, caller) => operate("clip.trim", params, caller),

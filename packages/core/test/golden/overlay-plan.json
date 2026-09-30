@@ -188,6 +188,8 @@
       "frame": 60,
       "at": 2,
       "clip": "c_talk1",
+      "files": {},
+      "fonts": [],
       "args": [
         "-hide_banner",
         "-nostdin",
@@ -230,6 +232,8 @@
       "frame": 135,
       "at": 4.5,
       "clip": "c_talk2",
+      "files": {},
+      "fonts": [],
       "args": [
         "-hide_banner",
         "-nostdin",
@@ -272,6 +276,8 @@
       "frame": 105,
       "at": 3.5,
       "clip": "c_talk2",
+      "files": {},
+      "fonts": [],
       "args": [
         "-hide_banner",
         "-nostdin",

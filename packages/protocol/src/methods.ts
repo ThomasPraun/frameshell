@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -899,8 +899,21 @@ export const methods = {
     mutating: true,
     description:
       "Add a track and return its new id (`t_…`). Example: `{ kind: \"video\", name: \"Camera\" }`; subtitle tracks need " +
-      "`follows`: `{ kind: \"subtitles\", follows: \"t_4d5e6f\" }`. Placed on top unless `index` is given.",
+      "`follows`: `{ kind: \"subtitles\", follows: \"t_4d5e6f\", style: { preset: \"big-keyword\" } }`. A subtitle track " +
+      "copies no words: it shows the transcript words (`transcribe` first) inside each clip of the followed track, on " +
+      "the timeline clock, so cuts update it and text corrections go in the transcript's `edits`. Placed on top unless " +
+      "`index` is given.",
     params: operationArgs["track.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "track.set": {
+    mutating: true,
+    description:
+      "Change a track: `name` (any track; null clears it), and for subtitle tracks the followed track (`follows`) and " +
+      "`style` (`preset`: `big-keyword` or `plain`; `position`: `top`, `center` or `bottom`; given fields change, others " +
+      "stay). Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" } }`. Preview and export use the same style. " +
+      "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, nothing to change).",
+    params: operationArgs["track.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "track.remove": {

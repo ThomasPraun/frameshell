@@ -32,7 +32,7 @@ export function useProgram(): Program | null {
  * timelines, by clip `source`, followed live on the shared feeds. A source
  * not read yet (or unreadable) is absent: the preview shows a placeholder.
  */
-function useNestedViews(root: TimelineView | null): ReadonlyMap<string, TimelineView> {
+export function useNestedViews(root: TimelineView | null): ReadonlyMap<string, TimelineView> {
   const [version, setVersion] = useState(0);
   const watched = useRef(new Map<string, () => void>());
   const reachable = useMemo(() => {

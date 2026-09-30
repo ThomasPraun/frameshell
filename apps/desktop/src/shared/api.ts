@@ -64,9 +64,10 @@ export type AssetChange = { path: string; asset: AssetInfo | null } | { path: nu
  * Timeline operations the app sends (SPEC §10): move, trim, split, delete,
  * ripple delete from the timeline panel; the transcript view restores words
  * (rippled trim or insert); clip settings (transform, gain, mute) from the
- * clip inspector and the preview's handles.
+ * clip inspector and the preview's handles; subtitle tracks added from the
+ * timeline and styled from their inspector.
  */
-export const TIMELINE_EDIT_OPS = ["clip.move", "clip.trim", "clip.split", "clip.remove", "cut", "clip.add", "clip.set"] as const;
+export const TIMELINE_EDIT_OPS = ["clip.move", "clip.trim", "clip.split", "clip.remove", "cut", "clip.add", "clip.set", "track.add", "track.set"] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */
 export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];

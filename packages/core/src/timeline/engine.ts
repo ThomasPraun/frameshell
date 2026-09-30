@@ -164,6 +164,8 @@ class Edit {
         return this.trackAdd(request.args);
       case "track.remove":
         return this.trackRemove(request.args);
+      case "track.set":
+        return this.trackSet(request.args);
       case "clip.add":
         return this.clipAdd(request.args);
       case "clip.move":
@@ -186,7 +188,7 @@ class Edit {
   // Tracks
 
   trackAdd(args: OperationArgs<"track.add">): void {
-    const { kind, name, follows, index } = args;
+    const { kind, name, follows, index, style } = args;
     if (kind === "subtitles") {
       if (follows === undefined) {
         throw this.invalid("a subtitle track needs `follows`: the video or audio track whose words it shows.", {
@@ -194,12 +196,9 @@ class Edit {
           hint: `Clip tracks here: ${this.clipTracks().map((t) => t.id).join(", ") || "none, add one first"}.`,
         });
       }
-      const followed = this.track(follows);
-      if (followed.kind === "subtitles") {
-        throw this.invalid(`\`follows\` must name a video or audio track; ${follows} is a subtitle track.`, { field: "follows" });
-      }
-    } else if (follows !== undefined) {
-      throw this.invalid("only subtitle tracks take `follows`.", { field: "follows" });
+      this.checkFollows(follows);
+    } else {
+      this.refuseSubtitleFields(args);
     }
     const count = this.draft.tracks.length;
     if (index !== undefined && index > count) {
@@ -208,9 +207,41 @@ class Edit {
     const id = this.newId("t");
     const track: Track =
       kind === "subtitles"
-        ? { id, kind, ...(name ? { name } : {}), follows: follows! }
+        ? { id, kind, ...(name ? { name } : {}), follows: follows!, ...(style && Object.keys(style).length > 0 ? { style } : {}) }
         : { id, kind, ...(name ? { name } : {}), clips: [] };
     this.draft.tracks.splice(index ?? count, 0, track);
+  }
+
+  trackSet(args: OperationArgs<"track.set">): void {
+    const track = this.track(args.track);
+    const { name, follows, style } = args;
+    if (name === undefined && follows === undefined && style === undefined) {
+      throw this.invalid("nothing to change.", { hint: "Pass `name`, or for subtitle tracks `follows` or `style`." });
+    }
+    if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
+    if (name === null) delete track.name;
+    else if (name !== undefined) track.name = name;
+    if (track.kind !== "subtitles") return;
+    if (follows !== undefined) {
+      this.checkFollows(follows);
+      track.follows = follows;
+    }
+    if (style !== undefined) {
+      const merged = { ...track.style, ...Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined)) };
+      if (Object.keys(merged).length > 0) track.style = merged;
+    }
+  }
+
+  /** `follows` must name an existing video or audio track. */
+  checkFollows(follows: string): void {
+    if (this.track(follows).kind === "subtitles") {
+      throw this.invalid(`\`follows\` must name a video or audio track; ${follows} is a subtitle track.`, { field: "follows" });
+    }
+  }
+
+  refuseSubtitleFields(args: { follows?: string | undefined; style?: object | undefined }): void {
+    if (args.follows !== undefined) throw this.invalid("only subtitle tracks take `follows`.", { field: "follows" });
+    if (args.style !== undefined) throw this.invalid("only subtitle tracks take `style`.", { field: "style" });
   }
 
   trackRemove(args: OperationArgs<"track.remove">): void {

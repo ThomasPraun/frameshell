@@ -428,6 +428,7 @@ export class TimelineService {
         kind: track.kind,
         name: track.name ?? null,
         follows: track.kind === "subtitles" ? track.follows : null,
+        ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
         clips,
       });
     }
@@ -456,6 +457,7 @@ export class TimelineService {
         kind: track.kind,
         name: track.name,
         follows: track.follows,
+        ...(track.style ? { style: track.style } : {}),
         clips: track.clips.length,
         end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
       })),

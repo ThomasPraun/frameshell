@@ -59,6 +59,7 @@ function follow(timeline: string, feed: Feed): () => void {
         if (timeline === SELECTION_TIMELINE) {
           selection.retainClips(new Set(view.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
           selection.retainWords((word) => placeWord(view, word));
+          selection.retainTrack(new Set(view.tracks.map((track) => track.id)));
         }
         publish({ ...feed.state, view, error: null });
       } catch (error) {

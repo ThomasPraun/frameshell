@@ -32,6 +32,8 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "clip.split": "Split",
   "clip.remove": "Delete",
   cut: "Ripple delete",
+  "track.add": "Add",
+  "track.set": "Change",
 };
 
 /**
@@ -176,7 +178,8 @@ export class TimelineEditor {
 function batchLabel(edits: readonly TimelineEdit[]): string {
   const [first] = edits;
   const verb = edits.every((edit) => edit.op === first!.op) ? BATCH_VERBS[first!.op] : "Edit";
-  return `${verb} ${edits.length} clips`;
+  const noun = edits.every((edit) => edit.op.startsWith("track.")) ? "tracks" : "clips";
+  return `${verb} ${edits.length} ${noun}`;
 }
 
 function conflictsOf(error: Partial<RpcError>): RevertConflict[] {

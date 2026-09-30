@@ -14,13 +14,16 @@
   "bin": {
     "frameshell": "./dist/bin/frameshell.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.12"
   },
   "dependencies": {
     "@frameshell/core": "workspace:*",
     "@frameshell/mcp": "workspace:*",
-    "@frameshell/protocol": "workspace:*"
+    "@frameshell/protocol": "workspace:*",
+    "@frameshell/schema": "workspace:*"
   }
 }

@@ -5,7 +5,7 @@ import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from 
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { ffprobeJson, makeClip } from "./media-fixtures.js";
-import { testBinaryManager } from "./media-tools.js";
+import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
 
 // Daemon wiring: presets, validation before queuing, the render job and frame capture on a 1 s project.
 const MEDIA_TIMEOUT = 180_000;
@@ -156,6 +156,49 @@ describe("render and frame methods", () => {
         code: ErrorCode.ExportUnsupported,
         message: expect.stringContaining("timelines/gone.json"),
       });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "burns a subtitle track's words from the asset's transcript file into frames, where its style puts them",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      /** Rows (0-1079) where a 1920x1080 frame at 0.5 s differs from `before`. */
+      const shot = async (name: string) => {
+        const out = join(tempDir(), `${name}.png`);
+        await conn.request("frame", { cwd: project, at: 0.5, out });
+        return runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", out, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+      };
+      const changedRows = (a: Buffer, b: Buffer) => {
+        const rows = new Set<number>();
+        for (let i = 0; i < a.length; i++) if (Math.abs(a[i]! - b[i]!) > 40) rows.add(Math.floor(i / (1920 * 3)));
+        return [...rows].sort((x, y) => x - y);
+      };
+      const plain = await shot("plain");
+      const transcript = {
+        schemaVersion: 1,
+        asset: "assets/take.mp4",
+        assetHash: `sha256:${"c".repeat(64)}`,
+        provider: "test",
+        model: "test",
+        words: [{ id: "w_000001", text: "hola", start: 0.3, end: 0.7 }],
+        edits: {},
+      };
+      await conn.request("file.write", { path: join(project, "transcripts", "take.words.json"), content: JSON.stringify(transcript) });
+      const track = (await conn.request("track.add", { cwd: project, kind: "subtitles", follows: video })).changes.added[0]!;
+
+      const bottom = changedRows(plain, await shot("bottom"));
+      expect(bottom.length).toBeGreaterThan(20);
+      // big-keyword: 70 px text whose line box ends 12 % above the bottom edge.
+      expect(bottom[0]).toBeGreaterThan(1080 * 0.7);
+      expect(bottom.at(-1)).toBeLessThan(1080 * 0.9);
+
+      await conn.request("track.set", { cwd: project, track, style: { position: "top" } });
+      const top = changedRows(plain, await shot("top"));
+      expect(top[0]).toBeGreaterThan(1080 * 0.1);
+      expect(top.at(-1)).toBeLessThan(1080 * 0.3);
+      expect(readdirSync(join(project, ".frameshell", "cache", "frame"))).toEqual([]);
     },
     MEDIA_TIMEOUT,
   );

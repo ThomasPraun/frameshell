@@ -273,6 +273,29 @@ describe("paintTimeline", () => {
       { x: 40, w: 30, h: RANGE_BAR },
     ]);
   });
+
+  it("draws a subtitle lane's cues with their words, framing them when the track is selected; a hint when it has none", () => {
+    const view = longTimeline(2);
+    view.tracks.push({ id: "t_s", kind: "subtitles", name: null, follows: "t_v", clips: [] });
+    const layout = layoutTimeline(view);
+    const cue = (start: number, end: number, text: string) => ({ start, end, text, cue: { start: 0, end: 1, words: [], highlight: true } });
+    const paint = (subtitles?: Map<string, ReturnType<typeof cue>[]>, selectedTrack?: string) => {
+      const ctx = recorder();
+      const frames: string[] = [];
+      ctx.strokeRect = () => void frames.push(String(ctx.strokeStyle));
+      const input = { layout, viewport: viewport(60), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia };
+      paintTimeline(ctx, { ...input, ...(subtitles ? { subtitles } : {}), ...(selectedTrack ? { selectedTrack } : {}) });
+      return { texts: ctx.texts, accentFrames: frames.filter((color) => color === DEFAULT_THEME.accent).length };
+    };
+    expect(paint().texts).toContain("Words show here once the clips of V1 are transcribed");
+    const cues = new Map([["t_s", [cue(0.5, 1.5, "HOLA A TODOS"), cue(2, 3, "HOY"), cue(20, 21, "LEJOS")]]]);
+    const shown = paint(cues);
+    // 600 px at 60 px/s shows 0-10 s: the cue at 20 s is culled.
+    expect(shown.texts).toEqual(expect.arrayContaining(["HOLA A TODOS", "HOY"]));
+    expect(shown.texts).not.toContain("LEJOS");
+    expect(shown.accentFrames).toBe(0);
+    expect(paint(cues, "t_s").accentFrames).toBe(2);
+  });
 });
 
 /** Height of the ruler bar marking a selected range, px. */

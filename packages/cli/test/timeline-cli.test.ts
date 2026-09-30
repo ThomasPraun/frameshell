@@ -300,3 +300,27 @@ describe("direct edits of the timeline file", () => {
     }
   });
 });
+
+describe("subtitle tracks", () => {
+  it("adds a subtitle track with a style, changes its style, and lists it", () => {
+    writeFileSync(
+      join(project, "timelines", "subs.json"),
+      JSON.stringify({ schemaVersion: 1, id: "subs", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }] }),
+    );
+    const added = json<{ changes: { added: string[] } }>(["track", "add", "subtitles", "--follows", "v1", "--preset", "plain", "--timeline", "subs"]);
+    const track = added.changes.added[0]!;
+    const set = frameshell(["track", "set", track, "--position", "top", "--name", "Captions", "--timeline", "subs"]);
+    expect(set.code).toBe(0);
+    expect(set.stdout).toMatch(new RegExp(`^track\\.set: updated ${track}\\nrevision 2 `));
+    const subs = () => JSON.parse(readFileSync(join(project, "timelines", "subs.json"), "utf8"));
+    expect(subs().tracks[1]).toEqual({ id: track, kind: "subtitles", name: "Captions", follows: "v1", style: { preset: "plain", position: "top" } });
+    expect(frameshell(["track", "list", "--timeline", "subs"]).stdout).toContain(`${track}  subtitles "Captions"  follows v1, plain at the top`);
+
+    expect(frameshell(["track", "set", track, "--preset", "big-keyword", "--clear-name", "--timeline", "subs"]).code).toBe(0);
+    expect(subs().tracks[1]).toEqual({ id: track, kind: "subtitles", follows: "v1", style: { preset: "big-keyword", position: "top" } });
+    const bad = frameshell(["track", "set", track, "--position", "left", "--timeline", "subs"]);
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toMatch(/position.*top.*center.*bottom/);
+    expect(frameshell(["track", "set", track, "--name", "x", "--clear-name", "--timeline", "subs"]).code).toBe(2);
+  });
+});

@@ -107,6 +107,49 @@ describe("track operations", () => {
     expect(refused.message).toMatch(/t_sub follows t_v.*Remove t_sub first/);
   });
 
+  it("adds a subtitle track with a style preset and position; only subtitle tracks take a style", async () => {
+    const { timeline } = await apply(
+      base(),
+      "track.add",
+      { kind: "subtitles", follows: "t_v", style: { preset: "big-keyword", position: "top" } },
+      context({ newId: () => "t_sub" }),
+    );
+    expect(timeline.tracks.at(-1)).toEqual({ id: "t_sub", kind: "subtitles", follows: "t_v", style: { preset: "big-keyword", position: "top" } });
+    const refused = await rejection(apply(base(), "track.add", { kind: "video", style: { preset: "plain" } }));
+    expect(refused.message).toMatch(/only subtitle tracks take `style`/);
+    // Unknown presets fail param validation, listing the valid ones.
+    expect(() => op("track.add", { kind: "subtitles", follows: "t_v", style: { preset: "neon" } })).toThrow(/big-keyword.*plain/);
+  });
+
+  it("track.set changes a subtitle track's style field by field, its followed track and name; the inverse restores them", async () => {
+    const { timeline } = await apply(base(), "track.add", { kind: "subtitles", follows: "t_v", style: { preset: "plain" } }, context({ newId: () => "t_sub" }));
+    const styled = await apply(timeline, "track.set", { track: "t_sub", style: { position: "center" } });
+    expect(styled.timeline.tracks.at(-1)).toEqual({ id: "t_sub", kind: "subtitles", follows: "t_v", style: { preset: "plain", position: "center" } });
+    expect(styled.changes).toMatchObject({ added: [], updated: ["t_sub"], removed: [], range: null });
+    const moved = await apply(styled.timeline, "track.set", { track: "t_sub", follows: "t_a", name: "Captions", style: { preset: "big-keyword" } });
+    expect(moved.timeline.tracks.at(-1)).toEqual({
+      id: "t_sub",
+      kind: "subtitles",
+      name: "Captions",
+      follows: "t_a",
+      style: { preset: "big-keyword", position: "center" },
+    });
+    const undone = await apply(moved.timeline, "timeline.patch", moved.inverse.args);
+    expect(undone.timeline.tracks).toEqual(styled.timeline.tracks);
+    const unnamed = await apply(moved.timeline, "track.set", { track: "t_sub", name: null });
+    expect(unnamed.timeline.tracks.at(-1)).not.toHaveProperty("name");
+  });
+
+  it("track.set refuses a style or follows on clip tracks, a subtitle track to follow, and no change at all", async () => {
+    const { timeline } = await apply(base(), "track.add", { kind: "subtitles", follows: "t_v" }, context({ newId: () => "t_sub" }));
+    expect((await rejection(apply(timeline, "track.set", { track: "t_v", style: { preset: "plain" } }))).message).toMatch(/only subtitle tracks take `style`/);
+    expect((await rejection(apply(timeline, "track.set", { track: "t_v", follows: "t_a" }))).message).toMatch(/only subtitle tracks take `follows`/);
+    expect((await rejection(apply(timeline, "track.set", { track: "t_sub", follows: "t_sub" }))).message).toMatch(/t_sub is a subtitle track/);
+    expect((await rejection(apply(timeline, "track.set", { track: "t_sub" }))).message).toMatch(/nothing to change/);
+    const renamed = await apply(timeline, "track.set", { track: "t_v", name: "Camera" });
+    expect(renamed.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", name: "Camera", clips: [] });
+  });
+
   it("refuses to remove a track with clips unless forced, and names missing tracks", async () => {
     const { timeline } = await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4" });
     expect((await rejection(apply(timeline, "track.remove", { track: "t_v" }))).message).toMatch(/1 clip.*force: true/);

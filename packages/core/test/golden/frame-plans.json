@@ -3,6 +3,12 @@
     "frame": 30,
     "at": 1,
     "clip": "c_talk1",
+    "files": {
+      "subtitles.ass": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\nScaledBorderAndShadow: yes\nWrapStyle: 2\nYCbCr Matrix: None\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: t0,Archivo Black,63.309,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,0,0,0,0,100,100,0,0,1,4.23,0,2,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:00.50,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}HOLA{\\c&H00FFFFFF&} A TODOS.\nDialogue: 0,0:00:00.50,0:00:00.70,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOLA {\\c&H0026D4FF&}A{\\c&H00FFFFFF&} TODOS.\nDialogue: 0,0:00:00.70,0:00:01.20,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOLA A {\\c&H0026D4FF&}TODOS.{\\c&H00FFFFFF&}\nDialogue: 0,0:00:01.80,0:00:02.20,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}HOY{\\c&H00FFFFFF&} CORTAMOS\nDialogue: 0,0:00:02.20,0:00:02.70,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOY {\\c&H0026D4FF&}CORTAMOS{\\c&H00FFFFFF&}\nDialogue: 0,0:00:03.16,0:00:03.53,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}RÁPIDO{\\c&H00FFFFFF&}\n"
+    },
+    "fonts": [
+      "ArchivoBlack-Regular.ttf"
+    ],
     "args": [
       "-hide_banner",
       "-nostdin",
@@ -19,7 +25,7 @@
       "-i",
       "/project/assets/talk.mp4",
       "-filter_complex",
-      "[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=1,setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=rgb24[p0];[p0]null[v]",
+      "[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=1,setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=rgb24[p0];[p0]null,setpts=PTS+1/TB,ass=filename=subtitles.ass:fontsdir=fonts,setpts=PTS-STARTPTS[v]",
       "-map",
       "[v]",
       "-frames:v",
@@ -37,6 +43,12 @@
     "frame": 105,
     "at": 3.5,
     "clip": "c_talk2",
+    "files": {
+      "subtitles.ass": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\nScaledBorderAndShadow: yes\nWrapStyle: 2\nYCbCr Matrix: None\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: t0,Archivo Black,63.309,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,0,0,0,0,100,100,0,0,1,4.23,0,2,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.10,0:00:00.50,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}HOLA{\\c&H00FFFFFF&} A TODOS.\nDialogue: 0,0:00:00.50,0:00:00.70,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOLA {\\c&H0026D4FF&}A{\\c&H00FFFFFF&} TODOS.\nDialogue: 0,0:00:00.70,0:00:01.20,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOLA A {\\c&H0026D4FF&}TODOS.{\\c&H00FFFFFF&}\nDialogue: 0,0:00:01.80,0:00:02.20,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}HOY{\\c&H00FFFFFF&} CORTAMOS\nDialogue: 0,0:00:02.20,0:00:02.70,t0,,0,0,0,,{\\an2\\pos(640,633.604)}HOY {\\c&H0026D4FF&}CORTAMOS{\\c&H00FFFFFF&}\nDialogue: 0,0:00:03.16,0:00:03.53,t0,,0,0,0,,{\\an2\\pos(640,633.604)}{\\c&H0026D4FF&}RÁPIDO{\\c&H00FFFFFF&}\n"
+    },
+    "fonts": [
+      "ArchivoBlack-Regular.ttf"
+    ],
     "args": [
       "-hide_banner",
       "-nostdin",
@@ -53,7 +65,7 @@
       "-i",
       "/project/assets/talk.mp4",
       "-filter_complex",
-      "[0:v:0]setpts=(PTS-1.008333/TB)/1.15,fps=30/1:start_time=0,trim=end_frame=1,setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=rgb24[p0];[p0]null[v]",
+      "[0:v:0]setpts=(PTS-1.008333/TB)/1.15,fps=30/1:start_time=0,trim=end_frame=1,setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=rgb24[p0];[p0]null,setpts=PTS+3.5/TB,ass=filename=subtitles.ass:fontsdir=fonts,setpts=PTS-STARTPTS[v]",
       "-map",
       "[v]",
       "-frames:v",
@@ -71,6 +83,8 @@
     "frame": 165,
     "at": 5.5,
     "clip": null,
+    "files": {},
+    "fonts": [],
     "args": [
       "-hide_banner",
       "-nostdin",
@@ -99,6 +113,8 @@
     "frame": 225,
     "at": 7.5,
     "clip": "c_logo",
+    "files": {},
+    "fonts": [],
     "args": [
       "-hide_banner",
       "-nostdin",

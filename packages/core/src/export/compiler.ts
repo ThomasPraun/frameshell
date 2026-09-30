@@ -3,14 +3,19 @@ import {
   type ExportPreset,
   type MediaClip,
   type Placement,
+  type ResolvedSubtitleTrack,
+  SUBTITLE_FONT,
   type Size,
   type Timeline,
+  type Transcript,
   isIdentityPlacement,
   layerRect,
   placementOf,
+  subtitleTracks,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
+import { assSubtitles } from "./ass.js";
 
 /**
  * Export compiler (SPEC §3.5): timeline → render plan → ffmpeg argument
@@ -41,6 +46,11 @@ export interface RenderInput {
   sources: ReadonlyMap<string, ExportSource>;
   /** Project resolution (`frameshell.json`): clip transform offsets are in its pixels. */
   resolution: Size;
+  /**
+   * Transcripts of the assets subtitle tracks follow, keyed by asset path.
+   * An asset without one shows no subtitles (and a warning when it has sound).
+   */
+  transcripts?: ReadonlyMap<string, Transcript>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
 }
@@ -82,6 +92,12 @@ export interface RenderPlan {
   warnings: string[];
   /** Files to write into the work directory before any step runs. */
   files: Record<string, string>;
+  /**
+   * Font files (`SUBTITLE_FONT.file`) to copy into `fonts/` of the work
+   * directory before any step runs: burned subtitles read them. Empty when
+   * nothing is burned.
+   */
+  fonts: string[];
   segments: RenderSegment[];
   audio: {
     sampleRate: number;
@@ -118,6 +134,8 @@ export interface FrameInput {
   sources: ReadonlyMap<string, ExportSource>;
   /** See {@link RenderInput.resolution}. */
   resolution: Size;
+  /** See {@link RenderInput.transcripts}. */
+  transcripts?: ReadonlyMap<string, Transcript>;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -134,6 +152,10 @@ export interface FramePlan {
   at: number;
   /** Clip on the base video track showing then; null for a gap (black frame). */
   clip: string | null;
+  /** Files to write into the work directory (the args' cwd) first. */
+  files: Record<string, string>;
+  /** Fonts to copy into its `fonts/`; see {@link RenderPlan.fonts}. */
+  fonts: string[];
   args: string[];
 }
 
@@ -155,6 +177,10 @@ export const LOUDNESS_STATS_FILE = "loudness.json";
 export const MIX_FILE = "mix.wv";
 /** Concat demuxer list, relative to the work directory. */
 const CONCAT_LIST = "segments.txt";
+/** Burned subtitles, relative to the work directory. */
+export const SUBTITLES_FILE = "subtitles.ass";
+/** Directory libass loads fonts from, relative to the work directory. */
+export const FONTS_DIR = "fonts";
 
 /** Quiet, overwrite, machine-readable progress on stdout (`runTool` parses it). */
 const BASE = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"];
@@ -187,6 +213,8 @@ interface Layout {
   overlays: Placed[][];
   /** Clips carrying sound, one list per track (base video track first). */
   audio: Placed[][];
+  /** Subtitle tracks with at least one cue, in track order. */
+  subtitles: ResolvedSubtitleTrack[];
   warnings: string[];
 }
 
@@ -208,7 +236,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources);
+  const layout = layoutTimeline(timeline, fps, input.sources, input.transcripts);
   const outFps = preset.video.fps ?? fps;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
@@ -218,11 +246,12 @@ export function compileRender(input: RenderInput): RenderPlan {
   const bounds = segmentBounds(layout.frames, edges, segmentFrames);
   const ext = preset.container;
   const files: Record<string, string> = {};
+  if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
     const graph = videoGraph(layout, from, to, target);
-    const tail = outFps === fps ? "" : `,fps=${rate}`;
+    const tail = `${burnSubtitles(layout, from, to, fps)}${outFps === fps ? "" : `,fps=${rate}`}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
       file: `${name}.${ext}`,
@@ -254,6 +283,7 @@ export function compileRender(input: RenderInput): RenderPlan {
     container: preset.container,
     warnings: layout.warnings,
     files,
+    fonts: layout.subtitles.length > 0 ? [SUBTITLE_FONT.file] : [],
     segments,
     audio,
   };
@@ -326,7 +356,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, input.transcripts);
   const frame = Math.floor((input.at + 0.0005) * fps);
   if (frame < 0 || frame >= layout.frames) {
     const last = seconds(layout.frames - 1, fps);
@@ -338,14 +368,17 @@ export function compileFrame(input: FrameInput): FramePlan {
   }
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: "rgb24", project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
+  const burn = burnSubtitles(layout, frame, frame + 1, fps);
   return {
     frame,
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
+    files: burn ? { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) } : {},
+    fonts: burn ? [SUBTITLE_FONT.file] : [],
     args: [
       ...BASE,
       ...graph.inputs,
-      ...["-filter_complex", `${graph.lines.join(";")}[v]`, "-map", "[v]", "-frames:v", "1"],
+      ...["-filter_complex", `${graph.lines.join(";")}${burn}[v]`, "-map", "[v]", "-frames:v", "1"],
       ...["-c:v", "png", "-f", "image2", "-update", "1", input.output],
     ],
   };
@@ -371,18 +404,20 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
   return Number.isFinite(integrated) && integrated > -70 ? measured : null;
 }
 
-/** Place the timeline's media clips on the frame grid and reject what export cannot render. */
-function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<string, ExportSource>): Layout {
+/** Place the timeline's media clips on the frame grid, resolve subtitle cues, and reject what export cannot render. */
+function layoutTimeline(
+  timeline: Timeline,
+  fps: number,
+  sources: ReadonlyMap<string, ExportSource>,
+  transcripts: ReadonlyMap<string, Transcript> = new Map(),
+): Layout {
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
   const video: Placed[][] = [];
   const audio: Placed[][] = [];
   let frames = 0;
   for (const track of timeline.tracks) {
-    if (track.kind === "subtitles") {
-      warnings.push(`Subtitle track ${track.id} is not burned into exports yet; it was skipped.`);
-      continue;
-    }
+    if (track.kind === "subtitles") continue;
     const placed: Placed[] = [];
     for (const clip of track.clips) {
       if (clip.type === "timeline" && "source" in clip) {
@@ -422,6 +457,19 @@ function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<st
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+  for (const track of subtitles) {
+    if (track.unknownPreset !== null) {
+      warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
+    }
+    // Only assets with sound have words to show.
+    const silent = track.missing.filter((asset) => sources.get(asset)?.audio === true);
+    if (silent.length > 0) {
+      warnings.push(
+        `Subtitle track ${track.track} shows no words for ${silent.join(", ")}: no transcript. Run \`frameshell transcribe <asset>\` first.`,
+      );
+    }
+  }
   const [base = [], ...upper] = video;
   const visible = (placed: Placed) => placed.source.video !== null && placed.placement.opacity > 0;
   const overlays = [base.filter((p) => !isIdentityPlacement(p.placement)), ...upper]
@@ -433,8 +481,23 @@ function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<st
     video: base.filter((p) => isIdentityPlacement(p.placement)),
     overlays,
     audio: audio.filter((track) => track.length > 0),
+    subtitles: subtitles.filter((track) => track.cues.length > 0),
     warnings,
   };
+}
+
+/**
+ * Filter chain appended to a graph rendering timeline frames [from, to)
+ * that burns the subtitle cues showing there; empty when none does. The
+ * graph's timestamps start at 0: they are moved to timeline time for the
+ * `ass` filter, then back.
+ */
+function burnSubtitles(layout: Layout, from: number, to: number, fps: number): string {
+  const showing = layout.subtitles.some((track) => track.cues.some((cue) => cue.start < to && cue.end > from));
+  if (!showing) return "";
+  const shift = from === 0 ? "" : `setpts=PTS+${num(from / fps)}/TB,`;
+  const back = from === 0 ? "" : ",setpts=PTS-STARTPTS";
+  return `,${shift}ass=filename=${SUBTITLES_FILE}:fontsdir=${FONTS_DIR}${back}`;
 }
 
 function unsupported(timeline: string, message: string, data: { track?: string; clip?: string }): RpcError {

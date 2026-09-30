@@ -1,5 +1,5 @@
-import type { Placement } from "@frameshell/schema/composite";
-import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
+import type { Placement, Size } from "@frameshell/schema/composite";
+import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { PreviewPlayer } from "../preview/player.js";
@@ -7,10 +7,14 @@ import { type PlaceholderReason, type Program, programAt } from "../preview/prog
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useResolution } from "../preview/useProgram.js";
-import { type SelectedRegion, selection, useSelection } from "../selection.js";
+import { type SelectedRegion, SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { drawSubtitleLines, subtitleLines } from "../subtitles/model.js";
+import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
 import { formatTimecode } from "../timeline/layout.js";
+import { useTimelineView } from "../timeline/useTimelineView.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
@@ -34,7 +38,8 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * frame (Shift: a second), Home/End jump to the ends. Clips it cannot play
  * yet show a placeholder. A click on a layer selects its clip; the selected
  * clip gets handles to move and scale it, and the inspector below sets its
- * placement and sound. The region tool draws a rectangle on the frame for
+ * placement and sound (a selected subtitle track's style is set there too;
+ * subtitle tracks draw over the picture as export burns them). The region tool draws a rectangle on the frame for
  * "Ask agent" (SPEC §10): it becomes the shared selection, with the
  * playhead's time; Escape clears it. Right-click opens "Ask agent".
  */
@@ -77,11 +82,14 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
   }, [program]);
 
   const aspect = resolution.width / resolution.height;
-  useEffect(() => {
+  const canvasSize = useMemo(() => {
     const scale = CANVAS_SHORT_SIDE / Math.min(resolution.width, resolution.height);
     const even = (n: number) => Math.max(2, Math.round((n * scale) / 2) * 2);
-    player.current?.setSize(even(resolution.width), even(resolution.height));
+    return { width: even(resolution.width), height: even(resolution.height) };
   }, [resolution.width, resolution.height]);
+  useEffect(() => {
+    player.current?.setSize(canvasSize.width, canvasSize.height);
+  }, [canvasSize]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -124,6 +132,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           aria-label={empty ? "Empty program monitor" : `Program monitor at ${formatTimecode(time, fps)}`}
           onContextMenu={openAskMenu}
         >
+          <SubtitleOverlay size={canvasSize} frame={frame} />
           <div className="safe-area action" />
           <div className="safe-area title" />
           {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
@@ -132,7 +141,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           <RegionLayer active={regionTool && !empty} fps={fps} />
         </div>
       </div>
-      <ClipInspector />
+      <Inspector />
       <TransportBar
         playing={playing}
         disabled={frames === 0}
@@ -212,6 +221,45 @@ function RegionLayer({ active, fps }: { active: boolean; fps: number }) {
       )}
     </div>
   );
+}
+
+/** Settings of the selection: a subtitle track's style, else the selected clip's placement and sound. */
+function Inspector() {
+  const { track } = useSelection();
+  const { view } = useTimelineView(SELECTION_TIMELINE);
+  const subtitles = track !== null && view?.tracks.some((candidate) => candidate.id === track && candidate.kind === "subtitles");
+  return subtitles ? <SubtitleInspector track={track} /> : <ClipInspector />;
+}
+
+/**
+ * Subtitle lines at program frame `frame`, drawn over the picture on a
+ * canvas the size of the player's, with the bundled face export burns with.
+ * `data-frame` names the frame drawn once the face is loaded (tests wait on it).
+ */
+function SubtitleOverlay({ size, frame }: { size: Size; frame: number }) {
+  const { tracks } = useSubtitles();
+  const ready = useSubtitleFont();
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const element = canvas.current;
+    const context = element?.getContext("2d");
+    if (!element || !context) return;
+    if (element.width !== size.width || element.height !== size.height) {
+      element.width = size.width;
+      element.height = size.height;
+    }
+    context.clearRect(0, 0, size.width, size.height);
+    if (!ready) return;
+    const lines = subtitleLines(tracks, frame, size, (text, font) => {
+      context.font = font;
+      return context.measureText(text).width;
+    });
+    drawSubtitleLines(context, lines);
+    element.dataset["frame"] = String(frame);
+    element.dataset["text"] = lines.map((line) => line.text).join("\n");
+    element.dataset["active"] = lines.map((line) => line.active ?? "").join("\n");
+  }, [tracks, frame, size, ready]);
+  return <canvas ref={canvas} className="preview-subtitles" aria-hidden="true" data-testid="preview-subtitles" />;
 }
 
 /** The base layer's placeholder fills the frame; upper layers' are listed small, over the picture. */
