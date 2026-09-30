@@ -16,6 +16,8 @@ import {
 } from "./recipe.js";
 import { DERIVED_DIRS, type Manifest, type MediaStore } from "./store.js";
 
+type IngestStep = Exclude<JobStep, "video" | "mux">;
+
 /** Resolved executables. */
 export interface MediaTools {
   ffmpeg: string;
@@ -23,8 +25,8 @@ export interface MediaTools {
 }
 
 /** Share of overall progress per step, by typical cost. */
-const WEIGHTS: Record<JobStep, number> = { hash: 0.05, probe: 0.02, proxy: 0.6, sidecar: 0.13, waveform: 0.05, thumbnails: 0.15 };
-const ORDER: JobStep[] = ["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails"];
+const WEIGHTS: Record<IngestStep, number> = { hash: 0.05, probe: 0.02, proxy: 0.6, sidecar: 0.13, waveform: 0.05, thumbnails: 0.15 };
+const ORDER: IngestStep[] = ["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails"];
 
 /** Inputs of {@link ingestAsset}. */
 export interface IngestOptions {
@@ -52,7 +54,7 @@ export interface IngestOptions {
 export async function ingestAsset(options: IngestOptions): Promise<void> {
   const { store, rel, fps, ctx } = options;
   const { signal } = ctx;
-  const report = (step: JobStep, fraction = 0) => {
+  const report = (step: IngestStep, fraction = 0) => {
     const done = ORDER.slice(0, ORDER.indexOf(step)).reduce((sum, s) => sum + WEIGHTS[s], 0);
     ctx.update({ step, progress: done + WEIGHTS[step] * Math.min(1, Math.max(0, fraction)) });
   };
@@ -82,7 +84,7 @@ async function build(
   options: IngestOptions,
   hash: string,
   key: string,
-  report: (step: JobStep, fraction?: number) => void,
+  report: (step: IngestStep, fraction?: number) => void,
 ): Promise<void> {
   const { store, rel, fps, ctx } = options;
   const { signal } = ctx;
@@ -99,7 +101,7 @@ async function build(
   }
   if (!media.video && !media.audio) throw notMedia(rel, "no audio or video stream");
   const duration = media.duration ?? 0;
-  const progressOf = (step: JobStep) => (seconds: number) => report(step, duration > 0 ? seconds / duration : 0);
+  const progressOf = (step: IngestStep) => (seconds: number) => report(step, duration > 0 ? seconds / duration : 0);
   const partial = `${process.pid}-${Date.now()}.partial`;
   const moving = media.video && !media.video.still;
 

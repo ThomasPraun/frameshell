@@ -84,3 +84,25 @@ export {
 export { applyPatch, diffTimelines } from "./timeline/patch.js";
 export { FrameGrid } from "./timeline/grid.js";
 export { NestedTimelineError } from "./timeline/timing.js";
+export {
+  type AudioItem,
+  DEFAULT_SEGMENT_SECONDS,
+  EDGE_FADE_SECONDS,
+  type ExportSource,
+  type FfmpegStep,
+  type FrameInput,
+  type FramePlan,
+  type LoudnessMeasurement,
+  type RenderInput,
+  type RenderPlan,
+  type RenderSegment,
+  compileFrame,
+  compileRender,
+  MIX_FILE,
+  loudnessAnalysis,
+  mixStep,
+  muxStep,
+  parseLoudnessStats,
+} from "./export/compiler.js";
+export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
+export { type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";

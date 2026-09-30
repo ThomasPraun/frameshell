@@ -47,6 +47,13 @@ Commands:
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
              [--provider p] [--model m] [--language l]
                                First run downloads the engine and model (minutes, once)
+  render [--preset p] [--out file] [--timeline id]
+                               Export a timeline to video (default preset: export.defaultPreset,
+                               else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
+                               Waits for the render job, printing progress; exit 1 if it fails
+  frame --at <s> --out <png> [--timeline id] [--preset p]
+                               Write the frame showing at <s> seconds as PNG (project resolution,
+                               or the preset's)
   <plugin> <command> [args…]   Run a plugin-provided command
 
 ${TIMELINE_USAGE}
@@ -57,7 +64,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", ...TIMELINE_COMMANDS]);
 
 /** How often `import --wait` polls job progress. */
 const WAIT_POLL_MS = 250;
@@ -85,6 +92,8 @@ type Invocation =
   | { kind: "plugin.list" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
+  | { kind: "render"; timeline?: string; preset?: string; out?: string }
+  | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
   | TimelineInvocation;
 
 interface Flags {
@@ -127,6 +136,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           provider: { type: "string" },
           model: { type: "string" },
           language: { type: "string" },
+          preset: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -190,9 +200,25 @@ function parseBuiltin(
     provider?: string | undefined;
     model?: string | undefined;
     language?: string | undefined;
+    preset?: string | undefined;
+    timeline?: string | undefined;
+    out?: string | undefined;
+    at?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
+  if (command === "render" || command === "frame") {
+    if (rest.length > 0) return null;
+    const { preset, timeline, out } = options;
+    const common = { ...(timeline ? { timeline } : {}), ...(preset ? { preset } : {}) };
+    if (command === "render") return { kind: "render", ...common, ...(out ? { out } : {}) };
+    const at = Number(options.at);
+    if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
+      throw new UsageError("`frameshell frame` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
+    }
+    if (!out) throw new UsageError("`frameshell frame` needs --out <file.png>.");
+    return { kind: "frame", at, out, ...common };
+  }
   if (command === "transcribe") {
     if (rest.length !== 1) return null;
     const { provider, model, language } = options;
@@ -282,6 +308,31 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         await settleTrust(conn, flags, io);
       }
       return executeTimeline(conn, inv, cwd, flags.json);
+    }
+    case "render": {
+      // Plugin presets load only for trusted projects.
+      await settleTrust(conn, flags, io);
+      const { kind: _kind, out, ...params } = inv;
+      const result = await conn.request("render", { cwd, ...params, ...(out ? { out: resolve(cwd, out) } : {}) });
+      if (!flags.json) {
+        io.stderr(
+          `Rendering timelines/${result.timeline}.json -> ${result.output}\n` +
+            `  ${result.preset} · ${result.width}x${result.height} · ${result.fps} fps · ${result.duration} s · ` +
+            `${result.segments} segment(s) · ${result.loudness} LUFS (job ${result.job.id})\n` +
+            result.warnings.map((warning) => `  warning: ${warning}\n`).join(""),
+        );
+      }
+      const job = (await waitForJobs(conn, cwd, [result.job.id], flags.json ? undefined : io)).get(result.job.id) ?? result.job;
+      if (job.state !== "done") outcome.code = 1;
+      if (flags.json) return json({ ...result, job });
+      return job.state === "done" ? `Rendered ${result.output}\n` : `Render failed: ${job.error ?? job.state}\n`;
+    }
+    case "frame": {
+      const { kind: _kind, out, ...params } = inv;
+      const result = await conn.request("frame", { cwd, ...params, out: resolve(cwd, out) });
+      return flags.json
+        ? json(result)
+        : `Wrote ${result.path} (frame ${result.frame} at ${result.at} s, ${result.clip ?? "gap"}, ${result.width}x${result.height})\n`;
     }
     case "plugin.run": {
       await settleTrust(conn, flags, io);

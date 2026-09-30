@@ -10,6 +10,8 @@ export interface RunToolOptions {
    * args (ffmpeg only); stdout is then parsed, not returned.
    */
   onProgress?: (seconds: number) => void;
+  /** Working directory of the process; relative paths in `args` resolve against it. */
+  cwd?: string;
 }
 
 /** Keep the end of stderr only: ffmpeg's cause is on the last lines. */
@@ -20,13 +22,13 @@ const STDERR_TAIL = 4000;
  * stderr tail on a non-zero exit, or with an abort error when `signal` fires.
  */
 export function runTool(file: string, args: string[], options: RunToolOptions = {}): Promise<string> {
-  const { signal, onProgress } = options;
+  const { signal, onProgress, cwd } = options;
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("aborted"));
       return;
     }
-    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...(cwd ? { cwd } : {}) });
     let stdout = "";
     let stderr = "";
     let pending = "";

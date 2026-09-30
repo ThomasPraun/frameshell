@@ -87,7 +87,7 @@ describe("plugin contributions", () => {
 
   it("exposes the plugin's export preset", async () => {
     const { presets } = await conn.request("export.presets", { cwd: dir });
-    expect(presets).toEqual([
+    expect(presets.filter((preset) => preset.plugin !== null)).toEqual([
       expect.objectContaining({ id: "hello-square", plugin: "hello-plugin", container: "mp4", loudness: -14 }),
     ]);
   });

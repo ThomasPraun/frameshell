@@ -20,6 +20,7 @@ import {
   writeMessage,
 } from "@frameshell/protocol";
 import { runDoctor } from "./binaries/doctor.js";
+import { ExportService } from "./export/service.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -56,6 +57,10 @@ export interface DaemonOptions {
   jobConcurrency?: number;
   /** Audio extraction for `transcribe`. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
   extractAudio?: AudioExtractor;
+  /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
+  renderParallelism?: number;
+  /** Render video segment length in seconds. Default 10. */
+  renderSegmentSeconds?: number;
 }
 
 /** Running daemon handle. */
@@ -106,6 +111,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
   });
+  const exports = new ExportService({
+    jobs,
+    ffmpeg: async (dir) => {
+      const project = await readEnclosingProject(dir);
+      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
+    },
+    probe: (dir, asset) => media.probe(dir, asset),
+    loadTimeline: (dir, id) => timelines.load(dir, id),
+    pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
+    ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
+    ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
+  });
   /** Run one timeline operation for `caller`; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
@@ -153,7 +170,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.install": async ({ cwd, spec }) => plugins.install(await root(cwd), spec),
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
-    "export.presets": async ({ cwd }) => plugins.presets(await root(cwd)),
+    "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
+    render: async ({ cwd, timeline, preset, out }) => exports.render(await root(cwd), { timeline, preset, out }),
+    frame: async ({ cwd, timeline, at, out, preset }) => exports.frame(await root(cwd), { timeline, at, out, preset }),
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;
