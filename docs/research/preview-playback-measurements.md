@@ -76,3 +76,33 @@ Full 200-cut runs after the fix, on a shared machine (load average 2.7 to 8.4):
 | c | pass | freeze 0.0 %, p95 8.1, max 9.9 ms | 3/28445 | 0 of 46,155,200 deviate | p5 3.8, p95 15.3 | 0.00 % |
 
 Run a's threshold 1 failure is video: 1 frame dropped at 1 cut, with a 32.9 ms freeze at that cut. The audio fix does not touch that path.
+
+## Proxy reads ahead of the decoder (#105, 2026-09-30)
+
+On a shared, loaded M3 a full run dropped 1 frame at a cut, and a quick run dropped 4 of 2,449 interior frames. Before #105 each layer read 30 proxy pictures (two GOPs) only when the decoder needed the first of them, with 12 decoded frames (0.4 s) kept ahead. Any range read slower than that starved the picture. At a cut the new clip's first read and its pre-roll decode (up to 14 frames) had to fit in the same 0.4 s. The engine worker now keeps up to 90 encoded pictures (about 3 s) read ahead of the decoder, across cuts (`preview/read-ahead.ts`).
+
+Method: quick measurement (2 min source, 22 cuts), the build before and after the change, with temporary worker probes (draw time per frame, decode and fetch latency; not committed). Every run started only with no other agent's load marker and a 1-min load average below 4. Load averages are sampled every 10 s.
+
+| load | build | dropped at cuts | interior drops | frames never drawn by the engine | range read during play, max | load average during run |
+|---|---|---|---|---|---|---|
+| every 4th proxy read delayed 600 ms | before | 44 | 171 / 2449 | 168 | 608 ms | 2.9-3.8 |
+| every 4th proxy read delayed 600 ms | after | 0 | 0 / 2449 | 0 | 608 ms | 2.9-3.9 |
+| 12 busy loops (3 pairs) | before | 0, 0, 0 | 0, 0, 0 | 0, 0, 0 | 79, 125, 84 ms | 2.9-55 |
+| 12 busy loops (3 pairs) | after | 0, 0, 0 | 0, 0, 0 | 0, 0, 0 | 110, 111, 81 ms | 3.7-59 |
+| 32 busy loops | before / after | 0 / 0 | 0 / 0 | 0 / 0 | 167 / 70 ms | up to 166 / 107 |
+
+Two more delayed-read runs of each build, with other agents' load for part of the run (load average up to 15): before, 42 frames dropped at cuts both times, 191 and 169 interior drops; after, 0 dropped at cuts both times, 0 and 9 interior drops (1 starved tick; that run was not probed).
+
+Full 200-cut runs after the change:
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 | load average |
+|---|---|---|---|---|---|---|---|
+| quiet, with probes | pass | freeze 0.0 %, p95 8.3, max 10 ms | 0/28445 | 0 of 46,155,200 deviate | p5 8.6, p95 17.4 | 0.00 % | 2.3-5.1 |
+| shared, final build | pass | freeze 0.5 %, p95 9.1, max 17.7 ms | 5/28445 | 0 of 46,155,200 deviate | p5 2.2, p95 15.7 | 0.00 % | 3.9-14 for the first 9 min, then 2-3.4 |
+
+Reading:
+
+- The worker thread was not starved: in the probed runs without other agents' load, its rAF ticks were never more than 25 ms apart and a tick took at most 8.1 ms. Draws were not scheduled late.
+- Pure CPU load does not reproduce the drops on this machine, even at load average 160. Range reads during playback stayed under 170 ms there, well inside the old 0.4 s. The slow reads seen under load (up to 916 ms) were the 1 MB index read when a proxy opens, before playback. Decode latency spikes (up to 647 ms) came at decoder start-up.
+- Which load made the main process answer range reads late on the shared machine was not identified. The change removes range-read latency up to about 3 s from the picture's critical path, and the delayed-read loop shows it. The 5 drops in the shared full run (with 5 starved ticks) were not probed; they are within threshold 3.
+- Some misses are on the page, not in the engine. In one probed run before #105 (uncontrolled load, load average 84-117), the engine drew the frame for 32.6 ms, but the page's own rAF stalled for 40 ms and never sampled it. The harness counts that as dropped. No engine change helps there.
