@@ -45,7 +45,7 @@ Compact JSON, the same as the matching `--json` CLI output:
 
 | URI | Content |
 |---|---|
-| `frameshell://status` | `status`: daemon, project, plugin trust, jobs |
+| `frameshell://status` | `status`: daemon, project, plugin trust, jobs, rejected edits, open transactions |
 | `frameshell://timelines/{timeline}` | `timeline.show` |
 | `frameshell://timelines/{timeline}/history` | `history` |
 | `frameshell://transcripts/{file}` | `transcripts/{file}` as written, e.g. `raw-01.words.json` |

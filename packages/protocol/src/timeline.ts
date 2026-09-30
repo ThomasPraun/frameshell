@@ -328,3 +328,21 @@ export const TimelineRejectionSchema = z.object({
 
 /** See {@link TimelineRejectionSchema}. */
 export type TimelineRejection = z.output<typeof TimelineRejectionSchema>;
+
+/**
+ * A rejection as `status` lists it, read back from `.frameshell/` so it
+ * survives daemon restarts. A preserved copy without recorded details (its
+ * log line lost, or kept by an older daemon) has reason `unknown`.
+ */
+export const RejectionRecordSchema = TimelineRejectionSchema.extend({
+  reason: z
+    .enum(["stale", "invalid", "unknown"])
+    .describe(
+      "`stale`: the edit's `revision` was not the current one. `invalid`: not JSON, fails the schema, or breaks a " +
+        "timeline rule. `unknown`: the copy is on disk but no reason was recorded; compare it with the timeline file.",
+    ),
+  current: z.int().nullable().describe("Revision of the daemon's version, restored on disk; null when not recorded."),
+});
+
+/** See {@link RejectionRecordSchema}. */
+export type RejectionRecord = z.output<typeof RejectionRecordSchema>;

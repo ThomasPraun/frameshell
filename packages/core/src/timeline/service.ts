@@ -9,6 +9,8 @@ import {
   type MediaProbe,
   type OperationRecord,
   type OperationResult,
+  type RejectionRecord,
+  type TimelinePatch,
   RpcError,
   type TimelineProblem,
   type TimelineRejection as RejectionInfo,
@@ -21,7 +23,7 @@ import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
-import { appendJournal, readJournal } from "../history/journal.js";
+import { appendJournal, readHead, readJournal, writeHead } from "../history/journal.js";
 import { type TimelineRevertFailure, abortConflictError, historyView, planRevert } from "../history/revert.js";
 import { checkScriptRef } from "../scripts/outline.js";
 import {
@@ -34,6 +36,7 @@ import {
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
 import { diffTimelines } from "./patch.js";
+import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
 /** Options for {@link TimelineService}. */
@@ -75,6 +78,13 @@ export interface TimelineChange {
   /** SPEC §6.2 author. */
   author: string;
   changes: OperationResult["changes"];
+}
+
+/** Who saves a timeline through {@link TimelineService.writeFile}, and in which transaction. */
+export interface Saver {
+  /** SPEC §6.2 author, e.g. `ui` for the desktop editor. */
+  author: string;
+  tx: TxRef;
 }
 
 /** Transaction an operation joins (SPEC §6.2). */
@@ -120,7 +130,7 @@ export interface RevertAllCall {
   timelines: { root: string; timeline: string }[];
 }
 
-/** Rejections kept per project for `status`, newest first. */
+/** Rejections listed by `status`, newest first. */
 const MAX_REJECTIONS = 20;
 
 /**
@@ -151,8 +161,6 @@ export class TimelineService {
   readonly #queues = new Map<string, Promise<unknown>>();
   /** By {@link TimelineService.#key}. */
   readonly #known = new Map<string, Known>();
-  /** By real project root, newest first. */
-  readonly #rejections = new Map<string, TimelineRejection[]>();
   /** Real path of each project root seen. */
   readonly #realRoots = new Map<string, Promise<string>>();
 
@@ -252,12 +260,14 @@ export class TimelineService {
 
   /**
    * `file.write` of `timelines/<id>.json` (SPEC §6.4): `content` is taken in
-   * like a direct edit, but a refusal throws instead of touching the disk:
-   * InvalidProjectFile (not JSON or schema), StaleRevision (`revision` is
-   * not the current one) or the engine's errors (timeline rules). Without a
-   * readable current version (new or broken file), valid content is written as is.
+   * like a direct edit, journaled by `saver` (default: author `file`), but a
+   * refusal throws instead of touching the disk: InvalidProjectFile (not
+   * JSON or schema), StaleRevision (`revision` is not the current one) or
+   * the engine's errors (timeline rules). Without a readable current version
+   * (new or broken file), valid content is written as is. Returns the
+   * journaled operation; null when nothing was journaled.
    */
-  writeFile(root: string, id: string, content: string): Promise<void> {
+  writeFile(root: string, id: string, content: string, saver?: Saver): Promise<OperationResult | null> {
     return this.#turn(root, id, async () => {
       const path = timelinePath(root, id);
       let base: Timeline | null = null;
@@ -267,23 +277,32 @@ export class TimelineService {
         const code = error instanceof RpcError ? error.code : undefined;
         if (code !== ErrorCode.TimelineNotFound && code !== ErrorCode.InvalidProjectFile) throw error;
       }
-      if (base) {
-        await this.#acceptEdit(root, id, content, base, await projectFps(root));
-        return;
-      }
+      if (base) return (await this.#acceptEdit(root, id, content, base, await projectFps(root), saver)).result;
       const parsed = parseText(content);
       if (!parsed.ok) throw invalidFile(path, parsed.error);
+      const journaled = await this.#journaledBase(root, id, content, parsed.value);
+      if (journaled) {
+        const patch = diffTimelines(journaled, parsed.value);
+        const { timeline, result } = await this.#extend(root, id, journaled, patch, await projectFps(root), saver ?? this.#fileSaver());
+        if (!result) await this.#announce(root, id, timeline);
+        return result;
+      }
       await writeTextAtomic(path, content);
       const key = await this.#key(root, id);
       const replaced = this.#known.has(key);
       this.#known.set(key, { text: content, timeline: parsed.value });
       if (replaced) await this.#announce(root, id, parsed.value);
+      return null;
     });
   }
 
-  /** Direct edits of `root`'s timelines refused since the daemon started, newest first (`status`). */
-  async rejections(root: string): Promise<TimelineRejection[]> {
-    return [...(this.#rejections.get(await this.#realRoot(root)) ?? [])];
+  /**
+   * Refused direct edits of `root`'s timelines whose preserved copy is still
+   * on disk, newest first, at most 20 (`status`). Read from disk, so they
+   * survive restarts; see `listRejections`.
+   */
+  rejections(root: string): Promise<RejectionRecord[]> {
+    return listRejections(root, MAX_REJECTIONS);
   }
 
   /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
@@ -328,6 +347,8 @@ export class TimelineService {
       hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
+    // Only catch-up of edits made while no daemon runs needs it; a lost snapshot must not fail an applied operation.
+    await writeHead(root, id, text).catch(() => {});
     this.#options.onChanged?.({
       root: await this.#realRoot(root),
       timeline: id,
@@ -515,18 +536,81 @@ export class TimelineService {
     const known = this.#known.get(key);
     if (known?.timeline && known.text === text) return { timeline: structuredClone(known.timeline), fps, ...snap };
     if (known?.timeline) return { timeline: await this.#absorb(root, id, text, known.timeline, fps), fps, ...snap };
-    // First sight, or no valid version yet: nothing to diff against or restore.
+    // First sight, or no valid version yet: the journal is the only thing to diff against.
     const parsed = parseText(text);
-    this.#known.set(key, { text, timeline: parsed.ok ? parsed.value : null });
-    if (!parsed.ok) throw invalidFile(path, parsed.error);
-    if (known) await this.#announce(root, id, parsed.value);
-    return { timeline: structuredClone(parsed.value), fps, ...snap };
+    if (!parsed.ok) {
+      this.#known.set(key, { text, timeline: null });
+      throw invalidFile(path, parsed.error);
+    }
+    const journaled = await this.#journaledBase(root, id, text, parsed.value);
+    if (!journaled) {
+      this.#known.set(key, { text, timeline: parsed.value });
+      if (known) await this.#announce(root, id, parsed.value);
+      return { timeline: structuredClone(parsed.value), fps, ...snap };
+    }
+    // Edited while no daemon watched: journal it now, so `revert` sees it (no revision check: nothing to be stale against).
+    let timeline: Timeline;
+    let result: OperationResult | null = null;
+    try {
+      ({ timeline, result } = await this.#extend(root, id, journaled, diffTimelines(journaled, parsed.value), fps, this.#fileSaver()));
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error;
+      await this.#reject(root, id, text, journaled, "invalid", error.message);
+      timeline = journaled;
+    }
+    if (!result && known) await this.#announce(root, id, timeline);
+    return { timeline: structuredClone(timeline), fps, ...snap };
+  }
+
+  /**
+   * Timeline the journal last recorded for `id`, when the file (`text`,
+   * parsed as `incoming`) differs from it and the head snapshot can say how;
+   * null when there is no journal, the file matches it, or the snapshot is
+   * missing or behind (a journal from an older daemon, a crash in between):
+   * then the change stays a gap `revert` refuses to cross. A file that
+   * matches refreshes a missing or stale snapshot.
+   */
+  async #journaledBase(root: string, id: string, text: string, incoming: Timeline): Promise<Timeline | null> {
+    const last = (await readJournal(root, id)).at(-1);
+    if (!last) return null;
+    const head = await readHead(root, id);
+    const current = head !== null && timelineHash(head) === last.hash;
+    if (timelineHash(incoming) === last.hash) {
+      if (!current) await writeHead(root, id, text);
+      return null;
+    }
+    return current ? head : null;
+  }
+
+  /**
+   * Apply `patch` to `base` as one journaled `timeline.patch` by `saver`,
+   * bumping `base`'s revision. An empty patch journals nothing: `base` is
+   * written back (dropping changes outside tracks and clips, such as the
+   * revision). Throws the engine's errors, without writing.
+   */
+  async #extend(
+    root: string,
+    id: string,
+    base: Timeline,
+    patch: TimelinePatch,
+    fps: number,
+    saver: Saver,
+  ): Promise<{ timeline: Timeline; result: OperationResult | null }> {
+    if (!patch.tracks && !patch.clips && !patch.order) {
+      const text = `${JSON.stringify(base, null, 2)}\n`;
+      await writeTextAtomic(timelinePath(root, id), text);
+      this.#known.set(await this.#key(root, id), { text, timeline: base });
+      return { timeline: structuredClone(base), result: null };
+    }
+    const applied = await applyOperation(base, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch"));
+    const result = await this.#record({ root, cwd: root, timeline: id, ...saver }, base, applied, "timeline.patch", patch);
+    return { timeline: applied.timeline, result };
   }
 
   /** A direct edit on disk: journal it, or restore `base` and keep the edit. Returns the timeline now on disk. */
   async #absorb(root: string, id: string, text: string, base: Timeline, fps: number): Promise<Timeline> {
     try {
-      return await this.#acceptEdit(root, id, text, base, fps);
+      return (await this.#acceptEdit(root, id, text, base, fps)).timeline;
     } catch (error) {
       if (!(error instanceof RpcError)) throw error;
       const reason = error.code === ErrorCode.StaleRevision ? "stale" : "invalid";
@@ -536,11 +620,19 @@ export class TimelineService {
   }
 
   /**
-   * Journal `text` as one `timeline.patch` operation by author `file` on top
-   * of `base`, bumping the revision. Throws, without writing: InvalidProjectFile,
-   * StaleRevision, or the engine's errors for a patch breaking timeline rules.
+   * Journal `text` as one `timeline.patch` operation by `saver` (default:
+   * author `file`) on top of `base`, bumping the revision. Throws, without
+   * writing: InvalidProjectFile, StaleRevision, or the engine's errors for a
+   * patch breaking timeline rules.
    */
-  async #acceptEdit(root: string, id: string, text: string, base: Timeline, fps: number): Promise<Timeline> {
+  async #acceptEdit(
+    root: string,
+    id: string,
+    text: string,
+    base: Timeline,
+    fps: number,
+    saver?: Saver,
+  ): Promise<{ timeline: Timeline; result: OperationResult | null }> {
     const path = timelinePath(root, id);
     const parsed = parseText(text);
     if (!parsed.ok) throw invalidFile(path, parsed.error);
@@ -559,12 +651,14 @@ export class TimelineService {
       // Same tracks and clips (formatting, key order): nothing to journal.
       await writeTextAtomic(path, text);
       this.#known.set(await this.#key(root, id), { text, timeline: base });
-      return structuredClone(base);
+      return { timeline: structuredClone(base), result: null };
     }
-    const applied = await applyOperation(base, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch"));
-    const tx = this.#options.fileTx?.() ?? { id: `tx_${randomBytes(4).toString("hex")}`, label: null };
-    await this.#record({ root, cwd: root, timeline: id, author: "file", tx }, base, applied, "timeline.patch", patch);
-    return applied.timeline;
+    return this.#extend(root, id, base, patch, fps, saver ?? this.#fileSaver());
+  }
+
+  /** Author `file` in a transaction from {@link TimelineServiceOptions.fileTx}. */
+  #fileSaver(): Saver {
+    return { author: "file", tx: this.#options.fileTx?.() ?? { id: `tx_${randomBytes(4).toString("hex")}`, label: null } };
   }
 
   /** Restore `base` on disk, keep `text` under `.frameshell/rejected/`, report it (SPEC §6.4). */
@@ -576,7 +670,9 @@ export class TimelineService {
     await writeTextAtomic(join(root, preserved), text);
     const path = timelinePath(root, id);
     const key = await this.#key(root, id);
-    const restored = this.#known.get(key)?.text ?? `${JSON.stringify(base, null, 2)}\n`;
+    // Known text only when it is `base`'s: a broken file's text is no version to restore.
+    const known = this.#known.get(key);
+    const restored = known?.timeline === base ? known.text : `${JSON.stringify(base, null, 2)}\n`;
     await writeTextAtomic(path, restored);
     this.#known.set(key, { text: restored, timeline: base });
     const real = await this.#realRoot(root);
@@ -590,7 +686,8 @@ export class TimelineService {
       current: base.revision,
       at,
     };
-    this.#rejections.set(real, [rejection, ...(this.#rejections.get(real) ?? [])].slice(0, MAX_REJECTIONS));
+    const { root: _root, ...record } = rejection;
+    await recordRejection(root, record);
     this.#options.onRejected?.(rejection);
   }
 
@@ -673,16 +770,6 @@ function invalidFile(path: string, details: string): RpcError {
     `Invalid ${path}:\n${details}\nFix the file (or restore it from version control) and retry.`,
     { path, details },
   );
-}
-
-/** `revision` of unvalidated content, when it has a readable one. */
-function revisionOf(text: string): number | null {
-  try {
-    const revision = (JSON.parse(text) as { revision?: unknown } | null)?.revision;
-    return Number.isInteger(revision) ? (revision as number) : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Parse a project-relative timeline file. Throws TimelineNotFound (missing) or InvalidProjectFile. */

@@ -142,15 +142,52 @@ describe("direct edits seen by the daemon's watcher", () => {
   });
 });
 
+describe("edits made while no daemon ran", () => {
+  it("are journaled as `file` operations when the project opens", async () => {
+    const { conn, dir, edit } = await setup();
+    await conn.request("track.add", { cwd: dir, kind: "video" });
+    conn.close();
+    await daemon!.close();
+    edit((timeline) => {
+      timeline.tracks[0].name = "Offline";
+    });
+
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const again = await connectToDaemon(daemon.socketPath, { client: "cli/test", session: "term-2" });
+    connections.push(again);
+    const changed = next(again, "timeline.changed", (event) => event.author === "file");
+    // Opening the project attaches the watcher, which takes the file in; no timeline call needed.
+    await again.request("events.subscribe", { cwd: dir, events: ["timeline.changed"] });
+
+    expect(await changed).toMatchObject({ timeline: "main", revision: 2, author: "file" });
+    const history = await again.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions.map((tx) => tx.author)).toEqual(["cli:term-1", "file"]);
+  });
+});
+
 describe("file.write of a timeline", () => {
-  it("is journaled as a `file` operation and bumps the revision", async () => {
+  it("is journaled as an operation of the caller and bumps the revision", async () => {
     const { conn, dir, file, read } = await setup();
     const timeline = read();
     timeline.tracks.push({ id: "v1", kind: "video", name: "Camera", clips: [] });
     await conn.request("file.write", { path: file, content: JSON.stringify(timeline) });
     expect(read()).toMatchObject({ revision: 1, tracks: [{ id: "v1" }] });
     const history = await conn.request("history", { cwd: dir, timeline: "main" });
-    expect(history.transactions).toMatchObject([{ author: "file", operations: [{ op: "timeline.patch", touched: ["v1"] }] }]);
+    expect(history.transactions).toMatchObject([{ author: "cli:term-1", operations: [{ op: "timeline.patch", touched: ["v1"] }] }]);
+  });
+
+  it("from the desktop editor is journaled with author `ui`, and announced as such", async () => {
+    const { conn, dir, file, read } = await setup();
+    const app = await connectToDaemon(daemon!.socketPath, { client: "desktop/test" });
+    connections.push(app);
+    const changed = next(conn, "timeline.changed");
+    const timeline = read();
+    timeline.tracks.push({ id: "v1", kind: "video", clips: [] });
+    await app.request("file.write", { path: file, content: JSON.stringify(timeline) });
+
+    expect(await changed).toMatchObject({ author: "ui", revision: 1 });
+    const history = await conn.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions).toMatchObject([{ author: "ui", operations: [{ op: "timeline.patch", author: "ui" }] }]);
   });
 
   it("is refused with StaleRevision when saved from an old copy", async () => {

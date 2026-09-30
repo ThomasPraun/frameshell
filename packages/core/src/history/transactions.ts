@@ -21,6 +21,8 @@ export interface StoredTransaction {
   tx: { id: string; label: string };
   operations: number;
   touched: TouchedTimeline[];
+  /** ISO 8601 time of `begin`; absent in files written before it was recorded. */
+  openedAt?: string | undefined;
 }
 
 /**
@@ -48,6 +50,8 @@ interface Open {
   lastAt: number;
   operations: number;
   touched: Map<string, TouchedTimeline>;
+  /** Explicit only: ISO time of `begin`; null when the store did not record it. */
+  openedAt: string | null;
 }
 
 /**
@@ -84,6 +88,7 @@ export class TransactionTracker {
         lastAt: this.#now(),
         operations: stored.operations,
         touched: new Map(stored.touched.map((where) => [touchKey(where), where])),
+        openedAt: stored.openedAt ?? null,
       });
     }
   }
@@ -104,7 +109,7 @@ export class TransactionTracker {
       return open.tx;
     }
     const tx = { id: newTxId(), label: null };
-    if (grouping) this.#open.set(author, { tx, explicit: false, lastAt: now, operations: 0, touched: new Map() });
+    if (grouping) this.#open.set(author, { tx, explicit: false, lastAt: now, operations: 0, touched: new Map(), openedAt: null });
     else this.#open.delete(author);
     return tx;
   }
@@ -149,7 +154,8 @@ export class TransactionTracker {
       );
     }
     const tx = { id: newTxId(), label };
-    this.#open.set(author, { tx, explicit: true, lastAt: this.#now(), operations: 0, touched: new Map() });
+    const now = this.#now();
+    this.#open.set(author, { tx, explicit: true, lastAt: now, operations: 0, touched: new Map(), openedAt: new Date(now).toISOString() });
     try {
       await this.#persist();
     } catch (error) {
@@ -166,6 +172,14 @@ export class TransactionTracker {
     this.#open.delete(author);
     await this.#persist();
     return summary(open);
+  }
+
+  /** Every open explicit transaction with its author, oldest `begin` first (unrecorded times first). */
+  list(): (ExplicitTransaction & { author: string })[] {
+    return [...this.#open]
+      .filter(([, open]) => open.explicit)
+      .map(([author, open]) => ({ author, ...summary(open) }))
+      .sort((a, b) => (a.openedAt ?? "").localeCompare(b.openedAt ?? ""));
   }
 
   /** `author`'s explicit transaction, left open; throws like {@link TransactionTracker.end}. */
@@ -188,7 +202,7 @@ export class TransactionTracker {
     if (!store) return Promise.resolve();
     const run = this.#saving.then(() =>
       store.save(
-        [...this.#open].filter(([, open]) => open.explicit).map(([author, open]) => ({ author, ...summary(open) })),
+        this.list().map(({ openedAt, ...open }) => ({ ...open, ...(openedAt ? { openedAt } : {}) })),
       ),
     );
     this.#saving = run.catch(() => {});
@@ -202,6 +216,8 @@ export interface ExplicitTransaction {
   /** Successful operations, every timeline. */
   operations: number;
   touched: TouchedTimeline[];
+  /** ISO 8601 time of `begin`; null when not recorded (opened by an older daemon). */
+  openedAt: string | null;
 }
 
 const StoredFileSchema = z.object({
@@ -212,6 +228,7 @@ const StoredFileSchema = z.object({
       tx: z.object({ id: TxIdSchema, label: z.string() }),
       operations: z.int().nonnegative(),
       touched: z.array(z.object({ root: z.string(), timeline: z.string() })),
+      openedAt: z.string().optional(),
     }),
   ),
 });
@@ -248,7 +265,12 @@ export class FileTransactionStore implements TransactionStore {
 }
 
 function summary(open: Open): ExplicitTransaction {
-  return { tx: { id: open.tx.id, label: open.tx.label ?? "" }, operations: open.operations, touched: [...open.touched.values()] };
+  return {
+    tx: { id: open.tx.id, label: open.tx.label ?? "" },
+    operations: open.operations,
+    touched: [...open.touched.values()],
+    openedAt: open.openedAt,
+  };
 }
 
 function touchKey(where: TouchedTimeline): string {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -58,5 +58,59 @@ export function canonicalPathSync(path: string): string {
     return realpathSync.native(path);
   } catch {
     return path;
+  }
+}
+
+/**
+ * Append `value` as one JSON line, creating the file and its directory. A
+ * crash may leave a partial last line; ours starts on a fresh one so only
+ * that line is lost. Callers serialize appends per file.
+ */
+export async function appendJsonLine(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const prefix = await endsWithoutNewline(path);
+  await appendFile(path, `${prefix ? "\n" : ""}${JSON.stringify(value)}\n`);
+}
+
+/**
+ * Parsed JSON lines of `path`, in file order; empty when the file is missing.
+ * Blank lines and lines that are not JSON (a write cut short, a hand edit) are skipped.
+ */
+export async function readJsonLines(path: string): Promise<unknown[]> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const values: unknown[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      values.push(JSON.parse(line));
+    } catch {
+      continue;
+    }
+  }
+  return values;
+}
+
+async function endsWithoutNewline(path: string): Promise<boolean> {
+  let file;
+  try {
+    file = await open(path, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  try {
+    const { size } = await file.stat();
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    await file.read(last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    await file.close();
   }
 }
