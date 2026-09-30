@@ -11,6 +11,7 @@ import {
 import type { ClipAdapter, TranscriptionProvider } from "@frameshell/plugin-api";
 import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
+import { AGENT_SKILLS_DIR, type SkillSync, syncPluginSkills } from "./skills.js";
 import { parsePluginSpec } from "./spec.js";
 import { NpmError, PluginStore } from "./store.js";
 import { TrustStore, pluginsHash } from "./trust.js";
@@ -31,6 +32,16 @@ export interface PluginHostOptions {
 interface ProjectPlugins {
   hash: string;
   plugins: LoadedPlugin[];
+  /** Agent skill links as the load that filled this entry left them. */
+  skills: SkillSync;
+}
+
+/** What {@link PluginHost} knows about a project's plugins; `loaded` and `skills` are null unless trusted. */
+interface PluginsState {
+  pins: PluginPins;
+  trust: TrustState;
+  loaded: LoadedPlugin[] | null;
+  skills: SkillSync | null;
 }
 
 /**
@@ -64,6 +75,8 @@ export class PluginHost {
       if (Object.keys(pins).length > 0) {
         await this.#trust.decide(root, pins, decision === "trust" ? "trusted" : "denied");
         this.#loaded.delete(root);
+        // Untrusted plugins teach agents nothing: their skills go with them.
+        if (decision === "deny") await syncPluginSkills(root, []).catch(() => {});
       }
       return { dir: root, trust: await this.#trust.state(root, pins), plugins: pins };
     });
@@ -113,9 +126,17 @@ export class PluginHost {
       // The user picked this list themselves: no prompt for it later.
       await this.#trust.decide(root, next, "trusted");
       this.#loaded.delete(root);
-      const { loaded } = await this.#ensureLoaded(root);
+      const { loaded, skills } = await this.#ensureLoaded(root);
       const plugin = loaded?.find((p) => p.info.name === added.name)?.info ?? untrusted(added.name, added.pin);
-      return { dir: root, name: added.name, pin: added.pin, plugin };
+      const mine = <T extends { plugin: string }>(items: readonly T[] | undefined) => (items ?? []).filter((item) => item.plugin === added.name);
+      return {
+        dir: root,
+        name: added.name,
+        pin: added.pin,
+        plugin,
+        skills: mine(skills?.linked).map((link) => link.path),
+        warnings: mine(skills?.warnings).map((warning) => warning.message),
+      };
     });
   }
 
@@ -134,11 +155,18 @@ export class PluginHost {
       const next = Object.fromEntries(Object.entries(pins).filter(([key]) => key !== name));
       await this.#pins.writePins(root, next);
       this.#loaded.delete(root);
+      let skills: string[];
       if (trust === "trusted") {
         await this.#trust.decide(root, next, "trusted");
         await storeFor(root).sync(next).catch(() => {}); // Stale dir is resynced on next load.
       }
-      return { dir: root, name, pin };
+      if (trust === "trusted" && Object.keys(next).length > 0) {
+        skills = (await this.#ensureLoaded(root)).skills?.removed ?? [];
+      } else {
+        // Nothing left that may expose skills.
+        skills = (await syncPluginSkills(root, [])).removed;
+      }
+      return { dir: root, name, pin, skills };
     });
   }
 
@@ -257,13 +285,13 @@ export class PluginHost {
   }
 
   /** Current pins and trust; `loaded` is null unless trusted. Caller holds the project lock. */
-  async #ensureLoaded(root: string): Promise<{ pins: PluginPins; trust: TrustState; loaded: LoadedPlugin[] | null }> {
+  async #ensureLoaded(root: string): Promise<PluginsState> {
     const pins = await this.#pins.readPins(root);
     const trust = await this.#trust.state(root, pins);
-    if (trust !== "trusted") return { pins, trust, loaded: null };
+    if (trust !== "trusted") return { pins, trust, loaded: null, skills: null };
     const hash = pluginsHash(pins);
     const cached = this.#loaded.get(root);
-    if (cached?.hash === hash) return { pins, trust, loaded: cached.plugins };
+    if (cached?.hash === hash) return { pins, trust, loaded: cached.plugins, skills: cached.skills };
 
     const store = storeFor(root);
     if (!(await store.isSynced(pins))) {
@@ -273,7 +301,7 @@ export class PluginHost {
         // Not cached: the next call retries the install.
         const message = `reinstalling from frameshell.json failed: ${(error as Error).message}`;
         const plugins = Object.entries(pins).map(([name, pin]) => failed(name, pin, message));
-        return { pins, trust, loaded: plugins };
+        return { pins, trust, loaded: plugins, skills: null };
       }
     }
     const plugins: LoadedPlugin[] = [];
@@ -288,8 +316,10 @@ export class PluginHost {
       for (const command of plugin.commands.keys()) owners.set(command, name);
       plugins.push(plugin);
     }
-    this.#loaded.set(root, { hash, plugins });
-    return { pins, trust, loaded: plugins };
+    // Every fresh load re-exposes skills: a clone or a hand-deleted link gets them back.
+    const skills = await exposeSkills(root, plugins);
+    this.#loaded.set(root, { hash, plugins, skills });
+    return { pins, trust, loaded: plugins, skills };
   }
 
   #exclusive<T>(root: string, work: () => Promise<T>): Promise<T> {
@@ -301,6 +331,19 @@ export class PluginHost {
       if (this.#queues.get(root) === settled) this.#queues.delete(root);
     });
     return next;
+  }
+}
+
+/** Link the skills of the plugins that loaded; a failure to link is a warning, never a failed load. */
+async function exposeSkills(root: string, plugins: readonly LoadedPlugin[]): Promise<SkillSync> {
+  const skills = plugins
+    .filter((plugin) => plugin.info.status === "loaded")
+    .flatMap((plugin) => (plugin.info.contributes?.skills ?? []).map((file) => ({ plugin: plugin.info.name, file })));
+  try {
+    return await syncPluginSkills(root, skills);
+  } catch (error) {
+    const message = `Could not link agent skills into ${AGENT_SKILLS_DIR}: ${(error as Error).message}`;
+    return { linked: [], removed: [], warnings: plugins.map((plugin) => ({ plugin: plugin.info.name, message })) };
   }
 }
 

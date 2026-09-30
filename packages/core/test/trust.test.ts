@@ -190,6 +190,7 @@ describe("plugins directory", () => {
         dir,
         name: "hello-plugin",
         pin,
+        skills: [".claude/skills/hello"],
       });
       expect(JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8")).plugins).toEqual({});
       expect(existsSync(join(dir, ".frameshell/plugins/node_modules/hello-plugin"))).toBe(false);

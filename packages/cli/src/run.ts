@@ -308,13 +308,16 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "plugin.install": {
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.install", { cwd, spec: inv.spec });
-      return flags.json
-        ? json(result)
-        : `Installed ${result.name} in ${result.dir}\n  pinned: ${result.pin}\n${formatContributions(result.plugin, "  ")}`;
+      if (flags.json) return json(result);
+      const skills = result.skills.length > 0 ? `  agent skills: ${result.skills.join(", ")}\n` : "";
+      const warnings = result.warnings.map((warning) => `  warning: ${warning}\n`).join("");
+      return `Installed ${result.name} in ${result.dir}\n  pinned: ${result.pin}\n${formatContributions(result.plugin, "  ")}${skills}${warnings}`;
     }
     case "plugin.remove": {
       const result = await conn.request("plugin.remove", { cwd, name: inv.name });
-      return flags.json ? json(result) : `Removed ${result.name} (was ${result.pin}) from ${result.dir}\n`;
+      if (flags.json) return json(result);
+      const skills = result.skills.length > 0 ? `  unlinked agent skills: ${result.skills.join(", ")}\n` : "";
+      return `Removed ${result.name} (was ${result.pin}) from ${result.dir}\n${skills}`;
     }
     case "plugin.list": {
       await settleTrust(conn, flags, io);

@@ -84,6 +84,7 @@ describe("frameshell plugin", () => {
       expect(result.stdout).toContain("hello-plugin");
       expect(result.stdout).toContain("hello greet");
       expect(result.stdout).toContain(hello.sha);
+      expect(result.stdout).toContain("agent skills: .claude/skills/hello");
       const config = JSON.parse(readFileSync(join(project, "frameshell.json"), "utf8"));
       expect(config.plugins).toEqual({ "hello-plugin": `${hello.spec}#${hello.sha}` });
     },

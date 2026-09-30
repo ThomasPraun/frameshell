@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
@@ -15,9 +15,12 @@ let daemon: Daemon;
 let conn: DaemonConnection;
 let hello: GitPlugin;
 
+let daemonDirs: { dataDir: string; configDir: string };
+
 beforeAll(async () => {
   hello = gitPluginFixture();
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() } });
+  daemonDirs = { dataDir: tempDir(), configDir: tempDir() };
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: daemonDirs });
   conn = await connectToDaemon(daemon.socketPath, { client: "test" });
 });
 afterAll(async () => {
@@ -91,6 +94,67 @@ describe("plugin contributions", () => {
       expect.objectContaining({ id: "hello-square", plugin: "hello-plugin", container: "mp4", loudness: -14 }),
     ]);
   });
+});
+
+describe("plugin agent skills", () => {
+  const skillLink = (dir: string) => join(dir, ".claude", "skills", "hello");
+
+  it(
+    "exposes the plugin's skills in .claude/skills on install and takes them away on remove",
+    async () => {
+      const dir = await newProject();
+      const installed = await conn.request("plugin.install", { cwd: dir, spec: hello.spec });
+
+      expect(installed.skills).toEqual([".claude/skills/hello"]);
+      expect(installed.warnings).toEqual([]);
+      expect(readFileSync(join(skillLink(dir), "SKILL.md"), "utf8")).toContain("name: hello");
+      expect(lstatSync(skillLink(dir)).isSymbolicLink()).toBe(true);
+
+      const removed = await conn.request("plugin.remove", { cwd: dir, name: "hello-plugin" });
+      expect(removed.skills).toEqual([".claude/skills/hello"]);
+      expect(existsSync(skillLink(dir))).toBe(false);
+      expect(lstatSync(join(dir, ".claude", "skills")).isDirectory()).toBe(true);
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "leaves a skill the user owns under the same name alone and says so",
+    async () => {
+      const dir = await newProject();
+      mkdirSync(skillLink(dir), { recursive: true });
+      writeFileSync(join(skillLink(dir), "SKILL.md"), "mine");
+
+      const installed = await conn.request("plugin.install", { cwd: dir, spec: hello.spec });
+      expect(installed.skills).toEqual([]);
+      expect(installed.warnings).toEqual([expect.stringContaining(".claude/skills/hello")]);
+      expect(readFileSync(join(skillLink(dir), "SKILL.md"), "utf8")).toBe("mine");
+
+      await conn.request("plugin.remove", { cwd: dir, name: "hello-plugin" });
+      expect(readFileSync(join(skillLink(dir), "SKILL.md"), "utf8")).toBe("mine");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "relinks skills removed by hand when the plugins load again",
+    async () => {
+      const dir = await newProject();
+      await conn.request("plugin.install", { cwd: dir, spec: hello.spec });
+      rmSync(skillLink(dir));
+      // A new daemon loads the project's plugins afresh, as after a restart or a fresh clone.
+      const other = await startDaemon({ socketPath: uniqueSocketPath(), dirs: daemonDirs });
+      const otherConn = await connectToDaemon(other.socketPath, { client: "test" });
+      try {
+        await otherConn.request("plugin.list", { cwd: dir });
+        expect(readFileSync(join(skillLink(dir), "SKILL.md"), "utf8")).toContain("name: hello");
+      } finally {
+        otherConn.close();
+        await other.close();
+      }
+    },
+    NPM_TIMEOUT,
+  );
 });
 
 describe("plugin validation at install", () => {
