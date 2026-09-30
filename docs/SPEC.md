@@ -566,5 +566,4 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 ## 14. Open items (non-blocking)
 
 - Idle gap for automatic transaction grouping (start at ~10 s, tune with real agent sessions).
-- Subtitle style presets and ASS generation details.
 - Plugin index hosting (static site generated from GitHub topic search).
