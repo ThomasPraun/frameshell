@@ -20,12 +20,15 @@ mutations print the new revision):
            [--type media|timeline|<adapter>] [--source path] [--props json]
            [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
   clip move <clip> [--start s] [--track <track>]
-  clip trim <clip> [--in s | --start s] [--out s | --end s]
+  clip trim <clip> [--in s | --start s] [--out s | --end s] [--no-snap] [--snap-window s]
   clip split <clip> --at s
   clip remove <clip>
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
-  cut [track…] --from s --to s Remove a timeline range and close the gap on every (or the given) track
+  cut [track…] --from s --to s [--no-snap] [--snap-window s]
+                               Remove a timeline range and close the gap on every (or the given) track
+  cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, --snap-window up to 10);
+  the output lists requested vs applied times. --no-snap uses the exact times.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session, FRAMESHELL_SESSION; mutations print their op and tx ids):
@@ -68,6 +71,8 @@ export const TIMELINE_OPTIONS = {
   from: { type: "string" },
   to: { type: "string" },
   since: { type: "string" },
+  "no-snap": { type: "boolean" },
+  "snap-window": { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | undefined>;
@@ -94,11 +99,11 @@ const ALLOWED: Record<string, string[]> = {
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref"],
   "clip move": ["start", "track"],
-  "clip trim": ["in", "out", "start", "end"],
+  "clip trim": ["in", "out", "start", "end", "no-snap", "snap-window"],
   "clip split": ["at"],
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
-  cut: ["from", "to"],
+  cut: ["from", "to", "no-snap", "snap-window"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -177,6 +182,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const t = { x: num("x"), y: num("y"), scale: num("scale"), opacity: num("opacity") };
     return Object.values(t).some((v) => v !== undefined) ? t : undefined;
   };
+  const snap = () => {
+    if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
+    return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
+  };
   const params: Record<string, unknown> = { timeline: str("timeline") };
   let method: MethodName;
   switch (command) {
@@ -222,7 +231,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "clip trim":
       method = "clip.trim";
-      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end") });
+      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap() });
       break;
     case "clip split":
       method = "clip.split";
@@ -261,7 +270,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     default:
       method = "cut";
       if (values["from"] === undefined || values["to"] === undefined) throw new UsageError("`frameshell cut` needs --from <s> and --to <s>.");
-      Object.assign(params, { from: num("from"), to: num("to"), tracks: args.length > 0 ? args : undefined });
+      Object.assign(params, { from: num("from"), to: num("to"), tracks: args.length > 0 ? args : undefined, ...snap() });
   }
   const clean = (value: Record<string, unknown> | undefined) =>
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
@@ -322,8 +331,13 @@ function formatOperation(result: OperationResult): string {
     ...(removed.length > 0 ? [`removed ${removed.join(", ")}`] : []),
     ...(range ? [`${range.from}–${range.to ?? "?"} s`] : []),
   ];
-  const { id, tx } = result.operation;
-  return `${result.operation.op}: ${parts.join(" · ") || "no change"}\nrevision ${result.revision} · op ${id} · tx ${tx}\n`;
+  const window = (result.operation.args["snapWindow"] as number | undefined) ?? 0.5;
+  const snaps = result.snaps.map(
+    (snap) =>
+      `snapped ${snap.field}${snap.clip ? ` of ${snap.clip}` : ""} ${snap.requested} -> ${snap.applied} ` +
+      (snap.clean ? "(in a pause)" : `(no pause within ±${window} s: quietest frame, speech may be clipped)`),
+  );
+  return [`${result.operation.op}: ${parts.join(" · ") || "no change"}`, ...snaps, `revision ${result.revision} · op ${result.operation.id} · tx ${result.operation.tx}`, ""].join("\n");
 }
 
 function formatTracks(result: { timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }): string {

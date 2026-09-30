@@ -113,10 +113,10 @@ describe("frameshell timeline editing", () => {
   it("splits, trims, sets, moves and cuts, bumping the revision each time", () => {
     const split = frameshell(["clip", "split", clip, "--at", "0.5"]);
     expect(split.stdout).toMatch(/clip\.split: added c_\w+ · updated c_\w+ · 0–1\.233 s\nrevision 4/);
-    expect(frameshell(["clip", "trim", clip, "--in", "0.6"]).stdout).toMatch(/revision 5/);
+    expect(frameshell(["clip", "trim", clip, "--in", "0.6", "--no-snap"]).stdout).toMatch(/revision 5/);
     expect(frameshell(["clip", "set", clip, "--gain=-6", "--opacity", "0.5"]).stdout).toMatch(/revision 6/);
     expect(frameshell(["clip", "add", audio, "assets/take.mp4"]).stdout).toMatch(/revision 7/);
-    expect(frameshell(["cut", "--from", "0.2", "--to", "0.4"]).stdout).toMatch(/revision 8/);
+    expect(frameshell(["cut", "--from", "0.2", "--to", "0.4", "--no-snap"]).stdout).toMatch(/revision 8/);
     expect(frameshell(["clip", "move", clip, "--start", "3"]).stdout).toMatch(/revision 9/);
 
     const view = json<{ revision: number; fps: number; duration: number; tracks: { clips: Record<string, unknown>[] }[] }>([

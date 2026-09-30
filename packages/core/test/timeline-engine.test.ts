@@ -298,12 +298,12 @@ describe("cut (ripple)", () => {
     expect((await rejection(apply(t, "cut", { from: 3, to: 3.01 }))).message).toMatch(/must be after `from`/);
   });
 
-  it("passes cut and trim edges through the edit-point seam before snapping", async () => {
+  it("passes cut and trim edges through the edit-point seam before frame snapping", async () => {
     const seen: EditPoint[] = [];
     const ctx = context({
       resolveEditPoint: (point) => {
         seen.push(point);
-        return point.edge === "end" ? point.time - 0.1 : point.time + 0.1;
+        return { time: point.edge === "end" ? point.time - 0.1 : point.time + 0.1, clean: true };
       },
     });
     let t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
@@ -313,11 +313,67 @@ describe("cut (ripple)", () => {
       [1.9, 3.1],
     ]);
     await apply(t, "clip.trim", { clip: "c_0001", out: 1 }, ctx);
-    expect(seen.map((p) => [p.clock, p.edge])).toEqual([
-      ["timeline", "end"],
-      ["timeline", "start"],
-      ["source", "end"],
+    expect(seen.map((p) => [p.clock, p.edge, p.window])).toEqual([
+      ["timeline", "end", 0.5],
+      ["timeline", "start", 0.5],
+      ["source", "end", 0.5],
     ]);
+  });
+
+  it("reports each snapped edge: requested, applied on the grid, clean", async () => {
+    const ctx = context({ resolveEditPoint: (point) => ({ time: point.time + 0.0123, clean: point.edge === "end" }) });
+    let t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    const cut = await apply(t, "cut", { from: 2, to: 3 }, ctx);
+    expect(cut.snaps).toEqual([
+      { field: "from", clip: null, requested: 2, applied: 2.0, clean: true },
+      { field: "to", clip: null, requested: 3, applied: 3.0, clean: false },
+    ]);
+    t = cut.timeline;
+    const trim = await apply(t, "clip.trim", { clip: "c_0001", end: 1.5 }, ctx);
+    expect(trim.snaps).toEqual([{ field: "end", clip: "c_0001", requested: 1.5, applied: 1.5, clean: true }]);
+    const plain = await apply(t, "clip.set", { clip: "c_0001", gain: -3 }, ctx);
+    expect(plain.snaps).toEqual([]);
+  });
+
+  it("cuts and trims exactly with snap: false, and passes the window", async () => {
+    const seen: EditPoint[] = [];
+    const ctx = context({
+      resolveEditPoint: (point) => {
+        seen.push(point);
+        return { time: point.time + 0.5, clean: true };
+      },
+    });
+    const t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    const exact = await apply(t, "cut", { from: 2, to: 3, snap: false }, ctx);
+    expect(seen).toEqual([]);
+    expect(exact.snaps).toEqual([]);
+    expect(clipsOf(exact.timeline, "t_v").map((c) => c.start)).toEqual([0, 2]);
+    await apply(t, "clip.trim", { clip: "c_0001", in: 1, snapWindow: 2 }, ctx);
+    expect(seen.map((p) => p.window)).toEqual([2]);
+    expect((await rejection(apply(t, "cut", { from: 2, to: 3, snapWindow: 0.2 }, ctx))).message).toMatch(/snapWindow/);
+  });
+
+  it("gives cut edges the clips of the cut tracks, and keeps edges the resolver declines", async () => {
+    const seen: EditPoint[] = [];
+    const ctx = context({
+      resolveEditPoint: (point) => {
+        seen.push(point);
+        return null;
+      },
+    });
+    let t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_a", asset: "assets/music.wav", start: 0 })).timeline;
+    const result = await apply(t, "cut", { from: 2, to: 3, tracks: ["t_a"] }, ctx);
+    expect(seen[0]!.clips!.map((c) => c.id)).toEqual(["c_0002"]);
+    expect(result.snaps).toEqual([]);
+    expect(clipsOf(result.timeline, "t_a").map((c) => c.start)).toEqual([0, 2]);
+  });
+
+  it("refuses a cut whose snapped edges collapse, naming snap: false", async () => {
+    const ctx = context({ resolveEditPoint: () => ({ time: 2.5, clean: true }) });
+    const t = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    const error = await rejection(apply(t, "cut", { from: 2.4, to: 2.6 }, ctx));
+    expect(error.message).toMatch(/same pause.*snap: false/s);
   });
 });
 

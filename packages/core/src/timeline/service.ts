@@ -42,8 +42,8 @@ export interface TimelineServiceOptions {
   clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>>;
   /** Id generator. Default: prefix + 6 random hex digits (`c_1a2b3c`). */
   newId?: (prefix: "c" | "t") => string;
-  /** Cut/trim edge adjustment (#12 energy snapping). Default: none. */
-  resolveEditPoint?: (root: string) => EditPointResolver | undefined;
+  /** Cut/trim edge adjustment per project and fps (#12 energy snapping). Default: none, edges stay. */
+  resolveEditPoint?: (root: string, fps: number) => EditPointResolver | undefined;
 }
 
 /** Transaction an operation joins (SPEC §6.2). */
@@ -160,7 +160,7 @@ export class TimelineService {
       hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
-    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes };
+    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps };
   }
 
   /**
@@ -241,7 +241,7 @@ export class TimelineService {
   #context(root: string, id: string, fps: number, op: string): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: "c" | "t") => `${prefix}_${randomBytes(3).toString("hex")}`);
-    const resolveEditPoint = this.#options.resolveEditPoint?.(root);
+    const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
     return {
       fps,
       source: async (asset) => {

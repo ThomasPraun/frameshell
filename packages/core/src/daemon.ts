@@ -24,12 +24,14 @@ import { ExportService } from "./export/service.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
+import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { TransactionTracker } from "./history/transactions.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
+import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
 
@@ -56,7 +58,7 @@ export interface DaemonOptions {
   binaries?: BinaryManager;
   /** Background jobs (ingest) run at once. Default 2: each ffmpeg already uses every core. */
   jobConcurrency?: number;
-  /** Audio extraction for `transcribe`. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
+  /** Audio extraction for `transcribe` and for energy snapping of assets without sidecar. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
   extractAudio?: AudioExtractor;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
@@ -113,9 +115,23 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const media = new MediaService({ binaries, jobs });
   const projects = new ProjectRegistry({ onOpen: (dir) => media.attach(dir) });
   const plugins = new PluginHost({ dirs, pins: projects });
+  const energy = new EnergyStore({
+    derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
+    ffmpeg: async (dir) => {
+      const project = await readEnclosingProject(dir);
+      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
+    },
+    extractAudio: options.extractAudio,
+  });
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
+    resolveEditPoint: (dir, fps) =>
+      energySnapper({
+        fps,
+        hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
+        profile: (asset) => energy.profile(dir, asset),
+      }),
   });
   const exports = new ExportService({
     jobs,

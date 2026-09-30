@@ -3,6 +3,7 @@ import {
   type OperationName,
   type OperationResult,
   RpcError,
+  type SnapReport,
   type TimelinePatch,
   type operationArgs,
 } from "@frameshell/protocol";
@@ -16,6 +17,7 @@ import {
   parseTimeline,
 } from "@frameshell/schema";
 import type { z } from "zod";
+import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, sortClips } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
@@ -36,7 +38,7 @@ export interface ClipTypeInfo {
 
 /**
  * Where a cut or trim edge lands, before frame snapping. Energy snapping
- * (#12) plugs in here to move edges into silence; the default keeps them.
+ * (#12, ADR 0003) plugs in here to move edges into audio pauses.
  */
 export interface EditPoint {
   /** Seconds on {@link EditPoint.clock}. */
@@ -45,12 +47,24 @@ export interface EditPoint {
   clock: "timeline" | "source";
   /** `start`: first kept frame after removed material; `end`: removed material follows. */
   edge: "start" | "end";
+  /** Search half-width, seconds (`snapWindow`, default {@link DEFAULT_SNAP_WINDOW_S}). */
+  window: number;
   /** Clip being trimmed; absent for `cut`, which spans tracks. */
   clip?: Clip;
+  /** `cut` only: clips of the tracks being cut, as before the operation. */
+  clips?: Clip[];
 }
 
-/** See {@link EditPoint}. Returns the adjusted time, same clock. */
-export type EditPointResolver = (point: EditPoint) => number | Promise<number>;
+/** Where a resolver put an edge. */
+export interface EditPointResolution {
+  /** Adjusted time, same clock as the request. */
+  time: number;
+  /** True inside an audio pause; false when none was in reach (speech may be clipped). */
+  clean: boolean;
+}
+
+/** See {@link EditPoint}. Null: not applicable here (no audio under the edge); the edge stays. */
+export type EditPointResolver = (point: EditPoint) => EditPointResolution | null | Promise<EditPointResolution | null>;
 
 /**
  * Everything project-specific an operation may consult. Implemented by the
@@ -70,7 +84,7 @@ export interface EditContext {
   clipTypes(): Promise<ReadonlyMap<string, ClipTypeInfo>>;
   /** Fresh id with prefix `c` (clip) or `t` (track); the engine retries on collision. */
   newId(prefix: "c" | "t"): string;
-  /** Edge adjustment seam for `cut` and `clip.trim` (#12). Default: identity. */
+  /** Edge adjustment seam for `cut` and `clip.trim` (#12). Absent: edges stay. */
   resolveEditPoint?: EditPointResolver;
 }
 
@@ -89,6 +103,8 @@ export interface AppliedOperation {
   /** Applied right after, restores the input timeline (with canonical clip order). */
   inverse: { op: "timeline.patch"; args: TimelinePatch };
   changes: OperationResult["changes"];
+  /** Edges placed by {@link EditContext.resolveEditPoint}, in arg order. */
+  snaps: SnapReport[];
 }
 
 /**
@@ -119,6 +135,8 @@ class Edit {
   readonly draft: Timeline;
   readonly grid: FrameGrid;
   readonly #spans = new Map<string, Promise<number>>();
+  readonly snaps: SnapReport[] = [];
+  #pending: EditPointResolution | null = null;
 
   constructor(
     readonly before: Timeline,
@@ -315,8 +333,9 @@ class Edit {
     const head = args.in !== undefined || args.start !== undefined;
     const tail = args.out !== undefined || args.end !== undefined;
     if (!head && !tail) throw this.invalid("nothing to trim.", { hint: "Pass `in`/`start` (head) and/or `out`/`end` (tail)." });
-    const edge = async (time: number, clock: EditPoint["clock"], side: EditPoint["edge"]) =>
-      (await this.context.resolveEditPoint?.({ time, clock, edge: side, clip: structuredClone(clip) })) ?? time;
+    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
+    const edge = (time: number, clock: EditPoint["clock"], side: EditPoint["edge"]) =>
+      this.resolve(snap.enabled, { time, clock, edge: side, window: snap.window, clip: structuredClone(clip) });
     const span = await this.span(clip);
 
     if (isMedia(clip)) {
@@ -324,16 +343,16 @@ class Edit {
       const info = await this.context.source(clip.asset);
       let { start, in: clipIn, out } = clip;
       if (args.in !== undefined) {
-        clipIn = this.grid.snap(await edge(args.in, "source", "start"));
+        clipIn = this.report("in", clip, args.in, this.grid.snap(await edge(args.in, "source", "start")));
         start = this.grid.snap(clip.start + (clipIn - clip.in) / speed);
       } else if (args.start !== undefined) {
-        start = this.grid.snap(await edge(args.start, "timeline", "start"));
+        start = this.report("start", clip, args.start, this.grid.snap(await edge(args.start, "timeline", "start")));
         clipIn = this.grid.ceil(clip.in + (start - clip.start) * speed);
       }
       if (args.out !== undefined) {
-        out = this.boundOut(await edge(args.out, "source", "end"), clipIn, info, clip.asset);
+        out = this.report("out", clip, args.out, this.boundOut(await edge(args.out, "source", "end"), clipIn, info, clip.asset));
       } else if (args.end !== undefined) {
-        const end = this.grid.snap(await edge(args.end, "timeline", "end"));
+        const end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
         out = this.boundOut(this.grid.floor(clip.in + (end - clip.start) * speed), clipIn, info, clip.asset, "end");
       }
       if (clipIn < 0 || start < 0) throw this.headLimit(clip, speed, args.in !== undefined, span.end, out);
@@ -352,15 +371,19 @@ class Edit {
     let start = clip.start;
     let clipIn = oldIn;
     if (args.in !== undefined) {
-      clipIn = this.grid.snap(await edge(args.in, "source", "start"));
+      clipIn = this.report("in", clip, args.in, this.grid.snap(await edge(args.in, "source", "start")));
       start = this.grid.snap(clip.start + (clipIn - oldIn));
     } else if (args.start !== undefined) {
-      start = this.grid.snap(await edge(args.start, "timeline", "start"));
+      start = this.report("start", clip, args.start, this.grid.snap(await edge(args.start, "timeline", "start")));
       clipIn = this.grid.snap(oldIn + (start - clip.start));
     }
     let end = span.end;
-    if (args.out !== undefined) end = this.grid.snap(start + (this.grid.snap(await edge(args.out, "source", "end")) - clipIn));
-    else if (args.end !== undefined) end = this.grid.snap(await edge(args.end, "timeline", "end"));
+    if (args.out !== undefined) {
+      const out = this.report("out", clip, args.out, this.grid.snap(await edge(args.out, "source", "end")));
+      end = this.grid.snap(start + (out - clipIn));
+    } else if (args.end !== undefined) {
+      end = this.report("end", clip, args.end, this.grid.snap(await edge(args.end, "timeline", "end")));
+    }
     if (clipIn < 0 || start < 0) throw this.headLimit(clip, 1, args.in !== undefined, span.end, oldIn + (span.end - clip.start));
     const duration = this.grid.snap(end - start);
     if (this.grid.frame(duration) < 1) {
@@ -444,17 +467,25 @@ class Edit {
 
   async cut(args: OperationArgs<"cut">): Promise<void> {
     const g = this.grid;
-    const resolve = async (time: number, edge: EditPoint["edge"]) =>
-      (await this.context.resolveEditPoint?.({ time, clock: "timeline", edge })) ?? time;
-    const from = g.snap(await resolve(args.from, "end"));
-    const to = g.snap(await resolve(args.to, "start"));
-    if (g.frame(to) <= g.frame(from)) {
-      throw this.invalid(`\`to\` (${to}) must be after \`from\` (${from}) by at least one frame.`, {
+    const tracks = args.tracks ? args.tracks.map((id) => this.clipTrack(id)) : this.clipTracks();
+    if (g.frame(args.to) <= g.frame(args.from)) {
+      throw this.invalid(`\`to\` (${g.snap(args.to)}) must be after \`from\` (${g.snap(args.from)}) by at least one frame.`, {
         field: "to",
-        valid: { min: g.seconds(g.frame(from) + 1), max: Number.MAX_SAFE_INTEGER },
+        valid: { min: g.seconds(g.frame(args.from) + 1), max: Number.MAX_SAFE_INTEGER },
       });
     }
-    const tracks = args.tracks ? args.tracks.map((id) => this.clipTrack(id)) : this.clipTracks();
+    const snap = { enabled: args.snap !== false, window: args.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
+    const clips = tracks.flatMap((track) => structuredClone(track.clips));
+    const resolve = (time: number, edge: EditPoint["edge"]) =>
+      this.resolve(snap.enabled, { time, clock: "timeline", edge, window: snap.window, clips });
+    const from = this.report("from", null, args.from, g.snap(await resolve(args.from, "end")));
+    const to = this.report("to", null, args.to, g.snap(await resolve(args.to, "start")));
+    if (g.frame(to) <= g.frame(from)) {
+      throw this.invalid(`both edges snapped into the same pause (from ${args.from} -> ${from}, to ${args.to} -> ${to}).`, {
+        field: "to",
+        hint: "Cut between two different pauses, or pass `snap: false` (CLI `--no-snap`) to cut exactly.",
+      });
+    }
     const [F, T] = [g.frame(from), g.frame(to)];
     const shift = to - from;
     for (const track of tracks) {
@@ -521,7 +552,7 @@ class Edit {
     const inverse = diffTimelines(this.draft, this.before);
     const changes = await this.changes(forward);
     const timeline = { ...this.draft, revision: this.before.revision + 1 };
-    return { timeline, inverse: { op: "timeline.patch", args: inverse }, changes };
+    return { timeline, inverse: { op: "timeline.patch", args: inverse }, changes, snaps: this.snaps };
   }
 
   /**
@@ -698,6 +729,27 @@ class Edit {
     }
     return duration;
   };
+
+  /**
+   * Run `point` through the context's resolver unless snapping is off. The
+   * resolution waits in `#pending` until {@link Edit.report} pairs it with
+   * the final grid time.
+   */
+  async resolve(enabled: boolean, point: EditPoint): Promise<number> {
+    this.#pending = null;
+    if (!enabled || !this.context.resolveEditPoint) return point.time;
+    const resolution = await this.context.resolveEditPoint(point);
+    if (!resolution) return point.time;
+    this.#pending = resolution;
+    return resolution.time;
+  }
+
+  /** Record the last resolved edge as a snap of `field`; returns `applied`. */
+  report(field: SnapReport["field"], clip: Clip | null, requested: number, applied: number): number {
+    if (this.#pending) this.snaps.push({ field, clip: clip?.id ?? null, requested, applied, clean: this.#pending.clean });
+    this.#pending = null;
+    return applied;
+  }
 
   /** Keep `clip` up to timeline time `at` (a grid time inside it). */
   trimTail(clip: Clip, at: number): void {

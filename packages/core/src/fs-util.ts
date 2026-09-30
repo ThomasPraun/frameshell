@@ -23,8 +23,8 @@ export async function readJsonIfExists(path: string): Promise<unknown> {
   return JSON.parse(text);
 }
 
-/** Temp + rename so readers never see a half-written file (SPEC §6.1). Creates the parent directory. */
-export async function writeTextAtomic(path: string, content: string): Promise<void> {
+/** Temp + rename so readers never see a half-written file (SPEC §6.1). Creates the parent directory. Text or bytes. */
+export async function writeTextAtomic(path: string, content: string | Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.tmp`;
   // Drop a stale temp (or a planted symlink) and create exclusively so the write never follows a link.
