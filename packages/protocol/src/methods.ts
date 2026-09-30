@@ -37,7 +37,26 @@ export interface MethodSpec<P extends z.ZodType = z.ZodType, R extends z.ZodType
   readonly result: R;
   /** Connection plumbing, not a project operation: never exposed as an MCP tool or CLI command. */
   readonly internal?: boolean;
+  /**
+   * Changes project files or daemon state, so a replay must not apply twice:
+   * the request may carry an {@link IdempotencyKeySchema} key in
+   * `params.idempotencyKey`, split off by {@link parseRequest}.
+   */
+  readonly mutating?: boolean;
 }
+
+/**
+ * Client-chosen id of one intended change (e.g. a UUID), sent as
+ * `params.idempotencyKey` of a {@link MethodSpec.mutating} method. The daemon
+ * remembers recent keys per author: a request repeating one (a retry after a
+ * lost reply) gets the first request's result instead of applying again.
+ * Kept out of tool schemas: transport plumbing, not an argument.
+ */
+export const IdempotencyKeySchema = z
+  .string()
+  .min(8)
+  .max(200)
+  .describe("Unique per intended change, e.g. a UUID; a replay with the same key returns the first result.");
 
 /** Absolute path on the daemon's machine; relative paths would resolve against the daemon's cwd, not the caller's. */
 const AbsolutePath = z.string().refine(isAbsolute, { message: "must be an absolute path" });
@@ -380,6 +399,7 @@ export const methods = {
     }),
   },
   "project.init": {
+    mutating: true,
     description:
       "Create a new Frameshell project: scaffold the directory layout, a default `frameshell.json` " +
       "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. " +
@@ -420,6 +440,7 @@ export const methods = {
     }),
   },
   "project.trust": {
+    mutating: true,
     description:
       "Record the user's trust decision for the plugins the enclosing project declares (SPEC §6.6). " +
       "Plugins run with full access to the machine: only send `trust` after the user explicitly agreed. " +
@@ -446,6 +467,7 @@ export const methods = {
     }),
   },
   "plugin.install": {
+    mutating: true,
     description:
       "Install a plugin into the enclosing project and pin it in `frameshell.json`. " +
       "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, or an npm name `[@scope/]name[@version]`. " +
@@ -464,6 +486,7 @@ export const methods = {
     }),
   },
   "plugin.remove": {
+    mutating: true,
     description:
       "Remove a plugin from the enclosing project: unpin it in `frameshell.json` and uninstall it. Fails with PluginNotFound.",
     params: z.strictObject({
@@ -477,6 +500,7 @@ export const methods = {
     }),
   },
   "plugin.run": {
+    mutating: true,
     description:
       "Run a plugin-contributed command, the same as `frameshell <plugin> <command> [args…]`. " +
       "Fails with ProjectNotTrusted when the project's plugins are not trusted, CommandNotFound (data lists available commands), " +
@@ -504,6 +528,7 @@ export const methods = {
     }),
   },
   render: {
+    mutating: true,
     description:
       "Export a timeline to a video file (SPEC §3.5) as a background job, and return at once with the job. Video is " +
       "encoded in segments in parallel and joined; audio is mixed in one continuous pass with a 2 ms fade at every cut, " +
@@ -561,6 +586,7 @@ export const methods = {
     }),
   },
   "asset.import": {
+    mutating: true,
     description:
       "Bring media files into the enclosing project's `assets/` and queue their ingest (probe, CFR proxy, PCM sidecar, " +
       "waveform, thumbnails). Returns at once; follow progress with `job.list`, `status`, or the `job.progress` and " +
@@ -615,6 +641,7 @@ export const methods = {
     }),
   },
   transcribe: {
+    mutating: true,
     description:
       "Transcribe one asset to word level and write `transcripts/<asset minus extension>.words.json` (SPEC §5.4; " +
       "`transcripts/<asset>.words.json`, extension kept, when another asset with the same base name owns the first " +
@@ -741,6 +768,7 @@ export const methods = {
     }),
   },
   "file.write": {
+    mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
       "Missing parent directories are created. `frameshell.json`, `timelines/*.json` and `transcripts/**/*.words.json` must pass schema validation " +
@@ -837,6 +865,7 @@ export const methods = {
     }),
   },
   "track.add": {
+    mutating: true,
     description:
       "Add a track and return its new id (`t_…`). Example: `{ kind: \"video\", name: \"Camera\" }`; subtitle tracks need " +
       "`follows`: `{ kind: \"subtitles\", follows: \"t_4d5e6f\" }`. Placed on top unless `index` is given.",
@@ -844,6 +873,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   "track.remove": {
+    mutating: true,
     description:
       "Remove a track. A track with clips needs `force: true`; a track followed by a subtitle track is refused until that " +
       "subtitle track is removed. Fails with TrackNotFound or InvalidOperation.",
@@ -851,6 +881,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   "clip.add": {
+    mutating: true,
     description:
       "Place a clip on a video or audio track and return its new id (`c_…`) in `changes.added`. Media example: " +
       "`{ track: \"t_4d5e6f\", asset: \"assets/raw-01.mp4\", start: 0, in: 3.2, out: 15.733 }` (in/out are source seconds, " +
@@ -862,6 +893,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   "clip.move": {
+    mutating: true,
     description:
       "Move a clip to a new timeline `start` and/or another track of the same kind, keeping its content and length. " +
       "Example: `{ clip: \"c_1a2b3c\", start: 12.5 }`. Refused when it would overlap another clip.",
@@ -869,6 +901,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   "clip.trim": {
+    mutating: true,
     description:
       "Trim or extend a clip's head and/or tail. By source time: `{ clip, in: 4.0 }` drops source before 4.0 s, the kept " +
       "frames stay where they were on the timeline (start moves right). By timeline time: `{ clip, end: 20.0 }`. Does not " +
@@ -879,6 +912,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   "clip.split": {
+    mutating: true,
     description:
       "Split a clip in two at timeline time `at`. The left part keeps the id; the right part's new id is in " +
       "`changes.added`. Example: `{ clip: \"c_1a2b3c\", at: 7.5 }`.",
@@ -886,11 +920,13 @@ export const methods = {
     result: OperationResultSchema,
   },
   "clip.remove": {
+    mutating: true,
     description: "Remove a clip, leaving a gap. To remove a time range and close the gap on every track, use `cut`.",
     params: operationArgs["clip.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "clip.set": {
+    mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
@@ -901,6 +937,7 @@ export const methods = {
     result: OperationResultSchema,
   },
   cut: {
+    mutating: true,
     description:
       "Remove the timeline range [from, to) and close the gap (ripple): clips inside are removed, clips crossing an edge " +
       "are trimmed or split, later clips move left by `to - from`. Applies to every video and audio track unless " +
@@ -912,18 +949,31 @@ export const methods = {
     result: OperationResultSchema,
   },
   "tx.begin": {
+    mutating: true,
     description:
       "Start an explicit transaction for this terminal session: every following operation (any timeline) joins it until " +
       "`tx.commit` or `tx.abort`, so `history` lists them under `label` and `revert` can undo them as one. Without it, " +
       "operations from one session are grouped automatically until an idle gap. The transaction is stored on disk and " +
       "survives a daemon restart. Needs a session: app terminals set `FRAMESHELL_SESSION`, elsewhere the CLI generates " +
-      "one per shell. Example: `{ label: \"remove silences\" }`. Fails with TransactionState when one is already open.",
+      "one per shell. Example: `{ label: \"remove silences\" }`. Pass `autoCommitAfter` when a crash of the caller must " +
+      "not leave the transaction open: it is then committed automatically once that many seconds pass without an " +
+      "operation of this author. Fails with TransactionState when one is already open.",
     params: z.strictObject({
       label: z.string().min(1).describe("What the transaction does, shown in the History panel, e.g. `remove silences`."),
+      autoCommitAfter: z
+        .number()
+        .positive()
+        .max(3600)
+        .optional()
+        .describe(
+          "Seconds without an operation of this author after which the daemon commits the transaction itself, e.g. `15`. " +
+            "Default: stays open until `tx.commit` or `tx.abort`.",
+        ),
     }),
     result: TransactionInfoSchema,
   },
   "tx.commit": {
+    mutating: true,
     description:
       "Close this session's explicit transaction, keeping its changes. `operations` counts them across timelines. " +
       "Fails with TransactionState when none is open.",
@@ -933,6 +983,7 @@ export const methods = {
     }),
   },
   "tx.abort": {
+    mutating: true,
     description:
       "Close this session's explicit transaction and undo its changes: on every timeline it touched, its operations' " +
       "inverses are applied newest first as one `revert` operation inside the transaction. All or nothing: every " +
@@ -958,6 +1009,7 @@ export const methods = {
     result: HistoryResultSchema,
   },
   revert: {
+    mutating: true,
     description:
       "Undo a transaction (`tx_…`) or a single operation (`op_…`) on one timeline by applying the stored inverses, " +
       "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
@@ -1157,11 +1209,37 @@ export function parseParams<M extends MethodName>(method: M, params: unknown): V
   throw new RpcError(ErrorCode.InvalidParams, `Invalid params for \`${method}\`:\n${lines.join("\n")}`, { issues });
 }
 
+/**
+ * Validate a raw request for `method`: split off a {@link MethodSpec.mutating}
+ * method's `idempotencyKey` (null when absent), then {@link parseParams} the
+ * rest. Other methods get no special field: their strict params refuse it.
+ * Throws {@link RpcError} `InvalidParams` like {@link parseParams}.
+ */
+export function parseRequest<M extends MethodName>(
+  method: M,
+  params: unknown,
+): { params: ValidatedParams<M>; idempotencyKey: string | null } {
+  const spec: MethodSpec = methods[method];
+  if (!spec.mutating || typeof params !== "object" || params === null || !Object.hasOwn(params, "idempotencyKey")) {
+    return { params: parseParams(method, params), idempotencyKey: null };
+  }
+  const { idempotencyKey: raw, ...rest } = params as Record<string, unknown>;
+  const key = IdempotencyKeySchema.safeParse(raw);
+  if (!key.success) {
+    const issues = key.error.issues.map(({ message }) => ({ path: ["idempotencyKey"], message }));
+    const lines = issues.map(({ message }) => `  params.idempotencyKey: ${message}`);
+    throw new RpcError(ErrorCode.InvalidParams, `Invalid params for \`${method}\`:\n${lines.join("\n")}`, { issues });
+  }
+  return { params: parseParams(method, rest), idempotencyKey: key.data };
+}
+
 /** JSON Schema (draft 2020-12) of one method, for tool generation. */
 export interface MethodJsonSchema {
   description: string;
   /** See {@link MethodSpec.internal}. */
   internal: boolean;
+  /** See {@link MethodSpec.mutating}. */
+  mutating: boolean;
   /** What callers send: optional and defaulted fields stay optional. */
   params: Record<string, unknown>;
   result: Record<string, unknown>;
@@ -1174,6 +1252,7 @@ export function methodJsonSchemas(): Record<MethodName, MethodJsonSchema> {
     {
       description: spec.description,
       internal: spec.internal ?? false,
+      mutating: spec.mutating ?? false,
       params: z.toJSONSchema(spec.params, { target: "draft-2020-12", io: "input" }),
       result: z.toJSONSchema(spec.result, { target: "draft-2020-12", io: "output" }),
     },

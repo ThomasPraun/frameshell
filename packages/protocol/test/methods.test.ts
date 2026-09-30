@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ErrorCode, RpcError, methodJsonSchemas, methods, parseParams } from "../src/index.js";
+import { ErrorCode, RpcError, methodJsonSchemas, methods, parseParams, parseRequest } from "../src/index.js";
 
 describe("method registry JSON Schema", () => {
   const schemas = methodJsonSchemas();
@@ -68,5 +68,40 @@ describe("parseParams", () => {
       message: expect.stringMatching(/project\.init[\s\S]*params\.dir[\s\S]*params\.name/),
       data: { issues: [{ path: ["dir"] }, { path: ["name"] }] },
     });
+  });
+});
+
+describe("idempotency keys", () => {
+  const schemas = methodJsonSchemas();
+  const mutating = Object.entries(schemas)
+    .filter(([, schema]) => schema.mutating)
+    .map(([name]) => name);
+
+  it("flags every method that changes a project or daemon state, and no read", () => {
+    expect(mutating).toEqual(
+      expect.arrayContaining(["file.write", "clip.move", "clip.trim", "clip.split", "clip.remove", "cut", "revert", "tx.begin", "tx.commit", "tx.abort"]),
+    );
+    for (const read of ["status", "timeline.show", "track.list", "history", "asset.list", "job.list", "script.outline", "handshake"]) {
+      expect(mutating).not.toContain(read);
+    }
+  });
+
+  it("keeps the key out of tool schemas: it is transport plumbing, not an argument", () => {
+    for (const name of mutating) expect(JSON.stringify(schemas[name as keyof typeof schemas].params)).not.toContain("idempotencyKey");
+  });
+
+  it("splits the key off a mutating method's params before validating them", () => {
+    const cwd = process.cwd();
+    expect(parseRequest("clip.remove", { cwd, clip: "c_1", idempotencyKey: "k-0123456789" })).toEqual({
+      params: { cwd, timeline: "main", clip: "c_1" },
+      idempotencyKey: "k-0123456789",
+    });
+    expect(parseRequest("clip.remove", { cwd, clip: "c_1" })).toEqual({ params: { cwd, timeline: "main", clip: "c_1" }, idempotencyKey: null });
+  });
+
+  it("refuses a malformed key, and a key on a method that reads", () => {
+    const cwd = process.cwd();
+    expect(() => parseRequest("clip.remove", { cwd, clip: "c_1", idempotencyKey: "" })).toThrow(/params\.idempotencyKey/);
+    expect(() => parseRequest("timeline.show", { cwd, idempotencyKey: "k-0123456789" })).toThrow(RpcError);
   });
 });
