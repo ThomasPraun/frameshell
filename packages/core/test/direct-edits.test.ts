@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, RpcError } from "@frameshell/protocol";
 import { createProjectConfig, createTimeline } from "@frameshell/schema";
@@ -27,13 +27,16 @@ function setup() {
   const changed: TimelineChange[] = [];
   const rejected: TimelineRejection[] = [];
   let next = 0;
-  const timelines = new TimelineService({
-    probe: async () => PROBE,
-    clipTypes: async () => new Map(),
-    newId: (prefix) => `${prefix}_${++next}`,
-    onChanged: (change) => changed.push(change),
-    onRejected: (rejection) => rejected.push(rejection),
-  });
+  /** A fresh service on the same project: what a restarted daemon holds (nothing in memory). */
+  const restart = () =>
+    new TimelineService({
+      probe: async () => PROBE,
+      clipTypes: async () => new Map(),
+      newId: (prefix) => `${prefix}_${++next}`,
+      onChanged: (change) => changed.push(change),
+      onRejected: (rejection) => rejected.push(rejection),
+    });
+  const timelines = restart();
   const path = join(root, "timelines", "main.json");
   const read = () => JSON.parse(readFileSync(path, "utf8"));
   /** Hand edit of the file on disk, as an editor or agent would do it. */
@@ -53,7 +56,7 @@ function setup() {
     });
   mkdirSync(join(root, "assets"));
   writeFileSync(join(root, "assets", "a.mp4"), "stub");
-  return { root, path, timelines, read, edit, addClip, changed, rejected };
+  return { root, path, timelines, restart, read, edit, addClip, changed, rejected };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<RpcError> {
@@ -130,7 +133,7 @@ describe("direct edit with a stale revision", () => {
         at: expect.any(String),
       },
     ]);
-    expect(await timelines.rejections(root)).toEqual(rejected);
+    expect(await timelines.rejections(root)).toEqual(rejected.map(({ root: _root, ...listed }) => listed));
     // Nothing journaled or announced beyond the clip.add.
     expect(changed.map((change) => change.author)).toEqual(["cli:agent"]);
     expect((await timelines.history(root, "main", {})).transactions).toHaveLength(1);
@@ -202,6 +205,59 @@ describe("direct edit with invalid content", () => {
     await timelines.reconcile(root, "main");
     expect(readFileSync(path, "utf8")).toBe(daemonVersion);
     expect(rejected).toMatchObject([{ reason: "invalid", message: expect.stringMatching(/c_1.*c_2.*overlap/) }]);
+  });
+});
+
+describe("rejections listed for status", () => {
+  const staleEdit = async (project: ReturnType<typeof setup>) => {
+    const { root, timelines, edit, addClip } = project;
+    await addClip(0);
+    edit((timeline) => {
+      timeline.revision = 0;
+      timeline.tracks[0].clips = [];
+    });
+    await timelines.reconcile(root, "main");
+  };
+
+  it("survive a restart: they are read from .frameshell/ on disk, newest first", async () => {
+    const project = setup();
+    const { root, restart, edit, rejected } = project;
+    await staleEdit(project);
+    edit((timeline) => {
+      timeline.tracks = "none";
+    });
+    await project.timelines.reconcile(root, "main");
+    expect(rejected.map((r) => r.reason)).toEqual(["stale", "invalid"]);
+
+    const listed = await restart().rejections(root);
+    expect(listed).toEqual(rejected.map(({ root: _root, ...rejection }) => rejection).reverse());
+  });
+
+  it("drop a rejection once its preserved copy is deleted", async () => {
+    const project = setup();
+    await staleEdit(project);
+    const [kept] = await project.timelines.rejections(project.root);
+    rmSync(join(project.root, kept!.preserved));
+    expect(await project.restart().rejections(project.root)).toEqual([]);
+  });
+
+  it("list a preserved copy with no recorded details as reason `unknown`", async () => {
+    const { root, restart, read } = setup();
+    mkdirSync(join(root, ".frameshell", "rejected"), { recursive: true });
+    const name = "2026-01-02T03-04-05-678Z-main.json";
+    writeFileSync(join(root, ".frameshell", "rejected", name), JSON.stringify({ ...read(), revision: 7 }));
+
+    expect(await restart().rejections(root)).toEqual([
+      {
+        timeline: "main",
+        reason: "unknown",
+        message: expect.stringMatching(/no recorded reason/i),
+        preserved: `.frameshell/rejected/${name}`,
+        revision: 7,
+        current: null,
+        at: "2026-01-02T03:04:05.678Z",
+      },
+    ]);
   });
 });
 

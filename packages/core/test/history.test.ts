@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, RpcError } from "@frameshell/protocol";
 import { createProjectConfig, createTimeline } from "@frameshell/schema";
@@ -202,21 +202,81 @@ describe("revert", () => {
     expect(again.data).toMatchObject({ conflicts: [{ id: first.operation.id, op: "revert" }] });
   });
 
-  // An edit made while no daemon held the file (daemon stopped): nothing saw it, so the journal has a gap.
-  const offlineEdit = (root: string, edit: (timeline: { revision: number; tracks: { clips: { start: number }[] }[] }) => void) => {
+  /**
+   * An edit made while no daemon held the file (daemon stopped), then a fresh
+   * service. `withoutHead`: the journal's head snapshot is gone too (a journal
+   * from an older daemon), so the edit cannot be diffed and stays a gap.
+   */
+  const offlineEdit = (
+    root: string,
+    edit: (timeline: { revision: number; tracks: { clips: { start: number }[] }[] }) => void,
+    { withoutHead = false } = {},
+  ) => {
     const path = join(root, "timelines", "main.json");
     const timeline = JSON.parse(readFileSync(path, "utf8"));
     edit(timeline);
     writeFileSync(path, JSON.stringify(timeline));
+    if (withoutHead) rmSync(join(root, ".frameshell", "history", "main.head.json"));
     return new TimelineService({ probe: async () => PROBE, clipTypes: async () => new Map(), newId: (prefix) => `${prefix}_x${Math.random()}` });
   };
 
-  it("refuses when the timeline file changed outside the journal", async () => {
+  it("journals an edit made while no daemon ran as a `file` operation on next load, so it can be reverted", async () => {
+    const { root, add, tracks } = setup();
+    await add("cli:agent", "tx_000000a1", 0);
+    const restarted = offlineEdit(root, (timeline) => {
+      timeline.tracks[0]!.clips[0]!.start = 5;
+    });
+
+    await restarted.reconcile(root, "main");
+
+    const history = await restarted.history(root, "main", {});
+    expect(history.transactions.map((tx) => tx.author)).toEqual(["cli:agent", "file"]);
+    expect(history.transactions[1]!.operations).toMatchObject([{ op: "timeline.patch", revisionBefore: 1, revision: 2, touched: ["c_1"] }]);
+    expect(JSON.parse(readFileSync(join(root, "timelines", "main.json"), "utf8")).revision).toBe(2);
+    const call = { root, cwd: root, timeline: "main", author: "ui", tx: { id: "tx_000000b1", label: null } };
+    await restarted.revert({ ...call, target: history.transactions[1]!.tx });
+    expect(tracks()[0].clips[0].start).toBe(0);
+  });
+
+  it("restores the journal's version when an edit made while no daemon ran breaks a timeline rule, keeping the edit", async () => {
+    const { root, add, tracks } = setup();
+    await add("cli:agent", "tx_000000a1", 0);
+    await add("cli:agent", "tx_000000a1", 3);
+    const before = readFileSync(join(root, "timelines", "main.json"), "utf8");
+    const restarted = offlineEdit(root, (timeline) => {
+      timeline.tracks[0]!.clips[1]!.start = 1; // overlaps c_1 (0 to 2)
+    });
+
+    await restarted.reconcile(root, "main");
+
+    expect(JSON.parse(readFileSync(join(root, "timelines", "main.json"), "utf8"))).toEqual(JSON.parse(before));
+    expect(tracks()[0].clips.map((clip: { start: number }) => clip.start)).toEqual([0, 3]);
+    const [rejected] = await restarted.rejections(root);
+    expect(rejected).toMatchObject({ timeline: "main", reason: "invalid", current: 2 });
+    expect(JSON.parse(readFileSync(join(root, rejected!.preserved), "utf8")).tracks[0].clips[1].start).toBe(1);
+    expect((await restarted.history(root, "main", {})).transactions).toHaveLength(1);
+  });
+
+  it("puts the journal's revision back when only the revision changed while no daemon ran", async () => {
     const { root, add } = setup();
     const added = await add("cli:agent", "tx_000000a1", 0);
     const restarted = offlineEdit(root, (timeline) => {
-      timeline.revision += 1;
+      timeline.revision += 5;
     });
+    await restarted.revert({ root, cwd: root, timeline: "main", author: "ui", tx: { id: "tx_000000b1", label: null }, target: added.operation.tx });
+    expect(JSON.parse(readFileSync(join(root, "timelines", "main.json"), "utf8"))).toMatchObject({ revision: 2, tracks: [{ clips: [] }] });
+  });
+
+  it("refuses when the timeline file changed outside the journal and no snapshot says how", async () => {
+    const { root, add } = setup();
+    const added = await add("cli:agent", "tx_000000a1", 0);
+    const restarted = offlineEdit(
+      root,
+      (timeline) => {
+        timeline.revision += 1;
+      },
+      { withoutHead: true },
+    );
     const error = await rejection(
       restarted.revert({ root, cwd: root, timeline: "main", author: "ui", tx: { id: "tx_000000b1", label: null }, target: added.operation.tx }),
     );
@@ -250,9 +310,13 @@ describe("revert", () => {
     const { root, add, apply } = setup();
     await add("cli:agent", "tx_000000a1", 0);
     const move = await apply("cli:agent", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
-    const restarted = offlineEdit(root, (timeline) => {
-      timeline.tracks[0]!.clips[0]!.start = 5;
-    });
+    const restarted = offlineEdit(
+      root,
+      (timeline) => {
+        timeline.tracks[0]!.clips[0]!.start = 5;
+      },
+      { withoutHead: true },
+    );
     const call = { root, cwd: root, timeline: "main" };
     await restarted.apply({ ...call, author: "ui", tx: { id: "tx_000000b1", label: null }, request: { op: "track.add", args: { kind: "video" } } });
 

@@ -5,6 +5,7 @@ import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   OpIdSchema,
   OperationResultSchema,
+  RejectionRecordSchema,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineRejectionSchema,
@@ -18,7 +19,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -350,10 +351,11 @@ export const methods = {
         .describe("Plugin trust of `project`; null when there is no project."),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
       rejections: z
-        .array(TimelineRejectionSchema)
+        .array(RejectionRecordSchema)
         .describe(
-          "Direct edits of `project`'s timeline files refused since the daemon started (at most 20, newest first): the " +
-            "daemon's version was restored and the edit kept at `preserved`. Empty when none or no project.",
+          "Refused direct edits of `project`'s timeline files still kept under `.frameshell/rejected/` (at most 20, " +
+            "newest first), across daemon restarts: the daemon's version was restored and the edit kept at `preserved`. " +
+            "Delete a preserved file once handled to drop it from this list. Empty when none or no project.",
         ),
       jobs: z
         .array(JobSchema)

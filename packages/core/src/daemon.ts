@@ -144,7 +144,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       media.attach(dir);
       timelineWatcher.attach(dir);
     },
-    writeTimeline: (dir, id, content): Promise<void> => timelines.writeFile(dir, id, content),
+    writeTimeline: async (dir, id, content, author = "file") => {
+      // The saver's transaction, like any operation of theirs (SPEC §6.2).
+      const tx = transactions.next(author);
+      await transactions.touching(author, tx, { root: dir, timeline: id });
+      if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(author, tx);
+    },
   });
   const plugins = new PluginHost({ dirs, pins: projects });
   const energy = new EnergyStore({
@@ -233,7 +238,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         project,
         trust,
         openProjects: projects.list(),
-        rejections: project ? (await timelines.rejections(project.dir)).map(({ root: _root, ...rejection }) => rejection) : [],
+        rejections: project ? await timelines.rejections(project.dir) : [],
         jobs: project ? jobs.list({ project: project.dir }) : [],
         caller: { ...caller },
       };
@@ -296,7 +301,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         progress: request.progress,
       });
     },
-    "file.write": ({ path, content }) => projects.writeFile(path, content),
+    "file.write": ({ path, content }, caller) => projects.writeFile(path, content, authorOf(caller)),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);

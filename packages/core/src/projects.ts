@@ -44,9 +44,9 @@ export interface ProjectRegistryOptions {
   /**
    * Takes over {@link ProjectRegistry.writeFile} of `timelines/<id>.json`
    * once the path is confined (SPEC §6.4, `TimelineService.writeFile`).
-   * Default: schema-validated plain write.
+   * `author` is the one given to `writeFile`. Default: schema-validated plain write.
    */
-  writeTimeline?: (root: string, id: string, content: string) => Promise<void>;
+  writeTimeline?: (root: string, id: string, content: string, author: string | undefined) => Promise<unknown>;
 }
 
 /** Projects the daemon holds open, keyed by absolute root directory. */
@@ -137,8 +137,9 @@ export class ProjectRegistry {
    * case-insensitive filesystems (APFS, NTFS).
    * Throws `OutsideProject` for paths in no project, under `.frameshell/`, or
    * naming a symlink; `InvalidProjectFile` when a config or timeline fails its schema.
+   * `author` (SPEC §6.2) is who saves: a timeline save is journaled as theirs.
    */
-  async writeFile(path: string, content: string): Promise<FileWriteResult> {
+  async writeFile(path: string, content: string, author?: string): Promise<FileWriteResult> {
     const target = resolve(path);
     const configPath = await findUp(dirname(target), PROJECT_FILE);
     if (!configPath) throw notInProject(target);
@@ -165,7 +166,7 @@ export class ProjectRegistry {
 
     const timeline = TIMELINE_FILE.exec(rel)?.[1];
     if (timeline !== undefined && this.#writeTimeline) {
-      await this.#writeTimeline(root, timeline, content);
+      await this.#writeTimeline(root, timeline, content, author);
       return { project: root, path: rel };
     }
 
