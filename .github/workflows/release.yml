@@ -10,9 +10,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/release.yml
-      - apps/desktop/electron-builder.yml
-      - apps/desktop/build/**
-      - apps/desktop/scripts/release/**
+      # Any desktop or shared-package change can break the packaged app, so its e2e suite runs too.
+      - apps/desktop/**
+      - packages/**
       - pnpm-lock.yaml
 
 permissions:
