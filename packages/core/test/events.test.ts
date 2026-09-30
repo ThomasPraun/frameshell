@@ -135,6 +135,28 @@ describe("timeline.changed notifications", () => {
     expect(seen).toEqual([]);
   });
 
+  it("are sent for a revert and for a tx.abort, in revision order", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const app = await connect("desktop/test");
+    const cli = await connect("cli/test", "term-2");
+    const dir = await project(cli);
+    await app.request("events.subscribe", { cwd: dir, events: ["timeline.changed"] });
+    const { seen, arrived } = collect(app, 3);
+
+    const added = await cli.request("track.add", { cwd: dir, kind: "video" });
+    const reverted = await cli.request("revert", { cwd: dir, timeline: "main", target: added.operation.id });
+    await cli.request("tx.begin", { label: "more" });
+    await cli.request("track.add", { cwd: dir, kind: "audio" });
+    await cli.request("tx.abort", {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await arrived;
+
+    expect(seen[1]).toMatchObject({ revision: reverted.revision, author: "cli:term-2", changes: reverted.changes });
+    await app.request("track.list", { cwd: dir });
+    expect(seen.map((event) => event.revision)).toEqual([...seen.map((event) => event.revision)].sort((a, b) => a - b));
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("refuses unknown event names and directories outside any project", async () => {
     daemon = await startDaemon({ socketPath: uniqueSocketPath() });
     const session = await rawSession(daemon.socketPath);

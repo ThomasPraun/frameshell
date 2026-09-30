@@ -30,7 +30,10 @@ function project(): string {
   return root;
 }
 
-function setup(resolveEditPoint?: TimelineServiceOptions["resolveEditPoint"]) {
+function setup(
+  resolveEditPoint?: TimelineServiceOptions["resolveEditPoint"],
+  onChanged?: TimelineServiceOptions["onChanged"],
+) {
   const root = project();
   let next = 0;
   const timelines = new TimelineService({
@@ -38,6 +41,7 @@ function setup(resolveEditPoint?: TimelineServiceOptions["resolveEditPoint"]) {
     clipTypes: async () => new Map(),
     newId: (prefix) => `${prefix}_${++next}`,
     ...(resolveEditPoint ? { resolveEditPoint } : {}),
+    ...(onChanged ? { onChanged } : {}),
   });
   const apply = (author: string, tx: string, request: OperationRequest, label: string | null = null) =>
     timelines.apply({ root, cwd: root, timeline: "main", author, tx: { id: tx, label }, request });
@@ -302,5 +306,38 @@ describe("revert", () => {
 
     await revert("cli:agent", "tx_000000a3", cut.operation.id);
     expect(tracks()).toEqual(before);
+  });
+});
+
+describe("timeline.changed feed (onChanged)", () => {
+  it("fires for a revert, with the revert operation's revision, author and changes", async () => {
+    const seen: Array<{ revision: number; author: string; changes: unknown }> = [];
+    const { add, revert } = setup(undefined, (change) => seen.push(change));
+    const first = await add("cli:agent", "tx_000000a1", 0);
+    const reverted = await revert("ui", "tx_000000a2", "tx_000000a1");
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toEqual({
+      root: expect.any(String),
+      timeline: "main",
+      revision: reverted.revision,
+      author: "ui",
+      changes: reverted.changes,
+    });
+    expect(reverted.revision).toBeGreaterThan(first.revision);
+    expect(reverted.changes.removed.length).toBeGreaterThan(0);
+  });
+
+  it("fires for a snapped cut, reporting the snapped edges' changes", async () => {
+    const seen: Array<{ revision: number; author: string; changes: unknown }> = [];
+    const { add, apply } = setup((_root, _fps) => (point) => ({ time: point.time + 0.2, clean: true }), (change) =>
+      seen.push(change),
+    );
+    await add("cli:agent", "tx_000000a1", 0);
+    const cut = await apply("cli:agent", "tx_000000a2", { op: "cut", args: { from: 0.5, to: 1 } });
+
+    expect(cut.snaps.length).toBeGreaterThan(0);
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toMatchObject({ revision: cut.revision, author: "cli:agent", changes: cut.changes });
   });
 });
