@@ -202,18 +202,29 @@ describe("revert", () => {
     expect(again.data).toMatchObject({ conflicts: [{ id: first.operation.id, op: "revert" }] });
   });
 
-  it("refuses when the timeline file changed outside the journal", async () => {
-    const { root, add, revert } = setup();
-    const added = await add("cli:agent", "tx_000000a1", 0);
+  // An edit made while no daemon held the file (daemon stopped): nothing saw it, so the journal has a gap.
+  const offlineEdit = (root: string, edit: (timeline: { revision: number; tracks: { clips: { start: number }[] }[] }) => void) => {
     const path = join(root, "timelines", "main.json");
-    const edited = JSON.parse(readFileSync(path, "utf8"));
-    writeFileSync(path, JSON.stringify({ ...edited, revision: edited.revision + 1 }));
-    const error = await rejection(revert("ui", "tx_000000b1", added.operation.tx));
+    const timeline = JSON.parse(readFileSync(path, "utf8"));
+    edit(timeline);
+    writeFileSync(path, JSON.stringify(timeline));
+    return new TimelineService({ probe: async () => PROBE, clipTypes: async () => new Map(), newId: (prefix) => `${prefix}_x${Math.random()}` });
+  };
+
+  it("refuses when the timeline file changed outside the journal", async () => {
+    const { root, add } = setup();
+    const added = await add("cli:agent", "tx_000000a1", 0);
+    const restarted = offlineEdit(root, (timeline) => {
+      timeline.revision += 1;
+    });
+    const error = await rejection(
+      restarted.revert({ root, cwd: root, timeline: "main", author: "ui", tx: { id: "tx_000000b1", label: null }, target: added.operation.tx }),
+    );
     expect(error.code).toBe(ErrorCode.RevertConflict);
     expect(error.message).toMatch(/changed outside/);
   });
 
-  // `file.write` is the desktop editor's save path; it validates but keeps `revision`.
+  // `file.write` is the desktop editor's save path; the registry alone writes as is, the service then sees a direct edit.
   const humanSave = async (root: string, edit: (timeline: { revision: number; tracks: { clips: { start: number }[] }[] }) => void) => {
     const path = join(root, "timelines", "main.json");
     const timeline = JSON.parse(readFileSync(path, "utf8"));
@@ -221,7 +232,7 @@ describe("revert", () => {
     await new ProjectRegistry().writeFile(path, JSON.stringify(timeline));
   };
 
-  it("refuses when a file.write save kept the revision but changed the content", async () => {
+  it("names a direct edit that changed the same clip as the conflict", async () => {
     const { root, add, apply, revert, tracks } = setup();
     await add("cli:agent", "tx_000000a1", 0);
     const move = await apply("cli:agent", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
@@ -231,25 +242,24 @@ describe("revert", () => {
 
     const error = await rejection(revert("cli:agent", "tx_000000a2", move.operation.id));
     expect(error.code).toBe(ErrorCode.RevertConflict);
-    expect(error.message).toMatch(/changed outside the journal/);
-    expect(error.data).toMatchObject({ conflicts: [] });
+    expect(error.data).toMatchObject({ conflicts: [{ op: "timeline.patch", author: "file", ids: ["c_1"] }] });
     expect(tracks()[0].clips[0].start).toBe(5);
   });
 
   it("refuses when an unjournaled edit is followed by journaled operations", async () => {
-    const { root, add, apply, revert, tracks } = setup();
+    const { root, add, apply } = setup();
     await add("cli:agent", "tx_000000a1", 0);
     const move = await apply("cli:agent", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
-    await humanSave(root, (timeline) => {
+    const restarted = offlineEdit(root, (timeline) => {
       timeline.tracks[0]!.clips[0]!.start = 5;
-      timeline.revision += 1;
     });
-    await apply("ui", "tx_000000b1", { op: "track.add", args: { kind: "video" } });
+    const call = { root, cwd: root, timeline: "main" };
+    await restarted.apply({ ...call, author: "ui", tx: { id: "tx_000000b1", label: null }, request: { op: "track.add", args: { kind: "video" } } });
 
-    const error = await rejection(revert("cli:agent", "tx_000000a2", move.operation.tx));
+    const error = await rejection(restarted.revert({ ...call, author: "cli:agent", tx: { id: "tx_000000a2", label: null }, target: move.operation.tx }));
     expect(error.code).toBe(ErrorCode.RevertConflict);
     expect(error.message).toMatch(new RegExp(`changed outside the journal between ${move.operation.id}`));
-    expect(tracks()[0].clips[0].start).toBe(5);
+    expect(JSON.parse(readFileSync(join(root, "timelines", "main.json"), "utf8")).tracks[0].clips[0].start).toBe(5);
   });
 
   it("refuses to cross an operation whose journal append was lost", async () => {
@@ -266,7 +276,7 @@ describe("revert", () => {
     expect(tracks()[0].clips[0].start).toBe(5);
   });
 
-  it("still reverts when the unjournaled edit came before the target", async () => {
+  it("still reverts when a direct edit came before the target", async () => {
     const { root, add, apply, revert, tracks } = setup();
     await add("cli:agent", "tx_000000a1", 0);
     await humanSave(root, (timeline) => {

@@ -1,4 +1,4 @@
-import type { AssetInfo, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, TimelineRejection, TimelineView } from "@frameshell/protocol";
 import type { Layout } from "./layout.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
@@ -80,6 +80,12 @@ export interface FrameshellApi {
     show(timeline: string): Promise<TimelineView>;
     /** Called on every change of the project's timelines; see {@link TimelineChange}. Returns an unsubscribe function. */
     onChanged(listener: (change: TimelineChange) => void): () => void;
+    /**
+     * Called when the daemon refuses a direct edit of one of the project's
+     * timeline files (daemon `timeline.rejected`): the file holds the daemon's
+     * version again, the edit is kept at `preserved`. Returns an unsubscribe function.
+     */
+    onRejected(listener: (rejection: TimelineRejection) => void): () => void;
   };
   media: {
     /** `asset.list` of the window's project: ingest state and derived media paths. */
@@ -110,6 +116,7 @@ export const Channel = {
   layoutSave: "layout:save",
   timelineShow: "timeline:show",
   timelineChanged: "timeline:changed",
+  timelineRejected: "timeline:rejected",
   mediaAssets: "media:assets",
   mediaRead: "media:read",
 } as const;

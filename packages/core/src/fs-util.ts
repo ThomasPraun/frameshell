@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** True when `path` exists (file or directory). */
@@ -36,4 +36,14 @@ export async function writeTextAtomic(path: string, content: string | Uint8Array
 /** {@link writeTextAtomic} of pretty-printed JSON with a trailing newline. */
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * One spelling per existing path, to compare paths clients spell differently:
+ * symlinks resolved, and on Windows 8.3 short names (`RUNNER~1`) expanded
+ * (the promise `realpath` is the native one; `fs.realpathSync` would keep them).
+ * `path` itself when it cannot be resolved.
+ */
+export async function canonicalPath(path: string): Promise<string> {
+  return realpath(path).catch(() => path);
 }

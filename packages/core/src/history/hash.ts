@@ -5,7 +5,7 @@ import type { Timeline } from "@frameshell/schema";
  * Content hash of a timeline for the journal (SPEC §6.2): sha256 of its JSON
  * with object keys sorted, so key order and `undefined` fields do not count.
  * Equal hashes mean the file holds what the journal last wrote; `revision`
- * alone misses edits that keep it (`file.write`).
+ * alone misses edits that keep it (a hand edit made while no daemon watched).
  */
 export function timelineHash(timeline: Timeline): string {
   return `sha256:${createHash("sha256").update(canonical(timeline)).digest("hex")}`;

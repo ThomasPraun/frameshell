@@ -60,7 +60,7 @@ interface ViewState {
  * player drives it (#15).
  */
 export function TimelinePanel({ collapsed, onToggle, playhead = 0 }: { collapsed: boolean; onToggle: () => void; playhead?: number }) {
-  const { view, error } = useTimelineView(TIMELINE);
+  const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const empty = layout !== null && layout.clipCount === 0;
 
@@ -79,6 +79,17 @@ export function TimelinePanel({ collapsed, onToggle, playhead = 0 }: { collapsed
           </span>
         )}
       </PanelHeader>
+      {!collapsed && rejection && (
+        <div className="editor-notice is-error timeline-rejection" role="alert">
+          <span>
+            {`Edit of timelines/${rejection.timeline}.json rejected (${rejection.reason}); the timeline was restored. ` +
+              `Your version is kept at ${rejection.preserved}.\n${rejection.message}`}
+          </span>
+          <button className="link" onClick={dismissRejection}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {!collapsed && (
         <TimelineCanvas
           layout={layout}

@@ -64,12 +64,27 @@ test("a clip added with the CLI in the terminal appears within 200 ms", async ()
   await expect(page.locator(".timeline-empty")).toHaveCount(0);
 });
 
-test("follows direct edits of the timeline file too", async () => {
+test("follows direct edits of the timeline file too, through the daemon", async () => {
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
-  timeline.revision += 1;
   timeline.tracks[0].name = "Camera";
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
   await expect(page.locator(".track-head").first()).toHaveText("V1Camera");
+  // Journaled as a `file` operation: the daemon bumped the revision.
+  await expect(lanes()).toHaveAttribute("data-revision", String(timeline.revision + 1));
+});
+
+test("shows a stale direct edit as rejected and keeps the daemon's timeline", async () => {
+  const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+  const revision = String(timeline.revision);
+  writeFileSync(mainFile, JSON.stringify({ ...timeline, revision: 0, tracks: [] }, null, 2));
+  const alert = page.locator(".timeline-rejection");
+  await expect(alert).toContainText("rejected (stale)");
+  await expect(alert).toContainText(".frameshell/rejected/");
+  await expect(page.locator(".track-head").first()).toHaveText("V1Camera");
+  await expect(lanes()).toHaveAttribute("data-revision", revision);
+  expect(JSON.parse(readFileSync(mainFile, "utf8")).revision).toBe(timeline.revision);
+  await alert.getByRole("button", { name: "Dismiss" }).click();
+  await expect(alert).toHaveCount(0);
 });
 
 test("stays smooth with 250 clips per track while scrolling and zooming", async () => {
@@ -83,7 +98,6 @@ test("stays smooth with 250 clips per track while scrolling and zooming", async 
       out: 1.5,
     }));
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
-  timeline.revision += 1;
   timeline.tracks[0].clips = clips("v");
   timeline.tracks[1].clips = clips("a");
   writeFileSync(mainFile, JSON.stringify(timeline));

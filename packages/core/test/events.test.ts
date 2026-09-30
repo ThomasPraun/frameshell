@@ -1,3 +1,4 @@
+import { symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -155,6 +156,22 @@ describe("timeline.changed notifications", () => {
     await app.request("track.list", { cwd: dir });
     expect(seen.map((event) => event.revision)).toEqual([...seen.map((event) => event.revision)].sort((a, b) => a - b));
     expect(seen.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("reach a connection that names the project by another path (symlink), spelled as it subscribed", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const app = await connect("desktop/test");
+    const cli = await connect("cli/test", "term-3");
+    const dir = await project(cli);
+    const alias = join(tempDir(), "alias");
+    // A junction needs no privileges on Windows; elsewhere the type is ignored.
+    symlinkSync(dir, alias, "junction");
+    await expect(app.request("events.subscribe", { cwd: alias, events: ["timeline.changed"] })).resolves.toMatchObject({ dir: alias });
+    const { seen, arrived } = collect(app);
+
+    await cli.request("track.add", { cwd: dir, kind: "video" });
+    await arrived;
+    expect(seen).toMatchObject([{ project: alias, author: "cli:term-3" }]);
   });
 
   it("refuses unknown event names and directories outside any project", async () => {

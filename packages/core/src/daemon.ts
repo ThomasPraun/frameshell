@@ -22,6 +22,7 @@ import {
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
+import { canonicalPath } from "./fs-util.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { JobQueue } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -33,6 +34,7 @@ import { FileTransactionStore, TransactionTracker } from "./history/transactions
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
+import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
@@ -117,7 +119,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const binaries = options.binaries ?? new BinaryManager(dirs);
   const jobs = new JobQueue({ concurrency: options.jobConcurrency ?? 2, onBusyChange: () => armIdleTimer() });
   const media = new MediaService({ binaries, jobs });
-  const projects = new ProjectRegistry({ onOpen: (dir) => media.attach(dir) });
+  const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
+  const projects = new ProjectRegistry({
+    onOpen: (dir) => {
+      media.attach(dir);
+      timelineWatcher.attach(dir);
+    },
+    writeTimeline: (dir, id, content): Promise<void> => timelines.writeFile(dir, id, content),
+  });
   const plugins = new PluginHost({ dirs, pins: projects });
   const energy = new EnergyStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
@@ -128,6 +137,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     extractAudio: options.extractAudio,
   });
   const events = new EventHub();
+  const transactions = new TransactionTracker({
+    idleGapMs: options.txIdleGapMs,
+    store: new FileTransactionStore(dirs.dataDir, socketPath),
+  });
+  await transactions.restore();
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
@@ -137,8 +151,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
         profile: (asset) => energy.profile(dir, asset),
       }),
+    // `root` is canonical, the hub's key; each connection gets `project` spelled as it subscribed.
     onChanged: ({ root, timeline, revision, author, changes }) =>
       events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes }),
+    onRejected: ({ root, ...rejection }) => events.publish("timeline.rejected", root, { project: root, ...rejection }),
+    fileTx: () => transactions.next("file"),
   });
   const exports = new ExportService({
     jobs,
@@ -152,11 +169,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
-  const transactions = new TransactionTracker({
-    idleGapMs: options.txIdleGapMs,
-    store: new FileTransactionStore(dirs.dataDir, socketPath),
-  });
-  await transactions.restore();
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
@@ -203,6 +215,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         project,
         trust,
         openProjects: projects.list(),
+        rejections: project ? (await timelines.rejections(project.dir)).map(({ root: _root, ...rejection }) => rejection) : [],
         jobs: project ? jobs.list({ project: project.dir }) : [],
         caller: { ...caller },
       };
@@ -254,11 +267,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "events.subscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, events: events.subscribe(request.sink, dir, names) };
+      return { dir, events: events.subscribe(request.sink, await canonicalPath(dir), dir, names) };
     },
     "events.unsubscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, events: events.unsubscribe(request.sink, dir, names) };
+      return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
     "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),
@@ -369,6 +382,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       // Canceled jobs are found again from disk when the project next opens.
       await media.close();
+      await timelineWatcher.close();
       await jobs.close();
     })().then(resolveClosed);
     return closing;

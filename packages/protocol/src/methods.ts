@@ -7,6 +7,7 @@ import {
   OperationResultSchema,
   TimelineIdSchema,
   TimelineProblemSchema,
+  TimelineRejectionSchema,
   TimelineViewSchema,
   TrackSummarySchema,
   TxIdSchema,
@@ -17,7 +18,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -232,8 +233,11 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed"])
-  .describe("`timeline.changed`: a timeline file of the project was changed by an operation (any client).");
+  .enum(["timeline.changed", "timeline.rejected"])
+  .describe(
+    "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
+      "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored.",
+  );
 
 const EventsParams = z.strictObject({
   cwd: CwdParam,
@@ -306,6 +310,12 @@ export const methods = {
         .nullable()
         .describe("Plugin trust of `project`; null when there is no project."),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
+      rejections: z
+        .array(TimelineRejectionSchema)
+        .describe(
+          "Direct edits of `project`'s timeline files refused since the daemon started (at most 20, newest first): the " +
+            "daemon's version was restored and the edit kept at `preserved`. Empty when none or no project.",
+        ),
       jobs: z
         .array(JobSchema)
         .describe("Background jobs of `project` in this daemon run, oldest first; empty when there is no project."),
@@ -614,7 +624,9 @@ export const methods = {
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
       "Missing parent directories are created. `frameshell.json`, `timelines/*.json` and `transcripts/**/*.words.json` must pass schema validation " +
-      "or the write is rejected with InvalidProjectFile and the old file kept. " +
+      "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
+      "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
+      "journaled as a `timeline.patch` operation by author `file` with the revision bumped. " +
       "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
@@ -831,7 +843,7 @@ export const methods = {
       "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
-      "a `file.write` save): the journal cannot undo what it did not record, so edit forward. Fails with " +
+      "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
       "HistoryNotFound when the id is not in the timeline's journal.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -874,15 +886,24 @@ export const notifications = {
   },
   "timeline.changed": {
     description:
-      "A timeline file was changed by an applied operation, from any client. Sent to connections subscribed with " +
+      "A timeline file was changed by an applied operation, from any client or a direct edit of the file (author `file`). Sent to connections subscribed with " +
       "`events.subscribe` on the project, after the file is written, in revision order per timeline. Re-read with " +
       "`timeline.show` when `revision` is newer than the one you hold; `changes` says what to re-read.",
     params: z.object({
       project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
       timeline: z.string().describe("Timeline id; the file is `timelines/<id>.json`."),
       revision: z.int().describe("Revision after the change."),
-      author: z.string().describe("`ui`, `cli:<session>`, `cli`, `file` or `plugin:<name>`."),
+      author: z.string().describe("`ui`, `cli:<session>`, `cli`, `file` (direct edit of the file) or `plugin:<name>`."),
       changes: OperationResultSchema.shape.changes,
+    }),
+  },
+  "timeline.rejected": {
+    description:
+      "A direct edit of a timeline file was refused (SPEC §6.4): its `revision` was stale, or its content invalid. The " +
+      "daemon's version is back on disk, so no `timeline.changed` follows; the edit is kept at `preserved` for recovery. " +
+      "Also listed by `status` as `rejections`.",
+    params: TimelineRejectionSchema.extend({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
     }),
   },
 } as const satisfies Record<string, { description: string; params: z.ZodType }>;
@@ -1094,6 +1115,11 @@ export const ErrorCode = {
   RevertConflict: -32032,
   /** data: `{ path, available: string[] }`: project-relative script asked for, and the `scripts/**\/*.md` there are. */
   ScriptNotFound: -32033,
+  /**
+   * data: `{ path, timeline, revision, current }`: a timeline write carried `revision` but the timeline is at
+   * `current`. Re-read the file, reapply the edit, write again.
+   */
+  StaleRevision: -32034,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

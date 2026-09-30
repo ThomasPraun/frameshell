@@ -11,12 +11,13 @@ import {
   type OperationResult,
   RpcError,
   type TimelineProblem,
+  type TimelineRejection as RejectionInfo,
   type TimelineView,
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type Timeline, parseTimeline } from "@frameshell/schema";
-import { writeJsonAtomic } from "../fs-util.js";
+import { type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
@@ -51,11 +52,21 @@ export interface TimelineServiceOptions {
    * revision order per timeline.
    */
   onChanged?: (change: TimelineChange) => void;
+  /** Called after a direct edit is refused, the daemon's version restored and the edit preserved (SPEC §6.4). */
+  onRejected?: (rejection: TimelineRejection) => void;
+  /** Transaction of each accepted direct edit (author `file`). Default: a new one per edit. */
+  fileTx?: () => TxRef;
+}
+
+/** A refused direct edit, as reported to {@link TimelineServiceOptions.onRejected} and {@link TimelineService.rejections}. */
+export interface TimelineRejection extends RejectionInfo {
+  /** Project root, canonical (`canonicalPath`): one spelling however callers named the project. */
+  root: string;
 }
 
 /** One applied operation, as reported to {@link TimelineServiceOptions.onChanged}. */
 export interface TimelineChange {
-  /** Project root. */
+  /** Project root, canonical (`canonicalPath`): one spelling however callers named the project. */
   root: string;
   /** Timeline id. */
   timeline: string;
@@ -109,16 +120,41 @@ export interface RevertAllCall {
   timelines: { root: string; timeline: string }[];
 }
 
+/** Rejections kept per project for `status`, newest first. */
+const MAX_REJECTIONS = 20;
+
+/**
+ * Last content the daemon wrote, accepted or first read for one timeline
+ * file. `timeline` null: the file was invalid when first seen, so there is
+ * no version to restore.
+ */
+interface Known {
+  text: string;
+  timeline: Timeline | null;
+}
+
 /**
  * The daemon's timeline files (SPEC §6.1): loads a timeline, runs one
  * operation through the engine with project facts (fps, media probes,
  * nested timelines, plugin clip types), writes the result atomically and
- * returns the operation record. Operations on one file are serialized; the
- * file is re-read each time, so it stays the source of truth.
+ * returns the operation record. Operations on one file are serialized.
+ *
+ * Direct edits (SPEC §6.4): every read compares the file with the last
+ * content this service wrote or accepted. A difference is someone else's
+ * edit: with the current `revision` and valid content it is journaled as a
+ * `timeline.patch` operation by author `file`; otherwise the daemon's version
+ * is restored and the edit kept under `.frameshell/rejected/`. The service's
+ * own writes match what it remembers, so they never count as edits.
  */
 export class TimelineService {
   readonly #options: TimelineServiceOptions;
   readonly #queues = new Map<string, Promise<unknown>>();
+  /** By {@link TimelineService.#key}. */
+  readonly #known = new Map<string, Known>();
+  /** By real project root, newest first. */
+  readonly #rejections = new Map<string, TimelineRejection[]>();
+  /** Real path of each project root seen. */
+  readonly #realRoots = new Map<string, Promise<string>>();
 
   constructor(options: TimelineServiceOptions) {
     this.#options = options;
@@ -135,8 +171,8 @@ export class TimelineService {
     const scriptRef = raw.op === "clip.add" || raw.op === "clip.set" ? raw.args.scriptRef : undefined;
     const problem = typeof scriptRef === "string" ? await checkScriptRef(root, scriptRef) : null;
     const warnings = problem ? [problem] : [];
-    return this.#exclusive([timelinePath(root, id)], async () => {
-      const { timeline, fps, snapWindow } = await this.load(root, id);
+    return this.#turn(root, id, async () => {
+      const { timeline, fps, snapWindow } = await this.#current(root, id);
       const request = normalizeArgs(call);
       const context = this.#context(root, id, fps, request.op, snapWindow);
       return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args, warnings);
@@ -150,8 +186,8 @@ export class TimelineService {
    */
   revert(call: RevertCall): Promise<OperationResult> {
     const { root, timeline: id, target } = call;
-    return this.#exclusive([timelinePath(root, id)], async () => {
-      const { timeline, fps } = await this.load(root, id);
+    return this.#turn(root, id, async () => {
+      const { timeline, fps } = await this.#current(root, id);
       const restored = planRevert(timeline, await readJournal(root, id), target, id);
       const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
       const applied = await applyOperation(timeline, patch, this.#context(root, id, fps, "revert"));
@@ -168,10 +204,11 @@ export class TimelineService {
    * RevertConflict listing every conflicting timeline, with nothing undone;
    * other errors (TimelineNotFound, engine errors) also before any write.
    */
-  revertAll(call: RevertAllCall): Promise<OperationResult[]> {
+  async revertAll(call: RevertAllCall): Promise<OperationResult[]> {
     const { timelines, target } = call;
+    const keys = await Promise.all(timelines.map(({ root, timeline }) => this.#key(root, timeline)));
     return this.#exclusive(
-      timelines.map(({ root, timeline }) => timelinePath(root, timeline)),
+      keys,
       async () => {
         const planned: { where: { root: string; timeline: string }; before: Timeline; applied: AppliedOperation }[] = [];
         const failures: TimelineRevertFailure[] = [];
@@ -179,7 +216,7 @@ export class TimelineService {
           const { root, timeline: id } = where;
           const entries = await readJournal(root, id);
           if (!entries.some((entry) => entry.tx === target)) continue;
-          const { timeline, fps } = await this.load(root, id);
+          const { timeline, fps } = await this.#current(root, id);
           let restored: Timeline;
           try {
             restored = planRevert(timeline, entries, target, id);
@@ -202,6 +239,53 @@ export class TimelineService {
     );
   }
 
+  /**
+   * Take in whatever is on disk for timeline `id` now (the daemon's watcher
+   * calls this on every change): a direct edit is journaled or rejected (see
+   * the class doc); the service's own writes are no-ops. Throws
+   * TimelineNotFound when the file is gone, InvalidProjectFile when it is
+   * invalid and there is no earlier version to restore.
+   */
+  async reconcile(root: string, id: string): Promise<void> {
+    await this.load(root, id);
+  }
+
+  /**
+   * `file.write` of `timelines/<id>.json` (SPEC §6.4): `content` is taken in
+   * like a direct edit, but a refusal throws instead of touching the disk:
+   * InvalidProjectFile (not JSON or schema), StaleRevision (`revision` is
+   * not the current one) or the engine's errors (timeline rules). Without a
+   * readable current version (new or broken file), valid content is written as is.
+   */
+  writeFile(root: string, id: string, content: string): Promise<void> {
+    return this.#turn(root, id, async () => {
+      const path = timelinePath(root, id);
+      let base: Timeline | null = null;
+      try {
+        base = (await this.#current(root, id)).timeline;
+      } catch (error) {
+        const code = error instanceof RpcError ? error.code : undefined;
+        if (code !== ErrorCode.TimelineNotFound && code !== ErrorCode.InvalidProjectFile) throw error;
+      }
+      if (base) {
+        await this.#acceptEdit(root, id, content, base, await projectFps(root));
+        return;
+      }
+      const parsed = parseText(content);
+      if (!parsed.ok) throw invalidFile(path, parsed.error);
+      await writeTextAtomic(path, content);
+      const key = await this.#key(root, id);
+      const replaced = this.#known.has(key);
+      this.#known.set(key, { text: content, timeline: parsed.value });
+      if (replaced) await this.#announce(root, id, parsed.value);
+    });
+  }
+
+  /** Direct edits of `root`'s timelines refused since the daemon started, newest first (`status`). */
+  async rejections(root: string): Promise<TimelineRejection[]> {
+    return [...(this.#rejections.get(await this.#realRoot(root)) ?? [])];
+  }
+
   /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
     await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
@@ -222,7 +306,10 @@ export class TimelineService {
     warnings: string[] = [],
   ): Promise<OperationResult> {
     const { root, timeline: id } = call;
-    await writeJsonAtomic(timelinePath(root, id), applied.timeline);
+    const path = timelinePath(root, id);
+    const text = `${JSON.stringify(applied.timeline, null, 2)}\n`;
+    await writeTextAtomic(path, text);
+    this.#known.set(await this.#key(root, id), { text, timeline: applied.timeline });
     const operation: OperationRecord = {
       id: `op_${randomBytes(4).toString("hex")}`,
       op,
@@ -241,7 +328,13 @@ export class TimelineService {
       hash: timelineHash(applied.timeline),
     };
     await appendJournal(root, id, entry);
-    this.#options.onChanged?.({ root, timeline: id, revision: applied.timeline.revision, author: call.author, changes: applied.changes });
+    this.#options.onChanged?.({
+      root: await this.#realRoot(root),
+      timeline: id,
+      revision: applied.timeline.revision,
+      author: call.author,
+      changes: applied.changes,
+    });
     return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings };
   }
 
@@ -390,17 +483,28 @@ export class TimelineService {
   }
 
   /**
-   * Parsed `timelines/<id>.json`, the project fps and its default snap window
-   * (`editing.snapWindow`, absent when unset). Throws TimelineNotFound (listing the ids) or InvalidProjectFile.
+   * Parsed `timelines/<id>.json` and the project fps, after taking in any
+   * direct edit (see {@link TimelineService.reconcile}). Throws
+   * TimelineNotFound (listing the ids) or InvalidProjectFile.
    */
-  async load(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
+  load(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
+    return this.#turn(root, id, () => this.#current(root, id));
+  }
+
+  /** {@link TimelineService.load} for callers already holding the file's turn. */
+  async #current(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
     const project = await readEnclosingProject(root);
     const fps = project?.config.fps ?? 30;
-    const snapWindow = project?.config.editing?.snapWindow;
+    const window = project?.config.editing?.snapWindow;
+    const snap = window !== undefined ? { snapWindow: window } : {};
+    const path = timelinePath(root, id);
+    const key = await this.#key(root, id);
+    let text: string;
     try {
-      return { timeline: await readTimelineFile(root, timelineRel(id)), fps, ...(snapWindow !== undefined ? { snapWindow } : {}) };
+      text = await readFile(path, "utf8");
     } catch (error) {
-      if (!(error instanceof RpcError && error.code === ErrorCode.TimelineNotFound)) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      this.#known.delete(key);
       const available = await listTimelines(root);
       throw new RpcError(
         ErrorCode.TimelineNotFound,
@@ -408,6 +512,118 @@ export class TimelineService {
         { timeline: id, path: timelineRel(id), available },
       );
     }
+    const known = this.#known.get(key);
+    if (known?.timeline && known.text === text) return { timeline: structuredClone(known.timeline), fps, ...snap };
+    if (known?.timeline) return { timeline: await this.#absorb(root, id, text, known.timeline, fps), fps, ...snap };
+    // First sight, or no valid version yet: nothing to diff against or restore.
+    const parsed = parseText(text);
+    this.#known.set(key, { text, timeline: parsed.ok ? parsed.value : null });
+    if (!parsed.ok) throw invalidFile(path, parsed.error);
+    if (known) await this.#announce(root, id, parsed.value);
+    return { timeline: structuredClone(parsed.value), fps, ...snap };
+  }
+
+  /** A direct edit on disk: journal it, or restore `base` and keep the edit. Returns the timeline now on disk. */
+  async #absorb(root: string, id: string, text: string, base: Timeline, fps: number): Promise<Timeline> {
+    try {
+      return await this.#acceptEdit(root, id, text, base, fps);
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error;
+      const reason = error.code === ErrorCode.StaleRevision ? "stale" : "invalid";
+      await this.#reject(root, id, text, base, reason, error.message);
+      return structuredClone(base);
+    }
+  }
+
+  /**
+   * Journal `text` as one `timeline.patch` operation by author `file` on top
+   * of `base`, bumping the revision. Throws, without writing: InvalidProjectFile,
+   * StaleRevision, or the engine's errors for a patch breaking timeline rules.
+   */
+  async #acceptEdit(root: string, id: string, text: string, base: Timeline, fps: number): Promise<Timeline> {
+    const path = timelinePath(root, id);
+    const parsed = parseText(text);
+    if (!parsed.ok) throw invalidFile(path, parsed.error);
+    const incoming = parsed.value;
+    if (incoming.revision !== base.revision) {
+      throw new RpcError(
+        ErrorCode.StaleRevision,
+        `${timelineRel(id)} was edited at revision ${incoming.revision}, but timeline ${id} is at revision ${base.revision}` +
+          `${incoming.revision < base.revision ? " (it changed since that copy was read)" : ""}. ` +
+          "Re-read the file, reapply the edit keeping its `revision`, and save again.",
+        { path, timeline: id, revision: incoming.revision, current: base.revision },
+      );
+    }
+    const patch = diffTimelines(base, incoming);
+    if (!patch.tracks && !patch.clips && !patch.order) {
+      // Same tracks and clips (formatting, key order): nothing to journal.
+      await writeTextAtomic(path, text);
+      this.#known.set(await this.#key(root, id), { text, timeline: base });
+      return structuredClone(base);
+    }
+    const applied = await applyOperation(base, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch"));
+    const tx = this.#options.fileTx?.() ?? { id: `tx_${randomBytes(4).toString("hex")}`, label: null };
+    await this.#record({ root, cwd: root, timeline: id, author: "file", tx }, base, applied, "timeline.patch", patch);
+    return applied.timeline;
+  }
+
+  /** Restore `base` on disk, keep `text` under `.frameshell/rejected/`, report it (SPEC §6.4). */
+  async #reject(root: string, id: string, text: string, base: Timeline, reason: "stale" | "invalid", message: string): Promise<void> {
+    const at = new Date().toISOString();
+    const stamp = at.replace(/[:.]/g, "-"); // `:` is not allowed in Windows file names.
+    let preserved = `.frameshell/rejected/${stamp}-${id}.json`;
+    for (let n = 2; await exists(join(root, preserved)); n++) preserved = `.frameshell/rejected/${stamp}-${n}-${id}.json`;
+    await writeTextAtomic(join(root, preserved), text);
+    const path = timelinePath(root, id);
+    const key = await this.#key(root, id);
+    const restored = this.#known.get(key)?.text ?? `${JSON.stringify(base, null, 2)}\n`;
+    await writeTextAtomic(path, restored);
+    this.#known.set(key, { text: restored, timeline: base });
+    const real = await this.#realRoot(root);
+    const rejection: TimelineRejection = {
+      root: real,
+      timeline: id,
+      reason,
+      message,
+      preserved,
+      revision: revisionOf(text),
+      current: base.revision,
+      at,
+    };
+    this.#rejections.set(real, [rejection, ...(this.#rejections.get(real) ?? [])].slice(0, MAX_REJECTIONS));
+    this.#options.onRejected?.(rejection);
+  }
+
+  /** A timeline that became readable without an operation (new or repaired file): re-read all of it. */
+  async #announce(root: string, id: string, timeline: Timeline): Promise<void> {
+    const updated = timeline.tracks.map((track) => track.id);
+    this.#options.onChanged?.({
+      root: await this.#realRoot(root),
+      timeline: id,
+      revision: timeline.revision,
+      author: "file",
+      changes: { added: [], updated, removed: [], range: { from: 0, to: null } },
+    });
+  }
+
+  /**
+   * Identity of a timeline file across spellings of its root (symlinks,
+   * `/var` vs `/private/var`): the app, the CLI and the watcher may name one
+   * project differently, and must share one known version and one queue.
+   */
+  async #key(root: string, id: string): Promise<string> {
+    return timelinePath(await this.#realRoot(root), id);
+  }
+
+  #realRoot(root: string): Promise<string> {
+    let real = this.#realRoots.get(root);
+    if (!real) this.#realRoots.set(root, (real = canonicalPath(root)));
+    return real;
+  }
+
+  /** Run `work` after every earlier call on the same timeline file. */
+  async #turn<T>(root: string, id: string, work: () => Promise<T>): Promise<T> {
+    return this.#exclusive([await this.#key(root, id)], work);
   }
 
   /** Run `work` once every earlier task on any of `keys` settled, holding all of them. Queues are claimed synchronously, so no deadlock. */
@@ -438,6 +654,37 @@ async function listTimelines(root: string): Promise<string[]> {
   return names.filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)).sort();
 }
 
+async function projectFps(root: string): Promise<number> {
+  return (await readEnclosingProject(root))?.config.fps ?? 30;
+}
+
+/** Timeline file content, JSON syntax and schema checked. */
+function parseText(text: string): ParseResult<Timeline> {
+  try {
+    return parseTimeline(JSON.parse(text));
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+function invalidFile(path: string, details: string): RpcError {
+  return new RpcError(
+    ErrorCode.InvalidProjectFile,
+    `Invalid ${path}:\n${details}\nFix the file (or restore it from version control) and retry.`,
+    { path, details },
+  );
+}
+
+/** `revision` of unvalidated content, when it has a readable one. */
+function revisionOf(text: string): number | null {
+  try {
+    const revision = (JSON.parse(text) as { revision?: unknown } | null)?.revision;
+    return Number.isInteger(revision) ? (revision as number) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Parse a project-relative timeline file. Throws TimelineNotFound (missing) or InvalidProjectFile. */
 async function readTimelineFile(root: string, rel: string): Promise<Timeline> {
   const path = join(root, ...rel.split("/"));
@@ -448,19 +695,8 @@ async function readTimelineFile(root: string, rel: string): Promise<Timeline> {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     throw new RpcError(ErrorCode.TimelineNotFound, `No timeline file ${rel}.`, { timeline: rel, path: rel, available: [] });
   }
-  let parsed;
-  try {
-    parsed = parseTimeline(JSON.parse(text));
-  } catch (error) {
-    parsed = { ok: false as const, error: (error as Error).message };
-  }
-  if (!parsed.ok) {
-    throw new RpcError(
-      ErrorCode.InvalidProjectFile,
-      `Invalid ${path}:\n${parsed.error}\nFix the file (or restore it from version control) and retry.`,
-      { path, details: parsed.error },
-    );
-  }
+  const parsed = parseText(text);
+  if (!parsed.ok) throw invalidFile(path, parsed.error);
   return parsed.value;
 }
 
