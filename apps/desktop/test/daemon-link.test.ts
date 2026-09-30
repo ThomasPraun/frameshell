@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { type Socket, createConnection, createServer } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "@frameshell/core";
 import { type EventParams, ErrorCode, connectToDaemon } from "@frameshell/protocol";
@@ -134,5 +135,74 @@ describe("DaemonLink event subscriptions", () => {
     await cli.request("track.add", { cwd: dir, kind: "video" });
     await next;
     expect(first.seen).toEqual([]);
+  });
+});
+
+describe("DaemonLink retries", () => {
+  /**
+   * Proxy on its own endpoint in front of the daemon. On the first line matching `drop`, it forwards
+   * the line and cuts the app's side before the reply comes back: the daemon applied the request, the
+   * app saw a transport failure. Later connections pass through.
+   */
+  async function lossyProxy(target: string, drop: RegExp) {
+    const path = socketPath();
+    let dropped = 0;
+    const sockets = new Set<Socket>();
+    const server = createServer((client) => {
+      const upstream = createConnection(target);
+      sockets.add(client).add(upstream);
+      let cut = false;
+      let pending = "";
+      upstream.on("data", (chunk) => {
+        if (!cut) client.write(chunk);
+      });
+      client.on("data", (chunk) => {
+        pending += chunk.toString("utf8");
+        let newline: number;
+        while ((newline = pending.indexOf("\n")) !== -1) {
+          const line = pending.slice(0, newline + 1);
+          pending = pending.slice(newline + 1);
+          upstream.write(line);
+          if (dropped === 0 && drop.test(line)) {
+            dropped++;
+            cut = true;
+            client.destroy();
+            return;
+          }
+        }
+      });
+      // Give the daemon time to run what it received before its side closes too.
+      client.on("close", () => setTimeout(() => upstream.destroy(), 500));
+      client.on("error", () => undefined);
+      upstream.on("error", () => client.destroy());
+    });
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    cleanups.push(
+      () =>
+        new Promise((resolve) => {
+          for (const socket of sockets) socket.destroy();
+          server.close(resolve);
+        }),
+    );
+    return { path, dropped: () => dropped };
+  }
+
+  it("retries a mutating request whose reply was lost with the same idempotency key, so it applies once", async () => {
+    const target = socketPath();
+    const daemon = await startDaemon({ socketPath: target });
+    cleanups.push(() => daemon.close());
+    const cli = await connectToDaemon(target, { client: "cli/test" });
+    cleanups.push(() => cli.close());
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-link-"))), "talk");
+    await cli.request("project.init", { dir });
+    const proxy = await lossyProxy(target, /"method":"track\.add"/);
+
+    const result = await link(proxy.path).request("track.add", { cwd: dir, kind: "video", name: "Once" });
+    expect(proxy.dropped()).toBe(1);
+    expect(result.operation.op).toBe("track.add");
+    const { tracks } = await cli.request("track.list", { cwd: dir });
+    expect(tracks.map((track) => track.name)).toEqual(["Once"]);
+    const history = await cli.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions.flatMap((tx) => tx.operations.map((op) => op.op))).toEqual(["track.add"]);
   });
 });

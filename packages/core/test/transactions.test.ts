@@ -305,6 +305,48 @@ describe("transactions", () => {
     expect(next.operation.tx).not.toBe(begun.tx);
   });
 
+  it("commits a transaction with autoCommitAfter by itself once its author goes quiet, as when the app crashes mid-batch", async () => {
+    const { dir, connect, addTrack, admin } = await setup();
+    const app = await connect("desktop/0.1.0");
+    const begun = await app.request("tx.begin", { label: "Split 2 clips", autoCommitAfter: 0.3 });
+    await addTrack(app, "U1");
+    await sleep(100);
+    // Activity keeps it open past the first deadline.
+    expect((await addTrack(app, "U2")).operation.tx).toBe(begun.tx);
+    app.close(); // Crash: no commit ever comes.
+
+    await sleep(600);
+    const restarted = await connect("desktop/0.1.0");
+    await expect(restarted.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+    expect((await addTrack(restarted, "U3")).operation.tx).not.toBe(begun.tx);
+    const history = await admin.request("history", { cwd: dir });
+    expect(history.transactions.map((t) => [t.label, t.operations.length])).toEqual([
+      ["Split 2 clips", 2],
+      [null, 1],
+    ]);
+  });
+
+  it("keeps an autoCommitAfter deadline across daemon restarts, never resuming a transaction past it", async () => {
+    const { connect, addTrack, restart } = await setup();
+    const app = await connect("desktop/0.1.0");
+    await app.request("tx.begin", { label: "expires while running", autoCommitAfter: 0.3 });
+    await addTrack(app, "U1");
+    await sleep(600);
+    await restart();
+    await expect((await connect("desktop/0.1.0")).request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+
+    const open = await (await connect("desktop/0.1.0")).request("tx.begin", { label: "survives", autoCommitAfter: 0.5 });
+    await restart();
+    const after = await connect("desktop/0.1.0");
+    expect((await addTrack(after, "U2")).operation.tx).toBe(open.tx);
+
+    // The deadline passes while no daemon runs: the next one does not resume it.
+    await daemon!.close();
+    await sleep(800);
+    await restart();
+    await expect((await connect("desktop/0.1.0")).request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+  });
+
   it("reverts through the daemon in a transaction of its own", async () => {
     const { dir, connect, addTrack, tracks } = await setup();
     const agent = await connect("cli/test", "agent");

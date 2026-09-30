@@ -113,11 +113,13 @@ export interface FrameshellApi {
      */
     onRejected(listener: (rejection: TimelineRejection) => void): () => void;
     /**
-     * Apply one edit as a daemon operation by `ui`: validated, saved and
-     * journaled at once (no unsaved state). Rejects with the daemon's message
-     * (overlap, bounds) and nothing changes.
+     * Apply the edits of one command, in order, as daemon operations by `ui`:
+     * validated, saved and journaled at once (no unsaved state). Several edits
+     * (a split of every selected clip) are one transaction, so one undo step.
+     * Resolves with the last result. Rejects with the daemon's message
+     * (overlap, bounds) at the first refused edit; earlier ones stay applied.
      */
-    edit(timeline: string, edit: TimelineEdit): Promise<OperationResult>;
+    edit(timeline: string, edits: TimelineEdit[]): Promise<OperationResult>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
     undo(timeline: string): Promise<OperationResult | null>;
     /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */

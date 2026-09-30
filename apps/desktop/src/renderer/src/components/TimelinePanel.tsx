@@ -391,15 +391,15 @@ function TimelineCanvas({
   }, []);
 
   /**
-   * Queue daemon operations, one at a time; the first refusal stops the rest
-   * and shows the daemon's message. Resolves with the last result, or null.
+   * Queue daemon calls, one at a time; a refusal shows the daemon's message.
+   * `clips` is how many clips the call edits, for the status line.
    */
   const run = useCallback(
-    (work: () => Promise<OperationResult | null>, done?: (result: OperationResult | null) => void) => {
+    (work: () => Promise<OperationResult | null>, done?: (result: OperationResult | null) => void, clips = 1) => {
       queue.current = queue.current.then(async () => {
         try {
           const result = await work();
-          onStatus(result ? describe(result, latest.current.fps) : null);
+          onStatus(result ? describe(result, latest.current.fps, clips) : null);
           done?.(result);
         } catch (error) {
           onStatus({ tone: "error", text: (error as Error).message });
@@ -416,11 +416,8 @@ function TimelineCanvas({
         done?.(null);
         return;
       }
-      run(async () => {
-        let last: OperationResult | null = null;
-        for (const edit of edits) last = await window.frameshell.timeline.edit(TIMELINE, edit);
-        return last;
-      }, done);
+      // One call per command: main applies its edits as one transaction, one undo step.
+      run(() => window.frameshell.timeline.edit(TIMELINE, edits), done, edits.length);
     },
     [run],
   );
@@ -716,8 +713,8 @@ function toGhost(preview: DragPreview): DragGhost {
   };
 }
 
-/** Header line for an applied edit: energy snapping news (ADR 0003), else what was done. */
-function describe(result: OperationResult, fps: number): Status {
+/** Header line for an applied edit of `clips` clips: energy snapping news (ADR 0003), else what was done. */
+function describe(result: OperationResult, fps: number, clips: number): Status {
   const rough = result.snaps.find((snap) => !snap.clean);
   if (rough) {
     return {
@@ -727,7 +724,8 @@ function describe(result: OperationResult, fps: number): Status {
   }
   const moved = result.snaps.find((snap) => Math.abs(snap.applied - snap.requested) >= 0.0005);
   if (moved) return { tone: "info", text: `Edge snapped ${formatDuration(Math.abs(moved.applied - moved.requested))} into a pause` };
-  return { tone: "info", text: `${OP_LABELS[result.operation.op] ?? result.operation.op} saved` };
+  const label = OP_LABELS[result.operation.op] ?? result.operation.op;
+  return { tone: "info", text: clips > 1 ? `${label} of ${clips} clips saved as one step` : `${label} saved` };
 }
 
 const OP_LABELS: Record<string, string> = {

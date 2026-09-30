@@ -27,6 +27,11 @@ export interface ConnectOptions {
 /** Per-call options of {@link DaemonConnection.request}. */
 export interface RequestOptions {
   onProgress?: ((progress: Progress) => void) | undefined;
+  /**
+   * Sent as `params.idempotencyKey` (see `IdempotencyKeySchema`): only
+   * mutating methods accept it. Reuse it when retrying the same change.
+   */
+  idempotencyKey?: string | undefined;
 }
 
 /** Open, handshaken connection to frameshelld. */
@@ -145,7 +150,10 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
 
   return {
     daemon,
-    request: (method, params, options) => call(method, params, options?.onProgress) as never,
+    request: (method, params, options) => {
+      const key = options?.idempotencyKey;
+      return call(method, key === undefined ? params : { ...params, idempotencyKey: key }, options?.onProgress) as never;
+    },
     on: (event, listener) => {
       let subscribers = listeners.get(event);
       if (!subscribers) listeners.set(event, (subscribers = new Set()));

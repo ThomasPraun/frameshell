@@ -17,7 +17,7 @@ import {
   type AppDirs,
   assertSocketPathFits,
   isMethodName,
-  parseParams,
+  parseRequest,
   readMessages,
   resolveAppDirs,
   writeMessage,
@@ -34,6 +34,7 @@ import { MediaService } from "./media/service.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
+import { IdempotencyCache } from "./idempotency.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
@@ -166,6 +167,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     store: new FileTransactionStore(dirs.dataDir, socketPath),
   });
   await transactions.restore();
+  const replays = new IdempotencyCache();
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
@@ -354,9 +356,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "tx.begin": async ({ label }, caller) => {
+    "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
-      const tx = await transactions.begin(author, label);
+      const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;
+      const tx = await transactions.begin(author, label, { autoCommitMs });
       return { tx: tx.id, label, author };
     },
     "tx.commit": async (_params, caller) => {
@@ -414,7 +417,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw new RpcError(ErrorCode.HandshakeRequired, "Send `handshake` before any other method");
         }
         if (!isMethodName(method)) throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
-        const params = parseParams(method, request.params);
+        const { params, idempotencyKey } = parseRequest(method, request.params);
         // Set before the await: a request pipelined behind the handshake is dispatched
         // while the handshake handler is still pending. Invalid params never get here.
         if (method === "handshake") handshaken = true;
@@ -425,7 +428,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           sink,
         };
         const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
-        const result = await handler(params, caller, context);
+        const result = await (idempotencyKey === null
+          ? handler(params, caller, context)
+          : replays.run(authorOf(caller), idempotencyKey, method, params, () => handler(params, caller, context)));
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;
@@ -445,6 +450,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   function close(): Promise<void> {
     closing ??= (async () => {
       clearTimeout(idleTimer);
+      transactions.close();
       await new Promise<void>((resolve) => {
         for (const socket of clients) socket.destroy();
         server.close(() => resolve());

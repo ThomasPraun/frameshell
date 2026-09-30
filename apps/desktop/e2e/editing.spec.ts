@@ -185,6 +185,29 @@ test("period nudges the selected clip one frame", async () => {
   await expect(clipItems().first()).toHaveText(/^V2: titles, 00:00:15:01 to 00:00:17:01/);
 });
 
+test("deleting two selected clips is one undo step", async () => {
+  await page.mouse.click(...xy(await at(1, "v1")));
+  await page.keyboard.down("Shift");
+  await page.mouse.click(...xy(await at(4, "v1")));
+  await page.keyboard.up("Shift");
+  await expect(lanes()).toHaveAttribute("data-selected", /^\S+ \S+$/);
+  const clipsBefore = await lanes().getAttribute("data-clips");
+  await page.keyboard.press("Delete");
+  await expect(lanes()).toHaveAttribute("data-clips", String(Number(clipsBefore) - 2));
+  await expect(page.locator(".timeline-status")).toContainText("Delete of 2 clips saved as one step");
+
+  await page.keyboard.press(`${modifier}+z`);
+  await expect(lanes()).toHaveAttribute("data-clips", clipsBefore!);
+  await expect(clipItems().nth(1)).toHaveText("V1: titles, 00:00:00:00 to 00:00:03:00");
+  await expect(clipItems().nth(2)).toHaveText("V1: titles, 00:00:03:00 to 00:00:06:00");
+  const lines = readFileSync(journal, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const [first, second, undo] = lines.slice(-3);
+  expect([first.op, second.op, undo.op]).toEqual(["clip.remove", "clip.remove", "revert"]);
+  expect(second.tx).toBe(first.tx);
+  expect(first.txLabel).toBe("Delete 2 clips");
+  expect(undo.args.target).toBe(first.tx);
+});
+
 test("every edit was saved at once and journaled as a ui operation", async () => {
   expect(journaled()).toEqual([
     { op: "clip.move", author: "ui" },
@@ -195,6 +218,9 @@ test("every edit was saved at once and journaled as a ui operation", async () =>
     { op: "revert", author: "ui" },
     { op: "revert", author: "ui" },
     { op: "clip.move", author: "ui" },
+    { op: "clip.remove", author: "ui" },
+    { op: "clip.remove", author: "ui" },
+    { op: "revert", author: "ui" },
   ]);
   const saved = JSON.parse(readFileSync(mainFile, "utf8"));
   await expect(lanes()).toHaveAttribute("data-revision", String(saved.revision));

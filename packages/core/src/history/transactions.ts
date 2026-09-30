@@ -23,6 +23,10 @@ export interface StoredTransaction {
   touched: TouchedTimeline[];
   /** ISO 8601 time of `begin`; absent in files written before it was recorded. */
   openedAt?: string | undefined;
+  /** `tx.begin` `autoCommitAfter` in ms; absent = open until commit or abort. */
+  autoCommitMs?: number | undefined;
+  /** Epoch ms of the author's last activity, the start of the auto-commit countdown. */
+  lastAt?: number | undefined;
 }
 
 /**
@@ -52,6 +56,10 @@ interface Open {
   touched: Map<string, TouchedTimeline>;
   /** Explicit only: ISO time of `begin`; null when the store did not record it. */
   openedAt: string | null;
+  /** Explicit only: commit by itself this long after `lastAt`. */
+  autoCommitMs?: number | undefined;
+  /** Pending auto-commit check. */
+  timer?: NodeJS.Timeout | undefined;
 }
 
 /**
@@ -63,6 +71,12 @@ interface Open {
  * authors (`ui`, `cli` without session, `file`, `plugin:<name>`) get one
  * transaction per operation unless they begin one explicitly (`cli` cannot:
  * without a session, each CLI call is a new connection).
+ *
+ * An explicit transaction begun with an auto-commit delay is committed by the
+ * tracker once its author stays quiet that long, so a client that crashed
+ * between `tx.begin` and `tx.commit` (the app's multi-clip edits) never
+ * leaves it absorbing the author's later operations. The countdown restarts
+ * on each operation and persists, so a restarted daemon honours it too.
  */
 export class TransactionTracker {
   readonly #idleGapMs: number;
@@ -78,19 +92,33 @@ export class TransactionTracker {
     this.#store = options.store;
   }
 
-  /** Reopen the explicit transactions the store holds. Call once, before the first operation. */
+  /**
+   * Reopen the explicit transactions the store holds, minus those whose
+   * auto-commit deadline passed meanwhile. Call once, before the first operation.
+   */
   async restore(): Promise<void> {
     if (!this.#store) return;
-    for (const stored of await this.#store.load()) {
-      this.#open.set(stored.author, {
-        tx: stored.tx,
+    const stored = await this.#store.load();
+    for (const entry of stored) {
+      const open: Open = {
+        tx: entry.tx,
         explicit: true,
-        lastAt: this.#now(),
-        operations: stored.operations,
-        touched: new Map(stored.touched.map((where) => [touchKey(where), where])),
-        openedAt: stored.openedAt ?? null,
-      });
+        lastAt: entry.lastAt ?? this.#now(),
+        operations: entry.operations,
+        touched: new Map(entry.touched.map((where) => [touchKey(where), where])),
+        openedAt: entry.openedAt ?? null,
+        autoCommitMs: entry.autoCommitMs,
+      };
+      if (this.#due(open)) continue;
+      this.#open.set(entry.author, open);
+      this.#arm(entry.author, open);
     }
+    if (this.#open.size < stored.length) await this.#persist().catch(() => {});
+  }
+
+  /** Stop auto-commit timers; open transactions stay stored for the next daemon. */
+  close(): void {
+    for (const open of this.#open.values()) clearTimeout(open.timer);
   }
 
   /**
@@ -101,8 +129,12 @@ export class TransactionTracker {
    */
   next(author: string, options: { standalone?: boolean } = {}): TxRef {
     const now = this.#now();
-    const open = this.#open.get(author);
-    if (open?.explicit) return open.tx;
+    const open = this.#live(author);
+    if (open?.explicit) {
+      // An operation starting counts as activity: a slow one must not see its transaction auto-commit.
+      open.lastAt = now;
+      return open.tx;
+    }
     const grouping = author.startsWith("cli:") && !options.standalone;
     if (grouping && open && now - open.lastAt <= this.#idleGapMs) {
       open.lastAt = now;
@@ -131,12 +163,17 @@ export class TransactionTracker {
     if (open?.tx.id !== tx.id) return;
     open.operations++;
     open.lastAt = this.#now();
+    this.#arm(author, open);
     // The count is informational: a lost save must not fail an operation already applied.
     if (open.explicit) await this.#persist().catch(() => {});
   }
 
-  /** Open an explicit transaction. Throws TransactionState without a session or when one is open. */
-  async begin(author: string, label: string): Promise<TxRef> {
+  /**
+   * Open an explicit transaction. With `autoCommitMs`, it commits by itself
+   * once `author` has no operation for that long. Throws TransactionState
+   * without a session or when one is open.
+   */
+  async begin(author: string, label: string, options: { autoCommitMs?: number | undefined } = {}): Promise<TxRef> {
     if (author === "cli") {
       throw new RpcError(
         ErrorCode.TransactionState,
@@ -145,7 +182,7 @@ export class TransactionTracker {
         { author, open: null, hint: "Set FRAMESHELL_SESSION." },
       );
     }
-    const open = this.#open.get(author);
+    const open = this.#live(author);
     if (open?.explicit) {
       throw new RpcError(
         ErrorCode.TransactionState,
@@ -155,7 +192,16 @@ export class TransactionTracker {
     }
     const tx = { id: newTxId(), label };
     const now = this.#now();
-    this.#open.set(author, { tx, explicit: true, lastAt: now, operations: 0, touched: new Map(), openedAt: new Date(now).toISOString() });
+    const begun: Open = {
+      tx,
+      explicit: true,
+      lastAt: now,
+      operations: 0,
+      touched: new Map(),
+      openedAt: new Date(now).toISOString(),
+      autoCommitMs: options.autoCommitMs,
+    };
+    this.#open.set(author, begun);
     try {
       await this.#persist();
     } catch (error) {
@@ -163,12 +209,14 @@ export class TransactionTracker {
       this.#open.delete(author);
       throw error;
     }
+    this.#arm(author, begun);
     return tx;
   }
 
   /** Close `author`'s explicit transaction and return what it did. Throws TransactionState when none is open. */
   async end(author: string): Promise<ExplicitTransaction> {
     const open = this.#explicit(author);
+    clearTimeout(open.timer);
     this.#open.delete(author);
     await this.#persist();
     return summary(open);
@@ -188,7 +236,7 @@ export class TransactionTracker {
   }
 
   #explicit(author: string): Open {
-    const open = this.#open.get(author);
+    const open = this.#live(author);
     if (open?.explicit) return open;
     throw new RpcError(ErrorCode.TransactionState, `No transaction is open for ${author}. Start one with \`frameshell tx begin "<label>"\`.`, {
       author,
@@ -197,12 +245,54 @@ export class TransactionTracker {
     });
   }
 
+  /** `author`'s open transaction, committing an explicit one past its auto-commit deadline first. */
+  #live(author: string): Open | undefined {
+    const open = this.#open.get(author);
+    if (!open?.explicit || !this.#due(open)) return open;
+    this.#autoCommit(author, open);
+    return undefined;
+  }
+
+  #due(open: Open): boolean {
+    return open.autoCommitMs !== undefined && this.#now() - open.lastAt >= open.autoCommitMs;
+  }
+
+  /** (Re)schedule `open`'s auto-commit check; the clock decides, the timer only wakes it up. */
+  #arm(author: string, open: Open): void {
+    if (open.autoCommitMs === undefined) return;
+    clearTimeout(open.timer);
+    const wait = Math.max(0, open.lastAt + open.autoCommitMs - this.#now());
+    open.timer = setTimeout(() => {
+      if (this.#open.get(author) !== open) return;
+      if (this.#due(open)) this.#autoCommit(author, open);
+      else this.#arm(author, open);
+    }, wait);
+    open.timer.unref?.();
+  }
+
+  #autoCommit(author: string, open: Open): void {
+    clearTimeout(open.timer);
+    this.#open.delete(author);
+    // Closed in memory already; a failed save is redone by the next persist.
+    void this.#persist().catch(() => {});
+  }
+
   #persist(): Promise<void> {
     const store = this.#store;
     if (!store) return Promise.resolve();
     const run = this.#saving.then(() =>
       store.save(
-        this.list().map(({ openedAt, ...open }) => ({ ...open, ...(openedAt ? { openedAt } : {}) })),
+        [...this.#open]
+          .filter(([, open]) => open.explicit)
+          .map(([author, open]) => {
+            const { openedAt, ...rest } = summary(open);
+            return {
+              author,
+              ...rest,
+              ...(openedAt ? { openedAt } : {}),
+              ...(open.autoCommitMs === undefined ? {} : { autoCommitMs: open.autoCommitMs, lastAt: open.lastAt }),
+            };
+          }),
       ),
     );
     this.#saving = run.catch(() => {});
@@ -229,6 +319,8 @@ const StoredFileSchema = z.object({
       operations: z.int().nonnegative(),
       touched: z.array(z.object({ root: z.string(), timeline: z.string() })),
       openedAt: z.string().optional(),
+      autoCommitMs: z.number().positive().optional(),
+      lastAt: z.number().optional(),
     }),
   ),
 });
