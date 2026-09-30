@@ -70,3 +70,16 @@ export {
   transcriptPathsFor,
 } from "./transcripts/transcriber.js";
 export { type AudioExtractor, type AudioInput, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "./transcripts/audio.js";
+export {
+  type AppliedOperation,
+  type ClipTypeInfo,
+  type EditContext,
+  type EditPoint,
+  type EditPointResolver,
+  type OperationArgs,
+  type OperationRequest,
+  type SourceInfo,
+  applyOperation,
+} from "./timeline/engine.js";
+export { applyPatch, diffTimelines } from "./timeline/patch.js";
+export { FrameGrid } from "./timeline/grid.js";
