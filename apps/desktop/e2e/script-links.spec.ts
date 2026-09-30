@@ -225,7 +225,10 @@ test("clicking the same scene heading again brings its clip back into view", asy
   }, Math.round(6 * pxPerSecond));
   const away = (await lanesBox()).scrollLeft;
   expect(away).toBeGreaterThan(4 * pxPerSecond);
-  await line("## Intro").click();
+  // Let the timeline see the scroll (its scroll event and next paint) before the click that must undo it.
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  // Left end of the heading: the editor's caret already sits mid-line from the earlier click, and a click through it is retried by Playwright.
+  await line("## Intro").click({ position: { x: 4, y: 10 } });
   await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
   await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(away);
 });
