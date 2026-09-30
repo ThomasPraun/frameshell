@@ -15,6 +15,8 @@ import {
   type Timeline,
   type Track,
   parseTimeline,
+  scriptRefPathProblem,
+  splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
@@ -226,6 +228,7 @@ class Edit {
     const track = this.clipTrack(args.track);
     const { type } = args;
     if (track.kind === "audio" && args.transform) throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
+    if (args.scriptRef !== undefined) this.checkScriptRefShape(args.scriptRef);
     const extras = {
       ...(args.transform ? { transform: args.transform } : {}),
       ...(args.gain !== undefined || args.muted !== undefined
@@ -443,6 +446,7 @@ class Edit {
     if ([speed, gain, muted, transform, props, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, transform, props, scriptRef." });
     }
+    if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
     if (speed !== undefined) {
       if (!isMedia(clip)) throw this.invalid(`only media clips take \`speed\`; ${clip.id} is ${clip.type}.`, { field: "speed" });
       if (speed === 1) delete clip.speed;
@@ -887,6 +891,17 @@ class Edit {
       if (taken.every(({ tracks, clips }) => !tracks.has(id) && !clips.has(id))) return id;
     }
     throw new Error(`could not generate a free ${prefix}_ id`);
+  }
+
+  /** Refuse a `scriptRef` that can never name a project file (absolute, `..`); a missing script is only warned about later. */
+  checkScriptRefShape(ref: string): void {
+    const problem = scriptRefPathProblem(splitScriptRef(ref).path);
+    if (problem) {
+      throw this.invalid(`scriptRef "${ref}" ${problem}.`, {
+        field: "scriptRef",
+        hint: "Use a project-relative script path plus scene, e.g. `scripts/script.md#intro` (see `frameshell script outline`).",
+      });
+    }
   }
 
   invalid(reason: string, extra: { field?: string; valid?: { min: number; max: number }; hint?: string } = {}): RpcError {

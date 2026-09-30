@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScript, scriptSlug, splitScriptRef } from "../src/index.js";
+import { parseScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
 
 describe("script outline (scripts/*.md, SPEC §5.5)", () => {
   it("turns each level-2 heading into a scene with a slug, line range and word count", () => {
@@ -88,5 +88,26 @@ describe("splitScriptRef", () => {
     expect(splitScriptRef("scripts\\a.md#x")).toEqual({ path: "scripts/a.md", anchor: "x" });
     expect(splitScriptRef("scripts/a.md")).toEqual({ path: "scripts/a.md", anchor: null });
     expect(splitScriptRef("scripts/a.md#")).toEqual({ path: "scripts/a.md", anchor: null });
+  });
+});
+
+describe("scriptRefPathProblem", () => {
+  it("accepts project-relative paths", () => {
+    expect(scriptRefPathProblem("scripts/script.md")).toBeNull();
+    expect(scriptRefPathProblem("scripts/a..b.md")).toBeNull();
+  });
+
+  it("refuses paths that cannot name a project file", () => {
+    const path = (ref: string) => splitScriptRef(ref).path;
+    expect(scriptRefPathProblem(path("#intro"))).toMatch(/no script path/);
+    expect(scriptRefPathProblem(path("/etc/hosts#x"))).toMatch(/absolute/);
+    expect(scriptRefPathProblem(path("\\\\host\\share\\a.md#x"))).toMatch(/absolute/);
+    expect(scriptRefPathProblem(path("C:/a.md#x"))).toMatch(/absolute/);
+    expect(scriptRefPathProblem(path("c:a.md#x"))).toMatch(/absolute/);
+    expect(scriptRefPathProblem(path("../x.md#s"))).toMatch(/`\.\.`/);
+    expect(scriptRefPathProblem(path("scripts/../../x.md#s"))).toMatch(/`\.\.`/);
+    expect(scriptRefPathProblem(path("scripts\\..\\..\\x.md#s"))).toMatch(/`\.\.`/);
+    expect(scriptRefPathProblem(path("scripts/..#s"))).toMatch(/`\.\.`/);
+    expect(scriptRefPathProblem("scripts/a\0.md")).toMatch(/NUL/);
   });
 });

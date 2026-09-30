@@ -759,7 +759,8 @@ export const methods = {
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`; null clears). " +
       "A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
-      "there are. Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
+      "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
+      "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

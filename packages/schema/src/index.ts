@@ -64,6 +64,7 @@ export {
   type ScriptMeta,
   type ScriptOutline,
   parseScript,
+  scriptRefPathProblem,
   scriptSlug,
   splitScriptRef,
 } from "./script.js";

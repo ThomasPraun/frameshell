@@ -1,7 +1,11 @@
-import { readFile, readdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ErrorCode, RpcError, type ScriptOutlineResult } from "@frameshell/protocol";
-import { type ScriptOutline, parseScript, parseTimeline, splitScriptRef } from "@frameshell/schema";
+import { type ScriptOutline, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
+
+/** Largest script read (1 MiB, ~150k words). Bigger files are refused, never loaded whole. */
+export const MAX_SCRIPT_BYTES = 1024 * 1024;
 
 /**
  * Scripts on the daemon side (SPEC §5.5): outline with clip links for
@@ -15,8 +19,8 @@ import { type ScriptOutline, parseScript, parseTimeline, splitScriptRef } from "
  * `OutsideProject` or `ScriptNotFound`.
  */
 export async function outlineScript(root: string, cwd: string, file: string): Promise<ScriptOutlineResult> {
-  const path = await locateScript(root, cwd, file);
-  const outline = parseScript(await readFile(join(root, ...path.split("/")), "utf8"));
+  const { path, text } = await locateScript(root, cwd, file);
+  const outline = parseScript(text);
   const { refs, warnings } = await clipRefs(root);
   const scenes = outline.scenes.map((scene) => ({ ...scene, ref: `${path}#${scene.slug}`, clips: [] as { timeline: string; clip: string }[] }));
   const bySlug = new Map(scenes.map((scene) => [scene.slug, scene]));
@@ -32,24 +36,25 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
 }
 
 /**
- * Why `ref` points nowhere (no anchor, missing script, missing scene), or
- * null when it names an existing scene. Never throws for a bad ref: the
- * operation stores it anyway (the script may be written later).
+ * Why `ref` points nowhere (bad path, no anchor, missing or unreadable
+ * script, missing scene), or null when it names an existing scene. Never
+ * throws and never blocks: only regular files inside the project (after
+ * symlinks) up to {@link MAX_SCRIPT_BYTES} are read, any read error becomes
+ * the returned warning. The operation stores the ref anyway (the script may
+ * be written later).
  */
 export async function checkScriptRef(root: string, ref: string): Promise<string | null> {
   const { path, anchor } = splitScriptRef(ref);
+  const shape = scriptRefPathProblem(path);
+  if (shape) return `scriptRef "${ref}" ${shape}; use a project-relative script path plus scene, e.g. \`scripts/script.md#intro\`.`;
+  const read = await readScript(root, path);
+  if (!read.ok) {
+    return read.missing
+      ? `scriptRef "${ref}": ${path} does not exist. Stored anyway; create the script or fix the ref.`
+      : `scriptRef "${ref}": ${path} ${read.reason}. Stored anyway; fix the script or the ref.`;
+  }
+  const parsed: ScriptOutline = parseScript(read.text);
   const outline = `\`frameshell script outline ${path}\``;
-  if (path === "" || isAbsolute(path) || path === ".." || path.startsWith("../")) {
-    return `scriptRef "${ref}" must be a project-relative script path plus scene, e.g. \`scripts/script.md#intro\`.`;
-  }
-  let parsed: ScriptOutline;
-  try {
-    parsed = parseScript(await readFile(join(root, ...path.split("/")), "utf8"));
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT" && code !== "EISDIR" && code !== "ENOTDIR") throw error;
-    return `scriptRef "${ref}": ${path} does not exist. Stored anyway; create the script or fix the ref.`;
-  }
   const slugs = parsed.scenes.map((scene) => scene.slug);
   if (anchor === null) return `scriptRef "${ref}" has no \`#scene\` anchor; use \`${path}#<scene>\` (scenes: see ${outline}).`;
   if (slugs.includes(anchor)) return null;
@@ -57,23 +62,75 @@ export async function checkScriptRef(root: string, ref: string): Promise<string 
   return `scriptRef "${ref}": no scene "${anchor}" in ${path}; scenes: ${known}. Stored anyway.`;
 }
 
-/** Project-relative `/`-path of an existing script file. */
-async function locateScript(root: string, cwd: string, file: string): Promise<string> {
+/** Project-relative `/`-path and text of an existing, readable script file. */
+async function locateScript(root: string, cwd: string, file: string): Promise<{ path: string; text: string }> {
   const candidates = isAbsolute(file) ? [file] : [resolve(cwd, file), resolve(root, file)];
   const inside = candidates.map((candidate) => relativeInside(root, candidate)).filter((rel): rel is string => rel !== null);
   if (inside.length === 0) {
     throw new RpcError(ErrorCode.OutsideProject, `${file} is outside the project ${root}. Scripts live under scripts/.`, { path: file });
   }
+  let unreadable: { path: string; reason: string } | undefined;
   for (const rel of inside) {
-    const text = await readFile(join(root, ...rel.split("/")), "utf8").catch(() => null);
-    if (text !== null) return rel;
+    const read = await readScript(root, rel);
+    if (read.ok) return { path: rel, text: read.text };
+    if (!read.missing) unreadable ??= { path: rel, reason: read.reason };
   }
   const available = await listScripts(root);
-  throw new RpcError(
-    ErrorCode.ScriptNotFound,
-    `No script ${inside[0]} in ${root}` + (available.length > 0 ? `; scripts: ${available.join(", ")}.` : "; scripts/ has no .md files."),
-    { path: inside[0], available },
-  );
+  const listing = available.length > 0 ? `; scripts: ${available.join(", ")}.` : "; scripts/ has no .md files.";
+  const path = unreadable?.path ?? inside[0]!;
+  const message = unreadable ? `Script ${path} ${unreadable.reason}` : `No script ${path} in ${root}`;
+  throw new RpcError(ErrorCode.ScriptNotFound, message + listing, { path, available });
+}
+
+type ScriptRead = { ok: true; text: string } | { ok: false; missing: boolean; reason: string };
+
+/**
+ * Read project-relative script `rel` without ever throwing or blocking.
+ * Refuses (not `missing`) a path whose real location (symlinks resolved)
+ * is outside `root`, anything but a regular file (FIFO, device, directory)
+ * and files over {@link MAX_SCRIPT_BYTES}. Opens non-blocking and checks
+ * the opened handle, so a file swapped for a FIFO after the path check
+ * cannot hang the read.
+ */
+async function readScript(root: string, rel: string): Promise<ScriptRead> {
+  const failed = (error: unknown): ScriptRead => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { ok: false, missing: true, reason: "does not exist" };
+    if (code === "EISDIR") return { ok: false, missing: false, reason: "is a directory, not a script" };
+    return { ok: false, missing: false, reason: `could not be read (${code ?? (error as Error).message})` };
+  };
+  let real: string;
+  try {
+    real = await realpath(join(root, ...rel.split("/")));
+    if (relativeInside(await realpath(root), real) === null) return { ok: false, missing: false, reason: "resolves outside the project" };
+  } catch (error) {
+    return failed(error);
+  }
+  // O_NONBLOCK: opening a FIFO with no writer must not wait. Absent on Windows (no such FIFOs there).
+  const handle = await open(real, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0)).catch((error: unknown) => error as Error);
+  if (handle instanceof Error) return failed(handle);
+  try {
+    const stats = await handle.stat();
+    if (stats.isDirectory()) return { ok: false, missing: false, reason: "is a directory, not a script" };
+    if (!stats.isFile()) return { ok: false, missing: false, reason: "is not a regular file" };
+    if (stats.size > MAX_SCRIPT_BYTES) {
+      return { ok: false, missing: false, reason: `is ${stats.size} bytes; scripts are at most ${MAX_SCRIPT_BYTES}` };
+    }
+    // Read at most the limit plus one byte: a file growing meanwhile is caught, never loaded whole.
+    const buffer = Buffer.alloc(MAX_SCRIPT_BYTES + 1);
+    let length = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+      if (length > MAX_SCRIPT_BYTES) return { ok: false, missing: false, reason: `is over ${MAX_SCRIPT_BYTES} bytes, too big for a script` };
+    }
+    return { ok: true, text: buffer.toString("utf8", 0, length) };
+  } catch (error) {
+    return failed(error);
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 function relativeInside(root: string, path: string): string | null {

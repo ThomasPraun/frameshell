@@ -1,9 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import { createTimeline } from "@frameshell/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "../src/index.js";
+import { MAX_SCRIPT_BYTES } from "../src/scripts/outline.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
 // Seam under test: the `script.outline` registry method and `scriptRef` checks
@@ -128,4 +130,66 @@ describe("scriptRef on clip operations", () => {
     expect((await set(null)).warnings).toEqual([]);
     expect((await conn.request("clip.set", { cwd: root, clip: "c_free", gain: -3 })).warnings).toEqual([]);
   });
+
+  it("refuses refs that leave the project, stores nothing and reads nothing outside", async () => {
+    writeFileSync(join(root, "..", "outside.md"), "## Secret heading\n");
+    const before = (await conn.request("timeline.show", { cwd: root })).revision;
+    for (const ref of ["scripts/../../outside.md#x", "../outside.md#x", "scripts\\..\\..\\outside.md#x", "/etc/hosts#x", "C:/x.md#x"]) {
+      const error = await set(ref).then(() => null, (reason: unknown) => reason as Error);
+      expect(error, ref).toMatchObject({ code: ErrorCode.InvalidOperation, data: { field: "scriptRef" } });
+      expect(error!.message).not.toMatch(/secret/i);
+    }
+    await expect(
+      conn.request("clip.add", { cwd: root, track: "t_v", type: "titles", duration: 1, start: 10, scriptRef: "scripts/../../outside.md#x" }),
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+    const view = await conn.request("timeline.show", { cwd: root });
+    expect(view.revision).toBe(before);
+    expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).not.toHaveProperty("scriptRef");
+  });
+
+  it.skipIf(process.platform === "win32")("warns without reading a script symlinked outside the project", async () => {
+    const outside = join(tempDir(), "secret.md");
+    writeFileSync(outside, "## Secret heading\n");
+    symlinkSync(outside, join(root, "scripts", "link.md"));
+    const result = await set("scripts/link.md#x");
+    expect(result.warnings).toEqual([expect.stringMatching(/scripts\/link\.md resolves outside the project/)]);
+    expect(result.warnings[0]).not.toMatch(/secret/i);
+  });
+
+  it("warns, never fails, when the script is a directory or too big", async () => {
+    mkdirSync(join(root, "scripts", "dir.md"));
+    expect((await set("scripts/dir.md#x")).warnings).toEqual([expect.stringMatching(/scripts\/dir\.md is a directory/)]);
+    writeFileSync(join(root, "assets", "big.md"), Buffer.alloc(MAX_SCRIPT_BYTES + 1, "a"));
+    const big = await set("assets/big.md#x");
+    expect(big.warnings).toEqual([expect.stringMatching(/assets\/big\.md is \d+ bytes; scripts are at most/)]);
+    const view = await conn.request("timeline.show", { cwd: root });
+    expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).toMatchObject({ scriptRef: "assets/big.md#x" });
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "warns, never fails, when the script cannot be read; the committed edit is reported as applied",
+    async () => {
+      const locked = join(root, "scripts", "locked.md");
+      writeFileSync(locked, "## X\n");
+      chmodSync(locked, 0o000);
+      try {
+        const result = await set("scripts/locked.md#x");
+        expect(result.warnings).toEqual([expect.stringMatching(/scripts\/locked\.md could not be read \(EACCES\)/)]);
+        expect((await conn.request("timeline.show", { cwd: root })).revision).toBe(result.revision);
+      } finally {
+        chmodSync(locked, 0o644);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("never blocks on a FIFO: the ref warns and later edits on the timeline run", async () => {
+    execFileSync("mkfifo", [join(root, "scripts", "pipe.md")]);
+    const result = await set("scripts/pipe.md#x");
+    expect(result.warnings).toEqual([expect.stringMatching(/scripts\/pipe\.md is not a regular file/)]);
+    expect((await conn.request("clip.set", { cwd: root, clip: "c_free", gain: -3 })).revision).toBe(result.revision + 1);
+    await expect(conn.request("script.outline", { cwd: root, file: "scripts/pipe.md" })).rejects.toMatchObject({
+      code: ErrorCode.ScriptNotFound,
+      message: expect.stringMatching(/scripts\/pipe\.md is not a regular file/),
+    });
+  }, 10_000);
 });

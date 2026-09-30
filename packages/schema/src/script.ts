@@ -125,6 +125,20 @@ export function splitScriptRef(ref: string): { path: string; anchor: string | nu
   return { path, anchor: anchor === "" ? null : anchor.normalize("NFC") };
 }
 
+/**
+ * Why a {@link splitScriptRef} path cannot name a file inside the project,
+ * or null when it can. Rejects empty, absolute (`/x`, `//host/x`, `C:x`),
+ * NUL, and any `..` segment: `scripts/../../x.md` escapes once joined.
+ * Shape only; symlinks leaving the project are the reader's job.
+ */
+export function scriptRefPathProblem(path: string): string | null {
+  if (path === "") return "has no script path";
+  if (path.includes("\0")) return "contains a NUL character";
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return "is absolute";
+  if (path.split("/").includes("..")) return "leaves the project through `..`";
+  return null;
+}
+
 /** github-slugger's disambiguation: `x`, `x-1`, `x-2`…, skipping slugs already taken. */
 class Slugger {
   readonly #occurrences = new Map<string, number>();
