@@ -11,7 +11,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Domain terms | `GLOSSARY.md` |
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
-| Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` |
+| Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
 | Managed binaries (ffmpeg, whisper.cpp, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
 | Transcription (transcript file, word ids, audio source, export verify) | `packages/core/src/transcripts/transcriber.ts`, `transcripts/verify.ts` + `align.ts`; provider `plugins/whisper-cpp` |
