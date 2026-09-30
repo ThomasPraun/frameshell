@@ -53,6 +53,7 @@ const api: FrameshellApi = {
   media: {
     assets: () => invokeOutcome(Channel.mediaAssets),
     read: (path) => invokeOutcome(Channel.mediaRead, path),
+    onChanged: (listener) => subscribe(Channel.mediaChanged, listener),
   },
 };
 

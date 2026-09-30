@@ -121,14 +121,18 @@ const CLIP_INSET_Y = 3;
 /** Labels need this much clip width, px. */
 const MIN_LABEL_WIDTH = 28;
 
-/** Paint one frame. Returns how many clips were drawn (culling is observable). */
-export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): { clipsDrawn: number } {
+/**
+ * Paint one frame. Returns how many clips were drawn (culling is observable)
+ * and how many of them showed derived media, a waveform or a thumbnail.
+ */
+export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): { clipsDrawn: number; mediaDrawn: number } {
   const { layout, viewport, theme } = input;
   const { width, height, pxPerSecond, scrollLeft, scrollTop } = viewport;
   const colors = palette(theme);
   const t0 = scrollLeft / pxPerSecond;
   const t1 = (scrollLeft + width) / pxPerSecond;
   let clipsDrawn = 0;
+  let mediaDrawn = 0;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = theme.lane;
@@ -152,7 +156,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       return;
     }
     for (const clip of visibleClips(row.clips, t0, t1)) {
-      paintClip(ctx, input, row, clip, top, colors);
+      if (paintClip(ctx, input, row, clip, top, colors)) mediaDrawn++;
       clipsDrawn++;
     }
   });
@@ -160,7 +164,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
 
   paintRuler(ctx, input);
   paintPlayhead(ctx, input);
-  return { clipsDrawn };
+  return { clipsDrawn, mediaDrawn };
 }
 
 interface Palette {
@@ -199,7 +203,8 @@ function withAlpha(color: string, alpha: number): string {
   return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, ${alpha})`;
 }
 
-function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, clip: ClipBox, top: number, colors: Palette): void {
+/** Returns true when derived media (thumbnails, waveform) was drawn. */
+function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, clip: ClipBox, top: number, colors: Palette): boolean {
   const { pxPerSecond, scrollLeft, width } = input.viewport;
   const theme = input.theme;
   const kind = colors.kind[row.kind === "audio" ? "audio" : "video"];
@@ -220,8 +225,9 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   ctx.beginPath();
   ctx.rect(left, y, w, h);
   ctx.clip();
-  if (clip.asset && row.kind === "video") paintThumbnails(ctx, input, clip, x0, left, right, y, h);
-  if (clip.asset && row.kind === "audio") paintWaveform(ctx, input, clip, left, right, y, h, kind.edge);
+  let media = false;
+  if (clip.asset && row.kind === "video") media = paintThumbnails(ctx, input, clip, x0, left, right, y, h);
+  if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, kind.edge);
   if (clip.kind === "generated" || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem ? colors.dangerFill : kind.hatch);
   ctx.restore();
 
@@ -247,6 +253,7 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   }
 
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
+  return media;
 }
 
 /** Name, then length (or why it is unknown) while it fits; sticks to the left edge of the view. */
@@ -283,9 +290,10 @@ function paintThumbnails<Img>(
   right: number,
   y: number,
   h: number,
-): void {
+): boolean {
   const strip = input.media.thumbnails(clip.asset!);
-  if (!strip || strip.count === 0) return;
+  if (!strip || strip.count === 0) return false;
+  let drawn = false;
   const tile = h * strip.aspect;
   const { pxPerSecond } = input.viewport;
   ctx.save();
@@ -294,9 +302,12 @@ function paintThumbnails<Img>(
     const source = clip.in + ((k * tile) / pxPerSecond) * clip.speed;
     const index = strip.interval > 0 ? Math.min(strip.count, Math.floor(source / strip.interval + 1e-6) + 1) : 1;
     const image = strip.image(index);
-    if (image) ctx.drawImage(image, x0 + k * tile, y, tile, h);
+    if (!image) continue;
+    ctx.drawImage(image, x0 + k * tile, y, tile, h);
+    drawn = true;
   }
   ctx.restore();
+  return drawn;
 }
 
 /** One bar per pixel column: min/max of the peaks under it, mirrored around the middle. */
@@ -309,9 +320,9 @@ function paintWaveform<Img>(
   y: number,
   h: number,
   color: string,
-): void {
+): boolean {
   const wave = input.media.waveform(clip.asset!);
-  if (!wave || wave.peaks.length === 0) return;
+  if (!wave || wave.peaks.length === 0) return false;
   const { pxPerSecond, scrollLeft } = input.viewport;
   const mid = y + 2 + (h - 2) / 2;
   const scale = (h - 6) / 2 / 128;
@@ -332,6 +343,7 @@ function paintWaveform<Img>(
     const top = mid - high * scale;
     ctx.fillRect(x, top, 1, Math.max(1, (high - low) * scale));
   }
+  return true;
 }
 
 /** Diagonal hatch: rendered-by-plugin clips, and clips whose length is unknown. */

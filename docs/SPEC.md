@@ -98,7 +98,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 ### 3.1 Daemon `frameshelld`
 
 - One per OS user. Holds any number of open projects.
-- Transport: Unix domain socket (macOS/Linux), named pipe (Windows). JSON-RPC 2.0 plus server-pushed notifications (`timeline.changed`, `job.progress`, `history.appended`, `asset.added`).
+- Transport: Unix domain socket (macOS/Linux), named pipe (Windows). JSON-RPC 2.0 plus server-pushed notifications (`timeline.changed`, `job.progress`, `history.appended`, `asset.changed`).
 - Handshake: client sends protocol version; incompatible → clear error with upgrade hint.
 - Lifecycle: auto-started by CLI or app if absent; exits after an idle timeout with no clients and no running jobs.
 - Owns every write to project files. Renders, transcriptions and exports continue if the window closes.

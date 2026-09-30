@@ -60,7 +60,17 @@ describe("frameshell import", () => {
       expect(first.stderr).toMatch(/frameshell init/);
 
       const imported = frameshell(["import", join(footage, "take 1.mp4"), "--wait"], project);
-      expect(imported.stderr).toMatch(/ingest assets\/take 1\.mp4: (proxy|done)/);
+      // Followed through `job.progress` events: every step shows, however short (polling skipped some).
+      const steps = [...imported.stderr.matchAll(/ingest assets\/take 1\.mp4: (\w+) \d+%/g)].map((match) => match[1]);
+      expect(steps.filter((step, i) => step !== steps[i - 1])).toEqual([
+        "starting",
+        "hash",
+        "probe",
+        "proxy",
+        "sidecar",
+        "waveform",
+        "thumbnails",
+      ]);
       expect(imported.code).toBe(0);
       expect(imported.stdout).toContain("assets/take 1.mp4  imported from");
       expect(imported.stdout).toMatch(/done \(j_\d+\)/);

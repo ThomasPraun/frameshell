@@ -9,7 +9,14 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection } from "@frameshell/protocol";
-import { Channel, type OpenOutcome, type Outcome, type ProjectView, type TimelineChange } from "../shared/api.js";
+import {
+  type AssetChange,
+  Channel,
+  type OpenOutcome,
+  type Outcome,
+  type ProjectView,
+  type TimelineChange,
+} from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
@@ -55,8 +62,11 @@ interface WindowState {
   window: BrowserWindow;
   project: ProjectView | null;
   files: ProjectFiles | null;
-  /** Daemon `timeline.changed` and `timeline.rejected` of the shown project, forwarded to the renderer. */
-  timelineEvents: LinkSubscription[];
+  /**
+   * Daemon `timeline.changed`, `timeline.rejected` and `asset.changed` of the
+   * shown project, forwarded to the renderer: nothing there polls the daemon.
+   */
+  daemonEvents: LinkSubscription[];
   terminals: TerminalManager;
 }
 const windows = new Map<number, WindowState>();
@@ -83,7 +93,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     window,
     project: null,
     files: null,
-    timelineEvents: [],
+    daemonEvents: [],
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -101,7 +111,7 @@ function createWindow(projectDir?: string): BrowserWindow {
   window.on("closed", () => {
     state.terminals.killAll();
     void state.files?.close();
-    for (const subscription of state.timelineEvents) void subscription.unsubscribe();
+    for (const subscription of state.daemonEvents) void subscription.unsubscribe();
     if (state.project) mediaRoots.revoke(state.project.mediaUrl);
     windows.delete(contents.id);
   });
@@ -137,7 +147,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     mediaUrl: mediaRoots.issue(status.project.dir),
   };
   await state.files?.close();
-  await Promise.all(state.timelineEvents.splice(0).map((subscription) => subscription.unsubscribe()));
+  await Promise.all(state.daemonEvents.splice(0).map((subscription) => subscription.unsubscribe()));
   const contents = state.window.webContents;
   state.files = await openProjectFiles(project.dir, (paths) => send(contents, Channel.filesChanged, paths));
   // Subscribed before the renderer first reads the timeline, so no change falls in between. The daemon
@@ -152,8 +162,12 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: ({ project: _project, ...rejection }) =>
         send(contents, Channel.timelineRejected, rejection satisfies TimelineRejection),
     }),
+    daemon.subscribe("asset.changed", project.dir, {
+      onEvent: ({ path, asset }) => send(contents, Channel.mediaChanged, { path, asset } satisfies AssetChange),
+      onResync: () => send(contents, Channel.mediaChanged, { path: null } satisfies AssetChange),
+    }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
-  state.timelineEvents = subscriptions;
+  state.daemonEvents = subscriptions;
   if (state.project) mediaRoots.revoke(state.project.mediaUrl);
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);

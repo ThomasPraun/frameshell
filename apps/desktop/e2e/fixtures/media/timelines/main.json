@@ -1,0 +1,14 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/timeline.json",
+  "schemaVersion": 1,
+  "id": "main",
+  "revision": 0,
+  "tracks": [
+    {
+      "id": "t_audio",
+      "kind": "audio",
+      "name": "Voice",
+      "clips": [{ "id": "c_voice", "type": "media", "asset": "assets/voice.wav", "start": 0, "in": 0, "out": 3 }]
+    }
+  ]
+}

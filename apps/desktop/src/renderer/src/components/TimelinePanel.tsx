@@ -35,8 +35,6 @@ import { PanelHeader } from "./PanelHeader.js";
 const TIMELINE = SELECTION_TIMELINE;
 /** Zoom step of the buttons and `+`/`-` keys. */
 const ZOOM_STEP = 1.5;
-/** Poll `asset.list` this often while an asset on the timeline is still ingesting. */
-const INGEST_POLL_MS = 2_000;
 /** User Timing entry of one paint; read by the performance e2e test and DevTools. */
 const PAINT_MEASURE = "timeline-paint";
 
@@ -160,7 +158,7 @@ function TimelineCanvas({
     }
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     const started = performance.now();
-    paintTimeline(context, {
+    const { mediaDrawn } = paintTimeline(context, {
       layout: current ?? { rows: [], duration: 0, height: RULER_HEIGHT, clipCount: 0 },
       viewport: view,
       fps: rate,
@@ -173,6 +171,8 @@ function TimelineCanvas({
     // User Timing buffers are unbounded: keep only recent paints.
     if (++paints.current % 500 === 0) performance.clearMeasures(PAINT_MEASURE);
     if (heads.current) heads.current.style.transform = `translateY(${-view.scrollTop}px)`;
+    // Written per paint, outside React: tests and DevTools see when waveforms or thumbnails arrive.
+    element.parentElement?.setAttribute("data-media-drawn", String(mediaDrawn));
   }, []);
 
   const schedule = useCallback(() => {
@@ -318,20 +318,14 @@ function TimelineCanvas({
     return () => box.removeEventListener("wheel", onWheel);
   }, [zoom]);
 
-  // Media derived by ingest (waveforms, thumbnails) appears as jobs finish.
+  // Media derived by ingest (waveforms, thumbnails) appears on the daemon's `asset.changed`, never by polling.
+  // Listening first: an event during the initial read is replayed over it.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let disposed = false;
-    const poll = async () => {
-      const ingesting = await mediaRef.current!.refresh();
-      if (ingesting && !disposed) timer = setTimeout(() => void poll(), INGEST_POLL_MS);
-    };
-    void poll();
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-    };
-  }, [revision]);
+    const media = mediaRef.current!;
+    const off = window.frameshell.media.onChanged((change) => media.apply(change));
+    void media.refresh();
+    return off;
+  }, []);
 
   const onScroll = () => {
     const box = scroller.current!;

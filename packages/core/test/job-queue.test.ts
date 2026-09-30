@@ -117,4 +117,61 @@ describe("JobQueue", () => {
     expect(queue.get(running.id)?.state).toBe("canceled");
     expect(queue.get(queued.id)?.state).toBe("canceled");
   });
+
+  it("tells watchers every state change, with a snapshot and whether the state moved", async () => {
+    const queue = new JobQueue({ concurrency: 1, progressIntervalMs: 0 });
+    const seen: [string, string, string | null, number, boolean][] = [];
+    queue.watch(({ job, stateChanged }) => seen.push([job.id, job.state, job.step, job.progress, stateChanged]));
+    const job = deferred();
+    const { id } = queue.enqueue({ kind: "ingest", project: "/p", asset: "assets/a.mp4", run: job.run });
+    const failing = queue.enqueue({
+      kind: "ingest",
+      project: "/p",
+      asset: "assets/b.mp4",
+      run: async () => {
+        throw new Error("broken");
+      },
+    });
+    await settle();
+    job.ctx().update({ step: "proxy", progress: 0.25 });
+    job.ctx().update({ progress: 0.5 });
+    job.finish();
+    await queue.drained();
+    expect(seen).toEqual([
+      [id, "queued", null, 0, true],
+      [id, "running", null, 0, true],
+      [failing.id, "queued", null, 0, true],
+      [id, "running", "proxy", 0.25, false],
+      [id, "running", "proxy", 0.5, false],
+      [id, "done", null, 1, true],
+      [failing.id, "running", null, 0, true],
+      [failing.id, "failed", null, 0, true],
+    ]);
+  });
+
+  it("rate-limits progress-only updates per job but never step or state changes", async () => {
+    const queue = new JobQueue({ concurrency: 1, progressIntervalMs: 60_000 });
+    const seen: string[] = [];
+    queue.watch(({ job }) => seen.push(`${job.state} ${job.step ?? "-"} ${job.progress}`));
+    const job = deferred();
+    queue.enqueue({ kind: "render", project: "/p", asset: "timelines/main.json", output: "/out.mp4", run: job.run });
+    await settle();
+    job.ctx().update({ step: "video", progress: 0.1 });
+    job.ctx().update({ progress: 0.2 });
+    job.ctx().update({ progress: 0.3 });
+    job.ctx().update({ step: "mux", progress: 0.8 });
+    job.finish();
+    await queue.drained();
+    expect(seen).toEqual(["queued - 0", "running - 0", "running video 0.1", "running mux 0.8", "done - 1"]);
+  });
+
+  it("stops telling a watcher once it unwatches", async () => {
+    const queue = new JobQueue({ concurrency: 1 });
+    const seen: string[] = [];
+    const unwatch = queue.watch(({ job }) => seen.push(job.state));
+    unwatch();
+    queue.enqueue({ kind: "ingest", project: "/p", asset: "assets/a.mp4", run: async () => {} });
+    await queue.drained();
+    expect(seen).toEqual([]);
+  });
 });

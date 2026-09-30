@@ -1,5 +1,5 @@
 import type { AssetInfo } from "@frameshell/protocol";
-import type { FrameshellApi } from "../../../shared/api.js";
+import type { AssetChange, FrameshellApi } from "../../../shared/api.js";
 import type { MediaLookup, Peaks, Thumbnails } from "./paint.js";
 
 /** Decoded thumbnails kept at once; each is ~160x90 px. */
@@ -12,7 +12,9 @@ type Load<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "f
 /**
  * Waveforms and thumbnails of the project's assets, loaded lazily the first
  * time the painter asks and cached. `onLoaded` fires when something new can
- * be drawn. Assets without finished ingest simply have nothing yet.
+ * be drawn. Assets without finished ingest simply have nothing yet. The asset
+ * list is read once ({@link MediaCache.refresh}) and then kept current by
+ * daemon `asset.changed` events ({@link MediaCache.apply}); nothing polls.
  */
 export class MediaCache implements MediaLookup<ImageBitmap> {
   #assets = new Map<string, AssetInfo>();
@@ -21,6 +23,8 @@ export class MediaCache implements MediaLookup<ImageBitmap> {
   readonly #strips = new Map<string, Thumbnails<ImageBitmap>>();
   readonly #aspects = new Map<string, number>();
   readonly #queue: { dir: string; path: string }[] = [];
+  /** Events received while a {@link MediaCache.refresh} is in flight; replayed over its (possibly older) reply. */
+  #pending: Extract<AssetChange, { path: string }>[] | null = null;
   #loading = 0;
   #disposed = false;
 
@@ -29,19 +33,34 @@ export class MediaCache implements MediaLookup<ImageBitmap> {
     private readonly onLoaded: () => void,
   ) {}
 
-  /** Re-read `asset.list`. Returns true while some asset is still ingesting (poll again later). */
-  async refresh(): Promise<boolean> {
-    let assets: AssetInfo[];
+  /** Re-read every asset (`asset.list`): on mount, and after a daemon reconnect when events may have been missed. */
+  async refresh(): Promise<void> {
+    const pending: Extract<AssetChange, { path: string }>[] = [];
+    this.#pending = pending;
+    let assets: AssetInfo[] | null = null;
     try {
       assets = await this.api.assets();
     } catch {
-      return false;
+      // Daemon unreachable: keep what we have; events or the next resync fill in.
     }
-    if (this.#disposed) return false;
+    if (this.#pending === pending) this.#pending = null;
+    if (this.#disposed || !assets) return;
     this.#assets = new Map(assets.map((asset) => [asset.path, asset]));
     this.#strips.clear();
+    for (const change of pending) this.#set(change.path, change.asset);
     this.onLoaded();
-    return assets.some((asset) => asset.state === "pending" || asset.state === "processing");
+  }
+
+  /** One daemon `asset.changed`, or a resync (`path: null`) that re-reads everything. */
+  apply(change: AssetChange): void {
+    if (this.#disposed) return;
+    if (change.path === null) {
+      void this.refresh();
+      return;
+    }
+    this.#pending?.push(change);
+    this.#set(change.path, change.asset);
+    this.onLoaded();
   }
 
   waveform(asset: string): Peaks | null {
@@ -80,6 +99,13 @@ export class MediaCache implements MediaLookup<ImageBitmap> {
       this.#strips.set(asset, strip);
     }
     return strip;
+  }
+
+  #set(path: string, asset: AssetInfo | null): void {
+    if (asset) this.#assets.set(path, asset);
+    else this.#assets.delete(path);
+    // New content means new derived paths: the strip is rebuilt from them on the next paint.
+    this.#strips.delete(path);
   }
 
   /** Release decoded images; later loads are ignored. */

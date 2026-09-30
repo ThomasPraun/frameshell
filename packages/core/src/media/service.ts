@@ -27,6 +27,11 @@ export interface MediaServiceOptions {
   jobs: JobQueue;
   /** Watch `assets/` of attached projects. Default true. */
   watch?: boolean;
+  /**
+   * An asset's ingest state changed or its file left `assets/` (`asset` null).
+   * Called in order per asset with what {@link MediaService.list} reports at that moment.
+   */
+  onAssetChanged?: (root: string, path: string, asset: AssetInfo | null) => void;
 }
 
 interface Attached {
@@ -49,12 +54,20 @@ export class MediaService {
   readonly #locks = new Map<string, Promise<void>>();
   /** On-demand probes keyed by root, path, size and mtime. */
   readonly #probes = new Map<string, Promise<MediaProbe>>();
+  readonly #onAssetChanged: MediaServiceOptions["onAssetChanged"];
+  /** Tail of each asset's report chain (root + path): reports never overtake each other. */
+  readonly #reports = new Map<string, Promise<void>>();
   #closed = false;
 
   constructor(options: MediaServiceOptions) {
     this.#binaries = options.binaries;
     this.#jobs = options.jobs;
     this.#watch = options.watch ?? true;
+    this.#onAssetChanged = options.onAssetChanged;
+    // Only state moves change what `list` says; progress within a state is the queue's own news.
+    this.#jobs.watch(({ job, stateChanged }) => {
+      if (job.kind === "ingest" && stateChanged) this.#report(job.project, job.asset);
+    });
   }
 
   /**
@@ -73,7 +86,13 @@ export class MediaService {
     });
     const onFile = (path: string) => void this.#autoIngest(root, path).catch(() => {});
     watcher.on("add", onFile).on("change", onFile);
-    watcher.on("unlink", (path) => void attached.store.forget(toRel(root, path)).catch(() => {}));
+    watcher.on("unlink", (path) => {
+      const rel = toRel(root, path);
+      void attached.store
+        .forget(rel)
+        .catch(() => {})
+        .then(() => this.#report(root, rel));
+    });
     // A vanished or unreadable assets/ must not crash the daemon.
     watcher.on("error", () => {});
     attached.watcher = watcher;
@@ -120,30 +139,7 @@ export class MediaService {
     const jobs = this.#jobs.list({ project: root });
     const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
     const assets: AssetInfo[] = [];
-    for (const rel of rels.sort()) {
-      const last = jobs.filter((job) => job.asset === rel).at(-1);
-      const hash = await store.knownHash(rel);
-      const manifest = hash ? await store.manifest(store.key(hash, fps)) : null;
-      const active = last?.state === "queued" || last?.state === "running";
-      const state: AssetInfo["state"] = active
-        ? "processing"
-        : manifest
-          ? "ready"
-          : last?.state === "failed"
-            ? "failed"
-            : "pending";
-      assets.push({
-        path: rel,
-        hash,
-        state,
-        error: state === "failed" ? (last?.error ?? null) : null,
-        media: manifest?.media ?? null,
-        proxy: manifest?.proxy ?? null,
-        sidecar: manifest?.sidecar ?? null,
-        waveform: manifest?.waveform ?? null,
-        thumbnails: manifest?.thumbnails ?? null,
-      });
-    }
+    for (const rel of rels.sort()) assets.push(await describeAsset(store, rel, jobs, fps));
     return assets;
   }
 
@@ -206,6 +202,31 @@ export class MediaService {
   #attached(root: string): Attached {
     this.attach(root);
     return this.#projects.get(root) ?? { store: new MediaStore(root), watcher: null, attempted: new Map() };
+  }
+
+  /**
+   * Tell `onAssetChanged` what `list` now says about `rel` (null when it is no
+   * longer a file). Chained per asset, so a slow read never lands after a newer one.
+   */
+  #report(root: string, rel: string): void {
+    const onAssetChanged = this.#onAssetChanged;
+    if (!onAssetChanged || this.#closed || !this.#projects.has(root)) return;
+    const key = `${root}\0${rel}`;
+    const tail = (this.#reports.get(key) ?? Promise.resolve()).then(async () => {
+      const { store } = this.#attached(root);
+      const current = await stat(store.abs(rel)).catch(() => null);
+      let asset: AssetInfo | null = null;
+      if (current?.isFile()) {
+        const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
+        asset = await describeAsset(store, rel, this.#jobs.list({ project: root }), fps);
+      }
+      if (!this.#closed) onAssetChanged(root, rel, asset);
+    });
+    const settled = tail.catch(() => {});
+    this.#reports.set(key, settled);
+    void settled.then(() => {
+      if (this.#reports.get(key) === settled) this.#reports.delete(key);
+    });
   }
 
   /** Watcher path: skip files already tried at this exact size and mtime. */
@@ -301,6 +322,26 @@ export class MediaService {
       return { rel, copied: true };
     }
   }
+}
+
+/** One asset as `asset.list` reports it; `jobs` are the project's, oldest first. */
+async function describeAsset(store: MediaStore, rel: string, jobs: JobInfo[], fps: number): Promise<AssetInfo> {
+  const last = jobs.filter((job) => job.kind === "ingest" && job.asset === rel).at(-1);
+  const hash = await store.knownHash(rel);
+  const manifest = hash ? await store.manifest(store.key(hash, fps)) : null;
+  const active = last?.state === "queued" || last?.state === "running";
+  const state: AssetInfo["state"] = active ? "processing" : manifest ? "ready" : last?.state === "failed" ? "failed" : "pending";
+  return {
+    path: rel,
+    hash,
+    state,
+    error: state === "failed" ? (last?.error ?? null) : null,
+    media: manifest?.media ?? null,
+    proxy: manifest?.proxy ?? null,
+    sidecar: manifest?.sidecar ?? null,
+    waveform: manifest?.waveform ?? null,
+    thumbnails: manifest?.thumbnails ?? null,
+  };
 }
 
 /** Hard link; across volumes (EXDEV) a symlink, which needs the source to stay. */
