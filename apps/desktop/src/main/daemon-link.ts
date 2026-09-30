@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { connectOrStartDaemon } from "@frameshell/cli";
 import {
   type DaemonConnection,
@@ -7,7 +8,9 @@ import {
   type MethodName,
   type MethodParams,
   type MethodResult,
+  type MethodSpec,
   RpcError,
+  methods,
 } from "@frameshell/protocol";
 
 /** Options for {@link DaemonLink}. */
@@ -70,14 +73,21 @@ export class DaemonLink {
 
   constructor(private readonly options: DaemonLinkOptions) {}
 
-  /** Typed request; see the method registry in `@frameshell/protocol`. */
+  /**
+   * Typed request; see the method registry in `@frameshell/protocol`. A
+   * mutating method carries a fresh idempotency key, the same on the retry:
+   * when the first attempt was applied but its reply lost, the daemon answers
+   * the retry with that result instead of applying the change twice.
+   */
   async request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
+    const spec: MethodSpec = methods[method];
+    const options = spec.mutating ? { idempotencyKey: randomUUID() } : {};
     try {
-      return await (await this.#connect()).request(method, params);
+      return await (await this.#connect()).request(method, params, options);
     } catch (error) {
       if (error instanceof RpcError) throw error;
       this.#drop();
-      return (await this.#connect()).request(method, params);
+      return (await this.#connect()).request(method, params, options);
     }
   }
 
