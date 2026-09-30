@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AppDirs, type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
+import { createTimeline } from "@frameshell/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -149,6 +150,73 @@ describe("transactions", () => {
     await app.request("revert", { cwd: dir, target: humanOp.operation.id });
     await agent.request("tx.abort", {});
     expect(await tracks()).toEqual(["Gone", "Kept"]);
+  });
+
+  it("aborts across timelines all or nothing, reporting the conflicts of every timeline", async () => {
+    const { dir, connect, admin } = await setup();
+    await admin.request("file.write", { path: join(dir, "timelines", "intro.json"), content: JSON.stringify(createTimeline("intro")) });
+    const agent = await connect("cli/test", "agent");
+    const app = await connect("desktop/0.1.0");
+    const timelines = ["main", "intro"];
+    const add = (conn: DaemonConnection, timeline: string, name: string) =>
+      conn.request("track.add", { cwd: dir, timeline, kind: "video", name });
+    const names = async (timeline: string) =>
+      (await admin.request("track.list", { cwd: dir, timeline })).tracks.map((track) => track.name);
+    const journalLength = (timeline: string) =>
+      readFileSync(join(dir, ".frameshell", "history", `${timeline}.jsonl`), "utf8").trim().split("\n").length;
+
+    // Same shape as the single-timeline conflict: the agent removes the bottom track, the human then adds one.
+    const gone = new Map<string, string>();
+    for (const timeline of timelines) {
+      gone.set(timeline, (await add(agent, timeline, "Gone")).changes.added[0]!);
+      await add(agent, timeline, "Kept");
+    }
+    await sleep(GAP_MS * 2);
+    await agent.request("tx.begin", { label: "cleanup" });
+    for (const timeline of timelines) await agent.request("track.remove", { cwd: dir, timeline, track: gone.get(timeline)! });
+    const human = new Map<string, string>();
+    for (const timeline of timelines) human.set(timeline, (await add(app, timeline, "Human")).operation.id);
+    const lengths = timelines.map(journalLength);
+
+    const refused = await agent.request("tx.abort", {}).catch((error: unknown) => error);
+    expect(refused).toMatchObject({
+      code: ErrorCode.RevertConflict,
+      message: expect.stringMatching(/nothing was undone/i),
+      data: {
+        timelines: [
+          { timeline: "main", conflicts: [expect.objectContaining({ id: human.get("main"), author: "ui" })] },
+          { timeline: "intro", conflicts: [expect.objectContaining({ id: human.get("intro"), author: "ui" })] },
+        ],
+      },
+    });
+    expect(timelines.map(journalLength)).toEqual(lengths);
+
+    // One timeline resolved is not enough: the other still conflicts and the resolved one is left as it is.
+    await app.request("revert", { cwd: dir, timeline: "main", target: human.get("main")! });
+    await expect(agent.request("tx.abort", {})).rejects.toMatchObject({
+      code: ErrorCode.RevertConflict,
+      data: { timelines: [{ timeline: "intro", conflicts: [expect.objectContaining({ id: human.get("intro") })] }] },
+    });
+    expect(await names("main")).toEqual(["Kept"]);
+
+    await app.request("revert", { cwd: dir, timeline: "intro", target: human.get("intro")! });
+    const aborted = await agent.request("tx.abort", {});
+    expect(aborted.reverted.map((result) => result.timeline)).toEqual(["main", "intro"]);
+    for (const timeline of timelines) expect(await names(timeline)).toEqual(["Gone", "Kept"]);
+  });
+
+  it("aborts past a timeline where the transaction's only operation failed", async () => {
+    const { dir, connect, addTrack, tracks } = await setup();
+    const agent = await connect("cli/test", "agent");
+    await agent.request("tx.begin", { label: "partial" });
+    await addTrack(agent, "Drop");
+    await expect(agent.request("track.remove", { cwd: dir, track: "t_000000" })).rejects.toMatchObject({ code: ErrorCode.TrackNotFound });
+    await expect(agent.request("track.add", { cwd: dir, timeline: "missing", kind: "video" })).rejects.toMatchObject({
+      code: ErrorCode.TimelineNotFound,
+    });
+    const aborted = await agent.request("tx.abort", {});
+    expect(aborted.reverted.map((result) => result.timeline)).toEqual(["main"]);
+    expect(await tracks()).toEqual([]);
   });
 
   it("shows the agent what the human changed since its last transaction", async () => {

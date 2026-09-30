@@ -274,7 +274,9 @@ export const methods = {
         .string()
         .min(1)
         .optional()
-        .describe("Terminal session the caller runs in (`FRAMESHELL_SESSION`); attributes its operations to that terminal."),
+        .describe(
+          "Terminal session the caller runs in (`FRAMESHELL_SESSION`, or one the CLI generates per shell); attributes its operations to that terminal.",
+        ),
     }),
     result: DaemonIdentitySchema,
   },
@@ -306,7 +308,7 @@ export const methods = {
           session: z
             .string()
             .nullable()
-            .describe("Terminal session the caller's operations are attributed to; null outside a Frameshell terminal."),
+            .describe("Terminal session the caller's operations are attributed to; null when the client sent none."),
         })
         .describe("Who the daemon attributes this connection's operations to."),
     }),
@@ -735,8 +737,9 @@ export const methods = {
     description:
       "Start an explicit transaction for this terminal session: every following operation (any timeline) joins it until " +
       "`tx.commit` or `tx.abort`, so `history` lists them under `label` and `revert` can undo them as one. Without it, " +
-      "operations from one session are grouped automatically until an idle gap. Needs a session (`FRAMESHELL_SESSION`, " +
-      "set in app terminals). Example: `{ label: \"remove silences\" }`. Fails with TransactionState when one is already open.",
+      "operations from one session are grouped automatically until an idle gap. The transaction is stored on disk and " +
+      "survives a daemon restart. Needs a session: app terminals set `FRAMESHELL_SESSION`, elsewhere the CLI generates " +
+      "one per shell. Example: `{ label: \"remove silences\" }`. Fails with TransactionState when one is already open.",
     params: z.strictObject({
       label: z.string().min(1).describe("What the transaction does, shown in the History panel, e.g. `remove silences`."),
     }),
@@ -754,8 +757,10 @@ export const methods = {
   "tx.abort": {
     description:
       "Close this session's explicit transaction and undo its changes: on every timeline it touched, its operations' " +
-      "inverses are applied newest first as one `revert` operation inside the transaction. Fails with RevertConflict " +
-      "(transaction stays open) when someone else changed the same clips since; with TransactionState when none is open.",
+      "inverses are applied newest first as one `revert` operation inside the transaction. All or nothing: every " +
+      "timeline is checked first, and when someone else changed the same tracks or clips since on any of them, nothing " +
+      "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
+      "open). Fails with TransactionState when none is open.",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
       reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed."),
@@ -1034,7 +1039,8 @@ export const ErrorCode = {
   HistoryNotFound: -32031,
   /**
    * data: `{ target, timeline, conflicts: { id, op, author, tx, ids }[], hint }`: later operations changed tracks or clips
-   * the revert would restore (`ids`); or `conflicts` is empty and the file changed outside the journal.
+   * the revert would restore (`ids`); or `conflicts` is empty and the file changed outside the journal. From `tx.abort`
+   * also `timelines: { root, timeline, conflicts, hint }[]`, one per refused timeline; `timeline` is the first of them.
    */
   RevertConflict: -32032,
 } as const;

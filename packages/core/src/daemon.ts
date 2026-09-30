@@ -283,11 +283,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "tx.abort": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
-      // A conflict leaves the transaction open: the caller can resolve it or commit instead.
-      const reverted = [];
-      for (const { root: dir, timeline } of touched) {
-        reverted.push(await revert(dir, dir, timeline, tx.id, author, false));
-      }
+      // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
+      const reverted = await timelines.revertAll({ author, tx, target: tx.id, timelines: touched });
       await transactions.end(author);
       return { tx: tx.id, label: tx.label, author, reverted };
     },

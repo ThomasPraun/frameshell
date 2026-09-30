@@ -225,3 +225,36 @@ function conflictError(target: string, timeline: string, found: { entry: Journal
     { target, timeline, conflicts, hint: `Revert ${newestFirst.join(", ")} first, newest first.` },
   );
 }
+
+/** A timeline `tx.abort` could not revert, with the RevertConflict `planRevert` threw for it. */
+export interface TimelineRevertFailure {
+  root: string;
+  timeline: string;
+  error: RpcError;
+}
+
+/**
+ * RevertConflict for a `tx.abort` refused on one or more timelines: says nothing
+ * was undone and lists each timeline's conflicts. `data.conflicts` flattens them
+ * (as for a one-timeline revert); `data.timelines` keeps them per timeline.
+ */
+export function abortConflictError(target: string, failures: TimelineRevertFailure[]): RpcError {
+  const timelines = failures.map(({ root, timeline, error }) => {
+    const data = error.data as { conflicts?: RevertConflict[]; hint?: string } | undefined;
+    return { root, timeline, conflicts: data?.conflicts ?? [], hint: data?.hint ?? "" };
+  });
+  const names = timelines.map((entry) => entry.timeline).join(", ");
+  return new RpcError(
+    ErrorCode.RevertConflict,
+    `Cannot abort ${target}: nothing was undone, because reverting it conflicts on timeline${failures.length > 1 ? "s" : ""} ${names}.\n` +
+      `${failures.map(({ error }) => error.message).join("\n")}\n` +
+      "The transaction stays open: resolve every conflict and abort again, or commit it.",
+    {
+      target,
+      timeline: timelines[0]!.timeline,
+      conflicts: timelines.flatMap((entry) => entry.conflicts),
+      timelines,
+      hint: timelines.map((entry) => `${entry.timeline}: ${entry.hint}`).join(" "),
+    },
+  );
+}
