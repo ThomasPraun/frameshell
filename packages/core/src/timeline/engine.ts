@@ -18,7 +18,7 @@ import {
 import type { z } from "zod";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, sortClips } from "./patch.js";
-import { clipEnd } from "./timing.js";
+import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
 
 /** What the engine needs to know about a media file. */
 export interface SourceInfo {
@@ -64,7 +64,7 @@ export interface EditContext {
    * (AssetNotFound, InvalidOperation) when missing or not media.
    */
   source(asset: string): Promise<SourceInfo>;
-  /** Derived duration of a nested timeline file (project-relative). Throws when missing, invalid or cyclic. */
+  /** Derived duration of a nested timeline file (project-relative). Throws `NestedTimelineError` when missing, invalid or cyclic. */
   nestedDuration(source: string): Promise<number>;
   /** Adapter clip types loaded for the project; empty when plugins are untrusted. */
   clipTypes(): Promise<ReadonlyMap<string, ClipTypeInfo>>;
@@ -118,7 +118,7 @@ export async function applyOperation(
 class Edit {
   readonly draft: Timeline;
   readonly grid: FrameGrid;
-  readonly #spans = new Map<string, number>();
+  readonly #spans = new Map<string, Promise<number>>();
 
   constructor(
     readonly before: Timeline,
@@ -250,7 +250,7 @@ class Edit {
     } else if (type === "timeline") {
       this.refuse(args, ["asset", "out", "speed", "props"], "timeline clips");
       if (!args.source) throw this.invalid("timeline clips need `source`, e.g. `timelines/intro.json`.", { field: "source" });
-      const nested = await this.context.nestedDuration(args.source);
+      const nested = await this.nestedSource(args.source);
       const clipIn = this.grid.snap(args.in ?? 0);
       const duration = args.duration === undefined ? undefined : this.grid.snap(args.duration);
       this.checkNestedBounds(args.source, nested, clipIn, duration);
@@ -366,7 +366,7 @@ class Edit {
     if (this.grid.frame(duration) < 1) {
       throw this.invalid("the clip would be shorter than one frame.", { hint: "Remove it with `clip.remove` instead." });
     }
-    if (isNested(clip)) this.checkNestedBounds(clip.source, await this.context.nestedDuration(clip.source), clipIn, duration);
+    if (isNested(clip)) this.checkNestedBounds(clip.source, await this.nestedOf(clip), clipIn, duration);
     clip.start = start;
     if (clipIn > 0 || clip.in !== undefined) clip.in = clipIn;
     clip.duration = duration;
@@ -460,12 +460,15 @@ class Edit {
     for (const track of tracks) {
       const kept: Clip[] = [];
       for (const clip of track.clips) {
-        const span = await this.span(clip);
-        const [S, E] = [g.frame(clip.start), g.frame(span.end)];
-        if (E <= F) {
-          kept.push(clip);
-        } else if (S >= T) {
+        const S = g.frame(clip.start);
+        if (S >= T) {
+          // After the range: only moves, so its end is not needed (it may be unknown).
           clip.start = g.snap(clip.start - shift);
+          kept.push(clip);
+          continue;
+        }
+        const E = g.frame((await this.span(clip)).end);
+        if (E <= F) {
           kept.push(clip);
         } else if (S >= F && E <= T) {
           // Entirely inside the range: removed.
@@ -521,19 +524,33 @@ class Edit {
     return { timeline, inverse: { op: "timeline.patch", args: inverse }, changes };
   }
 
-  /** Clips of one track: at least one frame each, none overlapping. Clips are sorted. */
+  /**
+   * Clips of one track: at least one frame each, none overlapping. Clips are
+   * sorted. A clip whose end is unknown (nested timeline unavailable) passes
+   * only when this operation provably kept it valid: content unchanged, and
+   * the next clip no closer than before (see {@link Edit.lengthBound}).
+   */
   async checkTrack(track: ClipTrack): Promise<void> {
     const g = this.grid;
-    let previous: { clip: Clip; end: number } | null = null;
+    let previous: { clip: Clip; end: number; known: boolean } | null = null;
     for (const clip of track.clips) {
-      const span = await this.span(clip);
-      if (g.frame(span.end) - g.frame(clip.start) < 1) {
-        throw this.invalid(`${clip.id} would be shorter than one frame (1/${this.context.fps} s).`, {
-          hint: "Make it longer, or remove it with `clip.remove`.",
-        });
+      const known = await this.end(clip);
+      let end: number;
+      if (known !== null) {
+        end = known;
+        if (g.frame(end) - g.frame(clip.start) < 1) {
+          throw this.invalid(`${clip.id} would be shorter than one frame (1/${this.context.fps} s).`, {
+            hint: "Make it longer, or remove it with `clip.remove`.",
+          });
+        }
+      } else {
+        const bound = this.lengthBound(clip);
+        if (bound === null) await this.span(clip); // throws the actionable error
+        end = clip.start + bound!;
       }
       if (previous && g.frame(clip.start) < g.frame(previous.end)) {
-        const [a, b] = [previous, { clip, end: span.end }];
+        if (!previous.known) await this.span(previous.clip); // unknown length: overlap cannot be ruled out
+        const [a, b] = [previous, { clip, end }];
         throw this.invalid(
           `${a.clip.id} (${a.clip.start}–${a.end}) and ${b.clip.id} (${b.clip.start}–${b.end}) would overlap on track ${track.id}.`,
           {
@@ -543,7 +560,7 @@ class Edit {
           },
         );
       }
-      previous = { clip, end: span.end };
+      previous = { clip, end, known: known !== null };
     }
   }
 
@@ -573,26 +590,110 @@ class Edit {
       sort(id, before.clips.has(id), after.clips.has(id));
       for (const clip of [before.clips.get(id), after.clips.get(id)]) if (clip) touched.push(clip);
     }
-    let range: { from: number; to: number } | null = null;
+    let range: { from: number; to: number | null } | null = null;
     for (const clip of touched) {
-      const { end } = await this.span(clip);
-      range = range ? { from: Math.min(range.from, clip.start), to: Math.max(range.to, end) } : { from: clip.start, to: end };
+      // Unknown end (nested timeline unavailable): bounded by the next clip before this operation, else open.
+      const known = await this.end(clip);
+      const bound = known === null ? this.lengthBound(clip) : null;
+      const end = known ?? (bound !== null && Number.isFinite(bound) ? this.grid.snap(clip.start + bound) : null);
+      if (range === null) range = { from: clip.start, to: end };
+      else range = { from: Math.min(range.from, clip.start), to: range.to === null || end === null ? null : Math.max(range.to, end) };
     }
     return { added, updated, removed, range };
   }
 
   // Helpers
 
-  /** Timeline end of `clip` on the grid. */
+  /**
+   * Timeline end of `clip` on the grid. Throws NestedTimelineUnavailable
+   * naming the clip, its track and the fix when its nested timeline is
+   * missing, invalid or cyclic.
+   */
   async span(clip: Clip): Promise<{ end: number }> {
-    return { end: await clipEnd(clip, this.grid, this.#nested) };
+    try {
+      return { end: await clipEnd(clip, this.grid, this.#nested) };
+    } catch (error) {
+      throw this.nestedError(clip, error);
+    }
   }
 
-  /** Nested durations, looked up once per operation. */
-  readonly #nested = async (source: string): Promise<number> => {
+  /** Like {@link Edit.span}, but null when the nested timeline is unavailable. */
+  async end(clip: Clip): Promise<number | null> {
+    try {
+      return await clipEnd(clip, this.grid, this.#nested);
+    } catch (error) {
+      if (error instanceof NestedTimelineError) return null;
+      throw error;
+    }
+  }
+
+  /** Duration of the timeline nested by an existing clip; errors name the clip. */
+  async nestedOf(clip: TimelineClip): Promise<number> {
+    try {
+      return await this.#nested(clip.source);
+    } catch (error) {
+      throw this.nestedError(clip, error);
+    }
+  }
+
+  /** Duration of a `source` arg (`clip.add`); errors blame the arg. */
+  async nestedSource(source: string): Promise<number> {
+    try {
+      return await this.#nested(source);
+    } catch (error) {
+      if (!(error instanceof NestedTimelineError)) throw error;
+      if (error.reason === "cycle") {
+        throw this.invalid(`${error.message}. Nested timelines cannot form a cycle.`, { field: "source" });
+      }
+      if (error.reason === "missing" && error.chain.length === 1) {
+        const available = error.available;
+        throw new RpcError(
+          ErrorCode.TimelineNotFound,
+          `${this.op}: no timeline file ${source}` +
+            (available.length > 0 ? `; timelines: ${available.join(", ")} (pass the id, e.g. \`${available[0]}\`).` : "."),
+          { timeline: source, path: source, available: [...available] },
+        );
+      }
+      throw this.invalid(`${source} has no derivable length: ${error.message}.`, {
+        field: "source",
+        hint: `Fix ${error.broken} first.`,
+      });
+    }
+  }
+
+  /** Wrap a nested timeline failure of an existing clip in an actionable error; rethrow anything else. */
+  nestedError(clip: Clip, error: unknown): unknown {
+    if (!(error instanceof NestedTimelineError)) return error;
+    const track = [this.draft, this.before]
+      .flatMap((timeline) => timeline.tracks)
+      .find((t) => t.kind !== "subtitles" && t.clips.some((c) => c.id === clip.id));
+    return nestedClipError(error, { timeline: this.draft.id, track: track?.id ?? "?", clip, op: this.op });
+  }
+
+  /**
+   * Upper bound of the length of a clip with unknown end, from the timeline
+   * before this operation: the gap to the next clip on its old track
+   * (Infinity when last). Valid only while its content is unchanged, so
+   * null when the clip is new or anything but `start` changed.
+   */
+  lengthBound(clip: Clip): number | null {
+    for (const track of this.before.tracks) {
+      if (track.kind === "subtitles") continue;
+      const index = track.clips.findIndex((c) => c.id === clip.id);
+      if (index < 0) continue;
+      const old = track.clips[index]!;
+      if (JSON.stringify({ ...old, start: 0 }) !== JSON.stringify({ ...clip, start: 0 })) return null;
+      const next = track.clips[index + 1];
+      return next ? next.start - old.start : Number.POSITIVE_INFINITY;
+    }
+    return null;
+  }
+
+  /** Nested durations, looked up once per operation (failures too). */
+  readonly #nested = (source: string): Promise<number> => {
     let duration = this.#spans.get(source);
     if (duration === undefined) {
-      duration = await this.context.nestedDuration(source);
+      duration = this.context.nestedDuration(source);
       this.#spans.set(source, duration);
     }
     return duration;

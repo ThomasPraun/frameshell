@@ -8,6 +8,7 @@ import {
   type OperationRecord,
   type OperationResult,
   RpcError,
+  type TimelineProblem,
   type TimelineView,
   type TrackSummary,
 } from "@frameshell/protocol";
@@ -18,7 +19,7 @@ import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { type ClipTypeInfo, type EditContext, type EditPointResolver, type OperationRequest, applyOperation } from "./engine.js";
 import { FrameGrid } from "./grid.js";
-import { clipEnd, timelineDuration } from "./timing.js";
+import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
 /** Options for {@link TimelineService}. */
 export interface TimelineServiceOptions {
@@ -80,16 +81,40 @@ export class TimelineService {
     });
   }
 
-  /** Compact dump for agents (`timeline.show`). */
+  /**
+   * Compact dump for agents (`timeline.show`). A clip whose nested timeline
+   * is missing, invalid or cyclic does not fail the dump: its `end` is null,
+   * the track end and duration are null, and `problems` says how to fix it.
+   */
   async show(root: string, id: string): Promise<TimelineView> {
     const { timeline, fps } = await this.#load(root, id);
     const grid = new FrameGrid(fps);
-    const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
+    const resolve = this.#nestedDurations(root, [timelineRel(id)], grid);
+    const durations = new Map<string, Promise<number>>();
+    const nested = (source: string) => {
+      let duration = durations.get(source);
+      if (!duration) durations.set(source, (duration = resolve(source)));
+      return duration;
+    };
     const tracks: TimelineView["tracks"] = [];
+    const problems: TimelineProblem[] = [];
+    let duration: number | null = 0;
     for (const track of timeline.tracks) {
       const clips = [];
       if (track.kind !== "subtitles") {
-        for (const clip of track.clips) clips.push({ ...clip, end: await clipEnd(clip, grid, nested) });
+        for (const clip of track.clips) {
+          let end: number | null;
+          try {
+            end = await clipEnd(clip, grid, nested);
+          } catch (error) {
+            if (!(error instanceof NestedTimelineError)) throw error;
+            end = null;
+            const { message } = nestedClipError(error, { timeline: id, track: track.id, clip });
+            problems.push({ clip: clip.id, track: track.id, source: error.chain[0]!, message });
+          }
+          duration = end === null || duration === null ? null : Math.max(duration, end);
+          clips.push({ ...clip, end });
+        }
       }
       tracks.push({
         id: track.id,
@@ -104,13 +129,17 @@ export class TimelineService {
       path: timelineRel(id),
       revision: timeline.revision,
       fps,
-      duration: await timelineDuration(timeline, grid, nested),
+      duration,
       tracks,
+      problems,
     };
   }
 
   /** Track summaries in stacking order (`track.list`). */
-  async tracks(root: string, id: string): Promise<{ timeline: string; revision: number; tracks: TrackSummary[] }> {
+  async tracks(
+    root: string,
+    id: string,
+  ): Promise<{ timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }> {
     const view = await this.show(root, id);
     return {
       timeline: id,
@@ -121,8 +150,9 @@ export class TimelineService {
         name: track.name,
         follows: track.follows,
         clips: track.clips.length,
-        end: track.clips.reduce((end, clip) => Math.max(end, clip.end), 0),
+        end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
       })),
+      problems: view.problems,
     };
   }
 
@@ -169,18 +199,27 @@ export class TimelineService {
 
   /**
    * Duration of nested timeline files (project-relative). `stack` holds the
-   * files being resolved; meeting one again is a cycle and fails.
+   * files being resolved, outermost first; meeting one again is a cycle.
+   * Throws {@link NestedTimelineError} naming the chain down to the file
+   * that is missing, invalid or cyclic.
    */
   #nestedDurations(root: string, stack: string[], grid: FrameGrid): (source: string) => Promise<number> {
     return async (source) => {
-      if (stack.includes(source)) {
-        throw new RpcError(
-          ErrorCode.InvalidOperation,
-          `${source} would contain itself (${[...stack, source].join(" -> ")}). Nested timelines cannot form a cycle.`,
-          { op: "clip.add", reason: "nested timeline cycle", field: "source" },
-        );
+      const chain = [...stack.slice(1), source];
+      if (stack.includes(source)) throw new NestedTimelineError("cycle", chain, [...stack, source].join(" -> "));
+      let timeline: Timeline;
+      try {
+        timeline = await readTimelineFile(root, source);
+      } catch (error) {
+        if (!(error instanceof RpcError)) throw error;
+        if (error.code === ErrorCode.TimelineNotFound) {
+          throw new NestedTimelineError("missing", chain, "", await listTimelines(root));
+        }
+        if (error.code === ErrorCode.InvalidProjectFile) {
+          throw new NestedTimelineError("invalid", chain, (error.data as { details: string }).details);
+        }
+        throw error;
       }
-      const timeline = await readTimelineFile(root, source);
       return timelineDuration(timeline, grid, this.#nestedDurations(root, [...stack, source], grid));
     };
   }

@@ -167,7 +167,13 @@ export const OperationResultSchema = z.object({
       updated: z.array(z.string()).describe("Ids of tracks and clips changed."),
       removed: z.array(z.string()).describe("Ids of tracks and clips deleted."),
       range: z
-        .object({ from: z.number(), to: z.number() })
+        .object({
+          from: z.number(),
+          to: z
+            .number()
+            .nullable()
+            .describe("Null when a touched clip's end is unknown (its nested timeline is missing or invalid): re-read from `from` on."),
+        })
         .nullable()
         .describe("Timeline seconds touched, before or after; null when no clip changed."),
     })
@@ -183,9 +189,20 @@ const ClipViewSchema = z
     id: z.string(),
     type: z.string(),
     start: z.number(),
-    end: z.number().describe("Derived: timeline time just after the last frame."),
+    end: z
+      .number()
+      .nullable()
+      .describe("Derived: timeline time just after the last frame. Null when its nested timeline is missing or invalid (see `problems`)."),
   })
   .describe("Clip as stored in the timeline file (asset/source, in/out, speed, …) plus derived `end`.");
+
+/** A clip whose timing cannot be derived; `timeline.show` and `track.list` still answer and list it here. */
+export const TimelineProblemSchema = z.object({
+  clip: z.string(),
+  track: z.string(),
+  source: z.string().describe("Nested timeline file the clip references."),
+  message: z.string().describe("What is wrong and how to fix it."),
+});
 
 /** Compact track summary of `track.list`. */
 export const TrackSummarySchema = z.object({
@@ -194,7 +211,7 @@ export const TrackSummarySchema = z.object({
   name: z.string().nullable(),
   follows: z.string().nullable().describe("Subtitle tracks: followed track id; null otherwise."),
   clips: z.int().describe("Number of clips; 0 for subtitle tracks."),
-  end: z.number().describe("Timeline time just after the last clip; 0 when empty."),
+  end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
 
 /** Result of `timeline.show`. */
@@ -203,7 +220,7 @@ export const TimelineViewSchema = z.object({
   path: z.string().describe("Project-relative file, e.g. `timelines/main.json`."),
   revision: z.int(),
   fps: z.number().describe("Project frame rate: every time is a multiple of 1/fps, 3 decimals."),
-  duration: z.number().describe("Derived: end of the last clip on any track."),
+  duration: z.number().nullable().describe("Derived: end of the last clip on any track; null when a clip's end is unknown."),
   tracks: z.array(
     z.object({
       id: z.string(),
@@ -213,9 +230,12 @@ export const TimelineViewSchema = z.object({
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),
+  problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),
 });
 
 /** See {@link TimelineViewSchema}. */
 export type TimelineView = z.output<typeof TimelineViewSchema>;
 /** See {@link TrackSummarySchema}. */
 export type TrackSummary = z.output<typeof TrackSummarySchema>;
+/** See {@link TimelineProblemSchema}. */
+export type TimelineProblem = z.output<typeof TimelineProblemSchema>;

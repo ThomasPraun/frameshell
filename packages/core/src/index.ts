@@ -83,3 +83,4 @@ export {
 } from "./timeline/engine.js";
 export { applyPatch, diffTimelines } from "./timeline/patch.js";
 export { FrameGrid } from "./timeline/grid.js";
+export { NestedTimelineError } from "./timeline/timing.js";

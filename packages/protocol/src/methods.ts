@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   OperationResultSchema,
   TimelineIdSchema,
+  TimelineProblemSchema,
   TimelineViewSchema,
   TrackSummarySchema,
   operationArgs,
@@ -524,16 +525,23 @@ export const methods = {
     description:
       "Compact dump of a timeline for agents: revision, project fps, derived duration, and every track with its clips " +
       "(ids, type, asset/source, `start`/`end` in timeline seconds, `in`/`out` in source seconds, speed, audio, transform). " +
-      "Read this before editing and use the returned ids. Fails with TimelineNotFound.",
+      "Read this before editing and use the returned ids. A clip whose nested timeline file is missing or invalid has " +
+      "`end: null` and is listed in `problems` with the fix. Fails with TimelineNotFound or InvalidProjectFile.",
     params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: TimelineViewSchema,
   },
   "track.list": {
     description:
       "List a timeline's tracks in stacking order (first video track = bottom layer): id, kind, name, followed track, " +
-      "clip count and end time. Fails with TimelineNotFound.",
+      "clip count and end time (null while a clip's nested timeline is missing or invalid; see `problems`). " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
     params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
-    result: z.object({ timeline: z.string(), revision: z.int(), tracks: z.array(TrackSummarySchema) }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int(),
+      tracks: z.array(TrackSummarySchema),
+      problems: z.array(TimelineProblemSchema),
+    }),
   },
   "track.add": {
     description:
@@ -801,6 +809,11 @@ export const ErrorCode = {
    * (overlap, source bounds, track kind…); `valid` is the allowed range in seconds when one exists.
    */
   InvalidOperation: -32026,
+  /**
+   * data: `{ timeline, track, clip, source, broken, reason, details }`: clip `clip` nests `source`, whose duration
+   * cannot be derived because `broken` (`source` itself or a file it nests) is `missing`, `invalid` or in a `cycle`.
+   */
+  NestedTimelineUnavailable: -32027,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

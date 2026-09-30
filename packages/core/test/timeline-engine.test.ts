@@ -5,6 +5,7 @@ import {
   type EditContext,
   type EditPoint,
   type OperationRequest,
+  NestedTimelineError,
   type SourceInfo,
   applyOperation,
 } from "../src/index.js";
@@ -30,7 +31,7 @@ function context(overrides: Partial<EditContext> = {}): EditContext {
     },
     nestedDuration: async (source) => {
       if (source === "timelines/intro.json") return 5;
-      throw new RpcError(ErrorCode.TimelineNotFound, `${source} not found`, {});
+      throw new NestedTimelineError("missing", [source], "", ["intro", "main"]);
     },
     clipTypes: async () =>
       new Map([
@@ -429,6 +430,100 @@ function assertInvariants(timeline: Timeline, fps: number): void {
     }
   }
 }
+
+describe("nested timeline unavailable", () => {
+  /**
+   * t_v: c_m media 0–3, c_n nests missing timelines/gone.json at 10 (end unknown), c_after media 20–23.
+   * t_a: c_a media 0–5.
+   */
+  function broken(): Timeline {
+    const media = (id: string, start: number): Clip => ({ id, type: "media", asset: "assets/talk.mp4", start, in: 0, out: 3 });
+    return {
+      ...createTimeline("main"),
+      tracks: [
+        {
+          id: "t_v",
+          kind: "video",
+          clips: [media("c_m", 0), { id: "c_n", type: "timeline", source: "timelines/gone.json", start: 10 }, media("c_after", 20)],
+        },
+        { id: "t_a", kind: "audio", clips: [{ id: "c_a", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 5 }] },
+      ],
+    };
+  }
+
+  function expectNamesClip(error: RpcError, op: string) {
+    expect(error.code).toBe(ErrorCode.NestedTimelineUnavailable);
+    expect(error.message).toContain(`${op}: clip c_n on track t_v of timeline main nests timelines/gone.json`);
+    expect(error.message).toContain("timelines/gone.json does not exist. Restore timelines/gone.json (existing timelines: intro, main)");
+    expect(error.message).toContain("`frameshell clip remove c_n`");
+    expect(error.data).toEqual({
+      timeline: "main",
+      track: "t_v",
+      clip: "c_n",
+      source: "timelines/gone.json",
+      broken: "timelines/gone.json",
+      reason: "missing",
+      details: "",
+    });
+  }
+
+  it("removes the clip, and its track with --force, reporting an open or bounded range", async () => {
+    const removed = await apply(broken(), "clip.remove", { clip: "c_n" });
+    expect(clipsOf(removed.timeline, "t_v").map((c) => c.id)).toEqual(["c_m", "c_after"]);
+    // Its end is unknown, but it ended by the next clip's start before the removal.
+    expect(removed.changes).toEqual({ added: [], updated: [], removed: ["c_n"], range: { from: 10, to: 20 } });
+    // Undo cannot check a clip of unknown length for overlaps: refused until the file is back.
+    expectNamesClip(await rejection(apply(removed.timeline, "timeline.patch", removed.inverse.args)), "timeline.patch");
+    const restored = context({ nestedDuration: async () => 5 });
+    const inverse = await apply(removed.timeline, "timeline.patch", removed.inverse.args, restored);
+    expect(clipsOf(inverse.timeline, "t_v")).toEqual(clipsOf(broken(), "t_v"));
+
+    const last = await apply((await apply(broken(), "clip.remove", { clip: "c_after" })).timeline, "clip.remove", { clip: "c_n" });
+    expect(last.changes.range).toEqual({ from: 10, to: null });
+
+    const track = await apply(broken(), "track.remove", { track: "t_v", force: true });
+    expect(track.timeline.tracks.map((t) => t.id)).toEqual(["t_a"]);
+    expect(track.changes).toMatchObject({ removed: ["t_v"], range: { from: 0, to: 23 } });
+  });
+
+  it("cuts before the clip (it only shifts) but refuses a cut that may reach into it", async () => {
+    const { timeline } = await apply(broken(), "cut", { from: 7, to: 8 });
+    expect(clipsOf(timeline, "t_v").map((c) => [c.id, c.start])).toEqual([["c_m", 0], ["c_n", 9], ["c_after", 19]]);
+    expectNamesClip(await rejection(apply(broken(), "cut", { from: 11, to: 12 })), "cut");
+  });
+
+  it("moves other clips unless they may overlap it", async () => {
+    const away = await apply(broken(), "clip.move", { clip: "c_after", start: 25 });
+    expect(clipsOf(away.timeline, "t_v").map((c) => c.start)).toEqual([0, 10, 25]);
+    const before = await apply(broken(), "clip.move", { clip: "c_m", start: 5 });
+    expect(clipsOf(before.timeline, "t_v").map((c) => c.start)).toEqual([5, 10, 20]);
+    expectNamesClip(await rejection(apply(broken(), "clip.move", { clip: "c_after", start: 15 })), "clip.move");
+    expectNamesClip(await rejection(apply(broken(), "clip.move", { clip: "c_n", start: 12 })), "clip.move");
+  });
+
+  it("names the clip, its track and the fix when an edit needs its length", async () => {
+    expectNamesClip(await rejection(apply(broken(), "clip.split", { clip: "c_n", at: 11 })), "clip.split");
+    expectNamesClip(await rejection(apply(broken(), "clip.trim", { clip: "c_n", end: 12 })), "clip.trim");
+    expectNamesClip(await rejection(apply(broken(), "clip.add", { track: "t_v", asset: "assets/talk.mp4" })), "clip.add");
+  });
+
+  it("blames the `source` arg of clip.add: missing file with the timelines that exist, or a cycle", async () => {
+    const missing = await rejection(apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/gone.json" }));
+    expect(missing.code).toBe(ErrorCode.TimelineNotFound);
+    expect(missing.message).toBe("clip.add: no timeline file timelines/gone.json; timelines: intro, main (pass the id, e.g. `intro`).");
+    expect(missing.data).toEqual({ timeline: "timelines/gone.json", path: "timelines/gone.json", available: ["intro", "main"] });
+
+    const cyclic = context({
+      nestedDuration: async (source) => {
+        throw new NestedTimelineError("cycle", [source, "timelines/main.json"], "timelines/main.json -> timelines/loop.json -> timelines/main.json");
+      },
+    });
+    const cycle = await rejection(apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/loop.json" }, cyclic));
+    expect(cycle.code).toBe(ErrorCode.InvalidOperation);
+    expect(cycle.data).toMatchObject({ field: "source" });
+    expect(cycle.message).toMatch(/timelines\/main\.json would contain itself .*Nested timelines cannot form a cycle\./);
+  });
+});
 
 describe("operation properties", () => {
   it.each([1, 2, 3, 4, 5, 6, 7, 8])("seed %i: every applied op keeps the invariants and apply∘inverse = identity", async (seed) => {

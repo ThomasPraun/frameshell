@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,42 @@ describe("frameshell timeline editing", () => {
     expect(noTimeline.stderr).toMatch(/No timeline "intro" \(timelines\/intro\.json\).*timelines: main/);
     const removed = frameshell(["track", "remove", video, "--force"]);
     expect(removed.stdout).toMatch(/removed .*revision 10/s);
+  });
+
+  it("stays readable and editable when a nested timeline file goes missing", () => {
+    // intro = a copy of main (its audio clips end at 1.8 s).
+    const introPath = join(project, "timelines", "intro.json");
+    writeFileSync(introPath, JSON.stringify({ ...onDisk(), id: "intro" }));
+    const track = json<{ changes: { added: string[] } }>(["track", "add", "video"]).changes.added[0]!;
+    const nested = json<{ changes: { added: string[] } }>(["clip", "add", track, "--type", "timeline", "--source", "intro", "--start", "10"])
+      .changes.added[0]!;
+    renameSync(introPath, join(project, "intro.bak"));
+
+    const human = frameshell(["timeline", "show"]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain("· duration unknown\n");
+    expect(human.stdout).toContain(`  ${nested}  timeline timelines/intro.json  10–?`);
+    expect(human.stdout).toContain(
+      `Problems (1):\n  clip ${nested} on track ${track} of timeline main nests timelines/intro.json, but its length is unknown: ` +
+        `timelines/intro.json does not exist. Restore timelines/intro.json (existing timelines: main), ` +
+        `or remove the clip: \`frameshell clip remove ${nested}\`.\n`,
+    );
+    const view = json<{ duration: number | null; problems: { clip: string; track: string }[] }>(["timeline", "show"]);
+    expect(view.duration).toBeNull();
+    expect(view.problems).toMatchObject([{ clip: nested, track, source: "timelines/intro.json" }]);
+    const tracks = frameshell(["track", "list"]);
+    expect(tracks.code).toBe(0);
+    expect(tracks.stdout).toContain(`  ${track}  video  1 clip(s), end unknown`);
+
+    // Edits that need its length name it and the fix; edits that do not, work.
+    const split = frameshell(["clip", "split", nested, "--at", "11"]);
+    expect(split.code).toBe(1);
+    expect(split.stderr).toContain(`clip ${nested} on track ${track}`);
+    expect(split.stderr).toContain(`\`frameshell clip remove ${nested}\``);
+    expect(frameshell(["cut", "--from", "7", "--to", "8"]).code).toBe(0);
+    const removed = frameshell(["clip", "remove", nested]);
+    expect(removed.stdout).toMatch(new RegExp(`clip\\.remove: removed ${nested} · 9–\\? s\\n`));
+    expect(json<{ problems: unknown[] }>(["timeline", "show"]).problems).toEqual([]);
   });
 
   it("exits 2 with a precise message on bad arguments", () => {

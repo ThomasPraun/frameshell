@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, RpcError } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
@@ -127,6 +127,59 @@ describe("TimelineService", () => {
     expect(cycle.message).toContain(
       "timelines/intro.json would contain itself (timelines/intro.json -> timelines/main.json -> timelines/intro.json)",
     );
+  });
+
+  it("keeps a timeline readable and editable when a nested timeline file goes missing or breaks", async () => {
+    const root = project();
+    const { timelines } = service();
+    const run = (request: Parameters<TimelineService["apply"]>[0]["request"]) =>
+      timelines.apply({ root, cwd: root, timeline: "main", author: "cli", request });
+    await timelines.apply({
+      root,
+      cwd: root,
+      timeline: "intro",
+      author: "cli",
+      request: { op: "clip.add", args: { track: "t_v", type: "media", asset: "assets/raw/a.mp4", start: 0 } },
+    });
+    const media = (await run({ op: "clip.add", args: { track: "t_v", type: "media", asset: "assets/raw/a.mp4", start: 0 } })).changes.added[0]!;
+    const nested = (await run({ op: "clip.add", args: { track: "t_v", type: "timeline", source: "intro", start: 10 } })).changes.added[0]!;
+    const introPath = join(root, "timelines", "intro.json");
+    const intro = readFileSync(introPath, "utf8");
+    renameSync(introPath, join(root, "intro.bak"));
+
+    const view = await timelines.show(root, "main");
+    expect(view.duration).toBeNull();
+    expect(view.tracks[0]!.clips.map((clip) => [clip.id, clip.end])).toEqual([[media, 4], [nested, null]]);
+    expect(view.problems).toEqual([
+      {
+        clip: nested,
+        track: "t_v",
+        source: "timelines/intro.json",
+        message:
+          `clip ${nested} on track t_v of timeline main nests timelines/intro.json, but its length is unknown: ` +
+          "timelines/intro.json does not exist. Restore timelines/intro.json (existing timelines: main), " +
+          `or remove the clip: \`frameshell clip remove ${nested}\`.`,
+      },
+    ]);
+    const tracks = await timelines.tracks(root, "main");
+    expect(tracks.tracks[0]).toMatchObject({ clips: 2, end: null });
+    expect(tracks.problems).toEqual(view.problems);
+
+    // A corrupt file is reported the same way, with the parser's reason.
+    writeFileSync(introPath, "{}");
+    const invalid = await timelines.show(root, "main");
+    expect(invalid.problems[0]!.message).toMatch(/timelines\/intro\.json is not a valid timeline: .*Fix timelines\/intro\.json/s);
+
+    // Restoring the file fixes it; removing the clip is the other way out.
+    writeFileSync(introPath, intro);
+    expect((await timelines.show(root, "main")).duration).toBe(14);
+    rmSync(introPath);
+    const cut = await run({ op: "cut", args: { from: 7, to: 8 } });
+    expect(cut.revision).toBe(3);
+    const removed = await run({ op: "clip.remove", args: { clip: nested } });
+    expect(removed.changes).toMatchObject({ removed: [nested], range: { from: 9, to: null } });
+    const after = await timelines.show(root, "main");
+    expect(after).toMatchObject({ duration: 4, problems: [] });
   });
 
   it("names the timelines that exist when one is missing", async () => {

@@ -1,4 +1,4 @@
-import type { DaemonConnection, MethodName, OperationResult, TimelineView, TrackSummary } from "@frameshell/protocol";
+import type { DaemonConnection, MethodName, OperationResult, TimelineProblem, TimelineView, TrackSummary } from "@frameshell/protocol";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -236,7 +236,7 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
   }
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
-  if (inv.method === "track.list") return formatTracks(result as { timeline: string; revision: number; tracks: TrackSummary[] });
+  if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   return formatOperation(result as OperationResult);
 }
 
@@ -246,40 +246,48 @@ function formatOperation(result: OperationResult): string {
     ...(added.length > 0 ? [`added ${added.join(", ")}`] : []),
     ...(updated.length > 0 ? [`updated ${updated.join(", ")}`] : []),
     ...(removed.length > 0 ? [`removed ${removed.join(", ")}`] : []),
-    ...(range ? [`${range.from}–${range.to} s`] : []),
+    ...(range ? [`${range.from}–${range.to ?? "?"} s`] : []),
   ];
   return `${result.operation.op}: ${parts.join(" · ") || "no change"}\nrevision ${result.revision}\n`;
 }
 
-function formatTracks(result: { timeline: string; revision: number; tracks: TrackSummary[] }): string {
+function formatTracks(result: { timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }): string {
   if (result.tracks.length === 0) {
     return `Timeline ${result.timeline} (revision ${result.revision}) has no tracks. Add one: \`frameshell track add video\`.\n`;
   }
   const lines = [`Timeline ${result.timeline} · revision ${result.revision} · bottom to top:`];
   for (const track of result.tracks) {
     const name = track.name ? ` "${track.name}"` : "";
-    const detail = track.kind === "subtitles" ? `follows ${track.follows}` : `${track.clips} clip(s), ends ${track.end} s`;
+    const ends = track.end === null ? "end unknown" : `ends ${track.end} s`;
+    const detail = track.kind === "subtitles" ? `follows ${track.follows}` : `${track.clips} clip(s), ${ends}`;
     lines.push(`  ${track.id}  ${track.kind}${name}  ${detail}`);
   }
-  return `${lines.join("\n")}\n`;
+  return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
+}
+
+/** Clips whose nested timeline is unavailable, with the fix; nothing when none. */
+function formatProblems(problems: TimelineProblem[]): string[] {
+  if (problems.length === 0) return [];
+  return [`Problems (${problems.length}):`, ...problems.map((problem) => `  ${problem.message}`)];
 }
 
 function formatTimeline(view: TimelineView): string {
-  const lines = [`Timeline ${view.timeline} · revision ${view.revision} · ${view.fps} fps · ${view.duration} s`];
+  const duration = view.duration === null ? "duration unknown" : `${view.duration} s`;
+  const lines = [`Timeline ${view.timeline} · revision ${view.revision} · ${view.fps} fps · ${duration}`];
   if (view.tracks.length === 0) lines.push("  (no tracks: `frameshell track add video`)");
   for (const track of view.tracks) {
     const name = track.name ? ` "${track.name}"` : "";
     lines.push(`${track.id}  ${track.kind}${name}${track.follows ? `  follows ${track.follows}` : ""}`);
     for (const clip of track.clips) {
-      const c = clip as Record<string, unknown> & { id: string; type: string; start: number; end: number };
+      const c = clip as Record<string, unknown> & { id: string; type: string; start: number; end: number | null };
       const what = typeof c["asset"] === "string" ? c["asset"] : typeof c["source"] === "string" ? c["source"] : "";
       const source =
         c["in"] !== undefined || c["out"] !== undefined
           ? `  in ${String(c["in"] ?? 0)}${c["out"] !== undefined ? ` out ${String(c["out"])}` : ""}`
           : "";
       const speed = c["speed"] !== undefined ? `  ×${String(c["speed"])}` : "";
-      lines.push(`  ${c.id}  ${c.type} ${what}  ${c.start}–${c.end}${source}${speed}`);
+      lines.push(`  ${c.id}  ${c.type} ${what}  ${c.start}–${c.end ?? "?"}${source}${speed}`);
     }
   }
-  return `${lines.join("\n")}\n`;
+  return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }
