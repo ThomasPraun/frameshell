@@ -207,6 +207,13 @@ describe("frameshell CLI", () => {
     expect(result.stderr).toContain("`frameshell status` does not take --from");
   });
 
+  it("timeline commands reject flags of other commands instead of ignoring them", () => {
+    const result = frameshell(["history", "--wait", "--link", "--no-skill"], tempDir());
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("`frameshell history` does not take --link, --wait, --no-skill");
+    expect(frameshell(["clip", "add", "--verify", "x.mp4"], tempDir()).stderr).toContain("does not take --verify");
+  });
+
   it("rejects an unknown command with usage", () => {
     const result = frameshell(["frobnicate"], tempDir());
     expect(result.code).toBe(2);

@@ -83,6 +83,9 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "trans
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
+/** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "no-skill", "provider", "model", "language", "verify"] as const;
+
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill"],
@@ -239,10 +242,16 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   }
 }
 
-/** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands check their own. */
+/** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   const key = command === "plugin" || command === "script" ? `${command} ${sub ?? ""}` : command!;
+  if (TIMELINE_COMMANDS.has(command!)) {
+    // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
+    const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
+    if (foreign.length > 0) throw new UsageError(`\`frameshell ${command}\` does not take ${foreign.map((flag) => `--${flag}`).join(", ")}.`);
+    return;
+  }
   const allowed = BUILTIN_FLAGS[key];
   if (!allowed) return;
   const extra = Object.keys(values).filter(
