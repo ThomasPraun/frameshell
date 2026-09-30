@@ -215,6 +215,40 @@ describe("whisper-cpp provider", () => {
     await expect(createWhisperProvider({ runEngine: run }).transcribe(holaMundoWav(), {}, context().ctx)).rejects.toThrow(/code 3/);
   });
 
+  it.each([
+    ["CUDA0", "cuda"],
+    ["Vulkan0", "vulkan"],
+  ])("retries once on CPU (-ng) when a run fails after the %s backend started", async (backend, device) => {
+    const calls: (readonly string[])[] = [];
+    const cpu = fakeEngine({ transcription: [segment(" Hola", 0, 1200, 45)] }, ["whisper_backend_init_gpu: no GPU found"]);
+    const run: RunEngine = async (binary, args, onLine) => {
+      calls.push(args);
+      if (calls.length === 1) {
+        onLine(`whisper_backend_init_gpu: using ${backend} backend`);
+        throw new Error("whisper-cli exited with code 1:\nCUDA error: out of memory");
+      }
+      await cpu.run(binary, args, onLine);
+    };
+    const { ctx, progress } = context();
+    const result = await createWhisperProvider({ runEngine: run }).transcribe(holaMundoWav(), {}, ctx);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).not.toContain("-ng");
+    expect(calls[1]).toEqual([...calls[0]!, "-ng"]);
+    expect(progress.map((p) => p.message)).toContain(`whisper.cpp failed on ${device} (CUDA error: out of memory); retrying on CPU`);
+    expect(result).toMatchObject({ device: "cpu", words: [{ text: "Hola" }] });
+  });
+
+  it("does not retry a failure on CPU", async () => {
+    let runs = 0;
+    const run: RunEngine = async () => {
+      runs += 1;
+      throw new Error("whisper-cli exited with code 3:\nfailed to open audio");
+    };
+    await expect(createWhisperProvider({ runEngine: run }).transcribe(holaMundoWav(), {}, context().ctx)).rejects.toThrow(/code 3/);
+    expect(runs).toBe(1);
+  });
+
   it("auto-detects the language when none is given", async () => {
     const engine = fakeEngine({ result: { language: "es" }, transcription: [] });
     const result = await createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), {}, context().ctx);

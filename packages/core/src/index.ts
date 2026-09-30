@@ -8,10 +8,12 @@ export {
 export { PROJECT_FILE } from "./projects.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
+  type Accelerator,
   type BinaryPackage,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
   FFMPEG_PACKAGE,
+  type MachineProbe,
   type ManagedModel,
   type PinnedArchive,
   type PinnedBuild,
@@ -19,6 +21,7 @@ export {
   type SourceBuild,
   WHISPER_MODELS,
   WHISPER_PACKAGE,
+  buildCandidates,
   currentPlatform,
 } from "./binaries/manifest.js";
 export {

@@ -43,11 +43,32 @@ export interface SourceBuild {
   readonly files: Readonly<Record<string, string>>;
   /** How to get the toolchain; shown when `cmake` is missing or the build fails. */
   readonly toolchainHint: string;
+  /** Expected build time shown while building, e.g. "about a minute". */
+  readonly duration?: string;
+}
+
+/** GPU backend a build is compiled with. */
+export type Accelerator = "metal" | "cuda" | "vulkan";
+
+/** Command that must exit 0 on this machine for an optional build to be chosen. */
+export interface MachineProbe {
+  readonly command: string;
+  readonly args: readonly string[];
+  /** What success proves, e.g. "an NVIDIA GPU and driver". Shown when the build is skipped. */
+  readonly proves: string;
 }
 
 /** Exact build pinned for one platform. Never floating: tools change behaviour between versions. */
 export interface PinnedBuild {
   readonly version: string;
+  /** GPU backend compiled in. Omitted = CPU only. */
+  readonly accelerator?: Accelerator;
+  /**
+   * Makes this an optional candidate: chosen only when every probe exits 0,
+   * else the next candidate for the platform is tried. Needs `accelerator`,
+   * which also names its install directory (`<platform>-<accelerator>`).
+   */
+  readonly requires?: readonly MachineProbe[];
   /** Who builds it (homepage), shown by `doctor`. */
   readonly origin: string;
   /** SPDX licence of the build as distributed. */
@@ -64,7 +85,13 @@ export interface BinaryPackage {
   readonly name: string;
   /** Executable names without `.exe`; the first is the one users override by default. */
   readonly tools: readonly string[];
-  readonly builds: Readonly<Partial<Record<PlatformKey, PinnedBuild>>>;
+  /**
+   * Per platform: one build, or candidates in preference order (GPU first).
+   * The first candidate whose `requires` all pass and whose install has not
+   * failed on this machine is used; the last one must have no `requires`
+   * (CPU fallback).
+   */
+  readonly builds: Readonly<Partial<Record<PlatformKey, PinnedBuild | readonly PinnedBuild[]>>>;
   /**
    * Installed by the feature that first needs it (whisper.cpp: first
    * transcription). `doctor` reports it but never lists it missing as a problem.
@@ -191,11 +218,18 @@ function whisperLinux(arch: "x64" | "arm64", sha256: string, size: number, cpuLi
   };
 }
 
-function whisperWindows(asset: string, sha256: string, size: number, dlls: readonly string[]): PinnedBuild {
+function whisperWindows(
+  asset: string,
+  sha256: string,
+  size: number,
+  dlls: readonly string[],
+  gpu: Pick<PinnedBuild, "accelerator" | "requires"> = {},
+): PinnedBuild {
   return {
     version: WHISPER_VERSION,
     origin: WHISPER_CPP,
     license: "MIT",
+    ...gpu,
     archives: [
       {
         urls: [`${WHISPER_RELEASE}/${asset}`],
@@ -209,12 +243,23 @@ function whisperWindows(asset: string, sha256: string, size: number, dlls: reado
   };
 }
 
-/** Upstream publishes no macOS CLI: built locally with Metal, shaders embedded, one static executable. */
-function whisperMacos(): PinnedBuild {
+const CMAKE_PROBE: MachineProbe = { command: "cmake", args: ["--version"], proves: "CMake" };
+const NVIDIA_PROBE: MachineProbe = { command: "nvidia-smi", args: ["-L"], proves: "an NVIDIA GPU and driver" };
+
+/** Only the `whisper-cli` target, statically linked: nothing to place next to it. */
+const WHISPER_CLI_ONLY = ["-DBUILD_SHARED_LIBS=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF", "-DWHISPER_SDL2=OFF"];
+
+/** Local CMake build of the pinned commit (source tarball) with backend flags. */
+function whisperSource(
+  configure: readonly string[],
+  recipe: Pick<SourceBuild, "toolchainHint" | "duration">,
+  gpu: Pick<PinnedBuild, "accelerator" | "requires">,
+): PinnedBuild {
   return {
     version: WHISPER_VERSION,
     origin: WHISPER_CPP,
     license: "MIT",
+    ...gpu,
     archives: [
       {
         urls: [`https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/${WHISPER_COMMIT}`],
@@ -225,21 +270,67 @@ function whisperMacos(): PinnedBuild {
     ],
     build: {
       root: `whisper.cpp-${WHISPER_COMMIT}`,
-      configure: [
-        "-DBUILD_SHARED_LIBS=OFF",
-        "-DGGML_METAL=ON",
-        "-DGGML_METAL_EMBED_LIBRARY=ON",
-        "-DWHISPER_BUILD_TESTS=OFF",
-        "-DWHISPER_BUILD_SERVER=OFF",
-        "-DWHISPER_SDL2=OFF",
-      ],
+      configure: [...WHISPER_CLI_ONLY, ...configure],
       targets: ["whisper-cli"],
       files: { "whisper-cli": "bin/whisper-cli" },
+      ...recipe,
+    },
+  };
+}
+
+/** Upstream publishes no macOS CLI: built locally with Metal, shaders embedded, one static executable. */
+function whisperMacos(): PinnedBuild {
+  return whisperSource(
+    ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"],
+    {
       toolchainHint:
         "Building whisper.cpp needs the Xcode Command Line Tools (`xcode-select --install`) and CMake " +
         "(`brew install cmake`, or https://cmake.org/download/)",
+      duration: "about a minute",
     },
-  };
+    { accelerator: "metal" },
+  );
+}
+
+/**
+ * Linux GPU candidates. Upstream publishes Linux CPU builds only, so the
+ * pinned commit is built locally when the GPU and its toolchain are present.
+ * `GGML_NATIVE=OFF`: `-march=native` breaks the CPU backend on some
+ * compiler/CPU pairs (gcc 12 in an arm64 VM), and CUDA then covers ggml's
+ * default architecture list, not only the GPU present at build time.
+ * A failed build falls back to the next candidate.
+ */
+function whisperLinuxGpu(): PinnedBuild[] {
+  return [
+    whisperSource(
+      ["-DGGML_NATIVE=OFF", "-DGGML_CUDA=ON"],
+      {
+        toolchainHint: "Building whisper.cpp with CUDA needs the NVIDIA driver, the CUDA toolkit (`nvcc`), a C++ compiler and CMake",
+        duration: "10 to 30 minutes",
+      },
+      {
+        accelerator: "cuda",
+        requires: [NVIDIA_PROBE, { command: "nvcc", args: ["--version"], proves: "the CUDA toolkit (nvcc)" }, CMAKE_PROBE],
+      },
+    ),
+    whisperSource(
+      ["-DGGML_NATIVE=OFF", "-DGGML_VULKAN=ON"],
+      {
+        toolchainHint:
+          "Building whisper.cpp with Vulkan needs a Vulkan driver, the Vulkan loader and headers (`libvulkan-dev`), " +
+          "SPIR-V headers (`spirv-headers`), `glslc`, a C++ compiler and CMake",
+        duration: "a few minutes",
+      },
+      {
+        accelerator: "vulkan",
+        requires: [
+          { command: "vulkaninfo", args: ["--summary"], proves: "a Vulkan driver (vulkaninfo, from vulkan-tools)" },
+          { command: "glslc", args: ["--version"], proves: "the Vulkan shader compiler (glslc)" },
+          CMAKE_PROBE,
+        ],
+      },
+    ),
+  ];
 }
 
 const X64_CPU_LIBS = [
@@ -251,10 +342,15 @@ const WIN_X64_CPU_DLLS = [
   "alderlake", "cannonlake", "cascadelake", "haswell", "icelake", "sandybridge", "skylakex", "sse42", "x64",
 ].map((variant) => `ggml-cpu-${variant}.dll`);
 
+const WIN_X64_DLLS = ["whisper.dll", "ggml.dll", "ggml-base.dll", ...WIN_X64_CPU_DLLS];
+
 /**
  * whisper.cpp `whisper-cli`, pinned: DTW and VAD behaviour change between
- * commits (ADR 0003). Linux and Windows use upstream CPU release builds;
- * macOS builds the same commit from source with Metal. Details: `docs/binaries.md`.
+ * commits (ADR 0003). GPU first, CPU last: macOS builds the commit with
+ * Metal; Windows x64 takes upstream's CUDA 12.4 build when an NVIDIA driver
+ * is present; Linux builds the commit with CUDA or Vulkan when GPU and
+ * toolchain are present; otherwise upstream CPU builds. ggml falls back to
+ * CPU at run time when no GPU device initialises. Details: `docs/binaries.md`.
  */
 export const WHISPER_PACKAGE: BinaryPackage = {
   name: "whisper-cpp",
@@ -264,16 +360,25 @@ export const WHISPER_PACKAGE: BinaryPackage = {
   builds: {
     "darwin-arm64": whisperMacos(),
     "darwin-x64": whisperMacos(),
-    "linux-x64": whisperLinux("x64", "53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32", 9_793_438, X64_CPU_LIBS),
-    "linux-arm64": whisperLinux("arm64", "93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6", 4_605_905, [
-      "libggml-cpu.so",
-    ]),
-    "win32-x64": whisperWindows("whisper-bin-x64.zip", "f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c", 8_573_270, [
-      "whisper.dll",
-      "ggml.dll",
-      "ggml-base.dll",
-      ...WIN_X64_CPU_DLLS,
-    ]),
+    "linux-x64": [
+      ...whisperLinuxGpu(),
+      whisperLinux("x64", "53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32", 9_793_438, X64_CPU_LIBS),
+    ],
+    "linux-arm64": [
+      ...whisperLinuxGpu(),
+      whisperLinux("arm64", "93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6", 4_605_905, ["libggml-cpu.so"]),
+    ],
+    "win32-x64": [
+      // Self-contained: ships cudart, cuBLAS and cuBLASLt 12. Only the driver (nvcuda.dll) comes from the system.
+      whisperWindows(
+        "whisper-cublas-12.4.0-bin-x64.zip",
+        "af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7",
+        674_539_285,
+        [...WIN_X64_DLLS, "ggml-cuda.dll", "cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"],
+        { accelerator: "cuda", requires: [NVIDIA_PROBE] },
+      ),
+      whisperWindows("whisper-bin-x64.zip", "f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c", 8_573_270, WIN_X64_DLLS),
+    ],
     "win32-arm64": whisperWindows(
       "whisper-bin-win-cpu-arm64.zip",
       "799543b926ab5b6c2d60cab269a2092e0ae8d27820e9e15429e59de3699546fc",
@@ -305,6 +410,17 @@ export const WHISPER_MODELS: readonly ManagedModel[] = [
   whisperModel("large-v3-turbo-q8_0", "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1", 874_188_075),
   whisperModel("large-v3-turbo", "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69", 1_624_555_275),
 ];
+
+/** Candidates for `platform`, in preference order; empty when nothing is pinned. */
+export function buildCandidates(pkg: BinaryPackage, platform: PlatformKey): readonly PinnedBuild[] {
+  const builds = pkg.builds[platform];
+  if (!builds) return [];
+  return isCandidateList(builds) ? builds : [builds];
+}
+
+function isCandidateList(builds: PinnedBuild | readonly PinnedBuild[]): builds is readonly PinnedBuild[] {
+  return Array.isArray(builds);
+}
 
 /** Every package the daemon manages. Headless Chrome joins here. */
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE];

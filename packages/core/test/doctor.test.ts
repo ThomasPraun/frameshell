@@ -96,6 +96,7 @@ describe("runDoctor with an on-demand package (whisper.cpp)", () => {
     builds: {
       [currentPlatform()]: {
         version: "1.9.4",
+        accelerator: "metal",
         origin: "https://example.test",
         license: "MIT",
         archives: [{ urls: ["http://127.0.0.1:9/never.tar.gz"], sha256: "b".repeat(64), size: 1, files: { "whisper-cli": "whisper-cli" } }],
@@ -113,7 +114,8 @@ describe("runDoctor with an on-demand package (whisper.cpp)", () => {
     const project = { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}` } };
     // Would reject if it tried to download whisper-cli from the unreachable pin.
     const report = await runDoctor(binaries, { exec: whisperExec, project, install: true });
-    expect(report.binaries.at(-1)).toMatchObject({ name: "whisper-cli", source: "managed", installed: false, pinned: { version: "1.9.4" } });
+    expect(report.binaries.at(-1)).toMatchObject({ name: "whisper-cli", source: "managed", installed: false, pinned: { version: "1.9.4", accelerator: "metal" } });
+    expect(report.binaries[0]!.pinned).toMatchObject({ accelerator: null });
     expect(report.problems).toEqual([]);
   });
 

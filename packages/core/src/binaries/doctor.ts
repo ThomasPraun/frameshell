@@ -44,7 +44,7 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
       path: location.path,
       installed: location.installed,
       version,
-      pinned: pinned && { version: pinned.version, origin: pinned.origin, license: pinned.license },
+      pinned: pinned && { version: pinned.version, origin: pinned.origin, license: pinned.license, accelerator: pinned.accelerator ?? null },
     });
 
     if (location.installed) {

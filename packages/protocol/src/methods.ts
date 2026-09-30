@@ -57,9 +57,16 @@ const BinaryReportSchema = z.object({
       version: z.string(),
       origin: z.string().describe("Who builds it (homepage)."),
       license: z.string().describe("SPDX licence of the build."),
+      accelerator: z
+        .enum(["metal", "cuda", "vulkan"])
+        .nullable()
+        .describe("GPU backend of the build; null = CPU only."),
     })
     .nullable()
-    .describe("Managed build pinned for this platform; null when none."),
+    .describe(
+      "Managed build chosen for this machine; null when none is pinned. GPU builds are chosen when the GPU and " +
+        "toolchain are detected, else the CPU build.",
+    ),
 });
 
 const CodecReportSchema = z.object({

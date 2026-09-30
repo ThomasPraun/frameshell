@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 
 /**
- * Runs one toolchain command (`cmake …`) to completion. Rejects with the
+ * Runs one toolchain command (`cmake …`, a probe like `nvidia-smi -L`, or a
+ * just-built executable by absolute path) to completion. Rejects with the
  * output tail when it exits non-zero, or with `code: "ENOENT"` when the
  * command is not installed.
  */
@@ -13,15 +14,21 @@ export type BuildRunner = (command: string, args: readonly string[], options: { 
 const TAIL_LINES = 30;
 
 /**
- * Where installers put CMake on macOS. A daemon started by the desktop app
- * inherits launchd's short PATH, which has neither.
+ * Toolchain dirs often missing from PATH. macOS: where installers put CMake
+ * (a daemon started by the desktop app inherits launchd's short PATH).
+ * Linux: the CUDA toolkit's default prefix, which its installer leaves off PATH.
  */
-const EXTRA_DIRS = process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin", "/Applications/CMake.app/Contents/bin"] : [];
+const EXTRA_DIRS =
+  process.platform === "darwin"
+    ? ["/opt/homebrew/bin", "/usr/local/bin", "/Applications/CMake.app/Contents/bin"]
+    : process.platform === "linux"
+      ? ["/usr/local/cuda/bin"]
+      : [];
 
-/** {@link BuildRunner} spawning the command from PATH (plus {@link EXTRA_DIRS}); no shell. */
+/** {@link BuildRunner} spawning the command from PATH (plus {@link EXTRA_DIRS}) or its absolute path; no shell. */
 export const runBuildTool: BuildRunner = (command, args, { cwd }) =>
   new Promise((resolve, reject) => {
-    const file = findExecutable(command);
+    const file = isAbsolute(command) ? command : findExecutable(command);
     if (!file) {
       reject(Object.assign(new Error(`${command} not found on PATH`), { code: "ENOENT" }));
       return;

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { chmod, mkdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
-import { availableParallelism } from "node:os";
+import { availableParallelism, tmpdir, totalmem } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
@@ -14,12 +14,14 @@ import { type BuildRunner, runBuildTool } from "./build-runner.js";
 import {
   type BinaryPackage,
   DEFAULT_MODELS,
+  type MachineProbe,
   DEFAULT_PACKAGES,
   type ManagedModel,
   type PinnedArchive,
   type PinnedBuild,
   type PlatformKey,
   type SourceBuild,
+  buildCandidates,
   currentPlatform,
 } from "./manifest.js";
 
@@ -50,7 +52,10 @@ export interface BinaryLocation {
   /** Null only when managed and nothing is pinned for this platform. */
   path: string | null;
   installed: boolean;
-  /** Managed build for this platform, whatever the source. */
+  /**
+   * Managed build chosen for this machine, whatever the source: the first
+   * candidate whose probes pass and whose install has not failed here.
+   */
   pinned: PinnedBuild | null;
 }
 
@@ -65,7 +70,11 @@ export interface BinaryManagerOptions {
   /** Defaults to {@link DEFAULT_MODELS}. Installed under `<dataDir>/models/<id>/<version>/`. */
   models?: readonly ManagedModel[];
   platform?: PlatformKey;
-  /** Runs `cmake` for source builds. Defaults to spawning it from PATH. */
+  /**
+   * Runs `cmake` for source builds, the machine probes of optional (GPU)
+   * builds and the start check of a built GPU executable. Defaults to
+   * spawning them from PATH.
+   */
   buildRunner?: BuildRunner;
 }
 
@@ -115,6 +124,8 @@ export class BinaryManager {
   readonly #buildRunner: BuildRunner;
   /** One in-flight install per package or model (keyed `pkg:` / `model:`); concurrent callers share it. */
   readonly #installing = new Map<string, Install>();
+  /** Machine probe results, keyed by command line. Hardware does not change under a running daemon. */
+  readonly #probes = new Map<string, Promise<boolean>>();
 
   constructor(options: BinaryManagerOptions) {
     this.dataDir = options.dataDir;
@@ -141,7 +152,7 @@ export class BinaryManager {
    */
   async locate(tool: string, project?: ProjectBinaries): Promise<BinaryLocation> {
     const pkg = this.#packageOf(tool);
-    const pinned = pkg.builds[this.platform] ?? null;
+    const pinned = await this.#selectBuild(pkg);
     const levels: { source: "project" | "global"; dir: string; binaries: Readonly<Record<string, string>> | undefined }[] = [
       ...(project ? [{ source: "project" as const, dir: project.dir, binaries: project.binaries }] : []),
       { source: "global", dir: this.#configDir, binaries: (await this.#readGlobalConfig()).binaries },
@@ -182,9 +193,26 @@ export class BinaryManager {
         { binary: tool, platform: this.platform },
       );
     }
-    const pinned = location.pinned;
-    await this.#shared(`pkg:${pkg.name}`, options, (report) => this.#install(pkg, pinned, tool, report));
-    return location.path;
+    let { pinned, path } = location;
+    for (;;) {
+      const build = pinned;
+      try {
+        await this.#shared(`pkg:${pkg.name}:${this.#installDir(pkg, build)}`, options, (report) => this.#install(pkg, build, tool, report));
+        return path;
+      } catch (error) {
+        // Only an optional (GPU) build that failed to build or start falls back; downloads and checksums never do.
+        if (!(error instanceof SourceBuildFailed) || !build.requires) throw error;
+        const marker = this.#failedMarker(pkg, build);
+        await mkdir(dirname(marker), { recursive: true });
+        await writeFile(marker, `${JSON.stringify({ failedAt: new Date().toISOString(), error: error.message }, null, 2)}\n`);
+        options.onProgress?.({
+          message: `${pkg.name} ${build.accelerator} build failed, using the next build (details in ${marker}; delete it to retry)`,
+        });
+        const next = await this.locate(tool, project);
+        if (!next.pinned || !next.path) throw error;
+        ({ pinned, path } = next);
+      }
+    }
   }
 
   /** Where model `id` lives and whether it is there. Never downloads. Throws for unknown ids. */
@@ -239,8 +267,44 @@ export class BinaryManager {
     return model;
   }
 
+  /** Optional candidates install beside the default one (`<platform>-<accelerator>`), so switching never mixes files. */
   #installDir(pkg: BinaryPackage, build: PinnedBuild): string {
-    return join(this.dataDir, "binaries", pkg.name, build.version, this.platform);
+    const dir = build.requires ? `${this.platform}-${build.accelerator ?? "gpu"}` : this.platform;
+    return join(this.dataDir, "binaries", pkg.name, build.version, dir);
+  }
+
+  /** Written when an optional build failed here; the candidate is skipped until it is deleted. */
+  #failedMarker(pkg: BinaryPackage, build: PinnedBuild): string {
+    return `${this.#installDir(pkg, build)}.failed.json`;
+  }
+
+  /**
+   * First candidate for this platform that is not an optional build whose
+   * probes fail or whose install already failed here; null when none is pinned.
+   */
+  async #selectBuild(pkg: BinaryPackage): Promise<PinnedBuild | null> {
+    const candidates = buildCandidates(pkg, this.platform);
+    for (const build of candidates) {
+      if (!build.requires) return build;
+      if (await isFile(this.#failedMarker(pkg, build))) continue;
+      const results = await Promise.all(build.requires.map((probe) => this.#probe(probe)));
+      if (results.every(Boolean)) return build;
+    }
+    return candidates.at(-1) ?? null;
+  }
+
+  /** Runs from the temp dir: the data dir may not exist before the first install. */
+  #probe(probe: MachineProbe): Promise<boolean> {
+    const key = [probe.command, ...probe.args].join(" ");
+    let result = this.#probes.get(key);
+    if (!result) {
+      result = this.#buildRunner(probe.command, probe.args, { cwd: tmpdir() }).then(
+        () => true,
+        () => false,
+      );
+      this.#probes.set(key, result);
+    }
+    return result;
   }
 
   async #readGlobalConfig(): Promise<z.output<typeof GlobalConfigSchema>> {
@@ -330,7 +394,7 @@ export class BinaryManager {
       }
       await writeFile(
         join(out, "install.json"),
-        `${JSON.stringify({ package: pkg.name, version: build.version, platform: this.platform, origin: build.origin, license: build.license, builtFromSource: Boolean(build.build), sources, installedAt: new Date().toISOString() }, null, 2)}\n`,
+        `${JSON.stringify({ package: pkg.name, version: build.version, platform: this.platform, accelerator: build.accelerator ?? null, origin: build.origin, license: build.license, builtFromSource: Boolean(build.build), sources, installedAt: new Date().toISOString() }, null, 2)}\n`,
       );
       await mkdir(dirname(finalDir), { recursive: true });
       try {
@@ -349,7 +413,7 @@ export class BinaryManager {
   /** Fail before downloading anything when CMake is not installed. */
   async #checkToolchain(recipe: SourceBuild, requestedBy: string, url: string): Promise<void> {
     try {
-      await this.#buildRunner("cmake", ["--version"], { cwd: this.dataDir });
+      await this.#buildRunner("cmake", ["--version"], { cwd: tmpdir() });
     } catch (error) {
       throw installFailed(requestedBy, url, `cmake is not available (${(error as Error).message}). ${this.#buildHelp(recipe, requestedBy)}`);
     }
@@ -371,18 +435,31 @@ export class BinaryManager {
       try {
         await this.#buildRunner("cmake", args, { cwd: staging });
       } catch (error) {
-        throw installFailed(requestedBy, url, `building from source failed: ${(error as Error).message}\n${this.#buildHelp(recipe, requestedBy)}`);
+        throw buildFailed(requestedBy, url, `building from source failed: ${(error as Error).message}\n${this.#buildHelp(recipe, requestedBy)}`);
       }
     };
     report({ message: `Configuring ${pkg.name} ${build.version} build` });
     await run(["-S", sourceDir, "-B", buildDir, "-DCMAKE_BUILD_TYPE=Release", ...recipe.configure]);
-    report({ message: `Building ${pkg.name} ${build.version} from source (one time, about a minute)` });
-    await run(["--build", buildDir, "--config", "Release", "--parallel", String(availableParallelism()), "--target", ...recipe.targets]);
+    const gpu = build.accelerator ? ` with ${build.accelerator}` : "";
+    const took = recipe.duration ? `, ${recipe.duration}` : "";
+    report({ message: `Building ${pkg.name} ${build.version}${gpu} from source (one time${took})` });
+    await run(["--build", buildDir, "--config", "Release", "--parallel", String(buildJobs()), "--target", ...recipe.targets]);
     const built: Record<string, string> = {};
     for (const [tool, member] of Object.entries(recipe.files)) {
       const path = join(buildDir, ...member.split("/"));
-      if (!(await isFile(path))) throw installFailed(requestedBy, url, `the build produced no ${member}`);
+      if (!(await isFile(path))) throw buildFailed(requestedBy, url, `the build produced no ${member}`);
       built[tool] = path;
+    }
+    if (build.requires) {
+      // A GPU build can link but not start (runtime library missing): check before publishing it.
+      const args = pkg.versionProbe?.args ?? ["-version"];
+      for (const [tool, path] of Object.entries(built)) {
+        try {
+          await this.#buildRunner(path, args, { cwd: staging });
+        } catch (error) {
+          throw buildFailed(requestedBy, url, `the built ${tool} does not start: ${(error as Error).message}`);
+        }
+      }
     }
     return built;
   }
@@ -409,6 +486,14 @@ export class BinaryManager {
       await rmdir(dirname(staging)).catch(() => {});
     }
   }
+}
+
+/** Memory one compiler job may need: ggml's Vulkan shader sources take over 1 GB each. */
+const BYTES_PER_BUILD_JOB = 2 ** 31;
+
+/** Parallel compile jobs: one per core, but never more than memory allows (8 jobs in 4 GB get OOM-killed). */
+function buildJobs(): number {
+  return Math.max(1, Math.min(availableParallelism(), Math.floor(totalmem() / BYTES_PER_BUILD_JOB)));
 }
 
 function megabytes(bytes: number): number {
@@ -505,6 +590,17 @@ async function extract(archive: string, dest: string, members: string[], binary:
     const hint = process.platform === "linux" ? " (tar.xz needs `xz`: install xz-utils)" : "";
     throw installFailed(binary, url, `could not extract ${members.join(", ")}${hint}: ${stderr || (error as Error).message}`);
   }
+}
+
+/** Configure, compile or start check of a source build failed: an optional build falls back on it. */
+class SourceBuildFailed extends RpcError {}
+
+function buildFailed(binary: string, url: string, details: string): SourceBuildFailed {
+  return new SourceBuildFailed(ErrorCode.BinaryInstallFailed, `Could not install ${binary} from ${url}: ${details}`, {
+    binary,
+    url,
+    details,
+  });
 }
 
 function installFailed(binary: string, url: string, details: string): RpcError {

@@ -41,7 +41,8 @@ export interface WhisperProviderOptions {
  * whisper.cpp provider with ADR 0003 settings: `-dtw <preset> -nfa -ml 1 -sow
  * -ojf` (DTW needs flash attention off; one segment per word), never `--vad`
  * (it breaks DTW times at the pinned version). Word start = DTW onset, end =
- * derived from audio energy.
+ * derived from audio energy. A run that fails after a GPU backend started
+ * (driver error, out of GPU memory) is retried once on CPU (`-ng`).
  */
 export function createWhisperProvider(options: WhisperProviderOptions = {}): TranscriptionProvider {
   const runEngine = options.runEngine ?? spawnEngine;
@@ -73,10 +74,17 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
           "-pp",
           "-of", prefix,
         ];
-        const monitor = engineMonitor(context, coldShaderNoticeMs);
+        let monitor = engineMonitor(context, coldShaderNoticeMs);
         context.progress({ message: "Loading model" });
         try {
           await runEngine(binary, args, monitor.line);
+        } catch (error) {
+          const gpu = monitor.device();
+          if (gpu === "cpu") throw error;
+          monitor.stop();
+          context.progress({ message: `whisper.cpp failed on ${gpu} (${lastLine(error)}); retrying on CPU` });
+          monitor = engineMonitor(context, coldShaderNoticeMs);
+          await runEngine(binary, [...args, "-ng"], monitor.line);
         } finally {
           monitor.stop();
         }
@@ -145,6 +153,11 @@ function engineMonitor(context: TranscribeContext, coldShaderNoticeMs: number) {
       }
     },
   };
+}
+
+/** Last log line of an engine failure: usually the cause (`CUDA error: out of memory`). */
+function lastLine(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).split("\n").filter(Boolean).at(-1) ?? "";
 }
 
 /** `MTL0` → `metal`, `CUDA0` → `cuda`, `Vulkan0` → `vulkan`. */

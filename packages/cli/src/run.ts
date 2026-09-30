@@ -394,7 +394,9 @@ function formatDoctor(report: DoctorResult): string {
   const lines = [`Platform ${report.platform} · data dir ${report.dataDir}`, "", "Binaries:"];
   for (const binary of report.binaries) {
     const state = binary.installed ? (binary.version ?? "not runnable") : "not installed";
-    const pin = binary.pinned ? ` · pinned ${binary.pinned.version} (${binary.pinned.license}, ${binary.pinned.origin})` : "";
+    const pinned = binary.pinned;
+    const gpu = pinned?.accelerator ? `, ${pinned.accelerator}` : "";
+    const pin = pinned ? ` · pinned ${pinned.version} (${pinned.license}, ${pinned.origin}${gpu})` : "";
     lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
   }
   if (report.codecs.length > 0) {
