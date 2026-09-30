@@ -139,11 +139,16 @@ const prompt =
   "This folder is a Frameshell video project. My raw recording is ../footage/talk.mp4 (a short talk in English). " +
   "Edit it: bring it into the project, transcribe it, remove the silences, export it for YouTube at 1080p, " +
   "and check that no words were lost in the cuts. Work on your own until it is done; do not ask me questions.";
+// What Case B needs: the CLI (the skill changes the project only through it), and reading files. No ffmpeg (the
+// skill never calls it), no Edit/Write (timelines are edited by commands), no other shell.
+const ALLOWED_TOOLS = ["Bash(frameshell:*)", "Bash(ls:*)", "Read", "Glob", "Grep"];
 const log = join(work, "session.jsonl");
 const args = [
   "-p", prompt,
   "--output-format", "stream-json", "--verbose",
-  "--permission-mode", "bypassPermissions",
+  // Least privilege: no bypass. -p cannot ask, so anything outside the allowlist is denied (and listed after the run).
+  "--permission-mode", "default",
+  "--allowedTools", ...ALLOWED_TOOLS,
   "--disallowedTools", "WebFetch", "WebSearch",
   "--setting-sources", "project",
   "--strict-mcp-config",
@@ -171,9 +176,12 @@ const events = readFileSync(log, "utf8").split("\n").filter(Boolean).flatMap((li
 const toolUses = events.flatMap((event) => (event.type === "assistant" ? event.message?.content ?? [] : [])).filter((part) => part.type === "tool_use");
 const commands = toolUses.map((use) => (typeof use.input?.command === "string" ? use.input.command : `${use.name} ${JSON.stringify(use.input)}`));
 const result = events.find((event) => event.type === "result");
+const denied = (result?.permission_denials ?? []).map((denial) => `${denial.tool_name} ${JSON.stringify(denial.tool_input)}`);
 console.log(`claude exited ${code}; ${toolUses.length} tool calls; ${result?.total_cost_usd !== undefined ? `$${result.total_cost_usd.toFixed(2)}` : "cost unknown"}`);
 
 // --- Checks --------------------------------------------------------------------------------------------------
+
+if (denied.length > 0) console.log(`Permission denials (outside the allowlist ${ALLOWED_TOOLS.join(", ")}):\n  ${denied.join("\n  ")}`);
 
 step("Checking the project");
 const checks = [];

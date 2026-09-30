@@ -19,3 +19,7 @@ Needs macOS or Linux, `claude` (Claude Code, logged in) and `git` on `PATH`, and
 4. Checks the result from the project itself: footage imported, word-level transcript, silences removed with speech kept, cuts snapped (none with snapping off) and grouped in a labelled transaction, a 1080p export, a `transcribe --verify` call in the session, and an independent verify reporting no lost words.
 
 On failure the work directory is kept; `session.jsonl` there is the full session (`--output-format stream-json`). After changing the skill: `pnpm gen:skill`, `pnpm exec tsc -b`, run again.
+
+## Permissions
+
+The session runs with least privilege, not `bypassPermissions`: `--permission-mode default` plus an explicit `--allowedTools` list, `Bash(frameshell:*)`, `Bash(ls:*)`, `Read`, `Glob` and `Grep`, and `WebFetch` / `WebSearch` disallowed. `claude -p` cannot ask for approval, so every other tool call (other shell commands, `Edit`, `Write`, ffmpeg) is denied. That is intended: the skill changes the project only through `frameshell`, so the agent has no reason to need more. Denied calls are listed after the run ("Permission denials") and stay in `session.jsonl`; if Case B fails because the agent tried something denied, that shows the skill leaves a gap, and the fix is in the skill, not a wider allowlist. Only widen `ALLOWED_TOOLS` in `case-b.mjs` for a tool the skill legitimately names.
