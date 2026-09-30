@@ -15,6 +15,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,plu
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
 | Managed binaries (ffmpeg, whisper.cpp, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
 | Transcription (transcript file, word ids, audio source) | `packages/core/src/transcripts/transcriber.ts`; provider `plugins/whisper-cpp` |
+| Timeline operations (engine, inverses, invariants, CLI verbs) | `packages/core/src/timeline/engine.ts`, `timeline/service.ts`; ADR 0004 |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |

@@ -16,35 +16,368 @@
     "revision": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "Bumped by the core on every applied operation; stale direct edits are rejected."
     },
     "tracks": {
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Stable, core-generated (`t_…`)."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "video",
+                  "audio"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "clips": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Stable, core-generated (`c_…`); reference clips by it."
+                        },
+                        "start": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Timeline seconds of the first frame."
+                        },
+                        "scriptRef": {
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "transform": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "scale": {
+                              "description": "Uniform scale factor. Default 1.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "opacity": {
+                              "description": "0 (invisible) to 1 (opaque). Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Overlay placement (video tracks only)."
+                        },
+                        "audio": {
+                          "type": "object",
+                          "properties": {
+                            "gain": {
+                              "description": "Gain in dB; 0 = unchanged, negative = quieter. Default 0.",
+                              "type": "number"
+                            },
+                            "muted": {
+                              "description": "Default false.",
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "media"
+                        },
+                        "asset": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."
+                        },
+                        "in": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Source seconds of the first frame."
+                        },
+                        "out": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Source seconds just after the last frame; greater than `in`."
+                        },
+                        "speed": {
+                          "description": "Playback rate; 1 = normal, 2 = twice as fast. Default 1.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "start",
+                        "type",
+                        "asset",
+                        "in",
+                        "out"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Stable, core-generated (`c_…`); reference clips by it."
+                        },
+                        "start": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Timeline seconds of the first frame."
+                        },
+                        "scriptRef": {
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "transform": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "scale": {
+                              "description": "Uniform scale factor. Default 1.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "opacity": {
+                              "description": "0 (invisible) to 1 (opaque). Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Overlay placement (video tracks only)."
+                        },
+                        "audio": {
+                          "type": "object",
+                          "properties": {
+                            "gain": {
+                              "description": "Gain in dB; 0 = unchanged, negative = quieter. Default 0.",
+                              "type": "number"
+                            },
+                            "muted": {
+                              "description": "Default false.",
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "timeline"
+                        },
+                        "source": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Project-relative timeline file, e.g. `timelines/intro.json`."
+                        },
+                        "in": {
+                          "description": "Nested-timeline seconds of the first frame. Default 0.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "duration": {
+                          "description": "Seconds played. Default: the rest of the nested timeline after `in`.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "start",
+                        "type",
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Stable, core-generated (`c_…`); reference clips by it."
+                        },
+                        "start": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Timeline seconds of the first frame."
+                        },
+                        "scriptRef": {
+                          "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "transform": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                              "type": "number"
+                            },
+                            "scale": {
+                              "description": "Uniform scale factor. Default 1.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "opacity": {
+                              "description": "0 (invisible) to 1 (opaque). Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Overlay placement (video tracks only)."
+                        },
+                        "audio": {
+                          "type": "object",
+                          "properties": {
+                            "gain": {
+                              "description": "Gain in dB; 0 = unchanged, negative = quieter. Default 0.",
+                              "type": "number"
+                            },
+                            "muted": {
+                              "description": "Default false.",
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "type": {
+                          "type": "string",
+                          "pattern": "^(?!(?:media|timeline)$)[a-z][a-z0-9-]*$",
+                          "description": "Clip type registered by an adapter plugin, e.g. `hyperframes`."
+                        },
+                        "source": {
+                          "description": "Project-relative composition entry, e.g. `compositions/hyperframes/intro/index.html`.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "in": {
+                          "description": "Composition seconds of the first frame. Default 0.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "duration": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds on the timeline."
+                        },
+                        "props": {
+                          "description": "Adapter-specific properties, validated by the adapter.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "start",
+                        "type",
+                        "duration"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "description": "Sorted by `start`, never overlapping."
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "clips"
+            ],
+            "additionalProperties": false
           },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "video",
-              "audio",
-              "subtitles"
-            ]
-          },
-          "name": {
-            "type": "string"
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "const": "subtitles"
+              },
+              "name": {
+                "type": "string"
+              },
+              "follows": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the video or audio track whose clips supply the words."
+              },
+              "style": {
+                "type": "object",
+                "properties": {
+                  "preset": {
+                    "type": "string"
+                  },
+                  "position": {
+                    "type": "string",
+                    "enum": [
+                      "top",
+                      "center",
+                      "bottom"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "follows"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "id",
-          "kind"
-        ],
-        "additionalProperties": {}
-      }
+        ]
+      },
+      "description": "Stacking order: the first video track is the bottom layer."
     }
   },
   "required": [

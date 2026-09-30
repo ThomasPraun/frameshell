@@ -1,11 +1,19 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import {
+  OperationResultSchema,
+  TimelineIdSchema,
+  TimelineProblemSchema,
+  TimelineViewSchema,
+  TrackSummarySchema,
+  operationArgs,
+} from "./timeline.js";
 
 /**
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -513,6 +521,96 @@ export const methods = {
       path: z.string().describe("Written file, project-relative and `/`-separated."),
     }),
   },
+  "timeline.show": {
+    description:
+      "Compact dump of a timeline for agents: revision, project fps, derived duration, and every track with its clips " +
+      "(ids, type, asset/source, `start`/`end` in timeline seconds, `in`/`out` in source seconds, speed, audio, transform). " +
+      "Read this before editing and use the returned ids. A clip whose nested timeline file is missing or invalid has " +
+      "`end: null` and is listed in `problems` with the fix. Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: TimelineViewSchema,
+  },
+  "track.list": {
+    description:
+      "List a timeline's tracks in stacking order (first video track = bottom layer): id, kind, name, followed track, " +
+      "clip count and end time (null while a clip's nested timeline is missing or invalid; see `problems`). " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int(),
+      tracks: z.array(TrackSummarySchema),
+      problems: z.array(TimelineProblemSchema),
+    }),
+  },
+  "track.add": {
+    description:
+      "Add a track and return its new id (`t_…`). Example: `{ kind: \"video\", name: \"Camera\" }`; subtitle tracks need " +
+      "`follows`: `{ kind: \"subtitles\", follows: \"t_4d5e6f\" }`. Placed on top unless `index` is given.",
+    params: operationArgs["track.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "track.remove": {
+    description:
+      "Remove a track. A track with clips needs `force: true`; a track followed by a subtitle track is refused until that " +
+      "subtitle track is removed. Fails with TrackNotFound or InvalidOperation.",
+    params: operationArgs["track.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.add": {
+    description:
+      "Place a clip on a video or audio track and return its new id (`c_…`) in `changes.added`. Media example: " +
+      "`{ track: \"t_4d5e6f\", asset: \"assets/raw-01.mp4\", start: 0, in: 3.2, out: 15.733 }` (in/out are source seconds, " +
+      "default the whole asset; start defaults to right after the track's last clip). Adapter example: " +
+      "`{ track, type: \"hyperframes\", source: \"compositions/hyperframes/intro/index.html\", duration: 8, props: {…} }`. " +
+      "Times snap to the project frame grid. Fails with InvalidOperation (overlap, out beyond the source duration, wrong " +
+      "track kind, unknown clip type; data says the valid range), AssetNotFound, TrackNotFound.",
+    params: operationArgs["clip.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.move": {
+    description:
+      "Move a clip to a new timeline `start` and/or another track of the same kind, keeping its content and length. " +
+      "Example: `{ clip: \"c_1a2b3c\", start: 12.5 }`. Refused when it would overlap another clip.",
+    params: operationArgs["clip.move"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.trim": {
+    description:
+      "Trim or extend a clip's head and/or tail. By source time: `{ clip, in: 4.0 }` drops source before 4.0 s, the kept " +
+      "frames stay where they were on the timeline (start moves right). By timeline time: `{ clip, end: 20.0 }`. Does not " +
+      "ripple: use `cut` to close gaps. Fails with InvalidOperation giving the valid range.",
+    params: operationArgs["clip.trim"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.split": {
+    description:
+      "Split a clip in two at timeline time `at`. The left part keeps the id; the right part's new id is in " +
+      "`changes.added`. Example: `{ clip: \"c_1a2b3c\", at: 7.5 }`.",
+    params: operationArgs["clip.split"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.remove": {
+    description: "Remove a clip, leaving a gap. To remove a time range and close the gap on every track, use `cut`.",
+    params: operationArgs["clip.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.set": {
+    description:
+      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
+      "`props` (adapter clips; replaced), `scriptRef` (null clears). Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
+    params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  cut: {
+    description:
+      "Remove the timeline range [from, to) and close the gap (ripple): clips inside are removed, clips crossing an edge " +
+      "are trimmed or split, later clips move left by `to - from`. Applies to every video and audio track unless " +
+      "`tracks` is given (cutting only some tracks shifts them against the rest). Example: `{ from: 12.4, to: 13.1 }` " +
+      "removes a 0.7 s silence.",
+    params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
 } as const satisfies Record<string, MethodSpec>;
 
 /** Any method name the daemon serves. */
@@ -700,6 +798,22 @@ export const ErrorCode = {
   TranscriptionFailed: -32021,
   /** data: `{ asset, transcripts: { path, asset }[] }`: every transcript name for the asset belongs to another asset */
   TranscriptNameTaken: -32022,
+  /** data: `{ timeline, path, available: string[] }` */
+  TimelineNotFound: -32023,
+  /** data: `{ track, available: string[] }` */
+  TrackNotFound: -32024,
+  /** data: `{ clip }` */
+  ClipNotFound: -32025,
+  /**
+   * data: `{ op, reason, field?, valid?: { min, max }, hint? }`: the operation breaks a timeline rule
+   * (overlap, source bounds, track kind…); `valid` is the allowed range in seconds when one exists.
+   */
+  InvalidOperation: -32026,
+  /**
+   * data: `{ timeline, track, clip, source, broken, reason, details }`: clip `clip` nests `source`, whose duration
+   * cannot be derived because `broken` (`source` itself or a file it nests) is `missing`, `invalid` or in a `cycle`.
+   */
+  NestedTimelineUnavailable: -32027,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

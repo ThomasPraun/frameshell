@@ -8,11 +8,13 @@ import {
   type AssetInfo,
   ErrorCode,
   type JobInfo,
+  type MediaProbe,
   RpcError,
 } from "@frameshell/protocol";
 import type { BinaryManager } from "../binaries/manager.js";
 import type { JobQueue } from "../jobs/queue.js";
 import { readEnclosingProject } from "../projects.js";
+import { probeMedia } from "./ffmpeg.js";
 import { type MediaTools, ingestAsset } from "./ingest.js";
 import { MediaStore, hashFile } from "./store.js";
 
@@ -45,6 +47,8 @@ export class MediaService {
   readonly #watch: boolean;
   readonly #projects = new Map<string, Attached>();
   readonly #locks = new Map<string, Promise<void>>();
+  /** On-demand probes keyed by root, path, size and mtime. */
+  readonly #probes = new Map<string, Promise<MediaProbe>>();
   #closed = false;
 
   constructor(options: MediaServiceOptions) {
@@ -159,6 +163,36 @@ export class MediaService {
     const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
     const manifest = await store.manifest(store.key(hash, fps));
     return { hash, sidecar: manifest?.sidecar ?? null };
+  }
+
+  /**
+   * ffprobe summary of `rel` (project-relative). Taken from a complete ingest
+   * of the current content when there is one, else probed now (sub-second)
+   * and cached while size and mtime hold: timeline edits never wait for
+   * proxies. Throws `AssetNotFound` when `rel` is not a file, {@link ToolError}
+   * when ffprobe cannot read it.
+   */
+  async probe(root: string, rel: string): Promise<MediaProbe> {
+    const { store } = this.#attached(root);
+    const current = await stat(store.abs(rel)).catch(() => null);
+    if (!current?.isFile()) {
+      throw new RpcError(ErrorCode.AssetNotFound, `${rel} is not a file in ${root}. Import it first: \`frameshell import <file>\`.`, {
+        path: rel,
+      });
+    }
+    const project = await readEnclosingProject(root);
+    const hash = await store.knownHash(rel);
+    const manifest = hash ? await store.manifest(store.key(hash, project?.config.fps ?? 30)) : null;
+    if (manifest) return manifest.media;
+    const key = `${root}\0${rel}\0${current.size}\0${current.mtimeMs}`;
+    let probed = this.#probes.get(key);
+    if (!probed) {
+      const overrides = project ? { dir: project.dir, binaries: project.config.binaries } : undefined;
+      probed = this.#binaries.ensure("ffprobe", overrides).then((ffprobe) => probeMedia(ffprobe, store.abs(rel)));
+      this.#probes.set(key, probed);
+      probed.catch(() => this.#probes.delete(key));
+    }
+    return probed;
   }
 
   /** Stop watching. Running jobs are the queue's to stop. */

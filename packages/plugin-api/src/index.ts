@@ -65,13 +65,41 @@ export type CommandResult = string | void | { output?: string; data?: unknown };
 
 /** Clip adapter contract (SPEC §8.2). Rendering is wired by the export pipeline, not by v0.1 of the host. */
 export interface ClipAdapter {
-  /** Clip `type` in timeline files. */
+  /** Clip `type` in timeline files: lowercase, not `media` or `timeline`. */
   readonly type: string;
+  /**
+   * Schema of the clip's `props`, checked on `clip.add` and `clip.set`.
+   * Any Standard Schema v1 validator works (Zod 4 schemas are one).
+   * Absent: any props are accepted.
+   */
+  readonly propsSchema?: PropsSchema;
   /** Project-relative files whose content feeds the render cache key. */
   inputs?(clip: unknown): string[] | Promise<string[]>;
   /** Render one clip. `hasAlpha: true` requires VP9 WebM with `alpha_mode=1`. */
   render(clip: unknown, context: RenderContext): Promise<{ file: string; hasAlpha: boolean }>;
 }
+
+/**
+ * Standard Schema v1 validator (https://standardschema.dev), the subset the
+ * host calls. Declared here so the plugin API depends on no schema library.
+ */
+export interface PropsSchema {
+  readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: string;
+    validate(value: unknown): PropsValidation | Promise<PropsValidation>;
+  };
+}
+
+/** Outcome of {@link PropsSchema} validation: `issues` present = invalid. */
+export type PropsValidation =
+  | { readonly value: unknown; readonly issues?: undefined }
+  | {
+      readonly issues: ReadonlyArray<{
+        readonly message: string;
+        readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> | undefined;
+      }>;
+    };
 
 /** Project facts an adapter needs to render. */
 export interface RenderContext {

@@ -15,6 +15,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
+    "@frameshell/schema": "workspace:*",
     "zod": "^4.6.5"
   }
 }
