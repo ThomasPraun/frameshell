@@ -505,6 +505,14 @@ function formatStatus(status: StatusResult, cwd: string): string {
     lines.push(`Jobs: ${active} active, ${status.jobs.length - active} finished`);
     for (const job of shown) lines.push(`  ${formatJob(job)}`);
   }
+  if (status.rejections.length > 0) {
+    lines.push(`Rejected direct edits (${status.rejections.length}):`);
+    for (const r of status.rejections) {
+      const revision = r.revision === null ? "unreadable revision" : `revision ${r.revision}`;
+      lines.push(`  ${r.at}  ${r.timeline}: ${r.reason} (${revision}, current ${r.current}), kept at ${r.preserved}`);
+      if (r.reason === "invalid") lines.push(`    ${r.message.split("\n").join("\n    ")}`);
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 

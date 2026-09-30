@@ -37,14 +37,27 @@ const LAYOUT_DIRS = [
   ".frameshell/rejected/",
 ];
 
+/** Options for {@link ProjectRegistry}. */
+export interface ProjectRegistryOptions {
+  /** Runs on every open, including re-opens: keep it idempotent. */
+  onOpen?: (dir: string) => void;
+  /**
+   * Takes over {@link ProjectRegistry.writeFile} of `timelines/<id>.json`
+   * once the path is confined (SPEC §6.4, `TimelineService.writeFile`).
+   * Default: schema-validated plain write.
+   */
+  writeTimeline?: (root: string, id: string, content: string) => Promise<void>;
+}
+
 /** Projects the daemon holds open, keyed by absolute root directory. */
 export class ProjectRegistry {
   readonly #open = new Map<string, ProjectSummary>();
   readonly #onOpen: (dir: string) => void;
+  readonly #writeTimeline: ProjectRegistryOptions["writeTimeline"];
 
-  /** `onOpen` runs on every open, including re-opens: keep it idempotent. */
-  constructor(options: { onOpen?: (dir: string) => void } = {}) {
+  constructor(options: ProjectRegistryOptions = {}) {
     this.#onOpen = options.onOpen ?? (() => {});
+    this.#writeTimeline = options.writeTimeline;
   }
 
   /**
@@ -150,6 +163,12 @@ export class ProjectRegistry {
     const rel = relativeTo(realRoot, realTarget);
     assertWritable(target, rel);
 
+    const timeline = TIMELINE_FILE.exec(rel)?.[1];
+    if (timeline !== undefined && this.#writeTimeline) {
+      await this.#writeTimeline(root, timeline, content);
+      return { project: root, path: rel };
+    }
+
     const validate = VALIDATED_FILES.find(({ match }) => match(rel))?.parse;
     if (validate) {
       let parsed: ParseResult<unknown>;
@@ -195,6 +214,9 @@ async function readConfig(root: string): Promise<{ raw: Record<string, unknown>;
   if (!parsed.ok) throw invalid(configPath, parsed.error);
   return { raw: raw as Record<string, unknown>, config: parsed.value };
 }
+
+/** Project-relative timeline file; group 1 is the timeline id. */
+const TIMELINE_FILE = /^timelines\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
 
 /** Project files whose content the daemon must be able to load; a bad write would break the project. */
 const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown) => ParseResult<unknown> }[] = [

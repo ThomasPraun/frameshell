@@ -248,3 +248,25 @@ describe("frameshell tx, history and revert", () => {
     expect(usage.code).toBe(2);
   });
 });
+
+describe("direct edits of the timeline file", () => {
+  it("status reports a stale edit the daemon rejected, and where the edit was kept", async () => {
+    const current = onDisk();
+    writeFileSync(join(project, "timelines", "main.json"), JSON.stringify({ ...current, revision: current.revision - 1, tracks: [] }));
+    type Status = { rejections: { timeline: string; reason: string; preserved: string; revision: number; current: number }[] };
+    let status = json<Status>(["status"]);
+    for (let i = 0; i < 100 && status.rejections.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      status = json<Status>(["status"]);
+    }
+    expect(status.rejections).toMatchObject([
+      { timeline: "main", reason: "stale", revision: current.revision - 1, current: current.revision },
+    ]);
+    expect(onDisk()).toEqual(current);
+    const human = frameshell(["status"]).stdout;
+    expect(human).toContain("Rejected direct edits (1):");
+    expect(human).toContain(
+      `main: stale (revision ${current.revision - 1}, current ${current.revision}), kept at ${status.rejections[0]!.preserved}`,
+    );
+  });
+});

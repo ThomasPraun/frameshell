@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, shell } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
+import type { TimelineRejection } from "@frameshell/protocol";
 import { Channel, type OpenOutcome, type Outcome, type ProjectView, type TimelineChange } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
@@ -37,8 +38,8 @@ interface WindowState {
   window: BrowserWindow;
   project: ProjectView | null;
   files: ProjectFiles | null;
-  /** Daemon `timeline.changed` of the shown project, forwarded to the renderer. */
-  timelineEvents: LinkSubscription | null;
+  /** Daemon `timeline.changed` and `timeline.rejected` of the shown project, forwarded to the renderer. */
+  timelineEvents: LinkSubscription[];
   terminals: TerminalManager;
 }
 const windows = new Map<number, WindowState>();
@@ -65,7 +66,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     window,
     project: null,
     files: null,
-    timelineEvents: null,
+    timelineEvents: [],
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -83,7 +84,7 @@ function createWindow(projectDir?: string): BrowserWindow {
   window.on("closed", () => {
     state.terminals.killAll();
     void state.files?.close();
-    void state.timelineEvents?.unsubscribe();
+    for (const subscription of state.timelineEvents) void subscription.unsubscribe();
     windows.delete(contents.id);
   });
 
@@ -116,17 +117,23 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon: { version: status.daemon.daemonVersion, pid: status.daemon.pid, socketPath: status.daemon.socketPath },
   };
   await state.files?.close();
-  await state.timelineEvents?.unsubscribe();
+  await Promise.all(state.timelineEvents.splice(0).map((subscription) => subscription.unsubscribe()));
   const contents = state.window.webContents;
   state.files = await openProjectFiles(project.dir, (paths) => send(contents, Channel.filesChanged, paths));
-  // Subscribed before the renderer first reads the timeline, so no change falls in between.
-  state.timelineEvents = await daemon
-    .subscribe("timeline.changed", project.dir, {
+  // Subscribed before the renderer first reads the timeline, so no change falls in between. The daemon
+  // watches timeline files itself (SPEC §6.4): direct edits arrive here too, as author `file`.
+  const subscriptions = await Promise.all([
+    daemon.subscribe("timeline.changed", project.dir, {
       onEvent: ({ timeline, revision, author }) =>
         send(contents, Channel.timelineChanged, { timeline, revision, author } satisfies TimelineChange),
       onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
-    })
-    .catch(() => null); // Daemon unreachable: the timeline still follows file changes.
+    }),
+    daemon.subscribe("timeline.rejected", project.dir, {
+      onEvent: ({ project: _project, ...rejection }) =>
+        send(contents, Channel.timelineRejected, rejection satisfies TimelineRejection),
+    }),
+  ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
+  state.timelineEvents = subscriptions;
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
   await rememberRecent(project.dir);

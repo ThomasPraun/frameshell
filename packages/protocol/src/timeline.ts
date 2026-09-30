@@ -304,3 +304,27 @@ export type TimelineView = z.output<typeof TimelineViewSchema>;
 export type TrackSummary = z.output<typeof TrackSummarySchema>;
 /** See {@link TimelineProblemSchema}. */
 export type TimelineProblem = z.output<typeof TimelineProblemSchema>;
+
+/**
+ * A direct edit of a timeline file the daemon refused (SPEC §6.4). The file
+ * on disk holds the daemon's version again; the edit is kept at `preserved`.
+ */
+export const TimelineRejectionSchema = z.object({
+  timeline: z.string().describe("Timeline id; the file is `timelines/<id>.json`."),
+  reason: z
+    .enum(["stale", "invalid"])
+    .describe(
+      "`stale`: the edited file's `revision` was not the current one (edited from an old copy, or the revision was changed). " +
+        "`invalid`: not JSON, fails the timeline schema, or breaks a timeline rule (e.g. overlapping clips).",
+    ),
+  message: z.string().describe("What was wrong, precise enough to fix the edit (schema path, clip ids, revisions)."),
+  preserved: z
+    .string()
+    .describe("Project-relative copy of the rejected content, `.frameshell/rejected/<timestamp>-<timeline>.json`."),
+  revision: z.int().nullable().describe("`revision` the edit carried; null when unreadable."),
+  current: z.int().describe("Revision of the daemon's version, restored on disk."),
+  at: z.string().describe("ISO 8601 time of the rejection."),
+});
+
+/** See {@link TimelineRejectionSchema}. */
+export type TimelineRejection = z.output<typeof TimelineRejectionSchema>;

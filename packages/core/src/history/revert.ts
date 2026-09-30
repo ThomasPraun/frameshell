@@ -130,8 +130,8 @@ export function historyView(entries: JournalEntry[], timeline: string, since?: s
  * Throws RevertConflict (empty `conflicts`) unless the journal from the
  * target's first entry on accounts for every change up to `current`: each
  * entry applied to what the previous one wrote (hash and revision), and the
- * file is what the last one wrote. A gap is an unjournaled edit (`file.write`,
- * a hand edit, a journal append that failed): it has no inverse, so replaying
+ * file is what the last one wrote. A gap is an unjournaled edit (a hand edit
+ * made while no daemon watched, a journal append that failed): it has no inverse, so replaying
  * inverses over it would silently drop it.
  */
 function checkUnbroken(current: Timeline, tail: JournalEntry[], target: string, timeline: string): void {
