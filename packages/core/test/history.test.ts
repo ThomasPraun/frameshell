@@ -437,6 +437,8 @@ describe("history diff", () => {
     const timeline = JSON.parse(readFileSync(path, "utf8"));
     timeline.revision += 1;
     writeFileSync(path, JSON.stringify(timeline));
+    // Without the head snapshot a restart cannot journal the offline edit: the change stays a gap.
+    rmSync(join(root, ".frameshell", "history", "main.head.json"), { force: true });
     const restarted = new TimelineService({ probe: async () => PROBE, clipTypes: async () => new Map() });
     const error = await rejection(restarted.diff(root, "main", added.operation.tx));
     expect(error.code).toBe(ErrorCode.HistoryUnavailable);

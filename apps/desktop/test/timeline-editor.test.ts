@@ -51,7 +51,9 @@ async function setup() {
   const dir = join(work, "talk");
   await app.request("project.init", { dir });
   // Loaded from the terminal: an app save would be a `ui` edit, the first thing undo takes back.
-  await cli.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
+  // Its own session: a `file.write` is journaled under the caller's author and would share the terminal's transaction.
+  const loader = await connect("cli/loader", "loader-1");
+  await loader.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
   const editor = new TimelineEditor((method, params) => app.request(method, params));
   /** Clip start/end as the daemon derives them. */
   const clip = async (id: string) => {
