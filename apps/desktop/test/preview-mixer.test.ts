@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EDGE_FADE_SAMPLES, ProgramMixer, QUANTUM } from "../src/renderer/src/preview/mixer.js";
+import { EDGE_FADE_SAMPLES, ProgramMixer, QUANTUM, QuantumClock } from "../src/renderer/src/preview/mixer.js";
 
 // Seam under test: the program audio mixer the AudioWorklet runs (ADR 0001: own sample counter, 2 ms edge fades).
 
@@ -50,6 +50,21 @@ describe("ProgramMixer", () => {
     expect(Array.from(out)).toEqual(Array.from(ramp));
   });
 
+  it("follows currentFrame past quanta the graph skipped: never plays late", () => {
+    const mixer = new ProgramMixer();
+    const ramp = Float32Array.from({ length: 2048 }, (_, i) => i / 2048);
+    mixer.schedule({ at: 0, data: ramp, fadeFrom: -10_000, fadeTo: 10_000 });
+    // Chromium renders silence without calling process() while the graph lock is busy, and currentFrame still
+    // advances: here quanta 1 and 2 never reach the worklet. Each later quantum must play its own frames.
+    const clock = (q: number) => (q === 0 ? 0 : (q + 2) * QUANTUM);
+    const out = render(mixer, 6, clock);
+    expect(Array.from(out.subarray(0, QUANTUM))).toEqual(Array.from(ramp.subarray(0, QUANTUM)));
+    for (let q = 1; q < 6; q++) {
+      expect(Array.from(out.subarray(q * QUANTUM, (q + 1) * QUANTUM))).toEqual(Array.from(ramp.subarray(clock(q), clock(q) + QUANTUM)));
+    }
+    expect(mixer.position).toBe(clock(5) + QUANTUM);
+  });
+
   it("mixes overlapping segments by summing them", () => {
     const mixer = new ProgramMixer();
     mixer.schedule({ at: 0, data: new Float32Array(512).fill(0.25), fadeFrom: -1000, fadeTo: 5000 });
@@ -91,5 +106,16 @@ describe("ProgramMixer", () => {
     const mixer = new ProgramMixer();
     render(mixer, 3, (q) => 1280 + q * QUANTUM);
     expect(mixer.position).toBe(1280 + 3 * QUANTUM);
+  });
+});
+
+describe("QuantumClock", () => {
+  it("counts quanta over a stale currentFrame and catches up with one that ran ahead", () => {
+    const clock = new QuantumClock();
+    expect(clock.next).toBe(-1);
+    // Seeded from the first reading; 256 stale (repeat of the last quantum); 1024 after skipped quanta.
+    const frames = [128, 256, 256, 1024, 1152].map((currentFrame) => clock.tick(currentFrame));
+    expect(frames).toEqual([128, 256, 384, 1024, 1152]);
+    expect(clock.next).toBe(1280);
   });
 });
