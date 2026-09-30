@@ -39,22 +39,25 @@ const lanes = () => page.getByTestId("timeline-lanes");
 const line = (text: string) => page.locator(".editor-host .view-line", { hasText: text });
 const selectedHeadings = () => page.locator(".editor-host .scene-heading-selected");
 
-/**
- * Where a clip is on screen. The panel keeps the whole timeline fitted until
- * the user zooms: a timeline under 48 s spans 60 s of lane width.
- */
-async function clipGeometry(id: ClipId): Promise<{ x: number; y: number; left: number; top: number; pxPerSecond: number }> {
-  const scroller = (await page.locator(".timeline-scroller").evaluate((element) => {
+/** Lanes scroller: screen position, scroll offset, and zoom. */
+async function lanesBox(): Promise<{ left: number; top: number; scrollLeft: number; pxPerSecond: number }> {
+  return page.locator(".timeline-scroller").evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    return { left: rect.left, top: rect.top, width: element.clientWidth };
-  })) as { left: number; top: number; width: number };
+    // A timeline under 48 s scrolls over 60 s of content at any zoom (`layout.ts` span).
+    return { left: rect.left, top: rect.top, scrollLeft: element.scrollLeft, pxPerSecond: element.scrollWidth / 60 };
+  });
+}
+
+/** Where a clip is: its middle on screen (`x`, `y`), its left edge and lane top in canvas px. */
+async function clipGeometry(id: ClipId): Promise<{ x: number; y: number; left: number; top: number; pxPerSecond: number }> {
+  const lanes = await lanesBox();
   const clip = CLIPS[id];
-  const pxPerSecond = scroller.width / 60;
+  const { pxPerSecond } = lanes;
   const top = ROW_TOP[clip.row];
   return {
-    x: scroller.left + ((clip.start + clip.end) / 2) * pxPerSecond,
-    y: scroller.top + top + LANE / 2,
-    left: clip.start * pxPerSecond + 0.5,
+    x: lanes.left + ((clip.start + clip.end) / 2) * pxPerSecond - lanes.scrollLeft,
+    y: lanes.top + top + LANE / 2,
+    left: clip.start * pxPerSecond - lanes.scrollLeft + 0.5,
     top,
     pxPerSecond,
   };
@@ -153,4 +156,50 @@ test("linking a clip on disk clears the scene's flag live", async () => {
   await line("## Outro").click();
   await expect(lanes()).toHaveAttribute("data-selected", "c_spare");
   await expect.poll(async () => isAccent(await frameColor("c_spare"))).toBe(true);
+});
+
+test("a selected clip removed on disk leaves the selection, and does not come back selected", async () => {
+  const path = join(box.projectDir, "timelines", "main.json");
+  await clickClip("c_card");
+  await clickClip("c_intro", ["Shift"]);
+  await expect(lanes()).toHaveAttribute("data-selected", "c_card c_intro");
+  const original = readFileSync(path, "utf8");
+  const timeline = JSON.parse(original);
+  timeline.tracks[1].clips = [];
+  timeline.revision += 1;
+  writeFileSync(path, JSON.stringify(timeline, null, 2));
+  await expect(lanes()).toHaveAttribute("data-clips", "3");
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  await clickClip("c_demo", ["Shift"]);
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_demo");
+  // Undo on disk: the clip is back with its id, but not selected.
+  const restored = JSON.parse(original);
+  restored.revision = timeline.revision + 1;
+  writeFileSync(path, JSON.stringify(restored, null, 2));
+  await expect(lanes()).toHaveAttribute("data-clips", "4");
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro c_demo");
+  await expect(selectedHeadings()).toHaveCount(2);
+});
+
+test("clicking a clip never scrolls the timeline, even with focus elsewhere", async () => {
+  const scroller = page.locator(".timeline-scroller");
+  await scroller.focus();
+  for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "Zoom in" }).click();
+  const { pxPerSecond } = await lanesBox();
+  // Scrolled to 5 s: c_demo (4 to 10 s) starts off-screen to the left.
+  await scroller.evaluate((element, left) => {
+    element.scrollLeft = left;
+  }, Math.round(5 * pxPerSecond));
+  const before = (await lanesBox()).scrollLeft;
+  expect(before).toBeGreaterThan(4 * pxPerSecond);
+  // Focus the script body (no heading: the selection stays), then click the clip at 8 s.
+  await line("Call.").click();
+  const at = await lanesBox();
+  await page.mouse.click(at.left + 8 * pxPerSecond - at.scrollLeft, at.top + ROW_TOP.v1 + LANE / 2);
+  await expect(lanes()).toHaveAttribute("data-selected", "c_demo");
+  expect((await lanesBox()).scrollLeft).toBe(before);
+  // A scene heading still brings its clip into view.
+  await line("## Intro").click();
+  await expect(lanes()).toHaveAttribute("data-selected", "c_intro");
+  await expect.poll(async () => (await lanesBox()).scrollLeft).toBeLessThan(before);
 });

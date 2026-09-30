@@ -90,9 +90,9 @@ export function EditorArea({
       const script = path && line ? links.current.get(path) : undefined;
       if (!script || !line) return;
       const scene = script.scenes.find((link) => link.line === line);
-      if (scene) selection.selectClips(scene.clips);
+      if (scene) selection.selectClips(scene.clips, "script");
       else if (line === 1 && script.wholeClips.length > 0 && event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-        selection.selectClips(script.wholeClips);
+        selection.selectClips(script.wholeClips, "script");
       }
     });
     editor.current = instance;

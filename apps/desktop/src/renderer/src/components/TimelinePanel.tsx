@@ -121,8 +121,10 @@ function TimelineCanvas({
   const frame = useRef(0);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips } = useSelection();
+  const { clips: selectedClips, origin } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
+  /** Clip to bring into view: only for selections made elsewhere (a script heading), never under the user's click. */
+  const revealClip = origin === "script" ? selectedClips[0] : undefined;
   const latest = useRef({ layout, fps, playhead, selected });
   latest.current = { layout, fps, playhead, selected };
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
@@ -213,12 +215,12 @@ function TimelineCanvas({
     draw();
   }, [layout, playhead, selected, settle, draw]);
 
-  // A selection made elsewhere (a scene heading in the script) scrolls its first clip into view.
+  // Keyed on the clip, not the selection: pruning other clips must not move the view.
   useEffect(() => {
-    const first = selectedClips[0];
+    const first = revealClip;
     const box = scroller.current;
     const current = latest.current.layout;
-    if (!first || !box || !current || box.contains(document.activeElement)) return;
+    if (!first || !box || !current) return;
     const row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === first));
     const clip = row?.clips.find((candidate) => candidate.id === first);
     if (!row || !clip) return;
@@ -230,7 +232,7 @@ function TimelineCanvas({
     const top = row.top - RULER_HEIGHT;
     if (top < view.scrollTop || top + row.height > view.scrollTop + lanes) view.scrollTop = Math.max(0, top);
     settle();
-  }, [selectedClips, settle]);
+  }, [revealClip, settle]);
 
   useEffect(() => {
     const style = getComputedStyle(document.documentElement);
@@ -312,7 +314,7 @@ function TimelineCanvas({
     if (event.key === "=" || event.key === "+") zoom(ZOOM_STEP);
     else if (event.key === "-") zoom(1 / ZOOM_STEP);
     else if (event.key === "0") fit();
-    else if (event.key === "Escape") selection.selectClips([]);
+    else if (event.key === "Escape") selection.clear();
     else return;
     event.preventDefault();
   };
@@ -325,9 +327,9 @@ function TimelineCanvas({
     const y = event.clientY - rect.top;
     if (event.button !== 0 || !layout || y < RULER_HEIGHT || x >= box.clientWidth || y >= box.clientHeight) return;
     const hit = clipAt(layout, state.current, x, y);
-    if (!hit) selection.selectClips([]);
-    else if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleClip(hit.clip.id);
-    else selection.selectClips([hit.clip.id]);
+    if (!hit) selection.clear();
+    else if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleClip(hit.clip.id, "timeline");
+    else selection.selectClips([hit.clip.id], "timeline");
   };
 
   const onPointerMove = (event: PointerEvent) => {

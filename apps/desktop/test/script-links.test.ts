@@ -46,20 +46,35 @@ describe("isScriptPath", () => {
 });
 
 describe("selection store", () => {
-  it("replaces, toggles and clears clips, notifying only on change", () => {
+  it("replaces, toggles and clears clips with their origin, notifying only on change", () => {
     let changes = 0;
     const off = selection.subscribe(() => changes++);
-    selection.selectClips(["c_a"]);
+    selection.selectClips(["c_a"], "timeline");
     const first = selection.get();
-    selection.selectClips(["c_a"]);
+    selection.selectClips(["c_a"], "timeline");
     expect(selection.get()).toBe(first);
-    selection.toggleClip("c_b");
-    expect(selection.get().clips).toEqual(["c_a", "c_b"]);
-    selection.toggleClip("c_a");
+    selection.selectClips(["c_a"], "script");
+    expect(selection.get()).toEqual({ clips: ["c_a"], origin: "script" });
+    selection.toggleClip("c_b", "timeline");
+    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], origin: "timeline" });
+    selection.toggleClip("c_a", "timeline");
     expect(selection.get().clips).toEqual(["c_b"]);
-    selection.selectClips([]);
-    expect(selection.get().clips).toEqual([]);
-    expect(changes).toBe(4);
+    selection.clear();
+    selection.clear();
+    expect(selection.get()).toEqual({ clips: [], origin: null });
+    expect(changes).toBe(5);
     off();
   });
+
+  it("prunes clips a new revision no longer has, keeping order and origin", () => {
+    selection.selectClips(["c_a", "c_gone", "c_b"], "script");
+    const before = selection.get();
+    selection.retainClips(new Set(["c_a", "c_b", "c_gone"]));
+    expect(selection.get()).toBe(before);
+    selection.retainClips(new Set(["c_b", "c_a"]));
+    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], origin: "script" });
+    selection.retainClips(new Set());
+    expect(selection.get()).toEqual({ clips: [], origin: null });
+  });
 });
+

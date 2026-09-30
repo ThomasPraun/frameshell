@@ -1,5 +1,6 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { useCallback, useSyncExternalStore } from "react";
+import { SELECTION_TIMELINE, selection } from "../selection.js";
 
 /** What the panel shows: the latest `timeline.show`, or why there is none. */
 export interface TimelineState {
@@ -45,7 +46,10 @@ function follow(timeline: string, feed: Feed): () => void {
       try {
         const view = await window.frameshell.timeline.show(timeline);
         revision = view.revision;
-        if (!disposed) publish({ view, error: null });
+        if (disposed) continue;
+        // Before publishing: no render may see a selected clip the new revision removed.
+        if (timeline === SELECTION_TIMELINE) selection.retainClips(new Set(view.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
+        publish({ view, error: null });
       } catch (error) {
         if (!disposed) publish({ view: feed.state.view, error: (error as Error).message });
       }
@@ -73,7 +77,9 @@ function follow(timeline: string, feed: Feed): () => void {
  * The latest `timeline.show` of one timeline of the window's project, live.
  * Every caller of the same timeline shares one feed (one read per change):
  * the timeline panel and the script editor's scene links see the same
- * revision. The feed stops when its last caller unmounts.
+ * revision. Each revision of {@link SELECTION_TIMELINE} first prunes the
+ * selection to clips it still has. The feed stops when its last caller
+ * unmounts.
  */
 export function useTimelineView(timeline: string): TimelineState {
   const subscribe = useCallback(

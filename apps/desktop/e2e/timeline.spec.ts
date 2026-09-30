@@ -90,6 +90,25 @@ test("stays smooth with 250 clips per track while scrolling and zooming", async 
   await expect(lanes()).toHaveAttribute("data-clips", "500");
   // Fitted: every clip on screen at once, the heaviest frame.
   await page.getByRole("button", { name: "Zoom to fit" }).click();
+  // Selected clips take the extra accent-frame paint: measure with some. The tooltip says when the pointer is on a clip.
+  const scroller = (await page.locator(".timeline-scroller").boundingBox())!;
+  for (let x = 4, picked = 0; picked < 3 && x < scroller.width; x += 3) {
+    // Over the ruler first: no tooltip left over from the previous position.
+    await page.mouse.move(scroller.x + x, scroller.y + 8);
+    await expect(page.locator(".clip-tooltip")).toHaveCount(0);
+    await page.mouse.move(scroller.x + x, scroller.y + 22 + 22);
+    const onClip = await page.locator(".clip-tooltip").waitFor({ timeout: 100 }).then(
+      () => true,
+      () => false,
+    );
+    if (!onClip) continue;
+    await page.keyboard.down("Shift");
+    await page.mouse.click(scroller.x + x, scroller.y + 22 + 22);
+    await page.keyboard.up("Shift");
+    picked++;
+    x += 12;
+  }
+  await expect(lanes()).toHaveAttribute("data-selected", /^c_v\d+ c_v\d+ c_v\d+$/);
 
   const { paints, frames } = await page.evaluate(async () => {
     const scroller = document.querySelector<HTMLElement>(".timeline-scroller")!;
