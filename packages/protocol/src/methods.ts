@@ -13,7 +13,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -131,16 +131,31 @@ const PluginInfoSchema = z.object({
 
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
-  kind: z.enum(["ingest"]).describe("`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails."),
+  kind: z
+    .enum(["ingest", "render"])
+    .describe(
+      "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
+        "`render`: export a timeline to a video file (`render` method).",
+    ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
-  asset: z.string().describe("Asset path, project-relative and `/`-separated, e.g. `assets/raw-01.mp4`."),
+  asset: z
+    .string()
+    .describe(
+      "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
+        "`render` (e.g. `timelines/main.json`).",
+    ),
+  output: z.string().nullable().describe("`render`: absolute path of the file being written. Null for `ingest`."),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; it is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "video", "mux"])
     .nullable()
-    .describe("Step running now (ingest runs them in this order); null when not running."),
+    .describe(
+      "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
+        "order. `render`: video (segments encoded in parallel, loudness measured alongside), then mux (joins segments, " +
+        "normalizes and encodes audio).",
+    ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
     .boolean()
@@ -214,8 +229,17 @@ const AssetSchema = z.object({
 const ExportPresetResultSchema = z.looseObject({
   id: z.string(),
   label: z.string().optional(),
-  plugin: z.string().describe("Package that contributed the preset."),
+  plugin: z.string().nullable().describe("Package that contributed the preset; null for presets built into Frameshell."),
 });
+
+const PresetParam = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
+      "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`.",
+  );
 
 /**
  * Every method frameshelld serves: the single source for client and daemon
@@ -388,12 +412,71 @@ export const methods = {
     }),
   },
   "export.presets": {
-    description: "List the export presets available in the enclosing project, contributed by its trusted plugins.",
+    description:
+      "List the export presets available in the enclosing project: the built-in ones (`youtube-1080p`, `youtube-1440p`, " +
+      "`vertical-1080x1920`) and those contributed by its trusted plugins.",
     params: z.strictObject({ cwd: CwdParam }),
     result: z.object({
       presets: z
         .array(ExportPresetResultSchema)
         .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
+    }),
+  },
+  render: {
+    description:
+      "Export a timeline to a video file (SPEC §3.5) as a background job, and return at once with the job. Video is " +
+      "encoded in segments in parallel and joined; audio is mixed in one continuous pass with a 2 ms fade at every cut, " +
+      "`atempo` for clip speed, then two-pass loudness normalization to the target (preset `loudness`, else " +
+      "`export.loudness` in `frameshell.json`, else -17 LUFS integrated). Follow the job with `job.list` until it is " +
+      "`done` (the file exists at `output`) or `failed` (`error` says why). Renders from the original assets, not " +
+      "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black) and " +
+      "the sound of every video and audio track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
+      "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
+      "clips), TimelineNotFound, AssetNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      preset: PresetParam,
+      out: AbsolutePath.optional().describe(
+        "Absolute output file, e.g. `/home/ana/videos/launch/exports/launch.mp4`; its folder is created. " +
+          "Default `<project>/exports/<timeline>-<preset>.<container>`. An existing file is replaced when the job finishes.",
+      ),
+    }),
+    result: z.object({
+      job: JobSchema,
+      output: z.string().describe("Absolute path the file is written to."),
+      preset: z.string().describe("Preset id used."),
+      timeline: z.string(),
+      duration: z.number().describe("Seconds rendered (timeline duration)."),
+      width: z.int(),
+      height: z.int(),
+      fps: z.string().describe("Output frame rate as a rational, e.g. `30/1` or `30000/1001`."),
+      loudness: z.number().describe("Integrated loudness target, LUFS."),
+      segments: z.int().describe("Video segments encoded in parallel."),
+      warnings: z.array(z.string()).describe("Timeline content this export does not render; empty when none."),
+    }),
+  },
+  frame: {
+    description:
+      "Capture the composited frame showing at timeline time `at` as a PNG, rendered by the export compiler " +
+      "(single-frame plan), so it matches `render` and works with the app closed. Size: the preset's when `preset` " +
+      "is given, else the project resolution. Fails with InvalidOperation (`at` outside the timeline; data.valid has " +
+      "the range), ExportUnsupported, PresetNotFound, TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`; the frame whose time span holds it is captured."),
+      out: AbsolutePath.describe("Absolute PNG path to write, e.g. `/tmp/frame.png`; its folder is created."),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+    }),
+    result: z.object({
+      path: z.string().describe("Absolute PNG path written."),
+      timeline: z.string(),
+      frame: z.int().describe("Timeline frame index captured (0-based, project fps)."),
+      at: z.number().describe("Start time of that frame, timeline seconds."),
+      clip: z.string().nullable().describe("Clip showing on the first video track; null in a gap (black frame)."),
+      width: z.int(),
+      height: z.int(),
     }),
   },
   "asset.import": {
@@ -682,13 +765,23 @@ export type TrustState = z.output<typeof TrustStateSchema>;
 export type PluginInfo = z.output<typeof PluginInfoSchema>;
 /** Declared plugins: package name to pinned spec. */
 export type PluginPins = Record<string, string>;
+/** `render` params. */
+export type RenderParams = MethodParams<"render">;
+/** Result of `render`. */
+export type RenderResult = MethodResult<"render">;
+/** `frame` params. */
+export type FrameParams = MethodParams<"frame">;
+/** Result of `frame`. */
+export type FrameResult = MethodResult<"frame">;
+/** One export preset as listed by `export.presets`. */
+export type ExportPresetInfo = z.output<typeof ExportPresetResultSchema>;
 /** `file.write` params. */
 export type FileWriteParams = MethodParams<"file.write">;
 /** Result of `file.write`. */
 export type FileWriteResult = MethodResult<"file.write">;
 /** Background job as reported by `status` and `job.list`. */
 export type JobInfo = z.output<typeof JobSchema>;
-/** Ingest step of a {@link JobInfo}. */
+/** Step of a running {@link JobInfo}. */
 export type JobStep = NonNullable<JobInfo["step"]>;
 /** ffprobe summary of an asset. */
 export type MediaProbe = z.output<typeof ProbeSchema>;
@@ -814,6 +907,10 @@ export const ErrorCode = {
    * cannot be derived because `broken` (`source` itself or a file it nests) is `missing`, `invalid` or in a `cycle`.
    */
   NestedTimelineUnavailable: -32027,
+  /** data: `{ preset, available: string[] }` */
+  PresetNotFound: -32028,
+  /** data: `{ timeline, track?, clip? }`: the timeline is empty or holds what export cannot render yet. */
+  ExportUnsupported: -32029,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

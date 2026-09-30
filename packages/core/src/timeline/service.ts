@@ -65,7 +65,7 @@ export class TimelineService {
   apply(call: TimelineCall): Promise<OperationResult> {
     const { root, timeline: id } = call;
     return this.#exclusive(timelinePath(root, id), async () => {
-      const { timeline, fps } = await this.#load(root, id);
+      const { timeline, fps } = await this.load(root, id);
       const request = normalizeArgs(call);
       const applied = await applyOperation(timeline, request, this.#context(root, id, fps, request.op));
       await writeJsonAtomic(timelinePath(root, id), applied.timeline);
@@ -87,7 +87,7 @@ export class TimelineService {
    * the track end and duration are null, and `problems` says how to fix it.
    */
   async show(root: string, id: string): Promise<TimelineView> {
-    const { timeline, fps } = await this.#load(root, id);
+    const { timeline, fps } = await this.load(root, id);
     const grid = new FrameGrid(fps);
     const resolve = this.#nestedDurations(root, [timelineRel(id)], grid);
     const durations = new Map<string, Promise<number>>();
@@ -224,7 +224,8 @@ export class TimelineService {
     };
   }
 
-  async #load(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
+  /** Parsed `timelines/<id>.json` and the project fps. Throws TimelineNotFound (listing the ids) or InvalidProjectFile. */
+  async load(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
     const project = await readEnclosingProject(root);
     const fps = project?.config.fps ?? 30;
     try {

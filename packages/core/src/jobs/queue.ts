@@ -20,8 +20,10 @@ export interface JobRequest {
   kind: JobInfo["kind"];
   /** Absolute project root. */
   project: string;
-  /** Project-relative asset path. A queued or running job for the same kind, project and asset is reused. */
+  /** Project-relative input (asset, or timeline file for renders). A queued or running job for the same kind, project, asset and output is reused. */
   asset: string;
+  /** Absolute file a render writes; omit for ingest. */
+  output?: string;
   /** Resolve = done, reject = failed with the error's message. */
   run: (ctx: JobContext) => Promise<void>;
 }
@@ -75,7 +77,12 @@ export class JobQueue {
   enqueue(request: JobRequest): JobInfo {
     for (const entry of [...this.#waiting, ...this.#running]) {
       const { info } = entry;
-      if (info.kind === request.kind && info.project === request.project && info.asset === request.asset) {
+      const same =
+        info.kind === request.kind &&
+        info.project === request.project &&
+        info.asset === request.asset &&
+        info.output === (request.output ?? null);
+      if (same) {
         return { ...info };
       }
     }
@@ -84,6 +91,7 @@ export class JobQueue {
       kind: request.kind,
       project: request.project,
       asset: request.asset,
+      output: request.output ?? null,
       state: "queued",
       step: null,
       progress: 0,

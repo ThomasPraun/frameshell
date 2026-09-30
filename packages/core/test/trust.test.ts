@@ -65,7 +65,8 @@ describe("project trust", () => {
         code: ErrorCode.ProjectNotTrusted,
         message: expect.stringContaining("--trust"),
       });
-      expect((await conn.request("export.presets", { cwd: dir })).presets).toEqual([]);
+      const { presets } = await conn.request("export.presets", { cwd: dir });
+      expect(presets.filter((preset) => preset.plugin !== null)).toEqual([]);
 
       expect(await conn.request("project.trust", { cwd: dir, decision: "trust" })).toMatchObject({ trust: "trusted" });
       expect((await greet(conn, dir)).output).toBe("Hello, Ana!");
