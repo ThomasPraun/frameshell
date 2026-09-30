@@ -53,13 +53,19 @@ export async function launch(box: Sandbox): Promise<{ app: ElectronApplication; 
       FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
     },
   });
-  const page = await app.firstWindow();
-  // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
-  page.on("console", (message) => {
-    if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
-  });
-  return { app, page };
+  try {
+    const page = await app.firstWindow();
+    // CI screens are smaller than the default window: pin a laptop-sized window so layout is deterministic.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
+    page.on("console", (message) => {
+      if (message.type() === "error") console.log(`[renderer] ${message.text()}`);
+    });
+    return { app, page };
+  } catch (error) {
+    // The caller never gets `app` to close: a leaked app stalls worker teardown and loads the next spec's machine.
+    await app.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Visible text of the active terminal's grid, rows joined so soft-wrapped output reads as one line. */
