@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import * as pty from "node-pty";
+import { appendFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
+
+// [DEBUG-109] temporary trace of pty lifecycle on Windows.
+export function debug109(line: string): void {
+  const dir = process.env["FRAMESHELL_DATA_DIR"];
+  if (!dir) return;
+  try {
+    appendFileSync(joinPath(dir, "debug109.log"), `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    // ignore
+  }
+}
 import { agentCommands, agentOfCommand, foregroundCommand } from "./agent-detect.js";
 import type { TerminalLaunch } from "./terminal-launch.js";
 
@@ -88,6 +101,21 @@ export class TerminalManager {
       env: launch.env,
     });
     const shell = basename(launch.file).replace(/\.exe$/i, "");
+    debug109(`[DEBUG-109] pty ${id} spawned pid ${proc.pid}`);
+    let firstData = true;
+    proc.onData(() => {
+      if (firstData) debug109(`[DEBUG-109] pty ${id} first data`);
+      firstData = false;
+    });
+    const agent = (proc as unknown as { _agent?: { kill: () => void } })._agent;
+    if (agent) {
+      const original = agent.kill.bind(agent);
+      agent.kill = () => {
+        debug109(`[DEBUG-109] pty ${id} agent.kill start`);
+        original();
+        debug109(`[DEBUG-109] pty ${id} agent.kill end`);
+      };
+    }
     const entry: Entry = {
       pty: proc,
       buffer: "",
@@ -197,7 +225,9 @@ export class TerminalManager {
     clearTimeout(entry.timer);
     this.#stopWatching(id, entry);
     try {
+      debug109(`[DEBUG-109] pty ${id} kill requested`);
       entry.pty.kill();
+      debug109(`[DEBUG-109] pty ${id} kill returned`);
     } catch {
       // Already gone.
     }

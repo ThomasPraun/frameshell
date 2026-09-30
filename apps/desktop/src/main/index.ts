@@ -27,7 +27,7 @@ import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { TimelineEditor } from "./timeline-editor.js";
-import { TerminalManager } from "./terminals.js";
+import { TerminalManager, debug109 } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
@@ -138,6 +138,7 @@ function createWindow(projectDir?: string): BrowserWindow {
   contents.on("will-navigate", (event) => event.preventDefault());
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
+    debug109("[DEBUG-109] window closed");
     state.terminals.killAll();
     void state.files?.close();
     for (const subscription of state.daemonEvents) void subscription.unsubscribe();
@@ -442,5 +443,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  debug109("[DEBUG-109] will-quit");
+  process.on("exit", () => debug109("[DEBUG-109] process exit"));
   void daemon.close();
 });
