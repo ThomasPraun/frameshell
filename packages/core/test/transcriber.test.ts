@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { TranscriptWord, TranscriptionProvider } from "@frameshell/plugin-api";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { parseTranscript } from "@frameshell/schema";
-import { type AudioExtractor, type TranscriberTools, transcribeAsset } from "../src/index.js";
+import { type AudioExtractor, type TranscriberMedia, type TranscriberTools, transcribeAsset } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 
 /** sha256("hello"): independent known value. */
@@ -32,10 +32,32 @@ function fakeProvider(words: TranscriptWord[], extra: { device?: string } = {}) 
   return { provider, calls };
 }
 
-/** Extractor stand-in: "decodes" by prefixing the source bytes, so tests see which file was used. */
+/** Extractor stand-in: "decodes" by prefixing the source bytes, so tests see which file was used and how. */
 const fakeExtract: AudioExtractor = async (input, output) => {
-  writeFileSync(output, `wav-of:${readFileSync(input, "utf8")}`);
+  const layout = input.raw ? `${input.raw.format}@${input.raw.sampleRate}x${input.raw.channels}:` : "";
+  writeFileSync(output, `wav-of:${layout}${readFileSync(input.path, "utf8")}`);
 };
+
+const SIDECAR_REL = ".frameshell/proxies/0123456789abcdef0123-30-r1.pcm";
+
+/** Media lookup stand-in: a complete ingest with a sidecar, or none. Records calls. */
+function fakeMedia(dir: string, ingested: boolean) {
+  const calls: string[] = [];
+  if (ingested) {
+    mkdirSync(join(dir, ".frameshell", "proxies"), { recursive: true });
+    writeFileSync(join(dir, ...SIDECAR_REL.split("/")), "sidecar-pcm");
+  }
+  const media: TranscriberMedia = {
+    async derivedAudio(rel) {
+      calls.push(rel);
+      return {
+        hash: `sha256:${HELLO_SHA256}`,
+        sidecar: ingested ? { path: SIDECAR_REL, format: "s16le", sampleRate: 48_000, channels: 1 } : null,
+      };
+    },
+  };
+  return { media, calls };
+}
 
 const noTools: TranscriberTools = {
   ensureBinary: async (name) => `/bin/${name}`,
@@ -92,14 +114,31 @@ describe("transcribeAsset", () => {
     });
   });
 
-  it("feeds the provider audio extracted from the CFR proxy when one exists", async () => {
+  it("feeds the provider audio resampled from the PCM sidecar of a complete ingest, as raw s16le", async () => {
     const dir = project();
-    mkdirSync(join(dir, ".frameshell", "proxies", "assets"), { recursive: true });
-    writeFileSync(join(dir, ".frameshell", "proxies", "assets", "raw-01.mp4"), "proxy-bytes");
+    const { media, calls } = fakeMedia(dir, true);
     const fake = fakeProvider([]);
-    const result = await run(dir, fake.provider);
-    expect(fake.calls[0]!.audioBytes).toBe("wav-of:proxy-bytes");
-    expect(result.audioSource).toBe(".frameshell/proxies/assets/raw-01.mp4");
+    const result = await run(dir, fake.provider, { media });
+    expect(calls).toEqual(["assets/raw-01.mp4"]);
+    expect(fake.calls[0]!.audioBytes).toBe("wav-of:s16le@48000x1:sidecar-pcm");
+    expect(result).toMatchObject({ audioSource: SIDECAR_REL, assetHash: `sha256:${HELLO_SHA256}` });
+  });
+
+  it("falls back to the asset itself when the media store has no complete ingest", async () => {
+    const dir = project();
+    const { media } = fakeMedia(dir, false);
+    const fake = fakeProvider([]);
+    const result = await run(dir, fake.provider, { media });
+    expect(fake.calls[0]!.audioBytes).toBe("wav-of:hello");
+    expect(result.audioSource).toBe("assets/raw-01.mp4");
+  });
+
+  it("does not reuse audio extracted from the asset once the sidecar exists", async () => {
+    const dir = project();
+    await run(dir, fakeProvider([]).provider, { media: fakeMedia(dir, false).media });
+    const fake = fakeProvider([]);
+    await run(dir, fake.provider, { media: fakeMedia(dir, true).media });
+    expect(fake.calls[0]!.audioBytes).toBe("wav-of:s16le@48000x1:sidecar-pcm");
   });
 
   it("extracts audio once per asset version and reuses it", async () => {
@@ -310,17 +349,6 @@ describe("transcribeAsset", () => {
     writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
     await expect(run(dir, intruder)).rejects.toMatchObject({ code: ErrorCode.TranscriptNameTaken });
     expect(readTranscript(dir)).toMatchObject({ asset: "assets/raw-01.wav", words: [{ text: "other" }] });
-  });
-
-  it("does not take audio from the proxy when a same-name sibling could own it", async () => {
-    const dir = project();
-    writeFileSync(join(dir, "assets", "raw-01.wav"), "recorder track");
-    mkdirSync(join(dir, ".frameshell", "proxies", "assets"), { recursive: true });
-    writeFileSync(join(dir, ".frameshell", "proxies", "assets", "raw-01.mp4"), "proxy-bytes");
-    const fake = fakeProvider([]);
-    const result = await run(dir, fake.provider, { asset: join(dir, "assets", "raw-01.wav") });
-    expect(fake.calls[0]!.audioBytes).toBe("wav-of:recorder track");
-    expect(result.audioSource).toBe("assets/raw-01.wav");
   });
 
   it("names transcripts after the asset path under assets/", async () => {

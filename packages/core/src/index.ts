@@ -52,9 +52,10 @@ export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";
 export {
   type TranscribeAssetOptions,
+  type TranscriberMedia,
   type TranscriberTools,
   transcribeAsset,
   resolveTranscript,
   transcriptPathsFor,
 } from "./transcripts/transcriber.js";
-export { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
+export { type AudioExtractor, type AudioInput, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "./transcripts/audio.js";

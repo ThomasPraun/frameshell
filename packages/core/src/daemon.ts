@@ -158,6 +158,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
           ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
         },
+        media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
         progress: request.progress,
       });

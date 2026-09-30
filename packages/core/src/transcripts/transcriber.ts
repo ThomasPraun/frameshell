@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { mkdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plugin-api";
-import { ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
+import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
 import { exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
-import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
+import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 
 /** Native tools a transcription may need, with progress for first-run installs. */
@@ -16,6 +16,20 @@ export interface TranscriberTools {
   ensureBinary(name: string, onProgress: (progress: Progress) => void): Promise<string>;
   /** See `BinaryManager.ensureModel`. */
   ensureModel(id: string, onProgress: (progress: Progress) => void): Promise<string>;
+}
+
+/**
+ * Derived media of the project (SPEC §6.3) the transcriber reuses; the daemon
+ * backs it with `MediaService.derivedAudio`.
+ */
+export interface TranscriberMedia {
+  /**
+   * Content hash `sha256:<hex>` of the asset at `assetRel` (project-relative,
+   * `/`-separated) and the PCM sidecar of a complete ingest of that content.
+   * `sidecar` is null when the asset is not ingested yet, its ingest is not
+   * complete, or it has no audio.
+   */
+  derivedAudio(assetRel: string, onProgress: (fraction: number) => void): Promise<{ hash: string; sidecar: AssetInfo["sidecar"] }>;
 }
 
 /** Input of {@link transcribeAsset}. */
@@ -30,6 +44,8 @@ export interface TranscribeAssetOptions {
   model?: string | undefined;
   language?: string | undefined;
   tools: TranscriberTools;
+  /** Derived media lookup. Absent: the asset is hashed here and audio always comes from the asset. */
+  media?: TranscriberMedia | undefined;
   /** Defaults to ffmpeg via `tools`. */
   extractAudio?: AudioExtractor | undefined;
   progress?: ((progress: Progress) => void) | undefined;
@@ -39,9 +55,12 @@ export interface TranscribeAssetOptions {
  * Transcribe one asset and write its transcript file (SPEC §5.4; name: see
  * {@link resolveTranscript}).
  *
- * Audio: the CFR proxy (`.frameshell/proxies/<asset path minus extension>.mp4`)
- * when present and no same-name sibling could own it, else the asset,
- * extracted once to 16 kHz mono WAV under `.frameshell/cache/audio/`. Word ids
+ * Audio: the asset's PCM sidecar when `media` has a complete ingest of its
+ * current content (no decode of the source; same clock as the CFR proxy),
+ * else the asset itself through the same clock filter. Ingest is never
+ * triggered or awaited: it also encodes proxy and thumbnails, which
+ * transcription does not need. Either source is resampled once to 16 kHz mono
+ * WAV under `.frameshell/cache/audio/`, keyed by content hash. Word ids
  * survive re-transcription where the same word is found again, and so do
  * their human edits; new words get ids never used before in the file.
  *
@@ -60,13 +79,18 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   const provider = typeof options.provider === "function" ? await options.provider() : options.provider;
 
   progress({ message: `Hashing ${assetRel}` });
-  const hash = await sha256File(assetPath);
-  const proxyRel = posix.join(".frameshell", "proxies", `${stripExtension(assetRel)}.mp4`);
-  const proxy = join(projectDir, ...proxyRel.split("/"));
-  // The proxy name drops the extension, so with a same-name sibling it may be the sibling's: use the asset itself.
-  const useProxy = (await isFile(proxy)) && !(await hasSameNameSibling(assetPath));
-  const audioSource = useProxy ? proxyRel : assetRel;
-  const audio = join(projectDir, ".frameshell", "cache", "audio", `${hash.slice(0, 16)}-${useProxy ? "proxy" : "asset"}.wav`);
+  const onHash = (fraction: number) => progress({ message: `Hashing ${assetRel}`, fraction });
+  const derived = options.media ? await options.media.derivedAudio(assetRel, onHash) : null;
+  const hash = derived ? derived.hash.replace(/^sha256:/, "") : await sha256File(assetPath);
+  const sidecar = derived?.sidecar ?? null;
+  const audioSource = sidecar ? sidecar.path : assetRel;
+  const input: AudioInput = sidecar
+    ? {
+        path: join(projectDir, ...sidecar.path.split("/")),
+        raw: { format: sidecar.format, sampleRate: sidecar.sampleRate, channels: sidecar.channels },
+      }
+    : { path: assetPath };
+  const audio = join(projectDir, ".frameshell", "cache", "audio", `${hash.slice(0, 16)}-${sidecar ? "sidecar" : "asset"}.wav`);
 
   const failed = (error: unknown): never => {
     if (error instanceof RpcError) throw error;
@@ -83,7 +107,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     const temp = `${audio}.${process.pid}.tmp.wav`;
     try {
       await mkdir(dirname(audio), { recursive: true });
-      await extractAudio(join(projectDir, ...audioSource.split("/")), temp, () => tools.ensureBinary("ffmpeg", progress));
+      await extractAudio(input, temp, () => tools.ensureBinary("ffmpeg", progress));
       await rename(temp, audio);
     } catch (error) {
       await rm(temp, { force: true });
@@ -189,13 +213,6 @@ function nameTaken(assetRel: string, transcripts: { path: string; asset: string 
       "one of those transcripts if it is stale.",
     { asset: assetRel, transcripts },
   );
-}
-
-/** True when the asset's directory holds another file with the same name minus extension. */
-async function hasSameNameSibling(assetPath: string): Promise<boolean> {
-  const base = stripExtension(basename(assetPath));
-  const entries = await readdir(dirname(assetPath), { withFileTypes: true });
-  return entries.some((entry) => entry.name !== basename(assetPath) && entry.isFile() && stripExtension(entry.name) === base);
 }
 
 function stripExtension(path: string): string {

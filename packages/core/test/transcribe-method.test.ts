@@ -1,10 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type DaemonConnection, ErrorCode, type Progress, connectToDaemon, methods } from "@frameshell/protocol";
+import { type AssetInfo, type DaemonConnection, ErrorCode, type Progress, connectToDaemon, methods } from "@frameshell/protocol";
 import { parseTranscript } from "@frameshell/schema";
-import { type AudioExtractor, BinaryManager, type Daemon, startDaemon } from "../src/index.js";
+import { type AudioExtractor, type AudioInput, BinaryManager, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
+import { makeClip } from "./media-fixtures.js";
 import { type GitPlugin, gitPluginFixture } from "./plugin-fixture.js";
 import { fakeWhisperCli, toneWav, whisperPluginFixture, whisperReadyBinaries, whisperSegment } from "./whisper-fixture.js";
 
@@ -12,7 +13,12 @@ import { fakeWhisperCli, toneWav, whisperPluginFixture, whisperReadyBinaries, wh
 const NPM_TIMEOUT = 120_000;
 
 /** "Hola" sounds 0.30–0.80 s, "mundo" 1.40–1.90 s. */
-const extractTone: AudioExtractor = async (_input, output) => writeFileSync(output, toneWav(2.5, [[0.3, 0.8], [1.4, 1.9]]));
+const extractTone: AudioExtractor = async (input, output) => {
+  extracted.push(input);
+  writeFileSync(output, toneWav(2.5, [[0.3, 0.8], [1.4, 1.9]]));
+};
+/** Every input the daemon asked to extract audio from. */
+const extracted: AudioInput[] = [];
 
 let daemon: Daemon;
 let conn: DaemonConnection;
@@ -81,6 +87,34 @@ describe.skipIf(process.platform === "win32")("transcribe method with @frameshel
       const args = cli.args();
       expect(args).toEqual(expect.arrayContaining(["-dtw", "large.v3.turbo", "-nfa", "-sow", "-ojf"]));
       expect(args[args.indexOf("-m") + 1]).toMatch(/ggml-large-v3-turbo-q5_0\.bin$/);
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "takes the audio from the PCM sidecar that importing the asset produced",
+    async () => {
+      const dir = tempDir();
+      await conn.request("project.init", { dir });
+      await conn.request("plugin.install", { cwd: dir, spec: whisper.spec });
+      const source = join(tempDir(), "take.mp4");
+      await makeClip(source, { durationS: 2.5 });
+      const { imported } = await conn.request("asset.import", { cwd: dir, files: [source] });
+      const deadline = Date.now() + 90_000;
+      let asset: AssetInfo | undefined;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        ({ assets: [asset] } = await conn.request("asset.list", { cwd: dir }));
+      } while (asset?.state !== "ready" && asset?.state !== "failed" && Date.now() < deadline);
+      expect(asset).toMatchObject({ path: imported[0]!.asset, state: "ready", sidecar: { format: "s16le", sampleRate: 48_000 } });
+
+      const from = extracted.length;
+      const result = await conn.request("transcribe", { cwd: dir, asset: "assets/take.mp4" });
+      expect(result.audioSource).toBe(asset!.sidecar!.path);
+      expect(result.assetHash).toBe(asset!.hash);
+      expect(extracted.slice(from)).toEqual([
+        { path: join(dir, ...asset!.sidecar!.path.split("/")), raw: { format: "s16le", sampleRate: 48_000, channels: 1 } },
+      ]);
     },
     NPM_TIMEOUT,
   );

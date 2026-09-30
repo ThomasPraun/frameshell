@@ -39,7 +39,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_WHISPER"] === "1")("real whispe
           ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
         },
         // Already 16 kHz mono PCM: no ffmpeg needed.
-        extractAudio: async (input, output) => writeFileSync(output, readFileSync(input)),
+        extractAudio: async (input, output) => writeFileSync(output, readFileSync(input.path)),
         progress: ({ message, fraction }) => {
           const line = `${((Date.now() - started) / 1000).toFixed(1)}s ${message}${fraction === undefined ? "" : ` ${Math.round(fraction * 100)}%`}`;
           if (log.at(-1)?.replace(/^\S+ /, "") !== line.replace(/^\S+ /, "")) log.push(line);

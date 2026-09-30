@@ -93,7 +93,7 @@ export interface TranscriptionProvider {
   readonly id: string;
   /**
    * Transcribe `audio`: a 16 kHz mono 16-bit PCM WAV the host extracted from
-   * the asset (its CFR proxy when one exists). Seconds in this file are
+   * the asset (from its PCM sidecar when ingested). Seconds in this file are
    * source-asset seconds. Throw to fail; the message reaches the user.
    */
   transcribe(audio: string, options: TranscribeOptions, context: TranscribeContext): Promise<TranscriptionResult>;

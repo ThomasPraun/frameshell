@@ -5,7 +5,7 @@ import { z } from "zod";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -446,7 +446,8 @@ export const methods = {
       "`transcripts/<asset>.words.json`, extension kept, when another asset with the same base name owns the first " +
       "name): every word with a " +
       "stable id, text, `start`/`end` in source-asset seconds (3 decimals) and confidence, plus the asset's SHA-256, " +
-      "provider and model. Audio comes from the asset's CFR proxy when one exists. Re-transcribing reuses word ids " +
+      "provider and model. Audio comes from the asset's PCM sidecar when its ingest is complete (see `asset.list`), " +
+        "else from the asset itself; transcription never waits for ingest. Re-transcribing reuses word ids " +
       "where the same word is found again (same text, start within 0.5 s) and keeps the human `edits` of those ids; " +
       "other words get ids never used before in that file. " +
       "The first run downloads the engine and model (whisper.cpp default: 574 MB) and may take minutes; progress " +
@@ -481,7 +482,10 @@ export const methods = {
       assetHash: z.string().describe("`sha256:<hex>` of the asset bytes."),
       audioSource: z
         .string()
-        .describe("Project-relative file the audio was taken from: the CFR proxy under `.frameshell/proxies/`, or the asset."),
+        .describe(
+          "Project-relative file the audio was taken from: the asset's PCM sidecar under `.frameshell/proxies/` (same as " +
+            "`asset.list` `sidecar.path`), or the asset itself when no complete ingest exists.",
+        ),
       provider: z.string(),
       model: z.string(),
       language: z.string().nullable().describe("Language used or detected; null when the provider did not say."),

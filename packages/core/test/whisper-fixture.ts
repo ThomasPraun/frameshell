@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BinaryManager } from "../src/index.js";
 import { tempDir } from "./helpers.js";
+import { mediaTools } from "./media-tools.js";
 import { type GitPlugin, commitFixture } from "./plugin-fixture.js";
 
 const PLUGIN_DIR = fileURLToPath(new URL("../../../plugins/whisper-cpp/", import.meta.url));
@@ -48,16 +49,18 @@ fs.writeFileSync(args[args.indexOf("-of") + 1] + ".json", ${JSON.stringify(JSON.
 }
 
 /**
- * Binary manager whose whisper-cli is `whisperCli` (global override) and whose
- * default model is already "downloaded". `create` builds it, so callers using
- * the built `@frameshell/core` pass their own class.
+ * Binary manager whose whisper-cli is `whisperCli` and whose ffmpeg/ffprobe
+ * are the shared managed test builds (global overrides: the daemon's ingest
+ * never downloads), with the default model already "downloaded". `create`
+ * builds it, so callers using the built `@frameshell/core` pass their own class.
  */
 export async function whisperReadyBinaries<T extends Pick<BinaryManager, "locateModel">>(
   whisperCli: string,
   create: (dirs: { dataDir: string; configDir: string }) => T,
 ): Promise<T> {
   const dirs = { dataDir: tempDir(), configDir: tempDir() };
-  writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify({ binaries: { "whisper-cli": whisperCli } }));
+  const { ffmpeg, ffprobe } = await mediaTools();
+  writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify({ binaries: { "whisper-cli": whisperCli, ffmpeg, ffprobe } }));
   const binaries = create(dirs);
   const model = await binaries.locateModel("ggml-large-v3-turbo-q5_0");
   mkdirSync(join(model.path, ".."), { recursive: true });
