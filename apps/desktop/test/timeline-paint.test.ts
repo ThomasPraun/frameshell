@@ -6,12 +6,14 @@ import { DEFAULT_THEME, type MediaLookup, type Paint2D, paintTimeline } from "..
 // Seam under test: `paintTimeline` against a recording 2D context, the way the panel calls it each frame.
 
 /** Records what a canvas would draw; no pixels. */
-function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rects: number } {
+function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rects: number; bars: number[] } {
   const noop = () => {};
   const ctx = {
     texts: [] as string[],
     images: [] as string[],
     rects: 0,
+    /** Heights of 1 px wide fills: waveform bars. */
+    bars: [] as number[],
     fillStyle: "",
     strokeStyle: "",
     lineWidth: 1,
@@ -34,7 +36,10 @@ function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rect
     setTransform: noop,
     clearRect: noop,
     strokeRect: noop,
-    fillRect: () => void ctx.rects++,
+    fillRect: (_x: number, _y: number, w: number, h: number) => {
+      ctx.rects++;
+      if (w === 1) ctx.bars.push(h);
+    },
     fillText: (text: string) => void ctx.texts.push(text),
     measureText: (text: string) => ({ width: text.length * 6 }),
     drawImage: (image: string) => void ctx.images.push(image),
@@ -144,6 +149,30 @@ describe("paintTimeline", () => {
     });
     // One bar per pixel column of the 250 px audio clip.
     expect(withPeaks.rects - without.rects).toBeGreaterThanOrEqual(240);
+  });
+
+  it("scales an audio clip's waveform by its gain and flattens a muted one, and says so in the label", () => {
+    const peaks: [number, number][] = Array.from({ length: 250 }, () => [-100, 100]);
+    const media: MediaLookup<string> = { waveform: () => ({ peaksPerSecond: 100, peaks }), thumbnails: () => null };
+    const tallest = (audio: Record<string, unknown> | undefined) => {
+      const view = longTimeline(1);
+      view.tracks = [{ ...view.tracks[1]!, clips: [{ ...view.tracks[1]!.clips[0]!, ...(audio ? { audio } : {}) }] }];
+      const ctx = recorder();
+      paintTimeline(ctx, { layout: layoutTimeline(view), viewport: viewport(100), fps: 30, playhead: 0, theme: DEFAULT_THEME, media });
+      // Constant peaks: the waveform is the most frequent bar height (ruler ticks and the playhead are few).
+      const counts = new Map<number, number>();
+      for (const bar of ctx.bars) counts.set(bar, (counts.get(bar) ?? 0) + 1);
+      const height = [...counts].reduce((best, entry) => (entry[1] > best[1] ? entry : best))[0];
+      return { height, texts: ctx.texts };
+    };
+    const unity = tallest(undefined);
+    const quieter = tallest({ gain: -6 });
+    // -6 dB is half the amplitude.
+    expect(quieter.height / unity.height).toBeCloseTo(0.5, 1);
+    expect(quieter.texts.some((text) => text.includes("-6 dB"))).toBe(true);
+    const muted = tallest({ gain: -6, muted: true });
+    expect(muted.height).toBe(1);
+    expect(muted.texts.some((text) => text.includes("muted"))).toBe(true);
   });
 
   it("stays cheap with 250 clips on screen", () => {

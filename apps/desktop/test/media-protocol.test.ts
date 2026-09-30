@@ -16,6 +16,9 @@ function project(): { root: string; roots: MediaRoots; base: string } {
   writeFileSync(join(root, ".frameshell", "proxies", "abc.pcm"), BYTES);
   writeFileSync(join(root, ".frameshell", "history", "main.jsonl"), "{}");
   writeFileSync(join(root, "frameshell.json"), "{}");
+  mkdirSync(join(root, "assets", "logos"), { recursive: true });
+  writeFileSync(join(root, "assets", "logos", "logo.PNG"), BYTES);
+  writeFileSync(join(root, "assets", "take.mp4"), BYTES);
   const roots = new MediaRoots();
   return { root, roots, base: roots.issue(root) };
 }
@@ -73,6 +76,15 @@ describe("serveMedia", () => {
       const response = await serveMedia(get(`${base}${path}`), roots);
       expect(response.status, path).toBe(403);
     }
+  });
+
+  it("serves still images from assets/ for overlays, and no other asset (footage plays from proxies)", async () => {
+    const { roots, base } = project();
+    const image = await serveMedia(get(`${base}assets/logos/logo.PNG`), roots);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect((await serveMedia(get(`${base}assets/take.mp4`), roots)).status).toBe(403);
+    expect((await serveMedia(get(`${base}assets/../frameshell.json`), roots)).status).toBe(403);
   });
 
   it("answers 404 for a missing proxy and for a project that is no longer open", async () => {

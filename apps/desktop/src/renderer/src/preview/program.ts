@@ -1,24 +1,27 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
+import type { Clip, Timeline, Track } from "@frameshell/schema";
+import { type Placement, type Size, flattenTimeline, placementOf } from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
 export const PROGRAM_SAMPLE_RATE = 48_000;
 
-/** Why a stretch of the picture shows a placeholder instead of footage. */
+/** Frame size when `frameshell.json` has none. */
+const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
+
+/** Why a stretch of a layer shows a placeholder instead of footage. */
 export type PlaceholderReason =
   /** Adapter clip (HyperFrames, Remotion): played from its render cache once #24 lands. */
   | "generated"
-  /** Nested timeline clip: not flattened by the preview yet. */
+  /** Nested timeline clip whose file cannot be read (missing, invalid, nesting itself). */
   | "timeline"
-  /** Still image: no proxy is built for stills. */
-  | "still"
   /** Proxy not built yet: ingest pending or running. */
   | "ingest"
   /** Ingest failed, or the asset is not in `asset.list` (missing file). */
   | "unavailable";
 
-/** One stretch of the base video track, program frames `[start, end)`. */
+/** One stretch of a video layer, program frames `[start, end)`. */
 export type VideoSpan =
   | {
       kind: "media";
@@ -31,6 +34,21 @@ export type VideoSpan =
       in: number;
       /** Source frames per program frame. */
       speed: number;
+      /** Source picture size as probed (placement uses it, as export does); null when unknown. */
+      size: Size | null;
+      placement: Placement;
+    }
+  | {
+      kind: "still";
+      clip: string;
+      start: number;
+      end: number;
+      /** Project-relative image file, drawn as is (alpha kept). */
+      image: string;
+      /** Content hash: a changed file is a new picture. */
+      version: string;
+      size: Size;
+      placement: Placement;
     }
   | { kind: "placeholder"; clip: string; start: number; end: number; reason: PlaceholderReason; type: string };
 
@@ -51,57 +69,76 @@ export interface AudioSpan {
 }
 
 /**
- * The preview's program: the picture of the first video track (upper tracks
- * are overlays, #17; export v1 renders the same track) and the sound of every
- * unmuted media clip on every track, mixed. Timing follows export v1 exactly:
- * clip edges on the project frame grid, sample boundaries rounded from frames.
+ * The preview's program: every video track as a layer, composited bottom
+ * first with each clip's placement, and the sound of every unmuted media
+ * clip on every track, mixed. Nested timelines are flattened first. Timing
+ * and placement follow export exactly: clip edges on the project frame
+ * grid, sample boundaries rounded from frames, layers placed by `layerRect`.
  */
 export interface Program {
   fps: number;
   sampleRate: number;
+  /** Project resolution: placement offsets are in its pixels. */
+  resolution: Size;
   /** Length in frames: end of the last span. */
   frames: number;
-  /** Sorted, never overlapping; frames outside every span are black. */
-  video: VideoSpan[];
+  /**
+   * One per video track, bottom first (the first video track is the base).
+   * Each sorted, never overlapping; frames outside every span of every
+   * layer are black.
+   */
+  layers: VideoSpan[][];
   /** Sorted by start; spans may overlap (they are mixed). */
   audio: AudioSpan[];
 }
 
-type Clip = TimelineView["tracks"][number]["clips"][number];
+/** Options of {@link compileProgram}. */
+export interface ProgramOptions {
+  /** `frameshell.json` resolution. Default 1920x1080. */
+  resolution?: Size;
+  /** Nested timelines by clip `source` (`timelines/<id>.json`); absent ones show a placeholder. */
+  nested?: ReadonlyMap<string, TimelineView>;
+}
 
 /** Build the {@link Program} of `view`; `assets` by project-relative path. */
-export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, AssetInfo>): Program {
+export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, AssetInfo>, options: ProgramOptions = {}): Program {
   const { fps } = view;
   const rate = PROGRAM_SAMPLE_RATE;
   const frame = (seconds: number) => Math.round(seconds * fps);
   const sample = (frames: number) => Math.round((frames / fps) * rate);
-  const video: VideoSpan[] = [];
+  const layers: VideoSpan[][] = [];
   const audio: AudioSpan[] = [];
   let frames = 0;
-  let base = true;
 
-  for (const track of view.tracks) {
+  const nested = options.nested;
+  const flat = flattenTimeline(asTimeline(view, true), (source) => {
+    const found = nested?.get(source);
+    return found ? asTimeline(found, false) : null;
+  });
+
+  for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
     const placed: { clip: Clip; start: number; end: number }[] = [];
     for (const clip of track.clips) {
+      const end = endOf(clip);
+      if (end === null) continue; // Unknown length (missing nested timeline): nothing to place.
       const start = frame(clip.start);
-      const end = Math.max(start + 1, frame(isMedia(clip) ? clip.start + (clip.out - clip.in) / (clip.speed ?? 1) : (clip.end ?? clip.start)));
-      if (!isMedia(clip) && clip.end === null) continue; // Unknown length (missing nested timeline): nothing to place.
-      placed.push({ clip, start, end });
+      placed.push({ clip, start, end: Math.max(start + 1, frame(end)) });
     }
     placed.sort((a, b) => a.start - b.start);
     // A hand-edited file may overlap clips: the later clip wins from its start.
     for (let i = 1; i < placed.length; i++) placed[i - 1]!.end = Math.min(placed[i - 1]!.end, placed[i]!.start);
     const kept = placed.filter((p) => p.end > p.start);
 
+    const layer: VideoSpan[] = [];
     for (const { clip, start, end } of kept) {
       frames = Math.max(frames, end);
-      const info = isMedia(clip) ? assets.get(clip.asset) : undefined;
-      if (track.kind === "video" && base) {
+      const info = "asset" in clip ? assets.get(clip.asset) : undefined;
+      if (track.kind === "video") {
         const span = pictureOf(clip, info, start, end, fps);
-        if (span) video.push(span);
+        if (span) layer.push(span);
       }
-      if (!isMedia(clip) || clip.audio?.muted === true || !info?.sidecar) continue;
+      if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) continue;
       const speed = clip.speed ?? 1;
       const inFrame = frame(clip.in);
       audio.push({
@@ -115,15 +152,18 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
       });
     }
-    if (track.kind === "video") base = false;
+    if (track.kind === "video") layers.push(layer);
   }
   audio.sort((a, b) => a.start - b.start);
-  return { fps, sampleRate: rate, frames, video, audio };
+  return { fps, sampleRate: rate, resolution: options.resolution ?? DEFAULT_RESOLUTION, frames, layers, audio };
 }
 
-/** Picture span at program frame `frame`; null in gaps and past the end. */
-export function programAt(program: Program, frame: number): VideoSpan | null {
-  const spans = program.video;
+/** Span of `layer` (0 = base) at program frame `frame`; null in gaps, past the end and for a missing layer. */
+export function programAt(program: Program, frame: number, layer = 0): VideoSpan | null {
+  return spanAt(program.layers[layer] ?? [], frame);
+}
+
+function spanAt(spans: readonly VideoSpan[], frame: number): VideoSpan | null {
   let lo = 0;
   let hi = spans.length;
   while (lo < hi) {
@@ -136,17 +176,21 @@ export function programAt(program: Program, frame: number): VideoSpan | null {
 }
 
 /**
- * First program frame at or after `from` whose picture differs between `a`
- * and `b`; Infinity when none does. Frames showing the same source frame of
- * the same proxy (or the same placeholder) are equal.
+ * First program frame at or after `from` whose picture on `layer` differs
+ * between `a` and `b` (a layer one of them lacks is empty); Infinity when
+ * none does. Frames showing the same source frame of the same proxy, the
+ * same image or the same placeholder are equal, wherever they are placed:
+ * a placement change needs a redraw, not a new decode.
  */
-export function firstVideoDifference(a: Program, b: Program, from: number): number {
+export function firstVideoDifference(a: Program, b: Program, from: number, layer = 0): number {
+  const x = a.layers[layer] ?? [];
+  const y = b.layers[layer] ?? [];
   const end = Math.max(a.frames, b.frames);
   for (let frame = Math.max(0, from); frame < end; ) {
-    const x = programAt(a, frame);
-    const y = programAt(b, frame);
-    if (!samePicture(x, y)) return frame;
-    frame = Math.min(x?.end ?? nextStart(a, frame), y?.end ?? nextStart(b, frame));
+    const p = spanAt(x, frame);
+    const q = spanAt(y, frame);
+    if (!samePicture(p, q)) return frame;
+    frame = Math.min(p?.end ?? nextStart(x, frame, end), q?.end ?? nextStart(y, frame, end));
   }
   return Infinity;
 }
@@ -172,9 +216,9 @@ export function firstAudioDifference(a: Program, b: Program, from: number): numb
   return first === Infinity ? Infinity : Math.max(from, first, 0);
 }
 
-function nextStart(program: Program, frame: number): number {
-  const next = program.video.find((span) => span.start > frame);
-  return next ? next.start : Math.max(program.frames, frame + 1);
+function nextStart(spans: readonly VideoSpan[], frame: number, end: number): number {
+  const next = spans.find((span) => span.start > frame);
+  return next ? next.start : Math.max(end, frame + 1);
 }
 
 function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
@@ -182,30 +226,47 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (x.kind === "media" && y.kind === "media") {
     return x.proxy === y.proxy && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
   }
+  if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
   return x.kind === "placeholder" && y.kind === "placeholder" && x.reason === y.reason && x.clip === y.clip;
 }
 
-interface MediaClip {
-  id: string;
-  type: "media";
-  asset: string;
-  start: number;
-  in: number;
-  out: number;
-  speed?: number;
-  audio?: { gain?: number; muted?: boolean };
+/**
+ * `view` as a timeline file for {@link flattenTimeline}: clips as stored.
+ * The root keeps its derived `end` (the only length an unreadable nested
+ * clip has); nested views drop it, their times move.
+ */
+function asTimeline(view: TimelineView, root: boolean): Timeline {
+  const tracks = view.tracks.map((track): Track => {
+    if (track.kind === "subtitles") return { id: track.id, kind: "subtitles", follows: track.follows ?? "" };
+    const clips = track.clips.map((clip) => {
+      if (root) return clip as unknown as Clip;
+      const { end: _end, ...stored } = clip;
+      return stored as unknown as Clip;
+    });
+    return { id: track.id, kind: track.kind, clips };
+  });
+  return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks };
 }
 
-function isMedia(clip: Clip): clip is Clip & MediaClip {
-  return clip.type === "media" && typeof clip["asset"] === "string";
+/** Timeline seconds just after the clip's last frame; null when unknown (unreadable nested timeline). */
+function endOf(clip: Clip): number | null {
+  if ("asset" in clip) return clip.start + (clip.out - clip.in) / (clip.speed ?? 1);
+  if (clip.duration !== undefined) return clip.start + clip.duration;
+  const derived = (clip as { end?: unknown }).end;
+  return typeof derived === "number" ? derived : null;
 }
 
 function pictureOf(clip: Clip, info: AssetInfo | undefined, start: number, end: number, fps: number): VideoSpan | null {
   const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: clip.id, start, end, reason, type: clip.type });
-  if (!isMedia(clip)) return placeholder(clip.type === "timeline" ? "timeline" : "generated");
+  if (!("asset" in clip)) return placeholder(clip.type === "timeline" ? "timeline" : "generated");
   if (!info) return placeholder("unavailable");
-  if (info.media?.video?.still) return placeholder("still");
-  if (info.proxy) return { kind: "media", clip: clip.id, start, end, proxy: info.proxy, in: Math.round(clip.in * fps), speed: clip.speed ?? 1 };
+  const video = info.media?.video;
+  const placement = placementOf(clip.transform);
+  const size = video ? { width: video.width, height: video.height } : null;
+  if (video?.still && size) return { kind: "still", clip: clip.id, start, end, image: clip.asset, version: info.hash ?? "", size, placement };
+  if (info.proxy) {
+    return { kind: "media", clip: clip.id, start, end, proxy: info.proxy, in: Math.round(clip.in * fps), speed: clip.speed ?? 1, size, placement };
+  }
   if (info.state === "pending" || info.state === "processing") return placeholder("ingest");
   if (info.state === "ready" && info.media && !info.media.video) return null; // Audio only: black picture, as in export.
   return placeholder("unavailable");

@@ -37,7 +37,7 @@ beforeAll(async () => {
     ...["-f", "lavfi", "-i", "sine=f=440:r=48000:d=20"],
     ...["-c:v", "libx264", "-crf", "8", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", path],
   ]);
-  counter = { path, video: { codec: "h264", still: false }, audio: true };
+  counter = { path, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: true };
 }, MEDIA_TIMEOUT);
 
 const media = (id: string, start: number, clipIn: number, out: number, speed?: number): MediaClip => ({
@@ -49,6 +49,9 @@ const media = (id: string, start: number, clipIn: number, out: number, speed?: n
   out,
   ...(speed ? { speed } : {}),
 });
+
+/** Project resolution of these tests: the tiny preset's frame. */
+const resolution = { width: 64, height: 64 };
 
 const oneTrack = (clips: MediaClip[]): Timeline => ({
   schemaVersion: 1,
@@ -67,6 +70,18 @@ async function sourceFrames(path: string): Promise<number[]> {
     for (let i = 1; i < levels.length; i++) if (Math.abs(levels[i]! - luma) < Math.abs(levels[best]! - luma)) best = i;
     return best;
   });
+}
+
+/** RGB of pixel (x, y) in every decoded frame of `path` (64x64). */
+async function pixels(path: string, x: number, y: number): Promise<[number, number, number][]> {
+  const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", path, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+  const size = 64 * 64 * 3;
+  const out: [number, number, number][] = [];
+  for (let offset = 0; offset + size <= raw.length; offset += size) {
+    const at = offset + (y * 64 + x) * 3;
+    out.push([raw[at]!, raw[at + 1]!, raw[at + 2]!]);
+  }
+  return out;
 }
 
 /** Decoded audio of `path`: first channel, 48 kHz float. */
@@ -90,7 +105,7 @@ describe("export render (real ffmpeg)", () => {
       const timeline = oneTrack([media("a", 0, 1, 1.5), media("b", 0.5, 3, 3.4, 2), media("c", 0.9, 0.2, 0.5)]);
       const sources = new Map([["assets/counter.mp4", counter]]);
       // 0.3 s segments: joins fall inside clips and at cuts.
-      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, segmentSeconds: 0.3 });
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 0.3 });
       expect(plan.segments.length).toBeGreaterThan(3);
       const output = join(dir, "frames.mp4");
       await executeRender(plan, { ffmpeg, workDir: join(dir, "work-frames"), output });
@@ -134,7 +149,7 @@ describe("export render (real ffmpeg)", () => {
         frame += frames;
       }
       const sources = new Map([["assets/counter.mp4", counter]]);
-      const plan = compileRender({ timeline: oneTrack(clips), fps: 30, preset: TINY, loudness: -17, sources, segmentSeconds: 1 });
+      const plan = compileRender({ timeline: oneTrack(clips), fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 1 });
       expect(plan.audio.tracks[0]!.filter((item) => item.kind === "clip")).toHaveLength(200);
       expect(plan.segments.length).toBeGreaterThan(20);
       const output = join(dir, "cuts.mp4");
@@ -167,7 +182,7 @@ describe("export render (real ffmpeg)", () => {
       const sources = new Map([["assets/counter.mp4", counter]]);
       const png = join(dir, "frame.png");
       // 0.6 s = timeline frame 18 = clip b (from frame 15, 2x from source 90) fourth frame = source 96.
-      const plan = compileFrame({ timeline, fps: 30, sources, width: 64, height: 64, at: 0.6, output: png });
+      const plan = compileFrame({ timeline, fps: 30, sources, resolution, width: 64, height: 64, at: 0.6, output: png });
       await runTool(ffmpeg, plan.args);
       expect(plan).toMatchObject({ frame: 18, clip: "b" });
       // Reference levels through the same RGB conversion a PNG goes through.
@@ -177,6 +192,56 @@ describe("export render (real ffmpeg)", () => {
       const [luma] = await frameLuma(png);
       const nearest = levels.reduce((best, level, i) => (Math.abs(level - luma!) < Math.abs(levels[best]! - luma!) ? i : best), 0);
       expect(nearest).toBe(96 % LEVELS);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "composites overlays over the base: placed by transform, alpha and opacity kept, on exactly their frames",
+    async () => {
+      // Badge: 32x32, left half opaque red, right half transparent. Patch: 16x16 opaque white.
+      const badge = join(dir, "badge.png");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=32x32,format=rgba"],
+        ...["-vf", "geq=r=255:g=0:b=0:a='if(lt(X,16),255,0)'", "-frames:v", "1", badge],
+      ]);
+      const patch = join(dir, "patch.png");
+      await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=16x16", "-frames:v", "1", patch]);
+      const still = (path: string, size: number): ExportSource => ({ path, video: { codec: "png", still: true, width: size, height: size }, audio: false });
+      const sources = new Map([
+        ["assets/counter.mp4", counter],
+        ["assets/badge.png", still(badge, 32)],
+        ["assets/patch.png", still(patch, 16)],
+      ]);
+      const timeline: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [media("base", 0, 1, 2)] },
+          // Fitted 64 px at half scale = 32 px, centered 16 px right: x 32-63, y 16-47. Frames 6-14.
+          { id: "v2", kind: "video", clips: [{ id: "badge", type: "media", asset: "assets/badge.png", start: 0.2, in: 0, out: 0.3, transform: { scale: 0.5, x: 16 } }] },
+          // A quarter scale = 16 px at the top left corner, half transparent. Frames 3-20.
+          { id: "v3", kind: "video", clips: [{ id: "patch", type: "media", asset: "assets/patch.png", start: 0.1, in: 0, out: 0.6, transform: { scale: 0.25, x: -24, y: -24, opacity: 0.5 } }] },
+        ],
+      };
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 0.25 });
+      const output = join(dir, "overlays.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-overlays"), output });
+
+      const red = ([r, g, b]: [number, number, number]) => r > 180 && g < 90 && b < 90;
+      const opaqueRed = (await pixels(output, 40, 32)).map(red);
+      expect(opaqueRed).toEqual(Array.from({ length: 30 }, (_, frame) => frame >= 6 && frame < 15));
+      // The transparent half shows the base: never red.
+      expect((await pixels(output, 56, 32)).some(red)).toBe(false);
+      // Half-transparent white over the base: brighter than the base alone, but not white.
+      const lifted = await pixels(output, 8, 8);
+      const plain = await pixels(output, 8, 56);
+      lifted.forEach(([r], frame) => {
+        const base = plain[frame]![0];
+        if (frame >= 3 && frame < 21) expect(r, `frame ${frame}`).toBeCloseTo((255 + base) / 2, -1.2);
+        else expect(Math.abs(r - base), `frame ${frame}`).toBeLessThan(6);
+      });
     },
     MEDIA_TIMEOUT,
   );

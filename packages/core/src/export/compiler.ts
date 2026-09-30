@@ -1,5 +1,14 @@
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import type { ExportPreset, MediaClip, Timeline } from "@frameshell/schema";
+import {
+  type ExportPreset,
+  type MediaClip,
+  type Placement,
+  type Size,
+  type Timeline,
+  isIdentityPlacement,
+  layerRect,
+  placementOf,
+} from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 
@@ -14,8 +23,8 @@ import { FrameGrid } from "../timeline/grid.js";
 export interface ExportSource {
   /** Absolute path of the original asset (never the proxy: export uses full quality). */
   path: string;
-  /** First video stream; null for audio-only files. */
-  video: { codec: string; still: boolean } | null;
+  /** First video stream (`width`x`height` as probed); null for audio-only files. */
+  video: { codec: string; still: boolean; width: number; height: number } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
 }
@@ -30,6 +39,8 @@ export interface RenderInput {
   loudness: number;
   /** Every asset the timeline's media clips name, keyed by project-relative path. */
   sources: ReadonlyMap<string, ExportSource>;
+  /** Project resolution (`frameshell.json`): clip transform offsets are in its pixels. */
+  resolution: Size;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
 }
@@ -105,6 +116,8 @@ export interface FrameInput {
   timeline: Timeline;
   fps: number;
   sources: ReadonlyMap<string, ExportSource>;
+  /** See {@link RenderInput.resolution}. */
+  resolution: Size;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -156,22 +169,42 @@ interface Placed {
   /** Source frame (project fps) of the first frame; may be fractional only through speed. */
   in: number;
   speed: number;
+  placement: Placement;
 }
 
 /** What export v1 renders of a timeline. */
 interface Layout {
   frames: number;
-  /** Clips of the base (first) video track, sorted. */
+  /** Every clip of the base (first) video track, sorted. */
+  base: Placed[];
+  /** Untransformed clips of the base track: they fill the frame, black elsewhere. */
   video: Placed[];
+  /**
+   * Layers composited over the base, bottom first (SPEC §5.3: track order is
+   * stacking order): transformed clips of the base track, then every upper
+   * video track. Only clips with a picture that is not fully transparent.
+   */
+  overlays: Placed[][];
   /** Clips carrying sound, one list per track (base video track first). */
   audio: Placed[][];
   warnings: string[];
 }
 
+/** Output of a video graph. */
+interface GraphTarget {
+  fps: number;
+  width: number;
+  height: number;
+  pixFmt: string;
+  /** Project resolution, for transform offsets. */
+  project: Size;
+}
+
 /**
- * Compile `timeline` into a render plan. Throws `ExportUnsupported` when the
- * timeline is empty or holds what export v1 cannot render yet (clips on a
- * second video track, nested timelines, adapter clips).
+ * Compile `timeline` into a render plan. Nested timelines must already be
+ * flattened (`flattenTimeline`). Throws `ExportUnsupported` when the
+ * timeline is empty or holds what export cannot render yet (adapter clips,
+ * nested timelines left unresolved).
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
@@ -181,13 +214,14 @@ export function compileRender(input: RenderInput): RenderPlan {
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = layout.video.flatMap((placed) => [placed.start, placed.end]);
+  const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const bounds = segmentBounds(layout.frames, edges, segmentFrames);
   const ext = preset.container;
   const files: Record<string, string> = {};
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
-    const graph = videoGraph(layout.video, from, to, { fps, width, height, pixFmt: "yuv420p" });
+    const graph = videoGraph(layout, from, to, target);
     const tail = outFps === fps ? "" : `,fps=${rate}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
@@ -285,8 +319,8 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
 }
 
 /**
- * Compile the capture of the one frame showing at `at` on the base video
- * track, scaled and letterboxed to `width`x`height`, as PNG. Throws
+ * Compile the capture of the one composited frame showing at `at` (every
+ * video layer), scaled and letterboxed to `width`x`height`, as PNG. Throws
  * `ExportUnsupported` like {@link compileRender} and `InvalidOperation`
  * when `at` is outside the timeline.
  */
@@ -302,8 +336,8 @@ export function compileFrame(input: FrameInput): FramePlan {
       { op: "frame", reason: "out of range", field: "at", valid: { min: 0, max: last } },
     );
   }
-  const graph = videoGraph(layout.video, frame, frame + 1, { fps, width, height, pixFmt: "rgb24" });
-  const clip = layout.video.find((placed) => placed.start <= frame && frame < placed.end);
+  const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: "rgb24", project: input.resolution });
+  const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
   return {
     frame,
     at: seconds(frame, fps),
@@ -337,11 +371,11 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
   return Number.isFinite(integrated) && integrated > -70 ? measured : null;
 }
 
-/** Place the timeline's media clips on the frame grid and reject what v1 cannot render. */
+/** Place the timeline's media clips on the frame grid and reject what export cannot render. */
 function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<string, ExportSource>): Layout {
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
-  let base: Placed[] | null = null;
+  const video: Placed[][] = [];
   const audio: Placed[][] = [];
   let frames = 0;
   for (const track of timeline.tracks) {
@@ -349,17 +383,16 @@ function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<st
       warnings.push(`Subtitle track ${track.id} is not burned into exports yet; it was skipped.`);
       continue;
     }
-    if (track.kind === "video" && base !== null) {
-      if (track.clips.length === 0) continue;
-      throw unsupported(
-        timeline.id,
-        `Track ${track.id} is a second video track with clips; exports render only the first video track (overlays are not supported yet). ` +
-          `Move its clips to the first video track, or remove them: \`frameshell clip remove <clip>\`.`,
-        { track: track.id, clip: track.clips[0]!.id },
-      );
-    }
     const placed: Placed[] = [];
     for (const clip of track.clips) {
+      if (clip.type === "timeline" && "source" in clip) {
+        throw unsupported(
+          timeline.id,
+          `Clip ${clip.id} on track ${track.id} nests ${clip.source}, which cannot be read (missing, invalid, or nesting itself). ` +
+            `Fix or restore ${clip.source}, or remove the clip to export: \`frameshell clip remove ${clip.id}\`.`,
+          { track: track.id, clip: clip.id },
+        );
+      }
       if (clip.type !== "media" || !("asset" in clip)) {
         throw unsupported(
           timeline.id,
@@ -373,7 +406,7 @@ function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<st
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
-      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed });
+      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform) });
       frames = Math.max(frames, end);
     }
     placed.sort((a, b) => a.start - b.start);
@@ -383,18 +416,25 @@ function layoutTimeline(timeline: Timeline, fps: number, sources: ReadonlyMap<st
       if (before.end > placed[i]!.start) before.end = Math.max(before.start, placed[i]!.start);
     }
     placed.splice(0, placed.length, ...placed.filter((p) => p.end > p.start));
-    if (track.kind === "video") {
-      base = placed;
-      if (placed.some(({ clip }) => clip.transform !== undefined)) {
-        warnings.push(`Clip transforms on track ${track.id} are not applied by exports yet; clips fill the frame.`);
-      }
-    }
+    if (track.kind === "video") video.push(placed);
     audio.push(placed.filter(({ clip, source }) => source.audio && clip.audio?.muted !== true));
   }
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  return { frames, video: base ?? [], audio: audio.filter((track) => track.length > 0), warnings };
+  const [base = [], ...upper] = video;
+  const visible = (placed: Placed) => placed.source.video !== null && placed.placement.opacity > 0;
+  const overlays = [base.filter((p) => !isIdentityPlacement(p.placement)), ...upper]
+    .map((layer) => layer.filter(visible))
+    .filter((layer) => layer.length > 0);
+  return {
+    frames,
+    base,
+    video: base.filter((p) => isIdentityPlacement(p.placement)),
+    overlays,
+    audio: audio.filter((track) => track.length > 0),
+    warnings,
+  };
 }
 
 function unsupported(timeline: string, message: string, data: { track?: string; clip?: string }): RpcError {
@@ -422,19 +462,16 @@ function segmentBounds(frames: number, edges: number[], target: number): [number
 }
 
 /**
- * Filter graph rendering timeline frames [from, to) of the base track. One
- * input per clip piece, seeked near its first frame. Each piece's timestamps
- * are shifted so its first frame is at 0 and divided by the speed; `fps`
- * then picks the source frame nearest to every output frame (the proxy
- * clock: frame n = source n / fps, SPEC §6.3) and `trim` keeps exactly the
- * piece's frames. The last line has no output label.
+ * Filter graph rendering timeline frames [from, to): the base track's
+ * untransformed clips (fitted, black between them), then every overlay layer
+ * bottom first. One input per clip piece, seeked near its first frame; see
+ * {@link pieceChain}. An overlay piece is scaled to its `layerRect` (the
+ * preview places layers with the same function), given its opacity as
+ * alpha, padded with transparent frames up to its first frame so it lines up
+ * with the base frame by frame, and overlaid until it ends. The last line
+ * has no output label.
  */
-function videoGraph(
-  video: Placed[],
-  from: number,
-  to: number,
-  out: { fps: number; width: number; height: number; pixFmt: string },
-): { inputs: string[]; lines: string[] } {
+function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget): { inputs: string[]; lines: string[] } {
   const { fps, width, height, pixFmt } = out;
   const rate = fpsRational(fps);
   const fit =
@@ -449,44 +486,82 @@ function videoGraph(
     labels.push(label);
   };
   let cursor = from;
-  for (const placed of video) {
+  for (const placed of layout.video) {
     const start = Math.max(placed.start, from);
     const end = Math.min(placed.end, to);
     if (end <= start) continue;
     if (start > cursor) black(start - cursor);
     cursor = end;
-    const frames = end - start;
     if (!placed.source.video) {
-      black(frames);
+      black(end - start);
       continue;
     }
-    const index = inputs.filter((arg) => arg === "-i").length;
     const label = `p${labels.length}`;
-    let shift: number;
-    if (placed.source.video.still) {
-      inputs.push("-loop", "1", "-framerate", rate, "-t", num(frames / fps + SEEK_PREROLL_SECONDS), "-i", placed.source.path);
-      shift = 0;
-    } else {
-      // Source frame (project fps) shown at the piece's first frame.
-      const first = placed.in + (start - placed.start) * placed.speed;
-      const seekFrame = Math.max(0, Math.floor(first - SEEK_PREROLL_SECONDS * fps));
-      shift = (first - seekFrame) / fps;
-      const length = shift + (frames * placed.speed) / fps + SEEK_PREROLL_SECONDS;
-      // ADR 0002: the native vp9 decoder drops alpha; libvpx keeps it.
-      const decoder = placed.source.video.codec === "vp9" ? ["-c:v", "libvpx-vp9"] : [];
-      inputs.push(...decoder, "-ss", num(seekFrame / fps), "-t", num(length), "-i", placed.source.path);
-    }
-    const speed = placed.speed === 1 ? "" : `/${num(placed.speed)}`;
-    lines.push(
-      `[${index}:v:0]setpts=(PTS-${num(shift)}/TB)${speed},fps=${rate}:start_time=0,trim=end_frame=${frames},` +
-        `setpts=PTS-STARTPTS,${fit}[${label}]`,
-    );
+    lines.push(`${pieceChain(placed, start, end, fps, inputs)},${fit}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
   const joined = labels.length === 1 ? `[${labels[0]}]null` : `${labels.map((l) => `[${l}]`).join("")}concat=n=${labels.length}:v=1:a=0`;
-  lines.push(joined);
+
+  const pieces = layout.overlays.flatMap((layer) =>
+    layer.flatMap((placed) => {
+      const start = Math.max(placed.start, from);
+      const end = Math.min(placed.end, to);
+      return end > start ? [{ placed, start, end }] : [];
+    }),
+  );
+  if (pieces.length === 0) {
+    lines.push(joined);
+    return { inputs, lines };
+  }
+  lines.push(`${joined}[base]`);
+  let below = "base";
+  pieces.forEach(({ placed, start, end }, n) => {
+    const rect = layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const { opacity } = placed.placement;
+    const chain = [
+      pieceChain(placed, start, end, fps, inputs),
+      `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
+      ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+      ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
+    ];
+    lines.push(`${chain.join(",")}[o${n}]`);
+    const overlay = `[${below}][o${n}]overlay=x=${rect.left}:y=${rect.top}:eof_action=pass:format=auto`;
+    below = `b${n}`;
+    lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
+  });
   return { inputs, lines };
+}
+
+/**
+ * Start of the filter chain yielding exactly frames [start, end) of
+ * `placed`, timestamps from 0 at the output rate; its input args are
+ * appended to `inputs`. The piece's timestamps are shifted so its first
+ * frame is at 0 and divided by the speed; `fps` then picks the source frame
+ * nearest to every output frame (the proxy clock: frame n = source n / fps,
+ * SPEC §6.3) and `trim` keeps exactly the piece's frames.
+ */
+function pieceChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
+  const rate = fpsRational(fps);
+  const frames = end - start;
+  const video = placed.source.video!;
+  const index = inputs.filter((arg) => arg === "-i").length;
+  let shift: number;
+  if (video.still) {
+    inputs.push("-loop", "1", "-framerate", rate, "-t", num(frames / fps + SEEK_PREROLL_SECONDS), "-i", placed.source.path);
+    shift = 0;
+  } else {
+    // Source frame (project fps) shown at the piece's first frame.
+    const first = placed.in + (start - placed.start) * placed.speed;
+    const seekFrame = Math.max(0, Math.floor(first - SEEK_PREROLL_SECONDS * fps));
+    shift = (first - seekFrame) / fps;
+    const length = shift + (frames * placed.speed) / fps + SEEK_PREROLL_SECONDS;
+    // ADR 0002: the native vp9 decoder drops alpha; libvpx keeps it.
+    const decoder = video.codec === "vp9" ? ["-c:v", "libvpx-vp9"] : [];
+    inputs.push(...decoder, "-ss", num(seekFrame / fps), "-t", num(length), "-i", placed.source.path);
+  }
+  const speed = placed.speed === 1 ? "" : `/${num(placed.speed)}`;
+  return `[${index}:v:0]setpts=(PTS-${num(shift)}/TB)${speed},fps=${rate}:start_time=0,trim=end_frame=${frames},setpts=PTS-STARTPTS`;
 }
 
 /**

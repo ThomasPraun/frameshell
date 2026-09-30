@@ -1,4 +1,4 @@
-// `frameshell-media://` (SPEC §3.2): proxies and PCM sidecars for the preview, with HTTP range support.
+// `frameshell-media://` (SPEC §3.2): proxies, PCM sidecars and still images for the preview, with HTTP range support.
 import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
@@ -8,10 +8,26 @@ import { Readable } from "node:stream";
 /** URL scheme of preview media. */
 export const MEDIA_SCHEME = "frameshell-media";
 
-/** Only these daemon-derived folders are served: proxies and sidecars live here (SPEC §5.1). */
-const SERVED_DIRS = [".frameshell/proxies/"];
+/**
+ * What is served: daemon-derived proxies and sidecars (SPEC §5.1), and still
+ * images under `assets/` (no proxy is built for stills; the preview draws
+ * the file). `types` limits a folder to those extensions; null allows any.
+ */
+const SERVED: readonly { dir: string; types: ReadonlySet<string> | null }[] = [
+  { dir: ".frameshell/proxies/", types: null },
+  { dir: "assets/", types: new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]) },
+];
 
-const TYPES: Record<string, string> = { mp4: "video/mp4", pcm: "application/octet-stream" };
+const TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  pcm: "application/octet-stream",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+};
 
 /** Renderer workers run on the page's `file://` origin: every reply allows it to read. */
 const CORS = {
@@ -55,8 +71,8 @@ function hostOf(url: string): string {
 }
 
 /**
- * Answer one `frameshell-media://` request: GET/HEAD of a file under
- * {@link SERVED_DIRS} of the project the host names, whole (200) or one byte
+ * Answer one `frameshell-media://` request: GET/HEAD of a file
+ * {@link SERVED} in the project the host names, whole (200) or one byte
  * range (206; 416 past the end). 403 for any other path, symlinks leading
  * elsewhere included; 404 for missing files and revoked hosts.
  */
@@ -72,14 +88,16 @@ export async function serveMedia(request: Request, roots: MediaRoots): Promise<R
     return reply(403);
   }
   const rel = parts.join("/");
-  if (parts.some((part) => part === ".." || part.includes("/") || part.includes("\\")) || !SERVED_DIRS.some((dir) => rel.startsWith(dir))) {
+  const ext = rel.slice(rel.lastIndexOf(".") + 1).toLowerCase();
+  const served = SERVED.find(({ dir, types }) => rel.startsWith(dir) && (types === null || types.has(ext)));
+  if (parts.some((part) => part === ".." || part.includes("/") || part.includes("\\")) || !served) {
     return reply(403);
   }
   let target: string;
   let size: number;
   try {
     target = await realpath(join(root, ...parts));
-    const inside = relative(await realpath(join(root, SERVED_DIRS[0]!)), target);
+    const inside = relative(await realpath(join(root, served.dir)), target);
     if (inside.startsWith("..") || inside.split(sep).includes("..")) return reply(403);
     const info = await stat(target);
     if (!info.isFile()) return reply(404);
@@ -88,7 +106,7 @@ export async function serveMedia(request: Request, roots: MediaRoots): Promise<R
     return reply(404);
   }
 
-  const type = TYPES[rel.slice(rel.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream";
+  const type = TYPES[ext] ?? "application/octet-stream";
   const headers: Record<string, string> = { ...CORS, "Content-Type": type, "Accept-Ranges": "bytes" };
   const range = parseRange(request.headers.get("range"), size);
   if (range === "unsatisfiable") return reply(416, { "Content-Range": `bytes */${size}` });

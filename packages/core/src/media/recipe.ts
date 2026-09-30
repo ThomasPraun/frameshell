@@ -3,7 +3,7 @@
  * {@link RECIPE_VERSION} whenever an output changes: it is part of the cache
  * key, so old outputs are rebuilt instead of reused.
  */
-export const RECIPE_VERSION = 1;
+export const RECIPE_VERSION = 2;
 
 /** PCM sidecar and proxy audio rate (SPEC §6.3). */
 export const SIDECAR_SAMPLE_RATE = 48_000;
@@ -52,7 +52,10 @@ const BASE = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-pr
  * CFR preview proxy. `fps` with `start_time=0` duplicates or drops frames
  * against the source timestamps (VFR in, CFR out, sync kept) and pads a video
  * stream that starts late. No B-frames: decode order = display order, so
- * sample index = frame index for the WebCodecs preview.
+ * sample index = frame index for the WebCodecs preview. Always BT.709,
+ * limited range, tagged: the source is read the way export reads it (its
+ * tags, else ffmpeg's default), so the browser shows the colors export
+ * renders; an untagged proxy would be guessed differently.
  */
 export function proxyArgs(input: string, output: string, fps: number): string[] {
   const shortSide = `min(iw\\,ih)`;
@@ -60,7 +63,8 @@ export function proxyArgs(input: string, output: string, fps: number): string[] 
   return [
     ...BASE,
     ...["-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1"],
-    ...["-vf", `fps=${fpsRational(fps)}:start_time=0,${scale},format=yuv420p`, "-fps_mode", "cfr"],
+    ...["-vf", `fps=${fpsRational(fps)}:start_time=0,${scale}:out_color_matrix=bt709:out_range=tv,format=yuv420p`, "-fps_mode", "cfr"],
+    ...["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"],
     ...["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-profile:v", "high"],
     ...["-g", String(PROXY_GOP), "-keyint_min", String(PROXY_GOP), "-sc_threshold", "0", "-bf", "0"],
     ...["-force_key_frames", `expr:eq(mod(n,${PROXY_GOP}),0)`],

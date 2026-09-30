@@ -29,11 +29,13 @@ function golden(name: string, actual: unknown): void {
 }
 
 const youtube1080 = BUILTIN_PRESETS.find((p) => p.id === "youtube-1080p")!;
+/** `frameshell.json` resolution: transform offsets are in these pixels. */
+const resolution = { width: 1920, height: 1080 };
 
 const sources = new Map<string, ExportSource>([
-  ["assets/talk.mp4", { path: "/project/assets/talk.mp4", video: { codec: "h264", still: false }, audio: true }],
-  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false }, audio: false }],
-  ["assets/logo.png", { path: "/project/assets/logo.png", video: { codec: "png", still: true }, audio: false }],
+  ["assets/talk.mp4", { path: "/project/assets/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true }],
+  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false, width: 1920, height: 1080 }, audio: false }],
+  ["assets/logo.png", { path: "/project/assets/logo.png", video: { codec: "png", still: true, width: 500, height: 500 }, audio: false }],
   ["assets/music.wav", { path: "/project/assets/music.wav", video: null, audio: true }],
 ]);
 
@@ -64,7 +66,7 @@ const timeline: Timeline = {
 const MEASURED = { input_i: "-23.10", input_tp: "-6.20", input_lra: "4.30", input_thresh: "-33.40", target_offset: "0.40" };
 
 describe("export compiler", () => {
-  const plan = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, segmentSeconds: 4 });
+  const plan = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 });
 
   it("compiles a cut list to segments, one audio pass and a mux (golden)", () => {
     golden("render-plan", {
@@ -112,26 +114,74 @@ describe("export compiler", () => {
     expect(plan.warnings).toEqual(["Subtitle track s1 is not burned into exports yet; it was skipped."]);
   });
 
-  it("refuses clips on a second video track and adapter clips, naming the clip and the fix", () => {
-    const overlay: Timeline = {
+  it("composites upper video tracks over the base with each clip's transform (golden)", () => {
+    const overlays: Timeline = {
       ...timeline,
-      tracks: [...timeline.tracks, { id: "v2", kind: "video", clips: [{ id: "c_over", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 1 }] }],
+      tracks: [
+        ...timeline.tracks,
+        {
+          id: "v2",
+          kind: "video",
+          clips: [
+            // Logo a quarter of the frame height, top right, 80 % opaque, from 1 s to 3 s.
+            { id: "c_logo2", type: "media", asset: "assets/logo.png", start: 1, in: 0, out: 2, transform: { x: 600, y: -300, scale: 0.25, opacity: 0.8 } },
+            // VP9 title at half size over the second cut.
+            { id: "c_title2", type: "media", asset: "assets/title.webm", start: 4, in: 0, out: 1, transform: { scale: 0.5 } },
+          ],
+        },
+      ],
     };
-    expect(() => compileRender({ timeline: overlay, fps: 30, preset: youtube1080, loudness: -17, sources })).toThrow(
-      expect.objectContaining({ code: ErrorCode.ExportUnsupported, data: { timeline: "main", track: "v2", clip: "c_over" } }),
-    );
+    const overlayPlan = compileRender({ timeline: overlays, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 });
+    const frame = (at: number) => compileFrame({ timeline: overlays, fps: 30, sources, resolution, width: 1280, height: 720, at, output: "/out/frame.png" });
+    golden("overlay-plan", { segments: overlayPlan.segments, files: overlayPlan.files, frames: { logo: frame(2), title: frame(4.5), none: frame(3.5) } });
+
+    expect(overlayPlan.warnings).toEqual(["Subtitle track s1 is not burned into exports yet; it was skipped."]);
+    const first = overlayPlan.files["seg-0001.filter"]!;
+    // Pillarboxed 1080x1080 at 0.25 = 270 px, centered 600 px right and 300 px up; starts 30 frames into the segment.
+    expect(first).toContain("scale=270:270,setsar=1,format=rgba,colorchannelmixer=aa=0.8,tpad=start=30:color=black@0[o0]");
+    expect(first).toContain("[base][o0]overlay=x=1425:y=105:eof_action=pass:format=auto");
+    const second = overlayPlan.segments[1]!.args;
+    const title = second.indexOf("/project/assets/title.webm");
+    // ADR 0002 holds for overlays too: libvpx keeps the title's alpha.
+    expect(second.slice(title - 7, title - 5)).toEqual(["-c:v", "libvpx-vp9"]);
+    expect(overlayPlan.files["seg-0002.filter"]).toContain("scale=960:540");
+    // Sound is untouched by overlays that have none.
+    expect(overlayPlan.audio).toEqual(plan.audio);
+    // The frame at 3.5 s has no overlay: same graph as without v2.
+    expect(frame(3.5).args).toEqual(compileFrame({ timeline, fps: 30, sources, resolution, width: 1280, height: 720, at: 3.5, output: "/out/frame.png" }).args);
+  });
+
+  it("places a transformed clip of the base track over black", () => {
+    const moved: Timeline = {
+      ...timeline,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_small", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 1, transform: { scale: 0.5, x: -480 } }] }],
+    };
+    const { args } = compileFrame({ timeline: moved, fps: 30, sources, resolution, width: 1920, height: 1080, at: 0.5, output: "/out/f.png" });
+    const graph = args[args.indexOf("-filter_complex") + 1]!;
+    expect(graph).toMatch(/^color=c=black:s=1920x1080:r=30\/1,trim=end_frame=1,setsar=1,format=rgb24\[p0\];\[p0\]null\[base\];/);
+    expect(graph).toContain("scale=960:540,setsar=1,format=rgba[o0];[base][o0]overlay=x=0:y=270:eof_action=pass:format=auto,format=rgb24");
+  });
+
+  it("refuses adapter clips and unresolved nested timelines on any track, naming the clip and the fix", () => {
     const adapter: Timeline = {
       ...timeline,
-      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_hf", type: "hyperframes", start: 0, duration: 2 }] }],
+      tracks: [...timeline.tracks, { id: "v2", kind: "video", clips: [{ id: "c_hf", type: "hyperframes", start: 0, duration: 2 }] }],
     };
-    expect(() => compileRender({ timeline: adapter, fps: 30, preset: youtube1080, loudness: -17, sources })).toThrow(
-      expect.objectContaining({ code: ErrorCode.ExportUnsupported, message: expect.stringContaining("frameshell clip remove c_hf") }),
+    expect(() => compileRender({ timeline: adapter, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(
+      expect.objectContaining({ code: ErrorCode.ExportUnsupported, message: expect.stringContaining("frameshell clip remove c_hf"), data: { timeline: "main", track: "v2", clip: "c_hf" } }),
+    );
+    const nested: Timeline = {
+      ...timeline,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_intro", type: "timeline", source: "timelines/intro.json", start: 0, duration: 2 }] }],
+    };
+    expect(() => compileRender({ timeline: nested, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(
+      expect.objectContaining({ code: ErrorCode.ExportUnsupported, message: expect.stringContaining("timelines/intro.json") }),
     );
   });
 
   it("refuses an empty timeline", () => {
     const empty: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [] }] };
-    expect(() => compileRender({ timeline: empty, fps: 30, preset: youtube1080, loudness: -17, sources })).toThrow(
+    expect(() => compileRender({ timeline: empty, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(
       expect.objectContaining({ code: ErrorCode.ExportUnsupported }),
     );
   });
@@ -139,7 +189,7 @@ describe("export compiler", () => {
   it("renders a timeline without sound as a silent track and skips loudness", () => {
     const silent: Timeline = { ...timeline, tracks: [timeline.tracks[0]!] };
     const silentSources = new Map([...sources].map(([key, source]) => [key, { ...source, audio: false }]));
-    const silentPlan = compileRender({ timeline: silent, fps: 30, preset: youtube1080, loudness: -17, sources: silentSources });
+    const silentPlan = compileRender({ timeline: silent, fps: 30, preset: youtube1080, loudness: -17, sources: silentSources, resolution });
     expect(silentPlan.audio.tracks).toEqual([]);
     expect(mixStep(silentPlan)).toBeNull();
     expect(loudnessAnalysis(silentPlan)).toBeNull();
@@ -148,7 +198,7 @@ describe("export compiler", () => {
 
   it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still (golden)", () => {
     const frame = (at: number) =>
-      compileFrame({ timeline, fps: 30, sources, width: 1280, height: 720, at, output: "/out/frame.png" });
+      compileFrame({ timeline, fps: 30, sources, resolution, width: 1280, height: 720, at, output: "/out/frame.png" });
     golden("frame-plans", { cut: frame(1), speed: frame(3.5), gap: frame(5.5), still: frame(7.5) });
     expect(frame(3.5)).toMatchObject({ frame: 105, at: 3.5, clip: "c_talk2" });
     expect(frame(5.5)).toMatchObject({ frame: 165, clip: null });
@@ -157,7 +207,7 @@ describe("export compiler", () => {
   });
 
   it("refuses a frame outside the timeline with the valid range", () => {
-    expect(() => compileFrame({ timeline, fps: 30, sources, width: 64, height: 36, at: 8, output: "x.png" })).toThrow(
+    expect(() => compileFrame({ timeline, fps: 30, sources, resolution, width: 64, height: 36, at: 8, output: "x.png" })).toThrow(
       expect.objectContaining({ code: ErrorCode.InvalidOperation, data: expect.objectContaining({ valid: { min: 0, max: 7.967 } }) }),
     );
   });

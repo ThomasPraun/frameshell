@@ -10,10 +10,11 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import type { ExportPreset, Timeline } from "@frameshell/schema";
+import { type ExportPreset, type Size, type Timeline, flattenTimeline } from "@frameshell/schema";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
+import { readTimelineFile } from "../timeline/service.js";
 import {
   type ExportSource,
   LOUDNESS_STATS_FILE,
@@ -113,6 +114,11 @@ export interface ExportServiceOptions {
   probe(root: string, asset: string): Promise<MediaProbe>;
   /** Parsed timeline and project fps; see `TimelineService.load`. */
   loadTimeline(root: string, id: string): Promise<{ timeline: Timeline; fps: number }>;
+  /**
+   * Parsed nested timeline file (project-relative `source` of a `timeline`
+   * clip); null when missing or invalid. Default: read the file.
+   */
+  readNested?(root: string, source: string): Promise<Timeline | null>;
   /** Presets contributed by the project's loaded plugins; see `PluginHost.presets`. */
   pluginPresets(root: string): Promise<ExportPresetInfo[]>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
@@ -146,11 +152,12 @@ export class ExportService {
   async render(root: string, params: { timeline: string; preset?: string | undefined; out?: string | undefined }): Promise<RenderResult> {
     const config = (await readEnclosingProject(root))?.config;
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
-    const { timeline, fps } = await this.#options.loadTimeline(root, params.timeline);
+    const { timeline, fps } = await this.#resolved(root, params.timeline);
     const plan = compileRender({
       timeline,
       fps,
       preset,
+      resolution: config?.resolution ?? DEFAULT_RESOLUTION,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
@@ -190,13 +197,15 @@ export class ExportService {
   /** Capture one composited frame as PNG, written atomically to `out`. */
   async frame(root: string, params: { timeline: string; at: number; out: string; preset?: string | undefined }): Promise<FrameResult> {
     const config = (await readEnclosingProject(root))?.config;
-    const size = params.preset ? (await this.#preset(root, params.preset)).video : (config?.resolution ?? { width: 1920, height: 1080 });
-    const { timeline, fps } = await this.#options.loadTimeline(root, params.timeline);
+    const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
+    const size = params.preset ? (await this.#preset(root, params.preset)).video : resolution;
+    const { timeline, fps } = await this.#resolved(root, params.timeline);
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
     const plan = compileFrame({
       timeline,
       fps,
       sources: await this.#sources(root, timeline),
+      resolution,
       width: size.width,
       height: size.height,
       at: params.at,
@@ -236,6 +245,31 @@ export class ExportService {
     );
   }
 
+  /**
+   * The timeline with its nested timelines flattened (SPEC §3.5 step 1).
+   * Unreadable nested files stay as `timeline` clips; the compiler refuses
+   * them by name.
+   */
+  async #resolved(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
+    const { timeline, fps } = await this.#options.loadTimeline(root, id);
+    const read = this.#options.readNested ?? readNestedFile;
+    const nested = new Map<string, Timeline | null>();
+    const pending = [timeline];
+    // Read every file the nesting reaches once; flattenTimeline itself stops cycles.
+    while (pending.length > 0) {
+      for (const track of pending.pop()!.tracks) {
+        if (track.kind === "subtitles") continue;
+        for (const clip of track.clips) {
+          if (clip.type !== "timeline" || !("source" in clip) || !clip.source || nested.has(clip.source)) continue;
+          const found = await read(root, clip.source);
+          nested.set(clip.source, found);
+          if (found) pending.push(found);
+        }
+      }
+    }
+    return { timeline: flattenTimeline(timeline, (source) => nested.get(source) ?? null), fps };
+  }
+
   /** Probe every asset the timeline's media clips use. Throws AssetNotFound for a missing one. */
   async #sources(root: string, timeline: Timeline): Promise<Map<string, ExportSource>> {
     const sources = new Map<string, ExportSource>();
@@ -246,12 +280,26 @@ export class ExportService {
         const probe = await this.#options.probe(root, clip.asset);
         sources.set(clip.asset, {
           path: join(root, ...clip.asset.split("/")),
-          video: probe.video ? { codec: probe.video.codec, still: probe.video.still } : null,
+          video: probe.video
+            ? { codec: probe.video.codec, still: probe.video.still, width: probe.video.width, height: probe.video.height }
+            : null,
           audio: probe.audio !== null,
         });
       }
     }
     return sources;
+  }
+}
+
+/** Frame size when `frameshell.json` has none (SPEC §5.2 default). */
+const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
+
+async function readNestedFile(root: string, source: string): Promise<Timeline | null> {
+  try {
+    return await readTimelineFile(root, source);
+  } catch (error) {
+    if (error instanceof RpcError) return null;
+    throw error;
   }
 }
 

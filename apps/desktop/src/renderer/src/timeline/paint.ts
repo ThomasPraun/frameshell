@@ -283,7 +283,7 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   ctx.clip();
   let media = false;
   if (clip.asset && row.kind === "video") media = paintThumbnails(ctx, input, clip, x0, left, right, y, h);
-  if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, kind.edge);
+  if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted ? theme.textFaint : kind.edge);
   if (clip.kind === "generated" || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem ? colors.dangerFill : kind.hatch);
   ctx.restore();
 
@@ -431,7 +431,7 @@ function paintLabel<Img>(ctx: Paint2D<Img>, clip: ClipBox, left: number, w: numb
   ctx.fillStyle = theme.text;
   ctx.fillText(clip.name, textX, y + 11);
   const nameWidth = ctx.measureText(clip.name).width;
-  const detail = clip.problem ? "length unknown" : formatDuration(clip.end - clip.start);
+  const detail = clip.problem ? "length unknown" : [formatDuration(clip.end - clip.start), ...clipBadges(clip)].join(", ");
   ctx.font = `10px ${theme.fontMono}`;
   if (nameWidth + 8 + ctx.measureText(detail).width <= room) {
     ctx.fillStyle = clip.problem ? theme.danger : theme.textMuted;
@@ -470,7 +470,22 @@ function paintThumbnails<Img>(
   return drawn;
 }
 
-/** One bar per pixel column: min/max of the peaks under it, mirrored around the middle. */
+/** Non-default audio and transform settings, short, for the clip label. */
+export function clipBadges(clip: ClipBox): string[] {
+  const badges: string[] = [];
+  if (clip.muted) badges.push("muted");
+  else if (clip.gain !== 0) badges.push(`${clip.gain > 0 ? "+" : ""}${Number(clip.gain.toFixed(1))} dB`);
+  const t = clip.transform;
+  if (t && (t.x !== 0 || t.y !== 0 || t.scale !== 1)) badges.push(`${Math.round(t.scale * 100)}%`);
+  if (t && t.opacity !== 1) badges.push(`${Math.round(t.opacity * 100)}% opacity`);
+  return badges;
+}
+
+/**
+ * One bar per pixel column: min/max of the peaks under it, mirrored around
+ * the middle, scaled by the clip's gain (what the mix hears); a muted clip
+ * shows a flat line.
+ */
 function paintWaveform<Img>(
   ctx: Paint2D<Img>,
   input: PaintInput<Img>,
@@ -485,7 +500,7 @@ function paintWaveform<Img>(
   if (!wave || wave.peaks.length === 0) return false;
   const { pxPerSecond, scrollLeft } = input.viewport;
   const mid = y + 2 + (h - 2) / 2;
-  const scale = (h - 6) / 2 / 128;
+  const scale = clip.muted ? 0 : (((h - 6) / 2 / 128) * 10 ** (clip.gain / 20));
   const sourceAt = (x: number) => clip.in + ((x + scrollLeft) / pxPerSecond - clip.start) * clip.speed;
   const last = wave.peaks.length - 1;
   ctx.fillStyle = color;
