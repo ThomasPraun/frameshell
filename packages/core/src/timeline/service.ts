@@ -118,9 +118,9 @@ export class TimelineService {
   apply(call: TimelineCall): Promise<OperationResult> {
     const { root, timeline: id } = call;
     return this.#exclusive(timelinePath(root, id), async () => {
-      const { timeline, fps } = await this.load(root, id);
+      const { timeline, fps, snapWindow } = await this.load(root, id);
       const request = normalizeArgs(call);
-      const context = this.#context(root, id, fps, request.op);
+      const context = this.#context(root, id, fps, request.op, snapWindow);
       return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args);
     });
   }
@@ -258,7 +258,7 @@ export class TimelineService {
     };
   }
 
-  #context(root: string, id: string, fps: number, op: string): EditContext {
+  #context(root: string, id: string, fps: number, op: string, snapWindow?: number): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: "c" | "t") => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
@@ -296,6 +296,7 @@ export class TimelineService {
       },
       newId,
       ...(resolveEditPoint ? { resolveEditPoint } : {}),
+      ...(snapWindow !== undefined ? { snapWindow } : {}),
     };
   }
 
@@ -326,12 +327,16 @@ export class TimelineService {
     };
   }
 
-  /** Parsed `timelines/<id>.json` and the project fps. Throws TimelineNotFound (listing the ids) or InvalidProjectFile. */
-  async load(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
+  /**
+   * Parsed `timelines/<id>.json`, the project fps and its default snap window
+   * (`editing.snapWindow`, absent when unset). Throws TimelineNotFound (listing the ids) or InvalidProjectFile.
+   */
+  async load(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
     const project = await readEnclosingProject(root);
     const fps = project?.config.fps ?? 30;
+    const snapWindow = project?.config.editing?.snapWindow;
     try {
-      return { timeline: await readTimelineFile(root, timelineRel(id)), fps };
+      return { timeline: await readTimelineFile(root, timelineRel(id)), fps, ...(snapWindow !== undefined ? { snapWindow } : {}) };
     } catch (error) {
       if (!(error instanceof RpcError && error.code === ErrorCode.TimelineNotFound)) throw error;
       const available = await listTimelines(root);

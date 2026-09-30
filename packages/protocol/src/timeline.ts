@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ClipSchema, TrackSchema, TransformSchema } from "@frameshell/schema";
+import { ClipSchema, MAX_SNAP_WINDOW_S, MIN_SNAP_WINDOW_S, TrackSchema, TransformSchema } from "@frameshell/schema";
 
 /**
  * Timeline operations (SPEC §6.1): the args of every mutating timeline verb,
@@ -23,10 +23,12 @@ const snapArgs = {
     ),
   snapWindow: z
     .number()
-    .min(0.5)
-    .max(10)
+    .min(MIN_SNAP_WINDOW_S)
+    .max(MAX_SNAP_WINDOW_S)
     .optional()
-    .describe("Search half-width for a pause, seconds, 0.5 to 10. Default 0.5 (±500 ms)."),
+    .describe(
+      "Search half-width for a pause, seconds, 0.5 to 10. Default: the project's `editing.snapWindow` in frameshell.json, else 0.5 (±500 ms).",
+    ),
 };
 
 /** Timeline id param: the file is `timelines/<id>.json`. */
@@ -207,6 +209,7 @@ export const SnapReportSchema = z.object({
   clean: z
     .boolean()
     .describe("True: inside an audio pause. False: no pause within the window, cut at the quietest frame; speech may be clipped."),
+  window: z.number().describe("Search half-width used, seconds: the op's `snapWindow`, else the project's `editing.snapWindow`, else 0.5."),
 });
 
 /** See {@link SnapReportSchema}. */

@@ -1,6 +1,8 @@
 export { SCHEMA_VERSION, type ParseResult } from "./common.js";
 export {
   PROJECT_SCHEMA_URL,
+  MIN_SNAP_WINDOW_S,
+  MAX_SNAP_WINDOW_S,
   ProjectConfigSchema,
   type ProjectConfig,
   parseProjectConfig,

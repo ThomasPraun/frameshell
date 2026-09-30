@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,7 @@ interface Snap {
   requested: number;
   applied: number;
   clean: boolean;
+  window: number;
 }
 interface Result {
   revision: number;
@@ -136,5 +137,38 @@ describe("cut snapping to audio energy", () => {
     expect(bad.code).not.toBe(0);
     expect(bad.stderr).toMatch(/snapWindow/);
     expect(frameshell(["cut", "--from", "1", "--to", "2", "--no-snap", "--snap-window", "1"]).code).toBe(2);
+  });
+
+  it("searches the project's editing.snapWindow by default; --snap-window overrides it", () => {
+    const configPath = join(project, "frameshell.json");
+    const original = readFileSync(configPath, "utf8");
+    const setEditing = (editing: unknown) => writeFileSync(configPath, JSON.stringify({ ...JSON.parse(original), editing }, null, 2));
+    const tail = () => clips().at(-1)!;
+    try {
+      expect(json<Result>(["clip", "trim", tail().id, "--out", "6.4", "--no-snap"]).snaps).toEqual([]);
+      setEditing({ snapWindow: 1 });
+      // Source 6.4 is 0.6 s before the 7.0-7.4 pause: in reach at the project's ±1 s.
+      const byProject = json<Result>(["clip", "trim", tail().id, "--out", "6.4"]);
+      expect(byProject.snaps).toEqual([expect.objectContaining({ field: "out", requested: 6.4, clean: true, window: 1 })]);
+      expect(byProject.snaps[0]!.applied).toBeGreaterThan(7);
+
+      const byFlag = json<Result>(["clip", "trim", tail().id, "--out", "6.4", "--snap-window", "0.5"]);
+      expect(byFlag.snaps).toEqual([expect.objectContaining({ field: "out", requested: 6.4, clean: false, window: 0.5 })]);
+      expect(byFlag.snaps[0]!.applied).toBeLessThan(7);
+
+      // Middle clip (source 2.567-4.933): source 4.8 is 1.3 s past the 2.5-3.5 pause, out of reach at ±1;
+      // the human output names the window used.
+      const human = frameshell(["clip", "trim", clips()[1]!.id, "--out", "4.8"]);
+      expect(human.code).toBe(0);
+      expect(human.stdout).toMatch(/snapped out of .* \(no pause within ±1 s: quietest frame/);
+
+      setEditing({ snapWindow: 0.2 });
+      const bad = frameshell(["cut", "--from", "1", "--to", "2"]);
+      expect(bad.code).not.toBe(0);
+      expect(bad.stderr).toMatch(/editing\.snapWindow: snap window 0\.2 s is below the 0\.5 s minimum/);
+      expect(bad.stderr).toMatch(/remove `editing\.snapWindow`/);
+    } finally {
+      writeFileSync(configPath, original);
+    }
   });
 });

@@ -94,6 +94,18 @@
         }
       },
       "additionalProperties": false
+    },
+    "editing": {
+      "type": "object",
+      "properties": {
+        "snapWindow": {
+          "description": "Default search half-width for moving cut and trim edges into audio pauses, seconds, 0.5 to 10. Default 0.5. A `snapWindow` passed to an operation (CLI `--snap-window`) overrides it.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
