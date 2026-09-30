@@ -131,6 +131,17 @@ describe("scriptRef on clip operations", () => {
     expect(view.tracks[0]!.clips.find((clip) => clip.id === "c_free")).toMatchObject({ scriptRef: "scripts/later.md" });
   });
 
+  it("warns on a whole-script ref that is no scripts/**/*.md, and only stats the script", async () => {
+    writeFileSync(join(root, "assets", "notes.md"), "## A\n");
+    expect((await set("assets/notes.md")).warnings).toEqual([expect.stringMatching(/assets\/notes\.md is not a script \(scripts live at/)]);
+    expect((await set("scripts/launch.json")).warnings).toEqual([expect.stringMatching(/is not a script/)]);
+    mkdirSync(join(root, "scripts", "folder.md"));
+    expect((await set("scripts/folder.md")).warnings).toEqual([expect.stringMatching(/is a directory, not a script/)]);
+    // Existence only: a script too big to outline is still a valid whole-script target.
+    writeFileSync(join(root, "scripts", "long.md"), Buffer.alloc(MAX_SCRIPT_BYTES + 1, "a"));
+    expect((await set("scripts/long.md")).warnings).toEqual([]);
+  });
+
   it("checks refs given to clip.add and never warns when clearing", async () => {
     const added = await conn.request("clip.add", {
       cwd: root,

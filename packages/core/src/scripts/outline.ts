@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, readFile, readdir, realpath } from "node:fs/promises";
+import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ErrorCode, RpcError, type ScriptOutlineResult } from "@frameshell/protocol";
 import { type ScriptOutline, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
@@ -44,24 +44,31 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
 
 /**
  * Why `ref` points nowhere (bad path, missing or unreadable script, missing
- * scene), or null when it names an existing scene, or an existing script
- * when it has no `#anchor` (whole script, SPEC §5.5). Never
- * throws and never blocks: only regular files inside the project (after
- * symlinks) up to {@link MAX_SCRIPT_BYTES} are read, any read error becomes
- * the returned warning. The operation stores the ref anyway (the script may
- * be written later).
+ * scene, whole-script ref to a file that is no `scripts/**\/*.md`), or null
+ * when it names an existing scene, or an existing script when it has no
+ * `#anchor` (whole script, SPEC §5.5). Never throws and never blocks: only
+ * regular files inside the project (after symlinks) are considered; a
+ * whole-script ref is only stat'ed, a scene ref reads the script up to
+ * {@link MAX_SCRIPT_BYTES}; any error becomes the returned warning. The
+ * operation stores the ref anyway (the script may be written later).
  */
 export async function checkScriptRef(root: string, ref: string): Promise<string | null> {
   const { path, anchor } = splitScriptRef(ref);
   const shape = scriptRefPathProblem(path);
   if (shape) return `scriptRef "${ref}" ${shape}; use a project-relative script path, plus \`#scene\` to name one scene, e.g. \`scripts/script.md#intro\`.`;
-  const read = await readScript(root, path);
-  if (!read.ok) {
-    return read.missing
+  const unavailable = (failure: ScriptFailure) =>
+    failure.missing
       ? `scriptRef "${ref}": ${path} does not exist. Stored anyway; create the script or fix the ref.`
-      : `scriptRef "${ref}": ${path} ${read.reason}. Stored anyway; fix the script or the ref.`;
+      : `scriptRef "${ref}": ${path} ${failure.reason}. Stored anyway; fix the script or the ref.`;
+  if (anchor === null) {
+    if (!isScriptPath(path)) {
+      return `scriptRef "${ref}": ${path} is not a script (scripts live at \`scripts/**/*.md\`). Stored anyway; fix the ref.`;
+    }
+    const failure = await statScript(root, path);
+    return failure ? unavailable(failure) : null;
   }
-  if (anchor === null) return null;
+  const read = await readScript(root, path);
+  if (!read.ok) return unavailable(read);
   const parsed: ScriptOutline = parseScript(read.text);
   const slugs = parsed.scenes.map((scene) => scene.slug);
   if (slugs.includes(anchor)) return null;
@@ -89,7 +96,49 @@ async function locateScript(root: string, cwd: string, file: string): Promise<{ 
   throw new RpcError(ErrorCode.ScriptNotFound, message + listing, { path, available });
 }
 
-type ScriptRead = { ok: true; text: string } | { ok: false; missing: boolean; reason: string };
+type ScriptFailure = { ok: false; missing: boolean; reason: string };
+type ScriptRead = { ok: true; text: string } | ScriptFailure;
+
+/** Script path for a `scriptRef` without anchor: Markdown under `scripts/` (SPEC §4 layout). */
+function isScriptPath(rel: string): boolean {
+  return /^scripts\/.+\.md$/i.test(rel);
+}
+
+function failed(error: unknown): ScriptFailure {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT" || code === "ENOTDIR") return { ok: false, missing: true, reason: "does not exist" };
+  if (code === "EISDIR") return { ok: false, missing: false, reason: "is a directory, not a script" };
+  return { ok: false, missing: false, reason: `could not be read (${code ?? (error as Error).message})` };
+}
+
+/** Real path of project-relative `rel`, refused when symlinks take it outside `root`. Never throws. */
+async function realInside(root: string, rel: string): Promise<{ ok: true; real: string } | ScriptFailure> {
+  try {
+    const real = await realpath(join(root, ...rel.split("/")));
+    if (relativeInside(await realpath(root), real) === null) return { ok: false, missing: false, reason: "resolves outside the project" };
+    return { ok: true, real };
+  } catch (error) {
+    return failed(error);
+  }
+}
+
+/**
+ * Whether script `rel` exists as a regular file inside the project, by
+ * `stat` only (a whole-script ref needs no content). Null when it does;
+ * never throws, and `stat` of a FIFO does not block.
+ */
+async function statScript(root: string, rel: string): Promise<ScriptFailure | null> {
+  const located = await realInside(root, rel);
+  if (!located.ok) return located;
+  try {
+    const stats = await stat(located.real);
+    if (stats.isDirectory()) return { ok: false, missing: false, reason: "is a directory, not a script" };
+    if (!stats.isFile()) return { ok: false, missing: false, reason: "is not a regular file" };
+    return null;
+  } catch (error) {
+    return failed(error);
+  }
+}
 
 /**
  * Read project-relative script `rel` without ever throwing or blocking.
@@ -100,19 +149,9 @@ type ScriptRead = { ok: true; text: string } | { ok: false; missing: boolean; re
  * cannot hang the read.
  */
 async function readScript(root: string, rel: string): Promise<ScriptRead> {
-  const failed = (error: unknown): ScriptRead => {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return { ok: false, missing: true, reason: "does not exist" };
-    if (code === "EISDIR") return { ok: false, missing: false, reason: "is a directory, not a script" };
-    return { ok: false, missing: false, reason: `could not be read (${code ?? (error as Error).message})` };
-  };
-  let real: string;
-  try {
-    real = await realpath(join(root, ...rel.split("/")));
-    if (relativeInside(await realpath(root), real) === null) return { ok: false, missing: false, reason: "resolves outside the project" };
-  } catch (error) {
-    return failed(error);
-  }
+  const located = await realInside(root, rel);
+  if (!located.ok) return located;
+  const { real } = located;
   // O_NONBLOCK: opening a FIFO with no writer must not wait. Absent on Windows (no such FIFOs there).
   const handle = await open(real, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0)).catch((error: unknown) => error as Error);
   if (handle instanceof Error) return failed(handle);
