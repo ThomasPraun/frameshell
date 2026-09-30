@@ -153,6 +153,16 @@ const ARITY: Record<string, [number, number]> = {
 };
 
 /**
+ * Timeline commands (`clip add`, `cut`, `history`…) and the flags each
+ * takes, `--timeline` included where it applies.
+ */
+export function timelineCommandFlags(): Map<string, string[]> {
+  return new Map(
+    Object.entries(ALLOWED).map(([command, flags]) => [command.trim(), command.startsWith("tx ") ? [...flags] : [...flags, "timeline"]]),
+  );
+}
+
+/**
  * Parse `timeline|track|clip|cut …`. Returns null for an unknown
  * subcommand; throws {@link UsageError} for bad flags or values.
  */

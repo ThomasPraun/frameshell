@@ -77,9 +77,9 @@ describe("UI state and navigation methods (SPEC §7b)", () => {
 });
 
 describe("parseParams", () => {
-  it("returns validated params unchanged when valid", () => {
+  it("returns validated params, defaults filled in, when valid", () => {
     const dir = process.cwd(); // Absolute on every platform.
-    expect(parseParams("project.init", { dir, name: "Talk" })).toEqual({ dir, name: "Talk" });
+    expect(parseParams("project.init", { dir, name: "Talk" })).toEqual({ dir, name: "Talk", agentSkill: true });
   });
 
   it("throws InvalidParams listing every bad field with its path", () => {

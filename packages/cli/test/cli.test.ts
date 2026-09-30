@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION, connectToDaemon, isDaemonUnavailable } from "@frameshell/protocol";
+import { runCli } from "../src/index.js";
 
 // Black-box: runs the built CLI (`tsc -b` first) exactly as a user or agent would.
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
@@ -68,6 +69,47 @@ describe("frameshell CLI", () => {
     expect(json.daemon.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(json.daemon.pid).not.toBe(process.pid);
     daemonPids.add(json.daemon.pid);
+  });
+
+  it("init installs the agent skill when no one can be asked, and --no-skill leaves it out", () => {
+    const withSkill = tempDir();
+    const init = frameshell(["init"], withSkill);
+    expect(init.code).toBe(0);
+    expect(init.stdout).toContain("Agent skill: .claude/skills/frameshell/");
+    expect(existsSync(join(withSkill, ".claude", "skills", "frameshell", "SKILL.md"))).toBe(true);
+
+    const without = tempDir();
+    const bare = frameshell(["init", "--no-skill"], without);
+    expect(bare.code).toBe(0);
+    expect(bare.stdout).not.toContain("Agent skill");
+    expect(existsSync(join(without, ".claude"))).toBe(false);
+  });
+
+  it("init offers the agent skill when someone can answer, installing it unless declined", async () => {
+    const ask = async (answer: string) => {
+      const dir = tempDir();
+      const questions: string[] = [];
+      let stdout = "";
+      const code = await runCli(["init"], {
+        stdout: (text) => (stdout += text),
+        stderr: () => {},
+        cwd: dir,
+        env: { ...process.env, FRAMESHELL_SOCKET: socketPath, FRAMESHELL_IDLE_TIMEOUT_MS: String(IDLE_MS) },
+        prompt: async (question) => {
+          questions.push(question);
+          return answer;
+        },
+      });
+      return { code, stdout, questions, installed: existsSync(join(dir, ".claude", "skills", "frameshell", "SKILL.md")) };
+    };
+    const declined = await ask("n");
+    expect(declined.code).toBe(0);
+    expect(declined.questions).toEqual([expect.stringContaining(".claude/skills/frameshell")]);
+    expect(declined.installed).toBe(false);
+
+    const accepted = await ask("");
+    expect(accepted.installed).toBe(true);
+    expect(accepted.stdout).toContain("Agent skill: .claude/skills/frameshell/");
   });
 
   it("status and status --json show rejected edits on disk and open transactions", () => {
@@ -157,6 +199,19 @@ describe("frameshell CLI", () => {
     const again = frameshell(["init"], root);
     expect(again.code).toBe(1);
     expect(again.stderr).toMatch(/already exists/);
+  });
+
+  it("rejects a flag the command does not take instead of ignoring it", () => {
+    const result = frameshell(["status", "--from", "3"], tempDir());
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("`frameshell status` does not take --from");
+  });
+
+  it("timeline commands reject flags of other commands instead of ignoring them", () => {
+    const result = frameshell(["history", "--wait", "--link", "--no-skill"], tempDir());
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("`frameshell history` does not take --link, --wait, --no-skill");
+    expect(frameshell(["clip", "add", "--verify", "x.mp4"], tempDir()).stderr).toContain("does not take --verify");
   });
 
   it("rejects an unknown command with usage", () => {

@@ -350,7 +350,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
     },
-    "project.init": (params) => projects.init(params.dir, params.name),
+    "project.init": (params) => projects.init(params.dir, params.name, params.agentSkill),
     doctor: async ({ cwd, install }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;

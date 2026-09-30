@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -478,11 +478,17 @@ export const methods = {
     mutating: true,
     description:
       "Create a new Frameshell project: scaffold the directory layout, a default `frameshell.json` " +
-      "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. " +
+      "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. Also writes the `frameshell` agent skill " +
+      "to `.claude/skills/frameshell/`, where agents such as Claude Code load it, unless `agentSkill` is false or " +
+      "that directory exists. " +
       "Fails with ProjectExists when the directory already holds `frameshell.json`; never overwrites.",
     params: z.strictObject({
       dir: AbsolutePath.describe("Absolute project directory; created if missing. Example: `/home/ana/videos/launch`."),
       name: z.string().optional().describe("Display name. Defaults to the directory name."),
+      agentSkill: z
+        .boolean()
+        .default(true)
+        .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`. Default true."),
     }),
     result: z.object({
       project: ProjectSummarySchema,
@@ -547,7 +553,8 @@ export const methods = {
     description:
       "Install a plugin into the enclosing project and pin it in `frameshell.json`. " +
       "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, or an npm name `[@scope/]name[@version]`. " +
-      "Git sources pin the resolved commit; npm sources pin the exact version. " +
+      "Git sources pin the resolved commit; npm sources pin the exact version. The agent skills it ships are linked " +
+      "into the project's `.claude/skills/`. " +
       "Fails with ProjectNotTrusted when the project already declares plugins that are not trusted, " +
       "InvalidPlugin when the package has no valid manifest or targets another plugin API version (nothing is pinned then).",
     params: z.strictObject({
@@ -559,12 +566,21 @@ export const methods = {
       name: z.string().describe("Installed package name."),
       pin: z.string().describe("Spec written to `frameshell.json`."),
       plugin: PluginInfoSchema,
+      skills: z
+        .array(z.string())
+        .describe(
+          "Agent skill directories of this plugin linked into the project, project-relative, e.g. `.claude/skills/hyperframes`: " +
+            "agents such as Claude Code load them from there. Empty when it ships none.",
+        ),
+      warnings: z
+        .array(z.string())
+        .describe("Skills not linked because the project already holds another entry under that name; empty when none."),
     }),
   },
   "plugin.remove": {
     mutating: true,
     description:
-      "Remove a plugin from the enclosing project: unpin it in `frameshell.json` and uninstall it. Fails with PluginNotFound.",
+      "Remove a plugin from the enclosing project: unpin it in `frameshell.json`, uninstall it and unlink its agent skills. Fails with PluginNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       name: z.string().min(1).describe("Package name as listed by `plugin.list`, e.g. `@acme/titles`."),
@@ -573,6 +589,7 @@ export const methods = {
       dir: z.string().describe("Project root."),
       name: z.string(),
       pin: z.string().describe("Pin that was removed."),
+      skills: z.array(z.string()).describe("Agent skill links removed from the project, project-relative, e.g. `.claude/skills/hyperframes`."),
     }),
   },
   "plugin.run": {
