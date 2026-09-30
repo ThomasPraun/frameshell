@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 
 /** Ten minutes: far longer than any client's retry after a lost reply. */
@@ -53,7 +54,8 @@ export class IdempotencyCache {
   run<T>(author: string, key: string, method: string, params: unknown, work: () => Promise<T>): Promise<T> {
     this.#expire();
     const id = `${author}\0${key}`;
-    const fingerprint = `${method}\0${stableJson(params)}`;
+    // Hashed: params can be large (`file.write` content) and live for the whole TTL.
+    const fingerprint = createHash("sha256").update(`${method}\0${stableJson(params)}`).digest("hex");
     const known = this.#entries.get(id);
     if (known) {
       if (known.fingerprint !== fingerprint) {
