@@ -85,8 +85,23 @@ export async function terminalText(page: Page): Promise<string> {
   return rows.join("");
 }
 
-/** Type a command into the active terminal and press Enter. */
+/**
+ * Type a command into the active terminal and press Enter, once the shell drew its prompt (output non-empty and
+ * unchanged for 300 ms). Keys typed while a login shell still starts are reordered or lost by its line editor.
+ */
 export async function runInTerminal(page: Page, command: string): Promise<void> {
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const text = (await terminalText(page)).trim();
+        const settled = text !== "" && text === last;
+        last = text;
+        return settled;
+      },
+      { timeout: 30_000, intervals: [300] },
+    )
+    .toBe(true);
   await page.locator(".terminal-view:not([hidden])").click();
   await page.keyboard.type(command);
   await page.keyboard.press("Enter");
