@@ -478,11 +478,17 @@ export const methods = {
     mutating: true,
     description:
       "Create a new Frameshell project: scaffold the directory layout, a default `frameshell.json` " +
-      "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. " +
+      "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. Also writes the `frameshell` agent skill " +
+      "to `.claude/skills/frameshell/`, where agents such as Claude Code load it, unless `agentSkill` is false or " +
+      "that directory exists. " +
       "Fails with ProjectExists when the directory already holds `frameshell.json`; never overwrites.",
     params: z.strictObject({
       dir: AbsolutePath.describe("Absolute project directory; created if missing. Example: `/home/ana/videos/launch`."),
       name: z.string().optional().describe("Display name. Defaults to the directory name."),
+      agentSkill: z
+        .boolean()
+        .default(true)
+        .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`. Default true."),
     }),
     result: z.object({
       project: ProjectSummarySchema,

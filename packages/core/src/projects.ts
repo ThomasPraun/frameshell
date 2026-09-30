@@ -18,6 +18,7 @@ import {
   parseTranscript,
 } from "@frameshell/schema";
 import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
+import { installCoreSkill } from "./skills/install.js";
 
 /** Project config file name; its directory is the project root. */
 export const PROJECT_FILE = "frameshell.json";
@@ -61,10 +62,11 @@ export class ProjectRegistry {
   }
 
   /**
-   * Scaffold a project in `dir` (created if missing) and open it.
+   * Scaffold a project in `dir` (created if missing) and open it, with the
+   * core agent skill unless `agentSkill` is false.
    * Throws `ProjectExists` instead of overwriting an existing `frameshell.json`.
    */
-  async init(dir: string, name?: string): Promise<ProjectInitResult> {
+  async init(dir: string, name?: string, agentSkill = true): Promise<ProjectInitResult> {
     const root = resolve(dir);
     const configPath = join(root, PROJECT_FILE);
     if (await exists(configPath)) {
@@ -84,6 +86,7 @@ export class ProjectRegistry {
       await writeFile(ignorePath, ".frameshell/\n");
       created.push(".gitignore");
     }
+    if (agentSkill) created.push(...(await installCoreSkill(root)));
     // Config last: its presence marks a complete project.
     await writeJsonAtomic(configPath, config);
     created.push(PROJECT_FILE);

@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "tsc -b && vitest run",
     "test:e2e": "tsc -b && pnpm --filter @frameshell/desktop test:e2e",
-    "gen:json-schema": "tsc -b && node packages/schema/scripts/generate-json-schema.mjs"
+    "gen:json-schema": "tsc -b && node packages/schema/scripts/generate-json-schema.mjs",
+    "gen:skill": "node packages/core/scripts/generate-core-skill.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

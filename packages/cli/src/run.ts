@@ -36,7 +36,9 @@ export const CLI_VERSION: string = (createRequire(import.meta.url)("../package.j
 const USAGE = `Usage: frameshell <command> [options]
 
 Commands:
-  init [dir] [--name <name>]   Scaffold a project in dir (default: current directory)
+  init [dir] [--name <name>] [--no-skill]
+                               Scaffold a project in dir (default: current directory) with the agent skill
+                               in .claude/skills/frameshell/ (asked first on a terminal; --no-skill: none)
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
   doctor [--install] [--json]  Check ffmpeg/ffprobe, versions and encoders; exit 1 on problems.
                                --install downloads missing managed binaries first
@@ -91,7 +93,7 @@ export interface CliIo {
 }
 
 type Invocation =
-  | { kind: "init"; dir: string | undefined; name: string | undefined }
+  | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean }
@@ -147,6 +149,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           name: { type: "string" },
+          "no-skill": { type: "boolean", default: false },
           provider: { type: "string" },
           model: { type: "string" },
           language: { type: "string" },
@@ -210,6 +213,7 @@ function parseBuiltin(
   positionals: string[],
   options: {
     name?: string | undefined;
+    "no-skill"?: boolean | undefined;
     install: boolean;
     link: boolean;
     wait: boolean;
@@ -259,7 +263,9 @@ function parseBuiltin(
     };
   }
   if (command === "script") return rest.length === 2 && rest[0] === "outline" ? { kind: "script.outline", file: rest[1]! } : null;
-  if (command === "init" && rest.length <= 1) return { kind: "init", dir: rest[0], name: options.name };
+  if (command === "init" && rest.length <= 1) {
+    return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined };
+  }
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
   if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
@@ -279,11 +285,21 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
   switch (inv.kind) {
     case "init": {
       const dir = resolve(cwd, inv.dir ?? ".");
-      const result = await conn.request("project.init", inv.name ? { dir, name: inv.name } : { dir });
-      return flags.json
-        ? json(result)
-        : `Created project "${result.project.name}" in ${result.project.dir}\n` +
-            result.created.map((path) => `  ${path}\n`).join("");
+      const agentSkill = inv.skill ?? (await offerSkill(io));
+      const result = await conn.request("project.init", { dir, agentSkill, ...(inv.name ? { name: inv.name } : {}) });
+      if (flags.json) return json(result);
+      const skillDir = `${SKILL_DIR}/`;
+      const skill = result.created.some((path) => path.startsWith(skillDir))
+        ? `Agent skill: ${skillDir} (Claude Code and compatible agents load it from there)\n`
+        : "";
+      return (
+        `Created project "${result.project.name}" in ${result.project.dir}\n` +
+        result.created
+          .filter((path) => !path.startsWith(skillDir))
+          .map((path) => `  ${path}\n`)
+          .join("") +
+        skill
+      );
     }
     case "status": {
       const status = await conn.request("status", { cwd });
@@ -391,6 +407,22 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return result.data === null || result.data === undefined ? "" : json(result.data);
     }
   }
+}
+
+/** Where `project.init` puts the core agent skill. */
+const SKILL_DIR = ".claude/skills/frameshell";
+
+/**
+ * Ask whether to install the agent skill when someone can answer; the
+ * default is yes. Without a terminal (agents, scripts) it is installed.
+ */
+async function offerSkill(io: CliIo): Promise<boolean> {
+  if (!io.prompt) return true;
+  const answer = await io.prompt(
+    `Install the Frameshell agent skill in ${SKILL_DIR}/? It teaches Claude Code and compatible agents ` +
+      "this project's CLI, history and review loop. [Y/n] ",
+  );
+  return !/^\s*n(o)?\s*$/i.test(answer);
 }
 
 /**

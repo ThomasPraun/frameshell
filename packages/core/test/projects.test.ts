@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import { parseProjectConfig, parseTimeline } from "@frameshell/schema";
@@ -38,6 +39,35 @@ describe("project.init", () => {
     const dir = join(tempDir(), "demo-reel");
     const { project } = await conn.request("project.init", { dir });
     expect(project.name).toBe("demo-reel");
+  });
+
+  it("installs the Frameshell agent skill, the same files as skills/frameshell (run `pnpm gen:skill` after editing it)", async () => {
+    const dir = tempDir();
+    const { created } = await conn.request("project.init", { dir });
+
+    const repoSkill = fileURLToPath(new URL("../../../skills/frameshell/", import.meta.url));
+    const skillFiles = readdirSync(repoSkill, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".md"));
+    expect(skillFiles).toContain("SKILL.md");
+    for (const file of skillFiles) {
+      const installed = join(dir, ".claude", "skills", "frameshell", file);
+      // Windows checkouts may turn LF into CRLF.
+      expect(readFileSync(installed, "utf8"), file).toBe(readFileSync(join(repoSkill, file), "utf8").replace(/\r\n/g, "\n"));
+      expect(created).toContain(`.claude/skills/frameshell/${file.split(sep).join("/")}`);
+    }
+  });
+
+  it("leaves the agent skill out with agentSkill: false, and keeps one already there", async () => {
+    const without = tempDir();
+    const { created } = await conn.request("project.init", { dir: without, agentSkill: false });
+    expect(existsSync(join(without, ".claude"))).toBe(false);
+    expect(created.some((path) => path.startsWith(".claude/"))).toBe(false);
+
+    const customized = tempDir();
+    mkdirSync(join(customized, ".claude", "skills", "frameshell"), { recursive: true });
+    writeFileSync(join(customized, ".claude", "skills", "frameshell", "SKILL.md"), "tuned by the user");
+    const second = await conn.request("project.init", { dir: customized });
+    expect(readFileSync(join(customized, ".claude", "skills", "frameshell", "SKILL.md"), "utf8")).toBe("tuned by the user");
+    expect(second.created.some((path) => path.startsWith(".claude/"))).toBe(false);
   });
 
   it("refuses to overwrite an existing project", async () => {
