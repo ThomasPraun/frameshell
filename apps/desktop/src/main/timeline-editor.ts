@@ -1,4 +1,12 @@
-import type { HistoryResult, MethodName, MethodParams, MethodResult, OperationResult } from "@frameshell/protocol";
+import {
+  ErrorCode,
+  type HistoryResult,
+  type MethodName,
+  type MethodParams,
+  type MethodResult,
+  type OperationResult,
+  type RpcError,
+} from "@frameshell/protocol";
 import { TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
 
 /** A typed daemon request, e.g. {@link DaemonLink.request} bound to the app's link. */
@@ -8,43 +16,118 @@ export type DaemonRequest = <M extends MethodName>(method: M, params: MethodPara
 const UI_AUTHOR = "ui";
 
 /**
+ * Seconds without an operation after which the daemon commits a batch's
+ * transaction itself: a crash mid-batch must not leave it absorbing later
+ * `ui` edits. Far above one edit's round trip, even with energy snapping.
+ */
+export const BATCH_AUTO_COMMIT_S = 15;
+
+/** History label verbs of the ops a batch holds. */
+const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
+  "clip.move": "Move",
+  "clip.trim": "Trim",
+  "clip.split": "Split",
+  "clip.remove": "Delete",
+  cut: "Ripple delete",
+};
+
+/**
  * The timeline panel's edits and undo/redo, as daemon operations on the
- * app's connection (author `ui`). Nothing is buffered: each call is one
- * operation, saved and journaled by the daemon before it resolves.
+ * app's connection (author `ui`). Nothing is buffered: each edit is one
+ * operation, saved and journaled by the daemon before the call resolves.
+ *
+ * A command touching several clips is one `ui` transaction, so it is one
+ * undo step. Calls run one at a time across every window: the daemon keeps
+ * one open transaction per author, and `ui` is every window's.
  *
  * Undo and redo are `revert`s of the journal (SPEC §6.2), so they survive
  * restarts and see edits from every app window, and never touch operations
  * of other authors (the agent's).
  */
 export class TimelineEditor {
+  #queue: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly request: DaemonRequest) {}
 
   /**
-   * Apply `edit` to `timeline` of the project enclosing `cwd`. Rejects ops
-   * outside {@link TIMELINE_EDIT_OPS} (the renderer is not trusted to pick
-   * any method) and passes daemon errors through.
+   * Apply `edits` to `timeline` of the project enclosing `cwd`, in order,
+   * and resolve with the last result. Several edits form one transaction
+   * labelled like `Split 3 clips`; the first the daemon refuses stops the
+   * rest, what applied stays (one undo step) and the call rejects with the
+   * daemon's message. Rejects ops outside {@link TIMELINE_EDIT_OPS} before
+   * sending anything: the renderer is not trusted to pick any method.
    */
-  async apply(cwd: string, timeline: string, edit: TimelineEdit): Promise<OperationResult> {
-    const op = (edit as { op: unknown }).op;
-    if (!(TIMELINE_EDIT_OPS as readonly unknown[]).includes(op)) {
-      throw new Error(`The timeline panel cannot send ${String(op)}; it sends ${TIMELINE_EDIT_OPS.join(", ")}.`);
+  apply(cwd: string, timeline: string, edits: readonly TimelineEdit[]): Promise<OperationResult> {
+    const ops = edits.map((edit) => (edit as { op: unknown }).op);
+    const foreign = ops.find((op) => !(TIMELINE_EDIT_OPS as readonly unknown[]).includes(op));
+    if (edits.length === 0 || foreign !== undefined) {
+      const sent = edits.length === 0 ? "an empty batch" : String(foreign);
+      return Promise.reject(new Error(`The timeline panel cannot send ${sent}; it sends ${TIMELINE_EDIT_OPS.join(", ")}.`));
     }
+    return this.#serial(async () => {
+      if (edits.length === 1) return this.#send(cwd, timeline, edits[0]!);
+      await this.#begin(batchLabel(edits));
+      try {
+        let last: OperationResult | undefined;
+        for (const edit of edits) last = await this.#send(cwd, timeline, edit);
+        return last!;
+      } finally {
+        // On failure too: what applied is one step. A lost commit is closed by the auto-commit.
+        await this.request("tx.commit", {}).catch(() => undefined);
+      }
+    });
+  }
+
+  /** Revert the latest `ui` transaction not yet undone; null when there is none. */
+  undo(cwd: string, timeline: string): Promise<OperationResult | null> {
+    return this.#serial(async () => {
+      const target = uiUndoStacks(await this.request("history", { cwd, timeline })).undo.at(-1);
+      return target ? this.request("revert", { cwd, timeline, target }) : null;
+    });
+  }
+
+  /** Revert the latest undo, re-applying what it undid; null when there is none. */
+  redo(cwd: string, timeline: string): Promise<OperationResult | null> {
+    return this.#serial(async () => {
+      const target = uiUndoStacks(await this.request("history", { cwd, timeline })).redo.at(-1);
+      return target ? this.request("revert", { cwd, timeline, target }) : null;
+    });
+  }
+
+  #send(cwd: string, timeline: string, edit: TimelineEdit): Promise<OperationResult> {
     // One call per op keeps each typed against its own params.
     const params = { ...edit.args, cwd, timeline };
     return this.request(edit.op, params as MethodParams<typeof edit.op>) as Promise<OperationResult>;
   }
 
-  /** Revert the latest `ui` transaction not yet undone; null when there is none. */
-  async undo(cwd: string, timeline: string): Promise<OperationResult | null> {
-    const target = uiUndoStacks(await this.request("history", { cwd, timeline })).undo.at(-1);
-    return target ? this.request("revert", { cwd, timeline, target }) : null;
+  /**
+   * Open the batch's transaction. A `ui` transaction still open can only be
+   * a batch of an app that crashed before its commit (this editor never
+   * leaves one open): commit it rather than wait for its auto-commit.
+   */
+  async #begin(label: string): Promise<void> {
+    const begin = () => this.request("tx.begin", { label, autoCommitAfter: BATCH_AUTO_COMMIT_S });
+    try {
+      await begin();
+    } catch (error) {
+      if ((error as RpcError | undefined)?.code !== ErrorCode.TransactionState) throw error;
+      await this.request("tx.commit", {});
+      await begin();
+    }
   }
 
-  /** Revert the latest undo, re-applying what it undid; null when there is none. */
-  async redo(cwd: string, timeline: string): Promise<OperationResult | null> {
-    const target = uiUndoStacks(await this.request("history", { cwd, timeline })).redo.at(-1);
-    return target ? this.request("revert", { cwd, timeline, target }) : null;
+  #serial<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.#queue.then(work);
+    this.#queue = run.catch(() => undefined);
+    return run;
   }
+}
+
+/** History label of a batch: `Split 3 clips`, or `Edit 3 clips` when ops differ. */
+function batchLabel(edits: readonly TimelineEdit[]): string {
+  const [first] = edits;
+  const verb = edits.every((edit) => edit.op === first!.op) ? BATCH_VERBS[first!.op] : "Edit";
+  return `${verb} ${edits.length} clips`;
 }
 
 /**

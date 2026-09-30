@@ -287,8 +287,8 @@ function registerIpc(): void {
       return daemon.request("timeline.show", { cwd: project.dir, timeline });
     }),
   );
-  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edit: TimelineEdit) =>
-    outcome(async () => editor.apply(requireProject(stateOf(event.sender)).project.dir, timeline, edit)),
+  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[]) =>
+    outcome(async () => editor.apply(requireProject(stateOf(event.sender)).project.dir, timeline, edits)),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo(requireProject(stateOf(event.sender)).project.dir, timeline)),
