@@ -1,14 +1,9 @@
 ---
 title: Launch
-target_duration: 30
 ---
-# Launch promo
-
 ## Intro
-Hook: one sentence on what the viewer gets.
-
+Hook.
 ## Demo
-Show the app editing a video.
-
+Show.
 ## Outro
-Call to action.
+Call.
