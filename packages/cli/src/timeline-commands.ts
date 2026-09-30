@@ -32,9 +32,13 @@ mutations print the new revision):
   --no-snap uses the exact times.
   Negative values need =, e.g. --gain=-6.
 
-History (per terminal session, FRAMESHELL_SESSION; mutations print their op and tx ids):
-  tx begin "<label>"           Group the following operations until commit/abort (else grouped until ~10 s idle)
-  tx commit | tx abort         Keep, or undo, the open transaction's changes
+History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
+app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
+new shell per command should export FRAMESHELL_SESSION to group across commands.
+  tx begin "<label>"           Group the following operations until commit/abort (else grouped until ~10 s idle).
+                               Survives daemon restarts
+  tx commit | tx abort         Keep, or undo, the open transaction's changes. Abort undoes every timeline or,
+                               on any conflict, none (listing every conflict)
   history [--since <tx>]       Operations grouped by transaction; --since: only what came after <tx>
   revert <tx|op>               Undo a transaction or one operation, as a new operation
 `;

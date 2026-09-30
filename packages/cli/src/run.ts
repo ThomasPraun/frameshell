@@ -16,6 +16,7 @@ import {
   resolveSocketPath,
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
+import { resolveSession } from "./session.js";
 import {
   TIMELINE_COMMANDS,
   TIMELINE_OPTIONS,
@@ -175,7 +176,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     conn = await connectOrStartDaemon({
       socketPath: resolveSocketPath(io.env),
       client: `cli/${CLI_VERSION}`,
-      session: io.env["FRAMESHELL_SESSION"],
+      session: resolveSession(io.env),
       env: io.env,
     });
     const outcome = { code: 0 };

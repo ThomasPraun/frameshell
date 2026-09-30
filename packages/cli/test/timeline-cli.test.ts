@@ -92,7 +92,7 @@ describe("frameshell timeline editing", () => {
     expect(result.revision).toBe(3);
     clip = result.changes.added[0]!;
     expect(clip).toMatch(/^c_[0-9a-f]{6}$/);
-    expect(result.operation).toMatchObject({ op: "clip.add", author: "cli", tx: expect.stringMatching(/^tx_/), revisionBefore: 2, inverse: { op: "timeline.patch" } });
+    expect(result.operation).toMatchObject({ op: "clip.add", author: expect.stringMatching(/^cli:sh-/), tx: expect.stringMatching(/^tx_/), revisionBefore: 2, inverse: { op: "timeline.patch" } });
     const track = onDisk().tracks[0];
     expect(track.clips).toEqual([{ id: clip, type: "media", asset: "assets/take.mp4", start: 0, in: 0.5, out: 1.733 }]);
   });
@@ -234,10 +234,13 @@ describe("frameshell tx, history and revert", () => {
     expect(names()).toEqual([...before, "Music"]);
   });
 
-  it("explains that transactions need a session, and rejects unknown ids", () => {
-    const bare = frameshell(["tx", "begin", "x"]);
-    expect(bare.code).toBe(1);
-    expect(bare.stderr).toMatch(/FRAMESHELL_SESSION/);
+  it("runs a transaction without FRAMESHELL_SESSION in the shell's generated session, and rejects unknown ids", () => {
+    const begun = frameshell(["tx", "begin", "no session"]);
+    expect(begun.code).toBe(0);
+    const tx = /tx_[0-9a-f]{8}/.exec(begun.stdout)![0];
+    const added = json<Op>(["track", "add", "video", "--name", "Scratch"]);
+    expect(added.operation).toMatchObject({ tx, author: expect.stringMatching(/^cli:sh-/) });
+    expect(frameshell(["tx", "abort"]).code).toBe(0);
     const unknown = frameshell(["revert", "tx_00000000"]);
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toMatch(/No transaction tx_00000000 in the history of timeline main/);
