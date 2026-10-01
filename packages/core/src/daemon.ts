@@ -84,6 +84,8 @@ export interface DaemonOptions {
    * passes without one (SPEC §6.2). Default {@link DEFAULT_TX_IDLE_GAP_MS}.
    */
   txIdleGapMs?: number;
+  /** Transaction clock in epoch ms (idle gaps, auto-commit deadlines). Default `Date.now`. Tests skew it to pass deadlines without waiting. */
+  txNow?: () => number;
 }
 
 /** Running daemon handle. */
@@ -188,6 +190,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   const transactions = new TransactionTracker({
     idleGapMs: options.txIdleGapMs,
+    ...(options.txNow ? { now: options.txNow } : {}),
     store: new FileTransactionStore(dirs.dataDir, socketPath),
   });
   await transactions.restore();
