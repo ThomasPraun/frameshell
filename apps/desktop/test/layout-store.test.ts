@@ -33,6 +33,15 @@ describe("LayoutStore", () => {
     expect(await store.load("/videos/talk")).toEqual(DEFAULT_LAYOUT);
   });
 
+  it("takes saves fired back to back (a panel drag), keeping one of them whole and no temp file", async () => {
+    const dir = storeDir();
+    const store = new LayoutStore(dir);
+    const layouts = [300, 400, 500, 600].map((width) => resizePanel(DEFAULT_LAYOUT, "terminal", width));
+    await Promise.all(layouts.map((layout) => store.save("/videos/talk", layout)));
+    expect(layouts).toContainEqual(await store.load("/videos/talk"));
+    expect(readdirSync(dir)).toHaveLength(1);
+  });
+
   it("creates its directory on first save", async () => {
     const dir = join(storeDir(), "nested", "layouts");
     await new LayoutStore(dir).save("/videos/talk", DEFAULT_LAYOUT);

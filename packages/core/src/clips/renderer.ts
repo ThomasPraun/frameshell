@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { copyFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import { type ClipRenderInfo, type ClipRendersResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import type { AdapterClip, Timeline } from "@frameshell/schema";
-import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
+import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
 import { type NestedReader, resolveNested } from "../timeline/nested.js";
@@ -509,7 +509,7 @@ function renderFailed(timeline: string, clip: AdapterClip, details: string): Rpc
 /** Rename, or copy when the adapter wrote across devices. */
 async function moveFile(from: string, to: string): Promise<void> {
   try {
-    await rename(from, to);
+    await renameRetrying(from, to);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
     await copyFile(from, to);

@@ -93,6 +93,8 @@ interface WindowState {
   opening: Promise<unknown>;
 }
 const windows = new Map<number, WindowState>();
+/** Shells of closed windows still exiting; the app waits for them before it quits. */
+const exitingShells = new Set<Promise<void>>();
 
 function createWindow(projectDir?: string): BrowserWindow {
   const window = new BrowserWindow({
@@ -138,7 +140,9 @@ function createWindow(projectDir?: string): BrowserWindow {
   contents.on("will-navigate", (event) => event.preventDefault());
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
-    state.terminals.killAll();
+    const exiting = state.terminals.killAll();
+    exitingShells.add(exiting);
+    void exiting.then(() => exitingShells.delete(exiting));
     void state.files?.close();
     for (const subscription of state.daemonEvents) void subscription.unsubscribe();
     if (state.project) mediaRoots.revoke(state.project.mediaUrl);
@@ -441,6 +445,12 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("will-quit", () => {
+app.on("will-quit", (event) => {
+  if (exitingShells.size > 0) {
+    // Quit once closed windows' shells are gone: see TerminalManager.killAll.
+    event.preventDefault();
+    void Promise.all(exitingShells).then(() => app.quit());
+    return;
+  }
   void daemon.close();
 });

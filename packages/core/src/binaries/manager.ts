@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -24,6 +24,7 @@ import {
   buildCandidates,
   currentPlatform,
 } from "./manifest.js";
+import { renameRetrying } from "../fs-util.js";
 
 /** Global config file name inside the config dir. */
 export const GLOBAL_CONFIG_FILE = "config.json";
@@ -359,16 +360,16 @@ export class BinaryManager {
         await extract(file, extracted, members, requestedBy, url);
         if (archive.tree) {
           const tree = join(extracted, ...archive.tree.split("/"));
-          for (const name of await readdir(tree)) await rename(join(tree, name), join(out, name));
+          for (const name of await readdir(tree)) await renameRetrying(join(tree, name), join(out, name));
         }
         for (const [tool, member] of Object.entries(archive.files)) {
           const target = join(out, executable(tool, this.platform));
           const source = archive.tree ? join(out, ...member.slice(archive.tree.length + 1).split("/")) : join(extracted, ...member.split("/"));
-          if (source !== target) await rename(source, target);
+          if (source !== target) await renameRetrying(source, target);
           if (!this.platform.startsWith("win32")) await chmod(target, 0o755);
         }
         for (const [name, member] of Object.entries(support)) {
-          await rename(join(extracted, ...member.split("/")), join(out, name)).catch((error: NodeJS.ErrnoException) => {
+          await renameRetrying(join(extracted, ...member.split("/")), join(out, name)).catch((error: NodeJS.ErrnoException) => {
             throw installFailed(requestedBy, url, `pinned archive has no ${member}: ${error.message}`);
           });
         }
@@ -385,7 +386,7 @@ export class BinaryManager {
       );
       await mkdir(dirname(finalDir), { recursive: true });
       try {
-        await rename(out, finalDir);
+        await renameRetrying(out, finalDir);
       } catch (error) {
         // Another daemon finished first; its install is identical.
         if (!(await isFile(join(finalDir, "install.json")))) throw error;
@@ -426,7 +427,7 @@ export class BinaryManager {
       const label = `Downloading model ${model.id} (${megabytes(model.size)} MB, one time)`;
       await download({ urls: model.urls, sha256: model.sha256, size: model.size, files: {} }, file, model.id, progressReporter(label, model.size, report));
       await mkdir(dirname(finalPath), { recursive: true });
-      await rename(file, finalPath);
+      await renameRetrying(file, finalPath);
     } finally {
       await rm(staging, { recursive: true, force: true });
       await rmdir(dirname(staging)).catch(() => {});

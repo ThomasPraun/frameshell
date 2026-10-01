@@ -9,7 +9,11 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./frameshelld": "./dist/bin/frameshelld.js"
+    "./frameshelld": "./dist/bin/frameshelld.js",
+    "./fs-util": {
+      "types": "./dist/fs-util.d.ts",
+      "default": "./dist/fs-util.js"
+    }
   },
   "bin": {
     "frameshelld": "./dist/bin/frameshelld.js"

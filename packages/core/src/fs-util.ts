@@ -1,6 +1,8 @@
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 /** True when `path` exists (file or directory). */
 export async function exists(path: string): Promise<boolean> {
@@ -24,14 +26,46 @@ export async function readJsonIfExists(path: string): Promise<unknown> {
   return JSON.parse(text);
 }
 
-/** Temp + rename so readers never see a half-written file (SPEC §6.1). Creates the parent directory. Text or bytes. */
+/**
+ * Temp + rename so readers never see a half-written file (SPEC §6.1). Creates the parent directory. Text or bytes.
+ * Each call has its own temp file, so concurrent writes of one path each land whole; the last rename wins.
+ */
 export async function writeTextAtomic(path: string, content: string | Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.${process.pid}.tmp`;
-  // Drop a stale temp (or a planted symlink) and create exclusively so the write never follows a link.
-  await rm(temp, { force: true });
-  await writeFile(temp, content, { flag: "wx" });
-  await rename(temp, path);
+  const temp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    // Exclusive create: never follows a planted symlink.
+    await writeFile(temp, content, { flag: "wx" });
+    await renameRetrying(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+}
+
+/** Windows codes for a rename blocked by another open handle on the source or the target. */
+const BUSY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+/** Longest a rename keeps retrying: a reader holds its handle for milliseconds, an antivirus scan longer. */
+const RENAME_RETRY_MS = 3_000;
+
+/**
+ * `rename`, retried with backoff on Windows while another handle blocks it (EPERM, EACCES, EBUSY):
+ * Windows refuses to replace or move a file that a reader, a watcher or an antivirus scan has open,
+ * where POSIX would just unlink the old name. Rethrows the last error after {@link RENAME_RETRY_MS};
+ * elsewhere those codes are real permission errors and throw at once. Works for files and directories.
+ */
+export async function renameRetrying(from: string, to: string): Promise<void> {
+  const deadline = Date.now() + RENAME_RETRY_MS;
+  for (let delayMs = 10; ; delayMs = Math.min(delayMs * 2, 200)) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (process.platform !== "win32" || !BUSY_CODES.has(code) || Date.now() >= deadline) throw error;
+    }
+    await sleep(delayMs);
+  }
 }
 
 /** {@link writeTextAtomic} of pretty-printed JSON with a trailing newline. */

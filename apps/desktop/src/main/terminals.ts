@@ -33,9 +33,13 @@ const AGENT_POLL_MS = 1000;
  * (Claude Code, Codex, ...) show as `node` until they set their process title.
  */
 const TITLE_SETTLE_MS = 5000;
+/** Longest {@link TerminalManager.killAll} waits for shells to exit: quitting must not hang on one. */
+const EXIT_WAIT_MS = 5000;
 
 interface Entry {
   pty: pty.IPty;
+  /** Settles when the shell has exited. */
+  exited: Promise<void>;
   buffer: string;
   timer: NodeJS.Timeout | undefined;
   session: string | null;
@@ -88,8 +92,10 @@ export class TerminalManager {
       env: launch.env,
     });
     const shell = basename(launch.file).replace(/\.exe$/i, "");
+    let markExited = () => {};
     const entry: Entry = {
       pty: proc,
+      exited: new Promise((resolve) => (markExited = resolve)),
       buffer: "",
       timer: undefined,
       session: launch.env["FRAMESHELL_SESSION"] || null,
@@ -112,6 +118,7 @@ export class TerminalManager {
       entry.timer ??= setTimeout(flush, FLUSH_MS);
     });
     proc.onExit(({ exitCode }) => {
+      markExited();
       clearTimeout(entry.timer);
       flush();
       this.#terminals.delete(id);
@@ -189,10 +196,28 @@ export class TerminalManager {
     }
   }
 
-  /** Close a terminal tab: kills its shell and everything in the foreground. */
+  /** Close a terminal tab: kills its shell and everything in the foreground. The exit still reaches `onExit`. */
   kill(id: string): void {
+    void this.#kill(id);
+  }
+
+  /**
+   * Kill every terminal (the window closes) and settle once each shell has exited, or after
+   * {@link EXIT_WAIT_MS}. The app must not exit before: on Windows node-pty kills a shell that has not
+   * printed yet only once it prints, and an Electron exiting first hangs with the pseudoconsole open.
+   */
+  async killAll(): Promise<void> {
+    const exits = [...this.#terminals.keys()].map((id) => this.#kill(id));
+    let timer: NodeJS.Timeout | undefined;
+    const bound = new Promise<void>((resolve) => (timer = setTimeout(resolve, EXIT_WAIT_MS)));
+    await Promise.race([Promise.all(exits), bound]);
+    clearTimeout(timer);
+  }
+
+  /** Settles when the shell has exited; at once when unknown or already gone. */
+  #kill(id: string): Promise<void> {
     const entry = this.#terminals.get(id);
-    if (!entry) return;
+    if (!entry) return Promise.resolve();
     this.#terminals.delete(id);
     clearTimeout(entry.timer);
     this.#stopWatching(id, entry);
@@ -200,11 +225,8 @@ export class TerminalManager {
       entry.pty.kill();
     } catch {
       // Already gone.
+      return Promise.resolve();
     }
-  }
-
-  /** Kill every terminal, e.g. when the window closes. */
-  killAll(): void {
-    for (const id of [...this.#terminals.keys()]) this.kill(id);
+    return entry.exited;
   }
 }

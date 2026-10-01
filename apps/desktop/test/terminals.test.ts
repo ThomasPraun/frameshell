@@ -7,8 +7,8 @@ import { TerminalManager, type TerminalManagerOptions } from "../src/main/termin
 
 // Real ptys running the user's real login shell: the same path the app takes.
 const managers: TerminalManager[] = [];
-afterEach(() => {
-  for (const manager of managers.splice(0)) manager.killAll();
+afterEach(async () => {
+  await Promise.all(managers.splice(0).map((manager) => manager.killAll()));
 });
 
 function setup(options?: TerminalManagerOptions) {
@@ -61,6 +61,18 @@ describe("TerminalManager", () => {
     manager.write(id, "exit\r");
     await expect.poll(() => exits.has(id), { timeout: 15_000 }).toBe(true);
     expect(manager.has(id)).toBe(false);
+  });
+
+  // The app quits once this settles. On Windows a shell killed before its first output is only killed later by
+  // node-pty; quitting before that left Electron hung at exit with the pseudoconsole open (#109).
+  it("killAll settles once every shell has exited, even one killed right after it started", async () => {
+    const { manager, exits, launch } = setup();
+    const fresh = manager.create(launch("term-fresh"), { cols: 80, rows: 24 });
+    const started = manager.create(launch("term-started"), { cols: 80, rows: 24 });
+    manager.write(started.id, echoSession);
+    await manager.killAll();
+    expect(exits.has(fresh.id)).toBe(true);
+    expect(exits.has(started.id)).toBe(true);
   });
 
   it.skipIf(process.platform === "win32")("applies resizes to the pty", async () => {

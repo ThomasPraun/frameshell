@@ -1,7 +1,7 @@
 import { basename, join } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 
-/** `timelines/<id>.json`; the daemon's temp files (`<id>.json.<pid>.tmp`) do not match. */
+/** `timelines/<id>.json`; the daemon's temp files (`<id>.json.<pid>.<random>.tmp`) do not match. */
 const TIMELINE_FILE = /^([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
 
 /** Options for {@link TimelineWatcher}. */
