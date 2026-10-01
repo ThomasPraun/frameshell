@@ -13,18 +13,22 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 const GAP_MS = 400;
 
 let daemon: Daemon | undefined;
+/** Added to the daemons' transaction clock: passes deadlines while no daemon runs, without real waits. */
+let skewMs = 0;
+const txNow = () => Date.now() + skewMs;
 const connections: DaemonConnection[] = [];
 afterEach(async () => {
   for (const conn of connections.splice(0)) conn.close();
   await daemon?.close();
   daemon = undefined;
+  skewMs = 0;
 });
 
 async function setup() {
   // Own app dirs: open transactions persist under `dataDir`.
   const dirs: AppDirs = { dataDir: tempDir(), configDir: tempDir() };
   const socketPath = uniqueSocketPath();
-  daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS });
+  daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS, txNow });
   const dir = join(tempDir(), "talk");
   const connect = async (client: string, session?: string) => {
     const conn = await connectToDaemon(daemon!.socketPath, { client, session });
@@ -39,7 +43,7 @@ async function setup() {
   const restart = async () => {
     for (const conn of connections.splice(0)) conn.close();
     await daemon!.close();
-    daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS });
+    daemon = await startDaemon({ socketPath, dirs, txIdleGapMs: GAP_MS, txNow });
   };
   return { dir, connect, admin, addTrack, tracks, restart };
 }
@@ -335,14 +339,15 @@ describe("transactions", () => {
     await restart();
     await expect((await connect("desktop/0.1.0")).request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
 
-    const open = await (await connect("desktop/0.1.0")).request("tx.begin", { label: "survives", autoCommitAfter: 0.5 });
+    // Deadline far beyond a restart + connect + op on a slow CI runner.
+    const open = await (await connect("desktop/0.1.0")).request("tx.begin", { label: "survives", autoCommitAfter: 30 });
     await restart();
     const after = await connect("desktop/0.1.0");
     expect((await addTrack(after, "U2")).operation.tx).toBe(open.tx);
 
     // The deadline passes while no daemon runs: the next one does not resume it.
     await daemon!.close();
-    await sleep(800);
+    skewMs += 31_000;
     await restart();
     await expect((await connect("desktop/0.1.0")).request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
   });
