@@ -1,8 +1,9 @@
-// What the engine worker decodes a layer's pictures from: a media proxy (MP4, read by byte ranges, ADR 0001) or a
-// cached clip render (WebM, alpha as a second stream, ADR 0002). One shape, so a layer decodes both the same way.
+// What the engine worker decodes a layer's pictures from: a media proxy (H.264 MP4, or VP9 WebM with alpha for sources
+// with alpha (#90), both read by byte ranges, ADR 0001) or a cached clip render (WebM, alpha as a second stream,
+// ADR 0002, read whole). One shape, so a layer decodes all of them the same way.
 import type { SyncTable } from "./decode-plan.js";
 import { type ByteReader, openProxy, readSamples } from "./demux.js";
-import { openWebm } from "./webm.js";
+import { openWebm, openWebmProxy, readWebmProxy } from "./webm.js";
 
 /** One encoded picture; index = source frame. */
 export interface EncodedPicture {
@@ -23,13 +24,29 @@ export interface VideoSource {
   read(from: number, to: number): Promise<EncodedPicture[]>;
 }
 
+/** Folder of the daemon's media proxies (SPEC §5.1). */
+const PROXIES = ".frameshell/proxies/";
+
+/**
+ * Whether {@link openVideoSource} holds the file at `path` in memory whole
+ * (a `.webm` clip render), so the engine should drop it once unused.
+ */
+export function isReadWhole(path: string): boolean {
+  return path.toLowerCase().endsWith(".webm") && !path.startsWith(PROXIES);
+}
+
 /**
  * Open the project file `path`: `.webm` renders are read whole (they are
- * small), anything else is an MP4 proxy indexed from its head and read by
- * ranges. Rejects when the file cannot be demuxed.
+ * small); a `.webm` proxy (VP9 with alpha, #90) is indexed from its head and
+ * Cues and read by ranges; anything else is an MP4 proxy indexed from its
+ * head and read by ranges. Rejects when the file cannot be demuxed.
  */
 export async function openVideoSource(path: string, read: ByteReader, readAll: () => Promise<Uint8Array>): Promise<VideoSource> {
-  if (path.toLowerCase().endsWith(".webm")) {
+  if (path.toLowerCase().endsWith(".webm") && path.startsWith(PROXIES)) {
+    const proxy = await openWebmProxy(read);
+    return { config: proxy.config, hasAlpha: proxy.hasAlpha, table: proxy.table, read: (from, to) => readWebmProxy(proxy, from, to, read) };
+  }
+  if (isReadWhole(path)) {
     const render = openWebm(await readAll());
     return {
       config: render.config,

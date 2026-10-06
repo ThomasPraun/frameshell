@@ -32,6 +32,35 @@ export async function makeClip(path: string, { width = 320, height = 240, fps = 
   ]);
 }
 
+/**
+ * Short VP9 WebM, test pattern plus tone. With `alpha` (default) the left half
+ * is opaque and the right half at alpha 64, stored as VP9 alpha
+ * (`alpha_mode=1`) the way overlay renders are; without it, plain opaque VP9.
+ */
+export async function makeVp9Clip(path: string, { alpha = true, width = 320, height = 180, fps = 24, durationS = 1 } = {}): Promise<void> {
+  const { ffmpeg } = await mediaTools();
+  const picture = alpha
+    ? `testsrc2=s=${width}x${height}:r=${fps}:d=${durationS},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X,W/2),255,64)'`
+    : `testsrc2=s=${width}x${height}:r=${fps}:d=${durationS}`;
+  await run(ffmpeg, [
+    ...["-hide_banner", "-loglevel", "error", "-y"],
+    ...["-f", "lavfi", "-i", picture],
+    ...["-f", "lavfi", "-i", `sine=f=440:r=48000:d=${durationS}`],
+    ...["-c:v", "libvpx-vp9", "-pix_fmt", alpha ? "yuva420p" : "yuv420p", "-auto-alt-ref", "0", "-deadline", "realtime", "-b:v", "0", "-crf", "30"],
+    // ffmpeg's own Opus encoder: in every build, unlike libopus.
+    ...["-c:a", "opus", "-strict", "-2", "-shortest", path],
+  ]);
+}
+
+/** RGBA bytes of the first frame of `path`, decoded with libvpx so VP9 alpha survives (ADR 0002). */
+export async function firstFrameRgba(path: string): Promise<Buffer> {
+  const { ffmpeg } = await mediaTools();
+  return runBuffer(ffmpeg, [
+    ...["-hide_banner", "-loglevel", "error", "-c:v", "libvpx-vp9", "-i", path, "-map", "0:v:0"],
+    ...["-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+  ]);
+}
+
 /** ffprobe `-show_entries` output as JSON. */
 export async function ffprobeJson(path: string, args: string[]): Promise<Record<string, unknown>> {
   const { ffprobe } = await mediaTools();

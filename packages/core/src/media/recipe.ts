@@ -3,7 +3,7 @@
  * {@link RECIPE_VERSION} whenever an output changes: it is part of the cache
  * key, so old outputs are rebuilt instead of reused.
  */
-export const RECIPE_VERSION = 2;
+export const RECIPE_VERSION = 3;
 
 /** PCM sidecar and proxy audio rate (SPEC §6.3). */
 export const SIDECAR_SAMPLE_RATE = 48_000;
@@ -58,19 +58,50 @@ const BASE = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-pr
  * renders; an untagged proxy would be guessed differently.
  */
 export function proxyArgs(input: string, output: string, fps: number): string[] {
-  const shortSide = `min(iw\\,ih)`;
-  const scale = `scale=w='trunc(iw*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2':h='trunc(ih*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2'`;
   return [
     ...BASE,
     ...["-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1"],
-    ...["-vf", `fps=${fpsRational(fps)}:start_time=0,${scale}:out_color_matrix=bt709:out_range=tv,format=yuv420p`, "-fps_mode", "cfr"],
-    ...["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"],
+    ...["-vf", proxyVideoFilter(fps, "yuv420p"), "-fps_mode", "cfr", ...PROXY_COLOR_TAGS],
     ...["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-profile:v", "high"],
     ...["-g", String(PROXY_GOP), "-keyint_min", String(PROXY_GOP), "-sc_threshold", "0", "-bf", "0"],
     ...["-force_key_frames", `expr:eq(mod(n,${PROXY_GOP}),0)`],
     ...["-af", AUDIO_FILTER, "-c:a", "aac", "-b:a", "128k"],
     ...["-movflags", "+faststart", "-f", "mp4", output],
   ];
+}
+
+/**
+ * CFR preview proxy of a source with alpha (#90): VP9 WebM with the alpha
+ * plane as a second VP9 stream (`alpha_mode=1`), the format the preview
+ * already decodes for generated clip renders (ADR 0002). Same frame grid,
+ * scale, colour tags and fixed GOP as {@link proxyArgs}; keyframes are forced
+ * in colour and alpha alike, so every GOP start is a decode start. No
+ * alt-ref frames (libvpx cannot encode them with alpha; without them every
+ * block is one shown frame). No audio: the preview plays the PCM sidecar.
+ * `decoder` comes from the probe: VP8/VP9 alpha is lost unless libvpx decodes it.
+ */
+export function alphaProxyArgs(input: string, output: string, fps: number, decoder: string | null): string[] {
+  return [
+    ...BASE,
+    ...(decoder ? ["-c:v", decoder] : []),
+    ...["-i", input, "-map", "0:v:0", "-an", "-map_metadata", "-1"],
+    ...["-vf", proxyVideoFilter(fps, "yuva420p"), "-fps_mode", "cfr", ...PROXY_COLOR_TAGS],
+    // Realtime: about 3x faster than `good` at 540p for a 35 % larger file; preview quality only.
+    ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1"],
+    ...["-crf", "32", "-b:v", "0", "-auto-alt-ref", "0"],
+    ...["-g", String(PROXY_GOP), "-keyint_min", String(PROXY_GOP), "-force_key_frames", `expr:eq(mod(n,${PROXY_GOP}),0)`],
+    ...["-f", "webm", output],
+  ];
+}
+
+/** Output colour tags of every proxy: BT.709, limited range. */
+const PROXY_COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
+
+/** CFR at `fps` from source time 0, short side capped, converted to BT.709 limited `pixFmt`. */
+function proxyVideoFilter(fps: number, pixFmt: "yuv420p" | "yuva420p"): string {
+  const shortSide = `min(iw\\,ih)`;
+  const scale = `scale=w='trunc(iw*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2':h='trunc(ih*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2'`;
+  return `fps=${fpsRational(fps)}:start_time=0,${scale}:out_color_matrix=bt709:out_range=tv,format=${pixFmt}`;
 }
 
 /** Raw s16le PCM sidecar of the first audio stream, same clock as the proxy. */
