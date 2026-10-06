@@ -6,6 +6,7 @@ import {
   type AssetImportResult,
   type DoctorResult,
   ErrorCode,
+  type GcResult,
   type JobInfo,
   type MethodResult,
   type PluginInfo,
@@ -47,6 +48,9 @@ Commands:
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
                                (exit 1 if any failed). Progress: \`frameshell status\`
+  gc [--dry-run]               Delete regenerable files under .frameshell/ nothing uses any more (derived media
+                               of deleted or changed assets, unused clip renders, stale temps).
+                               --dry-run lists them without deleting
   plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
                                or an npm name[@version]
   plugin remove <name>         Unpin and uninstall a plugin
@@ -78,13 +82,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "no-skill", "provider", "model", "language", "verify"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -92,6 +96,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   status: [],
   doctor: ["install"],
   import: ["link", "wait"],
+  gc: ["dry-run"],
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
@@ -129,6 +134,7 @@ type Invocation =
   | { kind: "status" }
   | { kind: "doctor"; install: boolean }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean }
+  | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
@@ -180,6 +186,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           install: { type: "boolean", default: false },
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
+          "dry-run": { type: "boolean", default: false },
           name: { type: "string" },
           "no-skill": { type: "boolean", default: false },
           provider: { type: "string" },
@@ -268,6 +275,7 @@ function parseBuiltin(
     install: boolean;
     link: boolean;
     wait: boolean;
+    "dry-run": boolean;
     provider?: string | undefined;
     model?: string | undefined;
     language?: string | undefined;
@@ -320,6 +328,7 @@ function parseBuiltin(
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
   if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
+  if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
   const [sub, arg, ...extra] = rest;
   if (extra.length > 0) return null;
@@ -371,6 +380,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));
       if (imported.some((entry) => entry.job.state !== "done")) outcome.code = 1;
       return flags.json ? json({ ...result, imported }) : formatImport({ ...result, imported });
+    }
+    case "gc": {
+      const result = await conn.request("gc", { cwd, dryRun: inv.dryRun });
+      return flags.json ? json(result) : formatGc(result);
     }
     case "plugin.install": {
       await settleTrust(conn, flags, io);
@@ -513,6 +526,31 @@ async function waitForJobs(follower: JobFollower, ids: string[], io?: CliIo): Pr
     if (io && last.get(job.id) !== line) io.stderr(`${line}\n`);
     last.set(job.id, line);
   });
+}
+
+function formatGc(result: GcResult): string {
+  const verb = result.dryRun ? "Would delete" : "Deleted";
+  const lines = result.removed.map((entry) => `  ${entry.path}  ${entry.kind} · ${formatBytes(entry.bytes)}`);
+  const head =
+    result.removed.length === 0
+      ? `Nothing to delete in ${result.dir}/.frameshell`
+      : `${verb} ${result.removed.length} item(s), ${formatBytes(result.bytes)}:`;
+  const forgotten =
+    result.forgotten.length > 0 ? [`${result.dryRun ? "Would forget" : "Forgot"} index entries of vanished files: ${result.forgotten.join(", ")}`] : [];
+  const skipped = result.skipped.map((skip) => `Kept ${skip.area}: ${skip.reason}`);
+  return `${[head, ...lines, ...forgotten, ...skipped].join("\n")}\n`;
+}
+
+/** `1.5 MB`-style size, base 1024. */
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`;
 }
 
 function formatImport(result: AssetImportResult): string {

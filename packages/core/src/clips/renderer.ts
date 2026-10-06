@@ -2,10 +2,19 @@ import { randomBytes } from "node:crypto";
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
-import { type ClipRenderInfo, type ClipRendersResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
+import {
+  type ClipRenderInfo,
+  type ClipRendersResult,
+  ErrorCode,
+  type GcEntry,
+  type GcSkip,
+  type JobInfo,
+  RpcError,
+} from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import type { AdapterClip, Timeline } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
+import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
 import { type NestedReader, resolveNested } from "../timeline/nested.js";
@@ -291,6 +300,60 @@ export class ClipRenderer {
     }
   }
 
+  /**
+   * Delete cache entries no generated clip of any timeline keys now, plus
+   * `.tmp-*` render folders when `temps`. Every clip is keyed first; when one
+   * cannot be (invalid timeline, plugin missing or untrusted, adapter error),
+   * entries are kept and `skipped` says why. A key with a render pending is
+   * kept. `busy`: a render or export job runs, so nothing is deleted.
+   */
+  async gc(root: string, options: { dryRun: boolean; temps: boolean; busy: boolean }): Promise<{ removed: GcEntry[]; skipped: GcSkip[] }> {
+    const skipped: GcSkip[] = [];
+    let keys: Set<string> | null = null;
+    if (options.busy) {
+      skipped.push({ area: "clips", reason: "a clip render or export job of this project is running; it may read any cache entry." });
+    } else {
+      const found = await this.#currentKeys(root);
+      if (typeof found === "string") skipped.push({ area: "clips", reason: found });
+      else keys = found;
+    }
+    const removed = await sweep({
+      root,
+      dir: CLIP_CACHE_DIR,
+      classify: classifyClipEntry,
+      keep: (key) => keys === null || keys.has(key),
+      temps: options.temps && !options.busy,
+      dryRun: options.dryRun,
+      claim: async (key) => (this.#pending.has(entryId(root, key)) ? null : () => {}),
+    });
+    return { removed, skipped };
+  }
+
+  /** Keys of every generated clip on every timeline of `root`, or why they cannot all be known. */
+  async #currentKeys(root: string): Promise<Set<string> | string> {
+    const placed: Placed[] = [];
+    for (const id of await this.#options.timelines(root)) {
+      try {
+        const timeline = await this.#options.peek(root, id);
+        // Flattened too: a nested timeline file may live outside `timelines/`.
+        placed.push(...generatedClips(timeline), ...generatedClips(await resolveNested(root, timeline, this.#options.readNested)));
+      } catch (error) {
+        return `timelines/${id}.json could not be read (${(error as Error).message}); its clips may use any entry.`;
+      }
+    }
+    const keys = new Set<string>();
+    // No generated clips: never load plugins (an untrusted project stays untouched).
+    if (placed.length === 0) return keys;
+    const adapters = await this.#options.adapters(root);
+    const format = await this.#options.format(root);
+    for (const { clip } of placed) {
+      const keyed = await this.#keyOf(root, clip, adapters, format);
+      if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
+      keys.add(keyed.key);
+    }
+    return keys;
+  }
+
   /** Stop watching. Running renders are the queue's to stop. */
   async close(): Promise<void> {
     this.#closed = true;
@@ -479,6 +542,19 @@ export class ClipRenderer {
 
 /** Top-level project entries whose changes never feed a render: daemon state, timelines (refreshed on change), VCS, exports. */
 const IGNORED = new Set([".frameshell", ".git", "node_modules", "timelines", "exports"]);
+
+const CLIP_ENTRY = /^([0-9a-f]{32})\.(json|mp4|webm)$/;
+const CLIP_TEMP = /^\.tmp-[0-9a-f]{32}-[0-9a-f]+$/;
+/** Atomic-write temps of an entry's metadata. */
+const META_TEMP = /^[0-9a-f]{32}\.json\..+\.tmp$/;
+
+/** What an entry of {@link CLIP_CACHE_DIR} is, for `gc`: part of entry `key`, a render temp, or null (kept). */
+function classifyClipEntry(name: string, isDirectory: boolean): GcClass {
+  if (isDirectory) return CLIP_TEMP.test(name) ? { kind: "temp", key: null } : null;
+  if (META_TEMP.test(name)) return { kind: "temp", key: null };
+  const key = CLIP_ENTRY.exec(name)?.[1];
+  return key ? { kind: "clip", key } : null;
+}
 
 function entryId(root: string, key: string): string {
   return `${root}\0${key}`;

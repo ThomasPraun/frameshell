@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ClipRenderInfo, type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
@@ -218,6 +218,39 @@ describe("clip render cache", () => {
     TIMEOUT,
   );
 
+  it(
+    "gc deletes renders no clip keys any more and keeps every current one, nested ones included",
+    async () => {
+      for (const deadline = Date.now() + 60_000; ; ) {
+        const { jobs } = await conn.request("job.list", { cwd: project, active: true });
+        if (jobs.length === 0) break;
+        if (Date.now() > deadline) throw new Error("clip jobs never settled");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const current = new Set<string>();
+      for (const timeline of ["main", "inner"]) {
+        for (const clip of (await conn.request("clip.renders", { cwd: project, timeline })).clips) if (clip.key) current.add(clip.key);
+      }
+      const orphan = "f".repeat(32);
+      writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.webm`), "x");
+      writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.json`), "{}");
+
+      const { removed, skipped } = await conn.request("gc", { cwd: project });
+      expect(skipped).toEqual([]);
+      const keys = new Set(removed.filter((entry) => entry.kind === "clip").map((entry) => entry.path.split("/").at(-1)!.split(".")[0]!));
+      expect(keys).toContain(orphan);
+      // Earlier edits left renders of old keys behind.
+      expect(keys.size).toBeGreaterThan(1);
+      for (const key of current) expect(keys).not.toContain(key);
+      for (const timeline of ["main", "inner"]) {
+        for (const clip of (await conn.request("clip.renders", { cwd: project, timeline })).clips) {
+          if (clip.key) expect(clip.state).toBe("ready");
+        }
+      }
+    },
+    TIMEOUT,
+  );
+
   it("reports clips no loaded plugin renders as unavailable, and refuses to export them", async () => {
     const other = tempDir();
     await conn.request("project.init", { dir: other });
@@ -233,5 +266,11 @@ describe("clip render cache", () => {
       code: ErrorCode.ClipRenderFailed,
       data: { clip: "c_hf", type: "hyperframes", timeline: "main" },
     });
+    // Its key is unknown, so gc cannot tell which render it would use: the cache is left alone.
+    mkdirSync(join(other, ".frameshell", "cache", "clips"), { recursive: true });
+    writeFileSync(join(other, ".frameshell", "cache", "clips", `${"e".repeat(32)}.webm`), "x");
+    const gc = await conn.request("gc", { cwd: other });
+    expect(gc.removed).toEqual([]);
+    expect(gc.skipped).toEqual([{ area: "clips", reason: expect.stringContaining("c_hf") }]);
   });
 });
