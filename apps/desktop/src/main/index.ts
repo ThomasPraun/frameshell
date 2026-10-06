@@ -15,6 +15,7 @@ import {
   Channel,
   type EditOptions,
   type HistoryCommand,
+  type MenuCommand,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -421,6 +422,8 @@ function buildMenu(): void {
     const dir = await pickFolder(state.window);
     if (dir) await openFromWindow(state, dir);
   };
+  // Aimed at the focused window: each window has its own project and editor tabs.
+  const command = (name: MenuCommand) => BrowserWindow.getFocusedWindow()?.webContents.send(Channel.menuCommand, name);
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     {
@@ -432,13 +435,28 @@ function buildMenu(): void {
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },
-    editMenu(process.platform, (command: HistoryCommand) => {
+    editMenu(process.platform, (history: HistoryCommand) => {
       // No focused window (app in the background, a test driving the menu): the only one, if there is just one.
       const all = BrowserWindow.getAllWindows();
       const target = BrowserWindow.getFocusedWindow() ?? (all.length === 1 ? all[0] : undefined);
-      if (target) send(target.webContents, Channel.timelineHistoryCommand, command);
+      if (target) send(target.webContents, Channel.timelineHistoryCommand, history);
     }),
-    { role: "viewMenu" },
+    {
+      label: "View",
+      submenu: [
+        { label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: () => command("showTranscript") },
+        { type: "separator" },
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

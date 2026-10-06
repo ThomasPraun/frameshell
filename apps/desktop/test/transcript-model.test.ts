@@ -1,7 +1,7 @@
 import type { TimelineView } from "@frameshell/protocol";
-import type { Transcript } from "@frameshell/schema";
+import { type Transcript, parseTranscript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, wordAt } from "../src/renderer/src/transcript/model.js";
+import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, restorePlan, rippleScope, struckRun, withWordText, wordAt } from "../src/renderer/src/transcript/model.js";
 
 // Seam under test: the transcript view's pure model. Timeline view and transcript files in; struck words,
 // timeline placements, the word under the playhead and the restore operation out.
@@ -218,6 +218,88 @@ describe("restoreEdit", () => {
     const model = buildTranscriptModel(cutView, sources);
     expect(restoreEdit(cutView, model, key("w_000001"))).toBeNull();
     expect(restoreEdit(cutView, model, "nope")).toBeNull();
+  });
+});
+
+describe("restorePlan", () => {
+  it("brings back a run of struck words with one edit, skipping kept and unknown keys", () => {
+    const model = buildTranscriptModel(cutView, sources);
+    const plan = restorePlan(cutView, model, [key("w_000003"), key("w_000004"), key("w_000005"), "nope"]);
+    expect(plan).toEqual({
+      edits: [{ op: "clip.trim", args: { clip: "c_a", out: 3.55, snapBounds: { out: { min: 3.5, max: 3.55 } }, ripple: true } }],
+      steps: [{ how: "extend", clip: "c_a", edit: plan!.edits[0] }],
+      keys: [key("w_000004"), key("w_000005")],
+      held: [],
+    });
+    expect(restorePlan(cutView, model, [key("w_000001")])).toBeNull();
+  });
+
+  it("restores separate runs latest first, so an earlier step never lands where a later one opened room", () => {
+    const wide = view([media("c_a", 0, 0, 2), media("c_b", 2, 4.7, 5.5)]);
+    const model = buildTranscriptModel(wide, sources);
+    // "hoy" and "a" selected, "vamos" between them left cut: two runs, both opening room at 2 s.
+    const plan = restorePlan(wide, model, [key("w_000004"), key("w_000006")])!;
+    expect(plan.keys).toEqual([key("w_000006"), key("w_000004")]);
+    expect(plan.steps.map((step) => [step.how, step.clip, step.edit.op])).toEqual([
+      ["insert", "c_a", "clip.add"],
+      ["extend", "c_a", "clip.trim"],
+    ]);
+    expect(plan.edits[0]).toMatchObject({ args: { start: 2, in: 3.55, out: 3.75 } });
+    expect(plan.edits[1]).toMatchObject({ args: { clip: "c_a", out: 2.95 } });
+  });
+
+  it("ripples only tracks where moving later clips opens no gap, and reports the others as held", () => {
+    const voice = view([media("c_a", 0, 0, 2), media("c_b", 2, 3.55, 5.5)]);
+    const other = (id: string, start: number, end: number) => ({ id, type: "media", asset: "assets/other.wav", start, in: 0, out: end - start, end });
+    voice.tracks.push(
+      // Music: one bed ending where the next starts at 2 s; moving the second leaves silence.
+      { id: "a_music", kind: "audio", name: null, follows: null, clips: [other("m_1", 0, 2), other("m_2", 2, 8)] },
+      // Sound effect after a gap: it moves with the voice, no hole opens.
+      { id: "a_fx", kind: "audio", name: null, follows: null, clips: [other("fx_1", 3, 3.5)] },
+      // Footage crossing the restore point: nothing after it, nothing moves.
+      { id: "v_broll", kind: "video", name: null, follows: null, clips: [other("b_1", 1, 4)] },
+      { id: "s_subs", kind: "subtitles", name: null, follows: "v1", clips: [] },
+    );
+    const model = buildTranscriptModel(voice, sources);
+    const plan = restorePlan(voice, model, [key("w_000004")])!;
+    expect(plan.held).toEqual(["a_music"]);
+    expect(plan.edits[0]).toEqual({
+      op: "clip.trim",
+      args: { clip: "c_a", out: 2.95, snapBounds: { out: { min: 2.9, max: 3 } }, ripple: true, rippleTracks: ["v1", "a_fx", "v_broll"] },
+    });
+    // The own track always moves, even where it would open a gap; the voice track is held from the music.
+    expect(rippleScope(voice, "a_music", 2)).toEqual({ tracks: ["a_music", "a_fx", "v_broll"], held: ["v1"] });
+  });
+});
+
+describe("struckRun", () => {
+  it("gives the cut passage around a struck word, nothing for a kept one", () => {
+    const words = wordsOf(buildTranscriptModel(cutView, sources));
+    expect(struckRun(words, 3)).toEqual([key("w_000004"), key("w_000005")]);
+    expect(struckRun(words, 4)).toEqual([key("w_000004"), key("w_000005")]);
+    expect(struckRun(words, 2)).toEqual([]);
+  });
+});
+
+describe("withWordText", () => {
+  const file = `${JSON.stringify(transcript)}\n`;
+  const editsOf = (content: string) => JSON.parse(content).edits;
+
+  it("records a correction as a human edit and keeps the rest of the file", () => {
+    const next = withWordText(file, "w_000001", "  Hola, ");
+    expect(editsOf(next)).toEqual({ w_000007: { text: "cortar," }, w_000001: { text: "Hola," } });
+    expect(JSON.parse(next).words).toEqual(transcript.words);
+    expect(next.endsWith("}\n")).toBe(true);
+    expect(parseTranscript(JSON.parse(next)).ok).toBe(true);
+  });
+
+  it("drops the edit when the text is cleared or back to what was transcribed", () => {
+    expect(editsOf(withWordText(file, "w_000007", ""))).toEqual({});
+    expect(editsOf(withWordText(file, "w_000007", "cortar"))).toEqual({});
+  });
+
+  it("refuses an unknown word", () => {
+    expect(() => withWordText(file, "w_000099", "x")).toThrow(/no word w_000099/);
   });
 });
 

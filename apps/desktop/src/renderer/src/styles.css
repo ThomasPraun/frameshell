@@ -1655,6 +1655,12 @@ code {
   background: rgba(227, 165, 60, 0.26);
 }
 
+/* Struck word inside a drag: the toolbar's restore button brings it back. */
+.tw.is-struck.is-marked {
+  color: var(--text-muted);
+  background: rgba(224, 103, 95, 0.2);
+}
+
 .tw.is-current {
   box-shadow: inset 0 -2px 0 var(--accent);
   color: #fff4e0;
@@ -1664,6 +1670,48 @@ code {
   .tw {
     transition: none;
   }
+}
+
+/* Restores a whole cut passage: sits before its first struck word, in the strike color. */
+.transcript-restore-run {
+  margin-right: 3px;
+  padding: 0 4px;
+  border: 1px solid rgba(224, 103, 95, 0.45);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.transcript-restore-run:hover:not(:disabled) {
+  background: rgba(224, 103, 95, 0.12);
+}
+
+.transcript-restore-run:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.transcript-toolbar .transcript-restore-marked {
+  flex: none;
+  font-size: 11.5px;
+}
+
+/* Correcting a word's text in place. */
+.tw-edit {
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.timeline-status-warning {
+  color: var(--accent);
 }
 
 /* Script scenes: gutter flag per `##` heading, highlight for the selected clip's scene. */

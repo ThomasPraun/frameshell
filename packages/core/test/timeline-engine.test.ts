@@ -569,6 +569,29 @@ describe("ripple trim and insert (restoring cut material)", () => {
     expect((await rejection(apply(t, "clip.add", add))).message).toMatch(/needs `snap: true`/);
   });
 
+  it("rippleTracks limits a rippled trim to the named tracks plus the clip's own", async () => {
+    const { timeline, changes } = await apply(await cutTake(), "clip.trim", { clip: "c_0001", out: 2.6, ripple: true, rippleTracks: ["t_m"] });
+    expect(clipsOf(timeline, "t_v").map((c) => c.start)).toEqual([0, 2.6]);
+    // t_a is not named: c_0004 stays at 2, no gap opens after c_0003.
+    expect(clipsOf(timeline, "t_a").map((c) => c.start)).toEqual([0, 2]);
+    expect(changes.updated.sort()).toEqual(["c_0001", "c_0002"]);
+  });
+
+  it("rippleTracks limits a rippled insert likewise", async () => {
+    const args = { track: "t_v", asset: "assets/talk.mp4", start: 2, in: 2.2, out: 2.7, ripple: true, rippleTracks: ["t_v"] };
+    const { timeline } = await apply(await cutTake(), "clip.add", args);
+    expect(clipsOf(timeline, "t_v").map((c) => c.start)).toEqual([0, 2, 2.5]);
+    expect(clipsOf(timeline, "t_a").map((c) => c.start)).toEqual([0, 2]);
+  });
+
+  it("rippleTracks needs ripple and clip tracks", async () => {
+    const t = await cutTake();
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 1.5, rippleTracks: ["t_a"] }))).message).toMatch(/needs `ripple: true`/);
+    t.tracks.push({ id: "t_s", kind: "subtitles", follows: "t_v" });
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, ripple: true, rippleTracks: ["t_s"] }))).message).toMatch(/subtitle track/);
+    expect((await rejection(apply(t, "clip.trim", { clip: "c_0001", out: 2.6, ripple: true, rippleTracks: ["t_x"] }))).code).toBe(ErrorCode.TrackNotFound);
+  });
+
   it("ripple and snap on clip.add apply to media clips only", async () => {
     const error = await rejection(
       apply(await cutTake(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, props: { title: "x" }, snap: true }),

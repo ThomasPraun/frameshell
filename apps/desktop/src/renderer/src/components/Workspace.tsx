@@ -122,6 +122,25 @@ export function Workspace({ project }: { project: ProjectView }) {
     [openFile],
   );
 
+  // The transcript view from anywhere: Mod+Shift+T, View > Transcript, the timeline header, the tab strip.
+  const showTranscript = useCallback(() => openFile(TRANSCRIPT_TAB), [openFile]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(isMac ? event.metaKey : event.ctrlKey) || event.altKey || !event.shiftKey || event.key.toLowerCase() !== "t") return;
+      event.preventDefault();
+      event.stopPropagation();
+      showTranscript();
+    };
+    window.addEventListener("keydown", onKey, true);
+    const offMenu = window.frameshell.menu.onCommand((command) => {
+      if (command === "showTranscript") showTranscript();
+    });
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      offMenu();
+    };
+  }, [showTranscript]);
+
   // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
   // so the state the agent gets back already shows the opened tab or panel.
   const editorState = useRef({ active, tabs });
@@ -220,7 +239,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           </div>
           {!timeline.collapsed && <Splitter orientation="horizontal" label="Resize timeline" {...edge("timeline", -1)} />}
           <div className="panel timeline" style={{ height: timeline.collapsed ? undefined : timeline.size }}>
-            <TimelinePanel collapsed={timeline.collapsed} onToggle={() => toggle("timeline")} />
+            <TimelinePanel collapsed={timeline.collapsed} onToggle={() => toggle("timeline")} onShowTranscript={showTranscript} />
           </div>
         </div>
 

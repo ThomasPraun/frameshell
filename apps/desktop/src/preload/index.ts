@@ -60,6 +60,9 @@ const api: FrameshellApi = {
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
   },
+  menu: {
+    onCommand: (listener) => subscribe(Channel.menuCommand, listener),
+  },
   ui: {
     publish: (state) => ipcRenderer.send(Channel.uiPublish, state),
     onCommand: (listener) => subscribe(Channel.uiCommand, listener),
