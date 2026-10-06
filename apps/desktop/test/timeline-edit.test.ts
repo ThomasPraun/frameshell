@@ -112,8 +112,17 @@ describe("ripple trim drags (#119)", () => {
   const ripple = (x: number, y: number, delta: number) => dragPreview({ layout, grab: grab(x, y), delta, y, fps: FPS, snap: null, ripple: true });
 
   it("sends clip.trim with ripple, so later clips follow and no gap is left", () => {
-    expect(ripple(43, Y.v1, 1.5)).toMatchObject({ part: "head", ripple: true, start: 5.5, end: 10 });
     expect(dragEdits(ripple(43, Y.v1, 1.5))).toEqual([{ op: "clip.trim", args: { clip: "c_b", start: 5.5, ripple: true } }]);
+  });
+
+  it("draws a ripple head trim where the daemon puts it: the clip keeps its left edge, its length changes", () => {
+    expect(ripple(43, Y.v1, 1.5)).toMatchObject({ part: "head", ripple: true, start: 4, end: 8.5, edge: 5.5 });
+    // Extending the head (source in 1 s, so up to 1 s earlier): the ghost grows to the right, never left of the clip.
+    const extended = ripple(23, Y.a1, -0.8);
+    expect(extended).toMatchObject({ part: "head", start: 2, end: 8.8, edge: 1.2 });
+    expect(dragEdits(extended)).toEqual([{ op: "clip.trim", args: { clip: "c_m", start: 1.2, ripple: true } }]);
+    // A plain head trim still moves the left edge.
+    expect(dragPreview({ layout, grab: grab(43, Y.v1), delta: 1.5, y: Y.v1, fps: FPS, snap: null })).toMatchObject({ start: 5.5, end: 10, edge: 5.5 });
   });
 
   it("never shows an extension as blocked: the next clip moves out of the way", () => {
@@ -140,13 +149,21 @@ describe("group moves of a multi-selection (#119)", () => {
       { op: "clip.move", args: { clip: "c_c", start: 23 } },
       { op: "clip.move", args: { clip: "c_b", start: 7 } },
     ]);
-    expect(dragEdits(moveGroup(["c_b", "c_c"], -1)).map((edit) => ("clip" in edit.args ? edit.args.clip : null))).toEqual(["c_b", "c_c"]);
+    expect(dragEdits(moveGroup(["c_m", "c_c"], -1)).map((edit) => ("clip" in edit.args ? edit.args.clip : null))).toEqual(["c_m", "c_c"]);
   });
 
   it("stops the group at timeline 0 and flags an overlap of any member", () => {
     const preview = moveGroup(["c_b", "c_c"], -6);
     expect(preview).toMatchObject({ start: 16, blocked: true });
     expect(preview.others[0]).toMatchObject({ start: 0, end: 6 });
+  });
+
+  it("sends nothing for a blocked group: the daemon would refuse one member after moving others", () => {
+    // Left by 3 s: c_c lands on free space, c_b on c_a. Sent anyway, c_b's move first would be refused and c_c's never sent.
+    const preview = moveGroup(["c_b", "c_c"], -3);
+    expect(preview).toMatchObject({ start: 17, blocked: true });
+    expect(preview.others[0]).toMatchObject({ start: 1, end: 7 });
+    expect(dragEdits(preview)).toEqual([]);
   });
 
   it("is a plain move when only the grabbed clip is selected", () => {

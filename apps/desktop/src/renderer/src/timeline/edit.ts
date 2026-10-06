@@ -74,9 +74,13 @@ export interface DragInput {
 
 /** A selected clip moving along with the grabbed one: where it would land. */
 export interface GroupMember {
+  /** The member as it is now. */
   clip: ClipBox;
+  /** Its own track: group members never change track. */
   row: TrackRow;
+  /** Landing start, seconds on the frame grid. */
   start: number;
+  /** Landing end, seconds on the frame grid. */
   end: number;
 }
 
@@ -87,12 +91,20 @@ export interface DragPreview {
   /** Track the clip lands on: the one under the pointer when of the same kind, else its own (always, for a group). */
   from: TrackRow;
   row: TrackRow;
-  /** Landing times, seconds on the frame grid. */
+  /** Landing times, seconds on the frame grid: where the ghost is drawn. */
   start: number;
   end: number;
+  /**
+   * Edge drags: timeline time the grabbed edge is trimmed to, as `clip.trim`
+   * takes it. Equals `start` (head) or `end` (tail), except for a ripple head
+   * trim: the daemon keeps the clip's left edge and moves its source in
+   * instead, so the ghost stays at the clip's start with the new length.
+   * Body drags: `start`.
+   */
+  edge: number;
   /** Target an edge landed on; null when it moved freely. */
   snapped: SnapPoint | null;
-  /** The grabbed clip or a group member overlaps a clip that stays: the daemon will refuse it. */
+  /** The grabbed clip or a group member overlaps a clip that stays: the daemon will refuse it, so a group sends nothing. */
   blocked: boolean;
   /** Edge drags: a ripple trim. */
   ripple: boolean;
@@ -105,7 +117,8 @@ export interface DragPreview {
  * nearer a target; a group keeps its spacing and stops at timeline 0.
  * Trimming moves one edge, keeping at least a frame, and a head no earlier
  * than timeline 0 or source 0; a ripple trim may pass timeline 0 (the clip
- * keeps its left edge) and is never blocked, since later clips move along.
+ * keeps its left edge, so its ghost does too) and is never blocked, since
+ * later clips move along.
  */
 export function dragPreview(input: DragInput): DragPreview {
   const { layout, grab, delta, fps } = input;
@@ -121,6 +134,7 @@ export function dragPreview(input: DragInput): DragPreview {
     candidate.clips.filter((other) => other.id !== clip.id && members.has(other.id)).map((other) => ({ clip: other, row: candidate })),
   );
   let others: GroupMember[] = [];
+  let trimTo: number | null = null;
 
   if (part === "body") {
     const length = clip.end - clip.start;
@@ -153,6 +167,11 @@ export function dragPreview(input: DragInput): DragPreview {
     snapped = nearest(input.snap, edge);
     start = Math.min(clip.end - frame, Math.max(earliest, snapped ? snapped.time : onGrid(edge)));
     if (snapped && start !== snapped.time) snapped = null;
+    if (ripple) {
+      trimTo = start;
+      end = clip.start + (clip.end - start);
+      start = clip.start;
+    }
   } else {
     const edge = clip.end + delta;
     snapped = nearest(input.snap, edge);
@@ -165,7 +184,8 @@ export function dragPreview(input: DragInput): DragPreview {
       (other) => !moving.has(other.id) && Math.round(other.start * fps) < Math.round(to * fps) && Math.round(other.end * fps) > Math.round(from * fps),
     );
   const blocked = !ripple && (overlaps(row, start, end) || others.some((member) => overlaps(member.row, member.start, member.end)));
-  return { clip, part, from: grab.row, row, start, end, snapped, blocked, ripple, others };
+  const edge = trimTo ?? (part === "tail" ? end : start);
+  return { clip, part, from: grab.row, row, start, end, edge, snapped, blocked, ripple, others };
 }
 
 /** Nearest snap point within reach of `time`, or null. */
@@ -187,8 +207,9 @@ function rowAt(layout: TimelineLayout, y: number): TrackRow | null {
 
 /**
  * The operations a released drag sends, as one call; none when it changes
- * nothing. A group move is a `clip.move` per clip, the leading one first so
- * clips of one track never collide midway. Trims keep the daemon's energy
+ * nothing, or for a blocked group move: the daemon would refuse one member,
+ * so the panel says why instead of sending it. A group move is a `clip.move`
+ * per clip, the leading one first so clips of one track never collide midway. Trims keep the daemon's energy
  * snapping (ADR 0003, as in the CLI), except an edge put on another clip's
  * edge: a pause-snapped edge there would leave a gap or an overlap, so it
  * goes exactly. A ripple trim adds `ripple`.
@@ -205,6 +226,7 @@ export function dragEdits(preview: DragPreview): TimelineEdit[] {
       args: { clip: clip.id, ...(moved ? { start } : {}), ...(track ? { track: preview.row.id } : {}) },
     };
     if (preview.others.length === 0) return [grabbed];
+    if (preview.blocked) return [];
     const later = preview.start > clip.start;
     return [{ clip, start: preview.start }, ...preview.others]
       .sort((a, b) => (later ? b.clip.start - a.clip.start : a.clip.start - b.clip.start))
@@ -213,10 +235,10 @@ export function dragEdits(preview: DragPreview): TimelineEdit[] {
   const exact = preview.snapped?.kind === "clip" ? { snap: false } : {};
   const ripple = preview.ripple ? { ripple: true } : {};
   if (part === "head") {
-    const start = seconds(preview.start);
+    const start = seconds(preview.edge);
     return start === seconds(clip.start) ? [] : [{ op: "clip.trim", args: { clip: clip.id, start, ...exact, ...ripple } }];
   }
-  const end = seconds(preview.end);
+  const end = seconds(preview.edge);
   return end === seconds(clip.end) ? [] : [{ op: "clip.trim", args: { clip: clip.id, end, ...exact, ...ripple } }];
 }
 

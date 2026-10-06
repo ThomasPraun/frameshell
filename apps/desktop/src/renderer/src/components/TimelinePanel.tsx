@@ -14,6 +14,7 @@ import {
 import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
+import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, revealSeek, selection, useSelection } from "../selection.js";
@@ -108,13 +109,6 @@ interface Status {
 /** Queue one daemon call of the panel; `done` gets its result, null when refused. */
 type RunCall = (work: () => Promise<OperationResult | null>, done?: (result: OperationResult | null) => void, clips?: number) => void;
 
-/** Text fields (inputs, Monaco, xterm) own their undo keys; the timeline's undo works everywhere else. */
-function editsText(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable || target instanceof HTMLTextAreaElement) return true;
-  return target instanceof HTMLInputElement && !["button", "checkbox", "radio", "range", "color", "file", "submit", "reset"].includes(target.type);
-}
-
 /**
  * Canvas timeline of the project's main timeline (SPEC §10): tracks and clips
  * from the daemon, redrawn live as the agent edits from the terminal, and
@@ -163,7 +157,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
     [run],
   );
 
-  // Undo and redo anywhere in the window but text fields (#119): their keys here, the Edit menu's items from main.
+  // Undo and redo anywhere in the window but text fields (#119): their keys here, the Edit menu's items via App.
   // A key handled here is prevented, so it never also reaches the menu; one in a text field is left to the field.
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -173,10 +167,7 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
       undoRedo(command);
     };
     window.addEventListener("keydown", onKey);
-    const off = window.frameshell.timeline.onHistoryCommand((command) => {
-      if (editsText(document.activeElement)) document.execCommand(command);
-      else undoRedo(command);
-    });
+    const off = handleTimelineHistory(undoRedo);
     return () => {
       window.removeEventListener("keydown", onKey);
       off();
@@ -819,6 +810,10 @@ function TimelineCanvas({
     if (edits.length === 0) {
       ghost.current = null;
       schedule();
+      // Sent, one member's refusal would leave the others moved: say why instead.
+      if (current.preview?.blocked && current.preview.others.length > 0) {
+        onStatus({ tone: "error", text: `Not moved: ${current.preview.others.length + 1} clips would overlap a clip that stays` });
+      }
       return;
     }
     const drawn = ghost.current;
@@ -1075,12 +1070,14 @@ function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; 
   const moved = preview.others.length > 0 ? `${preview.others.length + 1} clips` : clip.name;
   const trim = preview.ripple ? "Ripple trim" : "Trim";
   const title = part === "body" ? `Move ${moved}` : `${trim} ${part === "head" ? "start" : "end"} of ${clip.name}`;
+  // A ripple head trim keeps the clip's left edge: its source in moves instead.
+  const shift = part === "head" && preview.ripple ? (preview.edge - clip.start) * clip.speed : null;
   const time = part === "tail" ? preview.end : preview.start;
   return (
     <div className="clip-tooltip drag-tooltip" style={{ left: x + 12, top: y + 14 }} role="tooltip">
       <strong>{title}</strong>
       <span>
-        {formatTimecode(time, fps)}
+        {shift !== null ? `Source in ${shift < 0 ? "-" : "+"}${formatDuration(Math.abs(shift))}` : formatTimecode(time, fps)}
         {part === "body" && row.id !== preview.from.id ? ` on ${row.label}` : ""}
       </span>
       <span className={preview.blocked ? "clip-tooltip-danger" : "clip-tooltip-faint"}>

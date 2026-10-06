@@ -172,8 +172,10 @@ export interface FrameshellApi {
      * validated, saved and journaled at once (no unsaved state). Several edits
      * (a split of every selected clip) are one transaction, so one undo step.
      * Resolves with the last result. Rejects with the daemon's message
-     * (overlap, bounds) at the first refused edit; earlier ones stay applied.
-     * `options` labels the transaction or joins a gesture burst's.
+     * (overlap, bounds) at the first refused edit, and undoes the call's
+     * earlier ones, so a group move is all or nothing (in a gesture burst,
+     * earlier presses stay). `options` labels the transaction or joins a
+     * gesture burst's.
      */
     edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */

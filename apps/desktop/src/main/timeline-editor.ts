@@ -99,9 +99,13 @@ export class TimelineEditor {
    * as one transaction labelled `options.label`, else like `Move clip` or
    * `Split 3 clips`, and resolve with the last result. With
    * `options.burst`, the transaction stays open for the next call of the
-   * same burst. The first edit the daemon refuses stops the rest, what
-   * applied stays (one undo step) and the call rejects with the daemon's
-   * message; a refusal also ends the burst. Rejects ops outside
+   * same burst. The first edit the daemon refuses stops the rest and the
+   * call rejects with the daemon's message. Outside a burst a call is all
+   * or nothing: what applied before the refusal is undone (`tx.abort`), so
+   * a group move never lands half done; when that undo itself conflicts (an
+   * agent changed the same clips meanwhile), what applied stays as one
+   * step. In a burst, earlier presses stay and the refusal ends the burst.
+   * Rejects ops outside
    * {@link TIMELINE_EDIT_OPS} and malformed options before sending
    * anything: the renderer is not trusted to pick any method.
    */
@@ -125,22 +129,30 @@ export class TimelineEditor {
       const open = this.#burst;
       if (burst !== undefined && open?.key === burst && open.cwd === cwd && open.timeline === timeline) {
         clearTimeout(open.timer);
-        return this.#sendAll(cwd, timeline, edits, open);
+        return this.#sendBurst(cwd, timeline, edits, open);
       }
       await this.#endBurst();
       await this.#commitOrphan();
       await this.#begin((label as string | undefined) ?? editLabel(edits));
       if (burst === undefined) {
+        let applied = 0;
+        let last: OperationResult | undefined;
         try {
-          return await this.#sendAll(cwd, timeline, edits, null);
-        } finally {
-          // On failure too: what applied is one step. A lost commit is retried before the next call.
-          await this.#commit();
+          for (const edit of edits) {
+            last = await this.#send(cwd, timeline, edit);
+            applied += 1;
+          }
+        } catch (error) {
+          await (applied > 0 ? this.#abort() : this.#commit());
+          throw error;
         }
+        // A lost commit is retried before the next call.
+        await this.#commit();
+        return last!;
       }
       const begun: Burst = { key: burst as string, cwd, timeline, timer: undefined };
       this.#burst = begun;
-      return this.#sendAll(cwd, timeline, edits, begun);
+      return this.#sendBurst(cwd, timeline, edits, begun);
     });
   }
 
@@ -203,16 +215,16 @@ export class TimelineEditor {
     return this.#serial(() => this.#endBurst());
   }
 
-  /** Send `edits` in order; a refusal ends `burst`, success re-arms its gap timer. */
-  async #sendAll(cwd: string, timeline: string, edits: readonly TimelineEdit[], burst: Burst | null): Promise<OperationResult> {
+  /** Send a burst's `edits` in order; a refusal ends the burst, success re-arms its gap timer. */
+  async #sendBurst(cwd: string, timeline: string, edits: readonly TimelineEdit[], burst: Burst): Promise<OperationResult> {
     let last: OperationResult | undefined;
     try {
       for (const edit of edits) last = await this.#send(cwd, timeline, edit);
     } catch (error) {
-      if (burst) await this.#endBurst();
+      await this.#endBurst();
       throw error;
     }
-    if (burst && this.#burst === burst) {
+    if (this.#burst === burst) {
       burst.timer = setTimeout(() => {
         void this.#serial(async () => {
           if (this.#burst === burst) await this.#endBurst();
@@ -247,6 +259,20 @@ export class TimelineEditor {
       await this.request("tx.commit", {});
     } catch (error) {
       if ((error as RpcError | undefined)?.code !== ErrorCode.TransactionState) this.#orphanPossible = true;
+    }
+  }
+
+  /**
+   * Undo and close this editor's transaction. A conflict (someone changed
+   * the same clips since) leaves it open: commit it, keeping what applied.
+   * Other failures leave it to the next call's orphan commit.
+   */
+  async #abort(): Promise<void> {
+    try {
+      await this.request("tx.abort", {});
+    } catch (error) {
+      if ((error as RpcError | undefined)?.code === ErrorCode.RevertConflict) await this.#commit();
+      else if ((error as RpcError | undefined)?.code !== ErrorCode.TransactionState) this.#orphanPossible = true;
     }
   }
 
@@ -312,14 +338,18 @@ function conflictsOf(error: Partial<RpcError>): RevertConflict[] {
  * undo moves it to redo as the revert's own transaction (reverting that
  * re-applies the edit); a revert of the top of redo moves back to undo
  * likewise. Any other `ui` revert (e.g. from a History panel) counts as an
- * edit. Other authors' operations are skipped: their conflicts surface when
- * the daemon refuses the revert.
+ * edit. An aborted transaction (its last operation reverts the transaction
+ * itself: a refused call) changed nothing and is skipped. Other authors'
+ * operations are skipped: their conflicts surface when the daemon refuses
+ * the revert.
  */
 function uiUndoStacks(history: HistoryResult): { undo: string[]; redo: string[] } {
   const undo: string[] = [];
   let redo: string[] = [];
   for (const tx of history.transactions) {
     if (tx.author !== UI_AUTHOR) continue;
+    const closing = tx.operations.at(-1);
+    if (closing?.op === "revert" && closing.args["target"] === tx.tx) continue;
     const [only, ...more] = tx.operations;
     const target = only?.op === "revert" && more.length === 0 ? only.args["target"] : undefined;
     if (target !== undefined && target === undo.at(-1)) {

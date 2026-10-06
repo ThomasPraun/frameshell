@@ -453,6 +453,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+/** The quit already waited for {@link TimelineEditor.settle}: the next `will-quit` closes the daemon link and lets the app exit. */
+let editorSettled = false;
+
 app.on("will-quit", (event) => {
   if (exitingShells.size > 0) {
     // Quit once closed windows' shells are gone: see TerminalManager.killAll.
@@ -460,7 +463,15 @@ app.on("will-quit", (event) => {
     void Promise.all(exitingShells).then(() => app.quit());
     return;
   }
-  // Close an open nudge burst's transaction first; the daemon's auto-commit covers a quit that outruns it.
+  if (editorSettled) {
+    daemon.close();
+    return;
+  }
+  // Wait, up to 500 ms, for an open nudge burst's transaction to commit; the daemon's auto-commit covers one that outruns it.
+  event.preventDefault();
   const settled = Promise.race([editor.settle().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 500))]);
-  void settled.then(() => daemon.close());
+  void settled.then(() => {
+    editorSettled = true;
+    app.quit();
+  });
 });

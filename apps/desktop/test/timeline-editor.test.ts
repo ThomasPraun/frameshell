@@ -174,27 +174,48 @@ describe("TimelineEditor batches", () => {
     expect(await clip("c_b")).toBeNull();
   });
 
-  it("stops at an edit the daemon refuses, keeping what applied as one undo step, and says why", async () => {
+  it("is all or nothing: a refused edit undoes the call's earlier ones, and undo skips the call (#119)", async () => {
     const { dir, app, editor, clip } = await setup();
+    const before = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 25 } }]);
+    // A group move whose second member lands on a clip that stays.
     const batch: TimelineEdit[] = [
       { op: "clip.move", args: { clip: "c_c", start: 30 } },
       { op: "clip.move", args: { clip: "c_a", start: 5 } }, // Overlaps c_b.
       { op: "clip.move", args: { clip: "c_b", start: 40 } },
     ];
     await expect(editor.apply(dir, "main", batch)).rejects.toThrow(/overlap/);
-    expect(await clip("c_c")).toMatchObject({ start: 30 });
+    expect(await clip("c_c")).toMatchObject({ start: 25 });
+    expect(await clip("c_a")).toMatchObject({ start: 0 });
     expect(await clip("c_b")).toMatchObject({ start: 4 });
 
-    // Committed, not left open: the next edit is a transaction of its own.
+    // Closed, not left open: the next edit is a transaction of its own.
     const next = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_b", start: 40 } }]);
-    const history = await app.request("history", { cwd: dir, timeline: "main" });
-    expect(history.transactions.slice(1).map((tx) => [tx.tx, tx.operations.length])).toEqual([
-      [expect.any(String), 1],
-      [next.operation.tx, 1],
-    ]);
+    expect(next.operation.tx).not.toBe(before.operation.tx);
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
     await editor.undo(dir, "main");
+    expect(await clip("c_b")).toMatchObject({ start: 4 });
+    // The refused call changed nothing: the next undo takes back the edit before it.
     await editor.undo(dir, "main");
     expect(await clip("c_c")).toMatchObject({ start: 20 });
+    expect(await editor.undo(dir, "main")).toBeNull();
+  });
+
+  it("keeps what applied as one step when undoing it conflicts with an agent's edit made meanwhile", async () => {
+    const { dir, app, cli, clip } = await setup();
+    const editor = new TimelineEditor(async (method, params) => {
+      // The agent moves c_c again between the call's first and second edit.
+      if (method === "clip.move" && (params as { clip: string }).clip === "c_a") {
+        await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 35 });
+      }
+      return app.request(method, params);
+    });
+    const batch: TimelineEdit[] = [
+      { op: "clip.move", args: { clip: "c_c", start: 30 } },
+      { op: "clip.move", args: { clip: "c_a", start: 5 } }, // Overlaps c_b.
+    ];
+    await expect(editor.apply(dir, "main", batch)).rejects.toThrow(/overlap/);
+    expect(await clip("c_c")).toMatchObject({ start: 35 });
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
   });
 
   it("never lets a ui transaction left open by a crashed app block a batch or absorb its edits", async () => {
