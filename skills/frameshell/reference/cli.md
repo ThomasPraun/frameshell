@@ -57,7 +57,7 @@ Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` li
 
 | Command | Use |
 |---|---|
-| `frameshell plugin install <spec>` | `github:<user>/<repo>[#ref]`, `git+<url>[#ref]` or an npm name. Pins it in `frameshell.json` and links the skills it ships into `.claude/skills/`. |
+| `frameshell plugin install <spec>` | `github:<user>/<repo>[#ref]`, `git+<url>[#ref]`, an npm name, or a local tarball from `npm pack` (`./name-1.0.0.tgz`, pinned with its sha256: a changed file is never installed). Pins it in `frameshell.json` and links the skills it ships into `.claude/skills/`. |
 | `frameshell plugin remove <name>` | Unpin, uninstall, unlink its skills. |
 | `frameshell plugin list` | Plugins with status and what they contribute (commands, clip types, providers, presets, skills). |
 | `frameshell <plugin> <command> …` | A plugin command, e.g. `frameshell hyperframes new intro --duration 8`. |

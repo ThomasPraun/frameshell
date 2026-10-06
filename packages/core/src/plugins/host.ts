@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   type AppDirs,
   ErrorCode,
@@ -12,7 +13,7 @@ import type { ClipAdapter, TranscriptionProvider } from "@frameshell/plugin-api"
 import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
 import { AGENT_SKILLS_DIR, type SkillSync, syncPluginSkills } from "./skills.js";
-import { parsePluginSpec } from "./spec.js";
+import { type PluginSpec, parsePluginSpec } from "./spec.js";
 import { NpmError, PluginStore } from "./store.js";
 import { TrustStore, pluginsHash } from "./trust.js";
 
@@ -89,9 +90,12 @@ export class PluginHost {
     return { dir: root, trust, plugins };
   }
 
-  /** Install `rawSpec`, validate its manifest, pin it and trust the resulting plugin list. */
-  install(root: string, rawSpec: string): Promise<MethodResult<"plugin.install">> {
-    const spec = parsePluginSpec(rawSpec);
+  /**
+   * Install `rawSpec`, validate its manifest, pin it and trust the resulting
+   * plugin list. A tarball path resolves against `cwd` (default `root`).
+   */
+  install(root: string, rawSpec: string, cwd: string = root): Promise<MethodResult<"plugin.install">> {
+    const spec = localTarball(parsePluginSpec(rawSpec), cwd);
     return this.#exclusive(root, async () => {
       const pins = await this.#pins.readPins(root);
       const trust = await this.#trust.state(root, pins);
@@ -345,6 +349,16 @@ async function exposeSkills(root: string, plugins: readonly LoadedPlugin[]): Pro
     const message = `Could not link agent skills into ${AGENT_SKILLS_DIR}: ${(error as Error).message}`;
     return { linked: [], removed: [], warnings: plugins.map((plugin) => ({ plugin: plugin.info.name, message })) };
   }
+}
+
+/** A tarball spec with its path made absolute; refuses a path that is not a file before npm runs. */
+function localTarball(spec: PluginSpec, cwd: string): PluginSpec {
+  if (spec.kind !== "tarball") return spec;
+  const path = resolve(cwd, spec.path);
+  if (!statSync(path, { throwIfNoEntry: false })?.isFile()) {
+    throw new RpcError(ErrorCode.InvalidPluginSpec, `No such file: ${path} (plugin spec "${spec.spec}").`, { spec: spec.spec });
+  }
+  return { ...spec, path };
 }
 
 function storeFor(root: string): PluginStore {

@@ -48,7 +48,7 @@ Commands:
                                --link hard-links instead of copying; --wait blocks until done
                                (exit 1 if any failed). Progress: \`frameshell status\`
   plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
-                               or an npm name[@version]
+                               an npm name[@version], or a local tarball from npm pack (./name-1.0.0.tgz)
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).

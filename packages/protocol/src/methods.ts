@@ -552,14 +552,17 @@ export const methods = {
     mutating: true,
     description:
       "Install a plugin into the enclosing project and pin it in `frameshell.json`. " +
-      "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, or an npm name `[@scope/]name[@version]`. " +
-      "Git sources pin the resolved commit; npm sources pin the exact version. The agent skills it ships are linked " +
+      "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, an npm name `[@scope/]name[@version]`, " +
+      "or a local tarball made by `npm pack` (`<path>.tgz` or `file:<path>`, relative to `cwd`). " +
+      "Git sources pin the resolved commit; npm sources pin the exact version; tarballs pin `file:<path>#sha256=<digest>` " +
+      "(path project-relative when inside the project), and a tarball whose bytes later differ is never installed. The agent skills it ships are linked " +
       "into the project's `.claude/skills/`. " +
-      "Fails with ProjectNotTrusted when the project already declares plugins that are not trusted, " +
+      "Fails with InvalidPluginSpec for an unsupported spec or a missing tarball, " +
+      "ProjectNotTrusted when the project already declares plugins that are not trusted, " +
       "InvalidPlugin when the package has no valid manifest or targets another plugin API version (nothing is pinned then).",
     params: z.strictObject({
       cwd: CwdParam,
-      spec: z.string().min(1).describe("Plugin source, e.g. `github:acme/frameshell-titles` or `@acme/titles@1.2.0`."),
+      spec: z.string().min(1).describe("Plugin source, e.g. `github:acme/frameshell-titles`, `@acme/titles@1.2.0` or `./acme-titles-1.2.0.tgz`."),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),

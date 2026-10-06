@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./helpers.js";
@@ -39,6 +39,24 @@ export function commitFixture(dir: string): GitPlugin {
   git("add", "-A");
   git("commit", "-q", "-m", "fixture");
   return { spec: `git+${pathToFileURL(dir).href}`, sha: git("rev-parse", "HEAD"), dir };
+}
+
+/**
+ * `npm pack` a copy of the hello-plugin fixture into `dest`; returns the tarball path.
+ * `pkg` is shallow-merged into its `package.json`, so variants pack different bytes.
+ */
+export function tarballPluginFixture(dest: string, pkg: Record<string, unknown> = {}): string {
+  const dir = join(tempDir(), "hello-plugin");
+  cpSync(FIXTURE, dir, { recursive: true });
+  const pkgPath = join(dir, "package.json");
+  writeFileSync(pkgPath, `${JSON.stringify({ ...JSON.parse(readFileSync(pkgPath, "utf8")), ...pkg }, null, 2)}\n`);
+  mkdirSync(dest, { recursive: true });
+  const out = execFileSync("npm", ["pack", "--pack-destination", dest, "--loglevel=error"], {
+    cwd: dir,
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  return join(dest, out.trim().split(/\r?\n/).pop()!);
 }
 
 /**

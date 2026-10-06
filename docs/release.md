@@ -9,6 +9,7 @@ The desktop app ships as a macOS DMG (arm64 and x64), a Linux AppImage and `.deb
 | Push of a tag `v<major>.<minor>.<patch>[-pre]` | yes | if the secrets exist | a **draft** GitHub release with the installers and `SHA256SUMS.txt` |
 | Actions → Release → Run workflow (`workflow_dispatch`) | yes | if the secrets exist | nothing: installers are workflow artifacts (14 days) |
 | Pull request that touches packaging files | yes | never (no secrets on PRs) | nothing |
+| **Publish** of that draft release (by hand) | no | no | the official plugins to npm (see [npm plugins](#npm-plugins)) |
 
 Each OS job:
 
@@ -25,6 +26,46 @@ Before drafting, the publish job checks the ffmpeg mirror: the GitHub release na
 `@frameshell/cli` and `@frameshell/core` are dependencies of the app, so they ship inside `app.asar`. At startup the app writes a `frameshell` shim into `<userData>/bin` that runs the CLI with the app's own executable in Node mode (`ELECTRON_RUN_AS_NODE`). Integrated terminals put that directory first on `PATH`. The daemon is started the same way. The app does not install `frameshell` system-wide.
 
 Keep Electron's `RunAsNode` fuse enabled. Turning it off breaks the CLI in the terminal and daemon auto-start.
+
+## npm plugins
+
+The official plugins `@frameshell/whisper-cpp` and `@frameshell/hyperframes` (`plugins/*`) are published to npm, so `frameshell plugin install @frameshell/whisper-cpp` works outside the repo. `scripts/plugins-npm.mjs` does the work. The `npm plugins` job of the Release workflow runs it on every trigger.
+
+| Command | Does |
+|---|---|
+| `node scripts/plugins-npm.mjs verify` | Checks each `package.json` and `frameshell-plugin.json`: `@frameshell/` name, semver version equal in both files, Apache-2.0, `publishConfig` (`access: public`, `provenance: true`), `repository` with `directory`, `files` covering `dist`, the manifest and its skills, no `workspace:` runtime dependency. Needs no build and no network. `pnpm test` runs it. |
+| `node scripts/plugins-npm.mjs dry-run [dir]` | `verify`, then `pnpm pack` each plugin (pnpm rewrites `workspace:` ranges, npm would not), checks the tarball has `package.json`, the manifest, its `main`, its skills, `README.md` and `LICENSE` and no `src/` or `test/`, then `npm publish <tarball> --dry-run`. Needs the plugins built. CI runs it on every pull request (`ci.yml`, Linux). Tarballs land in `dir` (default: a temp dir). |
+| `node scripts/plugins-npm.mjs publish` | `dry-run`, then `npm publish <tarball> --access public --provenance` for each version npm does not have yet. Release workflow only. |
+
+**Versions.** Each plugin has its own semver version in its `package.json`, and `frameshell-plugin.json` must carry the same one. A release publishes only versions npm lacks, so bump a plugin's version (both files) when it changed; an unchanged plugin is skipped, never republished. A prerelease version (`0.2.0-beta.1`) goes to the `next` dist-tag, any other to `latest`. A plugin's version is part of the clip render cache key (SPEC §6.5), so bumping `@frameshell/hyperframes` re-renders its clips.
+
+**When.** Nothing reaches npm from a tag alone. Publishing the reviewed draft release (step 5 of [Cut a release](#cut-a-release)) fires the `release: published` event, and the `npm plugins` job publishes. Its summary lists each package as published or skipped.
+
+**Provenance.** Each package is signed with the workflow's GitHub OIDC identity (`id-token: write`), and npm shows where it was built. npm accepts provenance only from a **public** repository whose URL matches `repository.url`; while the repository is private, the publish step fails.
+
+### Without npm: install from a tarball
+
+Until a version is on npm (or for a build of a branch), install the packed plugin directly. `frameshell plugin install` takes a local tarball made by `npm pack` or `pnpm pack`:
+
+```sh
+node scripts/plugins-npm.mjs dry-run ./packs        # after building: writes ./packs/frameshell-whisper-cpp-<version>.tgz, …
+cp ./packs/frameshell-whisper-cpp-*.tgz <project>/vendor/
+cd <project> && frameshell plugin install ./vendor/frameshell-whisper-cpp-0.1.0.tgz
+```
+
+The pin is `file:<path>#sha256=<digest>`: project-relative when the tarball is inside the project (so a clone that carries it installs it too), absolute otherwise (works only on that machine). Trust covers those bytes: a tarball whose content no longer matches the digest is never installed, and the plugin shows as failed until it is reinstalled. Directories are refused; pack them first.
+
+### npm setup (once, by the maintainer)
+
+1. Create the `frameshell` organization on [npmjs.com](https://www.npmjs.com/org/create) (free plan, public packages). It owns the `@frameshell` scope.
+2. Create a **granular access token**: npmjs.com → Access Tokens → Generate New Token → Granular. Permissions: *Read and write*, limited to the `@frameshell` scope (or to the two packages once they exist). Pick an expiry and note it.
+3. Store it as the repository secret `NPM_TOKEN`:
+
+   ```sh
+   gh secret set NPM_TOKEN -R ThomasPraun/frameshell   # paste the token
+   ```
+
+Without `NPM_TOKEN` the publish step fails and names the secret. Renew the token before it expires. Pull requests never see it.
 
 ## macOS signing secrets
 
@@ -89,7 +130,7 @@ Linux and Windows need no secrets. Windows builds stay unsigned at v0.1: SmartSc
 
 ## Cut a release
 
-1. On `main`, move the `[Unreleased]` entries in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD` and merge that change.
+1. On `main`, move the `[Unreleased]` entries in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD`, bump the version of each official plugin that changed since its last npm release (its `package.json` and `frameshell-plugin.json`), and merge that change.
 2. Tag the merge commit and push the tag:
 
    ```sh
@@ -100,7 +141,7 @@ Linux and Windows need no secrets. Windows builds stay unsigned at v0.1: SmartSc
 
 3. Wait for the **Release** workflow. Read each job summary: the macOS job must say *notarized*. If it says *unsigned*, the secrets are missing. Delete the draft and the tag, add the secrets, and tag again.
 4. Open the draft release. Download the DMG on a Mac that has never run Frameshell and open it: the app must start with no Gatekeeper warning. `spctl --assess --type execute -vv /Applications/Frameshell.app` must print `source=Notarized Developer ID`.
-5. Edit the notes if needed, then **Publish release**.
+5. Edit the notes if needed, then **Publish release**. This publishes the official plugins whose version is new to npm: check the `npm plugins` job, then `npm view @frameshell/whisper-cpp version`.
 
 A broken tag can be deleted before publishing: `git push --delete origin v0.1.0 && git tag -d v0.1.0`, then delete the draft.
 
