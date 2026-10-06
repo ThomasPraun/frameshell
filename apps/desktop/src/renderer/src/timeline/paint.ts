@@ -151,6 +151,8 @@ export interface DragGhost {
   blocked: boolean;
   /** Snap target the ghost's edge sits on, seconds: a guide line across the lanes; null when free. */
   guide: number | null;
+  /** Other selected clips moving along (group move): dimmed in place, each with its own ghost. */
+  others?: readonly { clip: string; row: string; start: number; end: number }[];
 }
 
 /** Clip body inset from its lane, px. */
@@ -203,7 +205,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       return;
     }
     for (const clip of visibleClips(row.clips, t0, t1)) {
-      const dragged = input.drag?.clip === clip.id;
+      const dragged = input.drag?.clip === clip.id || !!input.drag?.others?.some((other) => other.clip === clip.id);
       if (dragged) ctx.globalAlpha = DRAGGED_ALPHA;
       if (paintClip(ctx, input, row, clip, top, colors)) mediaDrawn++;
       if (dragged) ctx.globalAlpha = 1;
@@ -396,14 +398,15 @@ function paintDiffTag<Img>(
   ctx.fillText(glyph, x + size / 2, y + size / 2 + 0.5);
 }
 
-/** Ghost of a drag: a clip-sized frame on its landing lane, and the snap guide it sits on. */
+/** Ghost of a drag: a clip-sized frame on each landing lane, and the snap guide it sits on. */
 function paintDrag<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, drag: DragGhost): void {
   const { layout, theme } = input;
   const { pxPerSecond, scrollLeft, scrollTop, width, height } = input.viewport;
-  const row = layout.rows.find((candidate) => candidate.id === drag.row);
-  if (row) {
-    const x0 = drag.start * pxPerSecond - scrollLeft + 0.5;
-    const x1 = drag.end * pxPerSecond - scrollLeft - 0.5;
+  for (const ghost of [drag, ...(drag.others ?? [])]) {
+    const row = layout.rows.find((candidate) => candidate.id === ghost.row);
+    if (!row) continue;
+    const x0 = ghost.start * pxPerSecond - scrollLeft + 0.5;
+    const x1 = ghost.end * pxPerSecond - scrollLeft - 0.5;
     const left = Math.max(x0, -2);
     const right = Math.min(Math.max(x1, x0 + 1), width + 2);
     const y = row.top - scrollTop + CLIP_INSET_Y;

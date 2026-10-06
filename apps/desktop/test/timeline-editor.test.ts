@@ -77,6 +77,27 @@ describe("TimelineEditor.apply", () => {
     expect(history.transactions.slice(1).map((tx) => [tx.author, tx.operations.map((op) => op.op)])).toEqual([["ui", ["clip.move"]]]);
   });
 
+  it("labels every call's transaction, so `history --since` reads as what the human did (#119)", async () => {
+    const { dir, app, editor } = await setup();
+    await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 30 } }]);
+    await editor.apply(dir, "main", [{ op: "clip.trim", args: { clip: "c_a", end: 3, ripple: true, snap: false } }]);
+    await editor.apply(dir, "main", [{ op: "clip.set", args: { clip: "c_c", gain: -3 } }], { label: "Lower gain" });
+    const history = await app.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions.slice(1).map((tx) => [tx.author, tx.label])).toEqual([
+      ["ui", "Move clip"],
+      ["ui", "Ripple trim clip"],
+      ["ui", "Lower gain"],
+    ]);
+  });
+
+  it("refuses a label or burst key that is not short text, before reaching the daemon", async () => {
+    const { dir, editor } = await setup();
+    const move: TimelineEdit[] = [{ op: "clip.move", args: { clip: "c_c", start: 30 } }];
+    await expect(editor.apply(dir, "main", move, { label: "" })).rejects.toThrow(/label/);
+    await expect(editor.apply(dir, "main", move, { burst: 7 as unknown as string })).rejects.toThrow(/burst/);
+    await expect(editor.apply(dir, "main", move, { label: "x".repeat(201) })).rejects.toThrow(/label/);
+  });
+
   it("covers trim, split and ripple delete (a cut of one track, exact)", async () => {
     const { dir, editor, clip } = await setup();
     await editor.apply(dir, "main", [{ op: "clip.trim", args: { clip: "c_b", end: 9, snap: false } }]);
@@ -230,9 +251,9 @@ describe("TimelineEditor batches", () => {
     const next = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 31 } }]);
     const history = await app.request("history", { cwd: dir, timeline: "main" });
     expect(history.transactions.slice(1).map((tx) => [tx.label, tx.operations.length])).toEqual([
-      [null, 1],
+      ["Move clip", 1],
       ["Split 2 clips", 2],
-      [null, 1],
+      ["Move clip", 1],
     ]);
     expect(history.transactions.at(-1)?.tx).toBe(next.operation.tx);
     await editor.undo(dir, "main");
@@ -254,6 +275,81 @@ describe("TimelineEditor batches", () => {
       ["Split 2 clips", ["clip.split", "clip.split"]],
       ["Move 2 clips", ["clip.move", "clip.move"]],
     ]);
+  });
+});
+
+describe("TimelineEditor gesture bursts (#119)", () => {
+  /** Nudge c_c one frame right, as a held `.` key sends it. */
+  const nudge = (start: number): TimelineEdit[] => [{ op: "clip.move", args: { clip: "c_c", start } }];
+  const burst = { label: "Nudge clip", burst: "nudge:c_c" };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const uiEntries = async (app: DaemonConnection, dir: string) =>
+    (await app.request("history", { cwd: dir, timeline: "main" })).transactions
+      .filter((tx) => tx.author === "ui")
+      .map((tx) => [tx.label, tx.operations.map((op) => op.op)]);
+
+  it("joins calls of one burst into one labelled transaction, one undo step", async () => {
+    const { dir, app, clip } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 5_000 });
+    const first = await editor.apply(dir, "main", nudge(20.033), burst);
+    const third = await editor.apply(dir, "main", nudge(20.067), burst).then(() => editor.apply(dir, "main", nudge(20.1), burst));
+    expect(third.operation.tx).toBe(first.operation.tx);
+    // Another command ends the burst: a step of its own.
+    await editor.apply(dir, "main", [{ op: "clip.split", args: { clip: "c_b", at: 7 } }]);
+    expect(await uiEntries(app, dir)).toEqual([
+      ["Nudge clip", ["clip.move", "clip.move", "clip.move"]],
+      ["Split clip", ["clip.split"]],
+    ]);
+    await editor.undo(dir, "main");
+    await editor.undo(dir, "main");
+    expect(await clip("c_c")).toMatchObject({ start: 20 });
+  });
+
+  it("closes the burst after the gap: a later press is a new entry", async () => {
+    const { dir, app } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 50 });
+    const first = await editor.apply(dir, "main", nudge(20.033), burst);
+    await sleep(300);
+    // Closed by its timer: nothing is open for `ui` any more.
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+    const second = await editor.apply(dir, "main", nudge(20.067), burst);
+    expect(second.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("another burst key, an undo, a History revert or a file save each close the open burst first", async () => {
+    const { dir, app, cli, clip } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 5_000 });
+    await editor.apply(dir, "main", nudge(20.033), burst);
+    const other = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_b", start: 11 } }], { burst: "nudge:c_b" });
+    const undone = await editor.undo(dir, "main");
+    expect(undone?.operation.tx).not.toBe(other.operation.tx);
+    expect(await clip("c_b")).toMatchObject({ start: 4 });
+    expect((await clip("c_c"))!.start).toBeCloseTo(20.033, 2);
+
+    await editor.apply(dir, "main", nudge(20.067), burst);
+    const agent = await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_b", start: 12 });
+    const reverted = await editor.revert(dir, "main", agent.operation.tx);
+    expect(reverted.status).toBe("reverted");
+
+    await editor.apply(dir, "main", nudge(20.1), burst);
+    const path = join(dir, "timelines", "main.json");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    saved.tracks[1].clips[0].start = 25;
+    await editor.alone(() => app.request("file.write", { path, content: JSON.stringify(saved) }));
+    const entries = await uiEntries(app, dir);
+    expect(entries.slice(-2)).toEqual([
+      ["Nudge clip", ["clip.move"]],
+      [null, ["timeline.patch"]],
+    ]);
+  });
+
+  it("ends the burst at a refused edit: the next press starts a new entry", async () => {
+    const { dir, app } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 5_000 });
+    const first = await editor.apply(dir, "main", nudge(20.033), burst);
+    await expect(editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: -1 } }], burst)).rejects.toThrow();
+    const next = await editor.apply(dir, "main", nudge(20.067), burst);
+    expect(next.operation.tx).not.toBe(first.operation.tx);
   });
 });
 
