@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { connectOrStartDaemon } from "@frameshell/cli";
+import { type DaemonLauncher, connectOrStartDaemon } from "@frameshell/cli";
 import {
   type DaemonConnection,
   EVENT_NAMES,
@@ -27,6 +27,8 @@ export interface DaemonLinkOptions {
   startTimeoutMs?: number;
   /** Script run as frameshelld. Default: the installed `@frameshell/core/frameshelld`. Tests only. */
   daemonEntry?: string;
+  /** Starts a daemon process. Default: spawn from this process. The app passes `helperDaemonLauncher` (#112). */
+  launch?: DaemonLauncher;
 }
 
 /**

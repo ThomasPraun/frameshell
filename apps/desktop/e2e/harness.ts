@@ -43,9 +43,13 @@ const OPEN_TIMEOUT_MS = 60_000;
 /**
  * Start the app on the sandbox project, in a laptop-sized window. Resolves once the startup open settled (the boot
  * screen gave way to the project, or to the welcome screen), so a spec's first assertion measures what it tests, not
- * a cold daemon. `settled: false` returns while the boot screen may still show.
+ * a cold daemon. `settled: false` returns while the boot screen may still show. `env` adds to or overrides the app's
+ * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`).
  */
-export async function launch(box: Sandbox, { settled = true } = {}): Promise<{ app: ElectronApplication; page: Page }> {
+export async function launch(
+  box: Sandbox,
+  { settled = true, env = {} }: { settled?: boolean; env?: Record<string, string> } = {},
+): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
@@ -61,6 +65,7 @@ export async function launch(box: Sandbox, { settled = true } = {}): Promise<{ a
       FRAMESHELL_DATA_DIR: box.dataDir,
       FRAMESHELL_CONFIG_DIR: box.configDir,
       FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
+      ...env,
     },
   });
   try {

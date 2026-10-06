@@ -4,7 +4,17 @@ import { defineConfig } from "electron-vite";
 
 export default defineConfig({
   // Main: ESM (package "type": "module"); dependencies stay external and load from node_modules.
-  main: {},
+  // `daemon-spawner`: utility process entry that starts frameshelld (see src/main/daemon-launcher.ts).
+  main: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(import.meta.dirname, "src/main/index.ts"),
+          "daemon-spawner": resolve(import.meta.dirname, "src/main/daemon-spawner.ts"),
+        },
+      },
+    },
+  },
   preload: {
     build: {
       rollupOptions: {

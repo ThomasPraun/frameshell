@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
+import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell, utilityProcess } from "electron";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
@@ -21,6 +21,7 @@ import {
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
 import { captureContextFrame } from "./context-frames.js";
+import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
@@ -35,11 +36,18 @@ app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 
 const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
-// Spawning the daemon reuses process.execPath (Electron): run it as plain Node.
+// Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
+// never holds this process's stdio handles (#112).
 const daemon = new DaemonLink({
   socketPath,
   client: `desktop/${APP_VERSION}`,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  launch: helperDaemonLauncher(() =>
+    utilityProcess.fork(join(import.meta.dirname, "daemon-spawner.js"), [], {
+      stdio: "ignore",
+      serviceName: "Frameshell daemon launcher",
+    }),
+  ),
 });
 const editor = new TimelineEditor((method, params) => daemon.request(method, params));
 // SPEC §7b: each window's state to the daemon, the daemon's navigation commands to the window. Window key = webContents id.
