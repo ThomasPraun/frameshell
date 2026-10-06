@@ -1723,7 +1723,8 @@ code {
 
 .timeline-heads {
   flex: none;
-  width: 124px;
+  /* Fits the six ruler-spacer buttons (zoom x3, snapping, ripple trim, subtitles). */
+  width: 144px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line-soft);
@@ -1945,6 +1946,10 @@ button.track-head:focus-visible {
 
 .timeline-zoom .snap-toggle {
   margin-left: 4px;
+}
+
+.timeline-zoom .snap-toggle + .snap-toggle {
+  margin-left: 0;
 }
 
 .sr-only {

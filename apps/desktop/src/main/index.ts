@@ -13,6 +13,8 @@ import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
+  type EditOptions,
+  type HistoryCommand,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -24,6 +26,7 @@ import { writeCliShim } from "./cli-shim.js";
 import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { editMenu } from "./edit-menu.js";
 import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
@@ -314,7 +317,8 @@ function registerIpc(): void {
   ipcMain.handle(Channel.filesWrite, async (event, path: string, content: string) => {
     try {
       const { project } = await requireProject(stateOf(event.sender));
-      await daemon.request("file.write", { path: join(project.dir, path), content });
+      // A timeline save is a `ui` operation: it must not join an open nudge burst's transaction.
+      await editor.alone(() => daemon.request("file.write", { path: join(project.dir, path), content }));
       return {};
     } catch (error) {
       return { error: (error as Error).message };
@@ -349,8 +353,8 @@ function registerIpc(): void {
       return daemon.request("timeline.show", { cwd: project.dir, timeline });
     }),
   );
-  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[]) =>
-    outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits)),
+  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[], options?: EditOptions) =>
+    outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits, options ?? {})),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),
@@ -428,8 +432,12 @@ function buildMenu(): void {
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },
-    // Edit roles make copy/paste work in xterm and Monaco on macOS.
-    { role: "editMenu" },
+    editMenu(process.platform, (command: HistoryCommand) => {
+      // No focused window (app in the background, a test driving the menu): the only one, if there is just one.
+      const all = BrowserWindow.getAllWindows();
+      const target = BrowserWindow.getFocusedWindow() ?? (all.length === 1 ? all[0] : undefined);
+      if (target) send(target.webContents, Channel.timelineHistoryCommand, command);
+    }),
     { role: "viewMenu" },
     { role: "windowMenu" },
   ];
@@ -458,6 +466,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+/** The quit already waited for {@link TimelineEditor.settle}: the next `will-quit` closes the daemon link and lets the app exit. */
+let editorSettled = false;
+
 app.on("will-quit", (event) => {
   if (exitingShells.size > 0) {
     // Quit once closed windows' shells are gone: see TerminalManager.killAll.
@@ -465,5 +476,15 @@ app.on("will-quit", (event) => {
     void Promise.all(exitingShells).then(() => app.quit());
     return;
   }
-  void daemon.close();
+  if (editorSettled) {
+    daemon.close();
+    return;
+  }
+  // Wait, up to 500 ms, for an open nudge burst's transaction to commit; the daemon's auto-commit covers one that outruns it.
+  event.preventDefault();
+  const settled = Promise.race([editor.settle().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 500))]);
+  void settled.then(() => {
+    editorSettled = true;
+    app.quit();
+  });
 });

@@ -208,6 +208,95 @@ test("deleting two selected clips is one undo step", async () => {
   expect(undo.args.target).toBe(first.tx);
 });
 
+/** Journal lines as written, oldest first. */
+function journalLines(): { op: string; tx: string; txLabel?: string; args: Record<string, unknown> }[] {
+  return readFileSync(journal, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("a repeated nudge is one labelled history entry, undone in one step (#119)", async () => {
+  await page.mouse.click(...xy(await at(16, "v2")));
+  await expect(lanes()).toHaveAttribute("data-selected", "c_card");
+  for (let i = 0; i < 3; i++) await page.keyboard.press(".");
+  await expect(clipItems().first()).toHaveText(/^V2: titles, 00:00:15:04 to 00:00:17:04/);
+  const nudges = journalLines().slice(-3);
+  expect(nudges.map((line) => line.op)).toEqual(["clip.move", "clip.move", "clip.move"]);
+  expect(new Set(nudges.map((line) => line.tx)).size).toBe(1);
+  expect(nudges[0]!.txLabel).toBe("Nudge clip");
+
+  await page.keyboard.press(`${modifier}+z`);
+  await expect(clipItems().first()).toHaveText(/^V2: titles, 00:00:15:01 to 00:00:17:01/);
+});
+
+test("undo and redo work from the Edit menu and with focus off the timeline (#119)", async () => {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press(`${modifier}+Shift+z`);
+  await expect(clipItems().first()).toHaveText(/^V2: titles, 00:00:15:04 to 00:00:17:04/);
+
+  const items = await app.evaluate(({ Menu }) =>
+    ["edit-undo", "edit-redo"].map((id) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+      return item ? { label: item.label, accelerator: item.accelerator } : null;
+    }),
+  );
+  expect(items).toEqual([
+    { label: "Undo", accelerator: "CmdOrCtrl+Z" },
+    { label: "Redo", accelerator: process.platform === "darwin" ? "Shift+CmdOrCtrl+Z" : "Ctrl+Y" },
+  ]);
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById("edit-undo")?.click());
+  await expect(clipItems().first()).toHaveText(/^V2: titles, 00:00:15:01 to 00:00:17:01/);
+});
+
+test("ripple trim (R) moves later clips along, leaving no gap (#119)", async () => {
+  await expect(clipItems()).toHaveText([
+    /^V2: titles, 00:00:15:01 to 00:00:17:01/,
+    /^V1: titles, 00:00:00:00 to 00:00:03:00/,
+    /^V1: titles, 00:00:03:00 to 00:00:06:00/,
+    /^V1: titles, 00:00:08:00 to 00:00:10:00/,
+  ]);
+  await (await laidOutScroller()).focus();
+  await page.keyboard.press("r");
+  await expect(page.getByRole("button", { name: "Ripple trim" })).toHaveAttribute("aria-pressed", "true");
+  const edge = await at(6, "v1");
+  const target = await at(5, "v1");
+  await drag({ x: edge.x - 1, y: edge.y }, { x: target.x - 1, y: target.y }, async () => {
+    await expect(page.locator(".drag-tooltip")).toContainText("Ripple trim end");
+  });
+  await expect(clipItems()).toHaveText([
+    /^V2: titles, 00:00:14:01 to 00:00:16:01/,
+    /^V1: titles, 00:00:00:00 to 00:00:03:00/,
+    /^V1: titles, 00:00:03:00 to 00:00:05:00/,
+    /^V1: titles, 00:00:07:00 to 00:00:09:00/,
+  ]);
+  const [trim] = journalLines().slice(-1);
+  expect(trim).toMatchObject({ op: "clip.trim", txLabel: "Ripple trim clip", args: { ripple: true } });
+  await page.keyboard.press("r");
+  await expect(page.getByRole("button", { name: "Ripple trim" })).toHaveAttribute("aria-pressed", "false");
+});
+
+test("dragging one of several selected clips moves them all, as one step (#119)", async () => {
+  await page.mouse.click(...xy(await at(15, "v2")));
+  await page.keyboard.down("Shift");
+  await page.mouse.click(...xy(await at(8, "v1")));
+  await page.keyboard.up("Shift");
+  await expect(lanes()).toHaveAttribute("data-selected", /^\S+ \S+$/);
+  await drag(await at(15, "v2"), await at(17, "v2"), async () => {
+    await expect(page.locator(".drag-tooltip")).toContainText("Move 2 clips");
+  });
+  await expect(clipItems()).toHaveText([
+    /^V2: titles, 00:00:16:01 to 00:00:18:01/,
+    /^V1: titles, 00:00:00:00 to 00:00:03:00/,
+    /^V1: titles, 00:00:03:00 to 00:00:05:00/,
+    /^V1: titles, 00:00:09:00 to 00:00:11:00/,
+  ]);
+  const moves = journalLines().slice(-2);
+  expect(moves.map((line) => line.op)).toEqual(["clip.move", "clip.move"]);
+  expect(moves[1]!.tx).toBe(moves[0]!.tx);
+  expect(moves[0]!.txLabel).toBe("Move 2 clips");
+});
+
 test("every edit was saved at once and journaled as a ui operation", async () => {
   expect(journaled()).toEqual([
     { op: "clip.move", author: "ui" },
@@ -221,6 +310,15 @@ test("every edit was saved at once and journaled as a ui operation", async () =>
     { op: "clip.remove", author: "ui" },
     { op: "clip.remove", author: "ui" },
     { op: "revert", author: "ui" },
+    { op: "clip.move", author: "ui" },
+    { op: "clip.move", author: "ui" },
+    { op: "clip.move", author: "ui" },
+    { op: "revert", author: "ui" },
+    { op: "revert", author: "ui" },
+    { op: "revert", author: "ui" },
+    { op: "clip.trim", author: "ui" },
+    { op: "clip.move", author: "ui" },
+    { op: "clip.move", author: "ui" },
   ]);
   const saved = JSON.parse(readFileSync(mainFile, "utf8"));
   await expect(lanes()).toHaveAttribute("data-revision", String(saved.revision));
