@@ -52,7 +52,7 @@ Commands:
                                of deleted or changed assets, unused clip renders, stale temps).
                                --dry-run lists them without deleting
   plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
-                               or an npm name[@version]
+                               an npm name[@version], or a local tarball from npm pack (./name-1.0.0.tgz)
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).

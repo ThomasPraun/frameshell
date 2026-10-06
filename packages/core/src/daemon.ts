@@ -374,7 +374,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
-    "plugin.install": async ({ cwd, spec }) => plugins.install(await root(cwd), spec),
+    "plugin.install": async ({ cwd, spec }) => plugins.install(await root(cwd), spec, cwd),
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),

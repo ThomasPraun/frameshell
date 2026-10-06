@@ -1,15 +1,16 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { PluginPins } from "@frameshell/protocol";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
-import type { PluginSpec } from "./spec.js";
+import { type PluginSpec, formatTarballPin, parseTarballPin } from "./spec.js";
 
 /** Records which pins the directory holds, so a load knows when to reinstall. */
 const MARKER = ".frameshell-pins.json";
 
-/** npm failure; `output` is the tail of its stderr. */
+/** Install failure: npm failed (`output` = tail of its stderr), or a pinned tarball is missing or changed. */
 export class NpmError extends Error {
   override readonly name = "NpmError";
   constructor(
@@ -24,12 +25,19 @@ export class NpmError extends Error {
  * Installed plugin packages of one project: `<project>/.frameshell/plugins`,
  * an npm prefix whose `package.json` dependencies mirror the pins in
  * `frameshell.json`. Regenerable at any time from those pins (SPEC §2).
+ * Tarball pins (`file:<path>#sha256=…`) are project-relative; every install
+ * checks the file still has the pinned digest first.
  *
  * Runs npm, so it executes package install scripts: callers gate every
  * method that installs behind project trust.
  */
 export class PluginStore {
-  constructor(readonly dir: string) {}
+  /** Project root: `dir` is always `<root>/.frameshell/plugins`. */
+  readonly #root: string;
+
+  constructor(readonly dir: string) {
+    this.#root = resolve(dir, "..", "..");
+  }
 
   /** Directory of an installed package. */
   packageDir(name: string): string {
@@ -55,14 +63,26 @@ export class PluginStore {
 
   /**
    * Install `spec` next to `pins` and work out its package name and pin:
-   * the resolved commit for git sources, the exact version for npm ones.
+   * the resolved commit for git sources, the exact version for npm ones, the
+   * path and sha256 for tarballs (whose `path` must be absolute by now).
    * Does not mark the result synced; callers do after validating the package.
    */
   async add(pins: PluginPins, spec: PluginSpec): Promise<{ name: string; pin: string }> {
-    await this.#writeManifest(pins);
+    const written = await this.#writeManifest(pins);
+    if (spec.kind === "tarball") {
+      if (!isAbsolute(spec.path)) throw new Error(`tarball path must be absolute: ${spec.path}`);
+      const pin = formatTarballPin(this.#pinPath(spec.path), await sha256(spec.path));
+      const dependency = this.#dependency(spec.path);
+      await npm(["install", "--save", "--save-exact", dependency], this.dir);
+      const saved = await this.#dependencies();
+      const changed = Object.keys(saved).filter((name) => saved[name] !== written[name]);
+      const name = changed.length === 1 ? changed[0]! : Object.keys(saved).find((key) => saved[key] === dependency);
+      if (!name) throw new NpmError(`Could not tell which package ${spec.spec} installed`, JSON.stringify(saved));
+      return { name, pin };
+    }
     await npm(["install", "--save", "--save-exact", spec.spec], this.dir);
     const saved = await this.#dependencies();
-    const name = installedName(pins, saved, spec);
+    const name = installedName(written, saved, spec);
     if (spec.kind === "npm") {
       const pkg = (await readJsonIfExists(join(this.packageDir(name), "package.json"))) as { version?: string } | undefined;
       if (!pkg?.version) throw new NpmError(`npm installed ${name} without a version`, "");
@@ -82,13 +102,46 @@ export class PluginStore {
     await writeJsonAtomic(join(this.dir, MARKER), pins);
   }
 
-  async #writeManifest(pins: PluginPins): Promise<void> {
+  /** Write the npm manifest for `pins` and return its dependencies. Throws for a missing or changed tarball. */
+  async #writeManifest(pins: PluginPins): Promise<Record<string, string>> {
+    const dependencies: Record<string, string> = {};
+    for (const [name, pin] of Object.entries(pins)) {
+      const tarball = parseTarballPin(pin);
+      if (!tarball) {
+        dependencies[name] = pin;
+        continue;
+      }
+      const file = resolve(this.#root, tarball.path);
+      const actual = await sha256(file).catch(() => null);
+      if (actual === null) throw new NpmError(`${name}: pinned tarball ${file} is missing`, "");
+      if (actual !== tarball.sha256) {
+        throw new NpmError(
+          `${name}: pinned tarball ${file} changed since it was pinned (sha256 ${actual}, pin ${tarball.sha256}). ` +
+            "Not installing code nobody trusted: reinstall it with `frameshell plugin install <tarball>` if you trust the new file.",
+          "",
+        );
+      }
+      dependencies[name] = this.#dependency(file);
+    }
     await writeJsonAtomic(join(this.dir, "package.json"), {
       name: "frameshell-project-plugins",
       private: true,
       description: "Generated from frameshell.json plugin pins. Regenerable; do not edit.",
-      dependencies: pins,
+      dependencies,
     });
+    return dependencies;
+  }
+
+  /** npm spec of a tarball, relative to this prefix like npm saves it. */
+  #dependency(file: string): string {
+    return `file:${posix(relative(this.dir, file))}`;
+  }
+
+  /** Pin path of a tarball: project-relative inside the project, absolute outside it. */
+  #pinPath(file: string): string {
+    const inside = relative(this.#root, file);
+    const outside = inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
+    return posix(outside ? file : inside);
   }
 
   async #dependencies(): Promise<Record<string, string>> {
@@ -100,7 +153,7 @@ export class PluginStore {
 }
 
 /** The dependency npm added or changed; falls back to the spec itself when nothing changed (reinstall). */
-function installedName(pins: PluginPins, saved: Record<string, string>, spec: PluginSpec): string {
+function installedName(pins: PluginPins, saved: Record<string, string>, spec: Exclude<PluginSpec, { kind: "tarball" }>): string {
   const changed = Object.keys(saved).filter((name) => saved[name] !== pins[name]);
   if (changed.length === 1) return changed[0]!;
   if (changed.length === 0) {
@@ -112,6 +165,14 @@ function installedName(pins: PluginPins, saved: Record<string, string>, spec: Pl
     }
   }
   throw new NpmError(`Could not tell which package ${spec.spec} installed`, JSON.stringify(saved));
+}
+
+function posix(path: string): string {
+  return path.split(sep).join("/");
+}
+
+async function sha256(file: string): Promise<string> {
+  return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
 function samePins(a: unknown, b: PluginPins): boolean {

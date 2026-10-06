@@ -35,6 +35,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      # Official plugins as npm would publish them (release.yml publishes them): pack, check the tarballs, npm publish --dry-run.
+      - name: Plugin npm packages (dry run)
+        if: runner.os == 'Linux'
+        run: node scripts/plugins-npm.mjs dry-run
 
   # Drives the built Electron app: real daemon, real login shell, real pty.
   e2e:

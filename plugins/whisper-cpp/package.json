@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "description": "Official Frameshell transcription provider: whisper.cpp with DTW word onsets and energy-derived word ends.",
   "license": "Apache-2.0",
+  "author": "Frameshell contributors",
+  "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/whisper-cpp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasPraun/frameshell.git",
+    "directory": "plugins/whisper-cpp"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasPraun/frameshell/issues"
+  },
+  "keywords": [
+    "frameshell",
+    "frameshell-plugin"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -11,11 +25,19 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "frameshell-plugin.json", "skills"],
+  "files": [
+    "dist",
+    "frameshell-plugin.json",
+    "skills"
+  ],
   "engines": {
     "node": ">=22.12"
   },
   "devDependencies": {
     "@frameshell/plugin-api": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

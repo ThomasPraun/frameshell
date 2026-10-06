@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import { type Daemon, parsePluginSpec, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
-import { type GitPlugin, gitPluginFixture } from "./plugin-fixture.js";
+import { type GitPlugin, gitPluginFixture, tarballPluginFixture } from "./plugin-fixture.js";
 
 // Installs run real npm against local git repos: slow, never networked.
 const NPM_TIMEOUT = 120_000;
@@ -56,6 +58,87 @@ describe("plugin.install", () => {
     },
     NPM_TIMEOUT,
   );
+});
+
+describe("plugin.install from a local tarball", () => {
+  const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
+
+  it(
+    "installs a packed tarball by relative path and pins it project-relative with its sha256",
+    async () => {
+      const dir = await newProject();
+      const tarball = tarballPluginFixture(join(dir, "vendor"));
+      const result = await conn.request("plugin.install", { cwd: join(dir, "assets"), spec: "../vendor/hello-plugin-0.1.0.tgz" });
+
+      const pin = `file:vendor/hello-plugin-0.1.0.tgz#sha256=${sha256(tarball)}`;
+      expect(result).toMatchObject({ dir, name: "hello-plugin", pin, skills: [".claude/skills/hello"] });
+      expect(result.plugin).toMatchObject({ status: "loaded", version: "0.1.0" });
+      expect(readConfig(dir).plugins).toEqual({ "hello-plugin": pin });
+      const greeted = await conn.request("plugin.run", { cwd: dir, plugin: "hello", command: "greet", args: ["Ana"] });
+      expect(greeted.output).toBe("Hello, Ana!");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "accepts file: specs and tarballs outside the project, pinned by absolute path",
+    async () => {
+      const dir = await newProject();
+      const tarball = tarballPluginFixture(tempDir());
+      const result = await conn.request("plugin.install", { cwd: dir, spec: `file:${tarball}` });
+      expect(result.pin).toBe(`file:${tarball.split(sep).join("/")}#sha256=${sha256(tarball)}`);
+      expect(result.plugin.status).toBe("loaded");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "refuses to load a pinned tarball whose bytes changed, so trust covers the code that runs",
+    async () => {
+      const dir = await newProject();
+      const tarball = tarballPluginFixture(join(dir, "vendor"));
+      await conn.request("plugin.install", { cwd: dir, spec: "vendor/hello-plugin-0.1.0.tgz" });
+
+      // Same path, other bytes (a clone, a pull): a fresh user trusts the pin list, the install must refuse.
+      rmSync(join(dir, ".frameshell", "plugins"), { recursive: true, force: true });
+      const swapped = tarballPluginFixture(tempDir(), { description: "not what was pinned" });
+      writeFileSync(tarball, readFileSync(swapped));
+      const other = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() } });
+      const otherConn = await connectToDaemon(other.socketPath, { client: "test" });
+      try {
+        await otherConn.request("project.trust", { cwd: dir, decision: "trust" });
+        const { plugins } = await otherConn.request("plugin.list", { cwd: dir });
+        expect(plugins).toEqual([
+          expect.objectContaining({ name: "hello-plugin", status: "error", error: expect.stringMatching(/changed since it was pinned \(sha256/) }),
+        ]);
+        expect(existsSync(join(dir, ".frameshell/plugins/node_modules/hello-plugin"))).toBe(false);
+      } finally {
+        otherConn.close();
+        await other.close();
+      }
+    },
+    NPM_TIMEOUT,
+  );
+
+  it.each([
+    ["a missing tarball", "vendor/missing.tgz", /no such file|not found/i],
+    ["a directory", "file:assets", /npm pack|tarball/i],
+  ])("refuses %s before running npm", async (_label, spec, message) => {
+    const dir = await newProject();
+    await expect(conn.request("plugin.install", { cwd: dir, spec })).rejects.toMatchObject({
+      code: ErrorCode.InvalidPluginSpec,
+      message: expect.stringMatching(message),
+    });
+    expect(readConfig(dir).plugins).toEqual({});
+  });
+
+  it("parses tarball paths and file: specs, never tarball URLs", () => {
+    expect(parsePluginSpec("./vendor/p-1.0.0.tgz")).toEqual({ kind: "tarball", spec: "./vendor/p-1.0.0.tgz", path: "./vendor/p-1.0.0.tgz" });
+    expect(parsePluginSpec("p-1.0.0.tgz")).toMatchObject({ kind: "tarball", path: "p-1.0.0.tgz" });
+    expect(parsePluginSpec("file:../p.tar.gz")).toMatchObject({ kind: "tarball", path: "../p.tar.gz" });
+    expect(parsePluginSpec(pathToFileURL(join(tempDir(), "p.tgz")).href)).toMatchObject({ kind: "tarball" });
+    expect(() => parsePluginSpec("https://example.com/p.tgz")).toThrow(/Unsupported plugin spec/);
+  });
 });
 
 describe("plugin contributions", () => {
