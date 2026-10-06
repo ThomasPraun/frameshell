@@ -34,7 +34,10 @@ describe("terminalToolPaths", () => {
     const { manager, projectDir, install, dataDir } = await fixture();
     const ffmpeg = await install("ffmpeg");
     const ffprobe = await install("ffprobe");
-    expect(await terminalToolPaths(manager, projectDir)).toEqual({ ffmpeg, ffprobe });
+    expect(await terminalToolPaths(manager, projectDir)).toEqual({
+      ffmpeg: { path: ffmpeg, managed: true },
+      ffprobe: { path: ffprobe, managed: true },
+    });
     expect(ffmpeg.startsWith(join(dataDir, "binaries"))).toBe(true);
   });
 
@@ -49,7 +52,7 @@ describe("terminalToolPaths", () => {
     await mkdir(dirname(own), { recursive: true });
     await writeFile(own, "");
     await writeFile(join(projectDir, "frameshell.json"), JSON.stringify({ binaries: { ffmpeg: `tools/ffmpeg${exe}` } }));
-    expect((await terminalToolPaths(manager, projectDir))["ffmpeg"]).toBe(own);
+    expect((await terminalToolPaths(manager, projectDir))["ffmpeg"]).toEqual({ path: own, managed: false });
   });
 
   it("leaves tools out instead of failing when the global config is malformed", async () => {
@@ -70,9 +73,9 @@ describe("terminalLaunch with tools", () => {
       platform: "linux",
       env: { PATH: "/usr/bin" },
       tools: {
-        ffmpeg: "/data/binaries/ffmpeg/7.1/linux-x64/ffmpeg",
-        ffprobe: "/data/binaries/ffmpeg/7.1/linux-x64/ffprobe",
-        "whisper-cli": "/data/binaries/whisper-cpp/1.7/linux-x64/whisper-cli",
+        ffmpeg: { path: "/data/binaries/ffmpeg/7.1/linux-x64/ffmpeg", managed: true },
+        ffprobe: { path: "/data/binaries/ffmpeg/7.1/linux-x64/ffprobe", managed: true },
+        "whisper-cli": { path: "/data/binaries/whisper-cpp/1.7/linux-x64/whisper-cli", managed: true },
       },
     });
     expect(env["PATH"]).toBe(
@@ -91,10 +94,28 @@ describe("terminalLaunch with tools", () => {
       platform: "win32",
       binDir: "C:\\bin",
       env: { Path: "C:\\Windows" },
-      tools: { ffmpeg: "C:\\Data\\binaries\\ffmpeg\\7.1\\win32-x64\\ffmpeg.exe" },
+      tools: { ffmpeg: { path: "C:\\Data\\binaries\\ffmpeg\\7.1\\win32-x64\\ffmpeg.exe", managed: true } },
     });
     expect(env["Path"]).toBe("C:\\bin;C:\\Data\\binaries\\ffmpeg\\7.1\\win32-x64;C:\\Windows");
     expect(env["FRAMESHELL_FFMPEG"]).toBe("C:\\Data\\binaries\\ffmpeg\\7.1\\win32-x64\\ffmpeg.exe");
+  });
+
+  it("names override tools but never reorders PATH for them", () => {
+    const { env } = terminalLaunch({
+      ...base,
+      platform: "linux",
+      env: { PATH: "/opt/homebrew/bin:/usr/bin" },
+      tools: {
+        ffmpeg: { path: "/usr/bin/ffmpeg", managed: false },
+        ffprobe: { path: "/videos/talk/bin/ffprobe", managed: false },
+        "whisper-cli": { path: "/data/binaries/whisper-cpp/1.7/linux-x64/whisper-cli", managed: true },
+      },
+    });
+    expect(env["PATH"]).toBe("/app-data/bin:/data/binaries/whisper-cpp/1.7/linux-x64:/opt/homebrew/bin:/usr/bin");
+    expect(env).toMatchObject({
+      FRAMESHELL_FFMPEG: "/usr/bin/ffmpeg",
+      FRAMESHELL_FFPROBE: "/videos/talk/bin/ffprobe",
+    });
   });
 
   it("sets no tool variables when none are installed", () => {

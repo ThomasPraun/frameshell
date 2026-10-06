@@ -88,7 +88,7 @@ describe("TerminalManager", () => {
       socketPath: "/tmp/unused.sock",
       session: "term-tools",
       binDir: projectDir,
-      tools: { ffmpeg: tool },
+      tools: { ffmpeg: { path: tool, managed: true } },
     });
     const { id } = manager.create(launch, { cols: 80, rows: 24 });
     manager.write(id, '"$FRAMESHELL_FFMPEG"\r');
