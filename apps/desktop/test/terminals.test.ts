@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,6 +73,26 @@ describe("TerminalManager", () => {
     await manager.killAll();
     expect(exits.has(fresh.id)).toBe(true);
     expect(exits.has(started.id)).toBe(true);
+  });
+
+  // #120: the agent runs the daemon's ffmpeg by hand. The variable survives login profiles that reorder PATH.
+  it.skipIf(process.platform === "win32")("runs the managed tools the launch names", async () => {
+    const { manager, output, projectDir } = setup();
+    const tool = join(projectDir, "tools", "ffmpeg");
+    mkdirSync(join(projectDir, "tools"));
+    writeFileSync(tool, "#!/bin/sh\necho fake-ffmpeg-ran\n", { mode: 0o755 });
+    const launch = terminalLaunch({
+      platform: process.platform,
+      env: process.env,
+      projectDir,
+      socketPath: "/tmp/unused.sock",
+      session: "term-tools",
+      binDir: projectDir,
+      tools: { ffmpeg: { path: tool, managed: true } },
+    });
+    const { id } = manager.create(launch, { cols: 80, rows: 24 });
+    manager.write(id, '"$FRAMESHELL_FFMPEG"\r');
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("fake-ffmpeg-ran");
   });
 
   it.skipIf(process.platform === "win32")("applies resizes to the pty", async () => {
