@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -87,6 +87,34 @@ describe("frameshell import", () => {
       const result = JSON.parse(again.stdout);
       expect(result.imported[0]).toMatchObject({ asset: "assets/take 1.mp4", copied: false, job: { state: "done", cached: true } });
       expect(existsSync(join(project, ".frameshell", "proxies"))).toBe(true);
+    },
+    120_000,
+  );
+
+  it(
+    "gc --dry-run lists the derived media of a deleted asset, gc deletes it",
+    async () => {
+      const project = join(tempDir(), "gc");
+      expect(frameshell(["init", project], tempDir()).code).toBe(0);
+      const footage = tempDir();
+      await makeClip(join(footage, "old.mp4"), { durationS: 0.5 });
+      expect(frameshell(["import", join(footage, "old.mp4"), "--wait"], project).code).toBe(0);
+      expect(frameshell(["gc", "--json"], project).stdout).toContain('"removed": []');
+      rmSync(join(project, "assets", "old.mp4"));
+
+      const dry = frameshell(["gc", "--dry-run"], project);
+      expect(dry.code).toBe(0);
+      expect(dry.stdout).toMatch(/^Would delete 5 item\(s\), [\d.]+ KB:/);
+      expect(dry.stdout).toMatch(/\.frameshell\/proxies\/[^ ]+\.mp4 {2}proxy · /);
+      const proxy = /(\.frameshell\/proxies\/[^ ]+\.mp4)/.exec(dry.stdout)![1]!;
+      expect(existsSync(join(project, proxy))).toBe(true);
+
+      const done = JSON.parse(frameshell(["gc", "--json"], project).stdout) as { dryRun: boolean; removed: { path: string; kind: string }[] };
+      expect(done.dryRun).toBe(false);
+      expect(done.removed.map((entry) => entry.kind).sort()).toEqual(["manifest", "proxy", "sidecar", "thumbnails", "waveform"]);
+      expect(existsSync(join(project, proxy))).toBe(false);
+      expect(frameshell(["gc"], project).stdout).toMatch(/^Nothing to delete/);
+      expect(frameshell(["gc", "--wait"], project).code).toBe(2);
     },
     120_000,
   );

@@ -7,8 +7,32 @@ import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plu
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
 import { exists, readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
+import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
+
+/** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
+export const AUDIO_CACHE_DIR = ".frameshell/cache/audio";
+
+/** Cache key of the transcription WAVs of content `hash` (`sha256:<hex>` or bare hex): their names start with it. */
+export function audioCacheKey(hash: string): string {
+  return hash.replace(/^sha256:/, "").slice(0, 16);
+}
+
+const AUDIO_FILE = /^([0-9a-f]{16})-(sidecar|asset)\.wav$/;
+/** Extraction temps: `<file>.<pid>.tmp.wav`. */
+const AUDIO_TEMP = /^[0-9a-f]{16}-(sidecar|asset)\.wav\..+\.tmp\.wav$/;
+
+/**
+ * What an entry of {@link AUDIO_CACHE_DIR} is, for `gc`: the WAV of cache
+ * key `key`, an extraction temp, or null (not ours: kept).
+ */
+export function classifyAudioCache(name: string, isDirectory: boolean): GcClass {
+  if (isDirectory) return null;
+  if (AUDIO_TEMP.test(name)) return { kind: "temp", key: null };
+  const key = AUDIO_FILE.exec(name)?.[1];
+  return key ? { kind: "audio", key } : null;
+}
 
 /** Native tools a transcription may need, with progress for first-run installs. */
 export interface TranscriberTools {
@@ -90,7 +114,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
         raw: { format: sidecar.format, sampleRate: sidecar.sampleRate, channels: sidecar.channels },
       }
     : { path: assetPath };
-  const audio = join(projectDir, ".frameshell", "cache", "audio", `${hash.slice(0, 16)}-${sidecar ? "sidecar" : "asset"}.wav`);
+  const audio = join(projectDir, ...AUDIO_CACHE_DIR.split("/"), `${audioCacheKey(hash)}-${sidecar ? "sidecar" : "asset"}.wav`);
 
   const failed = (error: unknown): never => {
     if (error instanceof RpcError) throw error;

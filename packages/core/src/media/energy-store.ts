@@ -4,6 +4,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AssetInfo } from "@frameshell/protocol";
 import { writeTextAtomic } from "../fs-util.js";
+import type { GcClass } from "../gc.js";
 import { type AudioExtractor, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "../transcripts/audio.js";
 import { type EnergyProfile, EnvelopeBuilder, energyProfile } from "./energy.js";
 
@@ -13,6 +14,27 @@ export const ENERGY_DIR = ".frameshell/energy";
 const ENERGY_VERSION = 1;
 /** Profiles kept in memory per store (~720 KB per 30 min of audio). */
 const MEMORY_ENTRIES = 32;
+
+/** Cache key of the envelope of content `hash` (`sha256:<hex>`): its file is `<key>.f32` in {@link ENERGY_DIR}. */
+export function energyCacheKey(hash: string): string {
+  return `${hash.replace(/^sha256:/, "").slice(0, 20)}-e${ENERGY_VERSION}`;
+}
+
+const ENVELOPE_FILE = /^([0-9a-f]{20}-e\d+)\.f32$/;
+/** Decode temps of {@link EnergyStore} and atomic-write temps of envelopes. */
+const ENERGY_TEMP = /^(\.decode-[0-9a-f]+\.wav|[0-9a-f]{20}-e\d+\.f32\..+\.tmp)$/;
+
+/**
+ * What an entry of {@link ENERGY_DIR} is, for `gc`: the envelope of cache key
+ * `key` (an older {@link ENERGY_VERSION} never matches a current key), a temp,
+ * or null (not ours: kept).
+ */
+export function classifyEnergy(name: string, isDirectory: boolean): GcClass {
+  if (isDirectory) return null;
+  if (ENERGY_TEMP.test(name)) return { kind: "temp", key: null };
+  const key = ENVELOPE_FILE.exec(name)?.[1];
+  return key ? { kind: "energy", key } : null;
+}
 
 /** Options for {@link EnergyStore}. */
 export interface EnergyStoreOptions {
@@ -53,7 +75,7 @@ export class EnergyStore {
   }
 
   async #load(root: string, rel: string, hash: string, sidecar: AssetInfo["sidecar"]): Promise<EnergyProfile> {
-    const cache = join(root, ...ENERGY_DIR.split("/"), `${hash.replace(/^sha256:/, "").slice(0, 20)}-e${ENERGY_VERSION}.f32`);
+    const cache = join(root, ...ENERGY_DIR.split("/"), `${energyCacheKey(hash)}.f32`);
     const cached = await readFile(cache).catch(() => null);
     if (cached && cached.length > 0 && cached.length % 4 === 0) return energyProfile(decodeFloats(cached));
     const db = sidecar ? await envelopeOfPcm(join(root, ...sidecar.path.split("/")), sidecar) : await this.#decode(root, rel);

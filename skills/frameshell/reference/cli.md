@@ -10,6 +10,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell status` | Daemon, project, plugin trust, jobs, refused direct edits, open transactions. First command in a new session. |
 | `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. |
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
+| `frameshell gc [--dry-run]` | Free disk: delete regenerable files under `.frameshell/` nothing uses (proxies, sidecars, waveforms, thumbnails, transcription audio of deleted or replaced assets; clip renders no clip keys). `--dry-run` lists them first. Never touches `assets/`; deleted outputs rebuild on demand. |
 | `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 

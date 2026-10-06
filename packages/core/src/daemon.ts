@@ -257,6 +257,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     if (!openedRoots.has(key)) openedRoots.set(key, dir);
     return openedRoots.get(key)!;
   };
+  /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
+  const transcriptions = new Map<string, number>();
+  const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
+    const key = canonicalPathSync(dir);
+    transcriptions.set(key, (transcriptions.get(key) ?? 0) + 1);
+    try {
+      return await work();
+    } finally {
+      const left = transcriptions.get(key)! - 1;
+      if (left > 0) transcriptions.set(key, left);
+      else transcriptions.delete(key);
+    }
+  };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
     const { cwd, timeline, ...args } = params;
@@ -372,7 +385,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { dir, config } = (await readEnclosingProject(cwd))!;
       const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
       const overrides = { dir, binaries: config.binaries };
-      return transcribeAsset({
+      return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
         providerId,
@@ -386,14 +399,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
         progress: request.progress,
-      });
+      }));
     },
     "transcribe.verify": async ({ cwd, export: file, timeline, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;
       const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
       const overrides = { dir, binaries: config.binaries };
-      return verifyExport({
+      return transcribing(dir, async () => verifyExport({
         projectDir: dir,
         exportFile: resolve(cwd, file),
         timelineId: timeline,
@@ -409,13 +422,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         assetHash: async (rel) => (await media.derivedAudio(dir, rel)).hash,
         extractAudio: options.extractAudio,
         progress: request.progress,
-      });
+      }));
     },
     "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, assets: await media.list(dir) };
+    },
+    gc: async ({ cwd, dryRun }) => {
+      const dir = await root(cwd);
+      const clipDir = clipRoot(dir);
+      const active = [...jobs.list({ project: dir, active: true }), ...clipJobs.list({ project: clipDir, active: true })];
+      const temps = active.length === 0;
+      const busy = active.some((job) => job.kind === "clip" || job.kind === "render");
+      const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
+      const cache = await clips.gc(clipDir, { dryRun, temps, busy });
+      const removed = [...derived.removed, ...cache.removed].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      const skipped = [...derived.skipped, ...cache.skipped];
+      if (!temps) skipped.push({ area: "temp", reason: "jobs of this project are running; temp files may be theirs." });
+      const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
+      return { dir, dryRun, removed, bytes, forgotten: derived.forgotten, skipped };
     },
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "job.list": async ({ cwd, active }) => {

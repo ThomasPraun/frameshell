@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 26;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -137,6 +137,25 @@ const TrustStateSchema = z
 const PinsSchema = z
   .record(z.string(), z.string())
   .describe("Declared plugins from `frameshell.json`: package name to pinned npm spec (exact version or git URL#commit).");
+
+const GcEntrySchema = z.object({
+  path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
+  kind: z
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "temp"])
+    .describe(
+      "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
+        "generated-clip render no timeline uses. `temp`: leftover of an interrupted job or transcription.",
+    ),
+  bytes: z.int().describe("Size on disk; a directory counts its files."),
+});
+
+const GcSkipSchema = z.object({
+  area: z
+    .enum(["media", "clips", "audio", "temp"])
+    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, or job temp files."),
+  reason: z.string(),
+});
 
 const CwdParam = AbsolutePath.describe(
   "Absolute directory inside the project, e.g. `/home/ana/videos/launch`. The project is found searching upwards.",
@@ -717,6 +736,31 @@ export const methods = {
     result: z.object({
       dir: z.string().describe("Project root."),
       assets: z.array(AssetSchema).describe("Sorted by path."),
+    }),
+  },
+  gc: {
+    mutating: true,
+    description:
+      "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
+      "thumbnails, energy envelopes and transcription WAVs of assets deleted or changed since (or built for an older " +
+      "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
+      "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
+      "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
+      "and temp files are skipped while jobs or transcriptions run (`skipped` says why). Deleted outputs rebuild on " +
+      "demand. `dryRun` lists without deleting.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      dryRun: z.boolean().default(false).describe("Only list what would be deleted. Default false."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      dryRun: z.boolean(),
+      removed: z.array(GcEntrySchema).describe("Deleted (or, with `dryRun`, deletable) entries, sorted by path."),
+      bytes: z.int().describe("Total size of `removed`."),
+      forgotten: z
+        .array(z.string())
+        .describe("Media index entries of files that no longer exist; dropped from the index unless `dryRun`."),
+      skipped: z.array(GcSkipSchema).describe("Areas left alone this run, with why; empty when everything was checked."),
     }),
   },
   "job.list": {
@@ -1462,6 +1506,14 @@ export type AssetInfo = z.output<typeof AssetSchema>;
 export type AssetImportParams = MethodParams<"asset.import">;
 /** Result of `asset.import`. */
 export type AssetImportResult = MethodResult<"asset.import">;
+/** `gc` params. */
+export type GcParams = MethodParams<"gc">;
+/** Result of `gc`. */
+export type GcResult = MethodResult<"gc">;
+/** One deleted (or deletable) entry of a {@link GcResult}. */
+export type GcEntry = z.output<typeof GcEntrySchema>;
+/** One area a {@link GcResult} left alone. */
+export type GcSkip = z.output<typeof GcSkipSchema>;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 

@@ -14,6 +14,19 @@ import type { MediaClip, Timeline, Transcript } from "@frameshell/schema";
 import { type WordHearing, alignWords, comparableText } from "./align.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
 import { type TranscriberTools, resolveTranscript } from "./transcriber.js";
+import type { GcClass } from "../gc.js";
+
+/** Project-relative folder of the WAVs `verifyExport` extracts; each lives only while its request runs. */
+export const VERIFY_CACHE_DIR = ".frameshell/cache/verify";
+
+/**
+ * What an entry of {@link VERIFY_CACHE_DIR} is, for `gc`: anything named
+ * after a verify WAV is the leftover of an interrupted run (a temp); other
+ * names are not ours and are kept.
+ */
+export function classifyVerifyCache(name: string, isDirectory: boolean): GcClass {
+  return !isDirectory && /^[0-9a-f]{12}\.wav/.test(name) ? { kind: "temp", key: null } : null;
+}
 
 /** Input of {@link verifyExport}. */
 export interface VerifyExportOptions {
@@ -109,7 +122,7 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
       details,
     });
   };
-  const audio = join(projectDir, ".frameshell", "cache", "verify", `${randomBytes(6).toString("hex")}.wav`);
+  const audio = join(projectDir, ...VERIFY_CACHE_DIR.split("/"), `${randomBytes(6).toString("hex")}.wav`);
   let result: TranscriptionResult;
   let exportSeconds: number | null;
   try {
