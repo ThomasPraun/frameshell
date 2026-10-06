@@ -5,7 +5,9 @@ import type { TranscriptWord } from "@frameshell/plugin-api";
 
 /** Mono 16-bit PCM samples of a transcription WAV. */
 export interface Pcm16 {
+  /** Samples per second. */
   sampleRate: number;
+  /** Mono 16-bit samples, in time order. */
   samples: Int16Array;
 }
 
@@ -71,8 +73,9 @@ export function pcmWavBytes(pcm: Pcm16): Buffer {
 export interface WindowRequest {
   /** Whole recording; the window is cut from it. */
   pcm: Pcm16;
-  /** Window, seconds on the recording's clock; clamped to the recording. */
+  /** Window start, seconds on the recording's clock; clamped to the recording. */
   from: number;
+  /** Window end (exclusive), seconds on the recording's clock; clamped to the recording. */
   to: number;
   /** Existing directory for the temporary window WAV. */
   dir: string;

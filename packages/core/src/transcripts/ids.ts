@@ -32,11 +32,11 @@ export function assignWordIds(fresh: readonly TranscriptWord[], previous: Transc
   let cursor = 0;
   let reusedIds = 0;
   const words = fresh.map((word): TranscriptFileWord => {
-    const text = normalize(word.text);
+    const text = normalizeWordText(word.text);
     let id: string | undefined;
     for (let k = cursor; k < old.length && old[k]!.start <= word.start + SAME_WORD_WINDOW; k++) {
       const candidate = old[k]!;
-      if (Math.abs(candidate.start - word.start) <= SAME_WORD_WINDOW && normalize(candidate.text) === text) {
+      if (Math.abs(candidate.start - word.start) <= SAME_WORD_WINDOW && normalizeWordText(candidate.text) === text) {
         id = candidate.id;
         cursor = k + 1;
         reusedIds++;
@@ -61,8 +61,8 @@ export function assignWordIds(fresh: readonly TranscriptWord[], previous: Transc
   return { words, edits, reusedIds, droppedEdits, nextWordId: next };
 }
 
-/** Case and punctuation differ between runs ("Hola," vs "hola"); the word does not. */
-function normalize(text: string): string {
+/** Word text compared across runs: case and punctuation differ ("Hola," vs "hola"); the word does not. */
+export function normalizeWordText(text: string): string {
   return text.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "");
 }
 

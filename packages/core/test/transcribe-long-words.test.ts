@@ -132,6 +132,69 @@ describe("transcribeAsset: long words (#117)", () => {
     expect(result).toMatchObject({ recoveredWords: 0, speechInside: [] });
   });
 
+  it("drops the previous word's tail heard at the start of the window", async () => {
+    const { dir, extract } = project();
+    // Window time 0 (1.7) catches the end of "Hola": whisper names it again.
+    const { provider } = fakeProvider(FULL, [...words(["hola", 1.7, 2.05]), ...WINDOW], () => 1.7);
+    const result = await run(dir, extract, provider);
+    expect(readTranscript(dir).words.map((word: { text: string }) => word.text)).toEqual(["Hola", "incluido.", "Aquella", "semana,", "otra", "vez.", "Fin"]);
+    expect(result).toMatchObject({ recoveredWords: 4 });
+  });
+
+  it("drops the next word heard inside the span before its lagging onset", async () => {
+    const { dir, extract } = project();
+    // "Fin" really starts at 6.3; the full pass put its onset at 7.0.
+    const { provider } = fakeProvider(FULL, [...WINDOW, ...words(["Fin", 6.3, 6.6])], () => 1.7);
+    const result = await run(dir, extract, provider);
+    expect(readTranscript(dir).words.map((word: { text: string }) => word.text)).toEqual(["Hola", "incluido.", "Aquella", "semana,", "otra", "vez.", "Fin"]);
+    expect(result).toMatchObject({ words: 7, recoveredWords: 4 });
+  });
+
+  it("does not count a window that only repeats neighbours as a recovery", async () => {
+    const { dir, extract } = project();
+    const { provider } = fakeProvider(FULL, words(["Hola", 1.7, 2.05], ["incluido.", 2.0, 6.5], ["Fin", 6.3, 6.6]), () => 1.7);
+    const result = await run(dir, extract, provider);
+    expect(readTranscript(dir).words.map((word: { text: string }) => word.text)).toEqual(["Hola", "incluido.", "Fin"]);
+    expect(result).toMatchObject({ recoveredWords: 0, speechInside: [readTranscript(dir).words[1].id] });
+  });
+
+  it("re-transcribes adjacent long words in one window and recovers words in the gap between them", async () => {
+    // #117's real shape: `incluido.` then `La`, the swallowed phrase running across the gap.
+    const { dir, extract } = project([
+      [0.5, 1.4],
+      [2.0, 2.5],
+      [3.0, 4.0],
+      [4.3, 6.4],
+      [7.0, 7.5],
+    ]);
+    const full = words(["Hola", 0.5, 1.4], ["incluido.", 2.0, 4.2], ["La", 4.9, 6.6], ["Fin", 7.0, 7.5]);
+    const window = words(
+      ["incluido.", 2.0, 2.5],
+      ["Aquella", 3.0, 3.4],
+      ["semana,", 3.5, 4.0],
+      ["otra", 4.3, 4.6],
+      ["vez.", 4.65, 4.85],
+      ["La", 4.9, 5.2],
+      ["misma.", 5.3, 6.4],
+    );
+    // One window over both words and the gap: 1.7-6.9.
+    const { provider, calls } = fakeProvider(full, window, () => 1.7);
+    const result = await run(dir, extract, provider);
+    expect(calls.map((call) => call.seconds)).toEqual([8, expect.closeTo(5.2, 3)]);
+    expect(readTranscript(dir).words.map((word: { text: string }) => word.text)).toEqual([
+      "Hola",
+      "incluido.",
+      "Aquella",
+      "semana,",
+      "otra",
+      "vez.",
+      "La",
+      "misma.",
+      "Fin",
+    ]);
+    expect(result).toMatchObject({ words: 9, recoveredWords: 5, speechInside: [] });
+  });
+
   it("does not read the audio when no word is long", async () => {
     const { dir } = project();
     // Not a WAV: reading it would find nothing; the run must not need it.
