@@ -503,6 +503,8 @@ app.on("will-quit", (event) => {
   const settled = Promise.race([editor.settle().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 500))]);
   void settled.then(() => {
     editorSettled = true;
-    app.quit();
+    // Next task, not this one: with nothing to settle this runs while Electron still handles the prevented quit,
+    // which ignores a nested `app.quit()` and leaves the app running.
+    setImmediate(() => app.quit());
   });
 });
