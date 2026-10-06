@@ -39,6 +39,7 @@ import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTim
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { uiLink } from "../ui-link.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
 
 /** Timeline the panel follows: the one selections name, the project's `main` until timelines can be switched. */
 const TIMELINE = SELECTION_TIMELINE;
@@ -100,7 +101,16 @@ interface Status {
  * The playhead is the shared transport's (preview/transport.ts): it moves while the preview
  * plays (the lanes follow it), and the ruler scrubs it.
  */
-export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+export function TimelinePanel({
+  collapsed,
+  onToggle,
+  onShowTranscript,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  /** Open the transcript view: the header's "Transcript" button. */
+  onShowTranscript?: () => void;
+}) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const empty = layout !== null && layout.clipCount === 0;
@@ -129,6 +139,11 @@ export function TimelinePanel({ collapsed, onToggle }: { collapsed: boolean; onT
           {status?.text ?? ""}
         </span>
         {history !== null && <DiffLegend target={history} marks={marks} />}
+        {onShowTranscript && (
+          <button className="link" aria-label="Show transcript" title={`Open the transcript view (${TRANSCRIPT_SHORTCUT})`} onClick={onShowTranscript}>
+            Transcript
+          </button>
+        )}
         {view && layout && (
           <span className="panel-meta timeline-summary">
             {`${layout.clipCount} ${layout.clipCount === 1 ? "clip" : "clips"}, ${formatTimecode(layout.duration, view.fps)}`}

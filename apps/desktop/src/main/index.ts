@@ -12,6 +12,7 @@ import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
+  type MenuCommand,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -404,6 +405,8 @@ function buildMenu(): void {
     const dir = await pickFolder(state.window);
     if (dir) await openFromWindow(state, dir);
   };
+  // Aimed at the focused window: each window has its own project and editor tabs.
+  const command = (name: MenuCommand) => BrowserWindow.getFocusedWindow()?.webContents.send(Channel.menuCommand, name);
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     {
@@ -417,7 +420,22 @@ function buildMenu(): void {
     },
     // Edit roles make copy/paste work in xterm and Monaco on macOS.
     { role: "editMenu" },
-    { role: "viewMenu" },
+    {
+      label: "View",
+      submenu: [
+        { label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: () => command("showTranscript") },
+        { type: "separator" },
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

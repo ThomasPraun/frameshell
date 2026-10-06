@@ -93,6 +93,12 @@ export type RevertOutcome =
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /**
+ * Command an application menu entry sends to the focused project window.
+ * `showTranscript`: open the transcript view (View > Transcript).
+ */
+export type MenuCommand = "showTranscript";
+
+/**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
  * the preload. The renderer never touches Node or the file system directly.
  */
@@ -169,6 +175,10 @@ export interface FrameshellApi {
      */
     revert(timeline: string, target: string): Promise<RevertOutcome>;
   };
+  menu: {
+    /** Called with each application menu command aimed at this window. Returns an unsubscribe function. */
+    onCommand(listener: (command: MenuCommand) => void): () => void;
+  };
   ui: {
     /**
      * Report what this window shows (SPEC §7b `ui_state`). Fire and forget:
@@ -238,6 +248,7 @@ export const Channel = {
   historyList: "history:list",
   historyDiff: "history:diff",
   historyRevert: "history:revert",
+  menuCommand: "menu:command",
   uiPublish: "ui:publish",
   uiCommand: "ui:command",
   uiReply: "ui:reply",

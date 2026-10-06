@@ -5,7 +5,7 @@ import { askAgent } from "../ask/ask-agent.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
-import { TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
+import { TRANSCRIPT_SHORTCUT, TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
 
 /** One open file. `savedVersion` is Monaco's alternative version id at last load or save: differs = dirty. */
 interface OpenDoc {
@@ -285,7 +285,11 @@ export function EditorArea({
           );
         })}
         {!tabs.includes(TRANSCRIPT_TAB) && (
-          <button className="tab-strip-action" title="Show the transcript of the timeline's media" onClick={() => onOpenFile(TRANSCRIPT_TAB)}>
+          <button
+            className="tab-strip-action"
+            title={`Show the transcript of the timeline's media (${TRANSCRIPT_SHORTCUT})`}
+            onClick={() => onOpenFile(TRANSCRIPT_TAB)}
+          >
             Transcript
           </button>
         )}
@@ -313,7 +317,7 @@ export function EditorArea({
       {active === TRANSCRIPT_TAB && <TranscriptView onOpenFile={onOpenFile} focus={transcriptFocus} />}
       {!active && (
         <div className="empty editor-empty">
-          <p>Open a script or JSON file from the explorer.</p>
+          <p>Open a script or JSON file from the explorer, or the transcript ({TRANSCRIPT_SHORTCUT}).</p>
           <p className="hint">Saved files go through frameshelld, so the agent sees your edits right away.</p>
         </div>
       )}
