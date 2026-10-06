@@ -38,7 +38,8 @@ const INDEX_FILE = ".frameshell/media.json";
 
 /** A {@link MediaStore.key}: 20 hex digits of the content hash, fps (`30`, `30000_1001`), recipe. */
 const KEY = String.raw`[0-9a-f]{20}-\d+(?:_\d+)?-r\d+`;
-const PROXY_FILE = new RegExp(String.raw`^(${KEY})\.(mp4|pcm|json)$`);
+/** Proxy (`.mp4`, or `.webm` for a source with alpha), PCM sidecar, manifest. */
+const PROXY_FILE = new RegExp(String.raw`^(${KEY})\.(mp4|webm|pcm|json)$`);
 const WAVEFORM_FILE = new RegExp(String.raw`^(${KEY})\.json$`);
 const THUMBS_DIR = new RegExp(String.raw`^(${KEY})$`);
 /** Build temps (`.<pid>-<time>.partial`) and atomic-write temps (`.<pid>.<hex>.tmp`) of a key's outputs. */
@@ -61,7 +62,7 @@ export function classifyDerived(area: keyof typeof DERIVED_DIRS, name: string, i
   }
   const match = PROXY_FILE.exec(name);
   if (!match) return null;
-  return { kind: match[2] === "mp4" ? "proxy" : match[2] === "pcm" ? "sidecar" : "manifest", key: match[1]! };
+  return { kind: match[2] === "mp4" || match[2] === "webm" ? "proxy" : match[2] === "pcm" ? "sidecar" : "manifest", key: match[1]! };
 }
 
 /**

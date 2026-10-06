@@ -31,11 +31,12 @@ function age(path: string, ageMs: number): void {
   utimesSync(path, when, when);
 }
 
-/** Every derived file of cache key `key` as ingest names them. */
+/** Every derived file of cache key `key` as ingest names them (a real key has one proxy: `.mp4`, or `.webm` with alpha). */
 function plantOutputs(root: string, key: string, ageMs = 0): string[] {
   const rels = [
     `.frameshell/proxies/${key}.json`,
     `.frameshell/proxies/${key}.mp4`,
+    `.frameshell/proxies/${key}.webm`,
     `.frameshell/proxies/${key}.pcm`,
     `.frameshell/waveforms/${key}.json`,
     `.frameshell/thumbs/${key}/0001.jpg`,
