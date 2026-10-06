@@ -48,10 +48,21 @@ const rippleArg = (what: string) =>
     .boolean()
     .optional()
     .describe(
-      `${what} Applies to every video and audio track, like \`cut\`, so tracks stay in sync; clips crossing the ` +
+      `${what} Applies to every video and audio track (or only \`rippleTracks\`), like \`cut\`, so tracks stay in sync; clips crossing the ` +
         "insertion point stay where they are. Default false: nothing else moves, and a clip that would overlap its " +
         "neighbour is refused.",
     );
+
+/** `rippleTracks` arg of `clip.trim` and `clip.add`: which tracks a ripple moves. */
+const rippleTracksArg = z
+  .array(TrackRef)
+  .min(1)
+  .optional()
+  .describe(
+    "With `ripple: true`: the only video and audio tracks whose later clips move; the clip's own track always moves. " +
+      "Default: every video and audio track. Leave out a track whose later clips would leave a gap (black, silence) " +
+      "behind them, e.g. footage or music under a restored voice line; that track keeps its timing.",
+  );
 
 /** Source-seconds range a snapped edge must stay in. */
 const SnapRangeSchema = z
@@ -163,6 +174,7 @@ export const operationArgs = {
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
     ripple: rippleArg("Make room: clips starting at or after `start` move right by the new clip's length."),
+    rippleTracks: rippleTracksArg,
     snap: z
       .boolean()
       .optional()
@@ -190,6 +202,7 @@ export const operationArgs = {
       "Ripple: the clip keeps its left edge and later clips move by the change in length (extending pushes them right, " +
         "shortening pulls them left). Clips starting inside the clip move by the head change only.",
     ),
+    rippleTracks: rippleTracksArg,
   }),
   "clip.split": z.strictObject({
     clip: ClipRef,
