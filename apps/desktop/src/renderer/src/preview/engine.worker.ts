@@ -16,7 +16,7 @@ import {
 } from "./engine-protocol.js";
 import { type Program, type VideoSpan, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
-import { type EncodedPicture, type VideoSource, openVideoSource } from "./video-source.js";
+import { type EncodedPicture, type VideoSource, isReadWhole, openVideoSource } from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
 interface WorkerScope {
@@ -48,7 +48,7 @@ interface Ready {
   from: number;
   to: number;
   frame: VideoFrame;
-  /** Alpha of a render with alpha; null when opaque. */
+  /** Alpha of a render or proxy with alpha; null when opaque. */
   alpha: AlphaPlane | null;
 }
 
@@ -102,7 +102,7 @@ function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | nu
 
 /**
  * The decode pipeline of one video layer: its own `VideoDecoder` (plus one
- * for the alpha plane of renders with alpha), fed the layer's media and
+ * for the alpha plane of renders and proxies with alpha), fed the layer's media and
  * rendered spans from a program frame on, keeping up to {@link MAX_AHEAD}
  * decoded frames in program order.
  */
@@ -413,7 +413,7 @@ type Still = { state: "loading" } | { state: "ready"; bitmap: ImageBitmap } | { 
 /** One picture of a composite: what to draw and where. */
 interface Part {
   image: CanvasImageSource;
-  /** Alpha of `image` (a decoded render with alpha). */
+  /** Alpha of `image` (a decoded render or proxy with alpha). */
   alpha: AlphaPlane | null;
   size: Size;
   placement: Placement;
@@ -555,7 +555,7 @@ class Engine implements LayerHost {
       }
     }
     // Renders are held in memory whole: drop the ones no longer played (proxy indexes are small, kept).
-    for (const path of this.#sources.keys()) if (!used.has(path) && path.toLowerCase().endsWith(".webm")) this.#sources.delete(path);
+    for (const path of this.#sources.keys()) if (!used.has(path) && isReadWhole(path)) this.#sources.delete(path);
     this.#forgetStills(next);
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();

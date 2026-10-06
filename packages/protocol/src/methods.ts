@@ -278,8 +278,9 @@ const AssetSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "Project-relative CFR proxy: H.264 at project fps, GOP 15, no B-frames (frame index = sample index), faststart, " +
-        "short side at most 540 px. Null for audio-only, still images, or before ingest.",
+      "Project-relative CFR proxy: H.264 `.mp4` at project fps, GOP 15, no B-frames (frame index = sample index), " +
+        "faststart, short side at most 540 px; `.webm` (VP9 with its alpha plane, same frame grid and GOP, no audio) when " +
+        "the source has alpha. Null for audio-only, still images, or before ingest.",
     ),
   sidecar: z
     .object({
