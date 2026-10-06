@@ -14,7 +14,7 @@ import type { MediaClip, Timeline, Transcript } from "@frameshell/schema";
 import { type WordHearing, alignWords, comparableText } from "./align.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
 import { type TranscriberTools, resolveTranscript } from "./transcriber.js";
-import { readPcmWav, transcribeWindow } from "./window.js";
+import { classifyWindowWav, readPcmWav, transcribeWindow } from "./window.js";
 import type { GcClass } from "../gc.js";
 
 /** Project-relative folder of the WAVs `verifyExport` extracts; each lives only while its request runs. */
@@ -22,12 +22,13 @@ export const VERIFY_CACHE_DIR = ".frameshell/cache/verify";
 
 /**
  * What an entry of {@link VERIFY_CACHE_DIR} is, for `gc`: anything named
- * after a verify WAV (the extracted export audio, or a `window-` re-check
- * cut from it) is the leftover of an interrupted run (a temp); other names
- * are not ours and are kept.
+ * after a verify WAV (the extracted export audio, or a window re-check cut
+ * from it) is the leftover of an interrupted run (a temp); other names are
+ * not ours and are kept.
  */
 export function classifyVerifyCache(name: string, isDirectory: boolean): GcClass {
-  return !isDirectory && /^(window-)?[0-9a-f]{12}\.wav/.test(name) ? { kind: "temp", key: null } : null;
+  if (!isDirectory && /^[0-9a-f]{12}\.wav/.test(name)) return { kind: "temp", key: null };
+  return classifyWindowWav(name, isDirectory);
 }
 
 /** Input of {@link verifyExport}. */

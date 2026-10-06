@@ -161,11 +161,13 @@ describe("MediaService.gc", () => {
       `.frameshell/cache/audio/${audioCacheKey(hash)}-asset.wav.123.tmp.wav`,
       ".frameshell/cache/verify/0123456789ab.wav",
       ".frameshell/cache/verify/window-0123456789ab.wav",
+      ".frameshell/cache/transcribe/window-0123456789ab.wav",
     ];
     plant(root, stale[0]!);
     for (const rel of stale.slice(1)) plant(root, rel, "x", TEMP_MIN_AGE_MS + 60_000);
     const young = plant(root, ".frameshell/cache/verify/ba9876543210.wav");
     const foreign = plant(root, ".frameshell/cache/audio/notes.txt");
+    const foreignWindow = plant(root, ".frameshell/cache/transcribe/notes.txt", "x", TEMP_MIN_AGE_MS + 60_000);
 
     const busy = await media.gc(root, { dryRun: false, temps: true, hashUnknown: true, transcribing: true });
     expect(busy.removed).toEqual([]);
@@ -179,12 +181,14 @@ describe("MediaService.gc", () => {
         [stale[1], "temp"],
         [stale[2], "temp"],
         [stale[3], "temp"],
+        [stale[4], "temp"],
       ].sort(),
     );
     for (const rel of stale) expect(existsSync(join(root, rel))).toBe(false);
     for (const rel of current) expect(existsSync(join(root, rel))).toBe(true);
     expect(existsSync(young)).toBe(true);
     expect(existsSync(foreign)).toBe(true);
+    expect(existsSync(foreignWindow)).toBe(true);
   });
 
   it("without hashing, keeps all derived media while a file's content is unknown", async () => {

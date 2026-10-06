@@ -11,7 +11,7 @@ import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
-import { readPcmWav, transcribeWindow } from "./window.js";
+import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
 
 /** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
 export const AUDIO_CACHE_DIR = ".frameshell/cache/audio";
@@ -156,7 +156,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     return failed(error);
   }
 
-  const windowDir = join(projectDir, ".frameshell", "cache", "transcribe");
+  const windowDir = join(projectDir, ...TRANSCRIBE_WINDOW_DIR.split("/"));
   const long = await recoverLongWords({
     words: result.words,
     loadPcm: () => readPcmWav(audio),

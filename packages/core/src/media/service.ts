@@ -24,6 +24,7 @@ import { renameRetrying } from "../fs-util.js";
 import { sweep } from "../gc.js";
 import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcripts/transcriber.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
+import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
 
 /** Project-relative directory the watcher and import own. */
 const ASSETS_DIR = "assets";
@@ -316,6 +317,7 @@ export class MediaService {
       removed.push(
         ...(await sweep({ ...common, dir: AUDIO_CACHE_DIR, classify: classifyAudioCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
         ...(await sweep({ ...common, dir: VERIFY_CACHE_DIR, classify: classifyVerifyCache, keep: () => true })),
+        ...(await sweep({ ...common, dir: TRANSCRIBE_WINDOW_DIR, classify: classifyWindowWav, keep: () => true })),
       );
     }
     removed.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

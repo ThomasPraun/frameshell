@@ -2,6 +2,22 @@ import { randomBytes } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TranscriptWord } from "@frameshell/plugin-api";
+import type { GcClass } from "../gc.js";
+
+/** Project-relative folder of the window WAVs `transcribe` cuts to re-check long words; each lives only while its request runs. */
+export const TRANSCRIBE_WINDOW_DIR = ".frameshell/cache/transcribe";
+
+/** Name of a WAV {@link transcribeWindow} writes. */
+const WINDOW_WAV = /^window-[0-9a-f]{12}\.wav$/;
+
+/**
+ * What an entry of a folder holding {@link transcribeWindow} WAVs is, for
+ * `gc`: a window WAV is the leftover of an interrupted run (a temp); other
+ * names are not ours and are kept.
+ */
+export function classifyWindowWav(name: string, isDirectory: boolean): GcClass {
+  return !isDirectory && WINDOW_WAV.test(name) ? { kind: "temp", key: null } : null;
+}
 
 /** Mono 16-bit PCM samples of a transcription WAV. */
 export interface Pcm16 {
