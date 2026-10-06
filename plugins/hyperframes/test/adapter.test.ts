@@ -138,6 +138,37 @@ describe("hyperframes adapter", () => {
     await expect(adapter.render({ id: "c_9", source: "compositions/hyperframes/intro/logo.png" }, ctx)).rejects.toThrow(/HTML entry/);
   });
 
+  it("passes no variables without props, so the composition's declared defaults apply (#116)", async () => {
+    const { producer, calls } = fakeProducer();
+    const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+    await adapter.render({ id: "c_1", source: SOURCE }, context(tempDir()).ctx);
+    expect(calls[0]!.config).toMatchObject({ variables: {} });
+  });
+
+  it("refuses variables declared as an object, which HyperFrames ignores, and prints the array to use (#116)", async () => {
+    const { producer, calls } = fakeProducer();
+    const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+    const dir = join(project, "compositions", "hyperframes", "intro");
+    writeFileSync(join(dir, "index.html"), `<html data-composition-variables='{"title":"Orkestra","size":3}'></html>`);
+    const out = tempDir();
+    await expect(adapter.render({ id: "c_1", source: SOURCE }, context(out).ctx)).rejects.toThrow(
+      `hyperframes clip c_1: ${SOURCE} declares data-composition-variables as an object, which HyperFrames ignores, so its defaults never apply. ` +
+        `Declare an array of {id, type, label, default} instead: data-composition-variables='[{"id":"title","type":"string","label":"title","default":"Orkestra"},` +
+        `{"id":"size","type":"number","label":"size","default":3}]'`,
+    );
+    // Any HTML file of the composition counts (sub-compositions); double-quoted values are entity-decoded.
+    writeFileSync(join(dir, "index.html"), `<html data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Hi"}]'></html>`);
+    writeFileSync(join(dir, "img", "part.html"), `<div data-composition-variables="{&quot;x&quot;:true}"></div>`);
+    await expect(adapter.render({ id: "c_1", source: SOURCE }, context(out).ctx)).rejects.toThrow(
+      /intro\/img\/part\.html declares .*'\[\{"id":"x","type":"boolean","label":"x","default":true\}\]'/,
+    );
+    expect(calls).toEqual([]);
+    // Array declarations, and values the producer itself reports, render.
+    writeFileSync(join(dir, "img", "part.html"), `<div data-composition-variables="not json"></div>`);
+    await adapter.render({ id: "c_1", source: SOURCE }, context(tempDir()).ctx);
+    expect(calls).toHaveLength(1);
+  });
+
   it("accepts plain JSON props only", async () => {
     const validate = (value: unknown) => propsSchema["~standard"].validate(value);
     expect(await validate({ title: "Launch", colors: ["#fff"], n: 1, on: true })).toEqual({ value: { title: "Launch", colors: ["#fff"], n: 1, on: true } });
@@ -178,6 +209,9 @@ describe("frameshell hyperframes new", () => {
     expect(html).toContain('data-composition-id="outro" data-width="2560" data-height="1440" data-duration="4"');
     expect(html).toContain('data-duration="4"');
     expect(html).toContain("getVariables()");
+    // HyperFrames reads declared defaults only from an array of {id, type, label, default} (#116).
+    const declared = /data-composition-variables='([^']*)'/.exec(html)?.[1];
+    expect(JSON.parse(declared!)).toEqual([{ id: "title", type: "string", label: "Title", default: "Title" }]);
   });
 
   it("never overwrites, and rejects bad names and flags", async () => {

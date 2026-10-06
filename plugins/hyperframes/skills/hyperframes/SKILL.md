@@ -23,7 +23,7 @@ Done = every hyperframes clip is `ready` and a captured frame shows it where int
 - The root element carries `data-composition-id`, `data-width`, `data-height` (the project resolution, from `frameshell.json`) and `data-duration` (seconds). The render is exactly that size and length.
 - Timed elements carry `data-start`, `data-duration` and `data-track-index`. Animate with CSS animations or a paused GSAP timeline registered as `window.__timelines["<composition id>"]`; HyperFrames drives the clock, so wall time never applies.
 - Transparency: leave `html`, `body` and the root unpainted; the footage shows through. Backgrounds on inner elements (cards, panels) are kept, including partial alpha.
-- Props are composition variables: declare defaults on `<html data-composition-variables='{"title":"Title"}'>` and read them with `window.__hyperframes.getVariables()`. Changing `props` (`frameshell clip set <clip> --props …`) re-renders that clip only.
+- Props are composition variables: declare each one with its default as an array on the root, `<html data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Title"}]'>` (`type`: `string`, `number`, `color`, `boolean`, `enum`, `font` or `image`), and read them with `window.__hyperframes.getVariables()`: the clip's `props` merged over the defaults. An object (`'{"title":"Title"}'`) is not a declaration; the render fails with the array to use instead. Changing `props` (`frameshell clip set <clip> --props …`) re-renders that clip only.
 - Clip `in` is composition seconds shown at the clip's start; `duration` is how long it plays. Moving, trimming or changing `transform` (`--x --y --scale --opacity`) never re-renders.
 
 ## Export
