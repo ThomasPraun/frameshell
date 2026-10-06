@@ -33,7 +33,7 @@ exports/                 render output
 
 `transcripts/<asset minus extension>.words.json` (extension kept when two assets share a base name; the file's `asset` field names its asset):
 
-- `words`: `{ id: "w_000001", text, start, end, confidence }`, source seconds of that asset. An id always names the same word, across re-transcriptions.
+- `words`: `{ id: "w_000001", text, start, end, confidence }`, source seconds of that asset. An id always names the same word, across re-transcriptions. `speechInside: true`: the span hides more speech than the word; never cut inside it.
 - `edits`: human corrections keyed by word id, `{ "w_000002": { "text": "a todos" } }`. Subtitles and verify show the edited text. Correct a word by adding to `edits`; leave `words` as the engine wrote them.
 - `assetHash`: the transcript is stale when the asset changes; re-run `transcribe`.
 

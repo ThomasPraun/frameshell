@@ -31,6 +31,8 @@ export interface TranscriptWord {
   end: number;
   /** Earliest first; empty when every clip cut it (struck). */
   placements: Placement[];
+  /** The span hides speech the transcript lacks (transcript `speechInside`): never cut inside it. */
+  speechInside: boolean;
 }
 
 /** The words of one asset on the timeline, in source order. */
@@ -135,7 +137,8 @@ export function buildTranscriptModel(view: TimelineView, sources: readonly Trans
         const key = `${path}#${word.id}`;
         const placements = place(clips, word.start, word.end);
         for (const { from, to } of placements) timeline.push({ from, to, key });
-        return { key, id: word.id, text: transcript.edits[word.id]?.text ?? word.text, start: word.start, end: word.end, placements };
+        const text = transcript.edits[word.id]?.text ?? word.text;
+        return { key, id: word.id, text, start: word.start, end: word.end, placements, speechInside: word.speechInside === true };
       });
     assets.push({ asset, path, words });
   }

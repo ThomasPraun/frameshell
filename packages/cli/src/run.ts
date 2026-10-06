@@ -577,6 +577,10 @@ function formatTranscribe(result: TranscribeResult): string {
     const dropped = result.droppedEdits.length > 0 ? `; dropped ${result.droppedEdits.length} (${result.droppedEdits.join(", ")})` : "";
     lines.push(`  kept ${result.keptEdits} human edit${result.keptEdits === 1 ? "" : "s"}${dropped}`);
   }
+  if (result.recoveredWords > 0) lines.push(`  recovered ${result.recoveredWords} word${result.recoveredWords === 1 ? "" : "s"} hidden in long words`);
+  if (result.speechInside.length > 0) {
+    lines.push(`  warning: ${result.speechInside.join(", ")} hide${result.speechInside.length === 1 ? "s" : ""} untranscribed speech; never cut inside`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

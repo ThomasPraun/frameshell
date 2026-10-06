@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 26;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -809,6 +809,18 @@ export const methods = {
       reusedIds: z.int().describe("Words that kept the id they had in the previous transcript."),
       keptEdits: z.int().describe("Human edits carried over from the previous transcript."),
       droppedEdits: z.array(z.string()).describe("Ids of human edits dropped because their word was not found again."),
+      recoveredWords: z
+        .int()
+        .describe(
+          "Words recovered by re-transcribing alone a word that lasted far too long and held more speech (whisper can " +
+            "swallow a repeated phrase into one word); they replace it.",
+        ),
+      speechInside: z
+        .array(z.string())
+        .describe(
+          "Ids of words still far too long with speech inside after that (`speechInside: true` in the file): they hide " +
+            "words the transcript lacks. Never cut inside them; check by ear.",
+        ),
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
     }),
   },
