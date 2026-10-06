@@ -88,7 +88,26 @@ interface FfprobeStream {
   avg_frame_rate?: string;
   sample_rate?: string;
   channels?: number;
+  pix_fmt?: string;
   disposition?: { attached_pic?: number };
+  tags?: Record<string, string>;
+}
+
+/** ffmpeg pixel formats with an alpha plane or channel. */
+const ALPHA_PIX_FMT = /^(yuva|ayuv|rgba|bgra|argb|abgr|gbrap|ya\d)/;
+
+/** How ffmpeg must decode a source's video so its alpha survives. */
+export interface SourceAlpha {
+  /** `-c:v` to put before `-i`; null when the default decoder keeps alpha. */
+  decoder: "libvpx-vp9" | "libvpx" | null;
+}
+
+/** {@link probeMedia} plus what only ingest needs. */
+export interface SourceProbe {
+  /** What {@link probeMedia} returns. */
+  media: MediaProbe;
+  /** Alpha of the first video stream; null when opaque or absent. */
+  alpha: SourceAlpha | null;
 }
 
 /**
@@ -96,6 +115,15 @@ interface FfprobeStream {
  * read it; a readable file with no audio or video yields both null.
  */
 export async function probeMedia(ffprobe: string, path: string, signal?: AbortSignal): Promise<MediaProbe> {
+  return (await probeSource(ffprobe, path, signal)).media;
+}
+
+/**
+ * {@link probeMedia} with alpha detection. VP8/VP9 alpha is a side stream
+ * ffprobe reports as `yuv420p`: only the `alpha_mode=1` tag shows it, and
+ * only libvpx decodes it (ADR 0002). Other formats show alpha in `pix_fmt`.
+ */
+export async function probeSource(ffprobe: string, path: string, signal?: AbortSignal): Promise<SourceProbe> {
   const out = await runTool(ffprobe, ["-v", "error", "-show_format", "-show_streams", "-of", "json", path], {
     ...(signal ? { signal } : {}),
   });
@@ -109,7 +137,7 @@ export async function probeMedia(ffprobe: string, path: string, signal?: AbortSi
   const still = /(^|,)(image2|\w+_pipe)(,|$)/.test(format);
   const avg = rate(video?.avg_frame_rate);
   const real = rate(video?.r_frame_rate);
-  return {
+  const media: MediaProbe = {
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     format,
     video: video
@@ -127,6 +155,14 @@ export async function probeMedia(ffprobe: string, path: string, signal?: AbortSi
       ? { codec: audio.codec_name ?? "unknown", sampleRate: Number(audio.sample_rate) || 0, channels: audio.channels ?? 0 }
       : null,
   };
+  return { media, alpha: video && !still ? alphaOf(video) : null };
+}
+
+function alphaOf(stream: FfprobeStream): SourceAlpha | null {
+  const tagged = Object.entries(stream.tags ?? {}).some(([key, value]) => key.toLowerCase() === "alpha_mode" && value === "1");
+  if (tagged && stream.codec_name === "vp9") return { decoder: "libvpx-vp9" };
+  if (tagged && stream.codec_name === "vp8") return { decoder: "libvpx" };
+  return ALPHA_PIX_FMT.test(stream.pix_fmt ?? "") ? { decoder: null } : null;
 }
 
 /** `30000/1001` → 29.97; null for `0/0` or garbage. */

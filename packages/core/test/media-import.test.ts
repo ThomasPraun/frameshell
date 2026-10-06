@@ -7,14 +7,16 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import {
   SYNC_MARK_S,
   ffprobeJson,
+  firstFrameRgba,
   firstLoudSample,
   frameLuma,
   makeClip,
   makeVfrRecording,
+  makeVp9Clip,
   readS16le,
   topLevelBoxes,
 } from "./media-fixtures.js";
-import { testBinaryManager } from "./media-tools.js";
+import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
 // Real managed ffmpeg on tiny synthetic media: the proxy recipe (ADR 0001) is only proven by decoding the output.
 const MEDIA_TIMEOUT = 120_000;
@@ -130,6 +132,87 @@ describe("asset import", () => {
       expect(Math.abs(beepS - SYNC_MARK_S)).toBeLessThanOrEqual(1 / 30);
       expect(Math.abs(flashS - SYNC_MARK_S)).toBeLessThanOrEqual(1 / 30);
       expect(Math.abs(flashS - beepS)).toBeLessThanOrEqual(1 / 30);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "keeps the alpha of a VP9-alpha source in a VP9-alpha WebM proxy on the same CFR grid and GOP (#90)",
+    async () => {
+      const source = join(tempDir(), "overlay.webm");
+      await makeVp9Clip(source);
+      const { asset, job } = await importOne(source);
+      expect(job).toMatchObject({ state: "done", error: null });
+      const info = await assetInfo(asset);
+      expect(info.proxy).toMatch(/^\.frameshell\/proxies\/.+\.webm$/);
+      expect(info.sidecar).toMatchObject({ format: "s16le", sampleRate: 48000 });
+      expect(info.thumbnails!.count).toBeGreaterThanOrEqual(1);
+      const proxy = join(project, info.proxy!);
+
+      const probed = (await ffprobeJson(proxy, [
+        "-show_entries",
+        "stream=codec_type,codec_name,width,height,r_frame_rate,color_space,color_range:stream_tags=alpha_mode:packet=flags",
+      ])) as {
+        streams: { codec_type: string; codec_name: string; r_frame_rate: string; tags?: { alpha_mode?: string } }[];
+        packets: { flags: string }[];
+      };
+      // Video only: the preview plays the PCM sidecar.
+      expect(probed.streams).toEqual([
+        expect.objectContaining({
+          codec_type: "video",
+          codec_name: "vp9",
+          width: 320,
+          height: 180,
+          r_frame_rate: "30/1",
+          color_space: "bt709",
+          color_range: "tv",
+          tags: { alpha_mode: "1" },
+        }),
+      ]);
+      // 1 s at project fps 30, keyframes exactly at 0 and 15.
+      expect(probed.packets).toHaveLength(30);
+      expect(probed.packets.flatMap((p, i) => (p.flags.startsWith("K") ? [i] : []))).toEqual([0, 15]);
+
+      // The alpha itself survived: left half opaque, right half about 64.
+      const rgba = await firstFrameRgba(proxy);
+      expect(rgba.length).toBe(320 * 180 * 4);
+      const alphaAt = (x: number, y: number) => rgba[(y * 320 + x) * 4 + 3]!;
+      expect(alphaAt(40, 90)).toBeGreaterThan(245);
+      expect(Math.abs(alphaAt(280, 90) - 64)).toBeLessThan(12);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "detects alpha carried in the pixel format (QuickTime Animation, argb) and keeps it in a WebM proxy",
+    async () => {
+      const source = join(tempDir(), "lower-third.mov");
+      const { ffmpeg } = await mediaTools();
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"],
+        ...["-i", "color=c=red@0.25:s=64x36:r=30:d=0.5,format=argb", "-c:v", "qtrle", "-pix_fmt", "argb", source],
+      ]);
+      const { asset } = await importOne(source);
+      const info = await assetInfo(asset);
+      expect(info.proxy).toMatch(/\.webm$/);
+      const rgba = await firstFrameRgba(join(project, info.proxy!));
+      expect(Math.abs(rgba[(18 * 64 + 32) * 4 + 3]! - 64)).toBeLessThan(12);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "builds the usual H.264 MP4 proxy for an opaque VP9 source",
+    async () => {
+      const source = join(tempDir(), "opaque.webm");
+      await makeVp9Clip(source, { alpha: false });
+      const { asset } = await importOne(source);
+      const info = await assetInfo(asset);
+      expect(info.proxy).toMatch(/^\.frameshell\/proxies\/.+\.mp4$/);
+      const { streams } = (await ffprobeJson(join(project, info.proxy!), ["-select_streams", "v:0", "-show_entries", "stream=codec_name"])) as {
+        streams: { codec_name: string }[];
+      };
+      expect(streams[0]!.codec_name).toBe("h264");
     },
     MEDIA_TIMEOUT,
   );
