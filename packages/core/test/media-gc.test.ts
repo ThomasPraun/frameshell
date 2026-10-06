@@ -159,6 +159,7 @@ describe("MediaService.gc", () => {
       `.frameshell/cache/audio/${audioCacheKey(gone)}-sidecar.wav`,
       `.frameshell/cache/audio/${audioCacheKey(hash)}-asset.wav.123.tmp.wav`,
       ".frameshell/cache/verify/0123456789ab.wav",
+      ".frameshell/cache/verify/window-0123456789ab.wav",
     ];
     plant(root, stale[0]!);
     for (const rel of stale.slice(1)) plant(root, rel, "x", TEMP_MIN_AGE_MS + 60_000);
@@ -176,6 +177,7 @@ describe("MediaService.gc", () => {
         [stale[0], "audio"],
         [stale[1], "temp"],
         [stale[2], "temp"],
+        [stale[3], "temp"],
       ].sort(),
     );
     for (const rel of stale) expect(existsSync(join(root, rel))).toBe(false);

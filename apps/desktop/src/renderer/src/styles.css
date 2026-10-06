@@ -1639,6 +1639,13 @@ code {
   background: rgba(224, 103, 95, 0.12);
 }
 
+/* Word hiding untranscribed speech (`speechInside`): never cut inside it. */
+.tw.has-speech-inside {
+  text-decoration: underline wavy rgba(227, 165, 60, 0.85);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 .tw.is-restoring {
   opacity: 0.5;
   cursor: progress;

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TranscriptWord, TranscriptionProvider } from "@frameshell/plugin-api";
@@ -6,7 +6,6 @@ import { ErrorCode, methods } from "@frameshell/protocol";
 import { type Timeline, parseTimeline, parseTranscript } from "@frameshell/schema";
 import { type AudioExtractor, type AudioInput, type TranscriberTools, verifyExport } from "../src/index.js";
 import { tempDir } from "./helpers.js";
-import { toneWav } from "./whisper-fixture.js";
 
 /**
  * Source take `assets/raw-01.mp4`, source seconds. Pauses at 1.4–2.2, 2.8–3.4,
@@ -146,17 +145,60 @@ function project(): string {
   return dir;
 }
 
-/** Provider replaying `words` for any audio; records what it was asked. */
-function fakeProvider(words: TranscriptWord[]) {
-  const calls: { audio: string; options: unknown }[] = [];
+/** What a re-check of export seconds `[from, to)` hears, on the export clock. */
+type WindowHearing = (from: number, to: number) => TranscriptWord[];
+
+/**
+ * Provider replaying `words` for the whole export. A later call is a re-check
+ * window: its start comes from the timecode audio of {@link fakeExtract}, and
+ * it hears `window(from, to)` (default: the same as the full pass), returned
+ * relative to the window like a real provider. Records what it was asked.
+ */
+function fakeProvider(words: TranscriptWord[], window?: WindowHearing) {
+  const calls: { audio: string; options: unknown; window?: { from: number; to: number } }[] = [];
   const provider: TranscriptionProvider = {
     id: "fake",
     async transcribe(audio, options) {
-      calls.push({ audio, options });
-      return { model: options.model ?? "fake-default", language: "es", words };
+      if (calls.length === 0) {
+        calls.push({ audio, options });
+        return { model: options.model ?? "fake-default", language: "es", words };
+      }
+      const wav = readFileSync(audio);
+      const from = (wav.readInt16LE(44) * TIMECODE_STEP) / 16_000;
+      const to = from + (wav.length - 44) / 2 / 16_000;
+      calls.push({ audio, options, window: { from, to } });
+      const heardThere = (window ?? ((a, b) => words.filter((word) => word.end > a && word.start < b)))(from, to);
+      return {
+        model: options.model ?? "fake-default",
+        language: "es",
+        words: heardThere.map((word) => ({ ...word, start: word.start - from, end: word.end - from })),
+      };
     },
   };
   return { provider, calls };
+}
+
+/** Samples per timecode step of {@link timecodeWav}. */
+const TIMECODE_STEP = 16;
+
+/** 16 kHz mono WAV whose sample i holds `i / TIMECODE_STEP`: any slice tells where it starts (1 ms steps). */
+function timecodeWav(seconds: number): Buffer {
+  const count = Math.round(seconds * 16_000);
+  const wav = Buffer.alloc(44 + count * 2);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + count * 2, 4);
+  wav.write("WAVEfmt ", 8, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(16_000, 24);
+  wav.writeUInt32LE(32_000, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(count * 2, 40);
+  for (let i = 0; i < count; i++) wav.writeInt16LE(Math.floor(i / TIMECODE_STEP), 44 + i * 2);
+  return wav;
 }
 
 const noTools: TranscriberTools = {
@@ -164,18 +206,23 @@ const noTools: TranscriberTools = {
   ensureModel: async (id) => `/models/${id}`,
 };
 
-/** Extractor stand-in: a silent WAV as long as the export. Records its inputs. */
+/** Extractor stand-in: a timecode WAV as long as the export. Records its inputs. */
 function fakeExtract(seconds = TIMELINE_SECONDS) {
   const inputs: AudioInput[] = [];
   const extract: AudioExtractor = async (input, output) => {
     inputs.push(input);
-    writeFileSync(output, toneWav(seconds, []));
+    writeFileSync(output, timecodeWav(seconds));
   };
   return { extract, inputs };
 }
 
-function run(dir: string, words: TranscriptWord[], extra: Partial<Parameters<typeof verifyExport>[0]> = {}) {
-  const fake = fakeProvider(words);
+function run(
+  dir: string,
+  words: TranscriptWord[],
+  extra: Partial<Parameters<typeof verifyExport>[0]> = {},
+  window?: WindowHearing,
+) {
+  const fake = fakeProvider(words, window);
   const extractor = fakeExtract();
   const result = verifyExport({
     projectDir: dir,
@@ -307,6 +354,47 @@ describe("verifyExport", () => {
         expect.objectContaining({ clip: "c_0003", reason: "stale-transcript" }),
       ]),
     );
+  });
+
+  it("re-checks each word at a cut in its own audio window before reporting it lost", async () => {
+    const dir = project();
+    const { result, calls } = run(dir, heard("c1", "c2FirstVamos", "c2", "c3"));
+    const report = await result;
+    expect(report.lost.map((word) => word.word)).toEqual(["w_000019", "w_000023"]);
+    // Both candidates sit within 5 s of each other: one window around them, clamped to the export.
+    expect(calls.slice(1).map((call) => call.window)).toEqual([{ from: expect.closeTo(1.65, 2), to: expect.closeTo(TIMELINE_SECONDS, 2) }]);
+    for (const call of calls) expect(existsSync(call.audio)).toBe(false);
+  });
+
+  it("does not report a word lost when its own window hears it (#115)", async () => {
+    const dir = project();
+    // The full pass skips "Hoy" (0.1 s inside c2's in point, not clipped); a window around it hears it.
+    const all = heard("c1", "c2FirstVamos", "c2", "importante", "gracias", "c3");
+    const full = all.filter((word) => word.text !== "Hoy" && word.text !== "eh");
+    const report = await run(dir, full, {}, (from, to) => all.filter((word) => word.end > from && word.start < to)).result;
+    expect(report.lost).toEqual([]);
+    expect(report.uncertain).toEqual([]);
+    expect(report.heard).toBe(report.expected);
+  });
+
+  it("reports a missed word whole inside its clip as unheard, never lost, even at a cut (#115)", async () => {
+    const dir = project();
+    const full = heard("c1", "c2FirstVamos", "c2", "importante", "gracias", "c3").filter((word) => word.text !== "Hoy" && word.text !== "eh");
+    const report = await run(dir, full).result;
+    expect(report.lost).toEqual([]);
+    expect(report.uncertain).toEqual([
+      expect.objectContaining({ word: "w_000006", reason: "unheard", cut: { edge: "in", at: 1.7 }, clipped: false, heardAs: null }),
+    ]);
+    expect(report.heard).toBe(report.expected - 1);
+  });
+
+  it("reports a clipped word heard as other text in its window as garbled", async () => {
+    const dir = project();
+    const report = await run(dir, heard("c1", "c2FirstVamos", "c2", "gracias", "c3"), {}, () => [
+      { text: "casa", start: 6.7, end: 6.95 },
+    ]).result;
+    expect(report.lost).toEqual([]);
+    expect(report.uncertain).toEqual([expect.objectContaining({ word: "w_000019", reason: "garbled", clipped: true, heardAs: "casa" })]);
   });
 
   it("fails with AssetNotFound for a missing export", async () => {

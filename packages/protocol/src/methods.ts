@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -384,7 +384,10 @@ const VerifiedWordSchema = z.object({
     .describe("0..1 that this word really is missing from the export: source word confidence times the run's agreement, lower away from cuts."),
 });
 
-const LostWordSchema = VerifiedWordSchema.describe("A word kept by the timeline, at a cut, of which nothing was heard in the export.");
+const LostWordSchema = VerifiedWordSchema.describe(
+  "A word kept by the timeline that the cut falls inside (`clipped` is always true), of which nothing was heard in the " +
+    "export, not even when the audio around it was re-transcribed alone.",
+);
 
 const UncertainWordSchema = VerifiedWordSchema.extend({
   reason: z
@@ -392,7 +395,8 @@ const UncertainWordSchema = VerifiedWordSchema.extend({
     .describe(
       "`repeat`: missing, but repeats the phrase next to it; whisper can collapse repeated phrases (ADR 0003), so check by ear. " +
         "`garbled`: at a cut, heard as other text (`heardAs`); the cut may have clipped it. " +
-        "`unheard`: missing away from any cut; more likely a transcription miss than a cut.",
+        "`unheard`: not heard, but either away from any cut or whole inside its clip (`clipped: false`, also after " +
+        "re-transcribing the audio around it): a transcription miss, not a cut; check by ear, never trim for it.",
     ),
   heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
 });
@@ -852,6 +856,18 @@ export const methods = {
       reusedIds: z.int().describe("Words that kept the id they had in the previous transcript."),
       keptEdits: z.int().describe("Human edits carried over from the previous transcript."),
       droppedEdits: z.array(z.string()).describe("Ids of human edits dropped because their word was not found again."),
+      recoveredWords: z
+        .int()
+        .describe(
+          "Words recovered by re-transcribing alone a word that lasted far too long and held more speech (whisper can " +
+            "swallow a repeated phrase into one word); they replace it.",
+        ),
+      speechInside: z
+        .array(z.string())
+        .describe(
+          "Ids of words still far too long with speech inside after that (`speechInside: true` in the file): they hide " +
+            "words the transcript lacks. Never cut inside them; check by ear.",
+        ),
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
     }),
   },
@@ -860,9 +876,11 @@ export const methods = {
       "Check an exported file for words lost at cuts (SPEC §3.5 step 6): re-transcribe the export and compare it, " +
       "on the timeline clock, with the source transcript words the timeline keeps (each media clip's words inside " +
       "its `in`/`out`, mapped by `start` and `speed`; a word counts as kept when most of it is inside). Writes no " +
-      "transcript. `lost` lists words at a cut of which nothing was heard: each with its timeline position, clip and " +
-      "the cut. `uncertain` lists the rest that were not confirmed (whisper-collapsed repeats, words at a cut heard " +
-      "as other text, words missing away from cuts). The alignment ignores case, punctuation, accents, onset jitter, " +
+      "transcript. A word missing at a cut is re-transcribed again in a short window of export audio around it " +
+      "before it is reported. `lost` lists words the cut falls inside (`clipped`) of which nothing was heard either " +
+      "time: each with its timeline position, clip and the cut. `uncertain` lists the rest that were not confirmed " +
+      "(whisper-collapsed repeats, words at a cut heard as other text, missing words away from cuts or whole inside " +
+      "their clip). The alignment ignores case, punctuation, accents, onset jitter, " +
       "split or merged words and close spellings. Clips whose asset has no transcript, or a stale one, are listed in " +
       "`unchecked`: run `transcribe` on them first. Use the same timeline the export was rendered from. Fails with " +
       "AssetNotFound (no such export), TimelineNotFound, and the errors of `transcribe`.",
@@ -902,7 +920,7 @@ export const methods = {
       }),
       expected: z.int().describe("Source words the timeline keeps, in checked clips."),
       heard: z.int().describe("Of those, words found in the export."),
-      lost: z.array(LostWordSchema).describe("Words lost at a cut, by timeline position. Empty = nothing lost."),
+      lost: z.array(LostWordSchema).describe("Words cut off at a clip edge, by timeline position. Empty = nothing lost."),
       uncertain: z.array(UncertainWordSchema).describe("Words not confirmed but not reported lost, by timeline position."),
       confidence: z
         .number()

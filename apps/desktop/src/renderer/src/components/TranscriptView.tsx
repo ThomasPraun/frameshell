@@ -265,7 +265,14 @@ function AssetSection({
               {words.map((word) => {
                 const i = index.get(word.key)!;
                 const struck = word.placements.length === 0;
-                const classes = ["tw", struck ? "is-struck" : "", selected.has(word.key) ? "is-selected" : "", restoring === word.key ? "is-restoring" : ""];
+                const classes = [
+                  "tw",
+                  struck ? "is-struck" : "",
+                  word.speechInside ? "has-speech-inside" : "",
+                  selected.has(word.key) ? "is-selected" : "",
+                  restoring === word.key ? "is-restoring" : "",
+                ];
+                const hidden = word.speechInside ? " Holds more speech than this word; do not cut inside it." : "";
                 return (
                   <span key={word.key}>
                     <span
@@ -273,7 +280,7 @@ function AssetSection({
                       data-key={word.key}
                       data-word={word.id}
                       data-state={struck ? "struck" : "kept"}
-                      title={struck ? "Cut from the timeline. Click to restore." : formatTimecode(word.placements[0]!.from, fps)}
+                      title={(struck ? "Cut from the timeline. Click to restore." : formatTimecode(word.placements[0]!.from, fps)) + hidden}
                       onPointerDown={(event) => onPointerDown(event, asset, i)}
                       onPointerEnter={(event) => onPointerEnter(event, asset, i)}
                       onContextMenu={(event) => onContextMenu(event, asset, i)}

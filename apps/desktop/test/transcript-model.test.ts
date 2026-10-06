@@ -83,6 +83,15 @@ describe("buildTranscriptModel", () => {
     expect(words[3]!.placements).toEqual([]);
   });
 
+  it("carries the transcript's speechInside flag, so the view can warn against cutting inside the word (#117)", () => {
+    const flagged: Transcript = {
+      ...transcript,
+      words: transcript.words.map((word) => (word.id === "w_000008" ? { ...word, end: 9, speechInside: true } : word)),
+    };
+    const words = wordsOf(buildTranscriptModel(cutView, [{ path: PATH, transcript: flagged }]));
+    expect(words.filter((w) => w.speechInside).map((w) => w.id)).toEqual(["w_000008"]);
+  });
+
   it("lists timeline assets that have no transcript, and ignores transcripts of assets not on the timeline", () => {
     const other = { ...transcript, asset: "assets/other.mp4" };
     const model = buildTranscriptModel(view([{ ...media("c_x", 0, 0, 2), asset: "assets/broll.mp4" }]), [

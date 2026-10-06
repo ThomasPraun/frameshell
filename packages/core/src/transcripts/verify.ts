@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plugin-api";
+import type { TranscriptWord, TranscriptionProvider, TranscriptionResult } from "@frameshell/plugin-api";
 import {
   ErrorCode,
   type LostWord,
@@ -14,6 +14,7 @@ import type { MediaClip, Timeline, Transcript } from "@frameshell/schema";
 import { type WordHearing, alignWords, comparableText } from "./align.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
 import { type TranscriberTools, resolveTranscript } from "./transcriber.js";
+import { readPcmWav, transcribeWindow } from "./window.js";
 import type { GcClass } from "../gc.js";
 
 /** Project-relative folder of the WAVs `verifyExport` extracts; each lives only while its request runs. */
@@ -21,11 +22,12 @@ export const VERIFY_CACHE_DIR = ".frameshell/cache/verify";
 
 /**
  * What an entry of {@link VERIFY_CACHE_DIR} is, for `gc`: anything named
- * after a verify WAV is the leftover of an interrupted run (a temp); other
- * names are not ours and are kept.
+ * after a verify WAV (the extracted export audio, or a `window-` re-check
+ * cut from it) is the leftover of an interrupted run (a temp); other names
+ * are not ours and are kept.
  */
 export function classifyVerifyCache(name: string, isDirectory: boolean): GcClass {
-  return !isDirectory && /^[0-9a-f]{12}\.wav/.test(name) ? { kind: "temp", key: null } : null;
+  return !isDirectory && /^(window-)?[0-9a-f]{12}\.wav/.test(name) ? { kind: "temp", key: null } : null;
 }
 
 /** Input of {@link verifyExport}. */
@@ -59,7 +61,7 @@ export interface VerifyExportOptions {
   progress?: ((progress: Progress) => void) | undefined;
 }
 
-/** Source seconds from a cut within which a missing word counts as lost at that cut. */
+/** Source seconds from a cut within which a missing word is a lost candidate at that cut. */
 const CUT_ZONE_S = 0.5;
 /** Export and timeline lengths may differ this much (frame rounding, encoder padding) before it is suspicious. */
 const DURATION_TOLERANCE_S = 0.5;
@@ -67,6 +69,12 @@ const DURATION_TOLERANCE_S = 0.5;
 const REPEAT_FACTOR = 0.3;
 /** Confidence factor of a garbled word at a cut, or a missing word away from cuts. */
 const WEAK_FACTOR = 0.5;
+/**
+ * Seconds of export audio kept on each side of a lost candidate when it is
+ * re-transcribed alone: enough context for whisper to decode the phrase
+ * (#115: a 12 s window heard what the full pass skipped).
+ */
+const RECHECK_PAD_S = 5;
 
 /** One source word the timeline keeps, placed on the timeline. */
 interface KeptWord extends Omit<LostWord, "confidence"> {
@@ -85,12 +93,14 @@ type SourceTranscript = { rel: string; transcript: Transcript } | { unchecked: "
  * inside the clip's visible `[in, out)`, mapped to timeline seconds. The
  * export's audio runs on the timeline clock, so both sides align on time as
  * well as text ({@link alignWords}). A clip edge is a cut when source speech
- * was removed across it. A missing word within 0.5 source seconds of a cut,
- * or crossing it, is `lost`; everything else unconfirmed is `uncertain`, so
- * whisper's own misses (a collapsed repeat, a word away from any cut) never
- * show up as losses.
+ * was removed across it. A word missing within 0.5 source seconds of a cut,
+ * or crossing it, is re-transcribed in its own audio window
+ * ({@link settleCandidates}); still missing, it is `lost` only when the cut
+ * falls inside it (`clipped`). Everything else unconfirmed is `uncertain`,
+ * so whisper's own misses (a collapsed repeat, a word away from any cut, a
+ * word whole inside its clip) never show up as losses.
  *
- * Writes nothing but a temporary WAV under `.frameshell/cache/verify/`.
+ * Writes nothing but temporary WAVs under `.frameshell/cache/verify/`.
  * Throws `AssetNotFound` (no export), `InvalidProjectFile` (broken
  * transcript), `TranscriptionFailed`, or the binary manager's errors.
  */
@@ -123,8 +133,16 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
     });
   };
   const audio = join(projectDir, ...VERIFY_CACHE_DIR.split("/"), `${randomBytes(6).toString("hex")}.wav`);
+  const transcribeOptions = { ...(model ? { model } : {}), ...(language ? { language } : {}) };
+  const context = {
+    ensureBinary: (name: string) => tools.ensureBinary(name, progress),
+    ensureModel: (id: string) => tools.ensureModel(id, progress),
+    progress: (update: Progress) => progress({ ...update }),
+  };
   let result: TranscriptionResult;
   let exportSeconds: number | null;
+  let report: Report;
+  let heardCount: number;
   try {
     progress({ message: `Extracting audio from ${exportFile}` });
     try {
@@ -135,28 +153,36 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
     }
     exportSeconds = await wavSeconds(audio);
     try {
-      result = await provider.transcribe(
-        audio,
-        { ...(model ? { model } : {}), ...(language ? { language } : {}) },
-        {
-          ensureBinary: (name) => tools.ensureBinary(name, progress),
-          ensureModel: (id) => tools.ensureModel(id, progress),
-          progress: (update) => progress({ ...update }),
-        },
-      );
+      result = await provider.transcribe(audio, transcribeOptions, context);
     } catch (error) {
       return failed(error);
+    }
+
+    progress({ message: "Comparing with the source transcripts" });
+    const hearing = alignWords(
+      kept.map((word) => ({ text: word.text, start: word.at, end: word.end })),
+      result.words,
+    );
+    heardCount = hearing.filter((word) => word.status === "heard").length;
+    report = classify(kept, hearing, result.words);
+    if (report.candidates.length > 0) {
+      progress({ message: `Re-checking ${report.candidates.length} word(s) at cuts in their own audio window` });
+      const pcm = await readPcmWav(audio);
+      const transcribe = (path: string) => provider.transcribe(path, transcribeOptions, context);
+      const recheck = async (from: number, to: number) => {
+        if (!pcm) return null;
+        try {
+          return await transcribeWindow({ pcm, from, to, dir: dirname(audio), transcribe });
+        } catch (error) {
+          return failed(error);
+        }
+      };
+      heardCount += (await settleCandidates(kept, report, recheck)).heard;
     }
   } finally {
     await rm(audio, { force: true });
   }
 
-  progress({ message: "Comparing with the source transcripts" });
-  const hearing = alignWords(
-    kept.map((word) => ({ text: word.text, start: word.at, end: word.end })),
-    result.words,
-  );
-  const report = classify(kept, hearing, result.words);
   const timelineSeconds = timelineDuration(timeline);
   if (exportSeconds !== null && Math.abs(exportSeconds - timelineSeconds) > DURATION_TOLERANCE_S) {
     warnings.push(
@@ -176,7 +202,7 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
     language: result.language ?? language ?? null,
     duration: { export: exportSeconds === null ? null : round(exportSeconds), timeline: timelineSeconds },
     expected: kept.length,
-    heard: hearing.filter((word) => word.status === "heard").length,
+    heard: heardCount,
     lost: report.lost,
     uncertain: report.uncertain,
     confidence: report.confidence,
@@ -316,36 +342,105 @@ function visibleClips(clips: readonly MediaClip[]): Visible[] {
   return placed.filter((p) => p.end > p.clip.start);
 }
 
-/** Split unconfirmed kept words into lost (at a cut, nothing heard) and uncertain. */
-function classify(
-  kept: readonly KeptWord[],
-  hearing: readonly WordHearing[],
-  heard: readonly { text: string }[],
-): { lost: LostWord[]; uncertain: UncertainWord[]; confidence: number } {
+/** Outcome of {@link classify}: settled words, plus missing words at a cut still to re-check. */
+interface Report {
+  lost: LostWord[];
+  uncertain: UncertainWord[];
+  confidence: number;
+  /** Indexes into the kept words, in time order. */
+  candidates: number[];
+  /** The run's agreement, a factor of every reported word's confidence. */
+  agreement: number;
+}
+
+/**
+ * Split unconfirmed kept words into uncertain ones and lost candidates
+ * (missing at a cut, not a repeat): those need {@link settleCandidates}
+ * before any is reported lost.
+ */
+function classify(kept: readonly KeptWord[], hearing: readonly WordHearing[], heard: readonly { text: string }[]): Report {
   // Agreement away from cuts measures how well this run reproduces the sources at all.
   const interior = kept.map((word, i) => ({ word, hearing: hearing[i]! })).filter(({ word }) => word.cut === null);
   const agreement = interior.length === 0 ? 1 : interior.filter(({ hearing }) => hearing.status !== "missing").length / interior.length;
   const repeats = repeatCollapses(kept, hearing);
-  const lost: LostWord[] = [];
   const uncertain: UncertainWord[] = [];
+  const candidates: number[] = [];
   kept.forEach((word, i) => {
     const how = hearing[i]!;
-    const { sourceConfidence, ...placed } = word;
-    const confidence = (factor: number) => round2(sourceConfidence * factor * agreement);
+    const placed = reported(word, agreement);
     if (how.status === "heard") return;
     if (how.status === "different") {
       if (word.cut === null) return; // Audio is there; the text is a transcription variant.
       const heardAs = how.heard.map((k) => heard[k]!.text.trim()).join(" ");
-      uncertain.push({ ...placed, confidence: confidence(WEAK_FACTOR), reason: "garbled", heardAs });
+      uncertain.push({ ...placed(WEAK_FACTOR), reason: "garbled", heardAs });
     } else if (repeats.has(i)) {
-      uncertain.push({ ...placed, confidence: confidence(REPEAT_FACTOR), reason: "repeat", heardAs: null });
+      uncertain.push({ ...placed(REPEAT_FACTOR), reason: "repeat", heardAs: null });
     } else if (word.cut === null) {
-      uncertain.push({ ...placed, confidence: confidence(WEAK_FACTOR), reason: "unheard", heardAs: null });
+      uncertain.push({ ...placed(WEAK_FACTOR), reason: "unheard", heardAs: null });
     } else {
-      lost.push({ ...placed, confidence: confidence(1) });
+      candidates.push(i);
     }
   });
-  return { lost, uncertain, confidence: round2(agreement) };
+  return { lost: [], uncertain, confidence: round2(agreement), candidates, agreement };
+}
+
+/** `word` as a report entry with confidence `source confidence × factor × agreement`. */
+function reported(word: KeptWord, agreement: number): (factor: number) => LostWord {
+  const { sourceConfidence, ...placed } = word;
+  return (factor) => ({ ...placed, confidence: round2(sourceConfidence * factor * agreement) });
+}
+
+/**
+ * Settle the lost candidates of `report` in place (#115): whisper can skip a
+ * phrase in a long pass that it hears fine in a short one, so each candidate
+ * is re-transcribed in a window of {@link RECHECK_PAD_S} around it first.
+ * Heard there: confirmed, not reported. Heard as other text: `garbled`.
+ * Still missing: `lost` only when the cut falls inside the word (`clipped`);
+ * a word whole inside its clip is a recognition miss (`unheard`), which no
+ * trim can fix. `recheck` returns the window's words on the export clock, or
+ * null when the audio cannot be re-checked (then no candidate is confirmed).
+ * Returns how many candidates were heard.
+ */
+async function settleCandidates(
+  kept: readonly KeptWord[],
+  report: Report,
+  recheck: (from: number, to: number) => Promise<TranscriptWord[] | null>,
+): Promise<{ heard: number }> {
+  const windows: { from: number; to: number; members: number[] }[] = [];
+  for (const i of report.candidates) {
+    const word = kept[i]!;
+    const from = Math.max(0, word.at - RECHECK_PAD_S);
+    const to = word.end + RECHECK_PAD_S;
+    const last = windows.at(-1);
+    if (last && from <= last.to) {
+      last.to = Math.max(last.to, to);
+      last.members.push(i);
+    } else windows.push({ from, to, members: [i] });
+  }
+  let heardCount = 0;
+  for (const window of windows) {
+    const words = await recheck(window.from, window.to);
+    const inside = kept.flatMap((word, i) => (word.end > window.from && word.at < window.to ? [i] : []));
+    const hearing = words
+      ? alignWords(
+          inside.map((i) => ({ text: kept[i]!.text, start: kept[i]!.at, end: kept[i]!.end })),
+          words,
+        )
+      : [];
+    for (const i of window.members) {
+      const word = kept[i]!;
+      const placed = reported(word, report.agreement);
+      const how: WordHearing = words ? hearing[inside.indexOf(i)]! : { status: "missing" };
+      if (how.status === "heard") heardCount++;
+      else if (how.status === "different") {
+        const heardAs = how.heard.map((k) => words![k]!.text.trim()).join(" ");
+        report.uncertain.push({ ...placed(WEAK_FACTOR), reason: "garbled", heardAs });
+      } else if (word.clipped) report.lost.push(placed(1));
+      else report.uncertain.push({ ...placed(WEAK_FACTOR), reason: "unheard", heardAs: null });
+    }
+  }
+  report.uncertain.sort((a, b) => a.at - b.at);
+  return { heard: heardCount };
 }
 
 /**

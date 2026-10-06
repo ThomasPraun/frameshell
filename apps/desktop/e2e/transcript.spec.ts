@@ -69,7 +69,8 @@ async function writeTake(): Promise<void> {
       assetHash: hash,
       provider: "whisper-cpp",
       model: "large-v3-turbo-q5_0",
-      words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end })),
+      // "nine" carries the transcriber's speechInside flag (#117): the view warns against cutting inside it.
+      words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end, ...(k === 8 ? { speechInside: true } : {}) })),
       edits: {},
     }),
   );
@@ -124,6 +125,9 @@ test("the transcript tab strikes the word the cut removed and keeps the rest", a
   for (const k of [3, 7]) await expect(word(k)).toHaveAttribute("data-state", "struck");
   for (const k of [0, 1, 2, 4, 5, 6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
   await expect(page.locator(".transcript-asset-head")).toContainText("7 of 9 words on the timeline");
+  await expect(page.locator(".tw.has-speech-inside")).toHaveCount(1);
+  await expect(word(8)).toHaveClass(/has-speech-inside/);
+  await expect(word(8)).toHaveAttribute("title", /do not cut inside it/);
 });
 
 test("clicking a word moves the playhead to it, and playback marks each word as it is heard", async () => {

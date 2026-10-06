@@ -22,6 +22,12 @@ const WordSchema = z
     end: z.number().nonnegative(),
     /** 0..1 */
     confidence: z.number().min(0).max(1).optional(),
+    /**
+     * True: the span lasts far longer than a word and holds more speech the
+     * engine could not split into words (e.g. a repeated phrase swallowed).
+     * Never cut inside it. Written by `transcribe` only when true.
+     */
+    speechInside: z.boolean().optional(),
   })
   .refine((word) => word.end >= word.start, { message: "end must be >= start", path: ["end"] });
 
