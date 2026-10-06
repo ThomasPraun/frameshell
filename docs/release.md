@@ -22,7 +22,7 @@ Before drafting, the publish job checks the ffmpeg mirror: the GitHub release na
 
 ### Bundled CLI and daemon
 
-`@frameshell/cli` and `@frameshell/core` are dependencies of the app, so they ship inside `app.asar`. At startup the app writes a `frameshell` shim into `<userData>/bin` that runs the CLI with the app's own executable in Node mode (`ELECTRON_RUN_AS_NODE`). Integrated terminals put that directory first on `PATH`. The daemon is started the same way. The app does not install `frameshell` system-wide.
+`@frameshell/cli` and `@frameshell/core` are dependencies of the app, so they ship inside `app.asar`. At startup the app writes a `frameshell` shim into `<userData>/bin` that runs the CLI with the app's own executable in Node mode (`ELECTRON_RUN_AS_NODE`). Integrated terminals put that directory first on `PATH`. The daemon is started the same way, from a short-lived utility process (`out/main/daemon-spawner.js`) so it holds none of the app's stdio handles (#112). The app does not install `frameshell` system-wide.
 
 Keep Electron's `RunAsNode` fuse enabled. Turning it off breaks the CLI in the terminal and daemon auto-start.
 
