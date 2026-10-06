@@ -1,3 +1,5 @@
+import { posix, win32 } from "node:path";
+
 /** Inputs for {@link terminalLaunch}. */
 export interface TerminalLaunchOptions {
   platform: NodeJS.Platform;
@@ -11,6 +13,14 @@ export interface TerminalLaunchOptions {
   session: string;
   /** Directory holding the `frameshell` shim; prepended to PATH. */
   binDir: string;
+  /**
+   * Installed native tools the daemon runs, name to absolute executable
+   * (`terminalToolPaths` in `terminal-tools.ts`). Each one's directory goes on PATH after
+   * `binDir`, and its path into `FRAMESHELL_<NAME>` (`whisper-cli` →
+   * `FRAMESHELL_WHISPER_CLI`): login profiles may reorder PATH, the variable
+   * stays exact.
+   */
+  tools?: Readonly<Record<string, string>>;
 }
 
 /** How to spawn one terminal's shell. */
@@ -38,7 +48,11 @@ export function terminalLaunch(options: TerminalLaunchOptions): TerminalLaunch {
   // Windows env keys are case-insensitive: reuse whatever casing PATH already has.
   const pathKey = (platform === "win32" && Object.keys(env).find((key) => key.toUpperCase() === "PATH")) || "PATH";
   const delimiter = platform === "win32" ? ";" : ":";
-  env[pathKey] = env[pathKey] ? `${options.binDir}${delimiter}${env[pathKey]}` : options.binDir;
+  const tools = Object.entries(options.tools ?? {});
+  const { dirname } = platform === "win32" ? win32 : posix;
+  const prepend = [...new Set([options.binDir, ...tools.map(([, path]) => dirname(path))])].join(delimiter);
+  env[pathKey] = env[pathKey] ? `${prepend}${delimiter}${env[pathKey]}` : prepend;
+  for (const [name, path] of tools) env[toolVariable(name)] = path;
   Object.assign(env, {
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
@@ -51,4 +65,9 @@ export function terminalLaunch(options: TerminalLaunchOptions): TerminalLaunch {
   if (platform === "win32") return { file: "powershell.exe", args: ["-NoLogo"], cwd: projectDir, env };
   const shell = options.env["SHELL"] || (platform === "darwin" ? "/bin/zsh" : "/bin/bash");
   return { file: shell, args: ["-l"], cwd: projectDir, env };
+}
+
+/** Environment variable holding `tool`'s absolute path: `whisper-cli` → `FRAMESHELL_WHISPER_CLI`. */
+export function toolVariable(tool: string): string {
+  return `FRAMESHELL_${tool.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }

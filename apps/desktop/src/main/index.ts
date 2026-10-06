@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
+import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
@@ -26,6 +27,7 @@ import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
+import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
@@ -56,6 +58,8 @@ daemon.on("ui.command", (params) => ui.command(params));
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const binDir = join(app.getPath("userData"), "bin");
+/** Same dirs as the daemon (spawned with this env): terminals see the binaries it runs. Locates only, never installs. */
+const binaries = new BinaryManager(resolveAppDirs(process.env));
 const recentFile = join(app.getPath("userData"), "recent.json");
 const MAX_RECENT = 10;
 /** Preview measurement mode: the renderer gets `?probe=1`. */
@@ -320,6 +324,7 @@ function registerIpc(): void {
       socketPath,
       session,
       binDir,
+      tools: await terminalToolPaths(binaries, project.dir),
     });
     const { id, shell: shellName } = state.terminals.create(launch, size);
     return { id, session, shell: shellName };
