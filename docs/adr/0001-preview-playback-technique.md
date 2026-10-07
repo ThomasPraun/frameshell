@@ -86,3 +86,7 @@ Rule now: each quantum's frame is `max(own count, currentFrame)` (`QuantumClock`
 ## Addendum (#105): proxy pictures are read ahead of the decoder
 
 Decoded frames kept ahead stay at 12 per layer (0.4 s). Encoded pictures are now read up to 90 ahead of the decoder (about 3 s), across cuts (`preview/read-ahead.ts`). Before, a layer's range read started only when the decoder needed its first picture, so a read slower than 0.4 s starved the picture. At a cut, the new clip's first read and its pre-roll decode shared that 0.4 s. With every 4th read delayed by 600 ms, the quick measurement went from 168 frames never drawn to 0. Thresholds unchanged. Details: `docs/research/preview-playback-measurements.md`.
+
+## Addendum (#90): media with alpha gets a VP9-alpha WebM proxy
+
+The H.264 proxy has no alpha, so a VP9-alpha media asset showed opaque in the preview while export kept its alpha. A source with alpha (VP9/VP8 `alpha_mode=1`, or an alpha pixel format such as ProRes 4444 or QuickTime Animation) now gets a VP9 WebM proxy with its alpha plane, on the same frame grid and GOP 15 as the H.264 recipe. The preview decodes it with WebCodecs exactly like a generated clip render (ADR 0002: alpha plane in a second decoder), read by byte ranges. Every other source keeps the H.264 proxy, so the measured thresholds above still hold for them. Not measured: playback thresholds with many alpha layers, whose software alpha decode costs more than an H.264 picture. Thumbnails of alpha media are opaque JPEGs.

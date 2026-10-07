@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { PluginPins } from "@frameshell/protocol";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { type PluginSpec, formatTarballPin, parseTarballPin } from "./spec.js";
 
 /** Records which pins the directory holds, so a load knows when to reinstall. */
 const MARKER = ".frameshell-pins.json";
+
+/** Project folder that receives tarballs installed from outside the project. */
+const VENDOR = "vendor";
 
 /** Install failure: npm failed (`output` = tail of its stderr), or a pinned tarball is missing or changed. */
 export class NpmError extends Error {
@@ -25,7 +28,8 @@ export class NpmError extends Error {
  * Installed plugin packages of one project: `<project>/.frameshell/plugins`,
  * an npm prefix whose `package.json` dependencies mirror the pins in
  * `frameshell.json`. Regenerable at any time from those pins (SPEC §2).
- * Tarball pins (`file:<path>#sha256=…`) are project-relative; every install
+ * Tarball pins (`file:<path>#sha256=…`) are project-relative (outside
+ * tarballs are copied to `vendor/` first); every install
  * checks the file still has the pinned digest first.
  *
  * Runs npm, so it executes package install scripts: callers gate every
@@ -64,21 +68,29 @@ export class PluginStore {
   /**
    * Install `spec` next to `pins` and work out its package name and pin:
    * the resolved commit for git sources, the exact version for npm ones, the
-   * path and sha256 for tarballs (whose `path` must be absolute by now).
+   * project-relative path and sha256 for tarballs (whose `path` must be
+   * absolute by now). A tarball outside the project is first copied to
+   * `<root>/vendor/<file>`, so the pin works in every clone that carries it.
    * Does not mark the result synced; callers do after validating the package.
    */
   async add(pins: PluginPins, spec: PluginSpec): Promise<{ name: string; pin: string }> {
     const written = await this.#writeManifest(pins);
     if (spec.kind === "tarball") {
       if (!isAbsolute(spec.path)) throw new Error(`tarball path must be absolute: ${spec.path}`);
-      const pin = formatTarballPin(this.#pinPath(spec.path), await sha256(spec.path));
-      const dependency = this.#dependency(spec.path);
-      await npm(["install", "--save", "--save-exact", dependency], this.dir);
-      const saved = await this.#dependencies();
-      const changed = Object.keys(saved).filter((name) => saved[name] !== written[name]);
-      const name = changed.length === 1 ? changed[0]! : Object.keys(saved).find((key) => saved[key] === dependency);
-      if (!name) throw new NpmError(`Could not tell which package ${spec.spec} installed`, JSON.stringify(saved));
-      return { name, pin };
+      const digest = await sha256(spec.path);
+      const { file, copied } = await this.#vendor(spec.path, digest);
+      try {
+        const dependency = this.#dependency(file);
+        await npm(["install", "--save", "--save-exact", dependency], this.dir);
+        const saved = await this.#dependencies();
+        const changed = Object.keys(saved).filter((name) => saved[name] !== written[name]);
+        const name = changed.length === 1 ? changed[0]! : Object.keys(saved).find((key) => saved[key] === dependency);
+        if (!name) throw new NpmError(`Could not tell which package ${spec.spec} installed`, JSON.stringify(saved));
+        return { name, pin: formatTarballPin(posix(relative(this.#root, file)), digest) };
+      } catch (error) {
+        if (copied) await rm(file, { force: true });
+        throw error;
+      }
     }
     await npm(["install", "--save", "--save-exact", spec.spec], this.dir);
     const saved = await this.#dependencies();
@@ -137,11 +149,25 @@ export class PluginStore {
     return `file:${posix(relative(this.dir, file))}`;
   }
 
-  /** Pin path of a tarball: project-relative inside the project, absolute outside it. */
-  #pinPath(file: string): string {
+  /**
+   * Tarball inside the project: itself. Outside: copied to `vendor/<file>`;
+   * an existing copy is reused only with the same digest, never overwritten.
+   */
+  async #vendor(file: string, digest: string): Promise<{ file: string; copied: boolean }> {
     const inside = relative(this.#root, file);
-    const outside = inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
-    return posix(outside ? file : inside);
+    if (!(inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside))) return { file, copied: false };
+    const target = join(this.#root, VENDOR, basename(file));
+    const existing = await sha256(target).catch(() => null);
+    if (existing === digest) return { file: target, copied: false };
+    if (existing !== null) {
+      throw new NpmError(
+        `${VENDOR}/${basename(file)} already exists with other content. Rename the tarball or remove the old copy first.`,
+        "",
+      );
+    }
+    await mkdir(dirname(target), { recursive: true });
+    await copyFile(file, target);
+    return { file: target, copied: true };
   }
 
   async #dependencies(): Promise<Record<string, string>> {

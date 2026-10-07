@@ -345,7 +345,7 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 
 ### 6.3 Asset ingestion
 
-Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies, a PCM audio sidecar, waveforms and thumbnails. Proxy recipe (ADR 0001): H.264, CFR, fixed GOP 15, **no B-frames** (decode order = display order), faststart, reduced resolution. A source with alpha (VP9/VP8 `alpha_mode=1`, or an alpha pixel format such as ProRes 4444 or QuickTime Animation) gets a VP9 WebM proxy with its alpha plane instead (#90), on the same frame grid and GOP, which the preview decodes like a clip render (ADR 0002). The sidecar is s16le 48 kHz PCM (~165 MiB per 30 min mono); both are regenerable. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
+Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies, a PCM audio sidecar, waveforms and thumbnails. Proxy recipe (ADR 0001): H.264, CFR, fixed GOP 15, **no B-frames** (decode order = display order), faststart, reduced resolution. A source with alpha (VP9/VP8 `alpha_mode=1`, or an alpha pixel format such as ProRes 4444 or QuickTime Animation) gets a VP9 WebM proxy with its alpha plane instead (#90, ADR 0001 addendum), on the same frame grid and GOP, which the preview decodes like a clip render (ADR 0002). The sidecar is s16le 48 kHz PCM (~165 MiB per 30 min mono); both are regenerable. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
 
 ### 6.4 Direct file edits and conflicts
 
@@ -388,7 +388,7 @@ frameshell revert <tx|op>
 frameshell render [--preset p] [--out file]   # export
 frameshell frame --at <s> --out <png>         # composited frame, same path as MCP frame_capture
 frameshell mcp                                # stdio MCP server (§7b)
-frameshell plugin install|remove|list <spec>  # github:user/repo | npm name
+frameshell plugin install|remove|list <spec>  # github:user/repo | npm name | local tarball (ADR 0008)
 frameshell <plugin> <command> …               # plugin-provided commands
 ```
 
@@ -450,7 +450,7 @@ Design rules:
 
 ### 8.3 Distribution
 
-- Install: `frameshell plugin install github:user/repo` or an npm package name. Pinned per project in `frameshell.json`; global plugins allowed.
+- Install: `frameshell plugin install github:user/repo`, an npm package name, or a local tarball from `npm pack` (ADR 0008: copied into the project's `vendor/`, pinned project-relative with its sha256). Pinned per project in `frameshell.json`; global plugins allowed.
 - Discovery: GitHub repos tagged `frameshell-plugin` get indexed automatically (herdr model). No review; trust and security guide in the docs.
 - Plugins run in the daemon process with full Node access (like VS Code extensions). No sandbox in v0.1; project trust is the gate. Package lifecycle scripts (e.g. `prepare` for git plugins) run only after the project is trusted.
 - Official plugins use only the public API; no private hooks.

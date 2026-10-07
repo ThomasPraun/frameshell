@@ -49,11 +49,10 @@ Until a version is on npm (or for a build of a branch), install the packed plugi
 
 ```sh
 node scripts/plugins-npm.mjs dry-run ./packs        # after building: writes ./packs/frameshell-whisper-cpp-<version>.tgz, …
-cp ./packs/frameshell-whisper-cpp-*.tgz <project>/vendor/
-cd <project> && frameshell plugin install ./vendor/frameshell-whisper-cpp-0.1.0.tgz
+cd <project> && frameshell plugin install <repo>/packs/frameshell-whisper-cpp-0.1.0.tgz   # copied to vendor/
 ```
 
-The pin is `file:<path>#sha256=<digest>`: project-relative when the tarball is inside the project (so a clone that carries it installs it too), absolute otherwise (works only on that machine). Trust covers those bytes: a tarball whose content no longer matches the digest is never installed, and the plugin shows as failed until it is reinstalled. Directories are refused; pack them first.
+The pin is `file:<path>#sha256=<digest>`: always project-relative (ADR 0008): a tarball from outside the project is first copied to `<project>/vendor/<file>`, never overwriting a copy with other content, so a clone that carries `vendor/` installs it too. Trust covers those bytes: a tarball whose content no longer matches the digest is never installed, and the plugin shows as failed until it is reinstalled. Directories are refused; pack them first.
 
 ### npm setup (once, by the maintainer)
 

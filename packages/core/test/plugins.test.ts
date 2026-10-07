@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
@@ -81,13 +81,30 @@ describe("plugin.install from a local tarball", () => {
   );
 
   it(
-    "accepts file: specs and tarballs outside the project, pinned by absolute path",
+    "copies a tarball from outside the project into vendor/ and pins the copy",
     async () => {
       const dir = await newProject();
       const tarball = tarballPluginFixture(tempDir());
       const result = await conn.request("plugin.install", { cwd: dir, spec: `file:${tarball}` });
-      expect(result.pin).toBe(`file:${tarball.split(sep).join("/")}#sha256=${sha256(tarball)}`);
+      expect(result.pin).toBe(`file:vendor/hello-plugin-0.1.0.tgz#sha256=${sha256(tarball)}`);
+      expect(readFileSync(join(dir, "vendor", "hello-plugin-0.1.0.tgz"))).toEqual(readFileSync(tarball));
       expect(result.plugin.status).toBe("loaded");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "never overwrites a vendor/ copy with other content",
+    async () => {
+      const dir = await newProject();
+      const kept = tarballPluginFixture(join(dir, "vendor"));
+      const before = readFileSync(kept);
+      const other = tarballPluginFixture(tempDir(), { description: "same name, other bytes" });
+      await expect(conn.request("plugin.install", { cwd: dir, spec: other })).rejects.toMatchObject({
+        code: ErrorCode.PluginInstallFailed,
+        message: expect.stringMatching(/already exists with other content/),
+      });
+      expect(readFileSync(kept)).toEqual(before);
     },
     NPM_TIMEOUT,
   );

@@ -579,7 +579,7 @@ export const methods = {
       "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, an npm name `[@scope/]name[@version]`, " +
       "or a local tarball made by `npm pack` (`<path>.tgz` or `file:<path>`, relative to `cwd`). " +
       "Git sources pin the resolved commit; npm sources pin the exact version; tarballs pin `file:<path>#sha256=<digest>` " +
-      "(path project-relative when inside the project), and a tarball whose bytes later differ is never installed. The agent skills it ships are linked " +
+      "(always project-relative: a tarball from outside the project is first copied to `vendor/<file>`), and a tarball whose bytes later differ is never installed. The agent skills it ships are linked " +
       "into the project's `.claude/skills/`. " +
       "Fails with InvalidPluginSpec for an unsupported spec or a missing tarball, " +
       "ProjectNotTrusted when the project already declares plugins that are not trusted, " +
