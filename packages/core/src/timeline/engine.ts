@@ -264,6 +264,7 @@ class Edit {
 
   async clipAdd(args: OperationArgs<"clip.add">): Promise<void> {
     const track = this.clipTrack(args.track);
+    const rippled = this.rippleScope(args, track);
     const { type } = args;
     if (track.kind === "audio" && args.transform) throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
     if (args.scriptRef !== undefined) this.checkScriptRefShape(args.scriptRef);
@@ -356,7 +357,7 @@ class Edit {
       // Room first, so the new clip is never compared with a clip it pushes away.
       const length = this.grid.snap((await this.span(clip)).end - clip.start);
       const from = this.grid.frame(clip.start);
-      for (const other of this.clipTracks().flatMap((t) => t.clips)) {
+      for (const other of rippled.flatMap((t) => t.clips)) {
         if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
       }
     }
@@ -405,26 +406,40 @@ class Edit {
   }
 
   async clipTrim(args: OperationArgs<"clip.trim">): Promise<void> {
-    const { clip } = this.clip(args.clip);
+    const { track, clip } = this.clip(args.clip);
+    const rippled = this.rippleScope(args, track);
     const before = { start: clip.start, end: args.ripple === true ? (await this.span(clip)).end : 0 };
     await this.trimEdges(clip, args);
-    if (args.ripple === true) await this.rippleTrim(clip, before);
+    if (args.ripple === true) await this.rippleTrim(clip, before, rippled);
+  }
+
+  /**
+   * Tracks a `ripple` moves: every clip track, or the `rippleTracks` named
+   * plus `own` (the edited clip's track). `rippleTracks` without `ripple` is
+   * refused rather than ignored.
+   */
+  rippleScope(args: { ripple?: boolean | undefined; rippleTracks?: string[] | undefined }, own: ClipTrack): ClipTrack[] {
+    if (args.rippleTracks === undefined) return this.clipTracks();
+    if (args.ripple !== true) throw this.invalid("`rippleTracks` needs `ripple: true`.", { field: "rippleTracks" });
+    const named = new Set<Track>(args.rippleTracks.map((id) => this.clipTrack(id)));
+    named.add(own);
+    return this.clipTracks().filter((track) => named.has(track));
   }
 
   /**
    * `clip.trim` with `ripple`: put the clip back at its old left edge, then
-   * move clips of every clip track by what the trim added or removed: those
-   * starting at or after the old end by the whole change, those starting
-   * inside the old clip by the head change only (they stay with its old
-   * first frame). Clips crossing either point stay.
+   * move clips of the `rippled` tracks by what the trim added or removed:
+   * those starting at or after the old end by the whole change, those
+   * starting inside the old clip by the head change only (they stay with its
+   * old first frame). Clips crossing either point stay.
    */
-  async rippleTrim(clip: Clip, before: { start: number; end: number }): Promise<void> {
+  async rippleTrim(clip: Clip, before: { start: number; end: number }, rippled: readonly ClipTrack[]): Promise<void> {
     const g = this.grid;
     const head = g.snap(before.start - clip.start);
     clip.start = before.start;
     const total = g.snap((await this.span(clip)).end - before.end);
     const [first, last] = [g.frame(before.start), g.frame(before.end)];
-    for (const other of this.clipTracks().flatMap((track) => track.clips)) {
+    for (const other of rippled.flatMap((track) => track.clips)) {
       if (other === clip) continue;
       const at = g.frame(other.start);
       if (at >= last) other.start = g.snap(other.start + total);

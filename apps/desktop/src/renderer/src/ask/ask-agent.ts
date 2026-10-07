@@ -1,6 +1,6 @@
 // "Ask agent" (SPEC decision 21): one command, run from Cmd/Ctrl+L or any panel's context menu.
 import type { MouseEvent } from "react";
-import { contextMenu } from "../components/ContextMenu.js";
+import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
 import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
 import { referenceLines } from "./reference.js";
@@ -65,10 +65,12 @@ export async function composeReference(): Promise<{ lines: string[]; warning: st
 /**
  * Open the "Ask agent" context menu at the pointer. Call after the panel
  * has selected what was right-clicked; the entry is disabled with nothing selected.
+ * `extra` entries (the panel's own commands) follow it.
  */
-export function openAskMenu(event: MouseEvent): void {
+export function openAskMenu(event: MouseEvent, extra: readonly MenuItem[] = []): void {
   event.preventDefault();
   contextMenu.open(event.clientX, event.clientY, [
     { label: "Ask agent", shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() },
+    ...extra,
   ]);
 }

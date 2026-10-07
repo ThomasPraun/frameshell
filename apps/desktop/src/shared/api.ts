@@ -81,6 +81,28 @@ export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
 export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
 
 /**
+ * How main groups and names the transaction of one `timeline.edit` call.
+ * Both optional; main rejects values longer than {@link EDIT_OPTION_MAX_LENGTH}.
+ */
+export interface EditOptions {
+  /** History label of the transaction. Default: from the edits, e.g. `Move clip`, `Split 3 clips`. */
+  label?: string;
+  /**
+   * Gesture burst key, e.g. `nudge:c_a c_b`. Calls with the same key on the
+   * same timeline, each soon after the previous one, share one transaction:
+   * a held or repeated key makes one history entry and one undo step. The
+   * first call's label names the burst, so the key should name the clips too.
+   */
+  burst?: string;
+}
+
+/** Longest {@link EditOptions} label or burst key main accepts. */
+export const EDIT_OPTION_MAX_LENGTH = 200;
+
+/** Undo or redo chosen in the Edit menu: the focused window picks text undo or timeline undo. */
+export type HistoryCommand = "undo" | "redo";
+
+/**
  * Result of a revert asked from the History panel. A refusal because later
  * operations changed the same clips is data, not an error: the panel lists
  * `conflicts` so the user can revert those first.
@@ -91,6 +113,12 @@ export type RevertOutcome =
 
 /** Reply of a main handler that can fail: Electron would bury a thrown message in IPC noise. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * Command an application menu entry sends to the focused project window.
+ * `showTranscript`: open the transcript view (View > Transcript).
+ */
+export type MenuCommand = "showTranscript";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -150,13 +178,21 @@ export interface FrameshellApi {
      * validated, saved and journaled at once (no unsaved state). Several edits
      * (a split of every selected clip) are one transaction, so one undo step.
      * Resolves with the last result. Rejects with the daemon's message
-     * (overlap, bounds) at the first refused edit; earlier ones stay applied.
+     * (overlap, bounds) at the first refused edit, and undoes the call's
+     * earlier ones, so a group move is all or nothing (in a gesture burst,
+     * earlier presses stay). `options` labels the transaction or joins a
+     * gesture burst's.
      */
-    edit(timeline: string, edits: TimelineEdit[]): Promise<OperationResult>;
+    edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
     undo(timeline: string): Promise<OperationResult | null>;
     /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */
     redo(timeline: string): Promise<OperationResult | null>;
+    /**
+     * Called when Undo or Redo is chosen in the app's Edit menu, or its key
+     * reaches the menu unhandled by the page. Returns an unsubscribe function.
+     */
+    onHistoryCommand(listener: (command: HistoryCommand) => void): () => void;
   };
   history: {
     /** `history` of one timeline of the window's project: transactions oldest first. Rejects with the daemon's message. */
@@ -168,6 +204,10 @@ export interface FrameshellApi {
      * (SPEC §6.2). Conflicts resolve as {@link RevertOutcome}; other failures reject.
      */
     revert(timeline: string, target: string): Promise<RevertOutcome>;
+  };
+  menu: {
+    /** Called with each application menu command aimed at this window. Returns an unsubscribe function. */
+    onCommand(listener: (command: MenuCommand) => void): () => void;
   };
   ui: {
     /**
@@ -235,9 +275,11 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
+  timelineHistoryCommand: "timeline:history-command",
   historyList: "history:list",
   historyDiff: "history:diff",
   historyRevert: "history:revert",
+  menuCommand: "menu:command",
   uiPublish: "ui:publish",
   uiCommand: "ui:command",
   uiReply: "ui:reply",

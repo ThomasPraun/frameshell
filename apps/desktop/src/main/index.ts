@@ -6,12 +6,16 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell } from "electron";
+import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell, utilityProcess } from "electron";
+import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
+  type EditOptions,
+  type HistoryCommand,
+  type MenuCommand,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -21,11 +25,14 @@ import {
 import { type Layout, normalizeLayout } from "../shared/layout.js";
 import { writeCliShim } from "./cli-shim.js";
 import { captureContextFrame } from "./context-frames.js";
+import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { editMenu } from "./edit-menu.js";
 import { LayoutStore } from "./layout-store.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
+import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
@@ -35,11 +42,18 @@ app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 
 const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
-// Spawning the daemon reuses process.execPath (Electron): run it as plain Node.
+// Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
+// never holds this process's stdio handles (#112).
 const daemon = new DaemonLink({
   socketPath,
   client: `desktop/${APP_VERSION}`,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  launch: helperDaemonLauncher(() =>
+    utilityProcess.fork(join(import.meta.dirname, "daemon-spawner.js"), [], {
+      stdio: "ignore",
+      serviceName: "Frameshell daemon launcher",
+    }),
+  ),
 });
 const editor = new TimelineEditor((method, params) => daemon.request(method, params));
 // SPEC §7b: each window's state to the daemon, the daemon's navigation commands to the window. Window key = webContents id.
@@ -56,6 +70,8 @@ daemon.on("ui.command", (params) => ui.command(params));
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const binDir = join(app.getPath("userData"), "bin");
+/** Same dirs as the daemon (spawned with this env): terminals see the binaries it runs. Locates only, never installs. */
+const binaries = new BinaryManager(resolveAppDirs(process.env));
 const recentFile = join(app.getPath("userData"), "recent.json");
 const MAX_RECENT = 10;
 /** Preview measurement mode: the renderer gets `?probe=1`. */
@@ -302,7 +318,8 @@ function registerIpc(): void {
   ipcMain.handle(Channel.filesWrite, async (event, path: string, content: string) => {
     try {
       const { project } = await requireProject(stateOf(event.sender));
-      await daemon.request("file.write", { path: join(project.dir, path), content });
+      // A timeline save is a `ui` operation: it must not join an open nudge burst's transaction.
+      await editor.alone(() => daemon.request("file.write", { path: join(project.dir, path), content }));
       return {};
     } catch (error) {
       return { error: (error as Error).message };
@@ -320,6 +337,7 @@ function registerIpc(): void {
       socketPath,
       session,
       binDir,
+      tools: await terminalToolPaths(binaries, project.dir),
     });
     const { id, shell: shellName } = state.terminals.create(launch, size);
     return { id, session, shell: shellName };
@@ -336,8 +354,8 @@ function registerIpc(): void {
       return daemon.request("timeline.show", { cwd: project.dir, timeline });
     }),
   );
-  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[]) =>
-    outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits)),
+  ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[], options?: EditOptions) =>
+    outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits, options ?? {})),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),
@@ -404,6 +422,8 @@ function buildMenu(): void {
     const dir = await pickFolder(state.window);
     if (dir) await openFromWindow(state, dir);
   };
+  // Aimed at the focused window: each window has its own project and editor tabs.
+  const command = (name: MenuCommand) => BrowserWindow.getFocusedWindow()?.webContents.send(Channel.menuCommand, name);
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     {
@@ -415,9 +435,28 @@ function buildMenu(): void {
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },
-    // Edit roles make copy/paste work in xterm and Monaco on macOS.
-    { role: "editMenu" },
-    { role: "viewMenu" },
+    editMenu(process.platform, (history: HistoryCommand) => {
+      // No focused window (app in the background, a test driving the menu): the only one, if there is just one.
+      const all = BrowserWindow.getAllWindows();
+      const target = BrowserWindow.getFocusedWindow() ?? (all.length === 1 ? all[0] : undefined);
+      if (target) send(target.webContents, Channel.timelineHistoryCommand, history);
+    }),
+    {
+      label: "View",
+      submenu: [
+        { label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: () => command("showTranscript") },
+        { type: "separator" },
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -445,6 +484,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+/** The quit already waited for {@link TimelineEditor.settle}: the next `will-quit` closes the daemon link and lets the app exit. */
+let editorSettled = false;
+
 app.on("will-quit", (event) => {
   if (exitingShells.size > 0) {
     // Quit once closed windows' shells are gone: see TerminalManager.killAll.
@@ -452,5 +494,17 @@ app.on("will-quit", (event) => {
     void Promise.all(exitingShells).then(() => app.quit());
     return;
   }
-  void daemon.close();
+  if (editorSettled) {
+    daemon.close();
+    return;
+  }
+  // Wait, up to 500 ms, for an open nudge burst's transaction to commit; the daemon's auto-commit covers one that outruns it.
+  event.preventDefault();
+  const settled = Promise.race([editor.settle().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 500))]);
+  void settled.then(() => {
+    editorSettled = true;
+    // Next task, not this one: with nothing to settle this runs while Electron still handles the prevented quit,
+    // which ignores a nested `app.quit()` and leaves the app running.
+    setImmediate(() => app.quit());
+  });
 });

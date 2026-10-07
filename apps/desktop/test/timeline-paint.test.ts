@@ -224,6 +224,31 @@ describe("paintTimeline", () => {
     expect(draw(true).ghosts).toEqual([{ x: 201, color: DEFAULT_THEME.danger }]);
   });
 
+  it("draws a ghost for every clip of a group move and dims them all (#119)", () => {
+    const layout = layoutTimeline(longTimeline(3));
+    const ctx = recorder();
+    const ghosts: number[] = [];
+    const alphaOf: Record<string, number> = {};
+    ctx.strokeRect = (x: number) => {
+      if (ctx.lineWidth === 1.5) ghosts.push(x);
+    };
+    ctx.fillText = (text: string) => void (alphaOf[text] = ctx.globalAlpha);
+    const drag = {
+      clip: "c_1",
+      row: "t_v",
+      start: 10,
+      end: 12.5,
+      blocked: false,
+      guide: null,
+      others: [{ clip: "c_0", row: "t_v", start: 5, end: 7.5 }],
+    };
+    paintTimeline(ctx, { layout, viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia, drag });
+    expect(ghosts).toEqual([201, 101]);
+    expect(alphaOf["take-0.mp4"]).toBeLessThan(1);
+    expect(alphaOf["take-1.mp4"]).toBeLessThan(1);
+    expect(alphaOf["take-2.mp4"]).toBe(1);
+  });
+
   it("marks what the selected history entry did: removed clips as ghosts, added, moved and changed ones framed", () => {
     const layout = layoutTimeline(longTimeline(3));
     const ctx = recorder();

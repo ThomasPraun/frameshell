@@ -10,6 +10,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell status` | Daemon, project, plugin trust, jobs, refused direct edits, open transactions. First command in a new session. |
 | `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. |
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
+| `frameshell gc [--dry-run]` | Free disk: delete regenerable files under `.frameshell/` nothing uses (proxies, sidecars, waveforms, thumbnails, transcription audio of deleted or replaced assets; clip renders no clip keys). `--dry-run` lists them first. Never touches `assets/`; deleted outputs rebuild on demand. |
 | `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
@@ -57,7 +58,7 @@ Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` li
 
 | Command | Use |
 |---|---|
-| `frameshell plugin install <spec>` | `github:<user>/<repo>[#ref]`, `git+<url>[#ref]` or an npm name. Pins it in `frameshell.json` and links the skills it ships into `.claude/skills/`. |
+| `frameshell plugin install <spec>` | `github:<user>/<repo>[#ref]`, `git+<url>[#ref]`, an npm name, or a local tarball from `npm pack` (`./name-1.0.0.tgz`; one from outside the project is copied to `vendor/`; pinned with its sha256: a changed file is never installed). Pins it in `frameshell.json` and links the skills it ships into `.claude/skills/`. |
 | `frameshell plugin remove <name>` | Unpin, uninstall, unlink its skills. |
 | `frameshell plugin list` | Plugins with status and what they contribute (commands, clip types, providers, presets, skills). |
 | `frameshell <plugin> <command> …` | A plugin command, e.g. `frameshell hyperframes new intro --duration 8`. |

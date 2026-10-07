@@ -15,8 +15,44 @@ export interface ConnectOrStartOptions {
   env: NodeJS.ProcessEnv;
   /** Give up waiting for a freshly spawned daemon after this long. */
   startTimeoutMs?: number;
-  /** Script run as frameshelld. Default: the installed `@frameshell/core/frameshelld`. */
+  /** Script run as frameshelld. Default: {@link defaultDaemonEntry}. */
   daemonEntry?: string;
+  /**
+   * Starts one daemon process. Default {@link spawnDetachedDaemon}, from this process. The desktop app passes one that
+   * spawns from a helper process, so the daemon never holds the app's own stdio handles (Windows, #112).
+   */
+  launch?: DaemonLauncher;
+}
+
+/** What a {@link DaemonLauncher} starts: `execPath entry`, with `env`. */
+export interface DaemonLaunch {
+  /** Node-compatible executable. From Electron: the Electron binary, run as Node by `ELECTRON_RUN_AS_NODE=1` in `env`. */
+  execPath: string;
+  /** Script run as frameshelld. */
+  entry: string;
+  /** Daemon environment; carries FRAMESHELL_SOCKET and idle timeout. */
+  env: NodeJS.ProcessEnv;
+}
+
+/** Starts one detached daemon process; see {@link ConnectOrStartOptions.launch}. */
+export type DaemonLauncher = (launch: DaemonLaunch) => SpawnedDaemon;
+
+/** A daemon process just started by a {@link DaemonLauncher}, watched until {@link SpawnedDaemon.release}. */
+export interface SpawnedDaemon {
+  /**
+   * Settles only when the daemon dies before we let go of it: an Error when it failed (message carries its stderr),
+   * `"clean-exit"` on exit 0 (lost a start race, or stopped idle). Never rejects.
+   */
+  readonly exited: Promise<Error | "clean-exit">;
+  /** Daemon stderr captured so far, trimmed. */
+  stderr(): string;
+  /** Detach: stop watching so this process can exit while the daemon lives on. Idempotent. */
+  release(): void;
+}
+
+/** Installed `@frameshell/core/frameshelld` script, resolved from this package. */
+export function defaultDaemonEntry(): string {
+  return fileURLToPath(import.meta.resolve("@frameshell/core/frameshelld"));
 }
 
 /** Daemons spawned per call at most: one that exits 0 unreached is replaced, a bounded number of times. */
@@ -42,11 +78,13 @@ export async function connectOrStartDaemon(options: ConnectOrStartOptions): Prom
     if (!isDaemonUnavailable(error)) throw error;
   }
 
+  const launch = options.launch ?? spawnDetachedDaemon;
+  const entry = options.daemonEntry ?? defaultDaemonEntry();
   const startTimeoutMs = options.startTimeoutMs ?? 10_000;
   const deadline = Date.now() + startTimeoutMs;
   let lastError: unknown;
   for (let spawns = 0; spawns < MAX_SPAWNS; spawns++) {
-    const daemon = spawnDaemon(options.env, options.daemonEntry);
+    const daemon = launch({ execPath: process.execPath, entry, env: options.env });
     try {
       let delayMs = 20;
       for (;;) {
@@ -82,24 +120,18 @@ export async function connectOrStartDaemon(options: ConnectOrStartOptions): Prom
   );
 }
 
-interface SpawnedDaemon {
-  /**
-   * Settles only when the daemon dies before we let go of it: an Error when it failed,
-   * `"clean-exit"` on exit 0 (lost a start race, or stopped idle).
-   */
-  readonly exited: Promise<Error | "clean-exit">;
-  /** Daemon stderr captured so far, trimmed. */
-  stderr(): string;
-  /** Detach: stop reading stderr so this process can exit while the daemon lives on. */
-  release(): void;
-}
-
-function spawnDaemon(
-  env: NodeJS.ProcessEnv,
-  entry = fileURLToPath(import.meta.resolve("@frameshell/core/frameshelld")),
+/**
+ * Spawn frameshelld from this process, detached so it outlives it. stdin and stdout go nowhere; stderr is piped only
+ * until {@link SpawnedDaemon.release}, to relay startup errors; `watch.onStderr` sees each chunk as it arrives.
+ *
+ * On Windows the child also inherits every inheritable handle of this process. Plain Node makes its own stdio
+ * non-inheritable at startup; Electron's main process does not, so the app spawns through a helper process (#112).
+ */
+export function spawnDetachedDaemon(
+  { execPath, entry, env }: DaemonLaunch,
+  watch: { onStderr?(chunk: string): void } = {},
 ): SpawnedDaemon {
-  // Detached so the daemon outlives this CLI; stderr piped only until it listens, to relay startup errors.
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(execPath, [entry], {
     detached: true,
     stdio: ["ignore", "ignore", "pipe"],
     windowsHide: true,
@@ -108,7 +140,10 @@ function spawnDaemon(
   child.unref();
   let output = "";
   child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => (output += chunk));
+  child.stderr.on("data", (chunk: string) => {
+    output += chunk;
+    watch.onStderr?.(chunk);
+  });
 
   const exited = new Promise<Error | "clean-exit">((resolve) => {
     child.once("error", (error) => resolve(new Error(`Could not start frameshelld: ${error.message}`, { cause: error })));

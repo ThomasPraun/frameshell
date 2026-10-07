@@ -69,7 +69,8 @@ async function writeTake(): Promise<void> {
       assetHash: hash,
       provider: "whisper-cpp",
       model: "large-v3-turbo-q5_0",
-      words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end })),
+      // "nine" carries the transcriber's speechInside flag (#117): the view warns against cutting inside it.
+      words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end, ...(k === 8 ? { speechInside: true } : {}) })),
       edits: {},
     }),
   );
@@ -124,6 +125,9 @@ test("the transcript tab strikes the word the cut removed and keeps the rest", a
   for (const k of [3, 7]) await expect(word(k)).toHaveAttribute("data-state", "struck");
   for (const k of [0, 1, 2, 4, 5, 6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
   await expect(page.locator(".transcript-asset-head")).toContainText("7 of 9 words on the timeline");
+  await expect(page.locator(".tw.has-speech-inside")).toHaveCount(1);
+  await expect(word(8)).toHaveClass(/has-speech-inside/);
+  await expect(word(8)).toHaveAttribute("title", /do not cut inside it/);
 });
 
 test("clicking a word moves the playhead to it, and playback marks each word as it is heard", async () => {
@@ -208,4 +212,95 @@ test("restoring a word in continuous speech brings back that word only, with no 
   expect(d.in).toBe(6.933);
   expect(d.start).toBeCloseTo(c.start + (c.out - c.in), 3);
   for (const k of [6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+});
+
+// #118: whole passages, other tracks, word corrections, opening the view.
+const MUSIC = "assets/music.wav";
+
+/** Replace the picture track's clips and the music track (null: no music track) at the current revision. */
+function writeTimeline(clips: object[], music: object[] | null): void {
+  const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+  timeline.tracks = [{ ...timeline.tracks[0], clips }, ...(music ? [{ id: "a_music", kind: "audio", name: "Music", clips: music }] : [])];
+  writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
+}
+
+/** Clips of track `track` as saved. */
+function savedTrack(track: string): { id: string; start: number; in: number; out: number }[] {
+  return JSON.parse(readFileSync(mainFile, "utf8")).tracks.find((candidate: { id: string }) => candidate.id === track).clips;
+}
+
+/** "two" and "three" (1.2–2.7) cut as one passage: source 0–1, then 2.9–7.9 from 1 s. The music bed changes at 1 s. */
+const PASSAGE = [
+  { id: "c_p1", type: "media", asset: ASSET, start: 0, in: 0, out: 1 },
+  { id: "c_p2", type: "media", asset: ASSET, start: 1, in: 2.9, out: 7.9 },
+];
+const BEDS = [
+  { id: "m_1", type: "media", asset: MUSIC, start: 0, in: 0, out: 1 },
+  { id: "m_2", type: "media", asset: MUSIC, start: 1, in: 1, out: 7 },
+];
+const mod = process.platform === "darwin" ? "Meta" : "Control";
+const status = () => page.locator(".transcript-toolbar .timeline-status");
+
+test("a cut passage comes back in one step and leaves the music track without a gap", async () => {
+  const ffmpeg = await testFfmpeg();
+  const staging = join(box.dataDir, "staging", "music.wav");
+  await ffmpegRun(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", staging]);
+  renameSync(staging, join(box.projectDir, MUSIC));
+  await waitForIngest(page, MUSIC);
+  writeTimeline(PASSAGE, BEDS);
+  for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "struck");
+  const before = journaled().length;
+  await page.getByRole("button", { name: "Restore 2 cut words" }).click();
+  for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+  expect(journaled().slice(before)).toEqual([{ op: "clip.trim", author: "ui" }]);
+  const [p1, p2] = savedTrack("v1");
+  expect(p1!.out).toBeGreaterThanOrEqual(2.7);
+  expect(p2!.start).toBeCloseTo(p1!.out - p1!.in, 3);
+  // The bed changing at 1 s stays put: moving m_2 would leave silence after m_1.
+  expect(savedTrack("a_music")).toEqual(BEDS);
+  await expect(status()).toContainText("Restored 2 words");
+  await expect(status()).toContainText("A1 (Music) kept in place");
+});
+
+test("struck words inside a drag selection restore with the toolbar button, as one undo step", async () => {
+  await page.locator(".timeline-scroller").focus();
+  await page.keyboard.press(`${mod}+z`);
+  for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "struck");
+  const one = await middle(0);
+  const four = await middle(3);
+  await page.mouse.move(one.x, one.y);
+  await page.mouse.down();
+  await page.mouse.move(four.x, four.y, { steps: 8 });
+  await page.mouse.up();
+  const restore = page.locator(".transcript-restore-marked");
+  await expect(restore).toHaveText("Restore 2 cut words");
+  const before = journaled().length;
+  await restore.click();
+  for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+  expect(journaled().slice(before)).toEqual([{ op: "clip.trim", author: "ui" }]);
+  await expect(restore).toHaveCount(0);
+});
+
+test("double-clicking a word corrects its text as a transcript edit", async () => {
+  await word(4).dblclick();
+  const field = page.getByRole("textbox", { name: "Text of “five”" });
+  await field.fill("fyve");
+  await field.press("Enter");
+  await expect(word(4)).toHaveText("fyve");
+  const saved = JSON.parse(readFileSync(join(box.projectDir, TRANSCRIPT), "utf8"));
+  expect(saved.edits).toEqual({ [id(4)]: { text: "fyve" } });
+  expect(saved.words[4].text).toBe("five");
+  await expect(status()).toContainText("Corrected “five” to “fyve”");
+});
+
+test("the transcript opens from the keyboard shortcut and from the timeline header", async () => {
+  const tab = page.getByRole("tab", { name: "Transcript" });
+  await page.getByRole("button", { name: "Close Transcript" }).click();
+  await expect(tab).toHaveCount(0);
+  await page.keyboard.press(`${mod}+Shift+T`);
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Close Transcript" }).click();
+  await expect(tab).toHaveCount(0);
+  await page.getByRole("button", { name: "Show transcript" }).click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 });

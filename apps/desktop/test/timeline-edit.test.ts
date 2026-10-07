@@ -1,6 +1,6 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { type Grab, commandEdits, dragEdit, dragPreview, grabAt, snapPoints } from "../src/renderer/src/timeline/edit.js";
+import { type Grab, commandEdits, commandOptions, dragEdits, dragPreview, grabAt, historyShortcut, snapPoints, withStarts } from "../src/renderer/src/timeline/edit.js";
 import { layoutTimeline } from "../src/renderer/src/timeline/layout.js";
 
 // Seam under test: the timeline panel's pure editing logic. Pointer and keys in, ghost and daemon edits out.
@@ -87,24 +87,138 @@ describe("dragPreview", () => {
   });
 });
 
-describe("dragEdit", () => {
+describe("dragEdits", () => {
   const preview = (x: number, y: number, delta: number, targetY = y, playhead = 30) =>
     dragPreview({ layout, grab: grab(x, y), delta, y: targetY, fps: FPS, snap: snap(playhead, grab(x, y).clip.id) });
 
   it("sends nothing for a drag that changed nothing", () => {
-    expect(dragEdit(preview(210, Y.v2, 0.001))).toBeNull();
+    expect(dragEdits(preview(210, Y.v2, 0.001))).toEqual([]);
   });
 
   it("sends one clip.move with only what changed", () => {
-    expect(dragEdit(preview(210, Y.v2, 3))).toEqual({ op: "clip.move", args: { clip: "c_c", start: 23 } });
-    expect(dragEdit(preview(210, Y.v2, -8, Y.v1))).toEqual({ op: "clip.move", args: { clip: "c_c", start: 12, track: "v1" } });
-    expect(dragEdit(preview(210, Y.v2, 0, Y.v1))).toEqual({ op: "clip.move", args: { clip: "c_c", track: "v1" } });
+    expect(dragEdits(preview(210, Y.v2, 3))).toEqual([{ op: "clip.move", args: { clip: "c_c", start: 23 } }]);
+    expect(dragEdits(preview(210, Y.v2, -8, Y.v1))).toEqual([{ op: "clip.move", args: { clip: "c_c", start: 12, track: "v1" } }]);
+    expect(dragEdits(preview(210, Y.v2, 0, Y.v1))).toEqual([{ op: "clip.move", args: { clip: "c_c", track: "v1" } }]);
   });
 
   it("trims by timeline time; energy snapping stays on unless the edge meets another clip's edge", () => {
-    expect(dragEdit(preview(43, Y.v1, 1.5))).toEqual({ op: "clip.trim", args: { clip: "c_b", start: 5.5 } });
-    expect(dragEdit(preview(78, Y.a1, 1.9, Y.a1, 30))).toEqual({ op: "clip.trim", args: { clip: "c_m", end: 10, snap: false } });
-    expect(dragEdit(preview(78, Y.a1, 1.1, Y.a1, 9))).toEqual({ op: "clip.trim", args: { clip: "c_m", end: 9 } });
+    expect(dragEdits(preview(43, Y.v1, 1.5))).toEqual([{ op: "clip.trim", args: { clip: "c_b", start: 5.5 } }]);
+    expect(dragEdits(preview(78, Y.a1, 1.9, Y.a1, 30))).toEqual([{ op: "clip.trim", args: { clip: "c_m", end: 10, snap: false } }]);
+    expect(dragEdits(preview(78, Y.a1, 1.1, Y.a1, 9))).toEqual([{ op: "clip.trim", args: { clip: "c_m", end: 9 } }]);
+  });
+});
+
+describe("ripple trim drags (#119)", () => {
+  const ripple = (x: number, y: number, delta: number) => dragPreview({ layout, grab: grab(x, y), delta, y, fps: FPS, snap: null, ripple: true });
+
+  it("sends clip.trim with ripple, so later clips follow and no gap is left", () => {
+    expect(dragEdits(ripple(43, Y.v1, 1.5))).toEqual([{ op: "clip.trim", args: { clip: "c_b", start: 5.5, ripple: true } }]);
+  });
+
+  it("draws a ripple head trim where the daemon puts it: the clip keeps its left edge, its length changes", () => {
+    expect(ripple(43, Y.v1, 1.5)).toMatchObject({ part: "head", ripple: true, start: 4, end: 8.5, edge: 5.5 });
+    // Extending the head (source in 1 s, so up to 1 s earlier): the ghost grows to the right, never left of the clip.
+    const extended = ripple(23, Y.a1, -0.8);
+    expect(extended).toMatchObject({ part: "head", start: 2, end: 8.8, edge: 1.2 });
+    expect(dragEdits(extended)).toEqual([{ op: "clip.trim", args: { clip: "c_m", start: 1.2, ripple: true } }]);
+    // A plain head trim still moves the left edge.
+    expect(dragPreview({ layout, grab: grab(43, Y.v1), delta: 1.5, y: Y.v1, fps: FPS, snap: null })).toMatchObject({ start: 5.5, end: 10, edge: 5.5 });
+  });
+
+  it("never shows an extension as blocked: the next clip moves out of the way", () => {
+    const plain = dragPreview({ layout, grab: grab(37, Y.v1), delta: 1, y: Y.v1, fps: FPS, snap: null });
+    expect(plain).toMatchObject({ end: 5, blocked: true, ripple: false });
+    expect(ripple(37, Y.v1, 1)).toMatchObject({ end: 5, blocked: false });
+    expect(dragEdits(ripple(37, Y.v1, 1))).toEqual([{ op: "clip.trim", args: { clip: "c_a", end: 5, ripple: true } }]);
+  });
+
+  it("ignores ripple for a body drag: that is a move", () => {
+    expect(dragEdits(ripple(210, Y.v2, 3))).toEqual([{ op: "clip.move", args: { clip: "c_c", start: 23 } }]);
+  });
+});
+
+describe("group moves of a multi-selection (#119)", () => {
+  const moveGroup = (group: string[], delta: number, y = Y.v2) =>
+    dragPreview({ layout, grab: grab(210, Y.v2), delta, y, fps: FPS, snap: null, group });
+
+  it("moves every selected clip by the grabbed clip's shift, on their own tracks, the leading one first", () => {
+    const preview = moveGroup(["c_b", "c_c"], 3, Y.v1);
+    expect(preview).toMatchObject({ start: 23, row: { id: "v2" }, blocked: false });
+    expect(preview.others).toMatchObject([{ clip: { id: "c_b" }, row: { id: "v1" }, start: 7, end: 13 }]);
+    expect(dragEdits(preview)).toEqual([
+      { op: "clip.move", args: { clip: "c_c", start: 23 } },
+      { op: "clip.move", args: { clip: "c_b", start: 7 } },
+    ]);
+    expect(dragEdits(moveGroup(["c_m", "c_c"], -1)).map((edit) => ("clip" in edit.args ? edit.args.clip : null))).toEqual(["c_m", "c_c"]);
+  });
+
+  it("stops the group at timeline 0 and flags an overlap of any member", () => {
+    const preview = moveGroup(["c_b", "c_c"], -6);
+    expect(preview).toMatchObject({ start: 16, blocked: true });
+    expect(preview.others[0]).toMatchObject({ start: 0, end: 6 });
+  });
+
+  it("sends nothing for a blocked group: the daemon would refuse one member after moving others", () => {
+    // Left by 3 s: c_c lands on free space, c_b on c_a. Sent anyway, c_b's move first would be refused and c_c's never sent.
+    const preview = moveGroup(["c_b", "c_c"], -3);
+    expect(preview).toMatchObject({ start: 17, blocked: true });
+    expect(preview.others[0]).toMatchObject({ start: 1, end: 7 });
+    expect(dragEdits(preview)).toEqual([]);
+  });
+
+  it("is a plain move when only the grabbed clip is selected", () => {
+    expect(moveGroup(["c_c"], 3).others).toEqual([]);
+    expect(dragEdits(moveGroup(["c_c"], -8, Y.v1))).toEqual([{ op: "clip.move", args: { clip: "c_c", start: 12, track: "v1" } }]);
+  });
+});
+
+describe("historyShortcut", () => {
+  const keys = (key: string, mods: Partial<Record<"metaKey" | "ctrlKey" | "shiftKey" | "altKey", boolean>> = {}) => ({
+    key,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...mods,
+  });
+
+  it("maps Command+Z and Command+Shift+Z on macOS", () => {
+    expect(historyShortcut(keys("z", { metaKey: true }), true)).toBe("undo");
+    expect(historyShortcut(keys("Z", { metaKey: true, shiftKey: true }), true)).toBe("redo");
+    expect(historyShortcut(keys("z", { ctrlKey: true }), true)).toBeNull();
+    expect(historyShortcut(keys("y", { metaKey: true }), true)).toBeNull();
+  });
+
+  it("maps Control+Z, Control+Shift+Z and Control+Y elsewhere", () => {
+    expect(historyShortcut(keys("z", { ctrlKey: true }), false)).toBe("undo");
+    expect(historyShortcut(keys("z", { ctrlKey: true, shiftKey: true }), false)).toBe("redo");
+    expect(historyShortcut(keys("y", { ctrlKey: true }), false)).toBe("redo");
+    expect(historyShortcut(keys("z", { ctrlKey: true, altKey: true }), false)).toBeNull();
+    expect(historyShortcut(keys("z"), false)).toBeNull();
+  });
+});
+
+describe("withStarts", () => {
+  it("builds a second nudge on the first before the daemon's new revision arrives", () => {
+    const first = commandEdits({ kind: "nudge", frames: 1 }, { layout, selected: ["c_c"], playhead: 0, fps: FPS });
+    // On the frame grid, as the daemon stores it: 3-decimal seconds would drift a frame over many presses.
+    const sent = new Map([["c_c", Math.round((first[0]!.args as { start: number }).start * FPS) / FPS]]);
+    expect(commandEdits({ kind: "nudge", frames: 1 }, { layout: withStarts(layout, sent), selected: ["c_c"], playhead: 0, fps: FPS })).toEqual([
+      { op: "clip.move", args: { clip: "c_c", start: 20.067 } },
+    ]);
+    expect(withStarts(layout, new Map())).toBe(layout);
+  });
+});
+
+describe("commandOptions", () => {
+  it("makes repeated nudges of the same clips one burst, labelled", () => {
+    expect(commandOptions({ kind: "nudge", frames: 1 }, ["c_b", "c_a"])).toEqual({ label: "Nudge 2 clips", burst: "nudge:c_a c_b" });
+    expect(commandOptions({ kind: "nudge", frames: -10 }, ["c_c"])).toEqual({ label: "Nudge clip", burst: "nudge:c_c" });
+  });
+
+  it("leaves other commands to main's default label, one transaction each", () => {
+    expect(commandOptions({ kind: "split" }, ["c_a"])).toEqual({});
+    expect(commandOptions({ kind: "delete", ripple: true }, ["c_a"])).toEqual({});
   });
 });
 

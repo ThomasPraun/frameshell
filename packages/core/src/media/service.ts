@@ -7,6 +7,8 @@ import {
   type AssetImportResult,
   type AssetInfo,
   ErrorCode,
+  type GcEntry,
+  type GcSkip,
   type JobInfo,
   type MediaProbe,
   RpcError,
@@ -16,8 +18,13 @@ import type { JobQueue } from "../jobs/queue.js";
 import { readEnclosingProject } from "../projects.js";
 import { probeMedia } from "./ffmpeg.js";
 import { type MediaTools, ingestAsset } from "./ingest.js";
-import { MediaStore, hashFile } from "./store.js";
+import { DERIVED_DIRS, MediaStore, classifyDerived, hashFile } from "./store.js";
+import { ENERGY_DIR, classifyEnergy, energyCacheKey } from "./energy-store.js";
 import { renameRetrying } from "../fs-util.js";
+import { sweep } from "../gc.js";
+import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcripts/transcriber.js";
+import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
+import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
 
 /** Project-relative directory the watcher and import own. */
 const ASSETS_DIR = "assets";
@@ -33,6 +40,50 @@ export interface MediaServiceOptions {
    * Called in order per asset with what {@link MediaService.list} reports at that moment.
    */
   onAssetChanged?: (root: string, path: string, asset: AssetInfo | null) => void;
+  /**
+   * On {@link MediaService.attach}, sweep derived media no asset uses that is
+   * older than {@link ATTACH_GC_MIN_AGE_MS}, without hashing (see
+   * {@link MediaService.gc}). Default true.
+   */
+  gcOnAttach?: boolean;
+}
+
+/**
+ * Age below which the sweep on attach keeps unused derived media: recently
+ * deleted or replaced assets often come back (undo, re-import), and their
+ * outputs are then reused instead of rebuilt.
+ */
+export const ATTACH_GC_MIN_AGE_MS = 7 * 24 * 60 * 60_000;
+
+/** Options of {@link MediaService.gc}. */
+export interface MediaGcOptions {
+  /** Only list. */
+  dryRun: boolean;
+  /** Also sweep temps of interrupted builds. Pass false while any job of the project runs. */
+  temps: boolean;
+  /**
+   * Hash files whose content the index does not know (new or changed since
+   * last hashed). False: while any is unknown, derived media is not swept at
+   * all, since it may be that file's.
+   */
+  hashUnknown: boolean;
+  /** Keep outputs modified at or after this time (ms since epoch). Default: no floor. */
+  keepNewerThan?: number;
+  /**
+   * A transcription or export verify of the project runs: transcription WAVs
+   * and verify temps are left alone (`skipped` says so). Default false.
+   */
+  transcribing?: boolean;
+}
+
+/** What {@link MediaService.gc} found. */
+export interface MediaGcReport {
+  /** Deleted (or deletable) entries, sorted by path. */
+  removed: GcEntry[];
+  /** Index entries of vanished files; dropped unless `dryRun`. */
+  forgotten: string[];
+  /** Areas left alone, with why. */
+  skipped: GcSkip[];
 }
 
 interface Attached {
@@ -58,12 +109,14 @@ export class MediaService {
   readonly #onAssetChanged: MediaServiceOptions["onAssetChanged"];
   /** Tail of each asset's report chain (root + path): reports never overtake each other. */
   readonly #reports = new Map<string, Promise<void>>();
+  readonly #gcOnAttach: boolean;
   #closed = false;
 
   constructor(options: MediaServiceOptions) {
     this.#binaries = options.binaries;
     this.#jobs = options.jobs;
     this.#watch = options.watch ?? true;
+    this.#gcOnAttach = options.gcOnAttach ?? true;
     this.#onAssetChanged = options.onAssetChanged;
     // Only state moves change what `list` says; progress within a state is the queue's own news.
     this.#jobs.watch(({ job, stateChanged }) => {
@@ -74,12 +127,17 @@ export class MediaService {
   /**
    * Start watching the project rooted at `root`. Idempotent. The first scan
    * queues every asset without complete outputs, which also resumes work a
-   * previous daemon did not finish.
+   * previous daemon did not finish. Also sweeps old unused derived media
+   * unless `gcOnAttach` is false.
    */
   attach(root: string): void {
     if (this.#closed || this.#projects.has(root)) return;
     const attached: Attached = { store: new MediaStore(root), watcher: null, attempted: new Map() };
     this.#projects.set(root, attached);
+    if (this.#gcOnAttach) {
+      const keepNewerThan = Date.now() - ATTACH_GC_MIN_AGE_MS;
+      void this.gc(root, { dryRun: false, temps: false, hashUnknown: false, keepNewerThan }).catch(() => {});
+    }
     if (!this.#watch) return;
     const watcher = watch(join(root, ASSETS_DIR), {
       ignored: (path) => isIgnored(basename(path)),
@@ -190,6 +248,80 @@ export class MediaService {
       probed.catch(() => this.#probes.delete(key));
     }
     return probed;
+  }
+
+  /**
+   * Delete derived media (proxies, sidecars, manifests, waveforms,
+   * thumbnails, energy envelopes, transcription WAVs) of content no file of the project has now,
+   * keyed by the media index at the current fps and recipe. The files are
+   * every one under `assets/` plus every other path the index holds (a
+   * deleted asset's entry is dropped). Never touches `assets/`. A key whose
+   * ingest is building is kept. Regenerable data only.
+   */
+  async gc(root: string, options: MediaGcOptions): Promise<MediaGcReport> {
+    const { store } = this.#attached(root);
+    const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
+    const indexed = new Set(await store.indexedPaths());
+    const files = new Set([...(await listFiles(join(root, ASSETS_DIR), ASSETS_DIR)), ...indexed]);
+    const hashes = new Set<string>();
+    const forgotten: string[] = [];
+    let unknown = 0;
+    for (const rel of [...files].sort()) {
+      const current = await stat(store.abs(rel)).catch(() => null);
+      if (!current?.isFile()) {
+        if (indexed.has(rel)) forgotten.push(rel);
+        continue;
+      }
+      let hash = await store.knownHash(rel);
+      if (!hash && options.hashUnknown) hash = await store.hash(rel).catch(() => null);
+      if (hash) hashes.add(hash);
+      else unknown++;
+    }
+    if (!options.dryRun) for (const rel of forgotten) await store.forget(rel);
+
+    const skipped: GcSkip[] = [];
+    if (unknown > 0) {
+      skipped.push({
+        area: "media",
+        reason: `${unknown} file(s) not hashed yet (new or changed since the last ingest); derived media may be theirs. Run again after ingest.`,
+      });
+    }
+    const mediaKeys = new Set([...hashes].map((hash) => store.key(hash, fps)));
+    const energyKeys = new Set([...hashes].map(energyCacheKey));
+    const common = {
+      root,
+      temps: options.temps,
+      dryRun: options.dryRun,
+      ...(options.keepNewerThan !== undefined ? { keepNewerThan: options.keepNewerThan } : {}),
+    };
+    const removed: GcEntry[] = [];
+    for (const area of ["proxies", "thumbs", "waveforms"] as const) {
+      removed.push(
+        ...(await sweep({
+          ...common,
+          dir: DERIVED_DIRS[area],
+          classify: (name, isDirectory) => classifyDerived(area, name, isDirectory),
+          keep: (key) => unknown > 0 || mediaKeys.has(key),
+          // Never while its ingest builds; held while deleting, so no build of it starts meanwhile.
+          claim: async (key) => (this.#locks.has(key) ? null : this.#lock(key)),
+        })),
+      );
+    }
+    removed.push(
+      ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
+    );
+    if (options.transcribing) {
+      skipped.push({ area: "audio", reason: "a transcription or export verify of this project is running; it may read any extracted WAV." });
+    } else {
+      const audioKeys = new Set([...hashes].map(audioCacheKey));
+      removed.push(
+        ...(await sweep({ ...common, dir: AUDIO_CACHE_DIR, classify: classifyAudioCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
+        ...(await sweep({ ...common, dir: VERIFY_CACHE_DIR, classify: classifyVerifyCache, keep: () => true })),
+        ...(await sweep({ ...common, dir: TRANSCRIBE_WINDOW_DIR, classify: classifyWindowWav, keep: () => true })),
+      );
+    }
+    removed.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return { removed, forgotten, skipped };
   }
 
   /** Stop watching. Running jobs are the queue's to stop. */

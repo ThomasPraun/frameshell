@@ -10,6 +10,10 @@
       "default": "./dist/index.js"
     },
     "./frameshelld": "./dist/bin/frameshelld.js",
+    "./binaries": {
+      "types": "./dist/binaries/manager.d.ts",
+      "default": "./dist/binaries/manager.js"
+    },
     "./fs-util": {
       "types": "./dist/fs-util.d.ts",
       "default": "./dist/fs-util.js"

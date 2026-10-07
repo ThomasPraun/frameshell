@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { connectOrStartDaemon } from "../src/daemon-client.js";
+import { type DaemonLaunch, connectOrStartDaemon, spawnDetachedDaemon } from "../src/daemon-client.js";
 
 // Seam under test: connectOrStartDaemon, the one way the CLI, MCP server and app reach frameshelld.
 
@@ -66,6 +66,31 @@ describe("connectOrStartDaemon", () => {
     ).rejects.toThrow(/exited before accepting a connection/);
     expect(Date.now() - began).toBeLessThan(30_000);
     expect(starts()).toBe(3);
+  });
+
+  it("starts each daemon through the given launcher, with this executable, the installed entry and the env", async () => {
+    const path = socketPath();
+    const { env } = daemonEnv(path, { FRAMESHELL_IDLE_TIMEOUT_MS: "2000" });
+    const launches: DaemonLaunch[] = [];
+    const conn = await connectOrStartDaemon({
+      socketPath: path,
+      client: "test/dc",
+      env,
+      launch: (launch) => {
+        launches.push(launch);
+        return spawnDetachedDaemon(launch);
+      },
+    });
+    try {
+      expect(launches).toHaveLength(1);
+      expect(launches[0]?.execPath).toBe(process.execPath);
+      expect(launches[0]?.entry).toMatch(/frameshelld\.js$/);
+      expect(launches[0]?.env).toBe(env);
+      expect(conn.daemon.pid).not.toBe(process.pid);
+    } finally {
+      conn.close();
+      await exited(conn.daemon.pid);
+    }
   });
 
   it("starts a fresh daemon when the one it reached stops on its idle timeout mid-handshake", async () => {

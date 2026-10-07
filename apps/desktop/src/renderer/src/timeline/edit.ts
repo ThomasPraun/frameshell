@@ -1,6 +1,6 @@
 // Timeline editing (SPEC §10): what a press grabs, where a drag lands, which daemon edits a gesture or key sends.
 // Pure and DOM-free, like layout.ts: the panel feeds pointer and keys in and sends the edits out.
-import type { TimelineEdit } from "../../../shared/api.js";
+import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
 import { type ClipBox, type LaneViewport, type TimelineLayout, type TrackRow, RULER_HEIGHT, clipAt, visibleClips } from "./layout.js";
 
 /** Edge handles are this wide at most, px; a third of the clip on short clips, so the middle still moves it. */
@@ -63,28 +63,62 @@ export interface DragInput {
   fps: number;
   /** Targets and reach, seconds (a few px at the current zoom); null snaps nothing. */
   snap: { points: readonly SnapPoint[]; tolerance: number } | null;
+  /** Edge drags: ripple trim, later clips of every track follow the edge (`clip.trim` `ripple`). */
+  ripple?: boolean;
+  /**
+   * Body drags: the selected clip ids. When they hold the grabbed clip and
+   * others, those move along by the same shift, each on its own track.
+   */
+  group?: readonly string[];
+}
+
+/** A selected clip moving along with the grabbed one: where it would land. */
+export interface GroupMember {
+  /** The member as it is now. */
+  clip: ClipBox;
+  /** Its own track: group members never change track. */
+  row: TrackRow;
+  /** Landing start, seconds on the frame grid. */
+  start: number;
+  /** Landing end, seconds on the frame grid. */
+  end: number;
 }
 
 /** Where a dragged clip would land: the ghost drawn during the drag, and the edit sent on release. */
 export interface DragPreview {
   clip: ClipBox;
   part: GrabPart;
-  /** Track the clip lands on: the one under the pointer when of the same kind, else its own. */
+  /** Track the clip lands on: the one under the pointer when of the same kind, else its own (always, for a group). */
   from: TrackRow;
   row: TrackRow;
-  /** Landing times, seconds on the frame grid. */
+  /** Landing times, seconds on the frame grid: where the ghost is drawn. */
   start: number;
   end: number;
+  /**
+   * Edge drags: timeline time the grabbed edge is trimmed to, as `clip.trim`
+   * takes it. Equals `start` (head) or `end` (tail), except for a ripple head
+   * trim: the daemon keeps the clip's left edge and moves its source in
+   * instead, so the ghost stays at the clip's start with the new length.
+   * Body drags: `start`.
+   */
+  edge: number;
   /** Target an edge landed on; null when it moved freely. */
   snapped: SnapPoint | null;
-  /** Overlaps another clip of {@link DragPreview.row}: the daemon will refuse it. */
+  /** The grabbed clip or a group member overlaps a clip that stays: the daemon will refuse it, so a group sends nothing. */
   blocked: boolean;
+  /** Edge drags: a ripple trim. */
+  ripple: boolean;
+  /** Body drags of a multi-selection: the other selected clips; empty otherwise. */
+  others: readonly GroupMember[];
 }
 
 /**
  * Ghost of a drag. Moving keeps the length and snaps whichever edge is
- * nearer a target; trimming moves one edge, keeping at least a frame, and a
- * head no earlier than timeline 0 or source 0.
+ * nearer a target; a group keeps its spacing and stops at timeline 0.
+ * Trimming moves one edge, keeping at least a frame, and a head no earlier
+ * than timeline 0 or source 0; a ripple trim may pass timeline 0 (the clip
+ * keeps its left edge, so its ghost does too) and is never blocked, since
+ * later clips move along.
  */
 export function dragPreview(input: DragInput): DragPreview {
   const { layout, grab, delta, fps } = input;
@@ -94,6 +128,13 @@ export function dragPreview(input: DragInput): DragPreview {
   let { start, end } = clip;
   let snapped: SnapPoint | null = null;
   let row = grab.row;
+  const ripple = part !== "body" && input.ripple === true;
+  const members = new Set(part === "body" && input.group?.includes(clip.id) ? input.group : []);
+  const group = layout.rows.flatMap((candidate) =>
+    candidate.clips.filter((other) => other.id !== clip.id && members.has(other.id)).map((other) => ({ clip: other, row: candidate })),
+  );
+  let others: GroupMember[] = [];
+  let trimTo: number | null = null;
 
   if (part === "body") {
     const length = clip.end - clip.start;
@@ -107,25 +148,44 @@ export function dragPreview(input: DragInput): DragPreview {
       start += best.shift;
       snapped = best.point;
     } else start = onGrid(start);
+    if (group.length > 0) {
+      // The member nearest timeline 0 stops the whole group there.
+      const floor = -Math.min(...group.map((member) => member.clip.start));
+      if (start - clip.start < floor) {
+        start = clip.start + floor;
+        snapped = null;
+      }
+      const shift = start - clip.start;
+      others = group.map(({ clip: other, row: lane }) => ({ clip: other, row: lane, start: other.start + shift, end: other.end + shift }));
+    }
     end = start + length;
     const under = rowAt(layout, input.y);
-    if (under && under.kind === grab.row.kind) row = under;
+    if (group.length === 0 && under && under.kind === grab.row.kind) row = under;
   } else if (part === "head") {
-    const earliest = Math.max(0, clip.start - clip.in / clip.speed);
+    const earliest = ripple ? clip.start - clip.in / clip.speed : Math.max(0, clip.start - clip.in / clip.speed);
     const edge = clip.start + delta;
     snapped = nearest(input.snap, edge);
     start = Math.min(clip.end - frame, Math.max(earliest, snapped ? snapped.time : onGrid(edge)));
     if (snapped && start !== snapped.time) snapped = null;
+    if (ripple) {
+      trimTo = start;
+      end = clip.start + (clip.end - start);
+      start = clip.start;
+    }
   } else {
     const edge = clip.end + delta;
     snapped = nearest(input.snap, edge);
     end = Math.max(clip.start + frame, snapped ? snapped.time : onGrid(edge));
     if (snapped && end !== snapped.time) snapped = null;
   }
-  const blocked = visibleClips(row.clips, start, end).some(
-    (other) => other.id !== clip.id && Math.round(other.start * fps) < Math.round(end * fps) && Math.round(other.end * fps) > Math.round(start * fps),
-  );
-  return { clip, part, from: grab.row, row, start, end, snapped, blocked };
+  const moving = new Set([clip.id, ...members]);
+  const overlaps = (lane: TrackRow, from: number, to: number) =>
+    visibleClips(lane.clips, from, to).some(
+      (other) => !moving.has(other.id) && Math.round(other.start * fps) < Math.round(to * fps) && Math.round(other.end * fps) > Math.round(from * fps),
+    );
+  const blocked = !ripple && (overlaps(row, start, end) || others.some((member) => overlaps(member.row, member.start, member.end)));
+  const edge = trimTo ?? (part === "tail" ? end : start);
+  return { clip, part, from: grab.row, row, start, end, edge, snapped, blocked, ripple, others };
 }
 
 /** Nearest snap point within reach of `time`, or null. */
@@ -146,27 +206,56 @@ function rowAt(layout: TimelineLayout, y: number): TrackRow | null {
 }
 
 /**
- * The one operation a released drag sends; null when it changes nothing.
- * Trims keep the daemon's energy snapping (ADR 0003, as in the CLI), except
- * an edge put on another clip's edge: a pause-snapped edge there would leave
- * a gap or an overlap, so it goes exactly.
+ * The operations a released drag sends, as one call; none when it changes
+ * nothing, or for a blocked group move: the daemon would refuse one member,
+ * so the panel says why instead of sending it. A group move is a `clip.move`
+ * per clip, the leading one first so clips of one track never collide midway. Trims keep the daemon's energy
+ * snapping (ADR 0003, as in the CLI), except an edge put on another clip's
+ * edge: a pause-snapped edge there would leave a gap or an overlap, so it
+ * goes exactly. A ripple trim adds `ripple`.
  */
-export function dragEdit(preview: DragPreview): TimelineEdit | null {
+export function dragEdits(preview: DragPreview): TimelineEdit[] {
   const { clip, part } = preview;
   if (part === "body") {
     const start = seconds(preview.start);
     const moved = start !== seconds(clip.start);
     const track = preview.row.id !== preview.from.id;
-    if (!moved && !track) return null;
-    return { op: "clip.move", args: { clip: clip.id, ...(moved ? { start } : {}), ...(track ? { track: preview.row.id } : {}) } };
+    if (!moved && !track) return [];
+    const grabbed: TimelineEdit = {
+      op: "clip.move",
+      args: { clip: clip.id, ...(moved ? { start } : {}), ...(track ? { track: preview.row.id } : {}) },
+    };
+    if (preview.others.length === 0) return [grabbed];
+    if (preview.blocked) return [];
+    const later = preview.start > clip.start;
+    return [{ clip, start: preview.start }, ...preview.others]
+      .sort((a, b) => (later ? b.clip.start - a.clip.start : a.clip.start - b.clip.start))
+      .map((member) => ({ op: "clip.move", args: { clip: member.clip.id, start: seconds(member.start) } }));
   }
   const exact = preview.snapped?.kind === "clip" ? { snap: false } : {};
+  const ripple = preview.ripple ? { ripple: true } : {};
   if (part === "head") {
-    const start = seconds(preview.start);
-    return start === seconds(clip.start) ? null : { op: "clip.trim", args: { clip: clip.id, start, ...exact } };
+    const start = seconds(preview.edge);
+    return start === seconds(clip.start) ? [] : [{ op: "clip.trim", args: { clip: clip.id, start, ...exact, ...ripple } }];
   }
-  const end = seconds(preview.end);
-  return end === seconds(clip.end) ? null : { op: "clip.trim", args: { clip: clip.id, end, ...exact } };
+  const end = seconds(preview.edge);
+  return end === seconds(clip.end) ? [] : [{ op: "clip.trim", args: { clip: clip.id, end, ...exact, ...ripple } }];
+}
+
+/**
+ * Undo or redo of a key press, as the Edit menu shows them: Command+Z and
+ * Command+Shift+Z on macOS; Control+Z, Control+Shift+Z and Control+Y elsewhere.
+ * Null for any other key.
+ */
+export function historyShortcut(
+  event: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean },
+  mac: boolean,
+): HistoryCommand | null {
+  const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  if (!mod || event.altKey) return null;
+  const key = event.key.toLowerCase();
+  if (key === "z") return event.shiftKey ? "redo" : "undo";
+  return key === "y" && !mac && !event.shiftKey ? "redo" : null;
 }
 
 /** Keyboard edit commands of the timeline panel. */
@@ -234,6 +323,36 @@ export function commandEdits(command: EditCommand, context: CommandContext): Tim
           args: { from: seconds(clip.start), to: seconds(clip.end), tracks: [row.id], snap: false },
         }));
   }
+}
+
+/**
+ * `layout` with clips moved to `starts` (clip id to seconds), keeping their
+ * length: where clips will be once nudges already sent apply, so a key
+ * pressed again before the daemon's new revision arrives builds on them.
+ */
+export function withStarts(layout: TimelineLayout, starts: ReadonlyMap<string, number>): TimelineLayout {
+  if (starts.size === 0) return layout;
+  const rows = layout.rows.map((row) => ({
+    ...row,
+    clips: row.clips
+      .map((clip) => {
+        const start = starts.get(clip.id);
+        return start === undefined ? clip : { ...clip, start, end: clip.end + (start - clip.start) };
+      })
+      .sort((a, b) => a.start - b.start),
+  }));
+  return { ...layout, rows };
+}
+
+/**
+ * How main records a command's call: nudges of the same clips are one
+ * gesture burst (a held `.` is one history entry and one undo step); other
+ * commands keep main's default, one labelled transaction per call.
+ */
+export function commandOptions(command: EditCommand, selected: readonly string[]): EditOptions {
+  if (command.kind !== "nudge") return {};
+  const ids = [...selected].sort();
+  return { label: ids.length === 1 ? "Nudge clip" : `Nudge ${ids.length} clips`, burst: `nudge:${ids.join(" ")}` };
 }
 
 /** Seconds as the daemon stores them: 3 decimals (it snaps to its frame grid itself). */

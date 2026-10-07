@@ -63,7 +63,7 @@ export const newComposition: PluginCommand = {
 
 function template(id: string, width: number, height: number, duration: number): string {
   return `<!doctype html>
-<html lang="en" data-composition-variables='{"title":"Title"}'>
+<html lang="en" data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Title"}]'>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=${width}, height=${height}" />
@@ -91,7 +91,7 @@ function template(id: string, width: number, height: number, duration: number): 
       </div>
     </div>
     <script>
-      // Clip props arrive as composition variables, merged over data-composition-variables.
+      // Clip props arrive as composition variables, merged over the defaults declared in data-composition-variables.
       var vars = (window.__hyperframes && window.__hyperframes.getVariables()) || { title: "Title" };
       document.getElementById("card").textContent = vars.title;
     </script>

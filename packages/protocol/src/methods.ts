@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 28;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -137,6 +137,25 @@ const TrustStateSchema = z
 const PinsSchema = z
   .record(z.string(), z.string())
   .describe("Declared plugins from `frameshell.json`: package name to pinned npm spec (exact version or git URL#commit).");
+
+const GcEntrySchema = z.object({
+  path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
+  kind: z
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "temp"])
+    .describe(
+      "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
+        "generated-clip render no timeline uses. `temp`: leftover of an interrupted job or transcription.",
+    ),
+  bytes: z.int().describe("Size on disk; a directory counts its files."),
+});
+
+const GcSkipSchema = z.object({
+  area: z
+    .enum(["media", "clips", "audio", "temp"])
+    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, or job temp files."),
+  reason: z.string(),
+});
 
 const CwdParam = AbsolutePath.describe(
   "Absolute directory inside the project, e.g. `/home/ana/videos/launch`. The project is found searching upwards.",
@@ -278,8 +297,9 @@ const AssetSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "Project-relative CFR proxy: H.264 at project fps, GOP 15, no B-frames (frame index = sample index), faststart, " +
-        "short side at most 540 px. Null for audio-only, still images, or before ingest.",
+      "Project-relative CFR proxy: H.264 `.mp4` at project fps, GOP 15, no B-frames (frame index = sample index), " +
+        "faststart, short side at most 540 px; `.webm` (VP9 with its alpha plane, same frame grid and GOP, no audio) when " +
+        "the source has alpha. Null for audio-only, still images, or before ingest.",
     ),
   sidecar: z
     .object({
@@ -365,7 +385,10 @@ const VerifiedWordSchema = z.object({
     .describe("0..1 that this word really is missing from the export: source word confidence times the run's agreement, lower away from cuts."),
 });
 
-const LostWordSchema = VerifiedWordSchema.describe("A word kept by the timeline, at a cut, of which nothing was heard in the export.");
+const LostWordSchema = VerifiedWordSchema.describe(
+  "A word kept by the timeline that the cut falls inside (`clipped` is always true), of which nothing was heard in the " +
+    "export, not even when the audio around it was re-transcribed alone.",
+);
 
 const UncertainWordSchema = VerifiedWordSchema.extend({
   reason: z
@@ -373,7 +396,8 @@ const UncertainWordSchema = VerifiedWordSchema.extend({
     .describe(
       "`repeat`: missing, but repeats the phrase next to it; whisper can collapse repeated phrases (ADR 0003), so check by ear. " +
         "`garbled`: at a cut, heard as other text (`heardAs`); the cut may have clipped it. " +
-        "`unheard`: missing away from any cut; more likely a transcription miss than a cut.",
+        "`unheard`: not heard, but either away from any cut or whole inside its clip (`clipped: false`, also after " +
+        "re-transcribing the audio around it): a transcription miss, not a cut; check by ear, never trim for it.",
     ),
   heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
 });
@@ -552,14 +576,17 @@ export const methods = {
     mutating: true,
     description:
       "Install a plugin into the enclosing project and pin it in `frameshell.json`. " +
-      "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, or an npm name `[@scope/]name[@version]`. " +
-      "Git sources pin the resolved commit; npm sources pin the exact version. The agent skills it ships are linked " +
+      "`spec` is `github:<user>/<repo>[#ref]`, a `git+<url>[#ref]` URL, an npm name `[@scope/]name[@version]`, " +
+      "or a local tarball made by `npm pack` (`<path>.tgz` or `file:<path>`, relative to `cwd`). " +
+      "Git sources pin the resolved commit; npm sources pin the exact version; tarballs pin `file:<path>#sha256=<digest>` " +
+      "(always project-relative: a tarball from outside the project is first copied to `vendor/<file>`), and a tarball whose bytes later differ is never installed. The agent skills it ships are linked " +
       "into the project's `.claude/skills/`. " +
-      "Fails with ProjectNotTrusted when the project already declares plugins that are not trusted, " +
+      "Fails with InvalidPluginSpec for an unsupported spec or a missing tarball, " +
+      "ProjectNotTrusted when the project already declares plugins that are not trusted, " +
       "InvalidPlugin when the package has no valid manifest or targets another plugin API version (nothing is pinned then).",
     params: z.strictObject({
       cwd: CwdParam,
-      spec: z.string().min(1).describe("Plugin source, e.g. `github:acme/frameshell-titles` or `@acme/titles@1.2.0`."),
+      spec: z.string().min(1).describe("Plugin source, e.g. `github:acme/frameshell-titles`, `@acme/titles@1.2.0` or `./acme-titles-1.2.0.tgz`."),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -719,6 +746,31 @@ export const methods = {
       assets: z.array(AssetSchema).describe("Sorted by path."),
     }),
   },
+  gc: {
+    mutating: true,
+    description:
+      "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
+      "thumbnails, energy envelopes and transcription WAVs of assets deleted or changed since (or built for an older " +
+      "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
+      "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
+      "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
+      "and temp files are skipped while jobs or transcriptions run (`skipped` says why). Deleted outputs rebuild on " +
+      "demand. `dryRun` lists without deleting.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      dryRun: z.boolean().default(false).describe("Only list what would be deleted. Default false."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      dryRun: z.boolean(),
+      removed: z.array(GcEntrySchema).describe("Deleted (or, with `dryRun`, deletable) entries, sorted by path."),
+      bytes: z.int().describe("Total size of `removed`."),
+      forgotten: z
+        .array(z.string())
+        .describe("Media index entries of files that no longer exist; dropped from the index unless `dryRun`."),
+      skipped: z.array(GcSkipSchema).describe("Areas left alone this run, with why; empty when everything was checked."),
+    }),
+  },
   "job.list": {
     description:
       "Background jobs of the enclosing project (ingest, render), with state and progress. Jobs keep running after the " +
@@ -805,6 +857,18 @@ export const methods = {
       reusedIds: z.int().describe("Words that kept the id they had in the previous transcript."),
       keptEdits: z.int().describe("Human edits carried over from the previous transcript."),
       droppedEdits: z.array(z.string()).describe("Ids of human edits dropped because their word was not found again."),
+      recoveredWords: z
+        .int()
+        .describe(
+          "Words recovered by re-transcribing alone a word that lasted far too long and held more speech (whisper can " +
+            "swallow a repeated phrase into one word); they replace it.",
+        ),
+      speechInside: z
+        .array(z.string())
+        .describe(
+          "Ids of words still far too long with speech inside after that (`speechInside: true` in the file): they hide " +
+            "words the transcript lacks. Never cut inside them; check by ear.",
+        ),
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
     }),
   },
@@ -813,9 +877,11 @@ export const methods = {
       "Check an exported file for words lost at cuts (SPEC §3.5 step 6): re-transcribe the export and compare it, " +
       "on the timeline clock, with the source transcript words the timeline keeps (each media clip's words inside " +
       "its `in`/`out`, mapped by `start` and `speed`; a word counts as kept when most of it is inside). Writes no " +
-      "transcript. `lost` lists words at a cut of which nothing was heard: each with its timeline position, clip and " +
-      "the cut. `uncertain` lists the rest that were not confirmed (whisper-collapsed repeats, words at a cut heard " +
-      "as other text, words missing away from cuts). The alignment ignores case, punctuation, accents, onset jitter, " +
+      "transcript. A word missing at a cut is re-transcribed again in a short window of export audio around it " +
+      "before it is reported. `lost` lists words the cut falls inside (`clipped`) of which nothing was heard either " +
+      "time: each with its timeline position, clip and the cut. `uncertain` lists the rest that were not confirmed " +
+      "(whisper-collapsed repeats, words at a cut heard as other text, missing words away from cuts or whole inside " +
+      "their clip). The alignment ignores case, punctuation, accents, onset jitter, " +
       "split or merged words and close spellings. Clips whose asset has no transcript, or a stale one, are listed in " +
       "`unchecked`: run `transcribe` on them first. Use the same timeline the export was rendered from. Fails with " +
       "AssetNotFound (no such export), TimelineNotFound, and the errors of `transcribe`.",
@@ -855,7 +921,7 @@ export const methods = {
       }),
       expected: z.int().describe("Source words the timeline keeps, in checked clips."),
       heard: z.int().describe("Of those, words found in the export."),
-      lost: z.array(LostWordSchema).describe("Words lost at a cut, by timeline position. Empty = nothing lost."),
+      lost: z.array(LostWordSchema).describe("Words cut off at a clip edge, by timeline position. Empty = nothing lost."),
       uncertain: z.array(UncertainWordSchema).describe("Words not confirmed but not reported lost, by timeline position."),
       confidence: z
         .number()
@@ -1011,8 +1077,8 @@ export const methods = {
       "default the whole asset; start defaults to right after the track's last clip). Adapter example: " +
       "`{ track, type: \"hyperframes\", source: \"compositions/hyperframes/intro/index.html\", duration: 8, props: {…} }`. " +
       "Times snap to the project frame grid. `ripple: true` inserts: clips at or after `start` on every video and audio " +
-      "track move right to make room (e.g. to restore removed words: `{ track, asset, start: 12.4, in: 30.1, out: 30.9, " +
-      "ripple: true, snap: true }`). `snap: true` moves media `in`/`out` into audio pauses and reports them in `snaps`. " +
+      "track (or only `rippleTracks`) move right to make room (e.g. to restore removed words: `{ track, asset, start: 12.4, " +
+      "in: 30.1, out: 30.9, ripple: true, snap: true }`). `snap: true` moves media `in`/`out` into audio pauses and reports them in `snaps`. " +
       "Fails with InvalidOperation (overlap, out beyond the source duration, wrong " +
       "track kind, unknown clip type; data says the valid range), AssetNotFound, TrackNotFound.",
     params: operationArgs["clip.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
@@ -1034,7 +1100,7 @@ export const methods = {
       "ripple: use `cut` to close gaps. Media clips with audio: each edge snaps into the nearest audio pause within " +
       "±`snapWindow` (default: project `editing.snapWindow`, else 0.5 s); `snaps` reports requested vs applied and `clean: false` when no pause was in " +
       "reach. `snap: false` trims exactly. `ripple: true` keeps the left edge and moves later clips on every video and " +
-      "audio track by the change in length: extend a clip over removed material with `{ clip, out: 18.4, ripple: true }` " +
+      "audio track (or only `rippleTracks`) by the change in length: extend a clip over removed material with `{ clip, out: 18.4, ripple: true }` " +
       "(the inverse of `cut`). Fails with InvalidOperation giving the valid range.",
     params: operationArgs["clip.trim"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -1462,6 +1528,14 @@ export type AssetInfo = z.output<typeof AssetSchema>;
 export type AssetImportParams = MethodParams<"asset.import">;
 /** Result of `asset.import`. */
 export type AssetImportResult = MethodResult<"asset.import">;
+/** `gc` params. */
+export type GcParams = MethodParams<"gc">;
+/** Result of `gc`. */
+export type GcResult = MethodResult<"gc">;
+/** One deleted (or deletable) entry of a {@link GcResult}. */
+export type GcEntry = z.output<typeof GcEntrySchema>;
+/** One area a {@link GcResult} left alone. */
+export type GcSkip = z.output<typeof GcSkipSchema>;
 /** Summary of an open project. */
 export type ProjectSummary = z.output<typeof ProjectSummarySchema>;
 

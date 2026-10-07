@@ -3,12 +3,13 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import type { JobStep } from "@frameshell/protocol";
 import { renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import type { JobContext } from "../jobs/queue.js";
-import { ToolError, probeMedia, runTool } from "./ffmpeg.js";
+import { ToolError, probeSource, runTool } from "./ffmpeg.js";
 import {
   PEAKS_PER_SECOND,
   RECIPE_VERSION,
   SIDECAR_CHANNELS,
   SIDECAR_SAMPLE_RATE,
+  alphaProxyArgs,
   proxyArgs,
   sidecarArgs,
   thumbnailArgs,
@@ -93,8 +94,9 @@ async function build(
 
   report("probe");
   let media;
+  let alpha;
   try {
-    media = await probeMedia(tools.ffprobe, source, signal);
+    ({ media, alpha } = await probeSource(tools.ffprobe, source, signal));
   } catch (error) {
     if (error instanceof ToolError) throw notMedia(rel, error.stderr);
     throw error;
@@ -121,10 +123,12 @@ async function build(
     await mkdir(store.abs(DERIVED_DIRS.proxies), { recursive: true });
     if (moving) {
       report("proxy");
-      const proxy = `${DERIVED_DIRS.proxies}/${key}.mp4`;
+      // Alpha needs VP9 WebM (#90): H.264 has no alpha plane.
+      const proxy = `${DERIVED_DIRS.proxies}/${key}.${alpha ? "webm" : "mp4"}`;
       const temp = `${store.abs(proxy)}.${partial}`;
       temps.push(temp);
-      await runTool(tools.ffmpeg, proxyArgs(source, temp, fps), { signal, onProgress: progressOf("proxy") });
+      const args = alpha ? alphaProxyArgs(source, temp, fps, alpha.decoder) : proxyArgs(source, temp, fps);
+      await runTool(tools.ffmpeg, args, { signal, onProgress: progressOf("proxy") });
       await renameRetrying(temp, store.abs(proxy));
       manifest.proxy = proxy;
     }

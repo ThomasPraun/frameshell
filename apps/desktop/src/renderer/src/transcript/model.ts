@@ -31,6 +31,8 @@ export interface TranscriptWord {
   end: number;
   /** Earliest first; empty when every clip cut it (struck). */
   placements: Placement[];
+  /** The span hides speech the transcript lacks (transcript `speechInside`): never cut inside it. */
+  speechInside: boolean;
 }
 
 /** The words of one asset on the timeline, in source order. */
@@ -135,7 +137,8 @@ export function buildTranscriptModel(view: TimelineView, sources: readonly Trans
         const key = `${path}#${word.id}`;
         const placements = place(clips, word.start, word.end);
         for (const { from, to } of placements) timeline.push({ from, to, key });
-        return { key, id: word.id, text: transcript.edits[word.id]?.text ?? word.text, start: word.start, end: word.end, placements };
+        const text = transcript.edits[word.id]?.text ?? word.text;
+        return { key, id: word.id, text, start: word.start, end: word.end, placements, speechInside: word.speechInside === true };
       });
     assets.push({ asset, path, words });
   }
@@ -173,96 +176,205 @@ export function placeWord(view: TimelineView, word: SelectedWord): TimeRange | n
   return first ? { from: first.from, to: first.to } : null;
 }
 
-/** How a cut word comes back: which clip grows or is inserted after, and the `ui` operation that does it. */
+/** How cut words come back: which clip grows or is inserted after, and the `ui` operation that does it. */
 export interface Restore {
-  /** `extend`: an adjacent clip grows over the word; `insert`: a new clip plays just the word. */
+  /** `extend`: an adjacent clip grows over the words; `insert`: a new clip plays just the words. */
   how: "extend" | "insert";
-  /** Clip extended, or the clip the new one is placed after (before, when the word precedes every clip). */
+  /** Clip extended, or the clip the new one is placed after (before, when the words precede every clip). */
   clip: string;
   edit: TimelineEdit;
 }
 
-/**
- * The operation that restores cut word `key` (SPEC §10), as the inverse of
- * the cut that removed it:
- *
- * - When nothing else was cut between the word and the clip that ends before
- *   it in the source, that clip's tail grows over it (`clip.trim` `out`);
- *   else, when nothing was cut between the word and the clip that starts
- *   after it, that clip's head grows back over it (`clip.trim` `in`).
- * - Otherwise only the word's range is inserted as a new clip right after
- *   the clip before it (`clip.add`), so other cut words stay cut.
- *
- * Every variant ripples (later clips on every track move right instead of
- * being overlapped) and snaps its edges into audio pauses (ADR 0003). Edges
- * are requested mid-gap between the word and its neighbours; `snapBounds`
- * keeps the snapped edge in that gap: a new `in` between the previous word's
- * end (or the source the clip before plays) and the word's start, a new `out`
- * between the word's end and the next word's start (or the source the clip
- * after plays). Inter-word gaps are often shorter than a pause, so an
- * unfenced snap could land across the word (leaving it cut) or across a
- * neighbour (bringing it back). Null for a kept word or unknown key.
- */
-export function restoreEdit(view: TimelineView, model: TranscriptModel, key: string): Restore | null {
-  const entry = model.assets.find((asset) => asset.words.some((word) => word.key === key));
-  if (!entry) return null;
-  const index = entry.words.findIndex((word) => word.key === key);
-  const word = entry.words[index]!;
-  if (word.placements.length > 0) return null;
-  const clips = mediaSpans(view).filter((span) => span.asset === entry.asset);
-  const center = mid(word);
-  const before = clips.filter((clip) => clip.out <= center).sort((a, b) => b.out - a.out || b.start - a.start)[0];
-  const after = clips.filter((clip) => clip.in > center).sort((a, b) => a.in - b.in || a.start - b.start)[0];
-  const cutBetween = (from: number, to: number) => entry.words.some((other) => other !== word && mid(other) >= from && mid(other) < to);
+/** One restore step with what the plan needs to order and report it. */
+interface RunRestore {
+  restore: Restore;
+  /** Keys of the words it brings back. */
+  keys: string[];
+  /** Timeline second where it opens room: clips starting there or later move. */
+  at: number;
+  /** Source second of its first word: orders steps that open room at the same point. */
+  source: number;
+  /** Clip tracks left in place, see {@link rippleScope}. */
+  held: string[];
+}
 
-  const previous = entry.words[index - 1];
-  const next = entry.words[index + 1];
-  // Fences: source an edge may take without cutting into the word, a neighbour word or another clip's source.
+/**
+ * Tracks a restore opening room at timeline second `at` on track `own`
+ * moves. The own track always moves. Another video or audio track moves
+ * only when that opens no gap: the first of its clips starting at or after
+ * `at` must not touch a clip that stays (one ending where it starts).
+ * Moving such a track would leave black or silence there, e.g. footage or
+ * music laid under a voice line restored on its own track. `held` lists the
+ * tracks that stay; those keep their timing, so they shift against the
+ * restored track after `at`.
+ */
+export function rippleScope(view: TimelineView, own: string, at: number): { tracks: string[]; held: string[] } {
+  const frame = (seconds: number) => Math.round(seconds * view.fps);
+  const from = frame(at);
+  const tracks: string[] = [];
+  const held: string[] = [];
+  for (const track of view.tracks) {
+    if (track.kind === "subtitles") continue;
+    const moving = track.clips.filter((clip) => frame(clip.start) >= from);
+    const first = moving.reduce<(typeof moving)[number] | undefined>((min, clip) => (!min || clip.start < min.start ? clip : min), undefined);
+    // A clip of unknown length (broken nested timeline) may touch: treat it as touching.
+    const opensGap =
+      track.id !== own &&
+      first !== undefined &&
+      track.clips.some((clip) => frame(clip.start) < from && (clip.end === null || frame(clip.end) === frame(first.start)));
+    (opensGap ? held : tracks).push(track.id);
+  }
+  return { tracks, held };
+}
+
+/**
+ * Restore of the struck words `first..last` (indices into `entry.words`, all
+ * struck) as one edit, the inverse of the cut that removed them:
+ *
+ * - When nothing else was cut between the words and the clip that ends
+ *   before them in the source, that clip's tail grows over them (`clip.trim`
+ *   `out`); else, when nothing was cut between them and the clip that starts
+ *   after them, that clip's head grows back over them (`clip.trim` `in`).
+ * - Otherwise only their range is inserted as a new clip right after the
+ *   clip before them (`clip.add`), so other cut words stay cut.
+ *
+ * Every variant ripples (later clips move right instead of being
+ * overlapped), on the tracks {@link rippleScope} allows, and snaps its edges
+ * into audio pauses (ADR 0003). Edges are requested mid-gap between the
+ * words and their neighbours; `snapBounds` keeps the snapped edge in that
+ * gap: a new `in` between the previous word's end (or the source the clip
+ * before plays) and the first word's start, a new `out` between the last
+ * word's end and the next word's start (or the source the clip after plays).
+ * Inter-word gaps are often shorter than a pause, so an unfenced snap could
+ * land across a restored word (leaving it cut) or across a neighbour
+ * (bringing it back). Null when no clip of the asset is left to anchor on.
+ */
+function restoreRun(view: TimelineView, entry: AssetTranscript, first: number, last: number): RunRestore | null {
+  const run = entry.words.slice(first, last + 1);
+  const head0 = run[0]!;
+  const tail0 = run.at(-1)!;
+  const clips = mediaSpans(view).filter((span) => span.asset === entry.asset);
+  const low = mid(head0);
+  const high = mid(tail0);
+  const before = clips.filter((clip) => clip.out <= low).sort((a, b) => b.out - a.out || b.start - a.start)[0];
+  const after = clips.filter((clip) => clip.in > high).sort((a, b) => a.in - b.in || a.start - b.start)[0];
+  const cutBetween = (from: number, to: number) => entry.words.some((other) => !run.includes(other) && mid(other) >= from && mid(other) < to);
+
+  const previous = entry.words[first - 1];
+  const next = entry.words[last + 1];
+  // Fences: source an edge may take without cutting into the run, a neighbour word or another clip's source.
   const inMin = round(Math.max(previous?.end ?? 0, before?.out ?? 0));
-  const inMax = round(Math.max(inMin, word.start));
+  const inMax = round(Math.max(inMin, head0.start));
   const outMax = round(Math.min(next?.start ?? Infinity, after?.in ?? Infinity));
-  const outMin = round(Math.min(outMax, word.end));
+  const outMin = round(Math.min(outMax, tail0.end));
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-  const head = clamp(round(previous ? (previous.end + word.start) / 2 : word.start), inMin, inMax);
-  const tail = clamp(round(next ? (word.end + next.start) / 2 : word.end), outMin, outMax);
+  const head = clamp(round(previous ? (previous.end + head0.start) / 2 : head0.start), inMin, inMax);
+  const tail = clamp(round(next ? (tail0.end + next.start) / 2 : tail0.end), outMin, outMax);
   const inBounds = { min: inMin, max: inMax };
   const outBounds = Number.isFinite(outMax) ? { min: outMin, max: outMax } : { min: outMin };
+  const keys = run.map((word) => word.key);
+  const step = (restore: Restore, at: number, scope: { tracks: string[]; held: string[] }): RunRestore => {
+    // Every track may move: leave `rippleTracks` out, as a plain ripple.
+    if (scope.held.length > 0) Object.assign(restore.edit.args, { rippleTracks: scope.tracks });
+    return { restore, keys, at, source: head0.start, held: scope.held };
+  };
 
-  if (before && !cutBetween(before.out, center)) {
-    return {
-      how: "extend",
-      clip: before.id,
-      edit: { op: "clip.trim", args: { clip: before.id, out: tail, snapBounds: { out: outBounds }, ripple: true } },
-    };
+  if (before && !cutBetween(before.out, low)) {
+    const at = round(before.end);
+    return step(
+      { how: "extend", clip: before.id, edit: { op: "clip.trim", args: { clip: before.id, out: tail, snapBounds: { out: outBounds }, ripple: true } } },
+      at,
+      rippleScope(view, before.track, at),
+    );
   }
-  if (after && !cutBetween(center, after.in)) {
-    return {
-      how: "extend",
-      clip: after.id,
-      edit: { op: "clip.trim", args: { clip: after.id, in: head, snapBounds: { in: inBounds }, ripple: true } },
-    };
+  if (after && !cutBetween(high, after.in)) {
+    return step(
+      { how: "extend", clip: after.id, edit: { op: "clip.trim", args: { clip: after.id, in: head, snapBounds: { in: inBounds }, ripple: true } } },
+      after.start,
+      rippleScope(view, after.track, after.start),
+    );
   }
   const anchor = before ?? after;
   if (!anchor) return null;
-  return {
-    how: "insert",
-    clip: anchor.id,
-    edit: {
-      op: "clip.add",
-      args: {
-        track: anchor.track,
-        asset: entry.asset,
-        start: before ? round(before.end) : anchor.start,
-        in: head,
-        out: tail,
-        ...(anchor.speed !== 1 ? { speed: anchor.speed } : {}),
-        ...(anchor.gain !== undefined ? { gain: anchor.gain } : {}),
-        ...(anchor.muted ? { muted: true } : {}),
-        ripple: true,
-        snap: true,
-        snapBounds: { in: inBounds, out: outBounds },
+  const start = before ? round(before.end) : anchor.start;
+  return step(
+    {
+      how: "insert",
+      clip: anchor.id,
+      edit: {
+        op: "clip.add",
+        args: {
+          track: anchor.track,
+          asset: entry.asset,
+          start,
+          in: head,
+          out: tail,
+          ...(anchor.speed !== 1 ? { speed: anchor.speed } : {}),
+          ...(anchor.gain !== undefined ? { gain: anchor.gain } : {}),
+          ...(anchor.muted ? { muted: true } : {}),
+          ripple: true,
+          snap: true,
+          snapBounds: { in: inBounds, out: outBounds },
+        },
       },
     },
+    start,
+    rippleScope(view, anchor.track, start),
+  );
+}
+
+/**
+ * The operation that restores cut word `key` (SPEC §10); see
+ * {@link restorePlan} for several words. Null for a kept word or unknown key.
+ */
+export function restoreEdit(view: TimelineView, model: TranscriptModel, key: string): Restore | null {
+  return restorePlan(view, model, [key])?.steps[0] ?? null;
+}
+
+/** Edits that bring back several cut words at once: one `ui` transaction, so one undo step. */
+export interface RestorePlan {
+  /** In apply order: latest on the timeline first, so no step moves where a later one opens room. */
+  edits: TimelineEdit[];
+  /** One per edit, same order. */
+  steps: Restore[];
+  /** Keys of the struck words the edits bring back. */
+  keys: string[];
+  /** Video and audio tracks some step leaves in place, so they do not get a gap; see {@link rippleScope}. */
+  held: string[];
+}
+
+/**
+ * Restore every struck word among `keys` (a struck sentence, a drag
+ * selection; kept and unknown keys are skipped). Struck words next to each
+ * other in their transcript come back as one run, by one edit (see
+ * {@link restoreRun}): the clip before grows over the whole run instead of
+ * word by word. Null when no key names a struck word that can come back.
+ */
+export function restorePlan(view: TimelineView, model: TranscriptModel, keys: readonly string[]): RestorePlan | null {
+  const wanted = new Set(keys);
+  const runs: RunRestore[] = [];
+  for (const entry of model.assets) {
+    let first = -1;
+    entry.words.forEach((word, index) => {
+      const take = wanted.has(word.key) && word.placements.length === 0;
+      if (take && first === -1) first = index;
+      const next = entry.words[index + 1];
+      const continues = next !== undefined && wanted.has(next.key) && next.placements.length === 0;
+      if (take && !continues) {
+        const run = restoreRun(view, entry, first, index);
+        if (run) runs.push(run);
+        first = -1;
+      }
+    });
+  }
+  if (runs.length === 0) return null;
+  // Each step is computed on the current timeline: apply the latest first so earlier ones still hold.
+  runs.sort((a, b) => b.at - a.at || b.source - a.source);
+  return {
+    edits: runs.map((run) => run.restore.edit),
+    steps: runs.map((run) => run.restore),
+    keys: runs.flatMap((run) => run.keys),
+    held: [...new Set(runs.flatMap((run) => run.held))],
   };
 }
 
@@ -270,6 +382,40 @@ export function restoreEdit(view: TimelineView, model: TranscriptModel, key: str
 export function isKept(view: TimelineView, sources: readonly TranscriptSource[], key: string): boolean {
   const model = buildTranscriptModel(view, sources);
   return model.assets.some((asset) => asset.words.some((word) => word.key === key && word.placements.length > 0));
+}
+
+/**
+ * Keys of the struck words around `words[index]` with no kept word between
+ * them, in source order: the cut passage it belongs to. Empty for a kept word.
+ */
+export function struckRun(words: readonly TranscriptWord[], index: number): string[] {
+  const struck = (i: number) => words[i] !== undefined && words[i]!.placements.length === 0;
+  if (!struck(index)) return [];
+  let first = index;
+  let last = index;
+  while (struck(first - 1)) first--;
+  while (struck(last + 1)) last++;
+  return words.slice(first, last + 1).map((word) => word.key);
+}
+
+/**
+ * Transcript file `content` with word `id` corrected to `text`, as a human
+ * edit (SPEC §5.4 `edits`; subtitles and `transcribe --verify` read it).
+ * Every other field and edit stays as it is. `text` is trimmed; empty, or
+ * equal to what was transcribed, drops the edit so the word reads as
+ * transcribed again. Throws when `content` is no transcript object or has no
+ * word `id`.
+ */
+export function withWordText(content: string, id: string, text: string): string {
+  const data = JSON.parse(content) as { words?: unknown; edits?: unknown };
+  const words = Array.isArray(data.words) ? (data.words as { id?: unknown; text?: unknown }[]) : null;
+  const word = words?.find((candidate) => candidate.id === id);
+  if (!word) throw new Error(`no word ${id} in this transcript`);
+  const edits = { ...(typeof data.edits === "object" && data.edits !== null ? (data.edits as Record<string, unknown>) : {}) };
+  const corrected = text.trim();
+  if (corrected === "" || corrected === word.text) delete edits[id];
+  else edits[id] = { ...(edits[id] as object | undefined), text: corrected };
+  return `${JSON.stringify({ ...data, edits }, null, 2)}\n`;
 }
 
 /** Source silence that starts a new paragraph, seconds. */

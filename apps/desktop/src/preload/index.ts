@@ -50,14 +50,18 @@ const api: FrameshellApi = {
     show: (timeline) => invokeOutcome(Channel.timelineShow, timeline),
     onChanged: (listener) => subscribe(Channel.timelineChanged, listener),
     onRejected: (listener) => subscribe(Channel.timelineRejected, listener),
-    edit: (timeline, edits) => invokeOutcome(Channel.timelineEdit, timeline, edits),
+    edit: (timeline, edits, options) => invokeOutcome(Channel.timelineEdit, timeline, edits, options),
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
     redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),
+    onHistoryCommand: (listener) => subscribe(Channel.timelineHistoryCommand, listener),
   },
   history: {
     list: (timeline) => invokeOutcome(Channel.historyList, timeline),
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
+  },
+  menu: {
+    onCommand: (listener) => subscribe(Channel.menuCommand, listener),
   },
   ui: {
     publish: (state) => ipcRenderer.send(Channel.uiPublish, state),

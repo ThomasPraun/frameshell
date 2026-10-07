@@ -7,8 +7,34 @@ import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plu
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
 import { exists, readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
+import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
+import { recoverLongWords } from "./long-words.js";
+import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
+
+/** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
+export const AUDIO_CACHE_DIR = ".frameshell/cache/audio";
+
+/** Cache key of the transcription WAVs of content `hash` (`sha256:<hex>` or bare hex): their names start with it. */
+export function audioCacheKey(hash: string): string {
+  return hash.replace(/^sha256:/, "").slice(0, 16);
+}
+
+const AUDIO_FILE = /^([0-9a-f]{16})-(sidecar|asset)\.wav$/;
+/** Extraction temps: `<file>.<pid>.tmp.wav`. */
+const AUDIO_TEMP = /^[0-9a-f]{16}-(sidecar|asset)\.wav\..+\.tmp\.wav$/;
+
+/**
+ * What an entry of {@link AUDIO_CACHE_DIR} is, for `gc`: the WAV of cache
+ * key `key`, an extraction temp, or null (not ours: kept).
+ */
+export function classifyAudioCache(name: string, isDirectory: boolean): GcClass {
+  if (isDirectory) return null;
+  if (AUDIO_TEMP.test(name)) return { kind: "temp", key: null };
+  const key = AUDIO_FILE.exec(name)?.[1];
+  return key ? { kind: "audio", key } : null;
+}
 
 /** Native tools a transcription may need, with progress for first-run installs. */
 export interface TranscriberTools {
@@ -60,7 +86,9 @@ export interface TranscribeAssetOptions {
  * else the asset itself through the same clock filter. Ingest is never
  * triggered or awaited: it also encodes proxy and thumbnails, which
  * transcription does not need. Either source is resampled once to 16 kHz mono
- * WAV under `.frameshell/cache/audio/`, keyed by content hash. Word ids
+ * WAV under `.frameshell/cache/audio/`, keyed by content hash. A long word
+ * hiding more speech is re-transcribed alone and split, or else flagged
+ * `speechInside` ({@link recoverLongWords}). Word ids
  * survive re-transcription where the same word is found again, and so do
  * their human edits; new words get ids never used before in the file.
  *
@@ -90,7 +118,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
         raw: { format: sidecar.format, sampleRate: sidecar.sampleRate, channels: sidecar.channels },
       }
     : { path: assetPath };
-  const audio = join(projectDir, ".frameshell", "cache", "audio", `${hash.slice(0, 16)}-${sidecar ? "sidecar" : "asset"}.wav`);
+  const audio = join(projectDir, ...AUDIO_CACHE_DIR.split("/"), `${audioCacheKey(hash)}-${sidecar ? "sidecar" : "asset"}.wav`);
 
   const failed = (error: unknown): never => {
     if (error instanceof RpcError) throw error;
@@ -115,25 +143,40 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     }
   }
 
+  const transcribeOptions = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
+  const context = {
+    ensureBinary: (name: string) => tools.ensureBinary(name, progress),
+    ensureModel: (id: string) => tools.ensureModel(id, progress),
+    progress: (update: Progress) => progress({ ...update }),
+  };
   let result: TranscriptionResult;
   try {
-    result = await provider.transcribe(
-      audio,
-      { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) },
-      {
-        ensureBinary: (name) => tools.ensureBinary(name, progress),
-        ensureModel: (id) => tools.ensureModel(id, progress),
-        progress: (update) => progress({ ...update }),
-      },
-    );
+    result = await provider.transcribe(audio, transcribeOptions, context);
   } catch (error) {
     return failed(error);
   }
 
+  const windowDir = join(projectDir, ...TRANSCRIBE_WINDOW_DIR.split("/"));
+  const long = await recoverLongWords({
+    words: result.words,
+    loadPcm: () => readPcmWav(audio),
+    async transcribeWindow(pcm, from, to) {
+      progress({ message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech` });
+      await mkdir(windowDir, { recursive: true });
+      return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, transcribeOptions, context) });
+    },
+  });
+
   // Re-read: the user may have edited it while the engine ran, or another asset's run may have taken the name.
   const previous = await readPrevious(transcriptPath);
   if (previous && previous.asset !== assetRel) throw nameTaken(assetRel, [{ path: transcriptRel, asset: previous.asset }]);
-  const assigned = assignWordIds(result.words, previous);
+  const assigned = assignWordIds(long.words, previous);
+  const speechInside: string[] = [];
+  assigned.words.forEach((word, i) => {
+    if (!long.speechInside[i]) return;
+    word.speechInside = true;
+    speechInside.push(word.id);
+  });
   const transcript: Transcript = {
     $schema: TRANSCRIPT_SCHEMA_URL,
     schemaVersion: SCHEMA_VERSION,
@@ -163,6 +206,8 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     reusedIds: assigned.reusedIds,
     keptEdits: Object.keys(assigned.edits).length,
     droppedEdits: assigned.droppedEdits,
+    recoveredWords: long.recovered,
+    speechInside,
     seconds: Math.round(performance.now() - started) / 1000,
   };
 }
@@ -266,6 +311,11 @@ async function readPrevious(path: string): Promise<Transcript | null> {
   const parsed = parseTranscript(raw);
   if (!parsed.ok) throw invalid(parsed.error);
   return parsed.value;
+}
+
+/** SPEC §5.3: times with 3 decimals. */
+function round(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
 }
 
 async function sha256File(path: string): Promise<string> {

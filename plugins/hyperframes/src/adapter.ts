@@ -1,4 +1,4 @@
-import { cp, readdir, realpath } from "node:fs/promises";
+import { cp, readFile, readdir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ClipAdapter, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
 
@@ -40,7 +40,8 @@ interface HyperframesClip {
 
 /**
  * `props` are HyperFrames composition variables: a JSON object, merged over
- * the defaults the composition declares (`data-composition-variables`).
+ * the defaults the composition declares (`data-composition-variables`, an
+ * array of `{id, type, label, default}`).
  */
 export const propsSchema: PropsSchema = {
   "~standard": {
@@ -87,6 +88,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
         );
       }
       const dir = await compositionDir(projectDir, { id, source });
+      await refuseObjectDeclarations(id, dir);
       const [ffmpeg, ffprobe, chrome] = await Promise.all([
         ctx.ensureBinary("ffmpeg"),
         ctx.ensureBinary("ffprobe"),
@@ -107,6 +109,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
         quality: "standard",
         format: "webm",
         entryFile: basename(source),
+        // Overrides only: the page runtime merges them over the declared defaults; `{}` keeps every default.
         variables: props ?? {},
       });
       await producer.executeRenderJob(
@@ -119,6 +122,55 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       return { file: output, hasAlpha: true };
     },
   };
+}
+
+/** `data-composition-variables` attribute, single- or double-quoted value. */
+const DECLARATION_ATTR = /\sdata-composition-variables\s*=\s*(?:'([^']*)'|"([^"]*)")/gi;
+
+/**
+ * Throws when an HTML file of the composition declares
+ * `data-composition-variables` as a JSON object (`{"title":"Title"}`).
+ * HyperFrames reads only an array of `{id, type, label, default}`
+ * declarations and silently ignores anything else, so the defaults would
+ * never reach `getVariables()` (#116). The error carries the array to use.
+ * Unparsable values are left to the producer.
+ */
+async function refuseObjectDeclarations(id: string, dir: { path: string; rel: string }): Promise<void> {
+  for (const file of (await listFiles(dir.path)).filter((f) => extname(f).toLowerCase() === ".html")) {
+    const html = await readFile(join(dir.path, ...file.split("/")), "utf8").catch(() => "");
+    for (const match of html.matchAll(DECLARATION_ATTR)) {
+      const raw = match[1] ?? decodeEntities(match[2] ?? "");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+      const declarations = Object.entries(parsed).map(([name, value]) => ({
+        id: name,
+        type: typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string",
+        label: name,
+        default: value,
+      }));
+      const path = dir.rel === "" ? file : `${dir.rel}/${file}`;
+      throw new Error(
+        `hyperframes clip ${id}: ${path} declares data-composition-variables as an object, which HyperFrames ignores, ` +
+          `so its defaults never apply. Declare an array of {id, type, label, default} instead: ` +
+          `data-composition-variables='${JSON.stringify(declarations)}'`,
+      );
+    }
+  }
+}
+
+/** Decodes the entities a double-quoted HTML attribute value can carry around JSON. */
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&quot;|&#34;|&#x22;/gi, '"')
+    .replace(/&apos;|&#39;|&#x27;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&");
 }
 
 /** True for values that survive JSON unchanged: the producer injects them into the page as JSON. */

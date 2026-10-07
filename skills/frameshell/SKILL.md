@@ -37,6 +37,15 @@ When the user says they changed something, or just "continue":
 
 Lost the resume point? `frameshell history --json`: your transactions carry your author (`agent:<label>:<session>` or `cli:<session>`); the last one is it.
 
+## In the app: what the human sees
+
+When you guide the human through the app, name only these places; do not invent controls.
+
+- **Transcript view.** Opened by the `Transcript` button in the editor tab strip, or by clicking a `transcripts/*.words.json` file in the Explorer sidebar. It lists the words of every asset on the timeline, in source order. Each asset section shows "N of M words on the timeline" and an `Open JSON` link to the raw file. A word you cut is **struck through**; clicking it restores it (a `ui` operation in history). Clicking or dragging over kept words selects them and moves the playhead there; right-click offers "Ask agent".
+- **Timeline panel.** Clips per track. A cut removes the range and closes the gap: the clip splits at the cut and later clips move earlier.
+- **History** (sidebar tab beside Explorer). Transactions newest first: author (`You`, `Terminal`, `agent: <label>`, `File`, `Plugin`), label, operation count, time. Selecting one marks its changes on the timeline (`+` added, `−` removed, `↔` moved, `~` changed); `Revert` undoes it. `ui_show_tx_diff` opens it on your transaction.
+- **App terminal tools.** In an app terminal the ffmpeg, ffprobe and whisper-cli Frameshell uses are in `$FRAMESHELL_FFMPEG`, `$FRAMESHELL_FFPROBE`, `$FRAMESHELL_WHISPER_CLI` (e.g. `"$FRAMESHELL_FFMPEG" -i assets/talk.mp4 -af volumedetect -f null -`). Managed downloads are also on `PATH`; `binaries` overrides are only in the variables. Prefer the variables: a login profile may put another ffmpeg first on `PATH`. Unset = not downloaded when the terminal opened; Frameshell downloads them on first use, a new terminal then sees them.
+
 ## Reference
 
 | When | Read |

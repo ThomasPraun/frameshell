@@ -13,6 +13,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
 | Media ingest (proxy recipe, cache, job queue) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `jobs/queue.ts` |
+| Cache cleanup (`gc`: unused derived media, clip renders, temps; sweep on open) | `packages/core/src/gc.ts`; `MediaService.gc`, `ClipRenderer.gc` |
 | Managed binaries (ffmpeg, whisper.cpp, headless Chrome, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
 | Transcription (transcript file, word ids, audio source, export verify) | `packages/core/src/transcripts/transcriber.ts`, `transcripts/verify.ts` + `align.ts`; provider `plugins/whisper-cpp` |
 | Timeline operations (engine, inverses, invariants, CLI verbs) | `packages/core/src/timeline/engine.ts`, `timeline/service.ts`; ADR 0004 |
@@ -33,7 +34,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
 | Agent-labelled terminals (detection, `session.tag`, `agent:<label>:<session>` author, `FRAMESHELL_AGENT`) | `apps/desktop/src/main/agent-detect.ts`, `main/terminals.ts`; `packages/protocol/src/agents.ts`; SPEC §6.2 |
 | History panel (list, diff marks, revert from UI) | `renderer/src/history/`, `components/HistoryPanel.tsx`; core `history/diff.ts` |
-| Transcript view (struck words, restore op, word selection) | `renderer/src/transcript/model.ts`, `components/TranscriptView.tsx` |
+| Transcript view (struck words, restore op + passages, per-track ripple scope, word selection, word text edits) | `renderer/src/transcript/model.ts`, `components/TranscriptView.tsx` |
 | Ask agent (Cmd/Ctrl+L, context menu, reference format, preview region, `.frameshell/context/`) | `renderer/src/ask/`; main `src/main/context-frames.ts` |
 | Subtitle tracks (words, cues, presets, layout: shared by export and preview; ASS burn, bundled font) | `packages/schema/src/subtitles.ts`; `packages/core/src/export/ass.ts`, `export/fonts.ts`; `renderer/src/subtitles/`, `components/SubtitleInspector.tsx` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |

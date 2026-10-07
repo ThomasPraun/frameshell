@@ -130,7 +130,7 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
-export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, proxyArgs, sidecarArgs } from "./media/recipe.js";
+export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
 export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
