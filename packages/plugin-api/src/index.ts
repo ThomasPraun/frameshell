@@ -163,12 +163,19 @@ export interface TranscriptionProvider {
   transcribe(audio: string, options: TranscribeOptions, context: TranscribeContext): Promise<TranscriptionResult>;
 }
 
-/** What the user asked for; both optional, the provider picks defaults. */
+/** What the user asked for, plus host context; all optional, the provider picks defaults. */
 export interface TranscribeOptions {
   /** BCP-47-ish language code (`es`, `en`); absent = provider default or auto-detect. */
   language?: string;
   /** Provider-specific model id; absent = provider default. */
   model?: string;
+  /**
+   * Text spoken right before the audio, set by the host when it re-transcribes
+   * a window of a longer recording. Decoding context only: it carries case and
+   * punctuation into the window, and is never part of the result. Providers
+   * without such a feature ignore it.
+   */
+  prompt?: string;
 }
 
 /** Host services for one transcription. Valid only until `transcribe` settles. */

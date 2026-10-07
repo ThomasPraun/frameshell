@@ -45,12 +45,12 @@ function project(bursts: [number, number][] = SPEECH): { dir: string; extract: A
  * answers `window` words inside it, relative to the window start.
  */
 function fakeProvider(full: TranscriptWord[], window: TranscriptWord[], windowFrom: () => number) {
-  const calls: { audio: string; seconds: number }[] = [];
+  const calls: { audio: string; seconds: number; prompt: string | undefined }[] = [];
   const provider: TranscriptionProvider = {
     id: "fake",
-    async transcribe(audio) {
+    async transcribe(audio, options) {
       const seconds = (readFileSync(audio).length - 44) / 2 / 16_000;
-      calls.push({ audio, seconds });
+      calls.push({ audio, seconds, prompt: options.prompt });
       if (calls.length === 1) return { model: "fake", language: "es", words: full };
       const from = windowFrom();
       return {
@@ -97,6 +97,15 @@ describe("transcribeAsset: long words (#117)", () => {
     expect(result).toMatchObject({ words: 7, recoveredWords: 4, speechInside: [] });
     expect(methods.transcribe.result.parse(result)).toEqual(result);
     expect(readdirSync(join(dir, ".frameshell", "cache", "transcribe"))).toEqual([]);
+  });
+
+  it("prompts the window with the words before the long word, never the long word itself (#123)", async () => {
+    const { dir, extract } = project();
+    const { provider, calls } = fakeProvider(FULL, WINDOW, () => 1.7);
+    await run(dir, extract, provider);
+
+    // Full pass: no prompt. Window: "Hola" only; "incluido." in the prompt would make whisper skip it.
+    expect(calls.map((call) => call.prompt)).toEqual([undefined, "Hola"]);
   });
 
   it("keeps the ids of recovered words when transcribing again", async () => {

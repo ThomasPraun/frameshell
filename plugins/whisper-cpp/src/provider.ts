@@ -41,7 +41,9 @@ export interface WhisperProviderOptions {
  * whisper.cpp provider with ADR 0003 settings: `-dtw <preset> -nfa -ml 1 -sow
  * -ojf` (DTW needs flash attention off; one segment per word), never `--vad`
  * (it breaks DTW times at the pinned version). Word start = DTW onset, end =
- * derived from audio energy. A run that fails after a GPU backend started
+ * derived from audio energy. A `prompt` goes to `--prompt` (a window
+ * re-transcribed alone keeps the case and punctuation of the text before it).
+ * A run that fails after a GPU backend started
  * (driver error, out of GPU memory) is retried once on CPU (`-ng`).
  */
 export function createWhisperProvider(options: WhisperProviderOptions = {}): TranscriptionProvider {
@@ -49,7 +51,7 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
   const coldShaderNoticeMs = options.coldShaderNoticeMs ?? 1500;
   return {
     id: PROVIDER_ID,
-    async transcribe(audio, { language, model = DEFAULT_MODEL }, context): Promise<TranscriptionResult> {
+    async transcribe(audio, { language, model = DEFAULT_MODEL, prompt }, context): Promise<TranscriptionResult> {
       const preset = MODELS[model];
       if (!preset) {
         throw new Error(`Unknown whisper.cpp model "${model}". Available: ${Object.keys(MODELS).join(", ")} (default ${DEFAULT_MODEL}).`);
@@ -73,6 +75,7 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
           "-ojf",
           "-pp",
           "-of", prefix,
+          ...(prompt?.trim() ? ["--prompt", prompt.trim()] : []),
         ];
         let monitor = engineMonitor(context, coldShaderNoticeMs);
         context.progress({ message: "Loading model" });
