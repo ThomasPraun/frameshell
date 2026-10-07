@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
@@ -94,20 +95,53 @@ describe("plugin.install from a local tarball", () => {
   );
 
   it(
-    "never overwrites a vendor/ copy with other content",
+    "replaces a pinned tarball with a new build of the same file name, never overwriting the old copy (#125)",
     async () => {
       const dir = await newProject();
-      const kept = tarballPluginFixture(join(dir, "vendor"));
-      const before = readFileSync(kept);
-      const other = tarballPluginFixture(tempDir(), { description: "same name, other bytes" });
-      await expect(conn.request("plugin.install", { cwd: dir, spec: other })).rejects.toMatchObject({
-        code: ErrorCode.PluginInstallFailed,
-        message: expect.stringMatching(/already exists with other content/),
-      });
-      expect(readFileSync(kept)).toEqual(before);
+      const first = tarballPluginFixture(tempDir());
+      await conn.request("plugin.install", { cwd: dir, spec: first });
+      const before = readFileSync(join(dir, "vendor", "hello-plugin-0.1.0.tgz"));
+      const rebuilt = tarballPluginFixture(tempDir(), { description: "rebuilt" });
+
+      const result = await conn.request("plugin.install", { cwd: dir, spec: rebuilt });
+
+      const copy = `vendor/hello-plugin-0.1.0-${sha256(rebuilt).slice(0, 12)}.tgz`;
+      expect(result.pin).toBe(`file:${copy}#sha256=${sha256(rebuilt)}`);
+      expect(readConfig(dir).plugins).toEqual({ "hello-plugin": result.pin });
+      expect(result.plugin.status).toBe("loaded");
+      expect(readFileSync(join(dir, copy))).toEqual(readFileSync(rebuilt));
+      expect(readFileSync(join(dir, "vendor", "hello-plugin-0.1.0.tgz"))).toEqual(before);
+      const installed = JSON.parse(readFileSync(join(dir, ".frameshell/plugins/node_modules/hello-plugin/package.json"), "utf8"));
+      expect(installed.description).toBe("rebuilt");
     },
     NPM_TIMEOUT,
   );
+
+  it(
+    "replaces a pin whose tarball is gone (#125)",
+    async () => {
+      const dir = await newProject();
+      await conn.request("plugin.install", { cwd: dir, spec: tarballPluginFixture(tempDir()) });
+      rmSync(join(dir, "vendor", "hello-plugin-0.1.0.tgz"));
+      const rebuilt = tarballPluginFixture(tempDir(), { description: "rebuilt" });
+
+      const result = await conn.request("plugin.install", { cwd: dir, spec: rebuilt });
+
+      expect(result.pin).toBe(`file:vendor/hello-plugin-0.1.0.tgz#sha256=${sha256(rebuilt)}`);
+      expect(result.plugin.status).toBe("loaded");
+    },
+    NPM_TIMEOUT,
+  );
+
+  it("refuses a .tgz that is not an npm package before running npm", async () => {
+    const dir = await newProject();
+    writeFileSync(join(dir, "junk.tgz"), gzipSync(Buffer.from("not a tar")));
+    await expect(conn.request("plugin.install", { cwd: dir, spec: "junk.tgz" })).rejects.toMatchObject({
+      code: ErrorCode.PluginInstallFailed,
+      message: expect.stringMatching(/not an npm package tarball/),
+    });
+    expect(readConfig(dir).plugins).toEqual({});
+  });
 
   it(
     "refuses to load a pinned tarball whose bytes changed, so trust covers the code that runs",
