@@ -86,6 +86,17 @@ describe("whisper-cpp provider", () => {
     expect(args).toEqual(expect.arrayContaining(["-nfa", "-sow", "-ojf"]));
     // VAD remaps nothing for DTW at the pinned version: seconds off (ADR 0003).
     expect(args.some((arg) => arg.includes("vad"))).toBe(false);
+    expect(args).not.toContain("--prompt");
+  });
+
+  it("passes a prompt to --prompt so a window keeps the case and punctuation of the text before it (#123)", async () => {
+    const engine = fakeEngine({ transcription: [] });
+    await createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { prompt: " Gratis durante la beta, con todo " }, context().ctx);
+    await createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { prompt: "  " }, context().ctx);
+
+    const [first, second] = engine.calls as [(typeof engine.calls)[number], (typeof engine.calls)[number]];
+    expect(first.args.slice(first.args.indexOf("--prompt"))).toEqual(["--prompt", "Gratis durante la beta, con todo"]);
+    expect(second.args).not.toContain("--prompt");
   });
 
   it("starts words at their DTW onset and ends them where the audio falls silent before the next word", async () => {

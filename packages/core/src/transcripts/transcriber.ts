@@ -160,10 +160,10 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   const long = await recoverLongWords({
     words: result.words,
     loadPcm: () => readPcmWav(audio),
-    async transcribeWindow(pcm, from, to) {
+    async transcribeWindow(pcm, from, to, prompt) {
       progress({ message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech` });
       await mkdir(windowDir, { recursive: true });
-      return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, transcribeOptions, context) });
+      return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, { ...transcribeOptions, prompt }, context) });
     },
   });
 

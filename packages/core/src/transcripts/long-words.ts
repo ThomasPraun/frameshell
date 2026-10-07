@@ -19,6 +19,8 @@ const WINDOW_MARGIN_S = 0.3;
 const MERGE_GAP_S = 2;
 /** A window word this close to the next engine word's onset, same text, is that word heard early (ADR 0003: DTW onset worst ~1 s). */
 const NEXT_ONSET_LAG_S = 1;
+/** Words before a window passed as its prompt (#123); whisper keeps only the prompt's last ~224 tokens anyway. */
+const PROMPT_WORDS = 40;
 
 /** Outcome of {@link recoverLongWords}. */
 export interface RecoveredWords {
@@ -38,17 +40,21 @@ export interface RecoverLongWordsOptions {
   loadPcm(): Promise<Pcm16 | null>;
   /**
    * Re-transcribe `[from, to)` of that audio alone; words on its clock.
+   * `prompt`: text of the words before the long word (never the long word
+   * itself, or whisper skips it as already said), so the window keeps their
+   * case and punctuation; empty at the recording's start.
    * A rejection keeps the long word as it is (it is still marked).
    */
-  transcribeWindow(pcm: Pcm16, from: number, to: number): Promise<TranscriptWord[]>;
+  transcribeWindow(pcm: Pcm16, from: number, to: number, prompt: string): Promise<TranscriptWord[]>;
 }
 
 /**
  * Recover words whisper swallowed into one long word (#117: a repeated
  * phrase came back as `incluido.` spanning 5 s). A word longer than
  * {@link LONG_WORD_S} whose energy shows speech after its first second is
- * re-transcribed alone; such words close together share one window spanning
- * the gap between them. When the window finds more words starting inside
+ * re-transcribed alone, prompted with the text before it so case and
+ * punctuation carry over (#123); such words close together share one window
+ * spanning the gap between them. When the window finds more words starting inside
  * that span than it replaces, they replace it, timed inside the span. Window
  * words that repeat a neighbour (the previous word's tail heard in the
  * leading margin, the next word heard before its lagging onset) are dropped,
@@ -81,7 +87,8 @@ export async function recoverLongWords(options: RecoverLongWordsOptions): Promis
     i = last + 1;
     let found: TranscriptWord[];
     try {
-      found = await options.transcribeWindow(pcm, Math.max(0, span.start - WINDOW_MARGIN_S), span.end + WINDOW_MARGIN_S);
+      const prompt = out.slice(-PROMPT_WORDS).map((w) => w.text).join(" ");
+      found = await options.transcribeWindow(pcm, Math.max(0, span.start - WINDOW_MARGIN_S), span.end + WINDOW_MARGIN_S, prompt);
     } catch {
       out.push(...run);
       continue;
