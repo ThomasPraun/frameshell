@@ -41,7 +41,7 @@ The official plugins `@frameshell/whisper-cpp` and `@frameshell/hyperframes` (`p
 
 **When.** Nothing reaches npm from a tag alone. Publishing the reviewed draft release (step 5 of [Cut a release](#cut-a-release)) fires the `release: published` event, and the `npm plugins` job publishes. Its summary lists each package as published or skipped.
 
-**Provenance.** Each package is signed with the workflow's GitHub OIDC identity (`id-token: write`), and npm shows where it was built. npm accepts provenance only from a **public** repository whose URL matches `repository.url`; while the repository is private, the publish step fails.
+**Authentication and provenance.** The job publishes with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm authenticates the Release workflow by its GitHub OIDC identity (`id-token: write`), so no npm token or repository secret exists. The same identity signs each package's provenance, and npm shows where it was built. It needs npm 11.5.1 or later (the job installs a pinned npm 11) and a **public** repository whose URL matches `repository.url`. A package without a trusted publisher set up for this workflow is refused.
 
 ### Without npm: install from a tarball
 
@@ -57,14 +57,19 @@ The pin is `file:<path>#sha256=<digest>`: always project-relative (ADR 0008): a 
 ### npm setup (once, by the maintainer)
 
 1. Create the `frameshell` organization on [npmjs.com](https://www.npmjs.com/org/create) (free plan, public packages). It owns the `@frameshell` scope.
-2. Create a **granular access token**: npmjs.com → Access Tokens → Generate New Token → Granular. Permissions: *Read and write*, limited to the `@frameshell` scope (or to the two packages once they exist). Pick an expiry and note it.
-3. Store it as the repository secret `NPM_TOKEN`:
+2. For each package (`@frameshell/whisper-cpp`, `@frameshell/hyperframes`): npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**, with organization or user `ThomasPraun`, repository `frameshell`, workflow filename `release.yml`, environment empty.
+3. In the same settings, under **Publishing access**, choose to disallow tokens, so only the workflow can publish.
 
-   ```sh
-   gh secret set NPM_TOKEN -R ThomasPraun/frameshell   # paste the token
-   ```
+npm sets up a trusted publisher only on a package that exists. If npm refuses step 2 for a package never published, publish its first version once by hand, with your account's 2FA, then return to step 2:
 
-Without `NPM_TOKEN` the publish step fails and names the secret. Renew the token before it expires. Pull requests never see it.
+```sh
+pnpm build
+node scripts/plugins-npm.mjs dry-run ./packs
+npm login
+npm publish ./packs/frameshell-whisper-cpp-<version>.tgz --access public --provenance=false
+```
+
+`--provenance=false` is needed because provenance can only be generated in CI. That version carries no provenance; every later one does.
 
 ## macOS signing secrets
 
