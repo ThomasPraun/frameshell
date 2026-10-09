@@ -4,7 +4,8 @@
 //   node scripts/plugins-npm.mjs dry-run [outDir]   verify, pnpm pack, check the tarballs, npm publish --dry-run
 //   node scripts/plugins-npm.mjs publish [outDir]   dry-run, then publish each version npm lacks, with provenance
 // `dry-run` and `publish` need the plugins built (`pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes`).
-// `publish` needs NODE_AUTH_TOKEN and GitHub Actions OIDC (`id-token: write`) for provenance.
+// `publish` runs in GitHub Actions only: npm trusted publishing authenticates the workflow by its OIDC identity
+// (`id-token: write`, npm >= 11.5.1), so no npm token exists.
 // Versions are per plugin, from package.json; a version already on npm is skipped, never republished.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, appendFileSync } from "node:fs";
@@ -40,7 +41,8 @@ for (const { plugin, file } of tarballs) {
 }
 if (command === "dry-run") process.exit(0);
 
-if (!process.env.NODE_AUTH_TOKEN) fail("NODE_AUTH_TOKEN is empty: add the NPM_TOKEN repository secret (docs/release.md).");
+if (!process.env.ACTIONS_ID_TOKEN_REQUEST_URL) fail("No GitHub Actions OIDC token: publish runs only in the Release workflow, with `id-token: write` (docs/release.md).");
+if (!npmSupportsTrustedPublishing()) fail("npm >= 11.5.1 is needed for trusted publishing (docs/release.md).");
 for (const { plugin, file } of tarballs) {
   const id = `${plugin.pkg.name}@${plugin.pkg.version}`;
   if (isPublished(plugin.pkg.name, plugin.pkg.version)) {
@@ -132,6 +134,13 @@ function isPublished(name, version) {
   if (result.status === 0) return result.stdout.trim() !== "";
   if (/E404|404 Not Found/.test(`${result.stdout}${result.stderr}`)) return false;
   fail(`npm view ${name}@${version} failed:\n${result.stderr}`);
+}
+
+/** True when the npm CLI is 11.5.1 or later, the first version with trusted publishing. */
+function npmSupportsTrustedPublishing() {
+  const version = execFileSync("npm", ["--version"], { encoding: "utf8", shell: WIN }).trim();
+  const [major, minor, patch] = version.split(/[.-]/).map(Number);
+  return major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
 }
 
 function npm(args) {
