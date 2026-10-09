@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Fixed
 
 - The daemon the desktop app starts held the app's stdout and stderr on Windows (#112): a child spawned from Electron's main process inherits every inheritable handle, and Electron leaves its stdio inheritable, so whoever read the app's output (Playwright: about 3 s per `app.close()`) saw it open until the daemon idled out. The app now starts each daemon from a short-lived Electron utility process (`daemon-spawner`), which hands the daemon none of the app's handles and exits once the daemon listens; startup errors are still relayed from the daemon's stderr. The CLI and MCP server spawn as before. `connectOrStartDaemon` takes a `launch` option (`DaemonLauncher`); `spawnDetachedDaemon` and `defaultDaemonEntry` are exported from `@frameshell/cli`. New e2e `daemon-stdio` spec: the app's stdout closes with the app while its daemon keeps running.
@@ -91,3 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugin system (SPEC §8): `frameshell-plugin.json` manifest schema with plugin API version check, public `@frameshell/plugin-api` types, and a daemon plugin host. `frameshell plugin install|remove|list` installs from `github:user/repo`, `git+<url>` or npm into `.frameshell/plugins` (regenerable) and pins the commit or exact version in `frameshell.json`. Projects that declare plugins load them only after the user trusts them (`--trust` or a prompt; decisions stored per user and re-asked when the plugin list changes). Plugin commands run as `frameshell <plugin> <command>`; plugins also contribute export presets. New daemon methods `project.trust`, `plugin.*` and `export.presets`.
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
+
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.2.0
