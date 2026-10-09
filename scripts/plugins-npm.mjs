@@ -1,7 +1,7 @@
 // Check, pack and publish the official plugins (`plugins/*`) to npm (docs/release.md, "npm plugins").
 // Usage:
 //   node scripts/plugins-npm.mjs verify             package.json + manifest checks only (no build, no network)
-//   node scripts/plugins-npm.mjs dry-run [outDir]   verify, pnpm pack, check the tarballs, npm publish --dry-run
+//   node scripts/plugins-npm.mjs dry-run [outDir]   verify, pnpm pack, check the tarballs, npm publish --dry-run of new versions
 //   node scripts/plugins-npm.mjs publish [outDir]   dry-run, then publish each version npm lacks, with provenance
 // `dry-run` and `publish` need the plugins built (`pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes`).
 // `publish` runs in GitHub Actions only: npm trusted publishing authenticates the workflow by its OIDC identity
@@ -36,7 +36,9 @@ const tarballs = plugins.map((plugin) => ({ plugin, file: pack(plugin, outDir) }
 for (const { plugin, file } of tarballs) {
   const missing = checkTarball(plugin, file);
   if (missing.length > 0) fail(`${file}:\n${missing.map((p) => `  - ${p}`).join("\n")}`);
-  npm(["publish", file, "--dry-run", "--access", "public", "--tag", distTag(plugin.pkg.version)]);
+  // npm 11 refuses even a dry run of a version the registry already has, so those only get the tarball checks.
+  if (isPublished(plugin.pkg.name, plugin.pkg.version)) log(`${plugin.pkg.name}@${plugin.pkg.version} already on npm, publish dry run skipped`);
+  else npm(["publish", file, "--dry-run", "--access", "public", "--tag", distTag(plugin.pkg.version)]);
   log(`packed ${plugin.pkg.name}@${plugin.pkg.version} -> ${file}`);
 }
 if (command === "dry-run") process.exit(0);

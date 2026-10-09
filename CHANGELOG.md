@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Release workflow's `npm plugins` job failed when a plugin version was already on npm (the v0.2.0 run): npm 11 refuses `npm publish --dry-run` over a published version. `plugins-npm.mjs dry-run` now dry-runs only versions npm lacks; a published one still gets the tarball checks.
+
 ## [0.2.0] - 2026-10-09
 
 ### Fixed
