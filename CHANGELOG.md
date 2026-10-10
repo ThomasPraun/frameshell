@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
 ### Added
 
 - `@frameshell/remotion` 0.1.0, the official Remotion clip adapter (#135, ADR 0009). A `remotion` clip names the entry of a Remotion project (`source`, relative to the Frameshell project; the Remotion project may sit next to it) and a composition (`props: { composition, inputProps? }`). Compositions may import code from outside the project, such as the user's web app: the adapter bundles the entry with webpack into `.frameshell/remotion/<entry>/<content hash>/` and reports that bundle as the clip's cache input, so an edit anywhere in the bundled code re-renders, and re-bundles only when a file webpack read (or probed and missed) changed. Renders use the Remotion project's own `@remotion/bundler` and `@remotion/renderer` (the plugin depends on no Remotion package; the user's version and licence apply), the managed headless Chrome, the project's fps (same length in seconds) and resolution (a same-aspect composition is rendered at its size and scaled), VP9 WebM with alpha and multithreaded libvpx (8 s at 1440p: 13.4 s instead of 66 s with Remotion's defaults). `frameshell remotion new <name> [--duration s]` adds a composition, creating `compositions/remotion/` (pinned Remotion 4.0.527) on first use. Agent skill `remotion`. Composition audio is dropped: clip renders are video only. The Remotion project's `remotion.config.ts` applies as with Remotion's CLI (webpack/bundler override, so Tailwind via `@remotion/tailwind-v4`, and OpenGL renderer; output settings ignored), read with the project's own `@remotion/cli` internals; editing it re-renders.
@@ -104,5 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.2.0
