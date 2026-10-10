@@ -162,7 +162,7 @@ jobs:
       # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.
       - run: npm install -g npm@11.21.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes
+      - run: pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes plugins/remotion
       - name: Pack and dry run
         run: node scripts/plugins-npm.mjs dry-run
       - name: Publish to npm

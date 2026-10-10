@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `@frameshell/remotion` 0.1.0, the official Remotion clip adapter (#135, ADR 0009). A `remotion` clip names the entry of a Remotion project (`source`, relative to the Frameshell project; the Remotion project may sit next to it) and a composition (`props: { composition, inputProps? }`). Compositions may import code from outside the project, such as the user's web app: the adapter bundles the entry with webpack into `.frameshell/remotion/<entry>/<content hash>/` and reports that bundle as the clip's cache input, so an edit anywhere in the bundled code re-renders, and re-bundles only when a file webpack read (or probed and missed) changed. Renders use the Remotion project's own `@remotion/bundler` and `@remotion/renderer` (the plugin depends on no Remotion package; the user's version and licence apply), the managed headless Chrome, the project's fps (same length in seconds) and resolution (a same-aspect composition is rendered at its size and scaled), VP9 WebM with alpha and multithreaded libvpx (8 s at 1440p: 13.4 s instead of 66 s with Remotion's defaults). `frameshell remotion new <name> [--duration s]` adds a composition, creating `compositions/remotion/` (pinned Remotion 4.0.527) on first use. Agent skill `remotion`. Composition audio is dropped: clip renders are video only.
+- Plugin API: `PluginApi.refreshRenders()`, callable after `activate`, asks the host to re-check the render keys of the project's generated clips. The Remotion adapter calls it when a watched file outside the project changes, since the project watcher never sees those. Additive: `apiVersion` stays `1`.
+
+### Changed
+
+- The clip render watcher ignores `node_modules` at any depth, not only at the project root, so installing a composition's packages (`compositions/remotion/node_modules`) no longer floods render refreshes.
+
 ## [0.2.0] - 2026-10-09
 
 ### Fixed

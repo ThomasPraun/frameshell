@@ -62,12 +62,18 @@ export async function readManifest(dir: string, name: string): Promise<PluginMan
   return manifest;
 }
 
+/** Host services a loaded plugin may call after `activate`. */
+export interface PluginHooks {
+  /** Backs `PluginApi.refreshRenders`: re-check the project's clip render keys. */
+  refreshRenders(): void;
+}
+
 /**
  * Validate, import and activate one installed plugin. Never throws: failures
  * come back as `info.status: "error"` so one broken plugin never blocks the project.
  * `pin` busts Node's ESM cache when the same daemon loads a re-pinned plugin.
  */
-export async function loadPlugin(dir: string, name: string, pin: string, projectDir: string): Promise<LoadedPlugin> {
+export async function loadPlugin(dir: string, name: string, pin: string, projectDir: string, hooks?: PluginHooks): Promise<LoadedPlugin> {
   const plugin: LoadedPlugin = {
     info: { name, pin, status: "error", version: null, apiVersion: null, error: null, contributes: null },
     manifest: null,
@@ -85,7 +91,7 @@ export async function loadPlugin(dir: string, name: string, pin: string, project
       ...manifest.contributes,
       skills: manifest.contributes.skills.map((skill) => resolve(dir, skill)),
     };
-    await activate(plugin, manifest, dir, pin, projectDir);
+    await activate(plugin, manifest, dir, pin, projectDir, hooks);
     plugin.info.status = "loaded";
   } catch (error) {
     plugin.info.error = error instanceof PluginLoadError ? error.message : `activate failed: ${(error as Error)?.message ?? error}`;
@@ -97,7 +103,7 @@ export async function loadPlugin(dir: string, name: string, pin: string, project
   return plugin;
 }
 
-async function activate(plugin: LoadedPlugin, manifest: PluginManifest, dir: string, pin: string, projectDir: string) {
+async function activate(plugin: LoadedPlugin, manifest: PluginManifest, dir: string, pin: string, projectDir: string, hooks: PluginHooks | undefined) {
   const url = `${pathToFileURL(join(dir, manifest.main)).href}?pin=${encodeURIComponent(pin)}`;
   let mod: { activate?: unknown; default?: { activate?: unknown } };
   try {
@@ -139,6 +145,14 @@ async function activate(plugin: LoadedPlugin, manifest: PluginManifest, dir: str
     registerTranscriptionProvider(provider) {
       guard("transcription provider", provider?.id, declared.transcriptionProviders, plugin.providers);
       plugin.providers.set(provider.id, provider);
+    },
+    refreshRenders() {
+      // Never throws into the plugin: a refresh is a hint, and its failures surface as render states.
+      try {
+        hooks?.refreshRenders();
+      } catch {
+        // Ignored, see above.
+      }
     },
   };
   try {

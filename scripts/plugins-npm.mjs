@@ -3,7 +3,7 @@
 //   node scripts/plugins-npm.mjs verify             package.json + manifest checks only (no build, no network)
 //   node scripts/plugins-npm.mjs dry-run [outDir]   verify, pnpm pack, check the tarballs, npm publish --dry-run of new versions
 //   node scripts/plugins-npm.mjs publish [outDir]   dry-run, then publish each version npm lacks, with provenance
-// `dry-run` and `publish` need the plugins built (`pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes`).
+// `dry-run` and `publish` need the plugins built (`pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes plugins/remotion`).
 // `publish` runs in GitHub Actions only: npm trusted publishing authenticates the workflow by its OIDC identity
 // (`id-token: write`, npm >= 11.5.1), so no npm token exists.
 // Versions are per plugin, from package.json; a version already on npm is skipped, never republished.

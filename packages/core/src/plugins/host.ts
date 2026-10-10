@@ -28,6 +28,8 @@ export interface PluginHostOptions {
   /** Per-user directories; trust decisions live in the config dir. */
   dirs: AppDirs;
   pins: PinsAccess;
+  /** Re-check the clip render keys of project `root`; backs `PluginApi.refreshRenders`. Default: no-op. */
+  refreshRenders?(root: string): void;
 }
 
 interface ProjectPlugins {
@@ -59,9 +61,12 @@ export class PluginHost {
   readonly #loaded = new Map<string, ProjectPlugins>();
   readonly #queues = new Map<string, Promise<unknown>>();
 
+  readonly #refreshRenders: (root: string) => void;
+
   constructor(options: PluginHostOptions) {
     this.#trust = new TrustStore(options.dirs);
     this.#pins = options.pins;
+    this.#refreshRenders = (root) => options.refreshRenders?.(root);
   }
 
   /** Trust state of `root` for its current pins. */
@@ -278,7 +283,7 @@ export class PluginHost {
     }
     const broken = (loaded ?? []).find((p) => p.manifest?.contributes.clipTypes.includes(type));
     if (broken) return `${broken.info.name} provides \`${type}\` clips but failed to load: ${broken.info.error}`;
-    const plugin = type === "hyperframes" ? "@frameshell/hyperframes" : "<spec>";
+    const plugin = OFFICIAL_ADAPTERS[type] ?? "<spec>";
     return `No installed plugin renders \`${type}\` clips. Install one: \`frameshell plugin install ${plugin}\`.`;
   }
 
@@ -311,7 +316,7 @@ export class PluginHost {
     const plugins: LoadedPlugin[] = [];
     const owners = new Map<string, string>();
     for (const [name, pin] of Object.entries(pins)) {
-      const plugin = await loadPlugin(store.packageDir(name), name, pin, root);
+      const plugin = await loadPlugin(store.packageDir(name), name, pin, root, { refreshRenders: () => this.#refreshRenders(root) });
       const clash = [...plugin.commands.keys()].find((command) => owners.has(command));
       if (clash) {
         plugins.push(failed(name, pin, `command "${clash}" is already provided by ${owners.get(clash)}`, plugin));
@@ -337,6 +342,12 @@ export class PluginHost {
     return next;
   }
 }
+
+/** Official plugin of each official clip type, for install hints. */
+const OFFICIAL_ADAPTERS: Readonly<Record<string, string>> = {
+  hyperframes: "@frameshell/hyperframes",
+  remotion: "@frameshell/remotion",
+};
 
 /** Link the skills of the plugins that loaded; a failure to link is a warning, never a failed load. */
 async function exposeSkills(root: string, plugins: readonly LoadedPlugin[]): Promise<SkillSync> {

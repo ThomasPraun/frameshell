@@ -158,8 +158,11 @@ export class ClipRenderer {
       const watcher = watch(root, {
         ignoreInitial: true,
         // Only files and folders: watching a FIFO or socket can block a libuv thread forever.
-        ignored: (path, stats) =>
-          IGNORED.has(relative(root, path).split(sep)[0] ?? "") || (stats !== undefined && !stats.isFile() && !stats.isDirectory()),
+        // Installed packages anywhere (a composition's own node_modules too): an install would flood refreshes.
+        ignored: (path, stats) => {
+          const parts = relative(root, path).split(sep);
+          return IGNORED.has(parts[0] ?? "") || parts.includes("node_modules") || (stats !== undefined && !stats.isFile() && !stats.isDirectory());
+        },
       });
       watcher.on("all", () => this.#schedule(root));
       // A vanished project must not crash the daemon.

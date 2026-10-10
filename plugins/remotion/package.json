@@ -1,0 +1,51 @@
+{
+  "name": "@frameshell/remotion",
+  "version": "0.1.0",
+  "description": "Official Frameshell clip adapter: Remotion compositions rendered with the project's own Remotion to VP9 WebM with alpha.",
+  "license": "Apache-2.0",
+  "author": "Frameshell contributors",
+  "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/remotion#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasPraun/frameshell.git",
+    "directory": "plugins/remotion"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasPraun/frameshell/issues"
+  },
+  "keywords": [
+    "frameshell",
+    "frameshell-plugin",
+    "remotion"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "frameshell-plugin.json",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@frameshell/core": "workspace:*",
+    "@frameshell/plugin-api": "workspace:*",
+    "@frameshell/schema": "workspace:*",
+    "@remotion/bundler": "4.0.527",
+    "@remotion/renderer": "4.0.527",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.527"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

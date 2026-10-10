@@ -29,7 +29,7 @@ Keep Electron's `RunAsNode` fuse enabled. Turning it off breaks the CLI in the t
 
 ## npm plugins
 
-The official plugins `@frameshell/whisper-cpp` and `@frameshell/hyperframes` (`plugins/*`) are published to npm, so `frameshell plugin install @frameshell/whisper-cpp` works outside the repo. `scripts/plugins-npm.mjs` does the work. The `npm plugins` job of the Release workflow runs it on every trigger.
+The official plugins `@frameshell/whisper-cpp`, `@frameshell/hyperframes` and `@frameshell/remotion` (`plugins/*`) are published to npm, so `frameshell plugin install @frameshell/whisper-cpp` works outside the repo. `scripts/plugins-npm.mjs` does the work. The `npm plugins` job of the Release workflow runs it on every trigger.
 
 | Command | Does |
 |---|---|
@@ -57,7 +57,7 @@ The pin is `file:<path>#sha256=<digest>`: always project-relative (ADR 0008): a 
 ### npm setup (once, by the maintainer)
 
 1. Create the `frameshell` organization on [npmjs.com](https://www.npmjs.com/org/create) (free plan, public packages). It owns the `@frameshell` scope.
-2. For each package (`@frameshell/whisper-cpp`, `@frameshell/hyperframes`): npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**, with organization or user `ThomasPraun`, repository `frameshell`, workflow filename `release.yml`, environment empty.
+2. For each package (`@frameshell/whisper-cpp`, `@frameshell/hyperframes`, `@frameshell/remotion`): npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**, with organization or user `ThomasPraun`, repository `frameshell`, workflow filename `release.yml`, environment empty.
 3. In the same settings, under **Publishing access**, choose to disallow tokens, so only the workflow can publish.
 
 npm sets up a trusted publisher only on a package that exists. If npm refuses step 2 for a package never published, publish its first version once by hand, with your account's 2FA, then return to step 2:

@@ -32,6 +32,15 @@ export interface PluginApi {
   registerClipType(adapter: ClipAdapter): void;
   /** Register a transcription provider declared (by `id`) in `contributes.transcriptionProviders`. */
   registerTranscriptionProvider(provider: TranscriptionProvider): void;
+  /**
+   * Ask the host to re-check the render cache keys of the project's
+   * generated clips (calling {@link ClipAdapter.inputs} again) and render
+   * what changed. The host already does this on project file edits; call it
+   * when something it cannot see changed, such as code outside the project
+   * that a composition imports. Cheap and coalesced; unlike the rest of this
+   * handle, callable at any time after `activate`.
+   */
+  refreshRenders(): void;
 }
 
 /** Entry points a plugin's `main` module exports, directly or as its default export. */
