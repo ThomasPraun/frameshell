@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readlink, rename, rm, symlink } from "node:fs/promises";
-import { dirname, join, resolve, win32 } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -42,7 +42,7 @@ export interface CliInstallOutcome {
 export function cliLinkDir(platform: NodeJS.Platform, home: string): string | undefined {
   if (platform === "darwin") return "/usr/local/bin";
   if (platform === "win32") return undefined;
-  return join(home, ".local", "bin");
+  return posix.join(home, ".local", "bin");
 }
 
 /**
