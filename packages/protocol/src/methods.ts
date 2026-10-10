@@ -44,7 +44,10 @@ export interface MethodSpec<P extends z.ZodType = z.ZodType, R extends z.ZodType
   /** Params object. Use `z.strictObject` so misspelled fields fail instead of being ignored. */
   readonly params: P;
   readonly result: R;
-  /** Connection plumbing, not a project operation: never exposed as an MCP tool or CLI command. */
+  /**
+   * Connection plumbing, or a method only the app uses (`ui.publish`, `clip.live`): never exposed as an MCP tool
+   * or CLI command.
+   */
   readonly internal?: boolean;
   /**
    * Changes project files or daemon state, so a replay must not apply twice:
