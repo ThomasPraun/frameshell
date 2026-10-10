@@ -1,0 +1,3 @@
+node_modules/
+# Generated bundles and media: regenerate with the scripts (see README).
+out/
