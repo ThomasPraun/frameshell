@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - File → Install 'frameshell' Command in PATH (and Uninstall) puts the app's `frameshell` CLI on the system PATH, so any terminal and MCP client can run it (#139). macOS links `/usr/local/bin/frameshell` (native admin prompt only when the directory is not writable), Linux links `~/.local/bin/frameshell`, Windows adds the shim directory to the user PATH. The link targets the shim the app rewrites on every start, so it follows app updates. It never replaces a regular file, and asks before replacing a `frameshell` command another install owns; uninstall removes only a command of this app. Refused for an AppImage and for a macOS app running from its disk image or a translocated path, whose locations change between runs.
+- CLI: `--ripple-track <track>` (repeatable) for `clip add` and `clip trim`, only with `--ripple`: the ripple moves later clips on the clip's own track plus the named ones instead of every video and audio track, as `rippleTracks` already allowed through the daemon and MCP (#131). Agent skill updated.
 
 ### Changed
 

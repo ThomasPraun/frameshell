@@ -21,9 +21,10 @@ mutations print the new revision):
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
            [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
-           [--ripple] [--snap] [--snap-window s]
+           [--ripple [--ripple-track <track>…]] [--snap] [--snap-window s]
   clip move <clip> [--start s] [--track <track>]
-  clip trim <clip> [--in s | --start s] [--out s | --end s] [--ripple] [--no-snap] [--snap-window s]
+  clip trim <clip> [--in s | --start s] [--out s | --end s] [--ripple [--ripple-track <track>…]]
+           [--no-snap] [--snap-window s]
   clip split <clip> --at s
   clip remove <clip>
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
@@ -35,6 +36,7 @@ mutations print the new revision):
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
   --ripple (clip add, clip trim) moves later clips on every video and audio track by the length added or
   removed, the inverse of cut: restore removed material without overlapping the next clip.
+  --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
   Subtitle tracks (--follows a video or audio track) show the transcript words of that track's clips: cuts
   update them, text corrections go in the transcript. --preset big-keyword (default: few large words, the
   spoken one highlighted) or plain; --position top, center or bottom. Preview and export look the same.
@@ -91,10 +93,11 @@ export const TIMELINE_OPTIONS = {
   "no-snap": { type: "boolean" },
   snap: { type: "boolean" },
   ripple: { type: "boolean" },
+  "ripple-track": { type: "string", multiple: true },
   "snap-window": { type: "string" },
 } as const;
 
-type Values = Record<string, string | boolean | undefined>;
+type Values = Record<string, string | boolean | string[] | undefined>;
 
 /** Parsed timeline invocation: one daemon method and its params minus `cwd`. */
 export interface TimelineInvocation {
@@ -117,9 +120,9 @@ const ALLOWED: Record<string, string[]> = {
   "track add": ["name", "follows", "index", "preset", "position"],
   "track set": ["name", "clear-name", "follows", "preset", "position"],
   "track remove": ["force"],
-  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "snap", "snap-window"],
+  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
   "clip move": ["start", "track"],
-  "clip trim": ["in", "out", "start", "end", "ripple", "no-snap", "snap-window"],
+  "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window"],
   "clip split": ["at"],
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
@@ -221,6 +224,12 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
     return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
   };
+  /** `--ripple` and its `--ripple-track` scope, as `ripple` / `rippleTracks` params. */
+  const ripple = () => {
+    const tracks = values["ripple-track"] as string[] | undefined;
+    if (tracks !== undefined && values["ripple"] !== true) throw new UsageError("--ripple-track needs --ripple.");
+    return { ripple: values["ripple"] === true ? true : undefined, rippleTracks: tracks };
+  };
   const params: Record<string, unknown> = { timeline: str("timeline") };
   let method: MethodName;
   switch (command) {
@@ -268,7 +277,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         transform: transform(),
         props: json("props"),
         scriptRef: str("script-ref"),
-        ripple: values["ripple"] === true ? true : undefined,
+        ...ripple(),
         snap: values["snap"] === true ? true : undefined,
         snapWindow: num("snap-window"),
       });
@@ -279,7 +288,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "clip trim":
       method = "clip.trim";
-      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap(), ripple: values["ripple"] === true ? true : undefined });
+      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap(), ...ripple() });
       break;
     case "clip split":
       method = "clip.split";
