@@ -18,7 +18,7 @@ Download the app from the [latest release](https://github.com/ThomasPraun/frames
 
 Open a folder in the app, then run `frameshell init` in its integrated terminal. ffmpeg, whisper.cpp and headless Chrome download on first use.
 
-The `frameshell` CLI is on the PATH of the app's integrated terminals, where your agent runs. It is not installed system-wide yet ([#139](https://github.com/ThomasPraun/frameshell/issues/139)).
+The `frameshell` CLI is on the PATH of the app's integrated terminals, where your agent runs. To use it from any other terminal (and to register the [MCP server](docs/mcp.md)), choose **File → Install 'frameshell' Command in PATH**: on macOS it links `/usr/local/bin/frameshell` (asks for your password if needed), on Linux `~/.local/bin/frameshell` (`.deb` install only, not the AppImage), on Windows it adds the command to your user PATH. The command follows app updates; **Uninstall 'frameshell' Command from PATH** removes it.
 
 Official plugins, installed per project:
 

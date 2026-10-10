@@ -4,6 +4,7 @@
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell, utilityProcess } from "electron";
@@ -23,6 +24,14 @@ import {
   type TimelineEdit,
 } from "../shared/api.js";
 import { type Layout, normalizeLayout } from "../shared/layout.js";
+import {
+  type CliInstallHost,
+  type CliInstallOutcome,
+  cliInstallBlocker,
+  installCli,
+  systemCliInstallHost,
+  uninstallCli,
+} from "./cli-install.js";
 import { writeCliShim } from "./cli-shim.js";
 import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
@@ -69,7 +78,10 @@ const ui = new UiBridge({
 daemon.on("ui.command", (params) => ui.command(params));
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
-const binDir = join(app.getPath("userData"), "bin");
+// A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
+// must keep pointing at the installed app.
+const binDir = join(app.getPath("userData"), app.isPackaged ? "bin" : "bin-dev");
+const cliShim = join(binDir, process.platform === "win32" ? "frameshell.cmd" : "frameshell");
 /** Same dirs as the daemon (spawned with this env): terminals see the binaries it runs. Locates only, never installs. */
 const binaries = new BinaryManager(resolveAppDirs(process.env));
 const recentFile = join(app.getPath("userData"), "recent.json");
@@ -432,6 +444,9 @@ function buildMenu(): void {
         { label: "Open Folder…", accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
         { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
+        { label: "Install 'frameshell' Command in PATH", click: () => void cliCommand(installCli) },
+        { label: "Uninstall 'frameshell' Command from PATH", click: () => void cliCommand(uninstallCli) },
+        { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },
@@ -460,6 +475,38 @@ function buildMenu(): void {
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Runs the File menu's install or uninstall of the system-wide CLI (#139) and reports the outcome in a message box. */
+async function cliCommand(action: (shim: string, host: CliInstallHost) => Promise<CliInstallOutcome>) {
+  const parent = BrowserWindow.getFocusedWindow() ?? undefined;
+  const box = (options: Electron.MessageBoxOptions) =>
+    parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+  const host = systemCliInstallHost({
+    home: homedir(),
+    confirmReplace: async (link, target) =>
+      (
+        await box({
+          type: "question",
+          message: `Replace the existing 'frameshell' command?`,
+          detail: `${link} points at ${target}, which another install put there.`,
+          buttons: ["Replace", "Cancel"],
+          defaultId: 0,
+          cancelId: 1,
+        })
+      ).response === 0,
+  });
+  const blocker = action === installCli ? cliInstallBlocker(process.platform, process.execPath, process.env) : undefined;
+  if (blocker) {
+    await box({ type: "warning", message: "Cannot install the 'frameshell' command from here.", detail: blocker });
+    return;
+  }
+  try {
+    const outcome = await action(cliShim, host);
+    await box({ type: "info", message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) });
+  } catch (error) {
+    await box({ type: "error", message: "Could not change the 'frameshell' command.", detail: (error as Error).message });
+  }
 }
 
 function projectArg(argv: string[]): string | undefined {
