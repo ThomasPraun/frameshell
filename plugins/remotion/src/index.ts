@@ -11,6 +11,11 @@ import { newComposition } from "./scaffold.js";
 export { CLIP_TYPE, type RemotionAdapterOptions, type RemotionProps, createRemotionAdapter, fastVp9, fitToProject, propsSchema } from "./adapter.js";
 export { BUNDLE_DIR, BundleCache, type Bundle, type BundleCacheOptions } from "./bundles.js";
 export {
+  type BundlerOverride,
+  NO_CONFIG,
+  type RemotionProjectConfig,
+  type WebpackOverride,
+  loadProjectConfig,
   type RemotionBundler,
   type RemotionComposition,
   type RemotionLoader,

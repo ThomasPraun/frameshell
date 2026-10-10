@@ -24,6 +24,8 @@ Done = every remotion clip is `ready` and a captured frame shows it where intend
 
 ## Composition rules
 
+- **`remotion.config.ts` applies** as with Remotion's CLI: its webpack override (Tailwind via `@remotion/tailwind-v4`, path aliases, Sass) and its OpenGL renderer. Output settings in it (codec, image format, CRF) are ignored: renders are always PNG frames to VP9 with alpha. Reading the config needs `@remotion/cli` installed in the Remotion project. Editing the config re-renders.
+- **Tailwind:** install `tailwindcss` and `@remotion/tailwind-v4` (same version as `remotion`) in the Remotion project, enable it in `remotion.config.ts`, and import a CSS file with `@import "tailwindcss";` from the entry or the composition.
 - **Code outside the project is fine.** Components imported from the user's web app are bundled like any other file, with the Remotion project's React. Any edit to bundled code, inside the project or not, re-renders the clips using that entry; unchanged code reuses the cache.
 - **Transparency:** paint no background on the root (`<AbsoluteFill>` without `background`) and the footage below shows through, partial alpha included. A full-frame scene paints its own background.
 - **Format:** Frameshell renders at the project's fps and resolution, keeping the composition's length in seconds. Same aspect ratio: rendered at the composition's size and scaled, so pixel layouts keep their proportions. Other aspect ratio: rendered at the project's size, so lay out from `useVideoConfig()` (`width`, `height`). Always time animations from `useVideoConfig().fps` (`spring({ frame, fps })`, `2 * fps` frames), never a hard-coded frame rate.

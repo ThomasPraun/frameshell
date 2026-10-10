@@ -16,6 +16,8 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 The plugin does not depend on Remotion. It loads `@remotion/bundler` and `@remotion/renderer` from the Remotion project a clip points at, so your version, webpack config and dependencies apply. Remotion is not Apache-licensed: companies above a size threshold need a [Remotion company license](https://www.remotion.dev/license). That licence is between you and Remotion.
 
+The project's `remotion.config.ts` (or `.js`) applies as with Remotion's CLI: its webpack override (e.g. Tailwind via `@remotion/tailwind-v4`) and OpenGL renderer. Output settings in it are ignored, since clips are always VP9 with alpha. Reading it needs `@remotion/cli` in the Remotion project; Remotion has no public API for this, so the plugin uses the CLI's own config loader.
+
 Renders use the headless Chrome Frameshell manages, never a browser Remotion would download.
 
 The plugin runs inside the Frameshell daemon with full Node access, like every plugin: a project's plugins load only after you trust the project.

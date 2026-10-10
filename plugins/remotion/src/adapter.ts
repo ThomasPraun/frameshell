@@ -99,10 +99,11 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       const bundle = await bundles.get(entry, (fraction) => ctx.progress({ fraction: fraction * 0.05, message: "Bundling" }));
       const { renderer } = bundle.remotion;
       const inputProps = props.inputProps ?? {};
-      const browser = { browserExecutable: chrome, chromeMode: "headless-shell" as const, logLevel: "error" as const };
+      const chromiumOptions = bundle.remotion.config.gl ? { gl: bundle.remotion.config.gl } : {};
+      const browser = { browserExecutable: chrome, chromeMode: "headless-shell" as const, chromiumOptions, logLevel: "error" as const };
       ctx.progress({ fraction: 0.05, message: "Starting headless Chrome" });
       const selected = await renderer.selectComposition({ serveUrl: bundle.dir, id: props.composition, inputProps, ...browser }).catch(async (error: unknown) => {
-        throw await unknownComposition(error, renderer, { serveUrl: bundle.dir, id: props.composition, inputProps, browserExecutable: chrome }, id);
+        throw await unknownComposition(error, renderer, { serveUrl: bundle.dir, id: props.composition, inputProps, browserExecutable: chrome, chromiumOptions }, id);
       });
       const { composition, scale } = fitToProject(selected, ctx);
       const { cancelSignal, cancel } = renderer.makeCancelSignal();
@@ -183,12 +184,12 @@ export function fastVp9(args: string[]): string[] {
 async function unknownComposition(
   error: unknown,
   renderer: RemotionRenderer,
-  wanted: { serveUrl: string; id: string; inputProps: Record<string, unknown>; browserExecutable: string },
+  wanted: { serveUrl: string; id: string; inputProps: Record<string, unknown>; browserExecutable: string; chromiumOptions: { gl?: string } },
   clip: string,
 ): Promise<Error> {
-  const { serveUrl, id, inputProps, browserExecutable } = wanted;
+  const { serveUrl, id, inputProps, browserExecutable, chromiumOptions } = wanted;
   const ids = await renderer
-    .getCompositions(serveUrl, { inputProps, browserExecutable, chromeMode: "headless-shell", logLevel: "error" })
+    .getCompositions(serveUrl, { inputProps, browserExecutable, chromeMode: "headless-shell", chromiumOptions, logLevel: "error" })
     .then((all) => all.map((c) => c.id))
     .catch(() => null);
   if (ids && !ids.includes(id)) {

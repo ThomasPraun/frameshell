@@ -6,6 +6,8 @@ import type { PluginApi, RenderContext, RenderProgress } from "@frameshell/plugi
 import { parsePluginManifest } from "@frameshell/schema";
 import {
   BUNDLE_DIR,
+  NO_CONFIG,
+  type RemotionProjectConfig,
   type RemotionComposition,
   type RemotionModules,
   type RemotionRenderer,
@@ -48,8 +50,11 @@ afterEach(() => {
  * entry and the outside file, and reports both through the webpack plugin
  * the adapter adds, as webpack's `fileDependencies` would.
  */
-function fakeRemotion(compositions: RemotionComposition[] = [{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 240 }]) {
-  const calls = { bundle: 0, roots: [] as string[], select: [] as unknown[], render: [] as Record<string, unknown>[], canceled: 0 };
+function fakeRemotion(
+  compositions: RemotionComposition[] = [{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 240 }],
+  config: (root: string) => RemotionProjectConfig = () => NO_CONFIG,
+) {
+  const calls = { bundle: 0, roots: [] as string[], select: [] as unknown[], render: [] as Record<string, unknown>[], canceled: 0, webpack: [] as WebpackConfig[] };
   const renderer: RemotionRenderer = {
     async selectComposition(options) {
       calls.select.push(options);
@@ -73,14 +78,17 @@ function fakeRemotion(compositions: RemotionComposition[] = [{ id: "Intro", widt
       root,
       version: "4.0.527",
       renderer,
+      config: config(root),
       bundler: {
         async bundle({ entryPoint, outDir, webpackOverride, onProgress }) {
           calls.bundle++;
           const deps = [entryPoint, join(web, "Panel.tsx"), web];
           const missing = [join(web, "missing.tsx")];
-          const config = webpackOverride!({ plugins: [] } as WebpackConfig);
-          for (const plugin of config.plugins as { apply(compiler: unknown): void }[]) {
-            plugin.apply({ hooks: { done: { tap: (_: string, fn: (stats: unknown) => void) => fn({ compilation: { fileDependencies: new Set(deps), missingDependencies: new Set(missing) } }) } } });
+          const webpack = await webpackOverride!({ plugins: [] } as WebpackConfig);
+          calls.webpack.push(webpack);
+          for (const plugin of (webpack.plugins as { apply?(compiler: unknown): void }[]).filter((p) => p.apply)) {
+            plugin.apply!(
+{ hooks: { done: { tap: (_: string, fn: (stats: unknown) => void) => fn({ compilation: { fileDependencies: new Set(deps), missingDependencies: new Set(missing) } }) } } });
           }
           onProgress?.(100);
           mkdirSync(outDir, { recursive: true });
@@ -235,6 +243,43 @@ describe("remotion adapter inputs", () => {
     writeFileSync(join(web, "index.ts"), "registerRoot(Root)");
     const outside = relative(project, join(web, "index.ts")).split(sep).join("/");
     await expect(remotion.inputs!({ id: "c_1", source: outside })).rejects.toThrow(/not inside a Remotion project/);
+  });
+});
+
+describe("remotion.config of the Remotion project", () => {
+  const configFile = () => join(project, "compositions", "remotion", "remotion.config.ts");
+
+  it("applies the project's webpack override before recording dependencies, so overridden loaders count", async () => {
+    const tailwind = { tailwind: true };
+    const { load, calls } = fakeRemotion(undefined, () => ({
+      ...NO_CONFIG,
+      file: configFile(),
+      webpackOverride: async (webpack) => ({ ...webpack, plugins: [...(webpack.plugins ?? []), tailwind] }),
+    }));
+    writeFileSync(configFile(), "Config.overrideWebpackConfig(enableTailwind)");
+    await adapter(load).inputs!({ id: "c_1", source: SOURCE });
+    expect(calls.webpack[0]?.plugins?.[0]).toBe(tailwind);
+    expect(calls.webpack[0]?.plugins).toHaveLength(2);
+  });
+
+  it("re-bundles and re-keys when the config file appears or changes, even if the bundle is the same", async () => {
+    const { load, calls } = fakeRemotion(undefined, () => (existsSync(configFile()) ? { ...NO_CONFIG, file: configFile() } : NO_CONFIG));
+    const remotion = adapter(load);
+    const [none] = await remotion.inputs!({ id: "c_1", source: SOURCE });
+    writeFileSync(configFile(), 'Config.setChromiumOpenGlRenderer("angle")');
+    const [angle] = await remotion.inputs!({ id: "c_1", source: SOURCE });
+    touch(configFile(), 'Config.setChromiumOpenGlRenderer("swangle")');
+    const [swangle] = await remotion.inputs!({ id: "c_1", source: SOURCE });
+    expect(new Set([none, angle, swangle]).size).toBe(3);
+    expect(calls.bundle).toBe(3);
+  });
+
+  it("renders with the project's OpenGL renderer", async () => {
+    const { load, calls } = fakeRemotion(undefined, () => ({ ...NO_CONFIG, file: configFile(), gl: "angle" }));
+    writeFileSync(configFile(), 'Config.setChromiumOpenGlRenderer("angle")');
+    await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, context(tempDir()).ctx);
+    expect(calls.select).toEqual([expect.objectContaining({ chromiumOptions: { gl: "angle" } })]);
+    expect(calls.render[0]).toMatchObject({ chromiumOptions: { gl: "angle" } });
   });
 });
 

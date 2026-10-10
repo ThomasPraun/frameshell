@@ -108,18 +108,23 @@ export class BundleCache {
     await mkdir(entryDir, { recursive: true });
     let found: Dependencies = { files: [], missing: [] };
     try {
+      const { config } = remotion;
+      const record = (webpack: WebpackConfig): WebpackConfig => ({
+        ...webpack,
+        plugins: [...(webpack.plugins ?? []), dependencyRecorder((recorded) => (found = recorded))],
+      });
       await remotion.bundler.bundle({
         entryPoint: entry,
         rootDir: remotion.root,
         outDir: temp,
         enableCaching: true,
         onProgress: (percent) => onProgress?.(Math.min(1, Math.max(0, percent / 100))),
-        webpackOverride: (config: WebpackConfig) => ({
-          ...config,
-          plugins: [...(config.plugins ?? []), dependencyRecorder((recorded) => (found = recorded))],
-        }),
+        // The project's own override first (Tailwind, aliases), as Remotion's CLI applies it; the recorder sees its result.
+        webpackOverride: async (webpack: WebpackConfig) => record(config.webpackOverride ? await config.webpackOverride(webpack) : webpack),
+        ...(config.bundlerOverride ? { bundlerOverride: config.bundlerOverride } : {}),
       });
-      const content = await dirHash(temp);
+      // The config file counts too: its render settings (OpenGL renderer) change pixels without changing the bundle.
+      const content = hash(`${await dirHash(temp)}\0${config.file ? hash(await readFile(config.file).catch(() => "")) : ""}`).slice(0, 32);
       const dir = join(entryDir, content);
       if (await exists(join(dir, "index.html"))) {
         await rm(temp, { recursive: true, force: true });
@@ -140,6 +145,11 @@ export class BundleCache {
           if (!(await exists(path))) deps.set(path, null);
         }),
       ]);
+      // Webpack never reads remotion.config.*, and a project without one may gain one: both re-bundle.
+      for (const name of ["remotion.config.ts", "remotion.config.js"]) {
+        const path = join(remotion.root, name);
+        deps.set(path, await stampOf(path));
+      }
       const marker = relative(projectDir, join(dir, "index.html")).split(sep).join("/");
       return { bundle: { dir, marker, remotion }, deps };
     } catch (error) {
