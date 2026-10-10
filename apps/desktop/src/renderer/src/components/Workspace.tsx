@@ -127,6 +127,9 @@ export function Workspace({ project }: { project: ProjectView }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(isMac ? event.metaKey : event.ctrlKey) || event.altKey || !event.shiftKey || event.key.toLowerCase() !== "t") return;
+      // Linux, Windows: a focused terminal keeps Ctrl+Shift+T, which xterm sends as Ctrl+T (readline, agent TUIs) (#132).
+      // macOS keeps the shortcut everywhere: no shell receives Cmd keys.
+      if (!isMac && (event.target as Element | null)?.closest?.(".xterm")) return;
       event.preventDefault();
       event.stopPropagation();
       showTranscript();

@@ -444,7 +444,13 @@ function buildMenu(): void {
     {
       label: "View",
       submenu: [
-        { label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: () => command("showTranscript") },
+        {
+          label: "Transcript",
+          accelerator: "CmdOrCtrl+Shift+T",
+          // Linux, Windows: shown only. The renderer handles the key, so a focused terminal keeps Ctrl+Shift+T (#132).
+          registerAccelerator: process.platform === "darwin",
+          click: () => command("showTranscript"),
+        },
         { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },

@@ -105,6 +105,31 @@ test("the pty follows the terminal panel size", async () => {
   await expect.poll(colsNow).toBeLessThan(before - 10);
 });
 
+test("with the terminal focused, Mod+Shift+T opens the transcript on macOS and reaches the shell elsewhere (#132)", async () => {
+  const tab = page.getByRole("tab", { name: "Transcript" });
+  await expect(tab).toHaveCount(0);
+  // Prints the first raw bytes it reads, in hex. The markers are split so the echoed command never matches them.
+  await runInTerminal(
+    `node -e "process.stdin.setRawMode(true); console.log('raw' + '-ready'); ` +
+      `process.stdin.once('data', (d) => { console.log('got' + '-' + d.toString('hex')); process.exit(0); })"`,
+  );
+  await expect.poll(terminalText, { timeout: 30_000 }).toContain("raw-ready");
+  await page.keyboard.press(`${mod}+Shift+T`);
+  if (process.platform === "darwin") {
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: "Close Transcript" }).click();
+    await expect(tab).toHaveCount(0);
+    // Let the reader exit.
+    await page.locator(".terminal-view:not([hidden]) .xterm").click();
+    await page.keyboard.press("q");
+    await expect.poll(terminalText).toContain("got-71");
+  } else {
+    // xterm sends Ctrl+Shift+T as Ctrl+T.
+    await expect.poll(terminalText).toContain("got-14");
+    await expect(tab).toHaveCount(0);
+  }
+});
+
 test("layout persists per project across restarts", async () => {
   await page.getByRole("button", { name: "Hide timeline" }).click();
   await expect(page.getByRole("button", { name: "Show timeline" })).toBeVisible();

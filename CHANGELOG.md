@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Linux, Windows: with an integrated terminal focused, Ctrl+Shift+T goes to the terminal (sent as Ctrl+T: readline, agent TUIs) instead of opening the transcript (#132). The shortcut still opens it from any other panel, and View → Transcript and the timeline header button work as before. macOS keeps Cmd+Shift+T everywhere, since no shell receives Cmd keys.
+
 ## [0.3.0] - 2026-10-10
 
 ### Added
