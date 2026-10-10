@@ -121,7 +121,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 - Generated clips (`hyperframes`, `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a placeholder with progress.
 - Overlays: CSS/canvas compositing with the clip `transform` (position, scale, opacity).
 - Subtitles: rendered in the DOM from the transcript, same style tokens as export.
-- v0.2: `livePreview()` mounts the active clip's engine directly (iframe for HyperFrames, `@remotion/player` for Remotion), synced to the playhead.
+- v0.2: `livePreview()`: while a generated clip's render is not ready, the preview plays its composition live in a sandboxed iframe (HyperFrames' runtime; the Remotion adapter's own bundle, driven through Remotion's frame globals), seeked to the playhead, when it is the topmost layer. The ready render always wins (ADR 0010).
 
 ### 3.5 Export pipeline
 
@@ -440,7 +440,7 @@ Design rules:
 
 | Point | v0.1 | Contract (sketch) |
 |---|---|---|
-| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview` (v0.2) |
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
 | Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |
