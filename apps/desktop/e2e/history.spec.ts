@@ -172,3 +172,20 @@ test("names the agent CLI that ran commands in a terminal, on its tab and in His
   // The agent quit: the tab names the shell again.
   if (!isWindows) await expect(tab).not.toHaveAttribute("data-agent", /.*/, { timeout: 30_000 });
 });
+
+test("an aborted transaction stays listed, dimmed and marked aborted, without Revert (#133)", async () => {
+  await runInTerminal(page, 'frameshell tx begin "try a move"');
+  await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain('"try a move"');
+  await runInTerminal(page, "frameshell clip move c_three --start 13");
+  await expect(lanes()).toHaveAttribute("data-revision", "7", { timeout: 30_000 });
+  await runInTerminal(page, "frameshell tx abort");
+  await expect(lanes()).toHaveAttribute("data-revision", "8", { timeout: 30_000 });
+
+  const aborted = row("try a move");
+  await expect(aborted).toHaveAttribute("data-aborted", "true");
+  await expect(aborted.locator(".history-aborted")).toHaveText("aborted");
+  await expect(aborted.locator(".history-count")).toHaveText("2 ops");
+  await expect(aborted.getByRole("button", { name: /^Revert/ })).toHaveCount(0);
+  // Other entries keep their Revert.
+  await expect(row("tighten intro").getByRole("button", { name: /^Revert tx_/ })).toHaveCount(1);
+});

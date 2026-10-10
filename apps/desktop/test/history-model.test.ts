@@ -1,6 +1,12 @@
 import type { HistoryTransaction } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { authorOf, historySelection, newestFirst, transactionTitle } from "../src/renderer/src/history/model.js";
+import {
+  abortedTransactions,
+  authorOf,
+  historySelection,
+  newestFirst,
+  transactionTitle,
+} from "../src/renderer/src/history/model.js";
 
 // Seam under test: the History panel's pure model (what rows say, what a click selects).
 
@@ -74,5 +80,19 @@ describe("historySelection", () => {
     const diff = [{ clip: "c_gone", change: "removed" as const, before: place(3, 5), after: null }];
     expect(historySelection(diff, new Set())).toEqual({ clips: [], reveal: { clip: "c_gone", place: place(3, 5) } });
     expect(historySelection([], new Set())).toEqual({ clips: [], reveal: null });
+  });
+});
+
+describe("abortedTransactions", () => {
+  it("finds transactions whose own revert undid them, in any of their rows, and nothing else", () => {
+    const transactions = [
+      tx("tx_kept", null, [op("op_1", "clip.move")]),
+      tx("tx_abort", "try", [op("op_2", "clip.move")]),
+      tx("tx_other", null, [op("op_3", "revert", { target: "tx_kept" })]),
+      // Interleaved: the aborted transaction's later run holds its revert.
+      tx("tx_abort", "try", [op("op_4", "revert", { target: "tx_abort" })]),
+    ];
+    expect(abortedTransactions(transactions)).toEqual(new Set(["tx_abort"]));
+    expect(abortedTransactions([])).toEqual(new Set());
   });
 });

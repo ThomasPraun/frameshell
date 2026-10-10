@@ -670,6 +670,24 @@ code {
   font-size: 10.5px;
 }
 
+/* Aborted: changed nothing, so it reads as background noise but stays listed like the journal. */
+.history-row.is-aborted .history-title,
+.history-row.is-aborted .history-author,
+.history-row.is-aborted .history-count {
+  color: var(--text-faint);
+}
+
+.history-aborted {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .history-side {
   flex: none;
   display: flex;
