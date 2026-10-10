@@ -4,7 +4,7 @@
   "apiVersion": "1",
   "main": "index.js",
   "contributes": {
-    "clipTypes": ["card"],
+    "clipTypes": ["card", "still"],
     "skills": ["skills/card/SKILL.md"]
   }
 }

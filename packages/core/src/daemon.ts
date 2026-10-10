@@ -450,6 +450,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, dryRun, removed, bytes, forgotten: derived.forgotten, skipped };
     },
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
+    "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
       return { dir, jobs: listJobs({ project: dir, active }) };
