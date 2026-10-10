@@ -1,0 +1,11 @@
+{
+  "name": "spike-remotion-alpha-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROTOTYPE, throwaway: stands in for a web app outside the Remotion project, with its own React install.",
+  "type": "module",
+  "dependencies": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}

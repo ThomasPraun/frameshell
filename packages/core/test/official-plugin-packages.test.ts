@@ -15,5 +15,6 @@ describe("official plugin npm packages", () => {
     });
     expect(output).toContain("@frameshell/whisper-cpp@");
     expect(output).toContain("@frameshell/hyperframes@");
+    expect(output).toContain("@frameshell/remotion@");
   });
 });

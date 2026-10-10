@@ -8,6 +8,7 @@
     { "path": "packages/mcp" },
     { "path": "packages/cli" },
     { "path": "plugins/whisper-cpp" },
-    { "path": "plugins/hyperframes" }
+    { "path": "plugins/hyperframes" },
+    { "path": "plugins/remotion" }
   ]
 }

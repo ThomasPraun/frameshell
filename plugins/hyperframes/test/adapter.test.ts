@@ -191,6 +191,7 @@ describe("plugin manifest", () => {
       registerCommand: (name) => registered.push(`command:${name}`),
       registerExportPreset: () => {},
       registerTranscriptionProvider: () => {},
+      refreshRenders: () => {},
     });
     const { clipTypes, commands, skills } = manifest.value.contributes;
     expect(registered.sort()).toEqual([...clipTypes.map((t) => `clip:${t}`), ...commands.map((c) => `command:${c}`)].sort());

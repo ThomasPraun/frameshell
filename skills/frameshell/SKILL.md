@@ -56,3 +56,4 @@ When you guide the human through the app, name only these places; do not invent 
 | The prompt holds a `[frameshell] …` line | [selection.md](reference/selection.md) |
 | Project files on disk: `frameshell.json`, timeline, transcript, script; direct file edits | [project-model.md](reference/project-model.md) |
 | Titles, lower thirds, animated overlays (HyperFrames clips) | The `hyperframes` skill, exposed when `@frameshell/hyperframes` is installed (`frameshell plugin list` shows its skills) |
+| React-built scenes, UI demos, overlays from the user's React code (Remotion clips) | The `remotion` skill, exposed when `@frameshell/remotion` is installed |

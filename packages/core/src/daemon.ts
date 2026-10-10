@@ -179,7 +179,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(key, tx);
     },
   });
-  const plugins = new PluginHost({ dirs, pins: projects });
+  const plugins = new PluginHost({
+    dirs,
+    pins: projects,
+    // Plugins see changes the project watcher cannot (code outside the project): `clips` exists by the time any plugin loads.
+    refreshRenders: (root) => void clips.refresh(root).catch(() => {}),
+  });
   const energy = new EnergyStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
     ffmpeg: async (dir) => {

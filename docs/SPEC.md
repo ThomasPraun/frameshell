@@ -118,7 +118,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 ### 3.4 Preview
 
 - `media` clips: proxies decoded with **WebCodecs** (`VideoDecoder`) from the keyframe before each in-point, pre-roll discarded, frames drawn to a canvas on the **audio clock**. Decode and draw run in a Worker with `OffscreenCanvas`. Program audio comes from a PCM sidecar mixed in one `AudioWorklet` with its own sample counter and 2 ms edge fades; all audio tracks mix in the same worklet. Double-buffered `<video>` elements were measured and rejected (ADR 0001).
-- Generated clips (`hyperframes`, later `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a placeholder with progress.
+- Generated clips (`hyperframes`, `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a placeholder with progress.
 - Overlays: CSS/canvas compositing with the clip `transform` (position, scale, opacity).
 - Subtitles: rendered in the DOM from the transcript, same style tokens as export.
 - v0.2: `livePreview()` mounts the active clip's engine directly (iframe for HyperFrames, `@remotion/player` for Remotion), synced to the playhead.
@@ -197,7 +197,7 @@ my-video/
 ├── assets/                    # footage, images, audio, fonts, AI-generated media
 ├── compositions/
 │   ├── hyperframes/intro/     # HTML compositions
-│   └── remotion/              # TSX components (v0.2)
+│   └── remotion/              # Remotion project (ADR 0009); clips may also point at one outside the project
 ├── transcripts/
 │   └── raw-01.words.json      # word-level transcript per asset
 └── .frameshell/               # gitignored
@@ -440,7 +440,7 @@ Design rules:
 
 | Point | v0.1 | Contract (sketch) |
 |---|---|---|
-| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; optional `livePreview` (v0.2) |
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview` (v0.2) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
 | Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |

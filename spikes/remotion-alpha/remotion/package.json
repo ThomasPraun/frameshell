@@ -1,0 +1,14 @@
+{
+  "name": "spike-remotion-alpha-video",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROTOTYPE, throwaway: the Remotion project of the spike (ticket #136).",
+  "type": "module",
+  "dependencies": {
+    "@remotion/bundler": "4.0.527",
+    "@remotion/renderer": "4.0.527",
+    "remotion": "4.0.527",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}

@@ -8,7 +8,7 @@ timelines/main.json      the exported sequence (others: nested timelines)
 assets/                  footage, images, audio, fonts, generated media
 transcripts/*.words.json word-level transcript per asset
 scripts/*.md             Markdown scripts
-compositions/            HyperFrames HTML compositions
+compositions/            HyperFrames HTML compositions, the Remotion project (compositions/remotion/)
 exports/                 render output
 .frameshell/             daemon state, regenerable, gitignored (history, proxies, caches, rejected edits)
 ```
@@ -25,7 +25,7 @@ exports/                 render output
 - **Clip:** `id` (`c_…`), `type`, `start` (timeline seconds).
   - `media`: `asset`, `in`/`out` (source seconds), `speed`; length `(out - in) / speed`.
   - `timeline`: `source` is another timeline file, embedded as one clip.
-  - adapter types such as `hyperframes`: `source`, `duration`, `props`.
+  - adapter types such as `hyperframes` or `remotion`: `source`, `duration`, `props`.
   - optional on any: `audio` (`gain` dB, `muted`), `transform` (`x`, `y` in project pixels, `scale`, `opacity` 0-1), `scriptRef` (`scripts/x.md#scene`).
 - Times snap to the project frame grid (`1/fps`), stored with 3 decimals. Duration is derived, never stored.
 
