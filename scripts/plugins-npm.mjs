@@ -2,7 +2,7 @@
 // Usage:
 //   node scripts/plugins-npm.mjs verify             package.json + manifest checks only (no build, no network)
 //   node scripts/plugins-npm.mjs dry-run [outDir]   verify, pnpm pack, check the tarballs, npm publish --dry-run of new versions
-//   node scripts/plugins-npm.mjs publish [outDir]   dry-run, then publish each version npm lacks, with provenance
+//   node scripts/plugins-npm.mjs publish [outDir]   dry-run, then stage each version npm lacks, with provenance (a maintainer approves it)
 // `dry-run` and `publish` need the plugins built (`pnpm exec tsc -b plugins/whisper-cpp plugins/hyperframes plugins/remotion`).
 // `publish` runs in GitHub Actions only: npm trusted publishing authenticates the workflow by its OIDC identity
 // (`id-token: write`, npm >= 11.5.1), so no npm token exists.
@@ -51,20 +51,22 @@ for (const { plugin, file } of tarballs) {
     summary(`- \`${id}\` already on npm, skipped`);
     continue;
   }
-  // Verbose: npm logs why the trusted publishing token exchange failed only at that level ("oidc" lines),
-  // and otherwise reports a bare ENEEDAUTH.
-  const published = spawnSync("npm", ["publish", file, "--access", "public", "--provenance", "--tag", distTag(plugin.pkg.version), "--loglevel", "verbose"], {
+  // Staged, not published: the trusted publisher allows only `npm stage publish`, and a maintainer approves each
+  // version with 2FA. Verbose: npm logs why the trusted publishing token exchange failed only at that level
+  // ("oidc" lines), and otherwise reports a bare ENEEDAUTH.
+  const published = spawnSync("npm", ["stage", "publish", file, "--access", "public", "--provenance", "--tag", distTag(plugin.pkg.version), "--loglevel", "verbose"], {
     cwd: ROOT,
     stdio: "inherit",
     shell: WIN,
   });
   if (published.status !== 0) {
     fail(
-      `npm publish ${id} failed. ENEEDAUTH means npm got no token from trusted publishing: check the "oidc" lines above and ` +
-        "the package's Trusted Publisher on npmjs.com (ThomasPraun / frameshell / release.yml, no environment); docs/release.md.",
+      `npm stage publish ${id} failed. ENEEDAUTH means npm got no token from trusted publishing: check the "oidc" lines above and ` +
+        "the package's Trusted Publisher on npmjs.com (ThomasPraun / frameshell / release.yml, no environment); docs/release.md. " +
+        "A version already staged must be approved or rejected, not staged again.",
     );
   }
-  summary(`- \`${id}\` published to npm (dist-tag \`${distTag(plugin.pkg.version)}\`)`);
+  summary(`- \`${id}\` staged on npm (dist-tag \`${distTag(plugin.pkg.version)}\`): approve it with \`npm stage approve\` (docs/release.md)`);
 }
 
 /** Package.json and plugin manifest of `plugins/<dir>`. */

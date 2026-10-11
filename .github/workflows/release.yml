@@ -1,7 +1,7 @@
 name: Release
 
 # Tag v<semver> -> build, smoke-test and attach installers to a DRAFT GitHub release (publish it by hand).
-# Publishing that release -> publish the official plugins (plugins/*) to npm, each version npm lacks.
+# Publishing that release -> stage the official plugins (plugins/*) on npm, each version npm lacks; a maintainer approves them.
 # workflow_dispatch and pull requests touching packaging -> same build, smoke test and npm dry run, nothing published.
 # workflow_dispatch with npm_publish_tag -> only retry the npm publish of that published release (no app build).
 # Every pull request also runs the npm dry run in ci.yml.
