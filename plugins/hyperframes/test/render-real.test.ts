@@ -104,7 +104,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("real Hy
     </style>
   </head>
   <body>
-    <div id="stage" data-composition-id="swatch" data-width="160" data-height="90" data-duration="0.2">
+    <div id="stage" data-composition-id="swatch" data-width="160" data-height="90" data-duration="0.2" data-no-timeline>
       <div class="clip" data-start="0" data-duration="0.2" data-track-index="0"><div id="left"></div><div id="right"></div></div>
     </div>
     <script>

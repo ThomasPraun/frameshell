@@ -207,7 +207,8 @@ describe("frameshell hyperframes new", () => {
       output: expect.stringContaining("--type hyperframes --source compositions/hyperframes/outro/index.html"),
     });
     const html = readFileSync(join(project, "compositions", "hyperframes", "outro", "index.html"), "utf8");
-    expect(html).toContain('data-composition-id="outro" data-width="2560" data-height="1440" data-duration="4"');
+    // CSS animation only: data-no-timeline spares the producer's 45 s wait for a GSAP timeline.
+    expect(html).toContain('data-composition-id="outro" data-width="2560" data-height="1440" data-duration="4" data-no-timeline>');
     expect(html).toContain('data-duration="4"');
     expect(html).toContain("getVariables()");
     // HyperFrames reads declared defaults only from an array of {id, type, label, default} (#116).
