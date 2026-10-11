@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Card live page</title>
+    <style>
+      html, body { margin: 0; width: 960px; height: 540px; overflow: hidden; }
+      #time { font: 700 64px/1 sans-serif; color: white; padding: 40px; }
+    </style>
+  </head>
+  <body>
+    <!-- The card adapter's head stores each seek in data-seconds; this page draws it, so a test can read it. -->
+    <p id="time">-</p>
+    <script>
+      var time = document.getElementById("time");
+      new MutationObserver(function () {
+        time.textContent = Number(document.documentElement.dataset.seconds).toFixed(3);
+      }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-seconds"] });
+    </script>
+  </body>
+</html>

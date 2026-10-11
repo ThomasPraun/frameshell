@@ -173,7 +173,7 @@ describe("compileProgram", () => {
     expect(program.frames).toBe(90);
     expect(program.layers[0]![1]).toEqual({
       kind: "generated", clip: "g1", type: "hyperframes", start: 60, end: 90, in: 0,
-      render: { state: "rendering", progress: 0.4, error: null }, size: null, placement: IDENTITY,
+      render: { state: "rendering", progress: 0.4, error: null, key: "k1" }, size: null, placement: IDENTITY,
     });
     expect(program.layers[1]).toEqual([
       {

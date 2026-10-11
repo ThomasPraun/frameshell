@@ -5,9 +5,11 @@ type GeneratedSpan = Extract<VideoSpan, { kind: "generated" }>;
 /**
  * Generated clips at `frame` whose render is not ready (SPEC §6.5): one slate
  * each, bottom layer first, with the render's state and live progress. Ready
- * renders need none: the engine composites them with the other layers.
+ * renders need none: the engine composites them with the other layers. The
+ * `live` clip plays its composition live (ADR 0010): its slate shrinks to a
+ * corner label, so nobody mistakes the live page for the render.
  */
-export function RenderSlates({ program, frame }: { program: Program; frame: number }) {
+export function RenderSlates({ program, frame, live = null }: { program: Program; frame: number; live?: string | null }) {
   const waiting = program.layers.flatMap((_, layer) => {
     const span = programAt(program, frame, layer);
     return span?.kind === "generated" && span.render?.state !== "ready" ? [span] : [];
@@ -15,9 +17,7 @@ export function RenderSlates({ program, frame }: { program: Program; frame: numb
   if (waiting.length === 0) return null;
   return (
     <div className="preview-render-slates">
-      {waiting.map((span) => (
-        <Slate key={span.clip} span={span} />
-      ))}
+      {waiting.map((span) => (span.clip === live ? <LiveLabel key={span.clip} span={span} /> : <Slate key={span.clip} span={span} />))}
     </div>
   );
 }
@@ -44,5 +44,17 @@ function Slate({ span }: { span: GeneratedSpan }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** Corner label of a clip shown live: what it is and how far its render got. */
+function LiveLabel({ span }: { span: GeneratedSpan }) {
+  const render = span.render && span.render.state !== "ready" ? span.render : null;
+  const percent = Math.round((render?.progress ?? 0) * 100);
+  const doing = render?.state === "rendering" ? `rendering ${percent}%` : "waiting to render";
+  return (
+    <p className="preview-live-label" data-testid="preview-live-label" data-clip={span.clip} role="status" title={`Live preview of ${span.type} clip ${span.clip}: export uses the render`}>
+      Live, {doing}
+    </p>
   );
 }

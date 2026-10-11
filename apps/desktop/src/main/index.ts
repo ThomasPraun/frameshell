@@ -16,6 +16,7 @@ import {
   Channel,
   type EditOptions,
   type HistoryCommand,
+  type LiveClipPage,
   type MenuCommand,
   type OpenOutcome,
   type Outcome,
@@ -38,6 +39,7 @@ import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { editMenu } from "./edit-menu.js";
 import { LayoutStore } from "./layout-store.js";
+import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
@@ -96,10 +98,14 @@ if (PREVIEW_PROBE) {
 }
 /** Base URLs of `frameshell-media://`, one per project shown in a window. */
 const mediaRoots = new MediaRoots();
+/** Live pages of generated clips (ADR 0010), served under `frameshell-live://`. */
+const livePages = new LivePages();
 
-// Before ready: fetch() from renderer workers, range streaming and CORS need a privileged scheme.
+// Before ready: fetch() from renderer workers, range streaming and CORS need a privileged scheme. Live pages resolve
+// relative URLs (standard) and load module scripts, fonts and media from an opaque origin (CORS).
 protocol.registerSchemesAsPrivileged([
   { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+  { scheme: LIVE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
 
 /** Per-window state; a window shows at most one project. */
@@ -114,6 +120,8 @@ interface WindowState {
    */
   daemonEvents: LinkSubscription[];
   terminals: TerminalManager;
+  /** Live page URL per clip id issued to this window; revoked when re-issued or the project closes. */
+  live: Map<string, string>;
   /**
    * The `--project` open started with the window. The page loads meanwhile (a cold daemon can take many seconds)
    * and `project.current` awaits this, so the renderer shows its boot screen, never a premature welcome screen.
@@ -147,6 +155,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     project: null,
     files: null,
     daemonEvents: [],
+    live: new Map(),
     opening: Promise.resolve(),
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
@@ -174,6 +183,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     void state.files?.close();
     for (const subscription of state.daemonEvents) void subscription.unsubscribe();
     if (state.project) mediaRoots.revoke(state.project.mediaUrl);
+    revokeLive(state);
     ui.detach(String(contents.id));
     windows.delete(contents.id);
   });
@@ -241,10 +251,17 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.daemonEvents = subscriptions;
   if (state.project) mediaRoots.revoke(state.project.mediaUrl);
+  revokeLive(state);
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
   await rememberRecent(project.dir);
   return { status: "opened", project };
+}
+
+/** Stop serving every live page issued to the window. */
+function revokeLive(state: WindowState): void {
+  for (const url of state.live.values()) livePages.revoke(url);
+  state.live.clear();
 }
 
 /** Window to open a folder in: this one while it shows the welcome screen, else a new one. */
@@ -402,6 +419,20 @@ function registerIpc(): void {
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
     outcome(async () => daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
   );
+  ipcMain.handle(Channel.clipsLive, (event, timeline: string, clip: string) =>
+    outcome(async (): Promise<LiveClipPage> => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const page = await daemon.request("clip.live", { cwd: project.dir, timeline, clip });
+      // The project may have changed while the daemon answered: never serve a page of a project the window left.
+      if (state.project !== project) throw new Error("The project changed while its live page loaded");
+      const url = livePages.issue({ project: project.dir, root: page.root, entry: page.entry, head: page.head });
+      const previous = state.live.get(clip);
+      if (previous) livePages.revoke(previous);
+      state.live.set(clip, url);
+      return { url, key: page.key };
+    }),
+  );
   ipcMain.handle(Channel.mediaRead, (event, path: string) =>
     outcome(async () => (await requireProject(stateOf(event.sender))).files.readMedia(path)),
   );
@@ -519,6 +550,7 @@ app.whenReady().then(async () => {
   const cliEntry = fileURLToPath(import.meta.resolve("@frameshell/cli/frameshell"));
   await writeCliShim(binDir, { runtime: process.execPath, cliEntry });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
+  protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   registerIpc();
   buildMenu();
   createWindow(projectArg(process.argv));

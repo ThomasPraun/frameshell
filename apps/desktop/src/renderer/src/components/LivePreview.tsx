@@ -1,0 +1,163 @@
+import type { Size } from "@frameshell/schema/composite";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type LiveTarget, liveSeconds } from "../preview/live.js";
+
+/** `source` of the messages the preview posts to a live page and the page's bridge posts back (main's `LIVE_MESSAGE`). */
+const TO_PAGE = "frameshell-preview";
+const FROM_PAGE = "frameshell-live";
+
+/** Live page of one clip render key: loading, loaded at `url`, or failed (the slate stays). */
+type PageState = { status: "loading" } | { status: "loaded"; url: string } | { status: "failed"; error: string };
+
+/**
+ * Live preview of the generated clip `target` names (ADR 0010): its
+ * composition in a sandboxed frame over the program canvas, placed and faded
+ * as the engine would place its render, and seeked to the playhead. The page
+ * is asked for once per clip and render key, so a new key (the composition
+ * or its props changed) reloads it; a clip whose adapter has no live
+ * preview, or whose page fails, keeps its slate. `onLive` names the clip
+ * while its page shows, so the slate can step aside; null otherwise.
+ */
+export function LivePreview({
+  target,
+  timeline,
+  time,
+  fps,
+  resolution,
+  onLive,
+}: {
+  target: LiveTarget | null;
+  timeline: string | null;
+  time: number;
+  fps: number;
+  resolution: Size;
+  onLive: (clip: string | null) => void;
+}) {
+  const pages = useRef(new Map<string, PageState>());
+  const [, setVersion] = useState(0);
+  const id = target ? `${target.clip}@${target.key}` : null;
+  const clip = target?.clip ?? null;
+
+  useEffect(() => {
+    if (!id || !clip || !timeline || pages.current.has(id)) return;
+    const settle = (state: PageState) => {
+      pages.current.set(id, state);
+      setVersion((n) => n + 1);
+    };
+    pages.current.set(id, { status: "loading" });
+    window.frameshell.clips.live(timeline, clip).then(
+      (page) => settle({ status: "loaded", url: page.url }),
+      (error: unknown) => settle({ status: "failed", error: (error as Error)?.message ?? String(error) }),
+    );
+  }, [id, clip, timeline]);
+
+  const page = id ? pages.current.get(id) : undefined;
+  // No frame: an unmounting LiveFrame has already reported null.
+  if (!target || !id || page?.status !== "loaded") return null;
+  return (
+    <LiveFrame
+      key={page.url}
+      url={page.url}
+      target={target}
+      time={time}
+      fps={fps}
+      resolution={resolution}
+      onLive={onLive}
+      onError={(error) => {
+        pages.current.set(id, { status: "failed", error });
+        setVersion((n) => n + 1);
+      }}
+    />
+  );
+}
+
+function LiveFrame({
+  url,
+  target,
+  time,
+  fps,
+  resolution,
+  onLive,
+  onError,
+}: {
+  url: string;
+  target: LiveTarget;
+  time: number;
+  fps: number;
+  resolution: Size;
+  onLive: (clip: string | null) => void;
+  onError: (error: string) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [ready, setReady] = useState(false);
+  const [scale, setScale] = useState(0);
+  const failed = useRef(onError);
+  failed.current = onError;
+  const seconds = liveSeconds(target.span, time, fps);
+
+  // The page is laid out at the project format; CSS scales it to the box the render would fill.
+  useLayoutEffect(() => {
+    const element = box.current!;
+    const measure = () => setScale(element.clientWidth / resolution.width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [resolution.width]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { source?: unknown; ready?: unknown; shown?: unknown; error?: unknown } | null;
+      if (event.source !== frame.current?.contentWindow || !data || data.source !== FROM_PAGE) return;
+      if (data.ready === true) setReady(true);
+      // Written straight to the DOM: while playing, one arrives per frame.
+      else if (typeof data.shown === "number") box.current?.setAttribute("data-shown", data.shown.toFixed(3));
+      else if (typeof data.error === "string") failed.current(data.error);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // One seek per playhead change: per frame while playing (the bridge keeps only the latest), exact while paused.
+  useEffect(() => {
+    if (ready) frame.current?.contentWindow?.postMessage({ source: TO_PAGE, seek: seconds }, "*");
+  }, [ready, seconds]);
+
+  useEffect(() => {
+    onLive(ready ? target.clip : null);
+  }, [ready, target.clip, onLive]);
+  useEffect(() => () => onLive(null), [onLive]);
+
+  const percent = (value: number) => `${value * 100}%`;
+  return (
+    <div
+      ref={box}
+      className="preview-live"
+      data-testid="preview-live"
+      data-clip={target.clip}
+      data-ready={ready || undefined}
+      style={{
+        left: percent(target.box.left),
+        top: percent(target.box.top),
+        width: percent(target.box.width),
+        height: percent(target.box.height),
+        opacity: ready ? target.opacity : 0,
+      }}
+    >
+      <iframe
+        ref={frame}
+        src={url}
+        title={`Live preview of clip ${target.clip}`}
+        sandbox="allow-scripts"
+        allow="autoplay 'none'"
+        referrerPolicy="no-referrer"
+        tabIndex={-1}
+        aria-hidden="true"
+        width={resolution.width}
+        height={resolution.height}
+        style={{ transform: `scale(${scale})` }}
+      />
+    </div>
+  );
+}

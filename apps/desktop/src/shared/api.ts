@@ -246,7 +246,22 @@ export interface FrameshellApi {
      * been missed. Returns an unsubscribe function.
      */
     onJob(listener: (job: JobInfo | null) => void): () => void;
+    /**
+     * Live page of a generated clip (daemon `clip.live`, ADR 0010), served
+     * under `frameshell-live://` for a sandboxed iframe. A new call for the
+     * same clip revokes the previous URL. Rejects with the daemon's message,
+     * e.g. when the clip's adapter has no live preview.
+     */
+    live(timeline: string, clip: string): Promise<LiveClipPage>;
   };
+}
+
+/** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */
+export interface LiveClipPage {
+  /** `frameshell-live://<token>/<entry>`, valid until the clip asks again or the project closes. */
+  url: string;
+  /** Render cache key the page was built for (`clip.renders` `key`): a new key means the page is stale. */
+  key: string;
 }
 
 /** IPC channel names; one place so main and preload cannot drift. */
@@ -289,4 +304,5 @@ export const Channel = {
   contextCaptureFrame: "context:capture-frame",
   clipsRenders: "clips:renders",
   clipsJob: "clips:job",
+  clipsLive: "clips:live",
 } as const;

@@ -988,6 +988,35 @@ code {
   white-space: nowrap;
 }
 
+/* Live page of a generated clip still rendering (ADR 0010): laid out at the project format, scaled to the layer's box. */
+.preview-live {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* A light color scheme like the page's default: a mismatch with the app's dark one would paint the frame opaque. */
+.preview-live iframe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  transform-origin: 0 0;
+  background: transparent;
+  color-scheme: light;
+}
+
+.preview-live-label {
+  justify-self: center;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  background: rgba(29, 30, 32, 0.88);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .preview-layer-progress span {
     transition: none;
