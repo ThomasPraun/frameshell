@@ -4,7 +4,7 @@
 
 ## Register it
 
-Claude Code, from the project directory:
+Claude Code, from the project directory. Outside the app's integrated terminals, `frameshell` needs **File → Install 'frameshell' Command in PATH** first (see the README's Install section).
 
 ```sh
 claude mcp add frameshell -- frameshell mcp
