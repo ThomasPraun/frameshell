@@ -69,6 +69,17 @@ jobs:
         run: xvfb-run -a pnpm --filter @frameshell/desktop exec playwright test
         env:
           FRAMESHELL_E2E_APP: ${{ steps.package.outputs.executable }}
+      # The .deb's /usr/bin/frameshell must run the bundled CLI (not the app), and go away with the package.
+      - name: Install the .deb and run its frameshell command
+        if: runner.os == 'Linux'
+        run: |
+          deb=$(ls apps/desktop/release/*.deb)
+          sudo apt-get install -y "$PWD/$deb"
+          test "$(frameshell --version)" = "$(dpkg-deb -f "$deb" Version)"
+          frameshell doctor --json > doctor.json || true
+          jq -e '.command.path == "/usr/bin/frameshell" and .command.same and .command.cli.app' doctor.json
+          sudo apt-get remove -y "$(dpkg-deb -f "$deb" Package)"
+          test ! -e /usr/bin/frameshell
       - name: Smoke test packaged app
         if: runner.os != 'Linux'
         run: pnpm --filter @frameshell/desktop exec playwright test

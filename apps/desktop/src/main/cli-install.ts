@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, readlink, rename, rm, symlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, readlink, rename, rm, symlink } from "node:fs/promises";
 import { dirname, join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
+import { parseCliShim } from "@frameshell/protocol";
 
 const run = promisify(execFile);
 
@@ -15,6 +16,12 @@ export interface CliInstallHost {
   linkDir?: string;
   /** PATH the app runs with. Linux warns when `linkDir` is missing from it. */
   path: string;
+  /**
+   * Command a system package installs (Linux `.deb`: `/usr/bin/frameshell`).
+   * When it runs this app's binary, install has nothing to add and uninstall
+   * leaves it to the package manager.
+   */
+  packageCommand?: string;
   /** Asks whether to replace a `frameshell` command that another install put at `link`. */
   confirmReplace(link: string, target: string): Promise<boolean>;
   /** Runs a `sh` script as administrator. Rejects when the user cancels the prompt. */
@@ -32,6 +39,9 @@ export interface CliInstallOutcome {
   message: string;
   detail?: string;
 }
+
+/** The command the `.deb` installs (`build/linux/after-install.sh`). */
+const LINUX_PACKAGE_COMMAND = "/usr/bin/frameshell";
 
 /**
  * Where the system-wide `frameshell` link goes: `/usr/local/bin` on macOS
@@ -71,7 +81,8 @@ export function cliInstallBlocker(
  * `frameshell` from any terminal. The shim's path never changes across app
  * updates, so neither does the link. A command another install owns is
  * replaced only after {@link CliInstallHost.confirmReplace}; a regular file is
- * never replaced.
+ * never replaced. With the `.deb`'s own command for this app in place
+ * ({@link CliInstallHost.packageCommand}), nothing is added.
  */
 export async function installCli(shim: string, host: CliInstallHost): Promise<CliInstallOutcome> {
   if (host.platform === "win32") {
@@ -86,6 +97,8 @@ export async function installCli(shim: string, host: CliInstallHost): Promise<Cl
       detail: `${dir} is now on your user PATH. Terminals opened before this keep their old PATH: open a new one.`,
     };
   }
+  const packaged = await packageCommandOf(shim, host);
+  if (packaged) return { changed: false, message: `The 'frameshell' command is already installed at ${packaged} by the Frameshell package.` };
   const link = join(requireLinkDir(host), "frameshell");
   const existing = await inspectLink(link, shim);
   if (existing.kind === "file") throw new Error(`${link} exists and is not a link. Remove it, then install again.`);
@@ -123,12 +136,14 @@ export async function uninstallCli(shim: string, host: CliInstallHost): Promise<
   }
   const link = join(requireLinkDir(host), "frameshell");
   const existing = await inspectLink(link, shim);
-  if (existing.kind === "missing") return { changed: false, message: `No 'frameshell' command at ${link}.` };
+  const packaged = await packageCommandOf(shim, host);
+  const stays = packaged ? { detail: `${packaged} comes with the Frameshell package: removing the package removes it.` } : {};
+  if (existing.kind === "missing") return { changed: false, message: `No 'frameshell' command at ${link}.`, ...stays };
   if (existing.kind !== "ours") {
-    return { changed: false, message: `${link} was not installed by Frameshell: left in place.` };
+    return { changed: false, message: `${link} was not installed by Frameshell: left in place.`, ...stays };
   }
   await withAdminFallback(host, `rm -f ${shQuote(link)}`, () => rm(link, { force: true }));
-  return { changed: true, message: `Removed the 'frameshell' command from ${link}.` };
+  return { changed: true, message: `Removed the 'frameshell' command from ${link}.`, ...stays };
 }
 
 /**
@@ -162,6 +177,7 @@ export function systemCliInstallHost(options: {
   return {
     platform,
     ...(linkDir ? { linkDir } : {}),
+    ...(platform === "linux" ? { packageCommand: LINUX_PACKAGE_COMMAND } : {}),
     path: process.env["PATH"] ?? "",
     confirmReplace: options.confirmReplace,
     runAsAdmin: async (script) => {
@@ -241,6 +257,14 @@ async function withAdminFallback(host: CliInstallHost, script: string, direct: (
     if (host.platform !== "darwin" || (code !== "EACCES" && code !== "EPERM")) throw error;
     await host.runAsAdmin(script);
   }
+}
+
+/** {@link CliInstallHost.packageCommand} when it runs the same app binary as `shim`, else undefined. */
+async function packageCommandOf(shim: string, host: CliInstallHost): Promise<string | undefined> {
+  if (!host.packageCommand) return undefined;
+  const read = (file: string) => readFile(file, "utf8").then(parseCliShim, () => null);
+  const [packaged, own] = await Promise.all([read(host.packageCommand), read(shim)]);
+  return packaged && own && packaged.runtime === own.runtime ? host.packageCommand : undefined;
 }
 
 function requireLinkDir(host: CliInstallHost): string {
