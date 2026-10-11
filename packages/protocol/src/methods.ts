@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 29;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -44,7 +44,10 @@ export interface MethodSpec<P extends z.ZodType = z.ZodType, R extends z.ZodType
   /** Params object. Use `z.strictObject` so misspelled fields fail instead of being ignored. */
   readonly params: P;
   readonly result: R;
-  /** Connection plumbing, not a project operation: never exposed as an MCP tool or CLI command. */
+  /**
+   * Connection plumbing, or a method only the app uses (`ui.publish`, `clip.live`): never exposed as an MCP tool
+   * or CLI command.
+   */
   readonly internal?: boolean;
   /**
    * Changes project files or daemon state, so a replay must not apply twice:
@@ -802,6 +805,23 @@ export const methods = {
         .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
     }),
   },
+  "clip.live": {
+    // The app's preview only: a page to load in an iframe is of no use to an agent, so no MCP tool or CLI command.
+    internal: true,
+    description:
+      "Live page of one generated clip (ADR 0010), which the app's preview plays while the clip's render is not ready. " +
+      "`clip` is an id as `clip.renders` reports it (`<nested clip>/<clip>` inside a nested timeline). Never writes project " +
+      "files. Fails with LiveUnavailable (no adapter, adapter without live preview, or the adapter failed), ClipNotFound, " +
+      "TimelineNotFound, OutsideProject (the adapter's page escapes the project).",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, clip: z.string().min(1).describe("Clip id as `clip.renders` reports it.") }),
+    result: z.object({
+      clip: z.string(),
+      root: z.string().describe("Project-relative, `/`-separated directory the page may load files from."),
+      entry: z.string().describe("Project-relative, `/`-separated HTML file inside `root`."),
+      head: z.string().describe("Script to insert at the start of the entry's `<head>`; defines `window.frameshellLive`."),
+      key: z.string().describe("The clip's render cache key now: when `clip.renders` reports another, ask again."),
+    }),
+  },
   transcribe: {
     mutating: true,
     description:
@@ -1518,6 +1538,10 @@ export type JobInfo = z.output<typeof JobSchema>;
 export type JobStep = NonNullable<JobInfo["step"]>;
 /** Result of `clip.renders`. */
 export type ClipRendersResult = MethodResult<"clip.renders">;
+/** `clip.live` params. */
+export type ClipLiveParams = MethodParams<"clip.live">;
+/** Result of `clip.live`. */
+export type ClipLiveResult = MethodResult<"clip.live">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** ffprobe summary of an asset. */
@@ -1711,6 +1735,8 @@ export const ErrorCode = {
   UiCommandFailed: -32037,
   /** data: `{ clip, type, timeline, details }`: a generated clip could not be rendered (adapter error, or no plugin renders its type). */
   ClipRenderFailed: -32038,
+  /** data: `{ clip, type, timeline, details }`: the clip cannot be shown live (no adapter, adapter without `livePreview`, or it failed). */
+  LiveUnavailable: -32039,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

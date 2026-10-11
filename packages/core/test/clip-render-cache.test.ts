@@ -274,3 +274,73 @@ describe("clip render cache", () => {
     expect(gc.skipped).toEqual([{ area: "clips", reason: expect.stringContaining("c_hf") }]);
   });
 });
+
+// Live preview (ADR 0010): `clip.live` asks the adapter for a page and checks it stays inside the project.
+describe("clip.live", () => {
+  const live = (clip: string) => conn.request("clip.live", { cwd: project, timeline: "main", clip });
+  let liveTrack = "";
+  const addLive = async (name: string, card: Record<string, unknown>, type = "card"): Promise<string> => {
+    writeCard(name, { color: "green", seconds: 2, ...card });
+    const result = await conn.request("clip.add", { cwd: project, track: liveTrack, type, source: `compositions/cards/${name}.json`, start: 40 + 3 * (await renders()).size, duration: 1 });
+    return result.changes.added[0]!;
+  };
+
+  beforeAll(async () => {
+    liveTrack = (await conn.request("track.add", { cwd: project, kind: "video" })).changes.added[0]!;
+    writeFileSync(join(project, "compositions", "cards", "live.html"), "<!doctype html><title>card</title>");
+  });
+
+  it("returns the adapter's page, its head script and the clip's render key, without writing anything", async () => {
+    const clip = await addLive("live-green", {});
+    const page = await live(clip);
+    expect(page).toEqual({
+      clip,
+      root: "compositions/cards",
+      entry: "compositions/cards/live.html",
+      head: expect.stringContaining("window.frameshellLive"),
+      key: (await renders()).get(clip)!.key,
+    });
+    // The adapter got the project format.
+    expect(page.head).toContain("window.cardFormat = [64,36,");
+    expect(page.head).toContain('"green"');
+  });
+
+  it("addresses a clip inside a nested timeline as clip.renders does", async () => {
+    const page = await live("c_nest/c_card");
+    expect(page).toMatchObject({ clip: "c_nest/c_card", entry: "compositions/cards/live.html", key: (await renders()).get("c_nest/c_card")!.key });
+  });
+
+  it("is LiveUnavailable when the adapter has none, fails, or its page is missing", async () => {
+    const still = await addLive("live-still", {}, "still");
+    await expect(live(still)).rejects.toMatchObject({
+      code: ErrorCode.LiveUnavailable,
+      message: expect.stringContaining("card-plugin 0.1.0 adapter has no live preview"),
+      data: { clip: still, type: "still", timeline: "main" },
+    });
+    const failing = await addLive("live-fail", { liveFail: true });
+    await expect(live(failing)).rejects.toMatchObject({ code: ErrorCode.LiveUnavailable, message: expect.stringContaining("asks live preview to fail") });
+    const missing = await addLive("live-missing", { liveEntry: "compositions/cards/nope.html" });
+    await expect(live(missing)).rejects.toMatchObject({ code: ErrorCode.LiveUnavailable, message: expect.stringContaining("compositions/cards/nope.html does not exist") });
+  });
+
+  it("refuses a page outside the project, or an entry outside its root, as OutsideProject", async () => {
+    for (const card of [{ liveRoot: "../elsewhere" }, { liveRoot: "/etc", liveEntry: "/etc/hosts" }, { liveRoot: "compositions/cards", liveEntry: "timelines/main.json" }]) {
+      const clip = await addLive(`live-out-${Object.values(card).join("-").replace(/\W/g, "")}`, card);
+      await expect(live(clip)).rejects.toMatchObject({ code: ErrorCode.OutsideProject });
+    }
+  });
+
+  it("names the generated clips for an unknown id, and says why a project without the plugin has none", async () => {
+    await expect(live("c_nope")).rejects.toMatchObject({ code: ErrorCode.ClipNotFound, message: expect.stringContaining("c_nest/c_card") });
+    const other = tempDir();
+    await conn.request("project.init", { dir: other });
+    await conn.request("track.add", { cwd: other, kind: "video" });
+    const timeline = JSON.parse(readFileSync(join(other, "timelines", "main.json"), "utf8")) as { tracks: { clips: unknown[] }[] };
+    timeline.tracks[0]!.clips.push({ id: "c_hf", type: "hyperframes", source: "compositions/intro/index.html", start: 0, duration: 2 });
+    await conn.request("file.write", { path: join(other, "timelines", "main.json"), content: JSON.stringify(timeline) });
+    await expect(conn.request("clip.live", { cwd: other, timeline: "main", clip: "c_hf" })).rejects.toMatchObject({
+      code: ErrorCode.LiveUnavailable,
+      message: expect.stringContaining("frameshell plugin install @frameshell/hyperframes"),
+    });
+  });
+});

@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import {
+  type ClipLiveResult,
   type ClipRenderInfo,
   type ClipRendersResult,
   ErrorCode,
@@ -11,7 +12,7 @@ import {
   type JobInfo,
   RpcError,
 } from "@frameshell/protocol";
-import type { ClipAdapter } from "@frameshell/plugin-api";
+import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
 import type { AdapterClip, Timeline } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
@@ -249,6 +250,64 @@ export class ClipRenderer {
       clips.push({ ...info, state: job?.state === "running" ? "rendering" : "queued", job: pending.job, progress: job?.progress ?? 0 });
     }
     return { timeline: timeline.id, revision: timeline.revision, clips };
+  }
+
+  /**
+   * Live page of generated clip `clipId` of timeline `id` (ADR 0010), from
+   * its adapter's `livePreview`, with the clip's render key so the app knows
+   * when to ask again. `clipId` is flattened as in {@link status}. Reads
+   * only: never renders. Throws ClipNotFound, LiveUnavailable, or
+   * OutsideProject when the page's `root` or `entry` leaves the project or
+   * `entry` leaves `root`.
+   */
+  async live(root: string, id: string, clipId: string): Promise<ClipLiveResult> {
+    const { timeline } = await this.#options.load(root, id);
+    const clips = generatedClips(await resolveNested(root, timeline, this.#options.readNested));
+    const clip = clips.find((placed) => placed.clip.id === clipId)?.clip;
+    if (!clip) {
+      const ids = clips.map((placed) => placed.clip.id);
+      throw new RpcError(
+        ErrorCode.ClipNotFound,
+        `No generated clip "${clipId}" on timeline ${timeline.id}` + (ids.length > 0 ? ` (generated clips: ${ids.join(", ")}).` : " (it has none)."),
+        { clip: clipId },
+      );
+    }
+    const unavailable = (details: string) =>
+      new RpcError(ErrorCode.LiveUnavailable, `${clip.type} clip ${clipId} cannot be shown live: ${details}`, {
+        clip: clipId,
+        type: clip.type,
+        timeline: timeline.id,
+        details,
+      });
+    const format = await this.#options.format(root);
+    const keyed = await this.#keyOf(root, clip, await this.#options.adapters(root), format);
+    if (keyed.key === null) throw unavailable(keyed.error);
+    const { adapter, plugin } = keyed.registered;
+    if (!adapter.livePreview) throw unavailable(`the ${plugin.name} ${plugin.version} adapter has no live preview.`);
+    let page: LivePage;
+    try {
+      page = await adapter.livePreview(structuredClone(clip), {
+        projectDir: root,
+        fps: format.fps,
+        width: format.width,
+        height: format.height,
+        ensureBinary: (name) => this.#options.ensureBinary(root, name),
+      });
+    } catch (error) {
+      throw unavailable(`${plugin.name}: ${(error as Error)?.message ?? error}`);
+    }
+    for (const field of ["root", "entry", "head"] as const) {
+      if (typeof page?.[field] !== "string" || page[field] === "") throw unavailable(`${plugin.name} returned a live page without \`${field}\`.`);
+    }
+    const dir = livePath(page.root, "root");
+    const entry = livePath(page.entry, "entry");
+    if (dir !== "." && !entry.startsWith(`${dir}/`)) {
+      throw new RpcError(ErrorCode.OutsideProject, `${plugin.name} returned a live entry ${entry} outside its root ${dir}.`, { path: entry });
+    }
+    if (!(await stat(join(root, ...entry.split("/"))).then((info) => info.isFile(), () => false))) {
+      throw unavailable(`its live page ${entry} does not exist.`);
+    }
+    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key };
   }
 
   /**
@@ -583,6 +642,18 @@ function renderFailed(timeline: string, clip: AdapterClip, details: string): Rpc
       `\`frameshell clip remove ${clip.id}\` drops the clip.`,
     { clip: clip.id, type: clip.type, timeline, details },
   );
+}
+
+/**
+ * Normalized project-relative, `/`-separated path of a live page field;
+ * throws OutsideProject for an absolute path or one that leaves the project.
+ */
+function livePath(value: string, field: "root" | "entry"): string {
+  const normalized = posix.normalize(value.replaceAll("\\", "/")).replace(/\/+$/, "") || ".";
+  if (posix.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized === ".." || normalized.startsWith("../")) {
+    throw new RpcError(ErrorCode.OutsideProject, `The adapter's live ${field} ${value} is outside the project.`, { path: value });
+  }
+  return normalized;
 }
 
 /** Rename, or copy when the adapter wrote across devices. */

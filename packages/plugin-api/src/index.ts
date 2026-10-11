@@ -102,6 +102,45 @@ export interface ClipAdapter {
    * opaque renders may be H.264 `.mp4`. Throw to fail; the message reaches the user.
    */
   render(clip: unknown, context: RenderContext): Promise<{ file: string; hasAlpha: boolean }>;
+  /**
+   * Optional. A page that plays the clip's composition at any time, which the
+   * app's preview shows (muted, in a sandboxed iframe) while the clip's render
+   * is not ready (ADR 0010). The cached render stays the reference: the
+   * preview switches to it once ready. Throw when the clip cannot be shown
+   * live; the message reaches the user and the preview keeps its slate.
+   */
+  livePreview?(clip: unknown, context: LiveContext): Promise<LivePage>;
+}
+
+/** What {@link ClipAdapter.livePreview} receives: the project facts of {@link RenderContext}, without output or progress. */
+export interface LiveContext {
+  readonly projectDir: string;
+  /** Project frame rate. */
+  readonly fps: number;
+  /** Project resolution: the page is shown at this size and placed like the render. */
+  readonly width: number;
+  readonly height: number;
+  /** See {@link RenderContext.ensureBinary}. */
+  ensureBinary(name: string): Promise<string>;
+}
+
+/**
+ * A live page (ADR 0010). The app serves only files under {@link root}, so
+ * everything the page loads by relative URL must live there.
+ */
+export interface LivePage {
+  /** Project-relative, `/`-separated directory served to the page. */
+  root: string;
+  /** Project-relative, `/`-separated HTML file inside {@link root}: the page loaded first. */
+  entry: string;
+  /**
+   * Script the app inserts at the start of the entry's `<head>` on every
+   * load; never written to disk. It must define
+   * `window.frameshellLive = { ready: Promise<void>, seek(seconds): void | Promise<void> }`,
+   * where `seek` shows composition time `seconds` (as file time `seconds` of
+   * a render), muted.
+   */
+  head: string;
 }
 
 /**

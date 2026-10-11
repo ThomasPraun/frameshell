@@ -41,11 +41,11 @@ describe("method registry JSON Schema", () => {
     expect(() => parseParams("asset.import", { cwd, files: ["relative.mp4"] })).toThrow(/params\.files\.0/);
   });
 
-  it("flags only connection plumbing as internal, so tool generators skip it", () => {
+  it("flags only connection plumbing and app-only methods as internal, so tool generators skip them", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)
       .map(([name]) => name);
-    expect(internal).toEqual(["handshake", "session.tag", "events.subscribe", "events.unsubscribe", "ui.publish", "ui.reply", "ui.detach"]);
+    expect(internal).toEqual(["handshake", "session.tag", "clip.live", "events.subscribe", "events.unsubscribe", "ui.publish", "ui.reply", "ui.detach"]);
   });
 });
 

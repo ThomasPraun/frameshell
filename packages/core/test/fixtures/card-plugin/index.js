@@ -1,5 +1,7 @@
 // Test fixture: a clip adapter that renders a flat colour card with ffmpeg, like a HyperFrames clip but in
 // milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail }. Props: { label? }.
+// Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
+// override or break it. `still` renders the same cards but has no live preview.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,12 +21,13 @@ const propsSchema = {
 
 export function activate(api) {
   const project = api.project.dir;
-  api.registerClipType({
-    type: "card",
+  const readCard = async (clip) => JSON.parse(await readFile(join(project, ...clip.source.split("/")), "utf8"));
+  const still = {
+    type: "still",
     propsSchema,
     inputs: (clip) => (clip.source ? [clip.source] : []),
     async render(clip, ctx) {
-      const card = JSON.parse(await readFile(join(project, ...clip.source.split("/")), "utf8"));
+      const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
@@ -48,6 +51,20 @@ export function activate(api) {
         ),
       );
       return { file, hasAlpha: true };
+    },
+  };
+  api.registerClipType(still);
+  api.registerClipType({
+    ...still,
+    type: "card",
+    async livePreview(clip, ctx) {
+      const card = await readCard(clip);
+      if (card.liveFail) throw new Error(`card ${clip.source} asks live preview to fail`);
+      const dir = clip.source.split("/").slice(0, -1).join("/");
+      const head =
+        `window.frameshellLive = { ready: Promise.resolve(), seek(seconds) { document.documentElement.dataset.seconds = String(seconds); } };` +
+        `document.documentElement.style.background = ${JSON.stringify(card.color ?? "white")}; window.cardFormat = ${JSON.stringify([ctx.width, ctx.height, ctx.fps])};`;
+      return { root: card.liveRoot ?? dir, entry: card.liveEntry ?? `${dir}/live.html`, head };
     },
   });
 }
