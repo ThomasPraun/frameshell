@@ -51,7 +51,19 @@ for (const { plugin, file } of tarballs) {
     summary(`- \`${id}\` already on npm, skipped`);
     continue;
   }
-  npm(["publish", file, "--access", "public", "--provenance", "--tag", distTag(plugin.pkg.version)]);
+  // Verbose: npm logs why the trusted publishing token exchange failed only at that level ("oidc" lines),
+  // and otherwise reports a bare ENEEDAUTH.
+  const published = spawnSync("npm", ["publish", file, "--access", "public", "--provenance", "--tag", distTag(plugin.pkg.version), "--loglevel", "verbose"], {
+    cwd: ROOT,
+    stdio: "inherit",
+    shell: WIN,
+  });
+  if (published.status !== 0) {
+    fail(
+      `npm publish ${id} failed. ENEEDAUTH means npm got no token from trusted publishing: check the "oidc" lines above and ` +
+        "the package's Trusted Publisher on npmjs.com (ThomasPraun / frameshell / release.yml, no environment); docs/release.md.",
+    );
+  }
   summary(`- \`${id}\` published to npm (dist-tag \`${distTag(plugin.pkg.version)}\`)`);
 }
 

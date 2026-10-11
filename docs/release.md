@@ -43,6 +43,10 @@ The official plugins `@frameshell/whisper-cpp`, `@frameshell/hyperframes` and `@
 
 **Authentication and provenance.** The job publishes with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm authenticates the Release workflow by its GitHub OIDC identity (`id-token: write`), so no npm token or repository secret exists. The same identity signs each package's provenance, and npm shows where it was built. It needs npm 11.5.1 or later (the job installs a pinned npm 11) and a **public** repository whose URL matches `repository.url`. A package without a trusted publisher set up for this workflow is refused.
 
+**Retry.** When the `npm plugins` job fails after the release is published, fix the cause, then run **Actions → Release → Run workflow** on `main` with `npm_publish_tag` set to the release tag (`v0.4.0`). It skips the app build, checks that the release is published, and publishes that tag's plugins with `main`'s `scripts/plugins-npm.mjs`; versions already on npm are skipped. From a terminal: `gh workflow run release.yml -f npm_publish_tag=v0.4.0`.
+
+**ENEEDAUTH** ("need auth") from `npm publish` means npm got no token from trusted publishing. npm logs the reason only at the verbose level, which the publish uses: look for the `oidc` lines above the error. A failed token exchange usually means the package's Trusted Publisher on npmjs.com does not match the workflow exactly (user `ThomasPraun`, repository `frameshell`, workflow `release.yml`, no environment). npm does not check those fields when they are saved.
+
 ### Without npm: install from a tarball
 
 Until a version is on npm (or for a build of a branch), install the packed plugin directly. `frameshell plugin install` takes a local tarball made by `npm pack` or `pnpm pack`:
