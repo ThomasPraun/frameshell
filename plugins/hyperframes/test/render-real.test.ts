@@ -1,9 +1,13 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import puppeteer from "puppeteer-core";
 import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import type { RenderProgress } from "@frameshell/plugin-api";
@@ -11,7 +15,7 @@ import { createHyperframesAdapter, newComposition } from "../src/index.js";
 
 // Opt-in: renders a scaffolded composition for real (in-process producer, managed ffmpeg and headless Chrome,
 // ~100 MB Chrome download on first run, kept under .cache/test-binaries). Run with
-// FRAMESHELL_TEST_REAL_HYPERFRAMES=1 pnpm test.
+// FRAMESHELL_TEST_REAL_HYPERFRAMES=1 pnpm test. The live preview test loads the page in that same Chrome.
 const execFileAsync = promisify(execFile);
 
 function tempDir(): string {
@@ -191,6 +195,66 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("real Hy
       );
       // Card starts at x = 19 px with 13 px side padding: only a non-empty title stretches its background past x = 60.
       expect(raw[3]).toBeGreaterThan(150);
+    },
+    600_000,
+  );
+
+  it(
+    "plays the live page in headless Chrome: the clip's title, and different pixels at different times (ADR 0010)",
+    async () => {
+      const project = tempDir();
+      writeFileSync(join(project, "frameshell.json"), JSON.stringify({ resolution: { width: 320, height: 180 } }));
+      await newComposition.run({ args: ["card", "--duration", "1"], cwd: project, project: { dir: project } });
+      const manager = binaries();
+      const chrome = await manager.ensure("chrome-headless-shell");
+      const adapter = createHyperframesAdapter({ projectDir: project });
+      const live = await adapter.livePreview!(
+        { id: "c_card", source: "compositions/hyperframes/card/index.html", props: { title: "Launch" } },
+        { projectDir: project, fps: 30, width: 320, height: 180, ensureBinary: (name) => manager.ensure(name) },
+      );
+      // Serves `root` and inserts `head` into the entry, as the app's frameshell-live scheme does.
+      const server = createServer((request, response) => {
+        const path = posix.join(live.root, decodeURIComponent(new URL(request.url ?? "/", "http://x").pathname));
+        readFile(join(project, ...path.split("/"))).then(
+          (body) => {
+            const html = path === live.entry;
+            response.writeHead(200, { "content-type": html ? "text/html" : "application/octet-stream" });
+            response.end(html ? body.toString("utf8").replace(/<head>/i, () => `<head><script>${live.head}</script>`) : body);
+          },
+          () => response.writeHead(404).end(),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const browser = await puppeteer.launch({ executablePath: chrome });
+      try {
+        const page = await browser.newPage();
+        await page.setViewport({ width: 320, height: 180 });
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/${posix.basename(live.entry)}`);
+        // Page code as strings: the tests compile without the DOM library.
+        await page.evaluate("window.frameshellLive.ready");
+        const at = async (seconds: number) => {
+          await page.evaluate(`window.frameshellLive.seek(${seconds})`);
+          const card = (await page.evaluate(
+            `(() => { const card = document.getElementById("card"); return { text: card.textContent, opacity: Number(getComputedStyle(card).opacity) }; })()`,
+          )) as { text: string; opacity: number };
+          return { ...card, pixels: Buffer.from(await page.screenshot({ type: "png" })) };
+        };
+        const start = await at(0.05);
+        const end = await at(0.8);
+        expect(errors).toEqual([]);
+        expect(end.text).toBe("Launch");
+        // The card fades in over 0.6 s on the composition clock.
+        expect(start.opacity).toBeLessThan(0.3);
+        expect(end.opacity).toBe(1);
+        expect(start.pixels.equals(end.pixels)).toBe(false);
+        // Seeking back shows the earlier frame again.
+        expect((await at(0.05)).opacity).toBe(start.opacity);
+      } finally {
+        await browser.close();
+        server.close();
+      }
     },
     600_000,
   );

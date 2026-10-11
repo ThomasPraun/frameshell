@@ -1,6 +1,7 @@
 import { cp, readFile, readdir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
-import type { ClipAdapter, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
+import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
+import { liveHead } from "./live.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "hyperframes";
@@ -29,6 +30,8 @@ export interface HyperframesAdapterOptions {
   projectDir: string;
   /** Loads the producer; default imports `@hyperframes/producer` on first render (it is large). */
   producer?: () => Promise<Producer>;
+  /** Loads the page runtime for live preview; default imports it from `@hyperframes/core` on first use (~470 KB). */
+  runtime?: () => Promise<string>;
 }
 
 /** Timeline clip fields the adapter reads. */
@@ -65,11 +68,14 @@ const SKIPPED_DIRS = new Set(["node_modules"]);
  * the composition's entry HTML; its directory is the composition, and every
  * file in it is a cache input, so editing any of them re-renders the clip.
  * Renders run in-process with `@hyperframes/producer` to VP9 WebM with alpha,
- * with the managed ffmpeg, ffprobe and headless Chrome.
+ * with the managed ffmpeg, ffprobe and headless Chrome. Live preview
+ * (ADR 0010) serves the composition directory as it is, with the clip's
+ * variables and the HyperFrames runtime in `head`.
  */
 export function createHyperframesAdapter(options: HyperframesAdapterOptions): ClipAdapter {
   const { projectDir } = options;
   const loadProducer = options.producer ?? (async () => (await import("@hyperframes/producer")) as unknown as Producer);
+  const loadRuntime = options.runtime ?? (async () => (await import("@hyperframes/core/runtime-script")).getHyperframeRuntimeScript());
   return {
     type: CLIP_TYPE,
     propsSchema,
@@ -81,12 +87,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
     },
     async render(clip, ctx: RenderContext) {
       const { id, source, props } = clip as HyperframesClip;
-      if (!source || extname(source).toLowerCase() !== ".html") {
-        throw new Error(
-          `hyperframes clip ${id} needs \`source\`: the composition's HTML entry, e.g. compositions/hyperframes/intro/index.html ` +
-            "(create one with `frameshell hyperframes new intro`).",
-        );
-      }
+      requireEntry(id, source);
       const dir = await compositionDir(projectDir, { id, source });
       await refuseObjectDeclarations(id, dir);
       const [ffmpeg, ffprobe, chrome] = await Promise.all([
@@ -121,7 +122,30 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       );
       return { file: output, hasAlpha: true };
     },
+    // The page is the composition directory as it is: the runtime loads sub-compositions and assets by relative URL.
+    async livePreview(clip, _ctx: LiveContext): Promise<LivePage> {
+      const { id, source, props } = clip as HyperframesClip;
+      requireEntry(id, source);
+      const dir = await compositionDir(projectDir, { id, source });
+      await refuseObjectDeclarations(id, dir);
+      const name = posix.basename(source);
+      return {
+        root: dir.rel === "" ? "." : dir.rel,
+        entry: dir.rel === "" ? name : `${dir.rel}/${name}`,
+        head: liveHead(props ?? {}, await loadRuntime()),
+      };
+    },
   };
+}
+
+/** Throws unless `source` names the composition's HTML entry. */
+function requireEntry(id: string, source: string | undefined): asserts source is string {
+  if (!source || extname(source).toLowerCase() !== ".html") {
+    throw new Error(
+      `hyperframes clip ${id} needs \`source\`: the composition's HTML entry, e.g. compositions/hyperframes/intro/index.html ` +
+        "(create one with `frameshell hyperframes new intro`).",
+    );
+  }
 }
 
 /** `data-composition-variables` attribute, single- or double-quoted value. */

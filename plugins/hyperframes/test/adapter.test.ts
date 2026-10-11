@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { RenderContext, RenderProgress } from "@frameshell/plugin-api";
+import type { LiveContext, RenderContext, RenderProgress } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
 import { type Producer, activate, createHyperframesAdapter, newComposition, propsSchema } from "../src/index.js";
 
@@ -174,6 +175,105 @@ describe("hyperframes adapter", () => {
     expect(await validate({ title: "Launch", colors: ["#fff"], n: 1, on: true })).toEqual({ value: { title: "Launch", colors: ["#fff"], n: 1, on: true } });
     expect(await validate("Launch")).toMatchObject({ issues: [{ message: expect.stringContaining("JSON object") }] });
     expect(await validate({ when: new Date(0) })).toMatchObject({ issues: [{ message: expect.stringContaining("plain JSON") }] });
+  });
+});
+
+describe("hyperframes live preview (ADR 0010)", () => {
+  const live: LiveContext = { projectDir: "", fps: 30, width: 2560, height: 1440, ensureBinary: async (name) => `/managed/${name}` };
+  /** Stand-in runtime: binds a player that records seeks, as the HyperFrames runtime does once the timeline is bound. */
+  const RUNTIME = "window.__renderReady = true; window.__player = { renderSeek: function (t) { window.seeks.push(t); } };";
+  const adapter = (runtime = RUNTIME) => createHyperframesAdapter({ projectDir: project, producer: async () => fakeProducer().producer, runtime: async () => runtime });
+
+  /** Runs `head` against a minimal page, as the host's `<script>` would, and returns that page's window. */
+  function load(head: string, media: { muted: boolean }[] = []) {
+    const listeners: Record<string, ((event: { target: unknown }) => void)[]> = {};
+    const window: Record<string, unknown> = { seeks: [] as number[] };
+    const document = {
+      addEventListener: (type: string, listener: (event: { target: unknown }) => void) => (listeners[type] ??= []).push(listener),
+      querySelectorAll: () => media,
+    };
+    window["window"] = window;
+    window["setTimeout"] = setTimeout;
+    runInNewContext(head, { window, document, setTimeout, Date, Promise, Number, Math, Error });
+    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void> };
+    return { window, page, play: (target: unknown) => listeners["play"]?.forEach((listener) => listener({ target })) };
+  }
+
+  it("serves the composition directory with the source as entry, never writing to the project", async () => {
+    const page = await adapter().livePreview!({ id: "c_1", source: SOURCE }, { ...live, projectDir: project });
+    expect(page).toMatchObject({ root: "compositions/hyperframes/intro", entry: SOURCE });
+    expect(readdirSync(join(project, "compositions", "hyperframes", "intro")).sort()).toEqual([".DS_Store", "gsap.min.js", "img", "index.html", "node_modules"]);
+    // A composition at the project root is served from the root itself.
+    writeFileSync(join(project, "card.html"), "<html></html>");
+    expect(await adapter().livePreview!({ id: "c_2", source: "card.html" }, live)).toMatchObject({ root: ".", entry: "card.html" });
+  });
+
+  it("puts the clip's variables, the glue and the runtime in head, in that order", async () => {
+    const { head } = await adapter().livePreview!({ id: "c_1", source: SOURCE, props: { title: "Launch" } }, live);
+    const variables = head.indexOf("window.__hfVariables = ");
+    const glue = head.indexOf("window.frameshellLive = ");
+    expect(variables).toBe(0);
+    expect(glue).toBeGreaterThan(variables);
+    expect(head.endsWith(RUNTIME)).toBe(true);
+    expect(load(head).window["__hfVariables"]).toEqual({ title: "Launch" });
+  });
+
+  it("sets no variables without props, as a render does, so the declared defaults apply (#116)", async () => {
+    for (const props of [undefined, {}]) {
+      const { head } = await adapter().livePreview!({ id: "c_1", source: SOURCE, ...(props ? { props } : {}) }, live);
+      expect(head).not.toContain("__hfVariables");
+    }
+  });
+
+  it("escapes props so no value can close the host's <script> or break the line", async () => {
+    const title = "</script><script>alert(1)</script>\u2028\u2029";
+    const { head } = await adapter().livePreview!({ id: "c_1", source: SOURCE, props: { title } }, live);
+    expect(head).not.toMatch(/<\/script/i);
+    expect(head).not.toMatch(/[\u2028\u2029]/);
+    expect(load(head).window["__hfVariables"]).toEqual({ title });
+  });
+
+  it("refuses a runtime that would close the host's <script>", async () => {
+    await expect(adapter("var s = '</SCRIPT>';").livePreview!({ id: "c_1", source: SOURCE }, live)).rejects.toThrow(/cannot be inlined/);
+  });
+
+  it("seeks with renderSeek once the runtime is ready, clamping bad times to 0 and keeping media muted", async () => {
+    const { head } = await adapter().livePreview!({ id: "c_1", source: SOURCE }, live);
+    const video = { muted: false };
+    const { window, page, play } = load(head, [video]);
+    await page.ready;
+    await page.seek(1.5);
+    await page.seek(-2);
+    await page.seek(Number.NaN);
+    expect(window["seeks"]).toEqual([1.5, 0, 0]);
+    expect(video.muted).toBe(true);
+    const audio = { muted: false };
+    play(audio);
+    expect(audio.muted).toBe(true);
+  });
+
+  it("waits for the runtime to bind the timeline before the first seek", async () => {
+    const late = "setTimeout(function () { window.__player = { renderSeek: function (t) { window.seeks.push(t); } }; window.__renderReady = true; }, 40);";
+    const { head } = await adapter(late).livePreview!({ id: "c_1", source: SOURCE }, live);
+    const { window, page } = load(head);
+    const seeking = page.seek(2);
+    expect(window["seeks"]).toEqual([]);
+    await seeking;
+    expect(window["seeks"]).toEqual([2]);
+  });
+
+  it("refuses what render refuses: no HTML source, a source outside the project, object variable declarations", async () => {
+    await expect(adapter().livePreview!({ id: "c_9" }, live)).rejects.toThrow(/c_9 needs `source`/);
+    await expect(adapter().livePreview!({ id: "c_9", source: "../x/index.html" }, live)).rejects.toThrow(/outside the project/);
+    writeFileSync(join(project, SOURCE), `<html data-composition-variables='{"title":"T"}'></html>`);
+    await expect(adapter().livePreview!({ id: "c_9", source: SOURCE }, live)).rejects.toThrow(/declares data-composition-variables as an object/);
+  });
+
+  it("loads the HyperFrames runtime from @hyperframes/core by default", async () => {
+    const real = createHyperframesAdapter({ projectDir: project, producer: async () => fakeProducer().producer });
+    const { head } = await real.livePreview!({ id: "c_1", source: SOURCE }, live);
+    expect(head).toContain("__hyperframes");
+    expect(head).toContain("renderSeek");
   });
 });
 
