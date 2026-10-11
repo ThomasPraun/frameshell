@@ -75,7 +75,9 @@ jobs:
         run: |
           deb=$(ls apps/desktop/release/*.deb)
           sudo apt-get install -y "$PWD/$deb"
-          test "$(frameshell --version)" = "$(dpkg-deb -f "$deb" Version)"
+          # Debian writes a semver prerelease dash as `~` (0.0.0-ci.1 -> 0.0.0~ci.1).
+          version=$(frameshell --version) && echo "frameshell --version: $version"
+          test "$version" = "$(dpkg-deb -f "$deb" Version | tr '~' '-')"
           frameshell doctor --json > doctor.json || true
           jq -e '.command.path == "/usr/bin/frameshell" and .command.same and .command.cli.app' doctor.json
           sudo apt-get remove -y "$(dpkg-deb -f "$deb" Package)"
