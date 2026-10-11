@@ -302,6 +302,8 @@ describe("frameshell doctor", () => {
 
   it.skipIf(process.platform === "win32")("names the frameshell on PATH: this CLI behind a link", () => {
     const bin = tempDir();
+    // npm marks a package's bin executable on install; tsc output is not, and PATH lookup skips it.
+    chmodSync(cliBin, 0o755);
     symlinkSync(cliBin, join(bin, "frameshell"));
     const result = frameshell(["doctor"], tempDir(), { ...isolated(), PATH: `${bin}:${process.env["PATH"]}` });
     expect(result.stdout).toMatch(/Command:\n {2}this CLI {6}CLI \S+ at .*frameshell\.js\n {2}on PATH {7}.*frameshell → .*frameshell\.js · this CLI\n\n/);
