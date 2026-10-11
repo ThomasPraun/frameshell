@@ -5,6 +5,7 @@ export * from "./agents.js";
 export * from "./ui.js";
 export { assertSocketPathFits, resolveSocketPath } from "./socket-path.js";
 export { type AppDirs, resolveAppDirs } from "./app-dirs.js";
+export { type CliShimTarget, cliShimName, cliShimScript, parseCliShim } from "./cli-shim.js";
 export { type JsonRpcRequest, type JsonRpcResponse, readMessages, writeMessage } from "./framing.js";
 export {
   type ConnectOptions,
