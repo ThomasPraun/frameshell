@@ -42,6 +42,7 @@
     "@remotion/cli": "4.0.527",
     "@remotion/renderer": "4.0.527",
     "@remotion/tailwind-v4": "4.0.527",
+    "puppeteer-core": "25.12.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "remotion": "4.0.527",
