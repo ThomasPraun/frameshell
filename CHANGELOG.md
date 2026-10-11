@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: `--ripple-track <track>` (repeatable) for `clip add` and `clip trim`, only with `--ripple`: the ripple moves later clips on the clip's own track plus the named ones instead of every video and audio track, as `rippleTracks` already allowed through the daemon and MCP (#131). Agent skill updated.
 - Plugin API: optional `ClipAdapter.livePreview(clip, context)` returning a `LivePage` (`root`, `entry`, `head`): a page that plays the clip's composition, which the preview will show while the clip's render is not ready (ADR 0010). Additive: `apiVersion` stays `1`.
 - Daemon method `clip.live` (app only, no CLI command or MCP tool): a generated clip's live page and its current render key. Error code `LiveUnavailable` (-32039) when the clip's adapter is missing, untrusted, has no live preview or fails; `OutsideProject` when the page leaves the project. `PROTOCOL_VERSION` 29.
+- `@frameshell/hyperframes`: live preview of `hyperframes` clips (ADR 0010). The live page is the composition directory as it is, with the clip's props as composition variables (set only when there are some, as for a render) and the HyperFrames runtime from `@hyperframes/core`, now a direct dependency at the producer's pin (0.8.92). Seeks use the runtime's render-accurate `renderSeek`; page media stays muted, since renders carry no audio.
 
 ### Changed
 
