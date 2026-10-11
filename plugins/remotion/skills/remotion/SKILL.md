@@ -5,7 +5,7 @@ description: Write Remotion (React) compositions and place them on the Frameshel
 
 # Remotion clips
 
-A `remotion` clip is a composition of a Remotion project, rendered headlessly to VP9 WebM with alpha and layered over the tracks below it. Frameshell bundles the project's entry with webpack, renders in the background and caches the result; preview shows a progress placeholder until the render is ready. Remotion itself comes from the Remotion project (its `node_modules`), never from Frameshell: the user's Remotion version and licence apply.
+A `remotion` clip is a composition of a Remotion project, rendered headlessly to VP9 WebM with alpha and layered over the tracks below it. Frameshell bundles the project's entry with webpack, renders in the background and caches the result. Until the render is ready, the human's preview plays the bundle itself, live at the playhead and labelled "Live". It does so when the clip is the topmost picture; otherwise the preview shows a progress slate. The render, not the live page, is what export uses. Remotion itself comes from the Remotion project (its `node_modules`), never from Frameshell: the user's Remotion version and licence apply.
 
 If a Remotion best-practices skill is installed, follow it for composition code. The rules below are what Frameshell adds.
 
@@ -31,6 +31,7 @@ Done = every remotion clip is `ready` and a captured frame shows it where intend
 - **Format:** Frameshell renders at the project's fps and resolution, keeping the composition's length in seconds. Same aspect ratio: rendered at the composition's size and scaled, so pixel layouts keep their proportions. Other aspect ratio: rendered at the project's size, so lay out from `useVideoConfig()` (`width`, `height`). Always time animations from `useVideoConfig().fps` (`spring({ frame, fps })`, `2 * fps` frames), never a hard-coded frame rate.
 - **Length:** the render is the whole composition. Clip `in` is composition seconds shown at the clip's start; `duration` is how long it plays. Moving, trimming or changing `transform` (`--x --y --scale --opacity`) never re-renders; changing `props` re-renders that clip only.
 - **Audio is dropped:** clip renders are video only. Put voice-over and music on audio tracks as media clips (`frameshell import`, then `frameshell clip add`).
+- **Live preview** runs the same bundle, frame by frame, in Remotion's rendering environment, inside a sandboxed frame: `localStorage` is in memory and there are no cookies. `<OffthreadVideo>` frames are decoded in the page from the same file, so a remote video source must allow CORS to show live. It drives Remotion's internal page globals. A Remotion release without them makes the preview keep the slate, and renders still work. Judge the result with `frame_capture` once the clip is `ready`.
 - **Deterministic frames:** a frame must depend only on `useCurrentFrame()` and props. Ship images and fonts with the Remotion project (`public/` + `staticFile()`), and wait on async loading with `delayRender()` / `continueRender()`; never animate with timers, CSS transitions or `Date.now()`.
 
 ## Layers

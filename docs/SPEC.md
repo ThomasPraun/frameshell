@@ -118,7 +118,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 ### 3.4 Preview
 
 - `media` clips: proxies decoded with **WebCodecs** (`VideoDecoder`) from the keyframe before each in-point, pre-roll discarded, frames drawn to a canvas on the **audio clock**. Decode and draw run in a Worker with `OffscreenCanvas`. Program audio comes from a PCM sidecar mixed in one `AudioWorklet` with its own sample counter and 2 ms edge fades; all audio tracks mix in the same worklet. Double-buffered `<video>` elements were measured and rejected (ADR 0001).
-- Generated clips (`hyperframes`, `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a placeholder with progress.
+- Generated clips (`hyperframes`, `remotion`): played from cached renders: `.frameshell/cache/clips/<hash>.webm` (VP9 with alpha) or `.mp4` (H.264) when opaque (ADR 0002). While a render is pending, show a slate with progress, or the clip's live page (next item).
 - Overlays: CSS/canvas compositing with the clip `transform` (position, scale, opacity).
 - Subtitles: rendered in the DOM from the transcript, same style tokens as export.
 - v0.2: `livePreview()`: while a generated clip's render is not ready, the preview plays its composition live in a sandboxed iframe (HyperFrames' runtime; the Remotion adapter's own bundle, driven through Remotion's frame globals), seeked to the playhead, when it is the topmost layer. The ready render always wins (ADR 0010).
@@ -447,6 +447,15 @@ Design rules:
 | Export presets | ✅ | Declarative codec, resolution, aspect and loudness settings |
 | UI panels (webviews) | v0.3 | — |
 | Effects / filters | v0.3 | ffmpeg filter fragments + preview equivalent |
+
+Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the adapter for the page. The desktop app serves it from `frameshell-live://` into a frame sandboxed with `allow-scripts` only, over the program canvas. Rules for adapter authors:
+
+- **Files:** `root` and `entry` are project-relative, and the page loads nothing from the project outside `root`. The network stays reachable.
+- **`head`:** JavaScript text, not HTML. The app inserts it in a `<script>` at the start of the entry's `<head>` on every load. It must not contain `</script`, and it must define `window.frameshellLive = { ready, seek(seconds) }`.
+- **`seek`:** shows composition time `seconds`, as file time `seconds` of a render. The app sends only the latest seek while one runs.
+- **Opaque origin:** no `localStorage`, `sessionStorage` or cookies (reading them throws), and no access to the app.
+- **Sound:** keep the page muted; renders carry no audio.
+- **What the app shows:** the page only while the clip's render is queued or rendering and the clip is the topmost picture. A new render key reloads it.
 
 ### 8.3 Distribution
 

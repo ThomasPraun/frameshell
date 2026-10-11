@@ -7,6 +7,8 @@ frameshell plugin install @frameshell/hyperframes
 frameshell hyperframes new title --duration 4
 ```
 
+While a clip renders, the Frameshell desktop preview plays its composition live at the playhead (ADR 0010); export always uses the render.
+
 Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Headless Chrome downloads on the first render. Usage for agents: [`skills/hyperframes/SKILL.md`](skills/hyperframes/SKILL.md).
 
 The plugin runs inside the Frameshell daemon with full Node access, like every plugin: a project's plugins load only after you trust the project.
