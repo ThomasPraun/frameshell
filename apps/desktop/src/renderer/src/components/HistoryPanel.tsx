@@ -1,6 +1,6 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
+import { abortedTransactions, authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -25,7 +25,8 @@ interface Notice {
  * the shared timeline feed. Selecting a transaction or one operation selects
  * it in the shared selection store; the timeline highlights what it did.
  * Revert undoes it as a new `ui` operation; a conflict lists the later
- * operations to revert first.
+ * operations to revert first. An aborted transaction changed nothing: it
+ * shows dimmed, marked "aborted", with no Revert.
  */
 export function HistoryPanel() {
   const { history, error } = useTimelineHistory(TIMELINE);
@@ -93,6 +94,7 @@ export function HistoryPanel() {
   }
 
   const rows = newestFirst(history.transactions);
+  const aborted = abortedTransactions(history.transactions);
   const selectedOpTx = selected?.startsWith("op_")
     ? history.transactions.find((tx) => tx.operations.some((op) => op.id === selected))?.tx
     : undefined;
@@ -108,11 +110,19 @@ export function HistoryPanel() {
       {rows.map(({ key, tx }) => {
         const open = expanded.has(key) || tx.tx === selectedOpTx;
         const active = selected === tx.tx;
+        const isAborted = aborted.has(tx.tx);
         return (
-          <li key={key} className="history-item" data-tx={tx.tx} data-selected={active || undefined}>
+          <li
+            key={key}
+            className="history-item"
+            data-tx={tx.tx}
+            data-selected={active || undefined}
+            data-aborted={isAborted || undefined}
+          >
             <TransactionRow
               tx={tx}
               active={active}
+              aborted={isAborted}
               open={open}
               busy={busy}
               diff={active ? (diff?.clips ?? null) : null}
@@ -130,14 +140,16 @@ export function HistoryPanel() {
                         <span className="history-op-title">{operationTitle(op)}</span>
                         <span className="history-op-touched">{op.touched.join(" ")}</span>
                       </button>
-                      <button
-                        className="history-revert"
-                        disabled={busy !== null}
-                        onClick={() => void revert(op.id)}
-                        aria-label={`Revert operation ${op.id}`}
-                      >
-                        Revert
-                      </button>
+                      {!isAborted && (
+                        <button
+                          className="history-revert"
+                          disabled={busy !== null}
+                          onClick={() => void revert(op.id)}
+                          aria-label={`Revert operation ${op.id}`}
+                        >
+                          Revert
+                        </button>
+                      )}
                     </div>
                     {selected === op.id && diff && <DiffSummary diff={diff.clips} />}
                     {notice && notice.target === op.id && <NoticeBox notice={notice} onShow={(id) => void select(id)} />}
@@ -155,6 +167,7 @@ export function HistoryPanel() {
 function TransactionRow({
   tx,
   active,
+  aborted,
   open,
   busy,
   diff,
@@ -164,6 +177,8 @@ function TransactionRow({
 }: {
   tx: HistoryTransaction;
   active: boolean;
+  /** Changed nothing (see {@link abortedTransactions}): dimmed, marked, no Revert. */
+  aborted: boolean;
   open: boolean;
   busy: string | null;
   diff: readonly ClipDiff[] | null;
@@ -175,7 +190,7 @@ function TransactionRow({
   const count = tx.operations.length;
   return (
     <>
-      <div className={`history-row${active ? " is-active" : ""}`}>
+      <div className={`history-row${active ? " is-active" : ""}${aborted ? " is-aborted" : ""}`}>
         <button
           className="history-expand"
           aria-expanded={open}
@@ -193,15 +208,22 @@ function TransactionRow({
               {author.detail && <span className="history-author-detail">{author.detail}</span>}
             </span>
             <span className="history-count">{`${count} ${count === 1 ? "op" : "ops"}`}</span>
+            {aborted && (
+              <span className="history-aborted" title="Aborted: its last operation undid the rest, so it changed nothing.">
+                aborted
+              </span>
+            )}
           </span>
         </button>
         <div className="history-side">
           <time className="history-time" dateTime={tx.at} title={new Date(tx.at).toLocaleString()}>
             {clock(tx.at)}
           </time>
-          <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={`Revert ${tx.tx}`}>
-            {busy === tx.tx ? "Reverting" : "Revert"}
-          </button>
+          {!aborted && (
+            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={`Revert ${tx.tx}`}>
+              {busy === tx.tx ? "Reverting" : "Revert"}
+            </button>
+          )}
         </div>
       </div>
       {diff && <DiffSummary diff={diff} />}

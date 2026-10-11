@@ -66,6 +66,21 @@ export function transactionTitle(tx: HistoryTransaction): string {
   return parts.join(", ") || "Empty";
 }
 
+/**
+ * Ids of aborted transactions: one of their operations reverts the
+ * transaction itself (`tx.abort`, or a refused desktop edit undoing what
+ * applied before the refusal), so together they changed nothing. The whole
+ * list is scanned because an interleaved transaction shows as several rows
+ * and only its last one holds the revert.
+ */
+export function abortedTransactions(transactions: readonly HistoryTransaction[]): Set<string> {
+  const aborted = new Set<string>();
+  for (const tx of transactions) {
+    if (tx.operations.some((op) => op.op === "revert" && op.args["target"] === tx.tx)) aborted.add(tx.tx);
+  }
+  return aborted;
+}
+
 /** A history row: one run of a transaction, keyed uniquely (a transaction interleaved with others' operations shows as several runs). */
 export interface HistoryRow {
   key: string;

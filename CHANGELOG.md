@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Unpackaged (dev) builds write their CLI shim to `<userData>/bin-dev` instead of `<userData>/bin`, so running a dev build no longer repoints the installed app's `frameshell` command.
+- History panel: an aborted transaction (`tx abort`, or a desktop edit refused part-way, whose own last operation undoes the rest) shows dimmed, marked "aborted", without Revert buttons, since it changed nothing (#133). `history --since` is unchanged.
 
 ## [0.3.0] - 2026-10-10
 
