@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { PluginApi, RenderContext, RenderProgress } from "@frameshell/plugin-api";
+import type { LiveContext, PluginApi, RenderContext, RenderProgress } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
 import {
   BUNDLE_DIR,
@@ -338,6 +339,177 @@ describe("remotion adapter render", () => {
   it("needs props naming the composition", async () => {
     const { load } = fakeRemotion();
     await expect(adapter(load).render({ id: "c_1", source: SOURCE }, context(tempDir()).ctx)).rejects.toThrow(/needs props naming its composition/);
+  });
+});
+
+describe("remotion adapter live preview (ADR 0010)", () => {
+  const live: LiveContext = { projectDir: "", fps: 30, width: 2560, height: 1440, ensureBinary: async (name) => `/managed/${name}` };
+  /** The bundle's script mentions the page globals live preview drives, as a real Remotion bundle does. */
+  const withInternals = () => writeFileSync(join(project, SOURCE), "registerRoot(Root); remotion_setBundleMode; remotion_setFrame; remotion_renderReady;");
+
+  /**
+   * Runs `head` against a minimal page, as the host's `<script>` would. Its
+   * `localStorage` throws, as in an opaque origin. `bundle()` then defines
+   * what the bundle defines: composition mode, and frames that render one
+   * timer tick after `remotion_setFrame`.
+   */
+  function load(head: string) {
+    const styles: string[] = [];
+    const listeners: string[] = [];
+    const calls = { mode: [] as Record<string, unknown>[], frames: [] as unknown[][] };
+    const window: Record<string, unknown> = {};
+    Object.defineProperty(window, "localStorage", { configurable: true, get: () => { throw new Error("SecurityError: sandboxed"); } });
+    const document = {
+      head: { appendChild: (element: { textContent: string }) => styles.push(element.textContent) },
+      createElement: () => ({ textContent: "" }),
+      addEventListener: (type: string) => listeners.push(type),
+      fonts: { ready: Promise.resolve() },
+    };
+    window["window"] = window;
+    window["setTimeout"] = setTimeout;
+    window["remotion_pageFetches"] = [] as unknown[];
+    window["fetch"] = function (this: unknown, input: unknown) {
+      (window["remotion_pageFetches"] as unknown[]).push(input);
+      return Promise.resolve(`page fetch of ${String(input)}`);
+    };
+    runInNewContext(head, { window, document, setTimeout, Date, Promise, Object, String, Number, Math, Error });
+    const bundle = () => {
+      window["remotion_setBundleMode"] = (mode: Record<string, unknown>) => {
+        calls.mode.push(mode);
+        window["remotion_setFrame"] = (...args: unknown[]) => {
+          calls.frames.push(args);
+          window["remotion_renderReady"] = false;
+          setTimeout(() => (window["remotion_renderReady"] = true), 1);
+        };
+        setTimeout(() => (window["remotion_renderReady"] = true), 1);
+      };
+    };
+    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void> };
+    return { window, page, bundle, calls, styles, listeners };
+  }
+
+  it("serves the clip's current bundle, its index.html as entry, inside the project", async () => {
+    withInternals();
+    const { load: loadRemotion, calls } = fakeRemotion();
+    const remotion = adapter(loadRemotion);
+    const clip = { id: "c_1", source: SOURCE, props: { composition: "Intro", inputProps: { title: "Hola" } } };
+    const page = await remotion.livePreview!(clip, live);
+    const [marker] = await remotion.inputs!(clip);
+    expect(page.entry).toBe(marker);
+    expect(page.root).toBe(marker!.slice(0, -"/index.html".length));
+    expect(page.root.startsWith(`${BUNDLE_DIR}/`)).toBe(true);
+    expect(calls.select).toEqual([expect.objectContaining({ id: "Intro", inputProps: { title: "Hola" }, browserExecutable: "/managed/chrome-headless-shell" })]);
+  });
+
+  it("sets the renderer's page globals before the bundle loads, with in-memory storage for the opaque origin", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro", inputProps: { title: "Hola" } } }, live);
+    const { window, styles, listeners } = load(head);
+    expect(window).toMatchObject({
+      remotion_inputProps: JSON.stringify({ title: "Hola" }),
+      remotion_initialFrame: 0,
+      remotion_audioEnabled: false,
+      remotion_puppeteerTimeout: 30_000,
+      process: { env: { NODE_ENV: "production" } },
+    });
+    const storage = window["localStorage"] as Storage;
+    storage.setItem("k", "v");
+    expect(storage.getItem("k")).toBe("v");
+    // Transparent like a PNG frame of a render; scaled from 1920x1080 to the 2560x1440 project, as `render` scales.
+    expect(styles.join("")).toContain("background: transparent");
+    expect(styles.join("")).toContain(`scale(${4 / 3})`);
+    expect(listeners).toContain("play");
+  });
+
+  it("enters composition mode with the composition render renders, then seeks frame by frame", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion([{ id: "Intro", width: 1920, height: 1080, fps: 25, durationInFrames: 50, props: { title: "Hola", size: 3 } }]);
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { page, bundle, calls } = load(head);
+    bundle();
+    await page.ready;
+    // Project fps (30), same length (2 s), resolved props.
+    expect(calls.mode).toEqual([
+      expect.objectContaining({
+        type: "composition",
+        compositionName: "Intro",
+        compositionFps: 30,
+        compositionDurationInFrames: 60,
+        compositionWidth: 1920,
+        compositionHeight: 1080,
+        serializedResolvedPropsWithSchema: JSON.stringify({ title: "Hola", size: 3 }),
+      }),
+    ]);
+    await page.seek(1);
+    await page.seek(5);
+    await page.seek(-1);
+    expect(calls.frames).toEqual([
+      [30, "Intro", 2],
+      [59, "Intro", 3],
+      [0, "Intro", 4],
+    ]);
+  });
+
+  it("serializes props as the renderer does, so a Date prop reaches the composition as a Date", async () => {
+    withInternals();
+    const when = new Date(Date.UTC(2026, 9, 11, 12));
+    const { load: loadRemotion } = fakeRemotion([{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 30, props: { when, nested: { at: when }, title: "Hola" } }]);
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { page, bundle, calls } = load(head);
+    bundle();
+    await page.ready;
+    // @remotion/renderer's DATE_TOKEN, which the bundle turns back into a Date; plain JSON would pass the ISO string.
+    expect(JSON.parse(calls.mode[0]!["serializedResolvedPropsWithSchema"] as string)).toEqual({
+      when: "remotion-date:2026-10-11T12:00:00.000Z",
+      nested: { at: "remotion-date:2026-10-11T12:00:00.000Z" },
+      title: "Hola",
+    });
+  });
+
+  it("leaves the page's own fetches to the page: only <OffthreadVideo>'s frame server requests are answered in the page", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { window } = load(head);
+    const fetch = window["fetch"] as (input: unknown) => Promise<unknown>;
+    expect(await fetch("https://example.com/data.json")).toBe("page fetch of https://example.com/data.json");
+    expect(await fetch("http://localhost:3000/proxy?src=x")).toBe("page fetch of http://localhost:3000/proxy?src=x");
+    expect(window["remotion_pageFetches"]).toEqual(["https://example.com/data.json", "http://localhost:3000/proxy?src=x"]);
+  });
+
+  it("fails ready with Remotion's own error when the composition cancels the render", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { window, page } = load(head);
+    window["remotion_cancelledError"] = "Error: cancelRender() was called\n    at Intro";
+    await expect(page.ready).rejects.toThrow(/^Error: cancelRender\(\) was called$/);
+  });
+
+  it("escapes props so no value can close the host's <script>", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion([{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 30, props: { title: "</script>\u2028" } }]);
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro", inputProps: { title: "</script>\u2028" } } }, live);
+    expect(head).not.toMatch(/<\/script/i);
+    expect(head).not.toMatch(/[\u2028\u2029]/);
+    expect(load(head).window["remotion_inputProps"]).toBe(JSON.stringify({ title: "</script>\u2028" }));
+  });
+
+  it("refuses a bundle without the page globals it drives, naming them and the Remotion version", async () => {
+    const { load: loadRemotion } = fakeRemotion();
+    await expect(adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live)).rejects.toThrow(
+      /lacks: remotion_setBundleMode, remotion_setFrame, remotion_renderReady\. Renders still work/,
+    );
+    expect((await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live).catch((e: Error) => e.message))).toContain("4.0.527");
+  });
+
+  it("refuses what render refuses: no props, an unknown composition", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const remotion = adapter(loadRemotion);
+    await expect(remotion.livePreview!({ id: "c_1", source: SOURCE }, live)).rejects.toThrow(/needs props naming its composition/);
+    await expect(remotion.livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Middle" } }, live)).rejects.toThrow(/no composition "Middle"/);
   });
 });
 
