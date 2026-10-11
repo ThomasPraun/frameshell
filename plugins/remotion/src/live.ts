@@ -48,7 +48,12 @@ export interface LiveComposition {
  * `head` of a Remotion live page. Before the bundle loads, it sets the
  * globals @remotion/renderer sets before a render (`setPropsAndEnv`), so the
  * page runs in Remotion's rendering environment: media is driven frame by
- * frame and never plays sound. The page has an opaque origin, where reading
+ * frame and never plays sound. `<OffthreadVideo>` asks @remotion/renderer's
+ * frame server (`http://localhost:<proxyPort>/proxy`) for each frame; the
+ * page has none, so `fetch` answers those requests itself: a hidden `<video>`
+ * per source seeks to the frame and a canvas encodes it (PNG when
+ * `transparent`, else JPEG). A source must allow CORS, or the canvas cannot
+ * read it: project files always do, a remote URL may not. The page has an opaque origin, where reading
  * `localStorage` throws and Remotion reads it, so both storages become
  * in-memory ones. Once the bundle defines `remotion_setBundleMode`, the page
  * enters composition mode with the clip's composition (as `make-page.js`
@@ -67,8 +72,8 @@ export function liveHead(live: LiveComposition): string {
     height: composition.height,
     scale,
     timeout: LIVE_TIMEOUT_MS,
-    inputProps: JSON.stringify(live.inputProps),
-    props: JSON.stringify(live.props),
+    inputProps: serializeProps(live.inputProps),
+    props: serializeProps(live.props),
     defaults: {
       compositionDefaultCodec: composition["defaultCodec"] ?? null,
       compositionDefaultOutName: composition["defaultOutName"] ?? null,
@@ -118,6 +123,61 @@ export function liveHead(live: LiveComposition): string {
   document.addEventListener("play", function (event) { if (event.target && typeof event.target.muted === "boolean") event.target.muted = true; }, true);
   var setTimer = w.setTimeout.bind(w);
   var now = Date.now;
+  var proxy = "http://localhost:" + w.remotion_proxyPort + "/proxy?";
+  var realFetch = w.fetch.bind(w);
+  var videos = {};
+  var frameOf = function (src, time, transparent) {
+    var entry = videos[src];
+    if (!entry) {
+      var video = document.createElement("video");
+      video.crossOrigin = "anonymous";
+      video.muted = true;
+      video.preload = "auto";
+      video.src = src;
+      entry = videos[src] = { video: video, queue: Promise.resolve() };
+    }
+    var next = entry.queue.then(function () {
+      var video = entry.video;
+      return new Promise(function (resolve, reject) {
+        var timer = setTimer(function () { done(new Error("Could not decode " + src + " at " + time + " s in " + c.timeout / 1000 + " s.")); }, c.timeout);
+        var done = function (error) {
+          clearTimeout(timer);
+          video.removeEventListener("seeked", draw);
+          video.removeEventListener("loadeddata", seek);
+          video.removeEventListener("error", failed);
+          if (error) return reject(error);
+          var canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext("2d").drawImage(video, 0, 0);
+          canvas.toBlob(function (blob) { blob ? resolve(blob) : reject(new Error("Could not encode a frame of " + src + ".")); }, transparent ? "image/png" : "image/jpeg", 0.92);
+        };
+        var draw = function () { done(null); };
+        var failed = function () { done(new Error("Could not load " + src + (video.error ? ": " + video.error.message : "") + ".")); };
+        var seek = function () {
+          var target = Math.min(time, Math.max(0, video.duration - 0.001));
+          if (Math.abs(video.currentTime - target) < 0.0005 && !video.seeking) return done(null);
+          video.addEventListener("seeked", draw);
+          video.currentTime = target;
+        };
+        video.addEventListener("error", failed);
+        if (video.error) return failed();
+        if (video.readyState >= 2) seek();
+        else video.addEventListener("loadeddata", seek, { once: true });
+      });
+    });
+    entry.queue = next.catch(function () {});
+    return next;
+  };
+  w.fetch = function (input, init) {
+    var url = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
+    if (typeof url !== "string" || url.indexOf(proxy) !== 0) return realFetch(input, init);
+    var query = new URLSearchParams(url.slice(proxy.length));
+    var transparent = query.get("transparent") === "true";
+    return frameOf(query.get("src"), Number(query.get("time")) || 0, transparent).then(function (blob) {
+      return new Response(blob, { status: 200, headers: { "content-type": blob.type } });
+    });
+  };
   var until = function (test, what) {
     var started = now();
     return new Promise(function (resolve, reject) {
@@ -160,6 +220,23 @@ export function liveHead(live: LiveComposition): string {
     },
   };
 })();`;
+}
+
+/** Prefix of a `Date` in serialized props (`DATE_TOKEN` in remotion's `input-props-serialization.js`). */
+export const DATE_TOKEN = "remotion-date:";
+
+/**
+ * Props serialized as @remotion/renderer serializes them for the page
+ * (`serializeJSONWithSpecialTypes` with no static base): a `Date` becomes
+ * {@link DATE_TOKEN} plus its ISO string, which the bundle turns back into a
+ * `Date`, so a composition reading `props.when.getTime()` works live as in
+ * the render. Plain `JSON.stringify` would hand it a string.
+ */
+export function serializeProps(props: Record<string, unknown>): string {
+  return JSON.stringify(props, function (this: Record<string, unknown>, key, value: unknown) {
+    const item = this[key];
+    return item instanceof Date ? `${DATE_TOKEN}${item.toISOString()}` : value;
+  });
 }
 
 /** JSON that is safe inside an inline `<script>`: `<` and the JS line separators are escaped. */

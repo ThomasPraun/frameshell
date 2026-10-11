@@ -367,6 +367,11 @@ describe("remotion adapter live preview (ADR 0010)", () => {
     };
     window["window"] = window;
     window["setTimeout"] = setTimeout;
+    window["remotion_pageFetches"] = [] as unknown[];
+    window["fetch"] = function (this: unknown, input: unknown) {
+      (window["remotion_pageFetches"] as unknown[]).push(input);
+      return Promise.resolve(`page fetch of ${String(input)}`);
+    };
     runInNewContext(head, { window, document, setTimeout, Date, Promise, Object, String, Number, Math, Error });
     const bundle = () => {
       window["remotion_setBundleMode"] = (mode: Record<string, unknown>) => {
@@ -444,6 +449,33 @@ describe("remotion adapter live preview (ADR 0010)", () => {
       [59, "Intro", 3],
       [0, "Intro", 4],
     ]);
+  });
+
+  it("serializes props as the renderer does, so a Date prop reaches the composition as a Date", async () => {
+    withInternals();
+    const when = new Date(Date.UTC(2026, 9, 11, 12));
+    const { load: loadRemotion } = fakeRemotion([{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 30, props: { when, nested: { at: when }, title: "Hola" } }]);
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { page, bundle, calls } = load(head);
+    bundle();
+    await page.ready;
+    // @remotion/renderer's DATE_TOKEN, which the bundle turns back into a Date; plain JSON would pass the ISO string.
+    expect(JSON.parse(calls.mode[0]!["serializedResolvedPropsWithSchema"] as string)).toEqual({
+      when: "remotion-date:2026-10-11T12:00:00.000Z",
+      nested: { at: "remotion-date:2026-10-11T12:00:00.000Z" },
+      title: "Hola",
+    });
+  });
+
+  it("leaves the page's own fetches to the page: only <OffthreadVideo>'s frame server requests are answered in the page", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { window } = load(head);
+    const fetch = window["fetch"] as (input: unknown) => Promise<unknown>;
+    expect(await fetch("https://example.com/data.json")).toBe("page fetch of https://example.com/data.json");
+    expect(await fetch("http://localhost:3000/proxy?src=x")).toBe("page fetch of http://localhost:3000/proxy?src=x");
+    expect(window["remotion_pageFetches"]).toEqual(["https://example.com/data.json", "http://localhost:3000/proxy?src=x"]);
   });
 
   it("fails ready with Remotion's own error when the composition cancels the render", async () => {
