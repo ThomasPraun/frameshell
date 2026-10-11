@@ -8,7 +8,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 |---|---|
 | `frameshell init [dir] [--name <name>]` | Scaffold a project: `frameshell.json`, empty `timelines/main.json`, `assets/`, `transcripts/`, `scripts/`, `compositions/`, and this skill under `.claude/skills/frameshell/` (`--no-skill` leaves it out). Fails on an existing project. |
 | `frameshell status` | Daemon, project, plugin trust, jobs, refused direct edits, open transactions. First command in a new session. |
-| `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. |
+| `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. Also says which `frameshell` PATH runs and whether it is this CLI (a note, never an exit 1). |
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
 | `frameshell gc [--dry-run]` | Free disk: delete regenerable files under `.frameshell/` nothing uses (proxies, sidecars, waveforms, thumbnails, transcription audio of deleted or replaced assets; clip renders no clip keys). `--dry-run` lists them first. Never touches `assets/`; deleted outputs rebuild on demand. |
 | `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips. |

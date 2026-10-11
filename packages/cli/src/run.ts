@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   type DaemonConnection,
@@ -20,6 +21,7 @@ import {
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
+import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import {
   TIMELINE_COMMANDS,
@@ -32,8 +34,14 @@ import {
   parseTimelineCommand,
 } from "./timeline-commands.js";
 
-/** CLI package version, used in `--version` and the handshake client id. */
-export const CLI_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+/** This CLI's package, and where it comes from (see {@link describeCliPackage}). */
+const SELF = describeCliPackage(fileURLToPath(new URL("..", import.meta.url)));
+
+/**
+ * Release version, used in `--version` and the handshake client id: the
+ * desktop app's when the CLI ships inside it, else the CLI package's.
+ */
+export const CLI_VERSION: string = SELF.version ?? (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 const USAGE = `Usage: frameshell <command> [options]
 
@@ -42,7 +50,7 @@ Commands:
                                Scaffold a project in dir (default: current directory) with the agent skill
                                in .claude/skills/frameshell/ (asked first on a terminal; --no-skill: none)
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
-  doctor [--install] [--json]  Check ffmpeg/ffprobe, versions and encoders; exit 1 on problems.
+  doctor [--install] [--json]  Check binaries, encoders and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first
   import <file…> [--link] [--wait]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
@@ -369,7 +377,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (flags.install && !flags.json) io.stderr("Installing missing managed binaries; first download can take minutes...\n");
       const report = await conn.request("doctor", { cwd, install: inv.install });
       if (report.problems.length > 0) outcome.code = 1;
-      return flags.json ? json(report) : formatDoctor(report);
+      // Which `frameshell` this shell runs: only the CLI sees the caller's PATH. Advice, never a problem.
+      const command = inspectPathCli(SELF, process.env);
+      return flags.json ? json({ ...report, command }) : formatDoctor(report, command);
     }
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
@@ -723,8 +733,18 @@ function formatStatus(status: StatusResult, cwd: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-function formatDoctor(report: DoctorResult): string {
-  const lines = [`Platform ${report.platform} · data dir ${report.dataDir}`, "", "Binaries:"];
+function formatDoctor(report: DoctorResult, command: PathCliReport): string {
+  const lines = [`Platform ${report.platform} · data dir ${report.dataDir}`, "", "Command:"];
+  lines.push(`  this CLI      ${label(command.self)}`);
+  if (command.path) {
+    const target = command.target && command.target !== command.path ? ` → ${command.target}` : "";
+    const runs = command.same ? "this CLI" : command.cli ? label(command.cli) : "unknown";
+    lines.push(`  on PATH       ${command.path}${target} · ${runs}`);
+  } else {
+    lines.push("  on PATH       none");
+  }
+  for (const note of command.notes) lines.push(`  note: ${note}`);
+  lines.push("", "Binaries:");
   for (const binary of report.binaries) {
     const state = binary.installed ? (binary.version ?? "not runnable") : "not installed";
     const pinned = binary.pinned;

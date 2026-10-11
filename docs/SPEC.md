@@ -369,7 +369,7 @@ On first open of a project that declares plugins, the UI and CLI ask for trust b
 ```
 frameshell init [dir] [--no-skill]            # scaffold project + agent skill in .claude/skills/frameshell/
 frameshell status [--json]                    # project, daemon, jobs, rejected edits, open transactions
-frameshell doctor [--install] [--json]        # binaries, encoders (x264, libvpx, VideoToolbox, NVENC, VAAPI), whisper accel; downloads only with --install
+frameshell doctor [--install] [--json]        # binaries, encoders (x264, libvpx, VideoToolbox, NVENC, VAAPI), whisper accel, the frameshell on PATH; downloads only with --install
 
 frameshell import <file…>                     # copy/link into assets/, queue proxies
 frameshell track add|remove|list …

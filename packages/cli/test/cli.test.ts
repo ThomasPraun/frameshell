@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -279,7 +279,8 @@ describe("frameshell doctor", () => {
   });
 
   it("--json lists managed ffmpeg, ffprobe, whisper-cli and headless Chrome as not installed, without downloading, and exits 1", () => {
-    const env = isolated();
+    // A PATH without frameshell, whatever the machine has installed.
+    const env = { ...isolated(), PATH: tempDir() };
     const result = frameshell(["doctor", "--json"], tempDir(), env);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(1);
@@ -294,6 +295,18 @@ describe("frameshell doctor", () => {
     expect(report.problems.join("\n")).toMatch(/doctor --install|No managed ffmpeg build/);
     // whisper.cpp installs on first transcription, headless Chrome on first HyperFrames render: never a problem here.
     expect(report.problems.join("\n")).not.toMatch(/whisper|chrome/);
+    // Which frameshell PATH runs is advice, never a problem: an empty PATH adds a note and no problem.
+    expect(report.command).toMatchObject({ path: null, self: { entry: realpathSync(cliBin), app: false } });
+    expect(report.command.notes).toEqual([expect.stringContaining("File → Install 'frameshell' Command in PATH")]);
+  });
+
+  it.skipIf(process.platform === "win32")("names the frameshell on PATH: this CLI behind a link", () => {
+    const bin = tempDir();
+    // npm marks a package's bin executable on install; tsc output is not, and PATH lookup skips it.
+    chmodSync(cliBin, 0o755);
+    symlinkSync(cliBin, join(bin, "frameshell"));
+    const result = frameshell(["doctor"], tempDir(), { ...isolated(), PATH: `${bin}:${process.env["PATH"]}` });
+    expect(result.stdout).toMatch(/Command:\n {2}this CLI {6}CLI \S+ at .*frameshell\.js\n {2}on PATH {7}.*frameshell → .*frameshell\.js · this CLI\n\n/);
   });
 
   // A shell-script ffmpeg needs a unix exec; Windows cannot run it without a shell.

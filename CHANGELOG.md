@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell doctor` says which `frameshell` the shell's PATH runs and whether it is the CLI running now (#142): the link and its target, the Frameshell app it belongs to and that app's version (read inside `app.asar` too, so an npm or source CLI can tell), a note when they differ, when the app it points at is gone, or when there is none, with the File menu item that installs it. Notes never change the exit code. `--json` adds `command`. The CLI does this, not the daemon: only the CLI sees the caller's PATH.
 - File → Install 'frameshell' Command in PATH (and Uninstall) puts the app's `frameshell` CLI on the system PATH, so any terminal and MCP client can run it (#139). macOS links `/usr/local/bin/frameshell` (native admin prompt only when the directory is not writable), Linux links `~/.local/bin/frameshell`, Windows adds the shim directory to the user PATH. The link targets the shim the app rewrites on every start, so it follows app updates. It never replaces a regular file, and asks before replacing a `frameshell` command another install owns; uninstall removes only a command of this app. Refused for an AppImage and for a macOS app running from its disk image or a translocated path, whose locations change between runs.
 - CLI: `--ripple-track <track>` (repeatable) for `clip add` and `clip trim`, only with `--ripple`: the ripple moves later clips on the clip's own track plus the named ones instead of every video and audio track, as `rippleTracks` already allowed through the daemon and MCP (#131). Agent skill updated.
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `@frameshell/hyperframes`: compositions from `frameshell hyperframes new` rendered 45 s slower than needed. They animate with CSS and register no GSAP timeline, so the producer waited its full player-ready timeout for `window.__timelines[id]` before capturing (an 8 s clip at 1440p: about 60 s, now 15 s). The scaffold's root now carries `data-no-timeline`, and the agent skill tells authors of CSS-only compositions to add it. Compositions scaffolded before keep the wait until the attribute is added.
+- `frameshell --version` of the CLI bundled in the desktop app printed `0.0.0`, the unversioned CLI package's version. It now prints the app's version.
 
 ## [0.3.0] - 2026-10-10
 
