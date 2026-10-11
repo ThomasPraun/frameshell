@@ -5,7 +5,7 @@ description: Write HyperFrames HTML compositions and place them on the Frameshel
 
 # HyperFrames clips
 
-A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha, then layered over the footage below it. The daemon renders it in the background and caches the result; preview shows a progress placeholder until the render is ready.
+A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha, then layered over the footage below it. The daemon renders it in the background and caches the result. Until the render is ready, the human's preview plays the page itself, live at the playhead and labelled "Live". It does so when the clip is the topmost picture; otherwise the preview shows a progress slate. The render, not the live page, is what export uses.
 
 ## Steps
 
@@ -24,6 +24,7 @@ Done = every hyperframes clip is `ready` and a captured frame shows it where int
 - Timed elements carry `data-start`, `data-duration` and `data-track-index`. Animate with CSS animations or a paused GSAP timeline registered as `window.__timelines["<composition id>"]`; HyperFrames drives the clock, so wall time never applies. A composition with no GSAP timeline (CSS animations only, as the scaffold) carries `data-no-timeline` on its root; without it every render first waits 45 s for a timeline that never comes.
 - Transparency: leave `html`, `body` and the root unpainted; the footage shows through. Backgrounds on inner elements (cards, panels) are kept, including partial alpha.
 - Props are composition variables: declare each one with its default as an array on the root, `<html data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Title"}]'>` (`type`: `string`, `number`, `color`, `boolean`, `enum`, `font` or `image`), and read them with `window.__hyperframes.getVariables()`: the clip's `props` merged over the defaults. An object (`'{"title":"Title"}'`) is not a declaration; the render fails with the array to use instead. Changing `props` (`frameshell clip set <clip> --props …`) re-renders that clip only.
+- Live preview serves the composition directory as it is, so the rules above also make the live page work: files inside the directory, a `[data-composition-id]` root, and no wall-clock animation. It runs in a sandboxed frame without `localStorage` or cookies. Fonts and timing can differ slightly from the render: judge the result with `frame_capture` once the clip is `ready`.
 - Clip `in` is composition seconds shown at the clip's start; `duration` is how long it plays. Moving, trimming or changing `transform` (`--x --y --scale --opacity`) never re-renders.
 
 ## Export

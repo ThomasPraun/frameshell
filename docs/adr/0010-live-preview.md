@@ -96,6 +96,16 @@ The adapter supplies the glue code that connects its engine to the page, so the 
 
 Docs with the slices: SPEC §3.4 and §8.2, the `plugin-api` README, the skills of both adapters, CHANGELOG (Added, plugin API additive).
 
+## Implementation notes (2026-10-10)
+
+Found while building the slices; the decision above stands.
+
+- **Insertion:** the app inserts `head` with a function replacement. The HyperFrames runtime contains `$&`-style sequences that a string replacement would expand.
+- **Storage:** a frame sandboxed without `allow-same-origin` throws on `localStorage`. Remotion reads it, so the Remotion `head` installs in-memory `localStorage` and `sessionStorage`. The HyperFrames runtime needed none.
+- **Remotion background:** Remotion's page CSS paints `body` `#1f2428`. As `take-frame.js` does for PNG frames, the live page makes it transparent, so the footage below shows as in the render. The page is scaled by the same factor `render` passes.
+- **Remotion environment:** the Remotion `head` sets the globals `setPropsAndEnv` sets (`remotion_puppeteerTimeout`, `NODE_ENV=production`, …). The page then runs in Remotion's rendering environment: media is driven per frame and makes no sound. Whether `<OffthreadVideo>`, which asks the renderer's frame server, shows anything live is not verified.
+- **Remotion internals check:** before serving a bundle, `livePreview` checks that its scripts mention `remotion_setBundleMode`, `remotion_setFrame` and `remotion_renderReady`. When one is missing, the failure names it and the slate stays.
+
 ## Side effects
 
 - **Plugin API:** additive optional member; `apiVersion` stays `"1"`, so existing plugins keep working.
