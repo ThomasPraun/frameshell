@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cliShimScript } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import {
   type CliInstallHost,
@@ -123,6 +124,37 @@ describe("uninstallCli (macOS, Linux)", () => {
     await installCli(shim, { ...host, confirmReplace: async () => true });
     expect(await uninstallCli(shim, host)).toMatchObject({ changed: true });
     expect(() => lstatSync(link)).toThrow();
+  });
+});
+
+describe("the .deb's own command (Linux)", () => {
+  const shimFor = (runtime: string) => cliShimScript({ runtime, cliEntry: "/opt/Frameshell/resources/app.asar/cli.js" }, "linux");
+
+  it("makes install a no-op and uninstall point at the package", async () => {
+    const { root, shim, link, host } = setup();
+    writeFileSync(shim, shimFor("/opt/Frameshell/frameshell"));
+    const packageCommand = join(root, "usr-bin-frameshell");
+    writeFileSync(packageCommand, shimFor("/opt/Frameshell/frameshell"));
+    const withPackage = { ...host, packageCommand };
+    expect(await installCli(shim, withPackage)).toMatchObject({
+      changed: false,
+      message: expect.stringContaining("by the Frameshell package"),
+    });
+    expect(() => lstatSync(link)).toThrow();
+    expect(await uninstallCli(shim, withPackage)).toMatchObject({
+      changed: false,
+      detail: expect.stringContaining("removing the package removes it"),
+    });
+  });
+
+  it("is ignored when it runs another app binary, or is missing", async () => {
+    const { root, shim, link, host } = setup();
+    writeFileSync(shim, shimFor("/home/me/Frameshell/frameshell"));
+    const packageCommand = join(root, "usr-bin-frameshell");
+    writeFileSync(packageCommand, shimFor("/opt/Frameshell/frameshell"));
+    expect(await installCli(shim, { ...host, packageCommand })).toMatchObject({ changed: true });
+    expect(readlinkSync(link)).toBe(shim);
+    expect(await uninstallCli(shim, { ...host, packageCommand: join(root, "missing") })).toMatchObject({ changed: true });
   });
 });
 
