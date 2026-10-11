@@ -1,6 +1,6 @@
 {
   "name": "@frameshell/remotion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Official Frameshell clip adapter: Remotion compositions rendered with the project's own Remotion to VP9 WebM with alpha.",
   "license": "Apache-2.0",
   "author": "Frameshell contributors",
