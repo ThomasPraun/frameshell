@@ -82,7 +82,7 @@ test("a clip still rendering plays its live page at the playhead, labelled live,
   const frame = await laidOutBox(page.getByTestId("preview-frame"));
   // The label sits in the top right corner, clear of the lower third where titles play.
   const label = await laidOutBox(page.getByTestId("preview-live-label"));
-  expect(label.y + label.height).toBeLessThan(frame.y + frame.height / 4);
+  expect(Math.abs(label.y - frame.y - 8)).toBeLessThan(2);
   expect(Math.abs(frame.x + frame.width - (label.x + label.width) - 8)).toBeLessThan(2);
   const shown = await laidOutBox(live());
   expect(Math.abs(shown.width - frame.width)).toBeLessThan(2);
