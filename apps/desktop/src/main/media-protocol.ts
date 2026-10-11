@@ -130,7 +130,7 @@ function reply(status: number, extra: Record<string, string> = {}): Response {
  * clamped to the file; null for none or a form it does not parse (the whole
  * file is served, as HTTP allows).
  */
-function parseRange(header: string | null, size: number): [number, number] | null | "unsatisfiable" {
+export function parseRange(header: string | null, size: number): [number, number] | null | "unsatisfiable" {
   const match = header && /^bytes=(\d*)-(\d*)\s*(?:,|$)/.exec(header.trim());
   if (!match) return null;
   const [, from, to] = match;

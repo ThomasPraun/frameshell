@@ -72,7 +72,13 @@ export type VideoSpan =
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
 export type LayerRender =
   | { state: "ready"; file: string }
-  | { state: "queued" | "rendering" | "failed" | "unavailable"; progress: number; error: string | null };
+  | {
+      state: "queued" | "rendering" | "failed" | "unavailable";
+      progress: number;
+      error: string | null;
+      /** Cache key being rendered (null when unavailable): the live page of the clip is built for it (ADR 0010). */
+      key: string | null;
+    };
 
 /** Sound of one media clip, program samples `[start, end)` at {@link PROGRAM_SAMPLE_RATE}. */
 export interface AudioSpan {
@@ -324,7 +330,7 @@ function generatedOf(clip: Clip, start: number, end: number, fps: number, info: 
   const render: LayerRender | null = ready
     ? { state: "ready", file: ready.file! }
     : info && info.state !== "ready"
-      ? { state: info.state, progress: info.progress, error: info.error }
+      ? { state: info.state, progress: info.progress, error: info.error, key: info.key }
       : null;
   const size = ready && ready.width && ready.height ? { width: ready.width, height: ready.height } : null;
   const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;

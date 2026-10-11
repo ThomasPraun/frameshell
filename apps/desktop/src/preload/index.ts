@@ -79,6 +79,7 @@ const api: FrameshellApi = {
   clips: {
     renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
+    live: (timeline, clip) => invokeOutcome(Channel.clipsLive, timeline, clip),
   },
 };
 

@@ -2,6 +2,7 @@ import type { Placement, Size } from "@frameshell/schema/composite";
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
+import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type Program, programAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
@@ -13,6 +14,7 @@ import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { ClipInspector } from "./ClipInspector.js";
+import { LivePreview } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
@@ -42,6 +44,8 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * subtitle tracks draw over the picture as export burns them). The region tool draws a rectangle on the frame for
  * "Ask agent" (SPEC §10): it becomes the shared selection, with the
  * playhead's time; Escape clears it. Right-click opens "Ask agent".
+ * A generated clip whose render is not ready plays its composition live
+ * when it is the topmost picture and its adapter supports it (ADR 0010).
  */
 export function PreviewPanel({ project }: { project: ProjectView }) {
   const program = useProgram();
@@ -51,6 +55,8 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
   const player = useRef<PreviewPlayer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [regionTool, setRegionTool] = useState(false);
+  const { view } = useTimelineView(SELECTION_TIMELINE);
+  const [liveClip, setLiveClip] = useState<string | null>(null);
 
   useEffect(() => {
     const box = frameBox.current!;
@@ -110,6 +116,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
 
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
+  const live = useMemo(() => (program ? liveTarget(program, frame) : null), [program, frame]);
   return (
     <>
       <PanelHeader>
@@ -136,7 +143,9 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           <div className="safe-area title" />
           {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
           {program && <Placeholder program={program} frame={frame} />}
-          {program && <RenderSlates program={program} frame={frame} />}
+          {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
+          <LivePreview target={live} timeline={view?.timeline ?? null} time={time} fps={fps} resolution={resolution} onLive={setLiveClip} />
+          {program && <RenderSlates program={program} frame={frame} live={liveClip} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
           {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} />}
