@@ -12,7 +12,7 @@ A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha,
 1. Scaffold: `frameshell hyperframes new <name> [--duration <s>]` writes `compositions/hyperframes/<name>/index.html` at the project resolution. Edit that file.
 2. Add the clip on a video track above the footage:
    `frameshell clip add <track> --type hyperframes --source compositions/hyperframes/<name>/index.html --start <s> --duration <s> [--props '{"title":"Launch"}']`
-3. Wait for the render: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. `failed` carries the render error in `error`: fix the composition and check again. A 1440p clip renders at about 3x its real length.
+3. Wait for the render: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. `failed` carries the render error in `error`: fix the composition and check again. A 1440p clip renders in about 2x its real length.
 4. Check the result with `frame_capture` / `frameshell frame --at <s>` at a time the clip covers.
 
 Done = every hyperframes clip is `ready` and a captured frame shows it where intended.
@@ -21,7 +21,7 @@ Done = every hyperframes clip is `ready` and a captured frame shows it where int
 
 - One directory per composition. Every file in it counts: editing any file re-renders every clip using it; unchanged clips reuse the cache. Keep images, fonts and scripts (e.g. `gsap.min.js`) inside the directory so the render is offline and reproducible.
 - The root element carries `data-composition-id`, `data-width`, `data-height` (the project resolution, from `frameshell.json`) and `data-duration` (seconds). The render is exactly that size and length.
-- Timed elements carry `data-start`, `data-duration` and `data-track-index`. Animate with CSS animations or a paused GSAP timeline registered as `window.__timelines["<composition id>"]`; HyperFrames drives the clock, so wall time never applies.
+- Timed elements carry `data-start`, `data-duration` and `data-track-index`. Animate with CSS animations or a paused GSAP timeline registered as `window.__timelines["<composition id>"]`; HyperFrames drives the clock, so wall time never applies. A composition with no GSAP timeline (CSS animations only, as the scaffold) carries `data-no-timeline` on its root; without it every render first waits 45 s for a timeline that never comes.
 - Transparency: leave `html`, `body` and the root unpainted; the footage shows through. Backgrounds on inner elements (cards, panels) are kept, including partial alpha.
 - Props are composition variables: declare each one with its default as an array on the root, `<html data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Title"}]'>` (`type`: `string`, `number`, `color`, `boolean`, `enum`, `font` or `image`), and read them with `window.__hyperframes.getVariables()`: the clip's `props` merged over the defaults. An object (`'{"title":"Title"}'`) is not a declaration; the render fails with the array to use instead. Changing `props` (`frameshell clip set <clip> --props …`) re-renders that clip only.
 - Clip `in` is composition seconds shown at the clip's start; `duration` is how long it plays. Moving, trimming or changing `transform` (`--x --y --scale --opacity`) never re-renders.

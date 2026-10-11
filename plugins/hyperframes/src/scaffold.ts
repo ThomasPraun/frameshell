@@ -84,8 +84,9 @@ function template(id: string, width: number, height: number, duration: number): 
     </style>
   </head>
   <body>
-    <!-- Composition root: size and length of the render. -->
-    <div id="stage" data-composition-id="${id}" data-width="${width}" data-height="${height}" data-duration="${duration}">
+    <!-- Composition root: size and length of the render. CSS animations register no GSAP timeline, and
+         data-no-timeline says so: without it the render first waits 45 s for window.__timelines["${id}"]. -->
+    <div id="stage" data-composition-id="${id}" data-width="${width}" data-height="${height}" data-duration="${duration}" data-no-timeline>
       <div class="clip" data-start="0" data-duration="${duration}" data-track-index="0">
         <div id="card"></div>
       </div>
