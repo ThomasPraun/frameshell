@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+`@frameshell/hyperframes` and `@frameshell/remotion` 0.2.0. A plugin's version is part of the clip render cache key, so existing `hyperframes` and `remotion` clips render once more after the update.
+
 ### Added
 
 - `frameshell doctor` says which `frameshell` the shell's PATH runs and whether it is the CLI running now (#142): the link and its target, the Frameshell app it belongs to and that app's version (read inside `app.asar` too, so an npm or source CLI can tell), a note when they differ, when the app it points at is gone, or when there is none, with the File menu item that installs it. Notes never change the exit code. `--json` adds `command`. The CLI does this, not the daemon: only the CLI sees the caller's PATH.
@@ -127,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.2.0
