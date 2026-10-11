@@ -210,6 +210,34 @@ describe("frameshell timeline editing", () => {
     expect(frameshell(["clip", "move", first!.id, "--ripple"]).code).toBe(2);
   });
 
+  it("--ripple-track limits a ripple to the clip's own track plus the named ones (#131)", () => {
+    type View = { tracks: { id: string; clips: { id: string; start: number; end: number }[] }[] };
+    const clipsOf = (track: string) => json<View>(["timeline", "show"]).tracks.find((t) => t.id === track)!.clips;
+    const other = json<{ changes: { added: string[] } }>(["track", "add", "audio"]).changes.added[0]!;
+    const music = json<{ changes: { added: string[] } }>([
+      "clip", "add", other, "assets/take.mp4", "--start", "5", "--in", "0", "--out", "0.5",
+    ]).changes.added[0]!;
+    const [first, next] = clipsOf(audio);
+    const nextStart = next!.start;
+
+    // Own track only: the other track's clip stays.
+    expect(frameshell(["clip", "trim", first!.id, "--out", "0.4", "--ripple", "--ripple-track", audio, "--no-snap"]).code).toBe(0);
+    expect(clipsOf(audio).find((c) => c.id === next!.id)!.start).toBeCloseTo(nextStart + 0.1, 6);
+    expect(clipsOf(other)).toEqual([expect.objectContaining({ id: music, start: 5 })]);
+    // Without it, every track moves; naming the other track moves it too.
+    expect(frameshell(["clip", "trim", first!.id, "--out", "0.5", "--ripple", "--no-snap"]).code).toBe(0);
+    expect(clipsOf(other)[0]!.start).toBeCloseTo(5.1, 6);
+    expect(frameshell(["clip", "trim", first!.id, "--out", "0.6", "--ripple", "--ripple-track", other, "--no-snap"]).code).toBe(0);
+    expect(clipsOf(other)[0]!.start).toBeCloseTo(5.2, 6);
+
+    const alone = frameshell(["clip", "trim", first!.id, "--out", "0.7", "--ripple-track", other]);
+    expect(alone.code).toBe(2);
+    expect(alone.stderr).toMatch(/--ripple-track needs --ripple/);
+    const unknown = frameshell(["clip", "add", audio, "assets/take.mp4", "--start", "0", "--in", "1", "--out", "1.1", "--ripple", "--ripple-track", "t_nope"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/t_nope/);
+  });
+
   it("exits 2 with a precise message on bad arguments", () => {
     const noAt = frameshell(["clip", "split", "c_x"]);
     expect(noAt.code).toBe(2);
