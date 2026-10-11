@@ -35,13 +35,25 @@ The official plugins `@frameshell/whisper-cpp`, `@frameshell/hyperframes` and `@
 |---|---|
 | `node scripts/plugins-npm.mjs verify` | Checks each `package.json` and `frameshell-plugin.json`: `@frameshell/` name, semver version equal in both files, Apache-2.0, `publishConfig` (`access: public`, `provenance: true`), `repository` with `directory`, `files` covering `dist`, the manifest and its skills, no `workspace:` runtime dependency. Needs no build and no network. `pnpm test` runs it. |
 | `node scripts/plugins-npm.mjs dry-run [dir]` | `verify`, then `pnpm pack` each plugin (pnpm rewrites `workspace:` ranges, npm would not), checks the tarball has `package.json`, the manifest, its `main`, its skills, `README.md` and `LICENSE` and no `src/` or `test/`, then `npm publish <tarball> --dry-run` for each version npm does not have yet (npm 11 refuses a dry run over a published version). Needs the plugins built. CI runs it on every pull request (`ci.yml`, Linux). Tarballs land in `dir` (default: a temp dir). |
-| `node scripts/plugins-npm.mjs publish` | `dry-run`, then `npm publish <tarball> --access public --provenance` for each version npm does not have yet. Release workflow only. |
+| `node scripts/plugins-npm.mjs publish` | `dry-run`, then `npm stage publish <tarball> --access public --provenance` for each version npm does not have yet: the version is uploaded but not public until a maintainer approves it. Release workflow only. |
 
 **Versions.** Each plugin has its own semver version in its `package.json`, and `frameshell-plugin.json` must carry the same one. A release publishes only versions npm lacks, so bump a plugin's version (both files) when it changed; an unchanged plugin is skipped, never republished. A prerelease version (`0.2.0-beta.1`) goes to the `next` dist-tag, any other to `latest`. A plugin's version is part of the clip render cache key (SPEC §6.5), so bumping `@frameshell/hyperframes` re-renders its clips.
 
-**When.** Nothing reaches npm from a tag alone. Publishing the reviewed draft release (step 5 of [Cut a release](#cut-a-release)) fires the `release: published` event, and the `npm plugins` job publishes. Its summary lists each package as published or skipped.
+**When.** Nothing reaches npm from a tag alone. Publishing the reviewed draft release (step 5 of [Cut a release](#cut-a-release)) fires the `release: published` event, and the `npm plugins` job stages each new version. Its summary lists each package as staged or skipped. A staged version is public only once approved:
+
+```sh
+npm stage list @frameshell/hyperframes      # the stage id of each staged version
+npm stage download <stage-id>               # optional: inspect the tarball
+npm stage approve <stage-id>                # asks for 2FA, then publishes
+```
+
+The package page on npmjs.com can approve it too. `npm stage reject <stage-id>` deletes a staged version, so it can be staged again.
 
 **Authentication and provenance.** The job publishes with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm authenticates the Release workflow by its GitHub OIDC identity (`id-token: write`), so no npm token or repository secret exists. The same identity signs each package's provenance, and npm shows where it was built. It needs npm 11.5.1 or later (the job installs a pinned npm 11) and a **public** repository whose URL matches `repository.url`. A package without a trusted publisher set up for this workflow is refused.
+
+**Retry.** When the `npm plugins` job fails after the release is published, fix the cause, then run **Actions → Release → Run workflow** on `main` with `npm_publish_tag` set to the release tag (`v0.4.0`). It skips the app build, checks that the release is published, and stages that tag's plugins with `main`'s `scripts/plugins-npm.mjs`; versions already on npm are skipped, and a version already staged fails: approve or reject it instead. From a terminal: `gh workflow run release.yml -f npm_publish_tag=v0.4.0`.
+
+**ENEEDAUTH** ("need auth") from `npm stage publish` means npm got no token from trusted publishing. npm logs the reason only at the verbose level, which the publish uses: look for the `oidc` lines above the error. A failed token exchange usually means the package's Trusted Publisher on npmjs.com does not match the workflow exactly (user `ThomasPraun`, repository `frameshell`, workflow `release.yml`, no environment). npm does not check those fields when they are saved.
 
 ### Without npm: install from a tarball
 
@@ -57,8 +69,8 @@ The pin is `file:<path>#sha256=<digest>`: always project-relative (ADR 0008): a 
 ### npm setup (once, by the maintainer)
 
 1. Create the `frameshell` organization on [npmjs.com](https://www.npmjs.com/org/create) (free plan, public packages). It owns the `@frameshell` scope.
-2. For each package (`@frameshell/whisper-cpp`, `@frameshell/hyperframes`, `@frameshell/remotion`): npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**, with organization or user `ThomasPraun`, repository `frameshell`, workflow filename `release.yml`, environment empty.
-3. In the same settings, under **Publishing access**, choose to disallow tokens, so only the workflow can publish.
+2. For each package (`@frameshell/whisper-cpp`, `@frameshell/hyperframes`, `@frameshell/remotion`): npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**, with organization or user `ThomasPraun`, repository `frameshell`, workflow filename `release.yml`, environment empty. Under **Allowed actions**, leave **Allow npm publish** and **Allow npm dist-tag** unchecked: the workflow only stages (`npm stage publish`, always allowed), and each version waits for your 2FA approval. Then **Set up connection**. A connection cannot be edited: to change it, delete it and set it up again. A new connection stays *Pending validation* until the workflow stages through it, and lapses if that does not happen within about two days: set it up shortly before the first release that stages a new version of that package.
+3. In the same settings, under **Publishing access**, choose **Require two-factor authentication and disallow bypass 2fa tokens**, then **Update Package Settings**. Trusted publishing still works.
 
 npm sets up a trusted publisher only on a package that exists. If npm refuses step 2 for a package never published, publish its first version once by hand, with your account's 2FA, then return to step 2:
 
@@ -145,7 +157,7 @@ Linux and Windows need no secrets. Windows builds stay unsigned at v0.1: SmartSc
 
 3. Wait for the **Release** workflow. Read each job summary: the macOS job must say *notarized*. If it says *unsigned*, the secrets are missing. Delete the draft and the tag, add the secrets, and tag again.
 4. Open the draft release. Download the DMG on a Mac that has never run Frameshell and open it: the app must start with no Gatekeeper warning. `spctl --assess --type execute -vv /Applications/Frameshell.app` must print `source=Notarized Developer ID`.
-5. Edit the notes if needed, then **Publish release**. This publishes the official plugins whose version is new to npm: check the `npm plugins` job, then `npm view @frameshell/whisper-cpp version`.
+5. Edit the notes if needed, then **Publish release**. This stages the official plugins whose version is new to npm: check the `npm plugins` job, approve each staged version (`npm stage approve`, see [npm plugins](#npm-plugins)), then `npm view @frameshell/hyperframes version`.
 
 A broken tag can be deleted before publishing: `git push --delete origin v0.1.0 && git tag -d v0.1.0`, then delete the draft.
 

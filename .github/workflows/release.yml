@@ -1,8 +1,9 @@
 name: Release
 
 # Tag v<semver> -> build, smoke-test and attach installers to a DRAFT GitHub release (publish it by hand).
-# Publishing that release -> publish the official plugins (plugins/*) to npm, each version npm lacks.
+# Publishing that release -> stage the official plugins (plugins/*) on npm, each version npm lacks; a maintainer approves them.
 # workflow_dispatch and pull requests touching packaging -> same build, smoke test and npm dry run, nothing published.
+# workflow_dispatch with npm_publish_tag -> only retry the npm publish of that published release (no app build).
 # Every pull request also runs the npm dry run in ci.yml.
 # Secrets and the release checklist: docs/release.md.
 on:
@@ -11,6 +12,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      npm_publish_tag:
+        description: "Retry npm: publish the official plugins of this already published release (e.g. v0.4.0). Empty: build and dry run only."
+        required: false
+        default: ""
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -30,7 +36,7 @@ jobs:
   package:
     name: package ${{ matrix.os }}
     # Publishing the release only publishes npm packages: the installers are already on it.
-    if: github.event_name != 'release'
+    if: github.event_name != 'release' && !inputs.npm_publish_tag
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -167,6 +173,21 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A retry publishes the release's own sources, never main's.
+          ref: ${{ inputs.npm_publish_tag }}
+      - name: Check the release to retry
+        if: inputs.npm_publish_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.npm_publish_tag }}
+        run: |
+          [[ "$TAG" == v* ]] || { echo "::error::npm_publish_tag must be a v* tag, got $TAG"; exit 1; }
+          test "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false \
+            || { echo "::error::$TAG is not a published release: publish it first"; exit 1; }
+          # The tag's packages, published by this workflow's script (a fix to publishing applies to a retry).
+          git fetch --depth 1 origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:scripts/plugins-npm.mjs" > scripts/plugins-npm.mjs
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -179,5 +200,5 @@ jobs:
       - name: Pack and dry run
         run: node scripts/plugins-npm.mjs dry-run
       - name: Publish to npm
-        if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
+        if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || inputs.npm_publish_tag
         run: node scripts/plugins-npm.mjs publish
