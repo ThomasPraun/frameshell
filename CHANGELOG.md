@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Linux `.deb`: `/usr/bin/frameshell` linked to the app binary, so `frameshell status` in a terminal started the app instead of running the CLI (#143). The package now installs a script that runs the bundled CLI as Node, the same command the app's per-user shim runs, so `frameshell` works right after install, before the app is first started, and `frameshell doctor` recognizes it. Removing the package removes it. File → Install 'frameshell' Command in PATH says it is already installed instead of adding a second link in `~/.local/bin`. The release workflow installs the built `.deb`, runs the command and removes the package.
-
 ## [0.4.0] - 2026-10-11
 
 `@frameshell/hyperframes` and `@frameshell/remotion` 0.2.0. A plugin's version is part of the clip render cache key, so existing `hyperframes` and `remotion` clips render once more after the update.
@@ -33,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Linux `.deb`: `/usr/bin/frameshell` linked to the app binary, so `frameshell status` in a terminal started the app instead of running the CLI (#143). The package now installs a script that runs the bundled CLI as Node, the same command the app's per-user shim runs, so `frameshell` works right after install, before the app is first started, and `frameshell doctor` recognizes it. Removing the package removes it. File → Install 'frameshell' Command in PATH says it is already installed instead of adding a second link in `~/.local/bin`. The release workflow installs the built `.deb`, runs the command and removes the package.
 - `@frameshell/hyperframes`: compositions from `frameshell hyperframes new` rendered 45 s slower than needed. They animate with CSS and register no GSAP timeline, so the producer waited its full player-ready timeout for `window.__timelines[id]` before capturing (an 8 s clip at 1440p: about 60 s, now 15 s). The scaffold's root now carries `data-no-timeline`, and the agent skill tells authors of CSS-only compositions to add it. Compositions scaffolded before keep the wait until the attribute is added.
 - `frameshell --version` of the CLI bundled in the desktop app printed `0.0.0`, the unversioned CLI package's version. It now prints the app's version.
 
