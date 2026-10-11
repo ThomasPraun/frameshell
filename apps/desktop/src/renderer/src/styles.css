@@ -1006,9 +1006,13 @@ code {
   color-scheme: light;
 }
 
+/* Top right, clear of the lower third where titles and the slates sit. */
 .preview-live-label {
-  justify-self: center;
+  position: absolute;
+  top: 8px;
+  right: 8px;
   margin: 0;
+  pointer-events: none;
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-left: 2px solid var(--accent);

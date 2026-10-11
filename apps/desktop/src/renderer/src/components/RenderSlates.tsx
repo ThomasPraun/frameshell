@@ -7,18 +7,27 @@ type GeneratedSpan = Extract<VideoSpan, { kind: "generated" }>;
  * each, bottom layer first, with the render's state and live progress. Ready
  * renders need none: the engine composites them with the other layers. The
  * `live` clip plays its composition live (ADR 0010): its slate shrinks to a
- * corner label, so nobody mistakes the live page for the render.
+ * label in the top right corner, away from the lower third where titles sit,
+ * so nobody mistakes the live page for the render.
  */
 export function RenderSlates({ program, frame, live = null }: { program: Program; frame: number; live?: string | null }) {
   const waiting = program.layers.flatMap((_, layer) => {
     const span = programAt(program, frame, layer);
     return span?.kind === "generated" && span.render?.state !== "ready" ? [span] : [];
   });
-  if (waiting.length === 0) return null;
+  const shown = waiting.find((span) => span.clip === live);
+  const slates = waiting.filter((span) => span !== shown);
   return (
-    <div className="preview-render-slates">
-      {waiting.map((span) => (span.clip === live ? <LiveLabel key={span.clip} span={span} /> : <Slate key={span.clip} span={span} />))}
-    </div>
+    <>
+      {slates.length > 0 && (
+        <div className="preview-render-slates">
+          {slates.map((span) => (
+            <Slate key={span.clip} span={span} />
+          ))}
+        </div>
+      )}
+      {shown && <LiveLabel span={shown} />}
+    </>
   );
 }
 
