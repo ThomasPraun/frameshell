@@ -21,6 +21,7 @@ import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
+import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
@@ -46,12 +47,26 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * playhead's time; Escape clears it. Right-click opens "Ask agent".
  * A generated clip whose render is not ready plays its composition live
  * when it is the topmost picture and its adapter supports it (ADR 0010).
+ * The header's button moves the panel to its own window and back
+ * (ADR 0012); F, pressed in the window it shows in, toggles full screen.
+ * The playback keys work from every window of the project.
  */
-export function PreviewPanel({ project }: { project: ProjectView }) {
+export function PreviewPanel({
+  project,
+  detached,
+  onDetach,
+}: {
+  project: ProjectView;
+  /** Shown in its own window. */
+  detached: boolean;
+  /** Move the panel to its own window, or back when `detached`. */
+  onDetach: () => void;
+}) {
   const program = useProgram();
   const resolution = useResolution();
   const { time, playing, frames, fps } = useTransport();
   const frameBox = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const player = useRef<PreviewPlayer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pickTool, setPickTool] = useState(false);
@@ -116,7 +131,13 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editable(event.target)) return;
       const second = transport.get().fps;
-      if (event.key === " " && !(event.target instanceof HTMLButtonElement)) transport.toggle();
+      const panel = body.current;
+      const doc = panel?.ownerDocument;
+      // Full screen needs a key press in the window the preview is in: a browser grants it to that window alone.
+      const here = panel !== null && windowOf(event.target) === windowOf(panel);
+      if (event.key === "Escape" && here && doc?.fullscreenElement) leaveFullScreen(doc);
+      else if ((event.key === "f" || event.key === "F") && !event.shiftKey && here) toggleFullScreen(panel);
+      else if (event.key === " " && !isTag(event.target, "BUTTON")) transport.toggle();
       else if (event.key === "ArrowLeft") transport.step(event.shiftKey ? -second : -1);
       else if (event.key === "ArrowRight") transport.step(event.shiftKey ? second : 1);
       else if (event.key === "Home") transport.seek(0);
@@ -127,16 +148,15 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
       else return;
       event.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return listenEverywhere("keydown", onKey);
   }, [togglePick]);
 
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
   const live = useMemo(() => (program ? liveTarget(program, frame) : null), [program, frame]);
   return (
-    <>
-      <PanelHeader>
+    <div className="preview-body" ref={body} data-testid="preview-body">
+      <PanelHeader actions={<DetachButton detached={detached} onClick={onDetach} />}>
         <span className="panel-title">Preview</span>
         <span className="timecode" aria-label="Playhead" data-testid="playhead">
           {formatTimecode(time, fps)}
@@ -177,7 +197,54 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
         pickTool={pickTool}
         onPickTool={togglePick}
       />
-    </>
+    </div>
+  );
+}
+
+/**
+ * How long a window takes to settle into full screen. macOS animates into
+ * it, and a request to leave during the animation is never answered, which
+ * would block every later one.
+ */
+const FULL_SCREEN_SETTLE_MS = 1500;
+/** When each document's preview last entered full screen, `performance.now()` of the project window. */
+const enteredFullScreen = new WeakMap<Document, number>();
+/** Documents with a request to leave full screen already on its way. */
+const leaving = new WeakSet<Document>();
+
+/** Enter full screen with the preview alone, or leave it. */
+function toggleFullScreen(panel: HTMLElement): void {
+  const doc = panel.ownerDocument;
+  if (doc.fullscreenElement) return leaveFullScreen(doc);
+  enteredFullScreen.set(doc, performance.now());
+  // Refused (no key press in this window): nothing changes.
+  void panel.requestFullscreen().catch(() => enteredFullScreen.delete(doc));
+}
+
+/** Leave full screen in `doc`, once the window has settled into it. */
+function leaveFullScreen(doc: Document): void {
+  if (leaving.has(doc)) return;
+  leaving.add(doc);
+  const wait = Math.max(0, (enteredFullScreen.get(doc) ?? 0) + FULL_SCREEN_SETTLE_MS - performance.now());
+  setTimeout(() => {
+    leaving.delete(doc);
+    if (doc.fullscreenElement) void doc.exitFullscreen().catch(() => undefined);
+  }, wait);
+}
+
+/** Move the preview to its own window, or dock it back. */
+function DetachButton({ detached, onClick }: { detached: boolean; onClick: () => void }) {
+  const label = detached ? "Dock preview back" : "Open preview in its own window";
+  return (
+    <button className="icon-button" aria-label={label} title={label} onClick={onClick} data-testid="preview-detach">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        {detached ? (
+          <path d="M9 3H13V7M13 3L8 8M7 4H3V13H12V9" fill="none" stroke="currentColor" strokeWidth="1.3" transform="rotate(180 8 8)" />
+        ) : (
+          <path d="M9 3H13V7M13 3L8 8M7 4H3V13H12V9" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        )}
+      </svg>
+    </button>
   );
 }
 
@@ -196,8 +263,8 @@ function Inspector() {
  */
 function SubtitleOverlay({ size, frame }: { size: Size; frame: number }) {
   const { tracks } = useSubtitles();
-  const ready = useSubtitleFont();
   const canvas = useRef<HTMLCanvasElement>(null);
+  const ready = useSubtitleFont(canvas);
   useLayoutEffect(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
@@ -443,15 +510,18 @@ function TransportBar({
   );
 }
 
-/** Typing targets keep their keys. Monaco may type through an EditContext on a plain div, so its whole subtree counts. */
+/**
+ * Typing targets keep their keys. Monaco may type through an EditContext on
+ * a plain div, so its whole subtree counts. Elements of any project window
+ * (a detached panel's come from its own realm).
+ */
 function editable(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  const element = elementOf(target);
+  if (!element) return false;
   return (
-    target.isContentEditable ||
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target.closest(".monaco-editor, .xterm") !== null ||
-    ("editContext" in target && (target as { editContext?: unknown }).editContext != null)
+    element.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) ||
+    element.closest(".monaco-editor, .xterm") !== null ||
+    ("editContext" in element && (element as { editContext?: unknown }).editContext != null)
   );
 }

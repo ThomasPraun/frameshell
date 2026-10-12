@@ -45,7 +45,10 @@ export const LIVE_MESSAGE = {
  * It answers `ready` once `frameshellLive.ready` settles, `shown` after each
  * seek, and `error` when either fails or the page defines no `frameshellLive`.
  * A probe (ADR 0011) runs {@link PROBE_SCRIPT} once the page is ready and no
- * seek is pending, so it describes the frame last seeked to.
+ * seek is pending, so it describes the frame last seeked to. Messages come
+ * from the parent, or from the parent's opener: a page in a detached panel's
+ * window (ADR 0012) is driven by the project window's renderer, which opened
+ * that window, so it gains nothing new.
  */
 export const LIVE_BRIDGE = `${PROBE_SCRIPT}
 (function () {
@@ -80,7 +83,7 @@ export const LIVE_BRIDGE = `${PROBE_SCRIPT}
   var num = function (value) { return typeof value === "number" && isFinite(value); };
   window.addEventListener("message", function (event) {
     var data = event.data;
-    if (event.source !== window.parent || !data || data.source !== "${LIVE_MESSAGE.toPage}") return;
+    if ((event.source !== window.parent && event.source !== window.parent.opener) || !data || data.source !== "${LIVE_MESSAGE.toPage}") return;
     if (typeof data.seek === "number") {
       pending = data.seek;
       next();

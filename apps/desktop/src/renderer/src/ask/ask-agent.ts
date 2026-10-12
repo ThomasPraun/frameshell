@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
 import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
+import { windowOf } from "../windows.js";
 import { referenceLines } from "./reference.js";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -117,8 +118,6 @@ async function clipRenders(): Promise<ClipRenderInfo[]> {
  */
 export function openAskMenu(event: MouseEvent, extra: readonly MenuItem[] = []): void {
   event.preventDefault();
-  contextMenu.open(event.clientX, event.clientY, [
-    { label: "Ask agent", shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() },
-    ...extra,
-  ]);
+  const items: MenuItem[] = [{ label: "Ask agent", shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() }, ...extra];
+  contextMenu.open(event.clientX, event.clientY, items, windowOf(event.target));
 }

@@ -53,7 +53,9 @@ export class PreviewPlayer implements TransportPlayer {
   /** Play requested and not paused since (the clock may still be starting). */
   #playing = false;
   #raf = 0;
-  #clockTimer: ReturnType<typeof setInterval> | undefined;
+  #clockTimer: number | undefined;
+  /** Window whose timers run the play loop: the canvas's when it started. */
+  #loopView: Window | null = null;
   #stats: EngineStats | null = null;
   #disposed = false;
   #alphaId = 0;
@@ -62,7 +64,7 @@ export class PreviewPlayer implements TransportPlayer {
 
   constructor(host: HTMLElement, mediaUrl: string, events: PlayerEvents, options: { probe?: boolean } = {}) {
     this.#events = events;
-    this.canvas = document.createElement("canvas");
+    this.canvas = host.ownerDocument.createElement("canvas");
     this.canvas.className = "preview-canvas";
     this.canvas.setAttribute("aria-hidden", "true");
     host.prepend(this.canvas);
@@ -122,12 +124,15 @@ export class PreviewPlayer implements TransportPlayer {
       this.#from = from;
       this.#anchor = { frame: startFrame, sample: Math.round(from * PROGRAM_SAMPLE_RATE) };
       this.#send({ type: "play", anchor: this.#anchor, clock: clock.sample() });
-      this.#clockTimer = setInterval(() => this.#send({ type: "clock", sample: clock.sample() }), CLOCK_MS);
+      // The window the canvas is in drives the loop (ADR 0012): a minimized project window must not slow a detached preview.
+      const view = this.#view();
+      this.#clockTimer = view.setInterval(() => this.#send({ type: "clock", sample: clock.sample() }), CLOCK_MS);
       const loop = () => {
-        this.#raf = requestAnimationFrame(loop);
+        this.#raf = view.requestAnimationFrame(loop);
         this.#events.onTime(this.#now());
       };
-      this.#raf = requestAnimationFrame(loop);
+      this.#raf = view.requestAnimationFrame(loop);
+      this.#loopView = view;
     })();
   }
 
@@ -185,10 +190,16 @@ export class PreviewPlayer implements TransportPlayer {
   }
 
   #stopClock(): void {
-    cancelAnimationFrame(this.#raf);
-    clearInterval(this.#clockTimer);
+    this.#loopView?.cancelAnimationFrame(this.#raf);
+    this.#loopView?.clearInterval(this.#clockTimer);
+    this.#loopView = null;
     this.#anchor = null;
     this.#clock = null;
+  }
+
+  /** The window the canvas is drawn in; the project window once the canvas is out of any document. */
+  #view(): Window {
+    return this.canvas.ownerDocument.defaultView ?? window;
   }
 
   #send(message: ToEngine, transfer: Transferable[] = []): void {

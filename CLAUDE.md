@@ -32,6 +32,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Live preview of generated clips (`frameshell-live://` scheme, seek bridge, iframe, topmost-layer rule) | `apps/desktop/src/main/live-protocol.ts`, `renderer/src/preview/live.ts`, `components/LivePreview.tsx`; daemon `clip.live`; ADR 0010 |
 | Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
 | Desktop selection (shared store, extend, never duplicate); playhead = `preview/transport.ts` | `apps/desktop/src/renderer/src/selection.ts` |
+| Detached panels (panel windows, allowlist, placement in `configDir`, project window registry, global keys) | `apps/desktop/src/main/panel-windows.ts`, `renderer/src/panel-window.ts`, `renderer/src/windows.ts`; ADR 0012 |
 | Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
 | Agent-labelled terminals (detection, `session.tag`, `agent:<label>:<session>` author, `FRAMESHELL_AGENT`) | `apps/desktop/src/main/agent-detect.ts`, `main/terminals.ts`; `packages/protocol/src/agents.ts`; SPEC §6.2 |
 | History panel (list, diff marks, revert from UI) | `renderer/src/history/`, `components/HistoryPanel.tsx`; core `history/diff.ts` |
@@ -55,6 +56,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused. Clip cache entry layout or key recipe changed: bump `CACHE_LAYOUT_VERSION` (`clips/cache-key.ts`).
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
 - Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
+- Panel code may run in detached panel window (ADR 0012). rAF, timers, observers, focus, fullscreen, `message`: take from element's own window (`ownerDocument.defaultView`). Global keys via `listenEverywhere`. Never `instanceof HTMLElement` on events or nodes: use `elementOf`/`isTag` (`renderer/src/windows.ts`).
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.
 - node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: the preview moves to its own window and back (#165, ADR 0012), for a second monitor. The button in its header opens it; "Dock preview back", closing the window, or "Bring back" in the slot it left returns it. The window is drawn by the project window, so it shares the playhead, the selection and the keys (Space, arrows, `I`, Cmd/Ctrl+L, undo) with it, and keeps playing at full rate while the project window is minimized. The project opens with the preview detached again, where it was: placement is saved globally (`panel-windows.json` in the config directory), per set of connected displays, and a window whose display is gone opens on the primary one.
+- Desktop: `F` shows the preview full screen, in the project window or a detached one; the transport shows while the pointer is over it, and Escape leaves.
+
 ## [0.5.0] - 2026-10-12
 
 Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets the clip and the HTML or React element there; the agent can ask the same itself with `frameshell inspect` / MCP `inspect_point`. `@frameshell/hyperframes` and `@frameshell/remotion` 0.3.0. A plugin's version is part of the clip render cache key, so existing `hyperframes` and `remotion` clips render once more after the update.

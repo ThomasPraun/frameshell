@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 
 /** One menu entry. */
 export interface MenuItem {
@@ -13,6 +14,8 @@ interface OpenMenu {
   x: number;
   y: number;
   items: MenuItem[];
+  /** Window the menu shows in: the project window, or a detached panel's (ADR 0012). */
+  view: Window;
 }
 
 let current: OpenMenu | null = null;
@@ -27,9 +30,9 @@ const publish = (next: OpenMenu | null) => {
  * matches the app and tests can click it. Panels open it from `contextmenu`.
  */
 export const contextMenu = {
-  /** Show `items` at client coordinates `x`, `y`, replacing any open menu. */
-  open(x: number, y: number, items: MenuItem[]): void {
-    publish({ x, y, items });
+  /** Show `items` at client coordinates `x`, `y` of window `view`, replacing any open menu. */
+  open(x: number, y: number, items: MenuItem[], view: Window = window): void {
+    publish({ x, y, items, view });
   },
   close(): void {
     if (current) publish(null);
@@ -41,7 +44,11 @@ export const contextMenu = {
   get: (): OpenMenu | null => current,
 };
 
-/** Renders {@link contextMenu}; mount once. Closes on Escape, a press elsewhere, scroll, resize or blur. */
+/**
+ * Renders {@link contextMenu}; mount once, in the project window. A menu of
+ * a detached panel's window is drawn there, through a portal. Closes on
+ * Escape, a press elsewhere, scroll, resize or blur.
+ */
 export function ContextMenuHost() {
   const menu = useSyncExternalStore(contextMenu.subscribe, contextMenu.get);
   const box = useRef<HTMLDivElement>(null);
@@ -51,9 +58,10 @@ export function ContextMenuHost() {
   useLayoutEffect(() => {
     if (!menu || !box.current) return setPlace(null);
     const { width, height } = box.current.getBoundingClientRect();
+    const { innerWidth, innerHeight } = menu.view;
     setPlace({
-      left: menu.x + width > window.innerWidth - 4 ? Math.max(4, menu.x - width) : menu.x,
-      top: menu.y + height > window.innerHeight - 4 ? Math.max(4, menu.y - height) : menu.y,
+      left: menu.x + width > innerWidth - 4 ? Math.max(4, menu.x - width) : menu.x,
+      top: menu.y + height > innerHeight - 4 ? Math.max(4, menu.y - height) : menu.y,
     });
     box.current.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, [menu]);
@@ -70,27 +78,31 @@ export function ContextMenuHost() {
       event.stopPropagation();
       close();
     };
-    window.addEventListener("pointerdown", onPress, true);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("wheel", close, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("blur", close);
+    const { view } = menu;
+    view.addEventListener("pointerdown", onPress, true);
+    view.addEventListener("keydown", onKey, true);
+    view.addEventListener("wheel", close, true);
+    view.addEventListener("resize", close);
+    view.addEventListener("blur", close);
+    // Its window closed (a detached panel docked back): nothing is left to click.
+    view.addEventListener("pagehide", close);
     return () => {
-      window.removeEventListener("pointerdown", onPress, true);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("wheel", close, true);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("blur", close);
+      view.removeEventListener("pointerdown", onPress, true);
+      view.removeEventListener("keydown", onKey, true);
+      view.removeEventListener("wheel", close, true);
+      view.removeEventListener("resize", close);
+      view.removeEventListener("blur", close);
+      view.removeEventListener("pagehide", close);
     };
   }, [menu]);
 
   if (!menu) return null;
   const move = (step: number) => {
     const buttons = [...(box.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const at = buttons.indexOf(menu.view.document.activeElement as HTMLButtonElement);
     buttons[(at + step + buttons.length) % buttons.length]?.focus();
   };
-  return (
+  const element = (
     <div
       ref={box}
       className="context-menu"
@@ -121,4 +133,5 @@ export function ContextMenuHost() {
       ))}
     </div>
   );
+  return menu.view === window ? element : createPortal(element, menu.view.document.body);
 }

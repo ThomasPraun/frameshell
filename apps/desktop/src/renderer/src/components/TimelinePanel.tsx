@@ -15,6 +15,7 @@ import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/
 import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
+import { listenEverywhere } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, revealSeek, selection, useSelection } from "../selection.js";
@@ -176,10 +177,10 @@ export function TimelinePanel({
       event.preventDefault();
       undoRedo(command);
     };
-    window.addEventListener("keydown", onKey);
+    const offKeys = listenEverywhere("keydown", onKey);
     const off = handleTimelineHistory(undoRedo);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      offKeys();
       off();
     };
   }, [undoRedo]);
