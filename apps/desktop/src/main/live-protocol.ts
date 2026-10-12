@@ -56,7 +56,7 @@ export const LIVE_BRIDGE = `(function () {
   };
   window.addEventListener("message", function (event) {
     var data = event.data;
-    if (event.source !== window.parent || !data || data.source !== "${LIVE_MESSAGE.toPage}" || typeof data.seek !== "number") return;
+    if ((event.source !== window.parent && event.source !== window.parent.opener) || !data || data.source !== "${LIVE_MESSAGE.toPage}" || typeof data.seek !== "number") return;
     pending = data.seek;
     next();
   });

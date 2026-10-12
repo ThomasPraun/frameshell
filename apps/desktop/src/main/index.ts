@@ -170,7 +170,19 @@ function createWindow(projectDir?: string): BrowserWindow {
   windows.set(contents.id, state);
 
   // Links (xterm web links) open in the browser; the app window never navigates away.
-  contents.setWindowOpenHandler(({ url }) => {
+  contents.setWindowOpenHandler(({ url, frameName }) => {
+    // SPIKE (ADR 0012): auxiliary panel windows, scripted by this renderer.
+    if (url === "about:blank" && frameName.startsWith("frameshell-panel:")) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 960,
+          height: 600,
+          backgroundColor: "#1e1e1e",
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+        },
+      };
+    }
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });

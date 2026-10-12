@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
+import { useDetachedWindow } from "../spike-detach.js";
 import type { ProjectView } from "../../../shared/api.js";
 import { type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
@@ -38,6 +39,10 @@ export function Workspace({ project }: { project: ProjectView }) {
   const terminals = useRef<AgentTerminal>(null);
   const terminalCollapsed = useRef(false);
   terminalCollapsed.current = layout?.panels.terminal.collapsed ?? false;
+  const [previewOut, setPreviewOut] = useState(false);
+  const [terminalOut, setTerminalOut] = useState(false);
+  const previewHost = useDetachedWindow(previewOut ? "preview" : null, () => setPreviewOut(false));
+  const terminalHost = useDetachedWindow(terminalOut ? "terminal" : null, () => setTerminalOut(false));
 
   useEffect(() => {
     void window.frameshell.layout.load().then(setLayout);
@@ -190,6 +195,12 @@ export function Workspace({ project }: { project: ProjectView }) {
       <header className="titlebar drag">
         <span className="titlebar-project">{project.name}</span>
         <span className="titlebar-path">{project.dir}</span>
+        <button type="button" className="no-drag" data-testid="spike-detach-preview" onClick={() => setPreviewOut((v) => !v)}>
+          {previewOut ? "Dock preview" : "Detach preview"}
+        </button>
+        <button type="button" className="no-drag" data-testid="spike-detach-terminal" onClick={() => setTerminalOut((v) => !v)}>
+          {terminalOut ? "Dock terminal" : "Detach terminal"}
+        </button>
       </header>
 
       <div className="main-row">
@@ -213,8 +224,15 @@ export function Workspace({ project }: { project: ProjectView }) {
         <div className="center-column">
           <div className="center-row" ref={centerRow}>
             <div className="panel preview" style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
-              <PreviewPanel project={project} />
+              {previewHost ? <div className="spike-placeholder">Docked in another window</div> : <PreviewPanel project={project} />}
             </div>
+            {previewHost &&
+              createPortal(
+                <div className="panel preview" style={{ flex: 1 }}>
+                  <PreviewPanel project={project} />
+                </div>,
+                previewHost,
+              )}
             <Splitter
               orientation="vertical"
               label="Resize preview and editor"
@@ -250,13 +268,24 @@ export function Workspace({ project }: { project: ProjectView }) {
           className="panel terminal-panel"
           style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}
         >
-          <TerminalPanel
-            ref={terminals}
-            visible={!terminal.collapsed}
-            onCollapse={() => toggle("terminal")}
-            onActiveSession={setActiveSession}
-          />
+          {terminalHost ? (
+            <div className="spike-placeholder">Docked in another window</div>
+          ) : (
+            <TerminalPanel
+              ref={terminals}
+              visible={!terminal.collapsed}
+              onCollapse={() => toggle("terminal")}
+              onActiveSession={setActiveSession}
+            />
+          )}
         </div>
+        {terminalHost &&
+          createPortal(
+            <div className="panel terminal-panel" style={{ flex: 1 }}>
+              <TerminalPanel ref={terminals} visible onCollapse={() => setTerminalOut(false)} onActiveSession={setActiveSession} />
+            </div>,
+            terminalHost,
+          )}
       </div>
 
       <StatusBar

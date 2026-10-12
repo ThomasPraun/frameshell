@@ -115,8 +115,10 @@ function LiveFrame({
       else if (typeof data.shown === "number") box.current?.setAttribute("data-shown", data.shown.toFixed(3));
       else if (typeof data.error === "string") failed.current(data.error);
     };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    // SPIKE (ADR 0012): the frame posts to its own parent, which is the window this panel is drawn in.
+    const owner = box.current?.ownerDocument.defaultView ?? window;
+    owner.addEventListener("message", onMessage);
+    return () => owner.removeEventListener("message", onMessage);
   }, []);
 
   // One seek per playhead change: per frame while playing (the bridge keeps only the latest), exact while paused.
