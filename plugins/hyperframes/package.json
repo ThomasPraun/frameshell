@@ -1,6 +1,6 @@
 {
   "name": "@frameshell/hyperframes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Official Frameshell clip adapter: HyperFrames HTML compositions rendered headlessly to VP9 WebM with alpha.",
   "license": "Apache-2.0",
   "author": "Frameshell contributors",

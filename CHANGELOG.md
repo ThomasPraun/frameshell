@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
+Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets the clip and the HTML or React element there; the agent can ask the same itself with `frameshell inspect` / MCP `inspect_point`. `@frameshell/hyperframes` and `@frameshell/remotion` 0.3.0. A plugin's version is part of the clip render cache key, so existing `hyperframes` and `remotion` clips render once more after the update.
+
+### Changed
+
+- Desktop: "Select region" is now the Pick tool (`I`): a drag still selects a region; a click picks a point. Plain clicks on the paused preview select the picture seen at that pixel, so transparent parts of an overlay let the click through.
+- `PROTOCOL_VERSION` 32 (from 29): the app, the CLI and the daemon must be of this release.
+
 ### Added
 
 - `frameshell inspect --at <s> (--point x,y | --px X,Y) [--json]`, MCP `inspect_point` and daemon `inspect.point` (#164, ADR 0011): what a point of the frame shows, with the app closed. The clips under it come from the export placement, topmost first, and the target is the one seen there. In a generated clip, the DOM element painting that pixel comes from its live page, loaded in managed headless Chrome (DevTools protocol over a pipe, no new dependency) and probed with the app's Pick script, adapter facts and `generated` included. Elements need a trusted project; footage counts as painting its whole box. Agent skill updated.
@@ -152,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.2.0
