@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { blockMean, previewPixels } from "./frames.js";
-import { laidOutBox, launch, sandbox } from "./harness.js";
+import { laidOutBox, launch, sandbox, terminalText } from "./harness.js";
 import { testFfmpeg } from "./media.js";
 
 // Live preview (ADR 0010): a generated clip whose render is not ready plays its composition in a sandboxed frame from
@@ -49,6 +49,19 @@ async function press(key: string): Promise<void> {
 }
 
 const live = () => page.getByTestId("preview-live");
+const MOD = process.platform === "darwin" ? "Meta" : "Control";
+/** A reference line's ` · ` separator as a terminal shows it: PowerShell on Windows CI draws the middle dot as a blank. */
+const DOT = "\\s[·\\s]?\\s?";
+/** `pattern` with every literal ` · ` matching {@link DOT}. */
+const line = (pattern: string) => new RegExp(pattern.split(" · ").join(DOT));
+
+/** Move the pointer to page pixel (`x`, `y`) of a full-frame clip's live page, on the preview frame. */
+async function pointAt(x: number, y: number): Promise<{ x: number; y: number }> {
+  const frame = await laidOutBox(page.getByTestId("preview-frame"));
+  const at = { x: frame.x + (frame.width * x) / SIZE.width, y: frame.y + (frame.height * y) / SIZE.height };
+  await page.mouse.move(at.x, at.y, { steps: 3 });
+  return at;
+}
 const liveText = () => page.frameLocator('[data-testid="preview-live"] iframe').locator("#time");
 
 test.describe.configure({ mode: "serial" });
@@ -127,4 +140,59 @@ test("a clip under another picture, or whose adapter has no live preview, keeps 
   await expect(live()).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
   await expect(live()).toHaveAttribute("data-clip", "c_held");
   await expect(liveText()).toHaveText("0.000");
+});
+
+test("the Pick tool outlines the element under the pointer and picks it for the agent (ADR 0011)", async () => {
+  test.setTimeout(120_000);
+  // c_held still renders: the pick page loads beside the live one. #time is the 64 px text block from y 64 (its margin).
+  await press("i");
+  await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "true");
+  await pointAt(90, 70);
+  const outline = page.getByTestId("preview-pick-outline");
+  await expect(outline).toHaveAttribute("data-selector", "#time", { timeout: 30_000 });
+  await expect(outline).toHaveAttribute("data-clip", "c_held");
+  await expect(page.getByTestId("preview-pick-page")).toHaveCount(1);
+  // ↑ walks up to the page's parent of #time: body, which paints nothing, is never a step; nothing above #time here.
+  await page.keyboard.press("ArrowUp");
+  await expect(outline).toHaveAttribute("data-selector", "#time");
+
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.getByTestId("preview-pick-point")).toHaveAttribute("data-selector", "#time");
+  await page.keyboard.press(`${MOD}+l`);
+  const picked = line(String.raw`\[frameshell\] point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_held card compositions/cards/held\.json · element #time "0\.000" · details (\.frameshell/context/e_0000_1\.json) · frame pending`);
+  await expect.poll(() => terminalText(page), { timeout: 30_000 }).toMatch(picked);
+  const details = JSON.parse(readFileSync(join(box.projectDir, picked.exec(await terminalText(page))![1]!), "utf8"));
+  expect(details).toMatchObject({ kind: "point", target: "c_held", layers: [{ clip: "c_held", type: "card", paints: true }] });
+  expect(details.elements[0]).toMatchObject({ selector: "#time", tag: "p", text: "0.000", box: { x: 0, y: 64 } });
+
+  // The page's own background (the card colour on <html>) is what shows elsewhere: it is the hit there.
+  await pointAt(800, 400);
+  await expect(outline).toHaveAttribute("data-selector", "html");
+  // Ask agent focused the terminal: back to the preview first.
+  await press("Escape");
+  await expect(page.getByTestId("preview-pick-point")).toHaveCount(0);
+});
+
+test("the Pick tool probes a clip whose render is ready, at the paused time", async () => {
+  test.setTimeout(120_000);
+  // c_slow rendered in the first test: the engine plays its render, and a pick page answers for it.
+  setClips([{ id: "c_slow", type: "card", source: "compositions/cards/slow.json", start: 0, in: 0.5, duration: 2 }]);
+  await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
+  await expect(live()).toHaveCount(0);
+  await pointAt(90, 70);
+  const outline = page.getByTestId("preview-pick-outline");
+  await expect(outline).toHaveAttribute("data-selector", "#time", { timeout: 30_000 });
+  await expect(outline).toHaveAttribute("data-clip", "c_slow");
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.keyboard.press(`${MOD}+l`);
+  await expect
+    .poll(() => terminalText(page), { timeout: 30_000 })
+    .toMatch(line(String.raw`point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_slow card compositions/cards/slow\.json · element #time "0\.500" · details \S+ · frame \.frameshell/context/f_0000\.png`));
+  // Escape clears the pick, then leaves the tool.
+  await press("Escape");
+  await expect(page.getByTestId("preview-pick-point")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "false");
 });

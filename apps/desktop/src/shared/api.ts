@@ -236,6 +236,12 @@ export interface FrameshellApi {
      * project-relative path. Rejects with the daemon's message.
      */
     captureFrame(at: number): Promise<string>;
+    /**
+     * Write an "Ask agent" details file `name` (`e_<frame>_<n>.json`) with
+     * JSON `content` under `.frameshell/context/` through the daemon's
+     * `context.write` (ADR 0011). Resolves with its project-relative path.
+     */
+    writeDetails(name: string, content: string): Promise<string>;
   };
   clips: {
     /** `clip.renders` of a timeline of the window's project: render cache state per generated clip. Rejects with the daemon's message. */
@@ -302,6 +308,7 @@ export const Channel = {
   mediaRead: "media:read",
   mediaChanged: "media:changed",
   contextCaptureFrame: "context:capture-frame",
+  contextWriteDetails: "context:write-details",
   clipsRenders: "clips:renders",
   clipsJob: "clips:job",
   clipsLive: "clips:live",

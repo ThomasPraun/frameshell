@@ -5,14 +5,16 @@ import { openAskMenu } from "../ask/ask-agent.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type Program, programAt } from "../preview/program.js";
-import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersIn, placementEdit } from "../preview/transform-edit.js";
+import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useResolution } from "../preview/useProgram.js";
-import { type SelectedRegion, SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { drawSubtitleLines, subtitleLines } from "../subtitles/model.js";
 import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { PickLayer } from "./PickLayer.js";
+import { forgetLivePages } from "../preview/live-pages.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { LivePreview } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
@@ -22,8 +24,6 @@ import { sendClipEdit } from "./clip-edits.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
-/** Smallest region side, as a fraction of the frame: a click is not a region. */
-const MIN_REGION = 0.01;
 /** `FRAMESHELL_PREVIEW_PROBE=1` (main adds `?probe=1`): expose measurement hooks (ADR 0001 harness). */
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
@@ -54,7 +54,14 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
   const frameBox = useRef<HTMLDivElement>(null);
   const player = useRef<PreviewPlayer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [regionTool, setRegionTool] = useState(false);
+  const [pickTool, setPickTool] = useState(false);
+  const pickToolOn = useRef(false);
+  pickToolOn.current = pickTool;
+  /** Pick tool on or off; turning it on pauses, since it points at one frame. */
+  const togglePick = useCallback(() => {
+    if (!pickToolOn.current) transport.pause();
+    setPickTool((on) => !on);
+  }, []);
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const [liveClip, setLiveClip] = useState<string | null>(null);
 
@@ -72,6 +79,8 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
       { probe: PROBE },
     );
     player.current = instance;
+    // Live pages belong to one project: another one asks again.
+    forgetLivePages();
     const detach = transport.attach(instance);
     instance.seek(transport.get().time);
     return () => {
@@ -112,13 +121,15 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
       else if (event.key === "ArrowRight") transport.step(event.shiftKey ? second : 1);
       else if (event.key === "Home") transport.seek(0);
       else if (event.key === "End") transport.seek(Infinity);
-      else if (event.key === "Escape" && selection.get().region) selection.clear();
+      else if (event.key === "Escape" && (selection.get().region || selection.get().points.length > 0)) selection.clear();
+      else if (event.key === "Escape" && pickToolOn.current) setPickTool(false);
+      else if ((event.key === "i" || event.key === "I") && !event.shiftKey) togglePick();
       else return;
       event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePick]);
 
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
@@ -155,7 +166,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
           {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
-          <RegionLayer active={regionTool && !empty} fps={fps} program={program} />
+          <PickLayer active={pickTool && !empty} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} />
         </div>
       </div>
       <Inspector />
@@ -163,80 +174,10 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
         playing={playing}
         disabled={frames === 0}
         notice={notice}
-        regionTool={regionTool}
-        onRegionTool={() => setRegionTool((on) => !on)}
+        pickTool={pickTool}
+        onPickTool={togglePick}
       />
     </>
-  );
-}
-
-/**
- * Region tool surface over the frame: while `active`, a drag draws a
- * rectangle that becomes the shared selection on release. The selected
- * region stays drawn (dimming the rest) whether or not the tool is on;
- * with the tool off, presses fall through to the layer handles below.
- */
-function RegionLayer({ active, fps, program }: { active: boolean; fps: number; program: Program | null }) {
-  const { region } = useSelection();
-  const layer = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState<{ pointer: number; x: number; y: number; rect: SelectedRegion | null } | null>(null);
-
-  /** Pointer position as fractions of the frame, clamped to it. */
-  const point = (event: PointerEvent) => {
-    const box = layer.current!.getBoundingClientRect();
-    const clamp = (n: number) => Math.min(1, Math.max(0, n));
-    return { x: clamp((event.clientX - box.left) / box.width), y: clamp((event.clientY - box.top) / box.height) };
-  };
-  const spanning = (a: { x: number; y: number }, b: { x: number; y: number }): SelectedRegion => {
-    const rect = { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
-    const { time, fps: rate } = transport.get();
-    const frame = Math.floor(time * rate + 1e-6);
-    const clips = program ? layersIn(program, frame, rect).map(({ clip, type }) => ({ clip, type })) : [];
-    return { ...rect, at: time, clips };
-  };
-
-  const shown = draft?.rect ?? region;
-  return (
-    <div
-      ref={layer}
-      className={`preview-region-layer${active ? " is-active" : ""}`}
-      data-testid="preview-region-layer"
-      onPointerDown={(event) => {
-        if (!active || event.button !== 0) return;
-        event.preventDefault();
-        transport.pause();
-        layer.current!.setPointerCapture(event.pointerId);
-        setDraft({ pointer: event.pointerId, ...point(event), rect: null });
-      }}
-      onPointerMove={(event) => {
-        if (!draft || draft.pointer !== event.pointerId) return;
-        setDraft({ ...draft, rect: spanning(draft, point(event)) });
-      }}
-      onPointerUp={(event) => {
-        if (!draft || draft.pointer !== event.pointerId) return;
-        const rect = spanning(draft, point(event));
-        setDraft(null);
-        if (rect.x1 - rect.x0 >= MIN_REGION && rect.y1 - rect.y0 >= MIN_REGION) selection.selectRegion(rect, "preview");
-        else if (selection.get().region) selection.clear();
-      }}
-      onPointerCancel={() => setDraft(null)}
-    >
-      {shown && (
-        <div
-          className={`preview-region${draft ? " is-drawing" : ""}`}
-          data-testid="preview-region"
-          data-region={`${shown.x0.toFixed(3)},${shown.y0.toFixed(3)},${shown.x1.toFixed(3)},${shown.y1.toFixed(3)}`}
-          style={{
-            left: `${shown.x0 * 100}%`,
-            top: `${shown.y0 * 100}%`,
-            width: `${(shown.x1 - shown.x0) * 100}%`,
-            height: `${(shown.y1 - shown.y0) * 100}%`,
-          }}
-        >
-          {!draft && <span className="preview-region-time">{formatTimecode(shown.at, fps)}</span>}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -436,24 +377,24 @@ function TransportBar({
   playing,
   disabled,
   notice,
-  regionTool,
-  onRegionTool,
+  pickTool,
+  onPickTool,
 }: {
   playing: boolean;
   disabled: boolean;
   notice: string | null;
-  regionTool: boolean;
-  onRegionTool: () => void;
+  pickTool: boolean;
+  onPickTool: () => void;
 }) {
   return (
     <div className="preview-transport" role="toolbar" aria-label="Transport">
       <button
-        className={`icon-button region-toggle${regionTool ? " on" : ""}`}
-        aria-label="Select region"
-        aria-pressed={regionTool}
-        title="Select a region of the frame to ask the agent about"
+        className={`icon-button region-toggle${pickTool ? " on" : ""}`}
+        aria-label="Pick"
+        aria-pressed={pickTool}
+        title="Pick what you mean to ask the agent about: click an element, drag a region (I)"
         disabled={disabled}
-        onClick={onRegionTool}
+        onClick={onPickTool}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />

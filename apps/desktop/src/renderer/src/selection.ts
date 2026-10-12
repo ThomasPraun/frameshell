@@ -1,3 +1,4 @@
+import type { ProbedElement } from "@frameshell/protocol";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -75,6 +76,43 @@ export interface SelectedRegion {
   readonly at: number;
   /** Clips whose picture meets the rectangle at `at`, topmost first (ADR 0011); empty over black. */
   readonly clips: readonly RegionClip[];
+  /**
+   * Elements of generated clips that paint at least half inside the
+   * rectangle, topmost clip first, at most 10 in all; empty when there are
+   * none, or when the region was drawn outside the Pick tool's probes.
+   */
+  readonly elements: readonly { readonly clip: string; readonly element: ProbedElement }[];
+}
+
+/** One layer under a picked point, topmost first. */
+export interface PointLayer {
+  /** Clip id; inside a nested timeline `<nested clip>/<clip>`. */
+  readonly clip: string;
+  /** `media` for footage and stills; the adapter type (e.g. `hyperframes`) for generated clips. */
+  readonly type: string;
+  /** Its picture shows at the point (not transparent there). */
+  readonly paints: boolean;
+}
+
+/** A point of the preview frame picked with the Pick tool (ADR 0011). */
+export interface SelectedPoint {
+  /** Fractions of the frame, 0,0 top left. */
+  readonly x: number;
+  readonly y: number;
+  /** Timeline seconds of the frame it was picked on. */
+  readonly at: number;
+  /** Every layer whose box holds the point, topmost first. */
+  readonly layers: readonly PointLayer[];
+  /** The clip the user sees there: the first layer that paints it; null over black. */
+  readonly target: string | null;
+  /**
+   * The element picked in the target's composition, then its ancestors up
+   * to the composition root; empty when the target is not a generated clip
+   * or its page could not say.
+   */
+  readonly elements: readonly ProbedElement[];
+  /** Why the target's elements are unknown (no live page: untrusted project, no adapter); null otherwise. */
+  readonly unavailable: string | null;
 }
 
 /** A clip under a preview region. */
@@ -135,6 +173,8 @@ export interface Selection {
   readonly scene: SelectedScene | null;
   /** Rectangle drawn on the preview; null otherwise. */
   readonly region: SelectedRegion | null;
+  /** Points picked on the preview with the Pick tool, in pick order; empty otherwise. */
+  readonly points: readonly SelectedPoint[];
   /**
    * Track of {@link SELECTION_TIMELINE} picked on its own or whose cue the
    * selected words were picked on (a subtitle track); null otherwise.
@@ -155,6 +195,7 @@ const EMPTY: Selection = {
   files: [],
   scene: null,
   region: null,
+  points: [],
   track: null,
 };
 let current: Selection = EMPTY;
@@ -316,7 +357,15 @@ export const selection = {
   },
   /** Replace the selection with a rectangle drawn on the preview. */
   selectRegion(region: SelectedRegion, origin: SelectionOrigin): void {
-    replace({ ...EMPTY, region: { ...region, clips: region.clips.map((c) => ({ ...c })) }, origin });
+    replace({ ...EMPTY, region: { ...region, clips: region.clips.map((c) => ({ ...c })), elements: [...region.elements] }, origin });
+  },
+  /** Replace the selection with points picked on the preview (empty clears it). */
+  selectPoints(points: readonly SelectedPoint[], origin: SelectionOrigin): void {
+    replace(points.length === 0 ? EMPTY : { ...EMPTY, points: [...points], origin });
+  },
+  /** Add a picked point (Shift+click), keeping points picked before, at any time. */
+  addPoint(point: SelectedPoint, origin: SelectionOrigin): void {
+    replace({ ...EMPTY, points: [...current.points, point], origin });
   },
   /**
    * Drop selected files that no longer exist (`present` = every project

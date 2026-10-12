@@ -49,6 +49,7 @@ import type { AudioExtractor } from "./transcripts/audio.js";
 import { transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
+import { writeContext } from "./context.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -451,6 +452,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
+    "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
       return { dir, jobs: listJobs({ project: dir, active }) };

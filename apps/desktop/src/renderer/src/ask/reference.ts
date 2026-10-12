@@ -1,6 +1,6 @@
 // "Ask agent" reference text (SPEC decision 21, §10): what the user selected, as plain lines any agent CLI reads.
 import type { TimelineView } from "@frameshell/protocol";
-import type { SelectedWord, Selection } from "../selection.js";
+import type { SelectedPoint, SelectedWord, Selection } from "../selection.js";
 import { wordPlacement } from "../transcript/model.js";
 
 /** Every reference line starts with this tag, so agents (and the bundled skill) recognize it. */
@@ -70,6 +70,68 @@ function clipLine(id: string, view: TimelineView | null): string {
   return `${TAG} clip ${id}`;
 }
 
+/** What the reference cites besides the selection itself: captures, details files, clip sources. */
+export interface ReferenceExtras {
+  /** Frame capture of the region, or of every point, by its time `at`. */
+  frame?: string | null;
+  /** Frame captures of points by their time `at` (seconds), when they differ from {@link frame}. */
+  frames?: ReadonlyMap<number, string>;
+  /** No capture: a render it needs is not ready (ADR 0011). */
+  framePending?: boolean;
+  /** Details file of the region (one entry) or of each point, in order; null where none was written. */
+  details?: readonly (string | null)[];
+  /** Composition source or asset by clip id (also nested `<nested clip>/<clip>` ids), for clips the view does not hold. */
+  sources?: ReadonlyMap<string, string>;
+}
+
+/** Last segments of a probe selector: enough to recognize the element in a line; the details file has it whole. */
+const SHORT_SELECTOR_SEGMENTS = 3;
+
+function shortSelector(selector: string): string {
+  const parts = selector.split(" > ");
+  return parts.length > SHORT_SELECTOR_SEGMENTS ? `… > ${parts.slice(-SHORT_SELECTOR_SEGMENTS).join(" > ")}` : selector;
+}
+
+/** Asset or composition source of clip `id`: the view's own clips, else `sources`. */
+function sourceOf(id: string, view: TimelineView | null, sources: ReadonlyMap<string, string> | undefined): string | null {
+  const known = sources?.get(id);
+  if (known) return known;
+  for (const track of view?.tracks ?? []) {
+    const fields = track.clips.find((candidate) => candidate.id === id) as Record<string, unknown> | undefined;
+    if (!fields) continue;
+    return typeof fields["asset"] === "string" ? fields["asset"] : typeof fields["source"] === "string" ? fields["source"] : null;
+  }
+  return null;
+}
+
+/** One `point` line (ADR 0011): where, the clip seen there, the element in its composition, what lies under it. */
+function pointLine(point: SelectedPoint, view: TimelineView | null, extras: ReferenceExtras, index: number): string {
+  const parts = [`${TAG} point (${point.x.toFixed(2)},${point.y.toFixed(2)}) @ ${referenceTime(point.at)}`];
+  const targetAt = point.layers.findIndex((layer) => layer.clip === point.target);
+  const target = point.layers[targetAt];
+  if (!target) parts.push("black");
+  else {
+    const source = sourceOf(target.clip, view, extras.sources);
+    parts.push([`clip ${target.clip} ${target.type}`, source].filter(Boolean).join(" "));
+    const [element] = point.elements;
+    if (element) {
+      parts.push([`element ${shortSelector(element.selector)}`, element.text ? quote(element.text) : null].filter(Boolean).join(" "));
+      const components = element.adapter?.["components"];
+      if (Array.isArray(components) && components.length > 0) parts.push(`react ${components.join(" > ")}`);
+    } else if (point.unavailable) {
+      parts.push(`elements unavailable: ${point.unavailable}`);
+    }
+  }
+  const under = point.layers.slice(targetAt + 1);
+  if (target && under.length > 0) parts.push(`under ${under.map((layer) => `${layer.clip} ${layer.type}`).join(", ")}`);
+  const details = extras.details?.[index];
+  if (details) parts.push(`details ${details}`);
+  const frame = extras.frames?.get(point.at) ?? extras.frame;
+  if (frame) parts.push(`frame ${frame}`);
+  else if (extras.framePending) parts.push("frame pending");
+  return parts.join(" · ");
+}
+
 /**
  * The reference of `selection`, one line per selected item (SPEC §10):
  * words become subtitle lines (one per clip playing them), clips one line
@@ -77,21 +139,19 @@ function clipLine(id: string, view: TimelineView | null): string {
  * one line naming its clips, a bare timeline range, explorer files (`asset`
  * under `assets/`, else `file`), a preview region naming the clips under it
  * (topmost first) and its saved `frame` capture when there is one, or
- * `frame pending` while a render it needs is not ready (ADR 0011). Times are
- * timeline times of `view`; ids are the project files'. Empty for an empty
- * selection.
+ * `frame pending` while a render it needs is not ready (ADR 0011), and
+ * points picked with the Pick tool, one line each. Times are timeline times
+ * of `view`; ids are the project files'. Empty for an empty selection.
  */
-export function referenceLines(
-  selection: Selection,
-  view: TimelineView | null,
-  options: { frame?: string | null; framePending?: boolean } = {},
-): string[] {
+export function referenceLines(selection: Selection, view: TimelineView | null, options: ReferenceExtras = {}): string[] {
+  if (selection.points.length > 0) return selection.points.map((point, index) => pointLine(point, view, options, index));
   if (selection.region) {
     const { x0, y0, x1, y1, at, clips } = selection.region;
     const point = (x: number, y: number) => `(${x.toFixed(2)},${y.toFixed(2)})`;
     const under = clips.length > 0 ? [`clips ${clips.map((c) => c.clip).join(", ")}`] : [];
+    const details = options.details?.[0] ? [`details ${options.details[0]}`] : [];
     const frame = options.frame ? [`frame ${options.frame}`] : options.framePending ? ["frame pending"] : [];
-    return [[`${TAG} region ${point(x0, y0)}–${point(x1, y1)} @ ${referenceTime(at)}`, ...under, ...frame].join(" · ")];
+    return [[`${TAG} region ${point(x0, y0)}–${point(x1, y1)} @ ${referenceTime(at)}`, ...under, ...details, ...frame].join(" · ")];
   }
   if (selection.words.length > 0) return wordLines(selection, view);
   if (selection.scene) {

@@ -3,6 +3,7 @@ export * from "./timeline.js";
 export * from "./history.js";
 export * from "./agents.js";
 export * from "./ui.js";
+export * from "./probe.js";
 export { assertSocketPathFits, resolveSocketPath } from "./socket-path.js";
 export { type AppDirs, resolveAppDirs } from "./app-dirs.js";
 export { type CliShimTarget, cliShimName, cliShimScript, parseCliShim } from "./cli-shim.js";

@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 30;
+export const PROTOCOL_VERSION = 31;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -822,6 +822,23 @@ export const methods = {
       head: z.string().describe("Script to insert at the start of the entry's `<head>`; defines `window.frameshellLive`."),
       key: z.string().describe("The clip's render cache key now: when `clip.renders` reports another, ask again."),
     }),
+  },
+  "context.write": {
+    // The app's Ask agent only: it may not write under `.frameshell/` itself (the daemon is the only writer).
+    internal: true,
+    description:
+      "Write one Ask agent details file (ADR 0011) into `.frameshell/context/`: what a pick or a preview region points at " +
+      "(layers, element facts), for the agent to read from the reference line. Regenerable and gitignored; `gc` deletes " +
+      "files older than 7 days. Replaces a file of the same name. Fails with OutsideProject when `.frameshell/context` leaves the project.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: z
+        .string()
+        .regex(/^e_\d+_\d+\.json$/)
+        .describe("File name `e_<frame>_<n>.json`: program frame of the pick, its place in the selection (1-based)."),
+      content: z.string().max(1_000_000).describe("JSON text to write."),
+    }),
+    result: z.object({ path: z.string().describe("Project-relative path written, e.g. `.frameshell/context/e_0421_1.json`.") }),
   },
   transcribe: {
     mutating: true,
