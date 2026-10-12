@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
+Detachable panels (ADR 0012): any panel moves to its own window and back, for a second monitor, sharing the playhead, the selection and the keys with the project window. Terminals keep running through the move, "Ask agent" finds the terminal running the agent in any window, the preview goes full screen with `F`, and Cmd/Ctrl+Shift+Enter maximizes a panel in place. No protocol change: the CLI and the daemon of 0.5.0 work with this app. The official plugins are unchanged.
+
 ### Added
 
 - Desktop: the preview moves to its own window and back (#165, ADR 0012), for a second monitor. The button in its header opens it; "Dock preview back", closing the window, or "Bring back" in the slot it left returns it. The window is drawn by the project window, so it shares the playhead, the selection and the keys (Space, arrows, `I`, Cmd/Ctrl+L, undo) with it, and keeps playing at full rate while the project window is minimized. The project opens with the preview detached again, where it was: placement is saved globally (`panel-windows.json` in the config directory), per set of connected displays, and a window whose display is gone opens on the primary one.
@@ -174,7 +178,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.3.0
