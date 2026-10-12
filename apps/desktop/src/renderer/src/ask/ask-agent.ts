@@ -1,4 +1,5 @@
 // "Ask agent" (SPEC decision 21): one command, run from Cmd/Ctrl+L or any panel's context menu.
+import type { ClipRenderInfo } from "@frameshell/protocol";
 import type { MouseEvent } from "react";
 import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
 import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
@@ -39,44 +40,73 @@ export function hasSelection(current: Selection): boolean {
     current.history !== null ||
     current.files.length > 0 ||
     current.scene !== null ||
-    current.region !== null
+    current.region !== null ||
+    current.points.length > 0
   );
 }
 
 /**
  * Reference lines of the current selection, on the shared timeline feed's
- * latest revision. A preview region first gets its frame captured by the
- * daemon; when that fails the line goes without it and `warning` says why.
- * The capture waits for every generated clip's render, so while one is
- * queued, rendering or failed the line says `frame pending` instead and is
- * typed at once (ADR 0011): the agent captures the frame later.
+ * latest revision. A preview region, and every point picked with the Pick
+ * tool, first gets its frame captured by the daemon; when that fails the line
+ * goes without it and `warning` says why. The capture waits for every
+ * generated clip's render, so while one is queued, rendering or failed the
+ * line says `frame pending` instead and is typed at once (ADR 0011): the
+ * agent captures the frame later. Points, and a region with elements, get a
+ * details file under `.frameshell/context/` with everything the line shortens.
  */
 export async function composeReference(): Promise<{ lines: string[]; warning: string | null }> {
   const current = selection.get();
-  let frame: string | null = null;
-  let framePending = false;
-  let warning: string | null = null;
-  if (current.region) {
-    framePending = await rendersPending();
-    if (!framePending) {
+  const view = timelineSnapshot(SELECTION_TIMELINE);
+  const warnings: string[] = [];
+  const times = current.points.length > 0 ? [...new Set(current.points.map((point) => point.at))] : current.region ? [current.region.at] : [];
+  if (times.length === 0) return { lines: referenceLines(current, view), warning: null };
+
+  const renders = await clipRenders();
+  const framePending = renders.some((clip) => clip.state === "queued" || clip.state === "rendering" || clip.state === "failed");
+  const sources = new Map(renders.filter((clip) => clip.source).map((clip) => [clip.clip, clip.source!]));
+  const frames = new Map<number, string>();
+  if (!framePending) {
+    for (const at of times) {
       try {
-        frame = await window.frameshell.context.captureFrame(current.region.at);
+        frames.set(at, await window.frameshell.context.captureFrame(at));
       } catch (error) {
-        warning = `Frame not captured: ${(error as Error).message}`;
+        warnings.push(`Frame not captured: ${(error as Error).message}`);
+        break;
       }
     }
   }
-  return { lines: referenceLines(current, timelineSnapshot(SELECTION_TIMELINE), { frame, framePending }), warning };
+
+  const fps = view?.fps ?? 30;
+  const name = (at: number, n: number) => `e_${String(Math.max(0, Math.floor(at * fps + 1e-6))).padStart(4, "0")}_${n}.json`;
+  const write = async (file: string, content: object): Promise<string | null> => {
+    try {
+      return await window.frameshell.context.writeDetails(file, `${JSON.stringify(content, null, 2)}\n`);
+    } catch (error) {
+      warnings.push(`Details not saved: ${(error as Error).message}`);
+      return null;
+    }
+  };
+  const details: (string | null)[] = [];
+  if (current.points.length > 0) {
+    for (const [index, point] of current.points.entries()) {
+      details.push(await write(name(point.at, index + 1), { kind: "point", timeline: SELECTION_TIMELINE, ...point }));
+    }
+  } else if (current.region && current.region.elements.length > 0) {
+    details.push(await write(name(current.region.at, 1), { kind: "region", timeline: SELECTION_TIMELINE, ...current.region }));
+  }
+
+  const frame = current.region ? (frames.get(current.region.at) ?? null) : null;
+  const lines = referenceLines(current, view, { frame, frames, framePending, details, sources });
+  return { lines, warning: warnings.length > 0 ? [...new Set(warnings)].join(" ") : null };
 }
 
-/** True while a generated clip of the timeline has no render the frame capture could use without waiting. */
-async function rendersPending(): Promise<boolean> {
+/** `clip.renders` of the selection's timeline; empty when the daemon cannot say (the capture then says what is wrong). */
+async function clipRenders(): Promise<ClipRenderInfo[]> {
   try {
-    const { clips } = await window.frameshell.clips.renders(SELECTION_TIMELINE);
-    return clips.some((clip) => clip.state === "queued" || clip.state === "rendering" || clip.state === "failed");
+    return (await window.frameshell.clips.renders(SELECTION_TIMELINE)).clips;
   } catch {
-    // Unknown: try the capture, which says what is wrong.
-    return false;
+    return [];
   }
 }
 

@@ -77,7 +77,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       void composeReference()
         .then(({ lines, warning }) => {
           if (lines.length === 0) {
-            setNotice("Select clips, words, a time range, a file, a scene or a preview region to ask the agent about.");
+            setNotice("Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.");
             return;
           }
           if (terminalCollapsed.current) toggle("terminal");

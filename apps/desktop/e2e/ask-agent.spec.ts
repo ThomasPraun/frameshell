@@ -120,7 +120,7 @@ test("an explorer asset's context menu asks about the file", async () => {
 });
 
 test("a region drawn on the preview saves a frame capture and references it with coordinates, time and the clips under it", async () => {
-  await page.getByRole("button", { name: "Select region" }).click();
+  await page.getByRole("button", { name: "Pick" }).click();
   const frame = await laidOutBox(page.getByTestId("preview-frame"));
   await page.mouse.move(frame.x + frame.width * 0.1, frame.y + frame.height * 0.2);
   await page.mouse.down();

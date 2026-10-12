@@ -75,6 +75,7 @@ const api: FrameshellApi = {
   },
   context: {
     captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),
+    writeDetails: (name, content) => invokeOutcome(Channel.contextWriteDetails, name, content),
   },
   clips: {
     renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),

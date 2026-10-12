@@ -437,6 +437,12 @@ function registerIpc(): void {
     outcome(async () => (await requireProject(stateOf(event.sender))).files.readMedia(path)),
   );
 
+  ipcMain.handle(Channel.contextWriteDetails, (event, name: string, content: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      return (await daemon.request("context.write", { cwd: project.dir, name, content })).path;
+    }),
+  );
   ipcMain.handle(Channel.contextCaptureFrame, (event, at: number) =>
     outcome(async () =>
       captureContextFrame((method, params) => daemon.request(method, params), (await requireProject(stateOf(event.sender))).project.dir, at),

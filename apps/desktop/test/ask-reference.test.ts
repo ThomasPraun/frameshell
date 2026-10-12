@@ -38,7 +38,7 @@ const view: TimelineView = {
   ],
 };
 
-const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, track: null };
+const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null };
 const word = (id: string, text: string, start: number, end: number): SelectedWord => ({ transcript: TRANSCRIPT, asset: ASSET, word: id, text, start, end });
 
 describe("reference lines", () => {
@@ -106,7 +106,7 @@ describe("reference lines", () => {
       '[frameshell] scene scripts/script.md#intro "Intro" · clips c_0001, c_0012',
     ]);
     expect(referenceLines({ ...blank, scene, origin: "script" }, view)).toEqual(['[frameshell] scene scripts/script.md#intro "Intro"']);
-    const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.2249, at: 65.2, clips: [] };
+    const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.2249, at: 65.2, clips: [], elements: [] };
     expect(referenceLines({ ...blank, region, origin: "preview" }, view, { frame: ".frameshell/context/f_1956.png" })).toEqual([
       "[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_1956.png",
     ]);
@@ -116,6 +116,42 @@ describe("reference lines", () => {
     expect(referenceLines({ ...blank, region: over, origin: "preview" }, view, { framePending: true })).toEqual([
       "[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · clips c_0100, c_0002 · frame pending",
     ]);
+  });
+
+  it("names picked points: the clip seen there, its element, what lies under it, details and frame (ADR 0011)", () => {
+    const element = {
+      selector: "#intro > div.card:nth-child(2) > div.body > h1",
+      tag: "h1",
+      id: null,
+      classes: [],
+      text: "Nuevo lanzamiento",
+      box: { x: 0, y: 0, width: 10, height: 10 },
+      styles: {},
+      html: "<h1>Nuevo lanzamiento</h1>",
+      data: {},
+      adapter: { components: ["Video", "Scene2", "Title"] },
+    };
+    const layers = [
+      { clip: "c_0100", type: "remotion", paints: true },
+      { clip: "c_0002", type: "media", paints: true },
+    ];
+    const picked = { x: 0.712, y: 0.14, at: 65.2, layers, target: "c_0100", elements: [element], unavailable: null };
+    const below = { x: 0.1, y: 0.9, at: 3, layers: [{ ...layers[0]!, paints: false }, layers[1]!], target: "c_0002", elements: [], unavailable: null };
+    const extras = {
+      details: [".frameshell/context/e_1956_1.json", ".frameshell/context/e_0090_2.json"],
+      frames: new Map([[65.2, ".frameshell/context/f_1956.png"]]),
+      sources: new Map([["c_0100", "src/index.ts"]]),
+    };
+    expect(referenceLines({ ...blank, points: [picked, below], origin: "preview" }, view, extras)).toEqual([
+      '[frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 remotion src/index.ts · element … > div.card:nth-child(2) > div.body > h1 "Nuevo lanzamiento" · react Video > Scene2 > Title · under c_0002 media · details .frameshell/context/e_1956_1.json · frame .frameshell/context/f_1956.png',
+      "[frameshell] point (0.10,0.90) @ 00:00:03.00 · clip c_0002 media · details .frameshell/context/e_0090_2.json",
+    ]);
+    const locked = { ...picked, elements: [], unavailable: "the project's plugins are not trusted" };
+    expect(referenceLines({ ...blank, points: [locked], origin: "preview" }, view, { framePending: true, sources: extras.sources })).toEqual([
+      "[frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 remotion src/index.ts · elements unavailable: the project's plugins are not trusted · under c_0002 media · frame pending",
+    ]);
+    const dark = { x: 0.5, y: 0.5, at: 1, layers: [], target: null, elements: [], unavailable: null };
+    expect(referenceLines({ ...blank, points: [dark], origin: "preview" }, view)).toEqual(["[frameshell] point (0.50,0.50) @ 00:00:01.00 · black"]);
   });
 
   it("has nothing to say about an empty selection", () => {

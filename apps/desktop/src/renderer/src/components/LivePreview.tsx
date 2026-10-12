@@ -1,6 +1,7 @@
 import type { Size } from "@frameshell/schema/composite";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type LiveTarget, liveSeconds } from "../preview/live.js";
+import { livePage } from "../preview/live-pages.js";
 
 /** `source` of the messages the preview posts to a live page and the page's bridge posts back (main's `LIVE_MESSAGE`). */
 const TO_PAGE = "frameshell-preview";
@@ -37,19 +38,20 @@ export function LivePreview({
   const [, setVersion] = useState(0);
   const id = target ? `${target.clip}@${target.key}` : null;
   const clip = target?.clip ?? null;
+  const key = target?.key ?? null;
 
   useEffect(() => {
-    if (!id || !clip || !timeline || pages.current.has(id)) return;
+    if (!id || !clip || !key || !timeline || pages.current.has(id)) return;
     const settle = (state: PageState) => {
       pages.current.set(id, state);
       setVersion((n) => n + 1);
     };
     pages.current.set(id, { status: "loading" });
-    window.frameshell.clips.live(timeline, clip).then(
-      (page) => settle({ status: "loaded", url: page.url }),
+    livePage(timeline, clip, key).then(
+      (url) => settle({ status: "loaded", url }),
       (error: unknown) => settle({ status: "failed", error: (error as Error)?.message ?? String(error) }),
     );
-  }, [id, clip, timeline]);
+  }, [id, clip, key, timeline]);
 
   const page = id ? pages.current.get(id) : undefined;
   // No frame: an unmounting LiveFrame has already reported null.

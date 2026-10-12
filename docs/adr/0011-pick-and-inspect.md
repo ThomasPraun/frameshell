@@ -79,6 +79,18 @@ There is no file:line for React for now. The hook leaves room for source maps la
 
 **8. Cleanup.** `gc` (and the sweep on open) deletes files in `.frameshell/context/` older than 7 days.
 
+## Implementation notes
+
+Found while building the parts; the decision above stands.
+
+- **Part 2 (2026-10-11):**
+  - Pick pages are kept while the tool is on and seeked again for a new frame, not dropped on every frame change: a probe waits for the seek it needs.
+  - The live page URL of a clip is asked of main once per clip and render identity, shared by the live preview and the Pick tool: main revokes a clip's previous URL when asked again.
+  - Where no element paints, a page whose `body` or `html` has a background is the hit (`body`/`html`): that is the composition's own background, not the layer below.
+  - The probe script lives in `@frameshell/protocol/probe` (browser-safe subpath): the app's bridge injects it now, the daemon's `inspect.point` will.
+  - The renderer may not write under `.frameshell/`, so details files go through a new internal daemon method, `context.write` (`PROTOCOL_VERSION` 31).
+  - `generated` (element absent from the source files) moves to part 3 with the adapters' source facts.
+
 ## Considered options
 
 - **The HyperFrames runtime's own picker** (`__HF_PICKER_API`, `enable-pick-mode`). It would be free for HyperFrames, but it ties the app to one adapter, which ADR 0010 avoids, and its selectors are one level deep. Rejected in favour of the generic probe.

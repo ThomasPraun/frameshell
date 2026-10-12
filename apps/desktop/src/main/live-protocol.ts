@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { realpath, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { Readable } from "node:stream";
+import { PROBE_MAX_DEPTH, PROBE_MAX_ELEMENTS, PROBE_SCRIPT } from "@frameshell/protocol";
 import { parseRange } from "./media-protocol.js";
 
 /** URL scheme of live pages. */
@@ -23,9 +24,17 @@ export interface LivePageSource {
 
 /** Messages between the preview and a live page's bridge. */
 export const LIVE_MESSAGE = {
-  /** `source` of what the preview posts: `{ source, seek: seconds }`. */
+  /**
+   * `source` of what the preview posts: `{ source, seek: seconds }`, and the
+   * element probes of ADR 0011, `{ source, probe: { id, x, y, depth } }` and
+   * `{ source, probeRect: { id, x0, y0, x1, y1, max } }` (page pixels).
+   */
   toPage: "frameshell-preview",
-  /** `source` of what the bridge posts: `{ source, ready: true }`, `{ source, shown: seconds }` or `{ source, error }`. */
+  /**
+   * `source` of what the bridge posts: `{ source, ready: true }`,
+   * `{ source, shown: seconds }`, `{ source, error }`, and the answer to a
+   * probe, `{ source, probe: { id, elements } }` (`ProbedElement`s).
+   */
   fromPage: "frameshell-live",
 } as const;
 
@@ -35,8 +44,11 @@ export const LIVE_MESSAGE = {
  * while a seek runs, only the latest request waits, older ones are dropped.
  * It answers `ready` once `frameshellLive.ready` settles, `shown` after each
  * seek, and `error` when either fails or the page defines no `frameshellLive`.
+ * A probe (ADR 0011) runs {@link PROBE_SCRIPT} once the page is ready and no
+ * seek is pending, so it describes the frame last seeked to.
  */
-export const LIVE_BRIDGE = `(function () {
+export const LIVE_BRIDGE = `${PROBE_SCRIPT}
+(function () {
   var post = function (message) { message.source = "${LIVE_MESSAGE.fromPage}"; window.parent.postMessage(message, "*"); };
   var fail = function (error) { post({ error: String((error && error.message) || error) }); };
   var live = window.frameshellLive;
@@ -54,11 +66,37 @@ export const LIVE_BRIDGE = `(function () {
       .then(function () { post({ shown: seconds }); }, fail)
       .then(function () { running = false; next(); });
   };
+  var settled = function () {
+    return new Promise(function (resolve) {
+      (function check() { if (!running && pending === null) resolve(); else setTimeout(check, 16); })();
+    });
+  };
+  var probe = function (id, run) {
+    ready
+      .then(settled)
+      .then(run)
+      .then(function (elements) { post({ probe: { id: id, elements: elements } }); }, function (error) { post({ probe: { id: id, elements: [], error: String((error && error.message) || error) } }); });
+  };
+  var num = function (value) { return typeof value === "number" && isFinite(value); };
   window.addEventListener("message", function (event) {
     var data = event.data;
-    if (event.source !== window.parent || !data || data.source !== "${LIVE_MESSAGE.toPage}" || typeof data.seek !== "number") return;
-    pending = data.seek;
-    next();
+    if (event.source !== window.parent || !data || data.source !== "${LIVE_MESSAGE.toPage}") return;
+    if (typeof data.seek === "number") {
+      pending = data.seek;
+      next();
+      return;
+    }
+    var at = data.probe;
+    if (at && num(at.id) && num(at.x) && num(at.y)) {
+      var depth = num(at.depth) ? Math.max(0, Math.min(${PROBE_MAX_DEPTH}, at.depth)) : 0;
+      probe(at.id, function () { return window.__frameshellProbe.at(at.x, at.y, depth); });
+      return;
+    }
+    var rect = data.probeRect;
+    if (rect && num(rect.id) && num(rect.x0) && num(rect.y0) && num(rect.x1) && num(rect.y1)) {
+      var max = num(rect.max) ? Math.max(0, Math.min(${PROBE_MAX_ELEMENTS}, rect.max)) : ${PROBE_MAX_ELEMENTS};
+      probe(rect.id, function () { return window.__frameshellProbe.within(rect.x0, rect.y0, rect.x1, rect.y1, max); });
+    }
   });
   ready.then(function () { post({ ready: true }); }, fail);
 })();`;

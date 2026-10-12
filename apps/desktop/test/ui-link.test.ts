@@ -88,7 +88,7 @@ describe("uiView", () => {
 
 describe("uiView region", () => {
   it("publishes a preview region with the clips under it, corners and time in thousandths", () => {
-    selection.selectRegion({ x0: 0.1234, y0: 0.2, x1: 0.56789, y1: 0.9, at: 65.20001, clips: [{ clip: "c_0100", type: "hyperframes" }] }, "preview");
+    selection.selectRegion({ x0: 0.1234, y0: 0.2, x1: 0.56789, y1: 0.9, at: 65.20001, clips: [{ clip: "c_0100", type: "hyperframes" }], elements: [] }, "preview");
     const view = uiView({ transport: createTransport().get(), selection: selection.get(), editor: { active: null, tabs: [] }, visible: null });
     expect(view.selection.region).toEqual({ x0: 0.123, y0: 0.2, x1: 0.568, y1: 0.9, at: 65.2, clips: [{ clip: "c_0100", type: "hyperframes" }] });
     selection.clear();

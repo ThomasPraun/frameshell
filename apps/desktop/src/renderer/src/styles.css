@@ -2315,6 +2315,62 @@ button.track-head:focus-visible {
   white-space: nowrap;
 }
 
+/* Pick tool (ADR 0011): hover outline of the element or picture under the pointer, as browser inspectors draw it. */
+.preview-pick-layer.is-active {
+  cursor: default;
+}
+
+.preview-pick-outline {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(227, 165, 60, 0.14);
+  pointer-events: none;
+}
+
+.preview-pick-label {
+  position: absolute;
+  left: -1px;
+  bottom: calc(100% + 3px);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+  font: 10.5px/15px var(--font-mono);
+  color: #1a1b1d;
+  background: var(--accent);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.preview-pick-point {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: rgba(29, 30, 32, 0.6);
+  pointer-events: none;
+}
+
+/* Pick pages answer probes only: never seen, never clicked. */
+.preview-pick-page {
+  position: absolute;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-pick-page iframe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  transform-origin: 0 0;
+  background: transparent;
+  color-scheme: light;
+}
+
 .status-notice {
   color: var(--accent);
   overflow: hidden;

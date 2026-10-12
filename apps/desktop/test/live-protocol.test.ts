@@ -104,9 +104,9 @@ describe("live page bridge", () => {
     const listeners: ((event: { source: unknown; data: unknown }) => void)[] = [];
     const parent = { postMessage: (message: Record<string, unknown>) => posted.push({ ...message }) };
     const window = { parent, frameshellLive: live, addEventListener: (_type: string, listener: (typeof listeners)[number]) => listeners.push(listener) };
-    runInNewContext(LIVE_BRIDGE, { window, Promise, String });
+    runInNewContext(LIVE_BRIDGE, { window, Promise, String, setTimeout });
     const send = (data: unknown, source: unknown = parent) => listeners.forEach((listener) => listener({ source, data }));
-    return { posted, send };
+    return { posted, send, window };
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -119,6 +119,25 @@ describe("live page bridge", () => {
     await settle();
     expect(seeks).toEqual([1.5]);
     expect(posted.at(-1)).toEqual({ source: "frameshell-live", shown: 1.5 });
+  });
+
+  it("answers element probes after the pending seek, with the probe's elements and clamped depth (ADR 0011)", async () => {
+    const order: string[] = [];
+    const { posted, send, window } = bridge({ ready: Promise.resolve(), seek: (t: number) => void order.push(`seek ${t}`) });
+    (window as Record<string, unknown>)["__frameshellProbe"] = {
+      at: (x: number, y: number, depth: number) => (order.push(`at ${x},${y},${depth}`), [{ selector: "#time" }]),
+      within: (x0: number, y0: number, x1: number, y1: number, max: number) => (order.push(`within ${x0},${y0},${x1},${y1},${max}`), []),
+    };
+    send({ source: "frameshell-preview", seek: 2 });
+    send({ source: "frameshell-preview", probe: { id: 7, x: 40, y: 50, depth: 99 } });
+    send({ source: "frameshell-preview", probeRect: { id: 8, x0: 0, y0: 0, x1: 10, y1: 10, max: 50 } });
+    send({ source: "frameshell-preview", probe: { id: "9", x: 1, y: 1 } });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(order).toEqual(["seek 2", "at 40,50,8", "within 0,0,10,10,10"]);
+    expect(posted.filter((message) => "probe" in message)).toEqual([
+      { source: "frameshell-live", probe: { id: 7, elements: [{ selector: "#time" }] } },
+      { source: "frameshell-live", probe: { id: 8, elements: [] } },
+    ]);
   });
 
   it("ignores messages from anything but the parent, and malformed ones", async () => {
