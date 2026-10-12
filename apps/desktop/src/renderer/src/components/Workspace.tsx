@@ -7,6 +7,7 @@ import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
 import { ContextMenuHost } from "./ContextMenu.js";
+import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
 import { PreviewPanel } from "./PreviewPanel.js";
@@ -29,8 +30,8 @@ const SHORTCUTS: Record<string, PanelId> = { b: "sidebar", j: "timeline", "\\": 
 
 /**
  * Project window: SPEC §10 layout with resizable, collapsible, per-project
- * persisted panels. The preview can move to its own window (ADR 0012): its
- * slot then says so and brings it back. Which panels are detached is global
+ * persisted panels. The preview and each terminal tab can move to their own
+ * window (ADR 0012): the slot left then says so and brings the panel back. Which panels are detached is global
  * and kept by main, so the project opens with them where they were.
  */
 export function Workspace({ project }: { project: ProjectView }) {
@@ -94,7 +95,7 @@ export function Workspace({ project }: { project: ProjectView }) {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // "Ask agent" (SPEC decision 21): type the selection's reference into the active terminal, unsent.
+  // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
   useEffect(() => {
     let asking = false;
     return askAgent.install(() => {
@@ -106,8 +107,9 @@ export function Workspace({ project }: { project: ProjectView }) {
             setNotice("Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.");
             return;
           }
-          if (terminalCollapsed.current) toggle("terminal");
-          terminals.current?.type(lines);
+          terminals.current?.type(lines, () => {
+            if (terminalCollapsed.current) toggle("terminal");
+          });
           setNotice(warning);
         })
         .finally(() => (asking = false));
@@ -288,6 +290,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         >
           <TerminalPanel
             ref={terminals}
+            projectName={project.name}
             visible={!terminal.collapsed}
             onCollapse={() => toggle("terminal")}
             onActiveSession={setActiveSession}
@@ -316,20 +319,6 @@ function askKeyApplies(target: EventTarget | null): boolean {
   if (!element) return true;
   if (element.closest(".monaco-editor")) return false;
   return isMac || !element.closest(".xterm");
-}
-
-/** A detached panel's slot (ADR 0012): where the panel went, and a way back. */
-function DockedElsewhere({ title, onBringBack }: { title: string; onBringBack: () => void }) {
-  return (
-    <div className="panel-docked-elsewhere" data-testid="panel-docked-elsewhere">
-      <p>
-        <strong>{title}</strong> is docked in another window
-      </p>
-      <button className="button" onClick={onBringBack}>
-        Bring back
-      </button>
-    </div>
-  );
 }
 
 function CollapsedRail({ side, label, onExpand }: { side: "left" | "right"; label: string; onExpand: () => void }) {

@@ -147,6 +147,12 @@ export interface FrameshellApi {
   };
   terminals: {
     create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
+    /**
+     * Output to feed a view mounting on terminal `id` (ADR 0012): its recent
+     * output, about 10,000 lines. Data events sent before the reply are in
+     * it; later ones are not. Null once the terminal was killed.
+     */
+    attach(id: string): Promise<string | null>;
     write(id: string, data: string): void;
     resize(id: string, cols: number, rows: number): void;
     kill(id: string): void;
@@ -291,6 +297,7 @@ export const Channel = {
   filesWrite: "files:write",
   filesChanged: "files:changed",
   terminalCreate: "terminal:create",
+  terminalAttach: "terminal:attach",
   terminalWrite: "terminal:write",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",

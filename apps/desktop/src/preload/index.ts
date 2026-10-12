@@ -35,6 +35,7 @@ const api: FrameshellApi = {
   },
   terminals: {
     create: (size) => ipcRenderer.invoke(Channel.terminalCreate, size),
+    attach: (id) => ipcRenderer.invoke(Channel.terminalAttach, id),
     write: (id, data) => ipcRenderer.send(Channel.terminalWrite, id, data),
     resize: (id, cols, rows) => ipcRenderer.send(Channel.terminalResize, id, cols, rows),
     kill: (id) => ipcRenderer.send(Channel.terminalKill, id),

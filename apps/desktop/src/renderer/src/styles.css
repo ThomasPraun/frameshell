@@ -2195,6 +2195,12 @@ button.track-head:focus-visible {
   .status-agent {
     animation: none;
   }
+
+  .terminal-tab.is-flashing,
+  .terminal-window-title.is-flashing {
+    animation: none;
+    background: var(--accent-soft);
+  }
 }
 
 .timeline-rejection {
@@ -2217,6 +2223,29 @@ button.track-head:focus-visible {
 .panel-window > .panel {
   flex: 1;
   min-width: 0;
+}
+
+/* A detached terminal tab's window. */
+.terminal-window {
+  background: var(--bg-term);
+}
+
+/* A terminal tab shown in its own window. */
+.terminal-tab.is-detached > span {
+  font-style: italic;
+}
+
+/* The Ask agent target: its tab, or its window's title, flashes where the reference went. */
+.terminal-tab.is-flashing,
+.terminal-window-title.is-flashing {
+  animation: ask-target-flash 400ms ease-in-out 3;
+}
+
+@keyframes ask-target-flash {
+  50% {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
 }
 
 /* What stays in a detached panel's slot. */

@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Desktop: the preview moves to its own window and back (#165, ADR 0012), for a second monitor. The button in its header opens it; "Dock preview back", closing the window, or "Bring back" in the slot it left returns it. The window is drawn by the project window, so it shares the playhead, the selection and the keys (Space, arrows, `I`, Cmd/Ctrl+L, undo) with it, and keeps playing at full rate while the project window is minimized. The project opens with the preview detached again, where it was: placement is saved globally (`panel-windows.json` in the config directory), per set of connected displays, and a window whose display is gone opens on the primary one.
 - Desktop: `F` shows the preview full screen, in the project window or a detached one; the transport shows while the pointer is over it, and Escape leaves.
+- Desktop: each terminal tab moves to its own window and back (#166, ADR 0012), for an agent on a second monitor. The button in the terminal header opens the active tab's window; "Dock terminal back", closing the window, or "Bring back" returns it. The shell keeps running through the move and the screen comes along: main keeps each terminal's recent output (about 10,000 lines, at most 4 MiB) and replays it into the view that shows it next. Closing a project still ends its terminals, so it reopens with them docked.
+- Desktop: "Ask agent" types into the last focused terminal running an agent, in any window of the project, else the last focused terminal, and flashes its tab. A terminal window behind others is not raised.
+
+### Changed
+
+- Desktop: a terminal's shell no longer ends when its view goes away, only when its tab is closed or its project window closes.
 
 ## [0.5.0] - 2026-10-12
 
