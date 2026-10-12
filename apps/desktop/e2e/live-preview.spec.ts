@@ -50,6 +50,10 @@ async function press(key: string): Promise<void> {
 
 const live = () => page.getByTestId("preview-live");
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
+/** A reference line's ` · ` separator as a terminal shows it: PowerShell on Windows CI draws the middle dot as a blank. */
+const DOT = "\\s[·\\s]?\\s?";
+/** `pattern` with every literal ` · ` matching {@link DOT}. */
+const line = (pattern: string) => new RegExp(pattern.split(" · ").join(DOT));
 
 /** Move the pointer to page pixel (`x`, `y`) of a full-frame clip's live page, on the preview frame. */
 async function pointAt(x: number, y: number): Promise<{ x: number; y: number }> {
@@ -156,9 +160,9 @@ test("the Pick tool outlines the element under the pointer and picks it for the 
   await page.mouse.up();
   await expect(page.getByTestId("preview-pick-point")).toHaveAttribute("data-selector", "#time");
   await page.keyboard.press(`${MOD}+l`);
-  const line = /\[frameshell\] point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_held card compositions\/cards\/held\.json · element #time "0\.000" · details (\.frameshell\/context\/e_0000_1\.json) · frame pending/;
-  await expect.poll(() => terminalText(page), { timeout: 30_000 }).toMatch(line);
-  const details = JSON.parse(readFileSync(join(box.projectDir, line.exec(await terminalText(page))![1]!), "utf8"));
+  const picked = line(String.raw`\[frameshell\] point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_held card compositions/cards/held\.json · element #time "0\.000" · details (\.frameshell/context/e_0000_1\.json) · frame pending`);
+  await expect.poll(() => terminalText(page), { timeout: 30_000 }).toMatch(picked);
+  const details = JSON.parse(readFileSync(join(box.projectDir, picked.exec(await terminalText(page))![1]!), "utf8"));
   expect(details).toMatchObject({ kind: "point", target: "c_held", layers: [{ clip: "c_held", type: "card", paints: true }] });
   expect(details.elements[0]).toMatchObject({ selector: "#time", tag: "p", text: "0.000", box: { x: 0, y: 64 } });
 
@@ -185,7 +189,7 @@ test("the Pick tool probes a clip whose render is ready, at the paused time", as
   await page.keyboard.press(`${MOD}+l`);
   await expect
     .poll(() => terminalText(page), { timeout: 30_000 })
-    .toMatch(/point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_slow card compositions\/cards\/slow\.json · element #time "0\.500" · details \S+ · frame \.frameshell\/context\/f_0000\.png/);
+    .toMatch(line(String.raw`point \(0\.09,0\.13\) @ 00:00:00\.00 · clip c_slow card compositions/cards/slow\.json · element #time "0\.500" · details \S+ · frame \.frameshell/context/f_0000\.png`));
   // Escape clears the pick, then leaves the tool.
   await press("Escape");
   await expect(page.getByTestId("preview-pick-point")).toHaveCount(0);
