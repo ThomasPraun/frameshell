@@ -51,11 +51,11 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 14 | Scripts | **Markdown with optional conventions** (`##` = scene, optional frontmatter); clips carry `scriptRef` | Free writing; traceability when useful; generation stays with the agent | Structured script format |
 | 15 | Agent changes | **Applied immediately, grouped in transactions**; history with author; diff review; revert whole tx or single ops | Keeps autonomy (agent works for an hour unattended) and adds review afterwards; `history --since` lets the agent resume from human edits | Plain undo, blocking proposal/diff mode (v0.2 opt-in) |
 | 16 | Platforms | **macOS + Linux stable, Windows beta**; CI on all three from day one | Focus plus early detection of OS assumptions; signing cost only on macOS at v0.1 | macOS only, all three stable |
-| 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left** | Agent, preview and timeline visible together | Terminal tabbed with timeline, free docking |
+| 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left**. Any panel can be **detached** into its own window (sharing the project window's state) and docked back, or maximized in place (ADR 0012) | Agent, preview and timeline visible together; a second monitor holds the preview or the agent | Terminal tabbed with timeline, free docking |
 | 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
 | 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
-| 20 | MCP scope | **Project + observe + navigate**: every core operation as a typed tool, frame capture as images, UI state (playhead, selection, open tab) and navigation (seek, play, select, open file, show transaction diff) | Model can see what it built and resolve "this" from the user's selection; UI actions are already core operations | Project-only (model edits blind), full UI automation (clicks/drags: fragile, adds no capability) |
-| 21 | Ask agent from selection | **"Ask agent" action** (Cmd/Ctrl+L, context menu) writes a compact text reference of the current selection into the active agent terminal's prompt, unsent. Selectable: clips, words/subtitles, time ranges, assets, script scenes, and a **rectangular region of the preview frame** | Removes "which one?" round trips; plain text works with any agent CLI; ids let the agent fetch detail via CLI/MCP | Agent-pull only via `ui_state` (user must still explain), chat panel (decision 9) |
+| 20 | MCP scope | **Project + observe + navigate**: every core operation as a typed tool, frame capture as images, what is at a point of a frame (clip stack and composition element, ADR 0011), UI state (playhead, selection, open tab) and navigation (seek, play, select, open file, show transaction diff) | Model can see what it built and resolve "this" from the user's selection; UI actions are already core operations | Project-only (model edits blind), full UI automation (clicks/drags: fragile, adds no capability) |
+| 21 | Ask agent from selection | **"Ask agent" action** (Cmd/Ctrl+L, context menu) writes a compact text reference of the current selection into the active agent terminal's prompt, unsent. Selectable: clips, words/subtitles, time ranges, assets, script scenes, a **rectangular region of the preview frame**, and **picked points**: the clip stack and the composition element under a pixel (ADR 0011) | Removes "which one?" round trips; plain text works with any agent CLI; ids let the agent fetch detail via CLI/MCP | Agent-pull only via `ui_state` (user must still explain), chat panel (decision 9) |
 
 ### Cross-cutting rules
 
@@ -105,7 +105,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 
 ### 3.2 Electron app
 
-- Main process: window, node-pty terminals (sessions die with the app in v0.1), custom `frameshell-media://` protocol serving proxies with HTTP range support.
+- Main process: one window per project plus its detached panel windows (ADR 0012), node-pty terminals (a terminal lives until closed, also across moves between windows; sessions die with the project window), custom `frameshell-media://` protocol serving proxies with HTTP range support.
 - Each pty receives `FRAMESHELL_SOCKET`, `FRAMESHELL_PROJECT` and `FRAMESHELL_SESSION` env vars, so a CLI call from that terminal is attributed to that session.
 - Renderer: React UI; subscribes to daemon events; sends operations, never writes files.
 
@@ -404,9 +404,9 @@ All mutating commands accept `--timeline <id>` (default `main`) and print the re
 |---|---|
 | **Project** | Every CLI operation of §7 as a typed tool (`clip_add`, `clip_trim`, `cut`, `track_add`, `transcribe`, `render`, `tx_begin`, `history`, `revert`, `plugin_install`…). Input schemas generated from the same Zod models as the protocol; errors as actionable tool errors. |
 | **Read** | Resources for timeline, transcript, script outline, history and project status, in the compact form of `--json` CLI output. Resource change notifications on `timeline.changed` / `history.appended`. |
-| **Observe** | `frame_capture(timeline, at)` returns the composited frame as an image; `frames_strip(timeline, from, to, count)` returns a contact sheet. Rendered by the daemon with the export compiler (single-frame plan), so it works with the app closed and matches export. |
-| **UI state** | `ui_state()` returns playhead, selection (clips, words, time range), open editor tab and visible range. Available when the app is connected; otherwise returns `{ connected: false }`. |
-| **Navigate** | `ui_seek`, `ui_play`, `ui_pause`, `ui_select`, `ui_open_file`, `ui_show_tx_diff`. Routed daemon → connected UI client. Navigation only: no pixel clicks, no drags. |
+| **Observe** | `frame_capture(timeline, at)` returns the composited frame as an image; `frames_strip(timeline, from, to, count)` returns a contact sheet. Rendered by the daemon with the export compiler (single-frame plan), so it works with the app closed and matches export. `inspect_point(timeline, at, x, y)` returns the clip stack under that point and, for generated clips in trusted projects, the composition element there (ADR 0011). |
+| **UI state** | `ui_state()` returns playhead, selection (clips, words, time range, preview region, picked points), open editor tab and visible range. Available when the app is connected; otherwise returns `{ connected: false }`. |
+| **Navigate** | `ui_seek`, `ui_play`, `ui_pause`, `ui_select` (also picked points, so the model can show what it understood), `ui_open_file`, `ui_show_tx_diff`. Routed daemon → connected UI client. Navigation only: no pixel clicks, no drags. |
 
 Design rules:
 
@@ -414,7 +414,7 @@ Design rules:
 - Tool outputs stay compact (ids, revision, changed ranges); large data goes through resources.
 - Every mutating tool reports the new `revision` and transaction id, so the model can revert its own work.
 - The UI publishes its state to the daemon; the daemon is the only broker. MCP never talks to Electron directly.
-- CLI parity: `frameshell frame --at <s> --out <png>` exists for non-MCP agents.
+- CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
 
 ## 8. Plugin system
 
@@ -490,14 +490,15 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 └──────────┴─────────────────────────────────┴──────────────┘
 ```
 
-- All panels resizable and collapsible; timeline maximize shortcut; layout saved per project.
+- All panels resizable and collapsible; any panel maximizes in place (Cmd/Ctrl+Shift+Enter) or detaches into its own window and docks back; `F` shows the preview full screen (ADR 0012). Panel sizes saved per project; detached windows' placement saved globally, per display set.
 - **Transcript view:** words synced to the playhead; words removed by cuts shown struck through; clicking a struck word restores it (an op that re-extends or re-inserts the clip range); selecting words selects the timeline range; clicking a word seeks the playhead to it, also while playing (selecting a script heading or History row never moves a playing playhead).
 - **Timeline v0.1:** multiple video tracks (overlay transform: position, scale, opacity), audio tracks with gain and waveform, subtitle tracks. Move, trim, split, ripple delete, snapping, zoom. Generated clips show render state. Ripple trim (R toggles it, Shift when pressing an edge inverts it). Multi-select (Shift/Cmd/Ctrl+click, Cmd/Ctrl+A) moves the selected clips together. Undo and redo in the Edit menu, and their keys anywhere outside text fields.
 - **History panel:** transactions by author, diff highlight, revert.
-- **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Region selection: drag a rectangle on the preview; the reference carries normalized coordinates and a frame capture saved under `.frameshell/context/` (regenerable, gitignored). Reference format, one line per selected item:
+- **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Pick tool (`I`, ADR 0011): hover outlines the element under the cursor, ↑/↓ moves to its parent or child, click picks a point, Shift+click adds points (each keeps its time), drag selects a region. A point names the clip stack under it (topmost painting layer first) and the composition element there; a region names the clips it touches. Details (full stack, element facts) and the frame capture go under `.frameshell/context/` (regenerable, gitignored, swept by `gc` after 7 days). The reference is typed at once; while a render is pending the frame is `frame pending`. Reference format, one line per selected item:
   ```
   [frameshell] subtitle "hola a todos" · 00:03:12.40–00:03:14.10 · clip c_0012 · words w_000123–w_000127
-  [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_0421.png
+  [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · clips c_0100 c_0002 · details .frameshell/context/e_0421_1.json · frame .frameshell/context/f_0421.png
+  [frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 hyperframes overlays/intro.html · element #scene-2 > .card > h1 "Nuevo lanzamiento" · under c_0002 media · details .frameshell/context/e_0421_2.json · frame .frameshell/context/f_0421.png
   [frameshell] asset assets/logo.png
   [frameshell] file scripts/launch.md
   [frameshell] clip c_0012 · media assets/raw-01.mp4 · 00:00:12.40–00:00:31.00 · track t_1a2b3c
