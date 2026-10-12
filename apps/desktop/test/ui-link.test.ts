@@ -79,7 +79,7 @@ describe("uiView", () => {
       playhead: 1.1,
       playing: false,
       duration: 10.033,
-      selection: { clips: ["c_a"], words: [], range: { from: 0.333, to: 2 }, history: null, region: null },
+      selection: { clips: ["c_a"], words: [], range: { from: 0.333, to: 2 }, history: null, region: null, points: [] },
       editor: { active: "scripts/a.md", tabs: ["scripts/a.md"] },
       visible: { from: 0, to: 12.346 },
     } satisfies UiView);
@@ -151,7 +151,7 @@ describe("runUiCommand", () => {
   it("selects clips, words and a range as the agent, revealing the first clip", async () => {
     const words = [{ transcript: "transcripts/raw.words.json", word: "w_000004" }];
     await expect(
-      runUiCommand({ kind: "select", clips: ["c_b"], words, range: { from: 1, to: 2 }, reveal: true }, targets()),
+      runUiCommand({ kind: "select", clips: ["c_b"], words, range: { from: 1, to: 2 }, reveal: true, points: [] }, targets()),
     ).resolves.toBe("Agent selected 1 clip, 1 word and a time range");
     expect(selection.get()).toMatchObject({
       clips: ["c_b"],
@@ -162,14 +162,28 @@ describe("runUiCommand", () => {
       reveal: { clip: "c_b" },
     });
     await expect(
-      runUiCommand({ kind: "select", clips: [], words: [{ transcript: "transcripts/raw.words.json", word: "w_000009" }], range: null, reveal: true }, targets()),
+      runUiCommand({ kind: "select", clips: [], words: [{ transcript: "transcripts/raw.words.json", word: "w_000009" }], range: null, reveal: true, points: [] }, targets()),
     ).rejects.toThrow("No word w_000009 in transcripts/raw.words.json");
+  });
+
+  it("shows points the daemon inspected as the agent's picks, at the first one's time (ADR 0011)", async () => {
+    const t = targets();
+    const element = { selector: "#title", tag: "h1", id: "title", classes: [], text: "Launch", box: { x: 0, y: 0, width: 1, height: 1 }, styles: {}, html: "", data: {}, adapter: null };
+    const point = { x: 0.71, y: 0.14, at: 2.5, layers: [{ clip: "c_b", type: "hyperframes", paints: true }], target: "c_b", elements: [element], unavailable: null };
+    await expect(runUiCommand({ kind: "select", clips: [], words: [], range: null, reveal: true, points: [point] }, t)).resolves.toBe(
+      "Agent picked 1 point in the preview",
+    );
+    expect(selection.get()).toMatchObject({ points: [point], origin: "agent" });
+    expect(t.transport.get().time).toBeCloseTo(2.5, 3);
+    const view = uiView({ transport: t.transport.get(), selection: selection.get(), editor: { active: null, tabs: [] }, visible: null });
+    expect(view.selection.points).toEqual([{ x: 0.71, y: 0.14, at: 2.5, target: "c_b", element: { selector: "#title", text: "Launch" } }]);
+    selection.clear();
   });
 
   it("refuses clip ids the timeline does not have, naming them, and keeps the selection", async () => {
     selection.selectClips(["c_a"], "timeline");
     await expect(
-      runUiCommand({ kind: "select", clips: ["c_a", "c_zz"], words: [], range: null, reveal: true }, targets()),
+      runUiCommand({ kind: "select", clips: ["c_a", "c_zz"], words: [], range: null, reveal: true, points: [] }, targets()),
     ).rejects.toThrow(/No clip c_zz on timeline main \(revision 3\)/);
     expect(selection.get().clips).toEqual(["c_a"]);
   });

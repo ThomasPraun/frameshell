@@ -90,6 +90,18 @@ describe("frameshell render and frame", () => {
     expect(readFileSync(join(project, "shot.png")).subarray(1, 4).toString("latin1")).toBe("PNG");
   });
 
+  it("inspects a point: the clip under it, in fractions or pixels (ADR 0011)", () => {
+    const text = frameshell(["inspect", "--at", "0.5", "--px", "960,540"]);
+    expect(text.code, text.stderr).toBe(0);
+    expect(text.stdout).toMatch(/^Point 0\.5,0\.5 \(960,540 px\) at 0\.5 s \(frame 15\) of main\n {2}c_[0-9a-f]{6} media \(seen\)\n$/);
+    const json = frameshell(["inspect", "--at", "0.5", "--point", "0.25,0.75", "--json"]);
+    expect(json.code, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({ x: 0.25, y: 0.75, pixel: { x: 480, y: 810 }, layers: [{ type: "media", paints: true }], elements: [] });
+    const both = frameshell(["inspect", "--at", "0.5"]);
+    expect(both.code).toBe(2);
+    expect(both.stderr).toContain("--point <x,y>");
+  });
+
   it("explains missing frame flags and unknown presets", () => {
     const noAt = frameshell(["frame", "--out", "x.png"]);
     expect(noAt.code).toBe(2);

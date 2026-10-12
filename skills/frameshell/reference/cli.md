@@ -53,6 +53,7 @@ Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` li
 | `frameshell transcribe --verify <export> [--timeline id]` | Re-transcribe an export and report words lost at cuts; exit 1 when any was. |
 | `frameshell render [--preset p] [--out file]` | Export; waits for the job and prints progress on stderr. Pending generated-clip renders are awaited. |
 | `frameshell frame --at <s> --out <file.png> [--preset p]` | Write the composited frame at timeline second `s`, exactly as export renders it. Open the PNG to look at it. |
+| `frameshell inspect --at <s> (--point x,y \| --px X,Y) [--timeline id] [--json]` | What a point of the frame shows: the clips under it (topmost first, which one is seen) and, in a generated clip, the DOM element painting it (selector, text, box, styles, file or React components, ancestors). `--point` takes fractions of the frame, `--px` project pixels. Use it to find what "the box at the top right" is before editing it, and to check the edit landed. Generated clips load in headless Chrome (a second or two each) and need a trusted project. |
 
 ## Plugins
 

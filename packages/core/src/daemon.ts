@@ -50,6 +50,8 @@ import { transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { writeContext } from "./context.js";
+import { InspectService } from "./inspect/service.js";
+import { resolveNested } from "./timeline/nested.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -263,6 +265,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     if (!openedRoots.has(key)) openedRoots.set(key, dir);
     return openedRoots.get(key)!;
   };
+  const inspector = new InspectService({
+    timeline: async (dir, id) => {
+      const { timeline, fps } = await timelines.load(dir, id);
+      return { timeline: await resolveNested(dir, timeline), fps };
+    },
+    resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
+    pictureSize: async (dir, asset) => {
+      const video = (await media.probe(dir, asset)).video;
+      return video ? { width: video.width, height: video.height } : null;
+    },
+    live: (dir, timeline, clip) => clips.live(clipRoot(dir), timeline, clip),
+    chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
+  });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
   const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
@@ -453,6 +468,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
+    "inspect.point": async ({ cwd, timeline, at, x, y, unit }) => inspector.point(await root(cwd), { timeline, at, x, y, unit }),
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
       return { dir, jobs: listJobs({ project: dir, active }) };
@@ -504,8 +520,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
     "ui.pause": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "pause" }),
-    "ui.select": async ({ cwd, clips, words, range, reveal }) =>
-      ui.command(await projectKey(cwd), { kind: "select", clips, words, range, reveal }),
+    "ui.select": async ({ cwd, clips, words, range, reveal, points }) => {
+      // Points are inspected here, so the app shows exactly what `inspect.point` reports.
+      const dir = points.length > 0 ? await root(cwd) : null;
+      const inspected = [];
+      for (const point of points) {
+        const { timeline: _timeline, frame: _frame, pixel: _pixel, ...picked } = await inspector.point(dir!, { timeline: "main", ...point });
+        inspected.push(picked);
+      }
+      return ui.command(await projectKey(cwd), { kind: "select", clips, words, range, reveal, points: inspected });
+    },
     "ui.openFile": async ({ cwd, file }) => {
       const dir = await root(cwd);
       return ui.command(await canonicalPath(dir), { kind: "openFile", path: projectRelative(dir, file) });

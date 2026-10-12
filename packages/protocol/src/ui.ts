@@ -17,6 +17,49 @@ export const WordRefSchema = z.object({
   word: z.string().min(1).describe("Word id in that file, e.g. `w_000123`."),
 });
 
+/** One element of a composition as the probe describes it (`ProbedElement`, ADR 0011). */
+export const ProbedElementSchema = z.object({
+  selector: z.string().describe("CSS selector from the nearest ancestor with an id (or from `body`), e.g. `#scene-2 > div.card:nth-child(2) > h1`."),
+  tag: z.string().describe("Tag name, lower case."),
+  id: z.string().nullable(),
+  classes: z.array(z.string()),
+  text: z.string().describe("Rendered text, whitespace collapsed, at most 200 characters; empty when none."),
+  box: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .describe("Box in the composition's page, project pixels (the page is laid out at the project resolution)."),
+  styles: z.record(z.string(), z.string()).describe("Computed background, colour, font, opacity, border and radius."),
+  html: z.string().describe("`outerHTML`, cut at 2048 characters."),
+  data: z.record(z.string(), z.string()).describe("`data-*` attributes without the prefix."),
+  adapter: z
+    .record(z.string(), z.unknown())
+    .nullable()
+    .describe("What the clip's adapter adds: `source` (file the element comes from), `components` (React components, outermost first)."),
+  generated: z.boolean().optional().describe("True when the element's id, classes and text are nowhere in its `source` file: a script created it."),
+});
+
+/** One layer under a point of the frame. */
+export const PointLayerSchema = z.object({
+  clip: z.string().describe("Clip id; inside a nested timeline `<nested clip>/<clip>`, e.g. `c_0200/c_0100`."),
+  type: z.string().describe("`media` for footage and stills, else the adapter clip type, e.g. `hyperframes`."),
+  paints: z.boolean().describe("Its picture shows at the point (not transparent there)."),
+});
+
+/** What a point of the frame shows (ADR 0011): the layers under it and the composition element there. */
+export const InspectedPointSchema = z.object({
+  x: z.number().min(0).max(1).describe("Fraction of the frame width, 0 = left."),
+  y: z.number().min(0).max(1).describe("Fraction of the frame height, 0 = top."),
+  at: z.number().nonnegative().describe("Timeline seconds of the frame."),
+  layers: z.array(PointLayerSchema).describe("Every clip whose picture's box holds the point, topmost first."),
+  target: z.string().nullable().describe("The clip seen there: the first layer that paints the point; null over black."),
+  elements: z
+    .array(ProbedElementSchema)
+    .describe("In a generated target, the element painting the point, then its ancestors to the composition root; empty otherwise."),
+  unavailable: z
+    .string()
+    .nullable()
+    .describe("Why the target's elements are unknown (untrusted project, no adapter, no live page); null otherwise."),
+});
+
 /** The user's selection in the app: one store, every kind at once. */
 export const UiSelectionSchema = z.object({
   clips: z.array(z.string()).describe("Selected clip ids of `timeline`, in selection order; empty when none."),
@@ -44,6 +87,20 @@ export const UiSelectionSchema = z.object({
     })
     .nullable()
     .describe("Rectangle the user drew on the preview frame (multiply by the project resolution for pixels); null when none."),
+  points: z
+    .array(
+      z.object({
+        x: z.number().describe("Fraction of the frame width."),
+        y: z.number().describe("Fraction of the frame height."),
+        at: z.number().describe("Timeline seconds of the frame it was picked on."),
+        target: z.string().nullable().describe("Clip seen there; null over black."),
+        element: z
+          .object({ selector: z.string(), text: z.string() })
+          .nullable()
+          .describe("Element picked in the target's composition; `inspect.point` gives every fact about it."),
+      }),
+    )
+    .describe("Points the user picked on the preview with the Pick tool, in pick order; empty when none."),
 });
 
 /** What the app publishes about one window: everything `ui.state` reports except connection facts. */
@@ -84,6 +141,8 @@ export const UiCommandSchema = z.discriminatedUnion("kind", [
     words: z.array(WordRefSchema),
     range: TimeRangeSchema.nullable(),
     reveal: z.boolean(),
+    /** Points the daemon already inspected (`inspect.point`): the app shows them as picks. */
+    points: z.array(InspectedPointSchema).default([]),
   }),
   z.object({ kind: z.literal("openFile"), path: z.string().min(1).describe("Project-relative, `/`-separated.") }),
   z.object({ kind: z.literal("showTxDiff"), timeline: z.string(), target: z.union([TxIdSchema, OpIdSchema]) }),
@@ -104,3 +163,7 @@ export type UiCommand = z.output<typeof UiCommandSchema>;
 export type TimeRange = z.output<typeof TimeRangeSchema>;
 /** One transcript word reference. */
 export type WordRef = z.output<typeof WordRefSchema>;
+/** One element as `inspect.point` and picks report it. */
+export type ProbedElementInfo = z.output<typeof ProbedElementSchema>;
+/** What a point of the frame shows. */
+export type InspectedPoint = z.output<typeof InspectedPointSchema>;

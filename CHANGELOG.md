@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell inspect --at <s> (--point x,y | --px X,Y) [--json]`, MCP `inspect_point` and daemon `inspect.point` (#164, ADR 0011): what a point of the frame shows, with the app closed. The clips under it come from the export placement, topmost first, and the target is the one seen there. In a generated clip, the DOM element painting that pixel comes from its live page, loaded in managed headless Chrome (DevTools protocol over a pipe, no new dependency) and probed with the app's Pick script, adapter facts and `generated` included. Elements need a trusted project; footage counts as painting its whole box. Agent skill updated.
+- `ui_select` takes `points` (`{ at, x, y }`): the daemon inspects each one and the app shows them as the agent's picks, outlined, with the playhead at the first, so the agent can show the user what it understood. `ui_state` reports picked `points` (clip and element at each). `PROTOCOL_VERSION` 32.
+
 - Plugin API: `frameshellLive` in a live page's `head` may define `describe(element)`, returning facts about a picked element the DOM does not hold: `source` (the file it comes from) and `components` (the components rendering it, outermost first). The app adds them to the pick under the element's `adapter` (#163, ADR 0011). Additive: `apiVersion` stays `1`.
 - `@frameshell/hyperframes`: `describe` names the file a picked element comes from, its `data-composition-src` sub-composition or the composition itself, project-relative.
 - `@frameshell/remotion`: `describe` names the React components rendering a picked element, outermost first (at most 8, innermost kept), from React's fiber on the DOM node.

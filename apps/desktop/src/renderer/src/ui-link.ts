@@ -57,6 +57,13 @@ export function uiView({ transport: t, selection: s, editor, visible }: UiViewIn
             clips: s.region.clips.map(({ clip, type }) => ({ clip, type })),
           }
         : null,
+      points: s.points.map((point) => ({
+        x: ms(point.x),
+        y: ms(point.y),
+        at: ms(point.at),
+        target: point.target,
+        element: point.elements[0] ? { selector: point.elements[0].selector, text: point.elements[0].text } : null,
+      })),
     },
     editor: { active: editor.active, tabs: [...editor.tabs] },
     visible: visible && visible.to > visible.from ? { from: ms(visible.from), to: ms(visible.to) } : null,
@@ -135,6 +142,16 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
       player.pause();
       return "Agent paused playback";
     case "select": {
+      if (command.points.length > 0) {
+        // Inspected by the daemon: shown as picks, at the first one's time.
+        const points = command.points.map((point) => ({
+          ...point,
+          elements: point.elements.map(({ generated, ...element }) => (generated === undefined ? element : { ...element, generated })),
+        }));
+        selection.selectPoints(points, "agent");
+        if (command.reveal && !targets.transport.get().playing) targets.transport.seek(command.points[0]!.at);
+        return `Agent picked ${command.points.length} point${command.points.length === 1 ? "" : "s"} in the preview`;
+      }
       if (command.clips.length > 0) {
         const view = targets.timelineView(SELECTION_TIMELINE);
         if (!view) throw new Error(`Timeline ${SELECTION_TIMELINE} is not loaded in the app yet; retry in a moment.`);

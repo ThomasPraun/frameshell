@@ -66,7 +66,7 @@ describe("UI state and navigation methods (SPEC §7b)", () => {
   });
 
   it("defaults ui.select to clearing what is omitted and revealing the first clip", () => {
-    expect(parseParams("ui.select", { cwd, clips: ["c_1"] })).toEqual({ cwd, clips: ["c_1"], words: [], range: null, reveal: true });
+    expect(parseParams("ui.select", { cwd, clips: ["c_1"] })).toEqual({ cwd, clips: ["c_1"], words: [], range: null, reveal: true, points: [] });
     expect(() => parseParams("ui.select", { cwd, range: { from: 3, to: 2 } })).toThrow(/params\.range\.to/);
   });
 
