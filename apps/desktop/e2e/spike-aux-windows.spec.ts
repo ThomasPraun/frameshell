@@ -79,14 +79,18 @@ test("preview in an auxiliary window plays, also with the project window minimiz
   log("main visibility:", await page.evaluate(() => document.visibilityState));
   const minimized = await sample(child, 2500);
   log("minimized main window:", JSON.stringify(minimized.frames), JSON.stringify(minimized.playheads));
-  // Hidden (another Space / Cmd+H path): stronger than minimize.
+  // Hidden (another Space / Cmd+H path): restart from 0 while visible, then hide the project window.
   await app.evaluate(({ BrowserWindow }) => {
-    for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.getURL().startsWith("about:")) { w.restore(); w.hide(); }
+    for (const w of BrowserWindow.getAllWindows()) if (w.isMinimized()) w.restore();
   });
+  await child.getByRole("button", { name: "Pause" }).click({ timeout: 5000 }).catch(() => log("no pause button (ended)"));
   await child.getByRole("button", { name: "Go to start" }).click();
-  await child.getByRole("button", { name: "Play" }).click().catch(() => undefined);
-  await page.waitForTimeout(1000);
-  log("hidden main visibility:", await page.evaluate(() => document.visibilityState));
+  await child.getByRole("button", { name: "Play" }).click();
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.getURL().startsWith("about:")) w.hide();
+  });
+  await page.waitForTimeout(500);
+  log("hidden main visible:", await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isVisible())));
   const hidden = await sample(child, 2500);
   log("hidden main window:", JSON.stringify(hidden.frames), JSON.stringify(hidden.playheads));
   await app.evaluate(({ BrowserWindow }) => {
@@ -95,11 +99,12 @@ test("preview in an auxiliary window plays, also with the project window minimiz
   await app.evaluate(({ BrowserWindow }) => {
     for (const w of BrowserWindow.getAllWindows()) if (w.isMinimized()) w.restore();
   });
-  await child.getByRole("button", { name: "Pause" }).click().catch(() => undefined);
-
   const advanced = hidden.frames.filter((f) => f >= 0);
   expect(advanced.length).toBeGreaterThan(5);
   expect(advanced.at(-1)!).toBeGreaterThan(advanced[0]!);
+  // The playhead (UI) keeps up too, not only the canvas: no once-a-second updates.
+  expect(new Set(minimized.playheads).size).toBeGreaterThan(10);
+  expect(new Set(hidden.playheads).size).toBeGreaterThan(10);
 
   // Dock back by closing the window.
   await child.close();

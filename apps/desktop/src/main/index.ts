@@ -147,6 +147,8 @@ function createWindow(projectDir?: string): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // SPIKE (ADR 0012): a hidden project window must not throttle its auxiliary windows.
+      backgroundThrottling: false,
     },
   });
   const contents = window.webContents;

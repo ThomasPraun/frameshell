@@ -120,12 +120,14 @@ export class PreviewPlayer implements TransportPlayer {
       this.#from = from;
       this.#anchor = { frame: startFrame, sample: Math.round(from * PROGRAM_SAMPLE_RATE) };
       this.#send({ type: "play", anchor: this.#anchor, clock: clock.sample() });
-      this.#clockTimer = setInterval(() => this.#send({ type: "clock", sample: clock.sample() }), CLOCK_MS);
+      // SPIKE (ADR 0012): the window the canvas is drawn in drives the loop, not the project window.
+      const view = this.canvas.ownerDocument.defaultView ?? window;
+      this.#clockTimer = view.setInterval(() => this.#send({ type: "clock", sample: clock.sample() }), CLOCK_MS);
       const loop = () => {
-        this.#raf = requestAnimationFrame(loop);
+        this.#raf = view.requestAnimationFrame(loop);
         this.#events.onTime(this.#now());
       };
-      this.#raf = requestAnimationFrame(loop);
+      this.#raf = view.requestAnimationFrame(loop);
     })();
   }
 
@@ -180,8 +182,9 @@ export class PreviewPlayer implements TransportPlayer {
   }
 
   #stopClock(): void {
-    cancelAnimationFrame(this.#raf);
-    clearInterval(this.#clockTimer);
+    const view = this.canvas.ownerDocument.defaultView ?? window;
+    view.cancelAnimationFrame(this.#raf);
+    view.clearInterval(this.#clockTimer);
     this.#anchor = null;
     this.#clock = null;
   }
