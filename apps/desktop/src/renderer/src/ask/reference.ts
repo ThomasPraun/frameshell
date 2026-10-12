@@ -75,16 +75,23 @@ function clipLine(id: string, view: TimelineView | null): string {
  * words become subtitle lines (one per clip playing them), clips one line
  * each, a History pick its transaction or operation first, a script scene
  * one line naming its clips, a bare timeline range, explorer files (`asset`
- * under `assets/`, else `file`), a preview region with its saved `frame`
- * capture when there is one. Times are timeline times of `view`; ids are the
- * project files'. Empty for an empty selection.
+ * under `assets/`, else `file`), a preview region naming the clips under it
+ * (topmost first) and its saved `frame` capture when there is one, or
+ * `frame pending` while a render it needs is not ready (ADR 0011). Times are
+ * timeline times of `view`; ids are the project files'. Empty for an empty
+ * selection.
  */
-export function referenceLines(selection: Selection, view: TimelineView | null, options: { frame?: string | null } = {}): string[] {
+export function referenceLines(
+  selection: Selection,
+  view: TimelineView | null,
+  options: { frame?: string | null; framePending?: boolean } = {},
+): string[] {
   if (selection.region) {
-    const { x0, y0, x1, y1, at } = selection.region;
+    const { x0, y0, x1, y1, at, clips } = selection.region;
     const point = (x: number, y: number) => `(${x.toFixed(2)},${y.toFixed(2)})`;
-    const frame = options.frame ? [`frame ${options.frame}`] : [];
-    return [[`${TAG} region ${point(x0, y0)}–${point(x1, y1)} @ ${referenceTime(at)}`, ...frame].join(" · ")];
+    const under = clips.length > 0 ? [`clips ${clips.map((c) => c.clip).join(", ")}`] : [];
+    const frame = options.frame ? [`frame ${options.frame}`] : options.framePending ? ["frame pending"] : [];
+    return [[`${TAG} region ${point(x0, y0)}–${point(x1, y1)} @ ${referenceTime(at)}`, ...under, ...frame].join(" · ")];
   }
   if (selection.words.length > 0) return wordLines(selection, view);
   if (selection.scene) {

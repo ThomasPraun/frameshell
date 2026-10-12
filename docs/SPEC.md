@@ -497,12 +497,12 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Pick tool (`I`, ADR 0011): hover outlines the element under the cursor, ↑/↓ moves to its parent or child, click picks a point, Shift+click adds points (each keeps its time), drag selects a region. A point names the clip stack under it (topmost painting layer first) and the composition element there; a region names the clips it touches. Details (full stack, element facts) and the frame capture go under `.frameshell/context/` (regenerable, gitignored, swept by `gc` after 7 days). The reference is typed at once; while a render is pending the frame is `frame pending`. Reference format, one line per selected item:
   ```
   [frameshell] subtitle "hola a todos" · 00:03:12.40–00:03:14.10 · clip c_0012 · words w_000123–w_000127
-  [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · clips c_0100 c_0002 · details .frameshell/context/e_0421_1.json · frame .frameshell/context/f_0421.png
+  [frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · clips c_0100, c_0002 · details .frameshell/context/e_0421_1.json · frame .frameshell/context/f_0421.png
   [frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 hyperframes overlays/intro.html · element #scene-2 > .card > h1 "Nuevo lanzamiento" · under c_0002 media · details .frameshell/context/e_0421_2.json · frame .frameshell/context/f_0421.png
   [frameshell] asset assets/logo.png
   [frameshell] file scripts/launch.md
   [frameshell] clip c_0012 · media assets/raw-01.mp4 · 00:00:12.40–00:00:31.00 · track t_1a2b3c
-  [frameshell] scene scripts/launch.md#intro "Intro" · clips c_0100 c_0101
+  [frameshell] scene scripts/launch.md#intro "Intro" · clips c_0100, c_0101
   [frameshell] transaction tx_0042
   [frameshell] operation op_0310
   [frameshell] range 00:01:00.00–00:01:12.50

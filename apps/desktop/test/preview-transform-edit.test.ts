@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Program } from "../src/renderer/src/preview/program.js";
-import { dragPlacement, layerAt, layerBox, placementEdit } from "../src/renderer/src/preview/transform-edit.js";
+import { dragPlacement, layerAt, layerBox, layersAt, layersIn, placementEdit } from "../src/renderer/src/preview/transform-edit.js";
 
 // Seam under test: the preview's on-canvas transform handles, as pure geometry (the component only forwards pointer events).
 
@@ -43,6 +43,57 @@ describe("layerAt", () => {
     expect(layerAt(program, 60, { x: 0.8, y: 0.2 })).toBe("c_logo");
     expect(layerAt(program, 60, { x: 0.2, y: 0.8 })).toBe("c_cam");
     expect(layerAt(program, 10, { x: 0.8, y: 0.2 })).toBe("c_cam");
+  });
+});
+
+/** Footage on V1, a full-frame HyperFrames overlay still rendering on V2, a half-opacity logo on V3 (ADR 0011). */
+const stacked: Program = {
+  ...program,
+  layers: [
+    program.layers[0]!,
+    [{ kind: "generated", clip: "c_0200/c_title", type: "hyperframes", start: 0, end: 90, in: 0, render: null, size: null, placement: IDENTITY }],
+    [{ kind: "still", clip: "c_logo", start: 0, end: 90, image: "assets/logo.png", version: "h", size: LOGO, placement: { x: 600, y: -300, scale: 0.25, opacity: 0.5 } }],
+  ],
+};
+
+describe("layersAt", () => {
+  const corner = { x: 0.8, y: 0.2 };
+
+  it("lists every layer under a point, topmost first; a render not ready yet covers the project frame", () => {
+    expect(layersAt(stacked, 30, corner)).toEqual([
+      { clip: "c_logo", layer: 2, kind: "still", type: "media", paints: true },
+      { clip: "c_0200/c_title", layer: 1, kind: "generated", type: "hyperframes", paints: true },
+      { clip: "c_cam", layer: 0, kind: "media", type: "media", paints: true },
+    ]);
+    expect(layerBox(stacked, 30, "c_0200/c_title")?.box).toEqual({ left: 0, top: 0, width: 1, height: 1 });
+  });
+
+  it("lets a click through where a picture's alpha (times its opacity) is too faint to see", () => {
+    // The overlay is transparent there, the logo's pixel half transparent at half opacity: the footage is the target.
+    const alpha = new Map([
+      [1, 0],
+      [2, 0.06],
+    ]);
+    const hits = layersAt(stacked, 30, corner, (layer) => alpha.get(layer));
+    expect(hits.map((hit) => [hit.clip, hit.paints])).toEqual([
+      ["c_logo", false],
+      ["c_0200/c_title", false],
+      ["c_cam", true],
+    ]);
+    expect(layerAt(stacked, 30, corner, (layer) => alpha.get(layer))).toBe("c_cam");
+    expect(layerAt(stacked, 30, corner)).toBe("c_logo");
+  });
+
+  it("finds nothing over black", () => {
+    expect(layersAt(stacked, 95, corner)).toEqual([]);
+    expect(layerAt(stacked, 95, corner)).toBeNull();
+  });
+});
+
+describe("layersIn", () => {
+  it("names the clips whose box meets a rectangle, topmost first", () => {
+    expect(layersIn(stacked, 30, { x0: 0, y0: 0.6, x1: 0.3, y1: 1 }).map((hit) => hit.clip)).toEqual(["c_0200/c_title", "c_cam"]);
+    expect(layersIn(stacked, 30, { x0: 0.7, y0: 0.05, x1: 0.9, y1: 0.3 }).map((hit) => hit.clip)).toEqual(["c_logo", "c_0200/c_title", "c_cam"]);
   });
 });
 

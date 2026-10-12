@@ -45,7 +45,7 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 
 | Tool | Does |
 |---|---|
-| `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
+| `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked, preview `region` with the clips under it, topmost first), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
 | `ui_seek(at)` / `ui_play` / `ui_pause` | Drive the preview's transport. |
 | `ui_select(clips?, words?, range?, reveal?)` | Replace the selection; unknown clip ids fail. `reveal` scrolls to the first clip. |
 | `ui_open_file(file)` | Open a project file in an active editor tab. |

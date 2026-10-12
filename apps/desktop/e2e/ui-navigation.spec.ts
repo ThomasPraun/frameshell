@@ -81,7 +81,7 @@ test("ui_state reports what the app shows: playhead, empty selection, no tab, th
     playhead: 0,
     playing: false,
     duration: 22,
-    selection: { clips: [], words: [], range: null, history: null },
+    selection: { clips: [], words: [], range: null, history: null, region: null },
     editor: { active: null, tabs: [] },
     visible: { from: 0, to: expect.any(Number) },
   });
@@ -135,7 +135,7 @@ test("a time range dragged over empty lane space is the selection ui_state repor
   expect(to).toBeCloseTo(6, 0);
   await expect
     .poll(async () => (await tool("ui_state"))["selection"])
-    .toEqual({ clips: [], words: [], range: { from: expect.closeTo(from!, 3), to: expect.closeTo(to!, 3) }, history: null });
+    .toEqual({ clips: [], words: [], range: { from: expect.closeTo(from!, 3), to: expect.closeTo(to!, 3) }, history: null, region: null });
 });
 
 test("ui_seek moves the shared playhead, and the status bar says the agent did it", async () => {
@@ -156,7 +156,7 @@ test("ui_play and ui_pause drive the preview's transport", async () => {
 
 test("ui_select replaces the selection with clips and a time range, and refuses unknown clip ids", async () => {
   const state = await tool("ui_select", { clips: ["c_three"], range: { from: 1, to: 3 } });
-  expect(state["selection"]).toEqual({ clips: ["c_three"], words: [], range: { from: 1, to: 3 }, history: null });
+  expect(state["selection"]).toEqual({ clips: ["c_three"], words: [], range: { from: 1, to: 3 }, history: null, region: null });
   await expect(lanes()).toHaveAttribute("data-selected", "c_three");
   await expect(lanes()).toHaveAttribute("data-range", "1-3");
   await expect(page.locator('li[data-clip="c_three"]')).toHaveAttribute("data-selected", "true");

@@ -24,7 +24,7 @@ Done = you looked at a frame inside every changed visual element's time span and
 
 ## What the user sees: `ui_state`
 
-`ui_state` returns the app's playhead, whether it plays, the selection (`clips`, `words` as transcript + word id, a time `range`, the History entry marked), the open editor tabs and the visible timeline span. Read it to resolve "this clip", "here", "these words" when the prompt has no `[frameshell]` line. `{ connected: false }` means no app window shows the project: ask the user instead.
+`ui_state` returns the app's playhead, whether it plays, the selection (`clips`, `words` as transcript + word id, a time `range`, the History entry marked, a preview `region` with the clips under it), the open editor tabs and the visible timeline span. Read it to resolve "this clip", "here", "these words" when the prompt has no `[frameshell]` line. `{ connected: false }` means no app window shows the project: ask the user instead.
 
 ## Take the user somewhere: `ui_*`
 

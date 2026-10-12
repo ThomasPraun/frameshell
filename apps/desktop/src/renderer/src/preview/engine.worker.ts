@@ -9,6 +9,7 @@ import {
   type ClockSample,
   type EngineStats,
   type FromEngine,
+  type LayerAlpha,
   type ToEngine,
   type ToMixer,
   heardTime,
@@ -412,6 +413,8 @@ type Still = { state: "loading" } | { state: "ready"; bitmap: ImageBitmap } | { 
 
 /** One picture of a composite: what to draw and where. */
 interface Part {
+  /** Layer index, 0 = base. */
+  layer: number;
   image: CanvasImageSource;
   /** Alpha of `image` (a decoded render or proxy with alpha). */
   alpha: AlphaPlane | null;
@@ -444,6 +447,9 @@ class Engine implements LayerHost {
   /** What the canvas holds: a key of the composited pictures, `black`, or `` (must redraw). */
   #drawn = "";
   #shown = Number.NaN;
+  /** What the canvas shows, for `alphaAt`: alpha planes and still images only (decoded frames are closed after use). */
+  #shownAlpha: { layer: number; size: Size; placement: Placement; alpha: AlphaPlane | null; bitmap: ImageBitmap | null }[] = [];
+  readonly #probe = new OffscreenCanvas(1, 1);
   #tickQueued = false;
 
   /** Program sample up to which audio has been requested. */
@@ -496,6 +502,9 @@ class Engine implements LayerHost {
         break;
       case "seek":
         this.#moveTo(message.frame);
+        break;
+      case "alphaAt":
+        scope.postMessage({ type: "alpha", id: message.id, frame: this.#shown, layers: this.#alphaAt(message.x, message.y) });
         break;
       case "init":
         break;
@@ -637,7 +646,7 @@ class Engine implements LayerHost {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ image: still.bitmap, alpha: null, size: span.size, placement: span.placement });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -648,7 +657,7 @@ class Engine implements LayerHost {
       if (ready) {
         const { frame } = ready;
         const size = span.size ?? { width: frame.displayWidth, height: frame.displayHeight };
-        parts.push({ image: frame, alpha: ready.alpha, size, placement: span.placement });
+        parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size, placement: span.placement });
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
         complete = false;
@@ -662,6 +671,13 @@ class Engine implements LayerHost {
       this.#drawBlack();
       return;
     }
+    this.#shownAlpha = parts.map((part) => ({
+      layer: part.layer,
+      size: part.size,
+      placement: part.placement,
+      alpha: part.alpha,
+      bitmap: part.image instanceof ImageBitmap ? part.image : null,
+    }));
     if (this.#drawn !== key) {
       this.#composite(parts);
       this.#drawn = key;
@@ -671,6 +687,7 @@ class Engine implements LayerHost {
   }
 
   #drawBlack(): void {
+    this.#shownAlpha = [];
     if (this.#drawn !== "black") {
       this.#context.fillStyle = "#000";
       this.#context.fillRect(0, 0, this.#canvas.width, this.#canvas.height);
@@ -698,6 +715,41 @@ class Engine implements LayerHost {
       }
     }
     context.globalAlpha = 1;
+  }
+
+  /**
+   * Alpha at point (`x`, `y`, fractions of the frame) of each picture on the
+   * canvas that has alpha there: a render or proxy's alpha plane, a still's
+   * own pixels. Opaque pictures and pictures not covering the point are left out.
+   */
+  #alphaAt(x: number, y: number): LayerAlpha[] {
+    const project = this.#program?.resolution;
+    if (!project) return [];
+    const px = x * project.width;
+    const py = y * project.height;
+    const layers: LayerAlpha[] = [];
+    for (const part of this.#shownAlpha) {
+      const rect = layerRect(part.size, project, project, part.placement);
+      if (px < rect.left || px >= rect.left + rect.width || py < rect.top || py >= rect.top + rect.height) continue;
+      const u = (px - rect.left) / rect.width;
+      const v = (py - rect.top) / rect.height;
+      if (part.alpha) {
+        const { data, offset, stride, width, height } = part.alpha;
+        const value = data[offset + Math.min(height - 1, Math.floor(v * height)) * stride + Math.min(width - 1, Math.floor(u * width))] ?? 255;
+        layers.push({ layer: part.layer, alpha: value / 255 });
+      } else if (part.bitmap) {
+        try {
+          const context = this.#probe.getContext("2d", { willReadFrequently: true })!;
+          const { width, height } = part.bitmap;
+          context.clearRect(0, 0, 1, 1);
+          context.drawImage(part.bitmap, Math.min(width - 1, Math.floor(u * width)), Math.min(height - 1, Math.floor(v * height)), 1, 1, 0, 0, 1, 1);
+          layers.push({ layer: part.layer, alpha: context.getImageData(0, 0, 1, 1).data[3]! / 255 });
+        } catch {
+          // A still released meanwhile: counted opaque.
+        }
+      }
+    }
+    return layers;
   }
 
   #announce(frame: number): void {

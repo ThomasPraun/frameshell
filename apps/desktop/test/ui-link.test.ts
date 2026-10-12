@@ -79,10 +79,19 @@ describe("uiView", () => {
       playhead: 1.1,
       playing: false,
       duration: 10.033,
-      selection: { clips: ["c_a"], words: [], range: { from: 0.333, to: 2 }, history: null },
+      selection: { clips: ["c_a"], words: [], range: { from: 0.333, to: 2 }, history: null, region: null },
       editor: { active: "scripts/a.md", tabs: ["scripts/a.md"] },
       visible: { from: 0, to: 12.346 },
     } satisfies UiView);
+  });
+});
+
+describe("uiView region", () => {
+  it("publishes a preview region with the clips under it, corners and time in thousandths", () => {
+    selection.selectRegion({ x0: 0.1234, y0: 0.2, x1: 0.56789, y1: 0.9, at: 65.20001, clips: [{ clip: "c_0100", type: "hyperframes" }] }, "preview");
+    const view = uiView({ transport: createTransport().get(), selection: selection.get(), editor: { active: null, tabs: [] }, visible: null });
+    expect(view.selection.region).toEqual({ x0: 0.123, y0: 0.2, x1: 0.568, y1: 0.9, at: 65.2, clips: [{ clip: "c_0100", type: "hyperframes" }] });
+    selection.clear();
   });
 });
 

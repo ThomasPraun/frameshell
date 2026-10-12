@@ -13,7 +13,7 @@ function view(overrides: Partial<UiView> = {}): UiView {
     playhead: 0,
     playing: false,
     duration: 10,
-    selection: { clips: [], words: [], range: null, history: null },
+    selection: { clips: [], words: [], range: null, history: null, region: null },
     editor: { active: null, tabs: [] },
     visible: { from: 0, to: 10 },
     ...overrides,
@@ -39,7 +39,7 @@ describe("UiBroker", () => {
   it("reports { connected: false } until a window publishes, then what it published", () => {
     const broker = new UiBroker();
     expect(broker.state(A.key)).toEqual({ connected: false });
-    broker.publish(sink(), "w1", A, view({ playhead: 3.5, selection: { clips: ["c_1"], words: [], range: null, history: null } }));
+    broker.publish(sink(), "w1", A, view({ playhead: 3.5, selection: { clips: ["c_1"], words: [], range: null, history: null, region: null } }));
     expect(broker.state(A.key)).toMatchObject({ connected: true, project: "/p/a", playhead: 3.5, selection: { clips: ["c_1"] } });
     expect(broker.state(A.key)).toHaveProperty("updatedAt", expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
     expect(broker.state(B.key)).toEqual({ connected: false });

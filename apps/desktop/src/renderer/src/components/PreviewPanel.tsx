@@ -1,11 +1,11 @@
 import type { Placement, Size } from "@frameshell/schema/composite";
-import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type Program, programAt } from "../preview/program.js";
-import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
+import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersIn, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useResolution } from "../preview/useProgram.js";
 import { type SelectedRegion, SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
@@ -87,6 +87,12 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
     transport.setProgram(program.frames, program.fps);
   }, [program]);
 
+  /** Alpha of the pictures on the canvas at a point; empty (all opaque) without a player. */
+  const alphaAt = useCallback(
+    (point: { x: number; y: number }) => player.current?.alphaAt(point) ?? Promise.resolve({ frame: -1, layers: new Map<number, number>() }),
+    [],
+  );
+
   const aspect = resolution.width / resolution.height;
   const canvasSize = useMemo(() => {
     const scale = CANVAS_SHORT_SIDE / Math.min(resolution.width, resolution.height);
@@ -148,8 +154,8 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
           {program && <RenderSlates program={program} frame={frame} live={liveClip} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
-          {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} />}
-          <RegionLayer active={regionTool && !empty} fps={fps} />
+          {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
+          <RegionLayer active={regionTool && !empty} fps={fps} program={program} />
         </div>
       </div>
       <Inspector />
@@ -170,7 +176,7 @@ export function PreviewPanel({ project }: { project: ProjectView }) {
  * region stays drawn (dimming the rest) whether or not the tool is on;
  * with the tool off, presses fall through to the layer handles below.
  */
-function RegionLayer({ active, fps }: { active: boolean; fps: number }) {
+function RegionLayer({ active, fps, program }: { active: boolean; fps: number; program: Program | null }) {
   const { region } = useSelection();
   const layer = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ pointer: number; x: number; y: number; rect: SelectedRegion | null } | null>(null);
@@ -181,13 +187,13 @@ function RegionLayer({ active, fps }: { active: boolean; fps: number }) {
     const clamp = (n: number) => Math.min(1, Math.max(0, n));
     return { x: clamp((event.clientX - box.left) / box.width), y: clamp((event.clientY - box.top) / box.height) };
   };
-  const spanning = (a: { x: number; y: number }, b: { x: number; y: number }): SelectedRegion => ({
-    x0: Math.min(a.x, b.x),
-    y0: Math.min(a.y, b.y),
-    x1: Math.max(a.x, b.x),
-    y1: Math.max(a.y, b.y),
-    at: transport.get().time,
-  });
+  const spanning = (a: { x: number; y: number }, b: { x: number; y: number }): SelectedRegion => {
+    const rect = { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
+    const { time, fps: rate } = transport.get();
+    const frame = Math.floor(time * rate + 1e-6);
+    const clips = program ? layersIn(program, frame, rect).map(({ clip, type }) => ({ clip, type })) : [];
+    return { ...rect, at: time, clips };
+  };
 
   const shown = draft?.rect ?? region;
   return (
@@ -313,7 +319,17 @@ const timelineClip = (id: string) => id.split("/")[0]!;
  * Clips of nested timelines select their nested clip and get no handles:
  * their placement is composed, not stored.
  */
-function Handles({ program, frame, frameRef }: { program: Program; frame: number; frameRef: RefObject<HTMLDivElement | null> }) {
+function Handles({
+  program,
+  frame,
+  frameRef,
+  alphaAt,
+}: {
+  program: Program;
+  frame: number;
+  frameRef: RefObject<HTMLDivElement | null>;
+  alphaAt: (point: { x: number; y: number }) => Promise<{ frame: number; layers: Map<number, number> }>;
+}) {
   const { clips } = useSelection();
   const selected = clips.length === 1 ? clips[0]! : null;
   const target = selected ? layerBox(program, frame, selected) : null;
@@ -330,12 +346,20 @@ function Handles({ program, frame, frameRef }: { program: Program; frame: number
     return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
   };
 
+  // The clip the user sees at that pixel (ADR 0011): transparent parts of an overlay let the click through.
   const onSelect = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button === 0) selectAt(event);
+  };
+  const selectAt = (event: PointerEvent) => {
     const at = local(event);
-    const hit = layerAt(program, frame, { x: at.x / at.width, y: at.y / at.height });
-    if (hit) selection.selectClips([timelineClip(hit)], "preview");
-    else selection.clear();
+    const point = { x: at.x / at.width, y: at.y / at.height };
+    void alphaAt(point).then((shown) => {
+      // Alpha of another frame (still decoding) says nothing about this one: boxes alone decide.
+      const alpha = shown.frame === frame ? (layer: number) => shown.layers.get(layer) : undefined;
+      const hit = layerAt(program, frame, point, alpha);
+      if (hit) selection.selectClips([timelineClip(hit)], "preview");
+      else selection.clear();
+    });
   };
 
   const onHandleDown = (kind: "move" | "scale") => (event: PointerEvent<HTMLElement>) => {
@@ -362,7 +386,9 @@ function Handles({ program, frame, frameRef }: { program: Program; frame: number
     if (!placement || !start || !selected) return;
     const edit = placementEdit(selected, start, placement);
     if (!edit) {
+      // A click, not a drag: the handles cover the whole box, so pick what shows at that pixel (maybe a layer above).
       setGhost(null);
+      selectAt(event);
       return;
     }
     setGhost({ clip: selected, placement });

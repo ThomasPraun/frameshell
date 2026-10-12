@@ -47,6 +47,16 @@ export function uiView({ transport: t, selection: s, editor, visible }: UiViewIn
       words: s.words.map(({ transcript, word }) => ({ transcript, word })),
       range: s.range ? { from: ms(s.range.from), to: ms(s.range.to) } : null,
       history: s.history,
+      region: s.region
+        ? {
+            x0: ms(s.region.x0),
+            y0: ms(s.region.y0),
+            x1: ms(s.region.x1),
+            y1: ms(s.region.y1),
+            at: ms(s.region.at),
+            clips: s.region.clips.map(({ clip, type }) => ({ clip, type })),
+          }
+        : null,
     },
     editor: { active: editor.active, tabs: [...editor.tabs] },
     visible: visible && visible.to > visible.from ? { from: ms(visible.from), to: ms(visible.to) } : null,

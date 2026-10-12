@@ -119,7 +119,7 @@ test("an explorer asset's context menu asks about the file", async () => {
   await expect.poll(() => terminalText(page)).toContain(`[frameshell] asset ${ASSET}`);
 });
 
-test("a region drawn on the preview saves a frame capture and references it with coordinates and time", async () => {
+test("a region drawn on the preview saves a frame capture and references it with coordinates, time and the clips under it", async () => {
   await page.getByRole("button", { name: "Select region" }).click();
   const frame = await laidOutBox(page.getByTestId("preview-frame"));
   await page.mouse.move(frame.x + frame.width * 0.1, frame.y + frame.height * 0.2);
@@ -129,7 +129,7 @@ test("a region drawn on the preview saves a frame capture and references it with
   await expect(page.getByTestId("preview-region")).toBeVisible();
   const at = Number(await page.getByTestId("timeline-lanes").getAttribute("data-playhead"));
   await page.keyboard.press(`${MOD}+l`);
-  const reference = /\[frameshell\] region \(0\.(09|10|11),0\.(19|20|21)\)–\(0\.(49|50|51),0\.(59|60|61)\) @ (\d\d:\d\d:\d\d\.\d\d) · frame (\.frameshell\/context\/f_\d{4}\.png)/;
+  const reference = /\[frameshell\] region \(0\.(09|10|11),0\.(19|20|21)\)–\(0\.(49|50|51),0\.(59|60|61)\) @ (\d\d:\d\d:\d\d\.\d\d) · clips c_a · frame (\.frameshell\/context\/f_\d{4}\.png)/;
   await expect.poll(() => terminalText(page), { timeout: 60_000 }).toMatch(reference);
   const match = reference.exec(await terminalText(page))!;
   const seconds = at.toFixed(2).padStart(5, "0");

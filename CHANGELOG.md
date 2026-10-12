@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: a click on the paused preview selects the clip the user sees at that pixel (#161, ADR 0011). Transparent parts of an overlay let the click through to the picture below: the preview engine reports each picture's alpha at the point (render and proxy alpha planes, still images), and a layer fainter than 5 % there (alpha × opacity) does not count. A generated clip whose render is not ready yet can be clicked and moved too: it covers the project frame, as its render will. A click on the selected clip's handles without dragging picks again, so a layer above it can be selected.
+- Ask agent: a preview region's line names the clips whose picture meets it, topmost first (`clips c_0100, c_0002`). While a generated clip's render is queued, rendering or failed, the line says `frame pending` and is typed at once instead of waiting for the frame capture. Agent skill updated.
+- `ui_state` (MCP) and daemon `ui.state`: `selection.region`, the rectangle drawn on the preview with its time and the clips under it. `PROTOCOL_VERSION` 30.
+- `gc`, and the sweep when the daemon opens a project, delete Ask agent captures in `.frameshell/context/` older than 7 days (kind `context`).
+
 ## [0.4.0] - 2026-10-11
 
 `@frameshell/hyperframes` and `@frameshell/remotion` 0.2.0. A plugin's version is part of the clip render cache key, so existing `hyperframes` and `remotion` clips render once more after the update.

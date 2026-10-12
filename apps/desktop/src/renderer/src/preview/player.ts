@@ -3,7 +3,7 @@
 import EngineWorker from "./engine.worker.ts?worker";
 import probeWorkletUrl from "./probe-recorder.worklet.ts?worker&url";
 import programWorkletUrl from "./program-audio.worklet.ts?worker&url";
-import type { Anchor, ClockSample, EngineStats, FromEngine, ToEngine } from "./engine-protocol.js";
+import type { Anchor, ClockSample, EngineStats, FromEngine, LayerAlpha, ToEngine } from "./engine-protocol.js";
 import { heardTime, programSample } from "./engine-protocol.js";
 import { PROGRAM_SAMPLE_RATE, type Program } from "./program.js";
 import type { TransportPlayer } from "./transport.js";
@@ -56,6 +56,8 @@ export class PreviewPlayer implements TransportPlayer {
   #clockTimer: ReturnType<typeof setInterval> | undefined;
   #stats: EngineStats | null = null;
   #disposed = false;
+  #alphaId = 0;
+  readonly #alphaReplies = new Map<number, (reply: { frame: number; layers: LayerAlpha[] }) => void>();
   readonly #probe: Probe | null;
 
   constructor(host: HTMLElement, mediaUrl: string, events: PlayerEvents, options: { probe?: boolean } = {}) {
@@ -154,6 +156,9 @@ export class PreviewPlayer implements TransportPlayer {
     this.#playToken++;
     this.#stopClock();
     this.#worker.terminate();
+    // A terminated worker never answers: pending alpha queries settle as black.
+    for (const reply of this.#alphaReplies.values()) reply({ frame: -1, layers: [] });
+    this.#alphaReplies.clear();
     void this.#context?.close();
     this.canvas.remove();
     this.#probe?.dispose();
@@ -193,7 +198,23 @@ export class PreviewPlayer implements TransportPlayer {
   #onEngine(message: FromEngine): void {
     if (message.type === "shown") this.#events.onShown?.(message.frame);
     else if (message.type === "stats") this.#stats = message.stats;
-    else this.#events.onError?.(message.message);
+    else if (message.type === "alpha") {
+      this.#alphaReplies.get(message.id)?.({ frame: message.frame, layers: message.layers });
+      this.#alphaReplies.delete(message.id);
+    } else this.#events.onError?.(message.message);
+  }
+
+  /**
+   * Alpha at `point` (fractions of the frame) of the pictures with alpha on
+   * the canvas now, by layer (ADR 0011); `frame` is the program frame they
+   * belong to, -1 for black. Layers left out are opaque there, or absent.
+   */
+  alphaAt(point: { x: number; y: number }): Promise<{ frame: number; layers: Map<number, number> }> {
+    const id = ++this.#alphaId;
+    return new Promise((resolve) => {
+      this.#alphaReplies.set(id, ({ frame, layers }) => resolve({ frame, layers: new Map(layers.map((l) => [l.layer, l.alpha])) }));
+      this.#send({ type: "alphaAt", id, x: point.x, y: point.y });
+    });
   }
 
   async #setupAudio(): Promise<void> {
