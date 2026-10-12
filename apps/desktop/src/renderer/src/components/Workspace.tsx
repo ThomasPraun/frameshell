@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { ProjectView } from "../../../shared/api.js";
-import { type DetachablePanel, type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
+import {
+  type DetachablePanel,
+  type Layout,
+  type PanelId,
+  type SidebarView,
+  resizePanel,
+  setCenterSplit,
+  togglePanel,
+} from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
@@ -11,28 +19,34 @@ import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
 import { PreviewPanel } from "./PreviewPanel.js";
-import { Sidebar } from "./Sidebar.js";
+import { PanelWindow } from "./PanelWindow.js";
+import { SIDEBAR_VIEWS, Sidebar, SidebarWindow } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { StatusBar } from "./StatusBar.js";
 import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
 import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
 import { isTranscriptPath } from "../transcript/useTranscripts.js";
-import { elementOf, listenEverywhere } from "../windows.js";
+import { elementOf, listenEverywhere, windowOf } from "../windows.js";
 
 const SAVE_DELAY_MS = 300;
 /** How long an "Ask agent" notice stays in the status bar, ms. */
 const NOTICE_MS = 5000;
 const isMac = navigator.userAgent.includes("Mac");
 
+/** Panels of the project window, as `data-panel` names them: what Cmd/Ctrl+Shift+Enter maximizes. */
+type WorkspacePanel = "sidebar" | "preview" | "editor" | "timeline" | "terminal";
+
 /** Keyboard toggles; Mod = Cmd on macOS, Ctrl elsewhere. */
 const SHORTCUTS: Record<string, PanelId> = { b: "sidebar", j: "timeline", "\\": "terminal" };
 
 /**
  * Project window: SPEC §10 layout with resizable, collapsible, per-project
- * persisted panels. The preview and each terminal tab can move to their own
- * window (ADR 0012): the slot left then says so and brings the panel back. Which panels are detached is global
- * and kept by main, so the project opens with them where they were.
+ * persisted panels. Any panel can move to its own window (ADR 0012): the
+ * preview, the timeline, the editor, each sidebar view and each terminal tab.
+ * The slot left says so and brings the panel back. Which panels are detached
+ * is global and kept by main, so the project opens with them where they
+ * were. Cmd/Ctrl+Shift+Enter maximizes the focused panel in place.
  */
 export function Workspace({ project }: { project: ProjectView }) {
   const [layout, setLayout] = useState<Layout | null>(null);
@@ -61,6 +75,43 @@ export function Workspace({ project }: { project: ProjectView }) {
   const previewWindow = usePanelWindow(detached.has("preview") ? "preview" : null, `Preview — ${project.name}`, () =>
     setPanelDetached("preview", false),
   );
+  const editorWindow = usePanelWindow(detached.has("editor") ? "editor" : null, `Editor — ${project.name}`, () =>
+    setPanelDetached("editor", false),
+  );
+  const detachedViews = useMemo(
+    () => new Set(SIDEBAR_VIEWS.map(({ id }) => id).filter((view) => detached.has(view))) as ReadonlySet<SidebarView>,
+    [detached],
+  );
+  const [maximized, setMaximized] = useState<WorkspacePanel | null>(null);
+
+  // Cmd/Ctrl+Shift+Enter: the panel holding the focus, else the one last clicked, fills the window; again restores.
+  // A detached panel's window holds that panel alone: there the key does nothing.
+  useEffect(() => {
+    let last: WorkspacePanel | null = null;
+    const onPointer = (event: PointerEvent) => (last = panelAt(event.target) ?? last);
+    const onKey = (event: KeyboardEvent) => {
+      if (!(isMac ? event.metaKey : event.ctrlKey) || !event.shiftKey || event.altKey || event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (windowOf(event.target) !== window) return;
+      const panel = panelAt(event.target) ?? last;
+      setMaximized((current) => (current ? null : panel));
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    const offKeys = listenEverywhere("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer, true);
+      offKeys();
+    };
+  }, []);
+
+  // A maximized panel that leaves its slot (detached, collapsed) gives the window back to the others.
+  useEffect(() => {
+    if (!maximized || !layout) return;
+    const collapsed = maximized in layout.panels && layout.panels[maximized as PanelId].collapsed;
+    const gone = (maximized === "preview" || maximized === "editor" || maximized === "timeline") && detached.has(maximized);
+    if (collapsed || gone) setMaximized(null);
+  }, [maximized, layout, detached]);
 
   useEffect(() => {
     void window.frameshell.panels.detached().then((panels) => setDetached(new Set(panels)));
@@ -212,8 +263,14 @@ export function Workspace({ project }: { project: ProjectView }) {
     onDragEnd: () => (dragBase.current = null),
   });
 
+  /** `data-panel` and the maximized class of a panel's slot. */
+  const slot = (panel: WorkspacePanel) => ({
+    "data-panel": panel,
+    className: `panel ${panel}${panel === "terminal" ? "-panel" : ""}${maximized === panel ? " is-maximized" : ""}`,
+  });
+
   return (
-    <div className="workspace">
+    <div className={`workspace${maximized ? " is-maximized" : ""}`} data-maximized={maximized ?? undefined}>
       <header className="titlebar drag">
         <span className="titlebar-project">{project.name}</span>
         <span className="titlebar-path">{project.dir}</span>
@@ -224,13 +281,15 @@ export function Workspace({ project }: { project: ProjectView }) {
           <CollapsedRail side="left" label="Show sidebar" onExpand={() => toggle("sidebar")} />
         ) : (
           <>
-            <div className="panel sidebar" style={{ flexBasis: sidebar.size }}>
+            <div {...slot("sidebar")} style={{ flexBasis: sidebar.size }}>
               <Sidebar
                 view={layout.sidebarView}
                 onView={(view) => setLayout({ ...layout, sidebarView: view })}
                 onCollapse={() => toggle("sidebar")}
                 onOpenFile={browseFile}
                 activeFile={active}
+                detached={detachedViews}
+                onDetach={setPanelDetached}
               />
             </div>
             <Splitter orientation="vertical" label="Resize sidebar" {...edge("sidebar", 1)} />
@@ -239,7 +298,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
         <div className="center-column">
           <div className="center-row" ref={centerRow}>
-            <div className="panel preview" style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
+            <div {...slot("preview")} style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
               {detached.has("preview") ? (
                 <DockedElsewhere title="Preview" onBringBack={() => setPanelDetached("preview", false)} />
               ) : (
@@ -264,7 +323,7 @@ export function Workspace({ project }: { project: ProjectView }) {
               }}
               onDragEnd={() => (dragBase.current = null)}
             />
-            <div className="panel editor">
+            <div {...slot("editor")}>
               <EditorArea
                 tabs={tabs}
                 active={active}
@@ -272,22 +331,42 @@ export function Workspace({ project }: { project: ProjectView }) {
                 onClose={closeFile}
                 onOpenFile={openFile}
                 transcriptFocus={transcriptFocus}
+                detached={detached.has("editor")}
+                target={editorWindow}
+                onDetach={(out) => setPanelDetached("editor", out)}
               />
             </div>
           </div>
-          {!timeline.collapsed && <Splitter orientation="horizontal" label="Resize timeline" {...edge("timeline", -1)} />}
-          <div className="panel timeline" style={{ height: timeline.collapsed ? undefined : timeline.size }}>
-            <TimelinePanel collapsed={timeline.collapsed} onToggle={() => toggle("timeline")} onShowTranscript={showTranscript} />
-          </div>
+          {detached.has("timeline") ? (
+            <div className="panel timeline">
+              <DockedElsewhere compact title="Timeline" onBringBack={() => setPanelDetached("timeline", false)} />
+            </div>
+          ) : (
+            <>
+              {!timeline.collapsed && <Splitter orientation="horizontal" label="Resize timeline" {...edge("timeline", -1)} />}
+              <div {...slot("timeline")} style={{ height: timeline.collapsed ? undefined : timeline.size }}>
+                <TimelinePanel
+                  collapsed={timeline.collapsed}
+                  onToggle={() => toggle("timeline")}
+                  onShowTranscript={showTranscript}
+                  onDetach={() => setPanelDetached("timeline", true)}
+                />
+              </div>
+            </>
+          )}
+          {detached.has("timeline") && (
+            <PanelWindow panel="timeline" title={`Timeline — ${project.name}`} onClosed={() => setPanelDetached("timeline", false)}>
+              <div className="panel timeline">
+                <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
+              </div>
+            </PanelWindow>
+          )}
         </div>
 
         {/* Terminals stay mounted while collapsed: shells and agents keep running. */}
         {!terminal.collapsed && <Splitter orientation="vertical" label="Resize terminal" {...edge("terminal", -1)} />}
         {terminal.collapsed && <CollapsedRail side="right" label="Show terminal" onExpand={() => toggle("terminal")} />}
-        <div
-          className="panel terminal-panel"
-          style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}
-        >
+        <div {...slot("terminal")} style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}>
           <TerminalPanel
             ref={terminals}
             projectName={project.name}
@@ -304,9 +383,19 @@ export function Workspace({ project }: { project: ProjectView }) {
         session={activeSession}
         notice={notice}
       />
+      {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
+        <PanelWindow key={id} panel={id} title={`${label} — ${project.name}`} onClosed={() => setPanelDetached(id, false)}>
+          <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} />
+        </PanelWindow>
+      ))}
       <ContextMenuHost />
     </div>
   );
+}
+
+/** The workspace panel `target` is in, from its slot's `data-panel`; null outside every panel. */
+function panelAt(target: EventTarget | null): WorkspacePanel | null {
+  return (elementOf(target)?.closest("[data-panel]")?.getAttribute("data-panel") as WorkspacePanel | null | undefined) ?? null;
 }
 
 /**

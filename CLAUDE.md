@@ -32,7 +32,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Live preview of generated clips (`frameshell-live://` scheme, seek bridge, iframe, topmost-layer rule) | `apps/desktop/src/main/live-protocol.ts`, `renderer/src/preview/live.ts`, `components/LivePreview.tsx`; daemon `clip.live`; ADR 0010 |
 | Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
 | Desktop selection (shared store, extend, never duplicate); playhead = `preview/transport.ts` | `apps/desktop/src/renderer/src/selection.ts` |
-| Detached panels (panel windows, allowlist, placement in `configDir`, project window registry, global keys) | `apps/desktop/src/main/panel-windows.ts`, `renderer/src/panel-window.ts`, `renderer/src/windows.ts`; ADR 0012 |
+| Detached panels (panel windows, allowlist, placement in `configDir`, project window registry, global keys, maximize) | `apps/desktop/src/main/panel-windows.ts`, `renderer/src/panel-window.ts`, `renderer/src/windows.ts`, `components/Workspace.tsx`; ADR 0012 |
 | Terminals across windows (pty outlives view, output ring + `terminal:attach` replay, Ask agent target) | `apps/desktop/src/main/output-ring.ts`, `main/terminals.ts`, `renderer/src/components/TerminalPanel.tsx`, `renderer/src/ask/ask-target.ts`; ADR 0012 |
 | Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
 | Agent-labelled terminals (detection, `session.tag`, `agent:<label>:<session>` author, `FRAMESHELL_AGENT`) | `apps/desktop/src/main/agent-detect.ts`, `main/terminals.ts`; `packages/protocol/src/agents.ts`; SPEC §6.2 |

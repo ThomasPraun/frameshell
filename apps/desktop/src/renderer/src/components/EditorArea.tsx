@@ -1,10 +1,13 @@
 import { isScriptPath, parseScript } from "@frameshell/schema";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
 import { askAgent } from "../ask/ask-agent.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { windowOf } from "../windows.js";
+import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { TRANSCRIPT_SHORTCUT, TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
 
 /** One open file. `savedVersion` is Monaco's alternative version id at last load or save: differs = dirty. */
@@ -30,6 +33,11 @@ interface OpenDoc {
  * caret; elsewhere it asks about the current selection.
  *
  * The {@link TRANSCRIPT_TAB} tab shows the transcript view instead of a file.
+ *
+ * The area can move to its own window (ADR 0012): while `detached`, it draws
+ * into `target` (that window's root) and leaves a placeholder here. It stays
+ * mounted here either way, so open files keep their unsaved edits, undo
+ * history and caret; only the Monaco view is created again in the new window.
  */
 export function EditorArea({
   tabs,
@@ -38,6 +46,9 @@ export function EditorArea({
   onClose,
   onOpenFile,
   transcriptFocus,
+  detached,
+  target,
+  onDetach,
 }: {
   tabs: string[];
   active: string | null;
@@ -47,8 +58,17 @@ export function EditorArea({
   onOpenFile: (path: string) => void;
   /** Transcript file to bring into view in the transcript tab. */
   transcriptFocus: TranscriptFocus | null;
+  /** The area is in its own window. */
+  detached: boolean;
+  /** Root of the area's window while it is open; null otherwise. */
+  target: HTMLElement | null;
+  /** Move the area to its own window (`true`) or dock it back. */
+  onDetach: (detached: boolean) => void;
 }) {
-  const host = useRef<HTMLDivElement>(null);
+  /** Where the Monaco view lives now: a new element, in the other window, after a move. */
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  /** Scroll and caret per file, kept while the view is created again elsewhere. */
+  const viewStates = useRef(new Map<string, monaco.editor.ICodeEditorViewState>());
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const docs = useRef(new Map<string, OpenDoc>());
   const activeRef = useRef(active);
@@ -78,10 +98,10 @@ export function EditorArea({
     rerender();
   }, []);
 
-  // One editor for the component's lifetime.
+  // One editor per host element: models outlive it, so a move to another window keeps every file.
   useEffect(() => {
-    if (!host.current) return;
-    const instance = monaco.editor.create(host.current, {
+    if (!host) return;
+    const instance = monaco.editor.create(host, {
       theme: "frameshell",
       automaticLayout: true,
       fontFamily: '"JetBrains Mono Variable", Menlo, Consolas, monospace',
@@ -124,16 +144,25 @@ export function EditorArea({
       }
     });
     editor.current = instance;
-    const open = docs.current;
     return () => {
+      const path = activeRef.current;
+      const state = instance.getModel() ? instance.saveViewState() : null;
+      if (path && state) viewStates.current.set(path, state);
       ask.dispose();
       onEdit.dispose();
       onClick.dispose();
       instance.dispose();
+      if (editor.current === instance) editor.current = null;
+    };
+  }, [host, save]);
+
+  useEffect(() => {
+    const open = docs.current;
+    return () => {
       for (const doc of open.values()) doc.model?.dispose();
       open.clear();
     };
-  }, [save]);
+  }, []);
 
   // Load newly opened tabs, show the active one, drop closed ones.
   useEffect(() => {
@@ -141,6 +170,7 @@ export function EditorArea({
       if (!tabs.includes(path)) {
         doc.model?.dispose();
         docs.current.delete(path);
+        viewStates.current.delete(path);
       }
     }
     if (!active || active === TRANSCRIPT_TAB) {
@@ -150,6 +180,10 @@ export function EditorArea({
     const existing = docs.current.get(active);
     if (existing) {
       editor.current?.setModel(existing.model);
+      // Once, right after a move: switching tabs starts each file at its top, as before.
+      const state = viewStates.current.get(active);
+      viewStates.current.delete(active);
+      if (existing.model && state) editor.current?.restoreViewState(state);
       if (existing.model) editor.current?.focus();
       return;
     }
@@ -179,11 +213,11 @@ export function EditorArea({
         rerender();
       },
     );
-  }, [tabs, active]);
+  }, [tabs, active, host]);
 
   useEffect(() => {
     editor.current?.updateOptions({ glyphMargin: !!active && isScriptPath(active) });
-  }, [active]);
+  }, [active, host]);
 
   // Scene links follow script edits, timeline changes and the selection.
   useEffect(() => {
@@ -236,8 +270,9 @@ export function EditorArea({
     [],
   );
 
-  const close = (path: string) => {
-    if (isDirty(docs.current.get(path)) && !window.confirm(`Discard unsaved changes to ${path}?`)) return;
+  /** `view`: the window asking, which shows the confirmation. */
+  const close = (path: string, view: Window) => {
+    if (isDirty(docs.current.get(path)) && !view.confirm(`Discard unsaved changes to ${path}?`)) return;
     onClose(path);
   };
 
@@ -254,7 +289,7 @@ export function EditorArea({
 
   const activeDoc = active ? docs.current.get(active) : undefined;
 
-  return (
+  const body = (
     <div className="editor-area">
       <div className="tab-strip" role="tablist" aria-label="Open files">
         {tabs.map((path) => {
@@ -268,7 +303,7 @@ export function EditorArea({
               className={`file-tab${path === active ? " is-active" : ""}`}
               title={path}
               onMouseDown={(event) => {
-                if (event.button === 1) close(path);
+                if (event.button === 1) close(path, windowOf(event.target));
               }}
               onClick={() => onActivate(path)}
             >
@@ -278,7 +313,7 @@ export function EditorArea({
                 aria-label={dirty ? `Close ${path} (unsaved)` : `Close ${path === TRANSCRIPT_TAB ? "Transcript" : path}`}
                 onClick={(event) => {
                   event.stopPropagation();
-                  close(path);
+                  close(path, windowOf(event.target));
                 }}
               />
             </div>
@@ -293,6 +328,9 @@ export function EditorArea({
             Transcript
           </button>
         )}
+        <span className="tab-strip-actions">
+          <DetachButton name="editor" detached={detached} onClick={() => onDetach(!detached)} testId="editor-detach" />
+        </span>
       </div>
 
       {activeDoc?.diskNotice && active && (
@@ -313,7 +351,7 @@ export function EditorArea({
         </div>
       )}
 
-      <div className="editor-host" ref={host} hidden={!activeDoc?.model} />
+      <div className="editor-host" ref={setHost} hidden={!activeDoc?.model} />
       {active === TRANSCRIPT_TAB && <TranscriptView onOpenFile={onOpenFile} focus={transcriptFocus} />}
       {!active && (
         <div className="empty editor-empty">
@@ -323,6 +361,13 @@ export function EditorArea({
       )}
       {activeDoc?.error && <div className="empty editor-empty">{activeDoc.error}</div>}
     </div>
+  );
+  if (!detached) return body;
+  return (
+    <>
+      <DockedElsewhere title="Editor" onBringBack={() => onDetach(false)} />
+      {target && createPortal(<div className="panel editor">{body}</div>, target)}
+    </>
   );
 }
 

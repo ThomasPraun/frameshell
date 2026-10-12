@@ -47,6 +47,8 @@ Renderer rules:
 - the editor tabs, which include the transcript;
 - the sidebar views: explorer, history, plugins.
 
+The editor moves as one window holding all its tabs, so open files keep their unsaved edits and undo history. Each sidebar view moves on its own, and the others stay docked. Both were settled with part 3 (#167).
+
 The preview and terminals ship first; the others follow in the same mechanism. A detached panel leaves a placeholder in its slot with "Docked in another window", plus "Bring back".
 
 **3. Docking back and closing.**

@@ -11,7 +11,7 @@ export function PanelHeader({
   children: ReactNode;
   /** Buttons at the right end, before the collapse control. */
   actions?: ReactNode;
-  onCollapse?: () => void;
+  onCollapse?: (() => void) | undefined;
   collapseLabel?: string;
   collapseSide?: "left" | "right" | "down" | "up";
 }) {
