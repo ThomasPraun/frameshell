@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import * as pty from "node-pty";
 import { agentCommands, agentOfCommand, foregroundCommand } from "./agent-detect.js";
+import { OutputRing, type OutputRingLimits } from "./output-ring.js";
 import type { TerminalLaunch } from "./terminal-launch.js";
 
 /** Where terminal output, exits and agent changes go; main forwards them to the renderer and daemon. */
@@ -22,6 +23,8 @@ export interface TerminalManagerOptions {
   detectAgent?: ((shellPid: number) => Promise<string | null>) | null;
   /** How often to look at each terminal's foreground, ms. */
   agentPollMs?: number;
+  /** Output kept per terminal for {@link TerminalManager.attach}. Default: about 10,000 lines, 4 MiB. */
+  outputLimits?: OutputRingLimits;
 }
 
 /** Output is flushed at most this often: one IPC message per burst instead of per chunk. */
@@ -42,6 +45,8 @@ interface Entry {
   exited: Promise<void>;
   buffer: string;
   timer: NodeJS.Timeout | undefined;
+  /** Send the buffered output now. */
+  flush: () => void;
   session: string | null;
   /** Shell program name: while the foreground has it, no agent runs. */
   shell: string;
@@ -65,13 +70,18 @@ function defaultDetect(): ((shellPid: number) => Promise<string | null>) | null 
 }
 
 /**
- * Real pseudo-terminals (node-pty; ConPTY on Windows) for one window.
- * Sessions die with the window in v0.1 (SPEC §3.2).
+ * Real pseudo-terminals (node-pty; ConPTY on Windows) for one project window.
+ * A terminal lives until it is killed: its views come and go (ADR 0012), and
+ * {@link TerminalManager.attach} replays its recent output into a new one.
+ * Sessions die with the window (SPEC §3.2).
  */
 export class TerminalManager {
   readonly #terminals = new Map<string, Entry>();
+  /** Recent output per terminal, kept after its shell exits until the terminal is killed. */
+  readonly #output = new Map<string, OutputRing>();
   readonly #detect: ((shellPid: number) => Promise<string | null>) | null;
   readonly #pollMs: number;
+  readonly #outputLimits: OutputRingLimits | undefined;
 
   constructor(
     private readonly events: TerminalEvents,
@@ -79,6 +89,7 @@ export class TerminalManager {
   ) {
     this.#detect = options.detectAgent === undefined ? defaultDetect() : options.detectAgent;
     this.#pollMs = options.agentPollMs ?? AGENT_POLL_MS;
+    this.#outputLimits = options.outputLimits;
   }
 
   /** Spawn a shell. `id` addresses the terminal in every later call and event. */
@@ -93,11 +104,21 @@ export class TerminalManager {
     });
     const shell = basename(launch.file).replace(/\.exe$/i, "");
     let markExited = () => {};
+    const output = new OutputRing(this.#outputLimits);
     const entry: Entry = {
       pty: proc,
       exited: new Promise((resolve) => (markExited = resolve)),
       buffer: "",
       timer: undefined,
+      flush: () => {
+        clearTimeout(entry.timer);
+        entry.timer = undefined;
+        if (!entry.buffer) return;
+        const data = entry.buffer;
+        entry.buffer = "";
+        output.append(data);
+        this.events.onData(id, data);
+      },
       session: launch.env["FRAMESHELL_SESSION"] || null,
       shell,
       agent: null,
@@ -106,26 +127,19 @@ export class TerminalManager {
       poll: undefined,
       probing: false,
     };
-    const flush = () => {
-      entry.timer = undefined;
-      if (!entry.buffer) return;
-      const data = entry.buffer;
-      entry.buffer = "";
-      this.events.onData(id, data);
-    };
     proc.onData((data) => {
       entry.buffer += data;
-      entry.timer ??= setTimeout(flush, FLUSH_MS);
+      entry.timer ??= setTimeout(entry.flush, FLUSH_MS);
     });
     proc.onExit(({ exitCode }) => {
       markExited();
-      clearTimeout(entry.timer);
-      flush();
+      entry.flush();
       this.#terminals.delete(id);
       this.#stopWatching(id, entry);
       this.events.onExit(id, exitCode);
     });
     this.#terminals.set(id, entry);
+    this.#output.set(id, output);
     if (this.#detect) entry.poll = setInterval(() => void this.#watch(id, entry), this.#pollMs);
     return { id, shell };
   }
@@ -175,6 +189,19 @@ export class TerminalManager {
     this.#setAgent(id, entry, null);
   }
 
+  /**
+   * Output a view needs to show the terminal as it stands: its recent
+   * output, from a fresh terminal's state (see {@link OutputRing.snapshot}).
+   * Output still buffered is sent through `onData` first, so everything sent
+   * before this returns is in the snapshot and everything after is not. Null
+   * for a terminal never created or already killed; an exited shell's output
+   * stays until its terminal is killed.
+   */
+  attach(id: string): string | null {
+    this.#terminals.get(id)?.flush();
+    return this.#output.get(id)?.snapshot() ?? null;
+  }
+
   /** True while the terminal's shell runs. */
   has(id: string): boolean {
     return this.#terminals.has(id);
@@ -196,7 +223,10 @@ export class TerminalManager {
     }
   }
 
-  /** Close a terminal tab: kills its shell and everything in the foreground. The exit still reaches `onExit`. */
+  /**
+   * Close a terminal tab: kills its shell and everything in the foreground,
+   * and forgets its output. The exit still reaches `onExit`.
+   */
   kill(id: string): void {
     void this.#kill(id);
   }
@@ -208,6 +238,7 @@ export class TerminalManager {
    */
   async killAll(): Promise<void> {
     const exits = [...this.#terminals.keys()].map((id) => this.#kill(id));
+    this.#output.clear();
     let timer: NodeJS.Timeout | undefined;
     const bound = new Promise<void>((resolve) => (timer = setTimeout(resolve, EXIT_WAIT_MS)));
     await Promise.race([Promise.all(exits), bound]);
@@ -216,6 +247,7 @@ export class TerminalManager {
 
   /** Settles when the shell has exited; at once when unknown or already gone. */
   #kill(id: string): Promise<void> {
+    this.#output.delete(id);
     const entry = this.#terminals.get(id);
     if (!entry) return Promise.resolve();
     this.#terminals.delete(id);

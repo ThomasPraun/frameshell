@@ -63,6 +63,34 @@ describe("TerminalManager", () => {
     expect(manager.has(id)).toBe(false);
   });
 
+  // ADR 0012: a view that mounts again (a tab moved to another window) replays the terminal's output.
+  it("replays a terminal's output to a view that attaches, and keeps it until the terminal is killed", async () => {
+    const { manager, output, exits, launch } = setup();
+    const { id } = manager.create(launch("term-replay"), { cols: 80, rows: 24 });
+    manager.write(id, echoSession);
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("sess=term-replay");
+    // Everything sent before attach returns is in the replay: the same text, byte for byte.
+    expect(manager.attach(id)).toBe(output.get(id));
+    manager.write(id, "exit\r");
+    await expect.poll(() => exits.has(id), { timeout: 15_000 }).toBe(true);
+    expect(manager.attach(id)).toContain("sess=term-replay");
+    manager.kill(id);
+    expect(manager.attach(id)).toBeNull();
+    expect(manager.attach("never-created")).toBeNull();
+  });
+
+  it("caps the output it keeps", async () => {
+    const { manager, output, launch } = setup({ outputLimits: { lines: 20, size: 100_000 } });
+    const { id } = manager.create(launch("term-cap"), { cols: 80, rows: 24 });
+    const count = process.platform === "win32" ? "1..200 | % { \"n=$_\" }\r" : "for i in $(seq 1 200); do echo n=$i; done\r";
+    manager.write(id, count);
+    await expect.poll(() => output.get(id) ?? "", { timeout: 15_000 }).toContain("n=200");
+    const replay = manager.attach(id)!;
+    expect(replay).toContain("n=200");
+    expect(replay).not.toContain("n=100\r");
+    expect(replay.split("\n").length).toBeLessThanOrEqual(26);
+  });
+
   // The app quits once this settles. On Windows a shell killed before its first output is only killed later by
   // node-pty; quitting before that left Electron hung at exit with the pseudoconsole open (#109).
   it("killAll settles once every shell has exited, even one killed right after it started", async () => {

@@ -41,7 +41,7 @@ import { editMenu } from "./edit-menu.js";
 import { LayoutStore } from "./layout-store.js";
 import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
-import { PANEL_WINDOW_MIN, PanelWindowStore, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
+import { PANEL_WINDOW_MIN, PanelWindowStore, cascade, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { terminalToolPaths } from "./terminal-tools.js";
@@ -134,10 +134,11 @@ interface WindowState {
   opening: Promise<unknown>;
   /**
    * Detached panel windows (ADR 0012): `about:blank` documents the project
-   * renderer draws a panel into. They have no preload and never send IPC;
-   * the menu routes their commands to this window.
+   * renderer draws a panel into, with the panel each shows. Several may show
+   * the same panel kind: one per detached terminal tab. They have no preload
+   * and never send IPC; the menu routes their commands to this window.
    */
-  panels: Map<DetachablePanel, BrowserWindow>;
+  panels: Map<BrowserWindow, DetachablePanel>;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -197,7 +198,7 @@ function createWindow(projectDir?: string): BrowserWindow {
   // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
   contents.setWindowOpenHandler(({ url, frameName }) => {
     const panel = panelWindowRequest(url, frameName);
-    if (panel) return { action: "allow", overrideBrowserWindowOptions: panelWindowOptions(panel) };
+    if (panel) return { action: "allow", overrideBrowserWindowOptions: panelWindowOptions(state, panel) };
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
@@ -238,10 +239,14 @@ function createWindow(projectDir?: string): BrowserWindow {
   return window;
 }
 
-/** Options of a detached panel's window: where it was on these displays, else centred on the primary display. */
-function panelWindowOptions(panel: DetachablePanel): Electron.BrowserWindowConstructorOptions {
+/**
+ * Options of a detached panel's window: where it was on these displays, else centred on the primary display;
+ * shifted when windows of the same panel are already open (terminal tabs).
+ */
+function panelWindowOptions(state: WindowState, panel: DetachablePanel): Electron.BrowserWindowConstructorOptions {
   const displays = screen.getAllDisplays();
-  const bounds = placeOnDisplays(panelWindows.placement(panel, displays)?.bounds, displays, screen.getPrimaryDisplay());
+  const placed = placeOnDisplays(panelWindows.placement(panel, displays)?.bounds, displays, screen.getPrimaryDisplay());
+  const bounds = cascade(placed, [...state.panels.values()].filter((open) => open === panel).length);
   return {
     ...bounds,
     minWidth: PANEL_WINDOW_MIN.width,
@@ -260,7 +265,7 @@ function panelWindowOptions(panel: DetachablePanel): Electron.BrowserWindowConst
  */
 function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: BrowserWindow): void {
   const childId = child.webContents.id;
-  state.panels.set(panel, child);
+  state.panels.set(child, panel);
   panelOwners.set(childId, state);
   void panelWindows.setDetached(panel, true);
   if (panelWindows.placement(panel, screen.getAllDisplays())?.fullScreen) child.setFullScreen(true);
@@ -285,9 +290,9 @@ function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: Bro
   child.on("closed", () => {
     clearTimeout(timer);
     panelOwners.delete(childId);
-    // A newer window of the same panel may have replaced this one (a quick dock and detach): it stays.
-    if (state.panels.get(panel) !== child) return;
-    state.panels.delete(panel);
+    state.panels.delete(child);
+    // A newer window of the same panel may have replaced this one (a quick dock and detach): the panel stays detached.
+    if ([...state.panels.values()].includes(panel)) return;
     if (!quitting && !state.closingPanels) void panelWindows.setDetached(panel, false);
   });
 }
@@ -295,7 +300,7 @@ function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: Bro
 /** Close a project window's panel windows, keeping their panels detached for the next time the project opens. */
 function closePanelWindows(state: WindowState): void {
   state.closingPanels = true;
-  for (const child of state.panels.values()) if (!child.isDestroyed()) child.close();
+  for (const child of state.panels.keys()) if (!child.isDestroyed()) child.close();
 }
 
 /** The project window a window belongs to: itself, or the owner of a detached panel window. */
@@ -476,6 +481,7 @@ function registerIpc(): void {
     const { id, shell: shellName } = state.terminals.create(launch, size);
     return { id, session, shell: shellName };
   });
+  ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),

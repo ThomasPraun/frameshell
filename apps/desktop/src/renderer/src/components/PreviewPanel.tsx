@@ -16,6 +16,7 @@ import { useTimelineView } from "../timeline/useTimelineView.js";
 import { PickLayer } from "./PickLayer.js";
 import { forgetLivePages } from "../preview/live-pages.js";
 import { ClipInspector } from "./ClipInspector.js";
+import { DetachButton } from "./DetachControls.js";
 import { LivePreview } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
@@ -156,7 +157,7 @@ export function PreviewPanel({
   const live = useMemo(() => (program ? liveTarget(program, frame) : null), [program, frame]);
   return (
     <div className="preview-body" ref={body} data-testid="preview-body">
-      <PanelHeader actions={<DetachButton detached={detached} onClick={onDetach} />}>
+      <PanelHeader actions={<DetachButton name="preview" detached={detached} onClick={onDetach} testId="preview-detach" />}>
         <span className="panel-title">Preview</span>
         <span className="timecode" aria-label="Playhead" data-testid="playhead">
           {formatTimecode(time, fps)}
@@ -230,22 +231,6 @@ function leaveFullScreen(doc: Document): void {
     leaving.delete(doc);
     if (doc.fullscreenElement) void doc.exitFullscreen().catch(() => undefined);
   }, wait);
-}
-
-/** Move the preview to its own window, or dock it back. */
-function DetachButton({ detached, onClick }: { detached: boolean; onClick: () => void }) {
-  const label = detached ? "Dock preview back" : "Open preview in its own window";
-  return (
-    <button className="icon-button" aria-label={label} title={label} onClick={onClick} data-testid="preview-detach">
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        {detached ? (
-          <path d="M9 3H13V7M13 3L8 8M7 4H3V13H12V9" fill="none" stroke="currentColor" strokeWidth="1.3" transform="rotate(180 8 8)" />
-        ) : (
-          <path d="M9 3H13V7M13 3L8 8M7 4H3V13H12V9" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        )}
-      </svg>
-    </button>
-  );
 }
 
 /** Settings of the selection: a subtitle track's style, else the selected clip's placement and sound. */

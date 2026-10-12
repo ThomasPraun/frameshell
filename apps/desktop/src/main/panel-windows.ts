@@ -1,7 +1,7 @@
 // Detached panel windows (ADR 0012): which popups the project renderer may open, and where each panel's window goes.
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "@frameshell/core/fs-util";
-import { DETACHABLE_PANELS, type DetachablePanel, PANEL_WINDOW_PREFIX } from "../shared/layout.js";
+import { DETACHABLE_PANELS, type DetachablePanel, PANEL_WINDOW_PREFIX, REOPENED_PANELS } from "../shared/layout.js";
 
 /** A screen rectangle in Electron's DIP coordinates. */
 export interface Rect {
@@ -28,6 +28,8 @@ export interface PanelPlacement {
 export const PANEL_WINDOW_SIZE = { width: 960, height: 600 } as const;
 /** Smallest panel window: the preview's transport and inspector still fit. */
 export const PANEL_WINDOW_MIN = { width: 320, height: 240 } as const;
+/** How far each further window of a panel already open is shifted right and down, so it does not hide the others. */
+export const PANEL_WINDOW_CASCADE = 28;
 /** A saved window is reused on a display only when at least this much of it, each way, lies in the display's work area. */
 const MIN_VISIBLE = 80;
 
@@ -67,6 +69,12 @@ export function placeOnDisplays(saved: Rect | undefined, displays: readonly Disp
   const width = Math.min(PANEL_WINDOW_SIZE.width, area.width);
   const height = Math.min(PANEL_WINDOW_SIZE.height, area.height);
   return { x: Math.round(area.x + (area.width - width) / 2), y: Math.round(area.y + (area.height - height) / 2), width, height };
+}
+
+/** `rect` moved {@link PANEL_WINDOW_CASCADE} right and down per window of the same panel already `open`. */
+export function cascade(rect: Rect, open: number): Rect {
+  const shift = PANEL_WINDOW_CASCADE * Math.max(0, open);
+  return { ...rect, x: rect.x + shift, y: rect.y + shift };
 }
 
 function overlap(a: Rect, b: Rect): boolean {
@@ -123,8 +131,9 @@ export class PanelWindowStore {
     return others.at(-1) ?? null;
   }
 
-  /** Mark `panel` detached or docked. */
+  /** Mark `panel` detached or docked. A panel not in {@link REOPENED_PANELS} is never marked. */
   setDetached(panel: DetachablePanel, detached: boolean): Promise<void> {
+    if (!REOPENED_PANELS.includes(panel)) return this.#writing;
     const rest = this.#stored.detached.filter((other) => other !== panel);
     this.#stored.detached = detached ? [...rest, panel] : rest;
     return this.#save();
@@ -149,7 +158,7 @@ export class PanelWindowStore {
 function normalize(raw: unknown): Stored {
   const input = isRecord(raw) ? raw : {};
   const detached = Array.isArray(input["detached"])
-    ? DETACHABLE_PANELS.filter((panel) => (input["detached"] as unknown[]).includes(panel))
+    ? REOPENED_PANELS.filter((panel) => (input["detached"] as unknown[]).includes(panel))
     : [];
   const sets: Stored["sets"] = {};
   if (isRecord(input["sets"])) {

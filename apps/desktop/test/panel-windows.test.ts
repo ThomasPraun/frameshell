@@ -6,6 +6,7 @@ import {
   type DisplayInfo,
   PANEL_WINDOW_SIZE,
   PanelWindowStore,
+  cascade,
   displaySetKey,
   panelWindowRequest,
   placeOnDisplays,
@@ -19,6 +20,7 @@ describe("panelWindowRequest", () => {
   it("allows only about:blank named after a known panel", () => {
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview/1")).toBe("preview");
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview/27")).toBe("preview");
+    expect(panelWindowRequest("about:blank", "frameshell-panel:terminal/3")).toBe("terminal");
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview")).toBeNull();
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview/x")).toBeNull();
     expect(panelWindowRequest("about:blank", "frameshell-panel:debugger/1")).toBeNull();
@@ -69,6 +71,29 @@ describe("PanelWindowStore", () => {
     expect(reopened.placement("preview", [monitor, laptop])).toEqual(placement);
     await reopened.setDetached("preview", false);
     expect(reopened.detached()).toEqual([]);
+  });
+
+  it("never marks a terminal detached, since its session ends with the project window, but places its windows", async () => {
+    const file = storeFile();
+    const store = new PanelWindowStore(file);
+    await store.load();
+    const placement = { bounds: { x: 200, y: 80, width: 700, height: 500 }, fullScreen: false };
+    await store.setDetached("terminal", true);
+    await store.place("terminal", [laptop], placement);
+    expect(store.detached()).toEqual([]);
+    writeFileSync(file, JSON.stringify({ version: 1, detached: ["terminal", "preview"], sets: {} }));
+    await store.load();
+    expect(store.detached()).toEqual(["preview"]);
+    await store.place("terminal", [laptop], placement);
+    const reopened = new PanelWindowStore(file);
+    await reopened.load();
+    expect(reopened.placement("terminal", [laptop])).toEqual(placement);
+  });
+
+  it("shifts each further window of a panel already open", () => {
+    const rect = { x: 100, y: 50, width: 960, height: 600 };
+    expect(cascade(rect, 0)).toEqual(rect);
+    expect(cascade(rect, 2)).toEqual({ x: 156, y: 106, width: 960, height: 600 });
   });
 
   it("keeps one placement per display set, and falls back to the one saved last", async () => {
