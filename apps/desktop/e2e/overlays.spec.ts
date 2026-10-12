@@ -120,6 +120,18 @@ test("composites every layer where export puts it: the preview frame matches `fr
   }
 });
 
+test("a click on a transparent part of a layer selects the picture under it (ADR 0011)", async () => {
+  const picture = await laidOutBox(frame());
+  // The logo's transparent half (x 180-261): the base take shows there, so the click goes through to it.
+  await page.mouse.click(picture.x + picture.width * (220 / W), picture.y + picture.height * (420 / H));
+  await expect(lanes()).toHaveAttribute("data-selected", "c_base");
+  // Its opaque half (x 99-180) is the logo's, though the base's handles cover the whole frame now. The inspector
+  // that opened for the base resized the frame: measured again.
+  const resized = await laidOutBox(frame());
+  await page.mouse.click(resized.x + resized.width * (140 / W), resized.y + resized.height * (420 / H));
+  await expect(lanes()).toHaveAttribute("data-selected", "c_logo");
+});
+
 test("clicking a layer selects its clip; the inspector sets its scale as one ui operation", async () => {
   const picture = await laidOutBox(frame());
   // Inside the logo's opaque half (fractions of the frame): V3 is the top layer there.

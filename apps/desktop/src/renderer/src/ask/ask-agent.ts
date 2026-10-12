@@ -47,19 +47,37 @@ export function hasSelection(current: Selection): boolean {
  * Reference lines of the current selection, on the shared timeline feed's
  * latest revision. A preview region first gets its frame captured by the
  * daemon; when that fails the line goes without it and `warning` says why.
+ * The capture waits for every generated clip's render, so while one is
+ * queued, rendering or failed the line says `frame pending` instead and is
+ * typed at once (ADR 0011): the agent captures the frame later.
  */
 export async function composeReference(): Promise<{ lines: string[]; warning: string | null }> {
   const current = selection.get();
   let frame: string | null = null;
+  let framePending = false;
   let warning: string | null = null;
   if (current.region) {
-    try {
-      frame = await window.frameshell.context.captureFrame(current.region.at);
-    } catch (error) {
-      warning = `Frame not captured: ${(error as Error).message}`;
+    framePending = await rendersPending();
+    if (!framePending) {
+      try {
+        frame = await window.frameshell.context.captureFrame(current.region.at);
+      } catch (error) {
+        warning = `Frame not captured: ${(error as Error).message}`;
+      }
     }
   }
-  return { lines: referenceLines(current, timelineSnapshot(SELECTION_TIMELINE), { frame }), warning };
+  return { lines: referenceLines(current, timelineSnapshot(SELECTION_TIMELINE), { frame, framePending }), warning };
+}
+
+/** True while a generated clip of the timeline has no render the frame capture could use without waiting. */
+async function rendersPending(): Promise<boolean> {
+  try {
+    const { clips } = await window.frameshell.clips.renders(SELECTION_TIMELINE);
+    return clips.some((clip) => clip.state === "queued" || clip.state === "rendering" || clip.state === "failed");
+  } catch {
+    // Unknown: try the capture, which says what is wrong.
+    return false;
+  }
 }
 
 /**

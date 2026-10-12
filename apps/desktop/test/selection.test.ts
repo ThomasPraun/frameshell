@@ -208,7 +208,7 @@ describe("selection store", () => {
     });
 
     it("a preview region keeps its normalized corners and timeline time until replaced", () => {
-      const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.22, at: 65.2 };
+      const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.22, at: 65.2, clips: [{ clip: "c_a", type: "media" }] };
       selection.selectRegion(region, "preview");
       expect(selection.get()).toEqual({ ...blank, region, origin: "preview" });
       const before = selection.get();

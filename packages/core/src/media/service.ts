@@ -21,6 +21,7 @@ import { type MediaTools, ingestAsset } from "./ingest.js";
 import { DERIVED_DIRS, MediaStore, classifyDerived, hashFile } from "./store.js";
 import { ENERGY_DIR, classifyEnergy, energyCacheKey } from "./energy-store.js";
 import { renameRetrying } from "../fs-util.js";
+import { CONTEXT_DIR, CONTEXT_MAX_AGE_MS, classifyContext } from "../context.js";
 import { sweep } from "../gc.js";
 import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcripts/transcriber.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
@@ -309,6 +310,14 @@ export class MediaService {
     }
     removed.push(
       ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
+      // "Ask agent" captures: by age only, never by key.
+      ...(await sweep({
+        ...common,
+        dir: CONTEXT_DIR,
+        classify: classifyContext,
+        keep: () => false,
+        keepNewerThan: Math.min(Date.now() - CONTEXT_MAX_AGE_MS, options.keepNewerThan ?? Number.POSITIVE_INFINITY),
+      })),
     );
     if (options.transcribing) {
       skipped.push({ area: "audio", reason: "a transcription or export verify of this project is running; it may read any extracted WAV." });

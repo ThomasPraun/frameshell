@@ -106,11 +106,16 @@ describe("reference lines", () => {
       '[frameshell] scene scripts/script.md#intro "Intro" · clips c_0001, c_0012',
     ]);
     expect(referenceLines({ ...blank, scene, origin: "script" }, view)).toEqual(['[frameshell] scene scripts/script.md#intro "Intro"']);
-    const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.2249, at: 65.2 };
+    const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.2249, at: 65.2, clips: [] };
     expect(referenceLines({ ...blank, region, origin: "preview" }, view, { frame: ".frameshell/context/f_1956.png" })).toEqual([
       "[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_1956.png",
     ]);
     expect(referenceLines({ ...blank, region, origin: "preview" }, view)).toEqual(["[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20"]);
+    // ADR 0011: the clips under it, topmost first; a frame a render still owes is pending.
+    const over = { ...region, clips: [{ clip: "c_0100", type: "hyperframes" }, { clip: "c_0002", type: "media" }] };
+    expect(referenceLines({ ...blank, region: over, origin: "preview" }, view, { framePending: true })).toEqual([
+      "[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · clips c_0100, c_0002 · frame pending",
+    ]);
   });
 
   it("has nothing to say about an empty selection", () => {

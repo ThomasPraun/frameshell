@@ -206,6 +206,22 @@ describe("MediaService.gc", () => {
     for (const rel of orphan) expect(existsSync(join(root, rel))).toBe(true);
   });
 
+  it("deletes Ask agent captures older than 7 days, keeps recent ones and anything else in the folder", async () => {
+    const { root, media } = await setup();
+    plant(root, ".frameshell/context/f_0421.png", "png", 8 * DAY_MS);
+    plant(root, ".frameshell/context/e_0421_1.json", "{}", 8 * DAY_MS);
+    plant(root, ".frameshell/context/f_0900.png", "png", 6 * DAY_MS);
+    plant(root, ".frameshell/context/notes.txt", "mine", 30 * DAY_MS);
+
+    const report = await media.gc(root, { dryRun: false, temps: true, hashUnknown: true });
+    expect(report.removed).toEqual([
+      { path: ".frameshell/context/e_0421_1.json", kind: "context", bytes: 2 },
+      { path: ".frameshell/context/f_0421.png", kind: "context", bytes: 3 },
+    ]);
+    expect(existsSync(join(root, ".frameshell/context/f_0900.png"))).toBe(true);
+    expect(existsSync(join(root, ".frameshell/context/notes.txt"))).toBe(true);
+  });
+
   it("sweeps old unused derived media when a project is attached, never recent ones", async () => {
     const { root, media, store } = await setup(true);
     plant(root, "assets/take.wav", "take one");

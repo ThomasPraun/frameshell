@@ -26,6 +26,24 @@ export const UiSelectionSchema = z.object({
     .string()
     .nullable()
     .describe("Transaction `tx_…` or operation `op_…` whose changes the timeline marks (History panel); null when none."),
+  region: z
+    .object({
+      x0: z.number().min(0).max(1).describe("Left edge, fraction of the frame width (0 = left)."),
+      y0: z.number().min(0).max(1).describe("Top edge, fraction of the frame height (0 = top)."),
+      x1: z.number().min(0).max(1).describe("Right edge, fraction of the frame width; at least `x0`."),
+      y1: z.number().min(0).max(1).describe("Bottom edge, fraction of the frame height; at least `y0`."),
+      at: z.number().nonnegative().describe("Timeline seconds of the frame it was drawn on."),
+      clips: z
+        .array(
+          z.object({
+            clip: z.string().describe("Clip id of `timeline`; inside a nested timeline `<nested clip>/<clip>`, e.g. `c_0200/c_0100`."),
+            type: z.string().describe("`media` for footage and stills, else the adapter clip type, e.g. `hyperframes`."),
+          }),
+        )
+        .describe("Clips whose picture meets the rectangle at `at`, topmost first; empty over black."),
+    })
+    .nullable()
+    .describe("Rectangle the user drew on the preview frame (multiply by the project resolution for pixels); null when none."),
 });
 
 /** What the app publishes about one window: everything `ui.state` reports except connection facts. */

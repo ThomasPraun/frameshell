@@ -22,12 +22,19 @@ export interface LayerBox {
   box: FrameBox;
 }
 
-/** Box of `clip` at program frame `frame`; null when it shows no picture then (gap, placeholder, other clip). */
+/**
+ * Box of `clip` at program frame `frame`; null when it shows no picture then
+ * (gap, placeholder, other clip, media of unknown size). A generated clip
+ * whose render is not ready yet takes the project format, the size its
+ * render will have, so it can be hit and moved while it renders.
+ */
 export function layerBox(program: Program, frame: number, clip: string): LayerBox | null {
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
-    if (!span || span.clip !== clip || span.kind === "placeholder" || !span.size) continue;
-    return { layer, size: span.size, placement: span.placement, box: frameBox(program.resolution, span.size, span.placement) };
+    if (!span || span.clip !== clip || span.kind === "placeholder") continue;
+    const size = span.size ?? (span.kind === "generated" ? program.resolution : null);
+    if (!size) continue;
+    return { layer, size, placement: span.placement, box: frameBox(program.resolution, size, span.placement) };
   }
   return null;
 }
@@ -43,17 +50,82 @@ export function frameBox(resolution: Size, size: Size, placement: Placement): Fr
   };
 }
 
-/** Clip whose picture is topmost at `point` (fractions of the frame) at `frame`; null over black. */
-export function layerAt(program: Program, frame: number, point: { x: number; y: number }): string | null {
+/** One layer under a point of the frame (ADR 0011). */
+export interface LayerHit {
+  /** Clip id; inside a nested timeline `<nested clip>/<clip>`. */
+  clip: string;
+  /** Layer index, 0 = base. */
+  layer: number;
+  kind: "media" | "still" | "generated";
+  /** Clip type: `media` for footage and stills, the adapter type (e.g. `hyperframes`) for generated clips. */
+  type: string;
+  /**
+   * The layer's picture covers the point: inside its box, not fully
+   * transparent there (its opacity, and its alpha when known), so the user
+   * sees it, or sees it blended, at that pixel.
+   */
+  paints: boolean;
+}
+
+/**
+ * Alpha at least this strong (alpha × opacity, 0-1) counts as painting the
+ * pixel: fainter than this, what the user sees there is the layer below.
+ */
+export const PAINT_MIN = 0.05;
+
+/**
+ * Every layer whose box holds `point` (fractions of the frame) at `frame`,
+ * topmost first. `alphaOf` gives a layer's alpha at the point, 0-1, when the
+ * engine knows it (pictures with alpha); absent means opaque inside its box.
+ * The target the user points at is the first hit that {@link LayerHit.paints}.
+ */
+export function layersAt(
+  program: Program,
+  frame: number,
+  point: { x: number; y: number },
+  alphaOf: (layer: number) => number | undefined = () => undefined,
+): LayerHit[] {
+  const hits: LayerHit[] = [];
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder") continue;
     const found = layerBox(program, frame, span.clip);
-    if (!found || found.placement.opacity === 0) continue;
+    if (!found) continue;
     const { left, top, width, height } = found.box;
-    if (point.x >= left && point.x < left + width && point.y >= top && point.y < top + height) return span.clip;
+    if (point.x < left || point.x >= left + width || point.y < top || point.y >= top + height) continue;
+    const strength = found.placement.opacity * (alphaOf(layer) ?? 1);
+    hits.push({ clip: span.clip, layer, kind: span.kind, type: span.kind === "generated" ? span.type : "media", paints: strength >= PAINT_MIN });
   }
-  return null;
+  return hits;
+}
+
+/** Clip whose picture is topmost at `point` (fractions of the frame) at `frame`; null over black. See {@link layersAt}. */
+export function layerAt(
+  program: Program,
+  frame: number,
+  point: { x: number; y: number },
+  alphaOf?: (layer: number) => number | undefined,
+): string | null {
+  return layersAt(program, frame, point, alphaOf).find((hit) => hit.paints)?.clip ?? null;
+}
+
+/**
+ * Clips whose visible box meets the rectangle `rect` (fractions of the
+ * frame, `x0 <= x1`, `y0 <= y1`) at `frame`, topmost first. Layers at
+ * opacity 0 are left out.
+ */
+export function layersIn(program: Program, frame: number, rect: { x0: number; y0: number; x1: number; y1: number }): LayerHit[] {
+  const hits: LayerHit[] = [];
+  for (let layer = program.layers.length - 1; layer >= 0; layer--) {
+    const span = programAt(program, frame, layer);
+    if (!span || span.kind === "placeholder") continue;
+    const found = layerBox(program, frame, span.clip);
+    if (!found || found.placement.opacity < PAINT_MIN) continue;
+    const { left, top, width, height } = found.box;
+    if (rect.x1 <= left || rect.x0 >= left + width || rect.y1 <= top || rect.y0 >= top + height) continue;
+    hits.push({ clip: span.clip, layer, kind: span.kind, type: span.kind === "generated" ? span.type : "media", paints: true });
+  }
+  return hits;
 }
 
 /** One handle drag, pointer positions in CSS px relative to the frame's top left corner. */

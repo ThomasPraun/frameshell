@@ -73,6 +73,16 @@ export interface SelectedRegion {
   readonly y1: number;
   /** Timeline seconds of the frame it was drawn on. */
   readonly at: number;
+  /** Clips whose picture meets the rectangle at `at`, topmost first (ADR 0011); empty over black. */
+  readonly clips: readonly RegionClip[];
+}
+
+/** A clip under a preview region. */
+export interface RegionClip {
+  /** Clip id; inside a nested timeline `<nested clip>/<clip>`. */
+  readonly clip: string;
+  /** `media` for footage and stills; the adapter type (e.g. `hyperframes`) for generated clips. */
+  readonly type: string;
 }
 
 /**
@@ -306,7 +316,7 @@ export const selection = {
   },
   /** Replace the selection with a rectangle drawn on the preview. */
   selectRegion(region: SelectedRegion, origin: SelectionOrigin): void {
-    replace({ ...EMPTY, region: { ...region }, origin });
+    replace({ ...EMPTY, region: { ...region, clips: region.clips.map((c) => ({ ...c })) }, origin });
   },
   /**
    * Drop selected files that no longer exist (`present` = every project

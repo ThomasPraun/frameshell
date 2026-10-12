@@ -28,7 +28,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 29;
+export const PROTOCOL_VERSION = 30;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -144,11 +144,12 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
-        "generated-clip render no timeline uses. `temp`: leftover of an interrupted job or transcription.",
+        "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
+        "`.frameshell/context/`, older than 7 days. `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });

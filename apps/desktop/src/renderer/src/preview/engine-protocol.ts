@@ -55,13 +55,24 @@ export type ToEngine =
   | { type: "clock"; sample: ClockSample }
   | { type: "play"; anchor: Anchor; clock: ClockSample }
   | { type: "pause"; frame: number }
-  | { type: "seek"; frame: number };
+  | { type: "seek"; frame: number }
+  /** Alpha of every picture with alpha at a point of the frame on the canvas (fractions of the frame); answered by `alpha`. */
+  | { type: "alphaAt"; id: number; x: number; y: number };
+
+/** Alpha of one layer at a point, 0-1. Layers left out of a reply are opaque there or do not cover it. */
+export interface LayerAlpha {
+  /** Layer index, 0 = base. */
+  layer: number;
+  alpha: number;
+}
 
 /** Engine worker to page. */
 export type FromEngine =
   /** Program frame now on the canvas; -1 for black (gap, placeholder, nothing decoded yet). */
   | { type: "shown"; frame: number }
   | { type: "stats"; stats: EngineStats }
+  /** Reply to `alphaAt` `id`: the alpha of the pictures with alpha on the canvas now, at program frame `frame` (-1: black). */
+  | { type: "alpha"; id: number; frame: number; layers: LayerAlpha[] }
   | { type: "error"; message: string };
 
 /** Engine worker to the program AudioWorklet. */
