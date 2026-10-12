@@ -1,6 +1,6 @@
-import { PROBE_MAX_ELEMENTS, type ProbedElement } from "@frameshell/protocol/probe";
+import { PROBE_MAX_ELEMENTS, type ProbedElement, markGenerated } from "@frameshell/protocol/probe";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
-import { type PickResult, elementBox, markGenerated, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
+import { type PickResult, elementBox, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
 import { PickPages } from "../preview/pick-pages.js";
 import type { Program } from "../preview/program.js";
 import { type FrameBox, layerBox, layersIn } from "../preview/transform-edit.js";

@@ -81,7 +81,7 @@ test("ui_state reports what the app shows: playhead, empty selection, no tab, th
     playhead: 0,
     playing: false,
     duration: 22,
-    selection: { clips: [], words: [], range: null, history: null, region: null },
+    selection: { clips: [], words: [], range: null, history: null, region: null, points: [] },
     editor: { active: null, tabs: [] },
     visible: { from: 0, to: expect.any(Number) },
   });
@@ -135,7 +135,7 @@ test("a time range dragged over empty lane space is the selection ui_state repor
   expect(to).toBeCloseTo(6, 0);
   await expect
     .poll(async () => (await tool("ui_state"))["selection"])
-    .toEqual({ clips: [], words: [], range: { from: expect.closeTo(from!, 3), to: expect.closeTo(to!, 3) }, history: null, region: null });
+    .toEqual({ clips: [], words: [], range: { from: expect.closeTo(from!, 3), to: expect.closeTo(to!, 3) }, history: null, region: null, points: [] });
 });
 
 test("ui_seek moves the shared playhead, and the status bar says the agent did it", async () => {
@@ -156,7 +156,7 @@ test("ui_play and ui_pause drive the preview's transport", async () => {
 
 test("ui_select replaces the selection with clips and a time range, and refuses unknown clip ids", async () => {
   const state = await tool("ui_select", { clips: ["c_three"], range: { from: 1, to: 3 } });
-  expect(state["selection"]).toEqual({ clips: ["c_three"], words: [], range: { from: 1, to: 3 }, history: null, region: null });
+  expect(state["selection"]).toEqual({ clips: ["c_three"], words: [], range: { from: 1, to: 3 }, history: null, region: null, points: [] });
   await expect(lanes()).toHaveAttribute("data-selected", "c_three");
   await expect(lanes()).toHaveAttribute("data-range", "1-3");
   await expect(page.locator('li[data-clip="c_three"]')).toHaveAttribute("data-selected", "true");
@@ -164,6 +164,17 @@ test("ui_select replaces the selection with clips and a time range, and refuses 
   const refused = await tool("ui_select", { clips: ["c_nope"] });
   expect(refused["error"]).toMatch(/^UiCommandFailed: .*No clip c_nope on timeline main/s);
   await expect(lanes()).toHaveAttribute("data-selected", "c_three");
+});
+
+test("ui_select points shows the agent's pick in the preview, and ui_state reports it (ADR 0011)", async () => {
+  // `titles` clips have no plugin here: the daemon names the clip seen there and why it has no element.
+  const state = await tool("ui_select", { points: [{ at: 5, x: 0.5, y: 0.5 }] });
+  expect(state["selection"]).toMatchObject({ clips: [], points: [{ x: 0.5, y: 0.5, at: 5, target: "c_two", element: null }] });
+  expect(state["playhead"]).toBe(5);
+  await expect(page.getByTestId("preview-pick-point")).toHaveAttribute("data-target", "c_two");
+  const inspected = await tool("inspect_point", { at: 5, x: 0.5, y: 0.5 });
+  expect(inspected).toMatchObject({ target: "c_two", layers: [{ clip: "c_two", type: "titles", paints: true }], elements: [] });
+  expect(inspected["unavailable"]).toMatch(/titles/);
 });
 
 test("ui_open_file opens a project file in an active editor tab", async () => {

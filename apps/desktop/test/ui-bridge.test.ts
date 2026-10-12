@@ -25,7 +25,7 @@ const idle: UiView = {
   playhead: 0,
   playing: false,
   duration: 12,
-  selection: { clips: [], words: [], range: null, history: null, region: null },
+  selection: { clips: [], words: [], range: null, history: null, region: null, points: [] },
   editor: { active: null, tabs: [] },
   visible: { from: 0, to: 12 },
 };

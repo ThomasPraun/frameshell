@@ -94,6 +94,12 @@ Found while building the parts; the decision above stands.
   - `generated` is decided in the app against the file the adapter names (`source`): HyperFrames elements only, since a Remotion element's source file is unknown. True only when the element's id, classes and leading text all miss that file; unknown (absent) when there is nothing to look for.
   - Remotion `components` keep Remotion's own components (`Sequence`, `AbsoluteFill`): the composition's components cannot be told from them in a production bundle. At most 8, innermost kept.
   - The point line adds `in <file>` when the element comes from another file than the clip's source.
+- **Part 4 (2026-10-12):**
+  - `inspect.point` places clips with the export geometry (`layerRect`) but cannot read footage alpha without decoding: footage and stills paint their whole box (at 5 % opacity or more). The app's picks keep the engine's alpha.
+  - It takes `unit: "fraction" | "pixel"`, so the CLI's `--px` and MCP callers need no project resolution of their own.
+  - The page is served from a reserved origin (`http://frameshell-inspect.invalid`) through CDP `Fetch` interception, with the same root containment as `frameshell-live:`; other origins reach the network, as for renders. The live page is asked for before Chrome starts, so an untrusted project never starts it.
+  - `ui.select` points are inspected in the daemon and sent to the app resolved: the app shows them without probing pages itself.
+  - `markGenerated` moved to `@frameshell/protocol/probe`, so the app and the daemon decide `generated` alike.
 
 ## Considered options
 

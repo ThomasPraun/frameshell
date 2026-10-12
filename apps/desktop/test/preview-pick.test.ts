@@ -1,6 +1,7 @@
 import type { ProbedElement } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { elementBox, markGenerated, pagePoint, pickTarget, resolvePick } from "../src/renderer/src/preview/pick.js";
+import { markGenerated } from "@frameshell/protocol/probe";
+import { elementBox, pagePoint, pickTarget, resolvePick } from "../src/renderer/src/preview/pick.js";
 import type { Program } from "../src/renderer/src/preview/program.js";
 
 // Seam under test: what the Pick tool points at (ADR 0011), with a fake page probe standing in for the live page.

@@ -76,6 +76,10 @@ Commands:
   frame --at <s> --out <png> [--timeline id] [--preset p]
                                Write the frame showing at <s> seconds as PNG (project resolution,
                                or the preset's)
+  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id]
+                               What a point of the frame shows: the clips under it (topmost first) and, in a
+                               generated clip, the element painting it (selector, text, box, styles). --point
+                               takes fractions of the frame (0.71,0.14), --px project pixels (1363,151)
   script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
@@ -90,13 +94,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "script", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify", "point", "px"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -111,6 +115,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   transcribe: ["verify", "timeline", "provider", "model", "language"],
   render: ["preset", "out", "timeline"],
   frame: ["at", "out", "timeline", "preset"],
+  inspect: ["at", "point", "px", "timeline"],
   "script outline": [],
   mcp: [],
 };
@@ -151,6 +156,7 @@ type Invocation =
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
+  | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string }
   | { kind: "script.outline"; file: string }
   | TimelineInvocation;
 
@@ -202,6 +208,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           language: { type: "string" },
           verify: { type: "string" },
           preset: { type: "string" },
+          point: { type: "string" },
+          px: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -292,9 +300,35 @@ function parseBuiltin(
     timeline?: string | undefined;
     out?: string | undefined;
     at?: string | undefined;
+    point?: string | undefined;
+    px?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
+  if (command === "inspect") {
+    if (rest.length > 0) return null;
+    const at = Number(options.at);
+    if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
+      throw new UsageError("`frameshell inspect` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
+    }
+    if ((options.point === undefined) === (options.px === undefined)) {
+      throw new UsageError("`frameshell inspect` needs one of --point <x,y> (fractions of the frame, e.g. 0.71,0.14) or --px <X,Y> (project pixels).");
+    }
+    const pair = (flag: "point" | "px", text: string) => {
+      const parts = text.split(",").map((part) => Number(part.trim()));
+      if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n) || n < 0) || (flag === "point" && parts.some((n) => n > 1))) {
+        throw new UsageError(`--${flag} takes two numbers x,y${flag === "point" ? " from 0 to 1" : " >= 0"}, e.g. --${flag} ${flag === "point" ? "0.71,0.14" : "1363,151"}.`);
+      }
+      return { x: parts[0]!, y: parts[1]! };
+    };
+    return {
+      kind: "inspect",
+      at,
+      point: options.point !== undefined ? pair("point", options.point) : null,
+      px: options.px !== undefined ? pair("px", options.px) : null,
+      ...(options.timeline ? { timeline: options.timeline } : {}),
+    };
+  }
   if (command === "render" || command === "frame") {
     if (rest.length > 0) return null;
     const { preset, timeline, out } = options;
@@ -473,6 +507,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         ? json(result)
         : `Wrote ${result.path} (frame ${result.frame} at ${result.at} s, ${result.clip ?? "gap"}, ${result.width}x${result.height})\n`;
     }
+    case "inspect": {
+      const where = inv.point ? { ...inv.point, unit: "fraction" as const } : { ...inv.px!, unit: "pixel" as const };
+      const result = await conn.request("inspect.point", { cwd, ...(inv.timeline ? { timeline: inv.timeline } : {}), at: inv.at, ...where });
+      return flags.json ? json(result) : describePoint(result);
+    }
     case "plugin.run": {
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.run", { cwd, plugin: inv.plugin, command: inv.command, args: inv.args });
@@ -481,6 +520,31 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return result.data === null || result.data === undefined ? "" : json(result.data);
     }
   }
+}
+
+/** `frameshell inspect` for people: the layers under the point, then the element and its parents. */
+function describePoint(result: MethodResult<"inspect.point">): string {
+  const lines = [`Point ${result.x},${result.y} (${result.pixel.x},${result.pixel.y} px) at ${result.at} s (frame ${result.frame}) of ${result.timeline}`];
+  if (result.layers.length === 0) lines.push("  black: no clip there");
+  for (const layer of result.layers) {
+    const note = layer.clip === result.target ? "seen" : layer.paints ? "under" : "transparent there";
+    lines.push(`  ${layer.clip} ${layer.type} (${note})`);
+  }
+  const [element, ...parents] = result.elements;
+  if (element) {
+    const file = element.adapter?.["source"];
+    const components = element.adapter?.["components"];
+    lines.push(`Element of ${result.target}: ${element.selector}${element.text ? ` "${element.text}"` : ""}`);
+    lines.push(`  <${element.tag}> ${element.box.width}x${element.box.height} at ${element.box.x},${element.box.y} px`);
+    if (typeof file === "string") lines.push(`  file ${file}${element.generated ? " (created by a script: not in this file)" : ""}`);
+    if (Array.isArray(components) && components.length > 0) lines.push(`  react ${components.join(" > ")}`);
+    const styles = Object.entries(element.styles).filter(([, value]) => value && value !== "none" && value !== "normal");
+    if (styles.length > 0) lines.push(`  ${styles.map(([key, value]) => `${key}: ${value}`).join("; ")}`);
+    if (parents.length > 0) lines.push(`  inside ${parents.map((parent) => parent.selector.split(" > ").at(-1)).join(" < ")}`);
+  } else if (result.unavailable) {
+    lines.push(`No element: ${result.unavailable}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 /** Where `project.init` puts the core agent skill. */

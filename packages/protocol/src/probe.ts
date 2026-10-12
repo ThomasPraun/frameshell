@@ -175,3 +175,36 @@ export const PROBE_SCRIPT = `(function () {
     }
   };
 })();`;
+
+/** Leading text an element's source must contain for its text to count as written there. */
+const TEXT_PROBE_CHARS = 24;
+
+/**
+ * `elements` with {@link ProbedElement.generated} set where the adapter named
+ * a `source` file: an element whose id, classes and text all occur nowhere in
+ * that file was created by a script (GSAP, bindings), so the agent looks for
+ * the script, not the markup. `read` returns a project file's text; each file
+ * is read once. Elements without a source, or with nothing to look for, are
+ * returned as they are.
+ */
+export async function markGenerated(elements: readonly ProbedElement[], read: (path: string) => Promise<string>): Promise<ProbedElement[]> {
+  const files = new Map<string, Promise<string | null>>();
+  const text = (path: string) => {
+    let file = files.get(path);
+    if (!file) {
+      file = read(path).catch(() => null);
+      files.set(path, file);
+    }
+    return file;
+  };
+  return Promise.all(
+    elements.map(async (element) => {
+      const source = element.adapter?.["source"];
+      if (typeof source !== "string") return element;
+      const tokens = [element.id, ...element.classes, element.text.slice(0, TEXT_PROBE_CHARS).trim()].filter((token): token is string => !!token);
+      const content = tokens.length > 0 ? await text(source) : null;
+      if (content === null) return element;
+      return { ...element, generated: tokens.every((token) => !content.includes(token)) };
+    }),
+  );
+}

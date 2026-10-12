@@ -16,6 +16,7 @@ import {
   operationArgs,
 } from "./timeline.js";
 import {
+  InspectedPointSchema,
   TimeRangeSchema,
   UiCommandSchema,
   UiStateSchema,
@@ -28,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 31;
+export const PROTOCOL_VERSION = 32;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -709,6 +710,30 @@ export const methods = {
       height: z.int(),
     }),
   },
+  "inspect.point": {
+    description:
+      "What a point of the frame shows at timeline time `at` (ADR 0011): every clip whose picture covers it, topmost " +
+      "first, the clip seen there, and in a generated clip (`hyperframes`, `remotion`) the DOM element painting that " +
+      "pixel with its selector, text, box, computed styles, HTML and ancestors, as the user's Pick tool reports it. Use it " +
+      "to find what to edit (\"the box at the top right at 12 s\") or to check an edit landed. Works with the app closed: " +
+      "generated clips are loaded in headless Chrome (a second or two each). Elements need a trusted project with the " +
+      "clip's plugin; otherwise `unavailable` says why and only the clips are reported. Footage counts as painting its " +
+      "whole box (alpha of footage is not read). Fails with InvalidOperation (`at` or the point outside the timeline or " +
+      "frame), TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`; the frame whose time span holds it."),
+      x: z.number().nonnegative().describe("Horizontal position, 0 = left edge: a fraction of the frame width (e.g. `0.71`), or project pixels with `unit: \"pixel\"`."),
+      y: z.number().nonnegative().describe("Vertical position, 0 = top edge: a fraction of the frame height (e.g. `0.14`), or project pixels with `unit: \"pixel\"`."),
+      unit: z.enum(["fraction", "pixel"]).default("fraction").describe("What `x` and `y` are. Default `fraction`."),
+    }),
+    result: InspectedPointSchema.extend({
+      timeline: z.string(),
+      frame: z.int().describe("Timeline frame index (0-based, project fps)."),
+      pixel: z.object({ x: z.int(), y: z.int() }).describe("The point in project pixels."),
+    }),
+  },
   "asset.import": {
     mutating: true,
     description:
@@ -1326,6 +1351,19 @@ export const methods = {
         .default(null)
         .describe("Timeline seconds to select, `{ from, to }` with `to` greater than `from`. Default none."),
       reveal: z.boolean().default(true).describe("Scroll the timeline to the first clip and move the playhead there. Default true."),
+      points: z
+        .array(
+          z.object({
+            at: z.number().nonnegative().describe("Timeline seconds."),
+            x: z.number().min(0).max(1).describe("Fraction of the frame width."),
+            y: z.number().min(0).max(1).describe("Fraction of the frame height."),
+          }),
+        )
+        .default([])
+        .describe(
+          "Points of the preview to show as picks (ADR 0011), e.g. `[{ at: 12.4, x: 0.71, y: 0.14 }]`, each inspected as " +
+            "`inspect.point` does, so the user sees the element you mean outlined. Replaces clips, words and range. Default none.",
+        ),
     }),
     result: UiStateSchema,
   },
