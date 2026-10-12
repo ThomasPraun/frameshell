@@ -6,6 +6,15 @@
 /** Panels with a draggable edge. The center (preview + editor) takes the rest. */
 export type PanelId = "sidebar" | "terminal" | "timeline";
 
+/** Panels that can move out to their own window (ADR 0012). */
+export type DetachablePanel = "preview";
+
+/** Every {@link DetachablePanel}, for validating stored and requested names. */
+export const DETACHABLE_PANELS: readonly DetachablePanel[] = ["preview"];
+
+/** Frame name prefix of a detached panel's `window.open` (`frameshell-panel:<panel>/<n>`); main allows no other popup. */
+export const PANEL_WINDOW_PREFIX = "frameshell-panel:";
+
 /** Views of the left sidebar. */
 export type SidebarView = "explorer" | "history" | "plugins";
 

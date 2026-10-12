@@ -12,7 +12,7 @@ import type {
   UiCommand,
   UiView,
 } from "@frameshell/protocol";
-import type { Layout } from "./layout.js";
+import type { DetachablePanel, Layout } from "./layout.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
 export type FileNode =
@@ -162,6 +162,15 @@ export interface FrameshellApi {
     load(): Promise<Layout>;
     save(layout: Layout): void;
   };
+  panels: {
+    /**
+     * Panels to open in their own window when the project shows (ADR 0012).
+     * Main keeps this list: a panel window opened through `window.open`
+     * marks its panel detached, and closing it docks the panel back unless
+     * its project window is closing or reloading.
+     */
+    detached(): Promise<DetachablePanel[]>;
+  };
   timeline: {
     /** `timeline.show` of the window's project. Rejects with the daemon's message. */
     show(timeline: string): Promise<TimelineView>;
@@ -290,6 +299,7 @@ export const Channel = {
   terminalAgent: "terminal:agent",
   layoutLoad: "layout:load",
   layoutSave: "layout:save",
+  panelsDetached: "panels:detached",
   timelineShow: "timeline:show",
   timelineChanged: "timeline:changed",
   timelineRejected: "timeline:rejected",

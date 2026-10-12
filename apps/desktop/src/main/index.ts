@@ -7,7 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, shell, utilityProcess } from "electron";
+import { type BaseWindow, BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
@@ -24,7 +24,7 @@ import {
   type TimelineChange,
   type TimelineEdit,
 } from "../shared/api.js";
-import { type Layout, normalizeLayout } from "../shared/layout.js";
+import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -41,6 +41,7 @@ import { editMenu } from "./edit-menu.js";
 import { LayoutStore } from "./layout-store.js";
 import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
+import { PANEL_WINDOW_MIN, PanelWindowStore, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { terminalToolPaths } from "./terminal-tools.js";
@@ -80,6 +81,10 @@ const ui = new UiBridge({
 daemon.on("ui.command", (params) => ui.command(params));
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
+/** Detached panels and their windows' placement (ADR 0012): a user decision, global, so in `configDir`. */
+const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
+/** Placement saves wait for the window to stop moving. */
+const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
 // must keep pointing at the installed app.
 const binDir = join(app.getPath("userData"), app.isPackaged ? "bin" : "bin-dev");
@@ -127,8 +132,23 @@ interface WindowState {
    * and `project.current` awaits this, so the renderer shows its boot screen, never a premature welcome screen.
    */
   opening: Promise<unknown>;
+  /**
+   * Detached panel windows (ADR 0012): `about:blank` documents the project
+   * renderer draws a panel into. They have no preload and never send IPC;
+   * the menu routes their commands to this window.
+   */
+  panels: Map<DetachablePanel, BrowserWindow>;
+  /**
+   * The project window is closing or reloading: its panel windows close
+   * with it but stay detached, so they open again with the project.
+   */
+  closingPanels: boolean;
 }
 const windows = new Map<number, WindowState>();
+/** Project window state of each detached panel window, by the panel window's webContents id. */
+const panelOwners = new Map<number, WindowState>();
+/** The app is quitting: windows close in any order, panel windows before their project window too. */
+let quitting = false;
 /** Shells of closed windows still exiting; the app waits for them before it quits. */
 const exitingShells = new Set<Promise<void>>();
 
@@ -147,6 +167,8 @@ function createWindow(projectDir?: string): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // This renderer also drives its detached panel windows (ADR 0012): hidden or minimized, it must not slow them down.
+      backgroundThrottling: false,
     },
   });
   const contents = window.webContents;
@@ -157,6 +179,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     daemonEvents: [],
     live: new Map(),
     opening: Promise.resolve(),
+    panels: new Map(),
+    closingPanels: false,
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -169,13 +193,27 @@ function createWindow(projectDir?: string): BrowserWindow {
   };
   windows.set(contents.id, state);
 
-  // Links (xterm web links) open in the browser; the app window never navigates away.
-  contents.setWindowOpenHandler(({ url }) => {
+  // Links (xterm web links) open in the browser; the app window never navigates away. The one popup allowed is a
+  // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
+  contents.setWindowOpenHandler(({ url, frameName }) => {
+    const panel = panelWindowRequest(url, frameName);
+    if (panel) return { action: "allow", overrideBrowserWindowOptions: panelWindowOptions(panel) };
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  contents.on("did-create-window", (child, { url, frameName }) => {
+    const panel = panelWindowRequest(url, frameName);
+    if (panel) adoptPanelWindow(state, panel, child);
+    else child.destroy();
+  });
   contents.on("will-navigate", (event) => event.preventDefault());
+  // A reload drops the documents the panel windows show: close them, still detached, and the new page opens them again.
+  contents.on("did-start-navigation", ({ isMainFrame, isSameDocument }) => {
+    if (isMainFrame && !isSameDocument) closePanelWindows(state);
+  });
+  contents.on("did-finish-load", () => (state.closingPanels = false));
   window.once("ready-to-show", () => window.show());
+  window.on("close", () => closePanelWindows(state));
   window.on("closed", () => {
     const exiting = state.terminals.killAll();
     exitingShells.add(exiting);
@@ -198,6 +236,73 @@ function createWindow(projectDir?: string): BrowserWindow {
     : window.loadFile(join(import.meta.dirname, "../renderer/index.html"), { query });
   load.catch(fail);
   return window;
+}
+
+/** Options of a detached panel's window: where it was on these displays, else centred on the primary display. */
+function panelWindowOptions(panel: DetachablePanel): Electron.BrowserWindowConstructorOptions {
+  const displays = screen.getAllDisplays();
+  const bounds = placeOnDisplays(panelWindows.placement(panel, displays)?.bounds, displays, screen.getPrimaryDisplay());
+  return {
+    ...bounds,
+    minWidth: PANEL_WINDOW_MIN.width,
+    minHeight: PANEL_WINDOW_MIN.height,
+    title: "Frameshell",
+    backgroundColor: "#1d1e20",
+    autoHideMenuBar: true,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+  };
+}
+
+/**
+ * Register a detached panel's window under its project window: menu
+ * commands from it reach the project, it closes with the project, and its
+ * placement is saved as it moves. Closed on its own, it docks its panel back.
+ */
+function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: BrowserWindow): void {
+  const childId = child.webContents.id;
+  state.panels.set(panel, child);
+  panelOwners.set(childId, state);
+  void panelWindows.setDetached(panel, true);
+  if (panelWindows.placement(panel, screen.getAllDisplays())?.fullScreen) child.setFullScreen(true);
+  child.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  child.webContents.on("will-navigate", (event) => event.preventDefault());
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const save = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (child.isDestroyed() || child.isMinimized()) return;
+      void panelWindows.place(panel, screen.getAllDisplays(), { bounds: child.getNormalBounds(), fullScreen: child.isFullScreen() });
+    }, PLACEMENT_SAVE_MS);
+  };
+  child.on("move", save);
+  child.on("resize", save);
+  child.on("enter-full-screen", save);
+  child.on("leave-full-screen", save);
+  child.on("closed", () => {
+    clearTimeout(timer);
+    panelOwners.delete(childId);
+    // A newer window of the same panel may have replaced this one (a quick dock and detach): it stays.
+    if (state.panels.get(panel) !== child) return;
+    state.panels.delete(panel);
+    if (!quitting && !state.closingPanels) void panelWindows.setDetached(panel, false);
+  });
+}
+
+/** Close a project window's panel windows, keeping their panels detached for the next time the project opens. */
+function closePanelWindows(state: WindowState): void {
+  state.closingPanels = true;
+  for (const child of state.panels.values()) if (!child.isDestroyed()) child.close();
+}
+
+/** The project window a window belongs to: itself, or the owner of a detached panel window. */
+function projectWindowOf(base: BaseWindow | null | undefined): WindowState | undefined {
+  const window = base ? BrowserWindow.fromId(base.id) : null;
+  if (!window || window.isDestroyed()) return undefined;
+  return windows.get(window.webContents.id) ?? panelOwners.get(window.webContents.id);
 }
 
 function send(contents: WebContents, channel: string, ...args: unknown[]): void {
@@ -297,7 +402,7 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
 }
 
 function stateOf(sender: WebContents): WindowState {
-  const state = windows.get(sender.id);
+  const state = windows.get(sender.id) ?? panelOwners.get(sender.id);
   if (!state) throw new Error("IPC from an unknown window");
   return state;
 }
@@ -458,12 +563,12 @@ function registerIpc(): void {
     const { project } = stateOf(event.sender);
     if (project) void layouts.save(project.dir, normalizeLayout(layout));
   });
+  ipcMain.handle(Channel.panelsDetached, () => panelWindows.detached());
 }
 
 function buildMenu(): void {
   const openFolder = async () => {
-    const focused = BrowserWindow.getFocusedWindow();
-    const state = focused ? windows.get(focused.webContents.id) : undefined;
+    const state = projectWindowOf(BrowserWindow.getFocusedWindow());
     if (!state) {
       createWindow();
       return;
@@ -471,8 +576,12 @@ function buildMenu(): void {
     const dir = await pickFolder(state.window);
     if (dir) await openFromWindow(state, dir);
   };
-  // Aimed at the focused window: each window has its own project and editor tabs.
-  const command = (name: MenuCommand) => BrowserWindow.getFocusedWindow()?.webContents.send(Channel.menuCommand, name);
+  // Aimed at the focused window (as the menu click reports it): each window has its own project and editor tabs.
+  // A detached panel's window is its project's.
+  const command = (name: MenuCommand, focused: BaseWindow | undefined) => {
+    const state = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow());
+    if (state) send(state.window.webContents, Channel.menuCommand, name);
+  };
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
     {
@@ -487,16 +596,16 @@ function buildMenu(): void {
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },
-    editMenu(process.platform, (history: HistoryCommand) => {
-      // No focused window (app in the background, a test driving the menu): the only one, if there is just one.
-      const all = BrowserWindow.getAllWindows();
-      const target = BrowserWindow.getFocusedWindow() ?? (all.length === 1 ? all[0] : undefined);
-      if (target) send(target.webContents, Channel.timelineHistoryCommand, history);
+    editMenu(process.platform, (history: HistoryCommand, focused) => {
+      // No focused window (app in the background, a test driving the menu): the only project window, if there is just one.
+      const all = [...windows.values()];
+      const target = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow()) ?? (all.length === 1 ? all[0] : undefined);
+      if (target) send(target.window.webContents, Channel.timelineHistoryCommand, history);
     }),
     {
       label: "View",
       submenu: [
-        { label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: () => command("showTranscript") },
+        { id: "view-transcript", label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
         { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },
@@ -557,6 +666,7 @@ app.whenReady().then(async () => {
   await writeCliShim(binDir, { runtime: process.execPath, cliEntry });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
+  await panelWindows.load();
   registerIpc();
   buildMenu();
   createWindow(projectArg(process.argv));
@@ -564,6 +674,8 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("before-quit", () => (quitting = true));
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -5,20 +5,24 @@ import type { HistoryCommand } from "../src/shared/api.js";
 
 // Seam under test: the app's Edit menu template (#119). Undo and Redo reach the window, clipboard roles stay.
 
-const items = (platform: NodeJS.Platform, dispatch: (command: HistoryCommand) => void = () => undefined) =>
+const items = (platform: NodeJS.Platform, dispatch: (command: HistoryCommand, focused: unknown) => void = () => undefined) =>
   editMenu(platform, dispatch).submenu as MenuItemConstructorOptions[];
 
 describe("editMenu", () => {
-  it("shows Undo and Redo with the platform's keys, and hands them to the window", () => {
-    const sent: HistoryCommand[] = [];
-    const mac = items("darwin", (command) => sent.push(command));
+  it("shows Undo and Redo with the platform's keys, and hands them to the window the click reports focused", () => {
+    const sent: [HistoryCommand, unknown][] = [];
+    const mac = items("darwin", (command, focused) => sent.push([command, focused]));
     const [undo, redo] = mac;
     expect(undo).toMatchObject({ id: EDIT_MENU_IDS.undo, label: "Undo", accelerator: "CmdOrCtrl+Z" });
     expect(redo).toMatchObject({ id: EDIT_MENU_IDS.redo, label: "Redo", accelerator: "Shift+CmdOrCtrl+Z" });
     expect(items("win32")[1]).toMatchObject({ accelerator: "Ctrl+Y" });
-    (undo!.click as () => void)();
-    (redo!.click as () => void)();
-    expect(sent).toEqual(["undo", "redo"]);
+    const panelWindow = { id: 4 };
+    (undo!.click as (item: unknown, focused?: unknown) => void)({}, panelWindow);
+    (redo!.click as (item: unknown, focused?: unknown) => void)({});
+    expect(sent).toEqual([
+      ["undo", panelWindow],
+      ["redo", undefined],
+    ]);
   });
 
   it("keeps the clipboard roles xterm and Monaco need, and never the text-only undo roles", () => {

@@ -103,7 +103,8 @@ function LiveFrame({
     const element = box.current!;
     const measure = () => setScale(element.clientWidth / resolution.width);
     measure();
-    const observer = new ResizeObserver(measure);
+    // From the window the frame is drawn in (ADR 0012).
+    const observer = new (element.ownerDocument.defaultView ?? window).ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
   }, [resolution.width]);
@@ -117,8 +118,10 @@ function LiveFrame({
       else if (typeof data.shown === "number") box.current?.setAttribute("data-shown", data.shown.toFixed(3));
       else if (typeof data.error === "string") failed.current(data.error);
     };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    // The page posts to its own parent: the window this frame is drawn in, a detached panel's too (ADR 0012).
+    const view = box.current?.ownerDocument.defaultView ?? window;
+    view.addEventListener("message", onMessage);
+    return () => view.removeEventListener("message", onMessage);
   }, []);
 
   // One seek per playhead change: per frame while playing (the bridge keeps only the latest), exact while paused.

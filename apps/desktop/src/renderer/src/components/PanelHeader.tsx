@@ -3,11 +3,14 @@ import type { ReactNode } from "react";
 /** Slim header shared by every panel; the collapse control sits on the edge the panel folds toward. */
 export function PanelHeader({
   children,
+  actions,
   onCollapse,
   collapseLabel,
   collapseSide,
 }: {
   children: ReactNode;
+  /** Buttons at the right end, before the collapse control. */
+  actions?: ReactNode;
   onCollapse?: () => void;
   collapseLabel?: string;
   collapseSide?: "left" | "right" | "down" | "up";
@@ -15,6 +18,7 @@ export function PanelHeader({
   return (
     <div className="panel-header">
       <div className="panel-header-content">{children}</div>
+      {actions}
       {onCollapse && (
         <button className="icon-button" aria-label={collapseLabel} title={collapseLabel} onClick={onCollapse}>
           <svg viewBox="0 0 16 16" aria-hidden="true">

@@ -46,6 +46,9 @@ const api: FrameshellApi = {
     load: () => ipcRenderer.invoke(Channel.layoutLoad),
     save: (layout) => ipcRenderer.send(Channel.layoutSave, layout),
   },
+  panels: {
+    detached: () => ipcRenderer.invoke(Channel.panelsDetached),
+  },
   timeline: {
     show: (timeline) => invokeOutcome(Channel.timelineShow, timeline),
     onChanged: (listener) => subscribe(Channel.timelineChanged, listener),

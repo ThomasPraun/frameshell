@@ -99,10 +99,10 @@ describe("injectHead", () => {
 
 describe("live page bridge", () => {
   /** Runs the bridge in a page whose `frameshellLive` is `live`; returns what it posts and a way to message it. */
-  function bridge(live: unknown) {
+  function bridge(live: unknown, opener: unknown = null) {
     const posted: Record<string, unknown>[] = [];
     const listeners: ((event: { source: unknown; data: unknown }) => void)[] = [];
-    const parent = { postMessage: (message: Record<string, unknown>) => posted.push({ ...message }) };
+    const parent = { opener, postMessage: (message: Record<string, unknown>) => posted.push({ ...message }) };
     const window = { parent, frameshellLive: live, addEventListener: (_type: string, listener: (typeof listeners)[number]) => listeners.push(listener) };
     runInNewContext(LIVE_BRIDGE, { window, Promise, String, setTimeout });
     const send = (data: unknown, source: unknown = parent) => listeners.forEach((listener) => listener({ source, data }));
@@ -148,6 +148,17 @@ describe("live page bridge", () => {
     send({ source: "frameshell-preview", seek: "1" });
     await settle();
     expect(seeks).toEqual([]);
+  });
+
+  it("takes seeks from the parent's opener: the project window driving a detached panel's window (ADR 0012)", async () => {
+    const seeks: number[] = [];
+    const opener = {};
+    const { send } = bridge({ ready: Promise.resolve(), seek: (t: number) => void seeks.push(t) }, opener);
+    send({ source: "frameshell-preview", seek: 2 }, opener);
+    await settle();
+    send({ source: "frameshell-preview", seek: 3 }, {});
+    await settle();
+    expect(seeks).toEqual([2]);
   });
 
   it("runs one seek at a time and keeps only the latest request meanwhile", async () => {

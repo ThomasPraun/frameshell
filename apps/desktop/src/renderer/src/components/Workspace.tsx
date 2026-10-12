@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import type { ProjectView } from "../../../shared/api.js";
-import { type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
+import { type DetachablePanel, type Layout, type PanelId, resizePanel, setCenterSplit, togglePanel } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
+import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
 import { ContextMenuHost } from "./ContextMenu.js";
@@ -16,6 +17,7 @@ import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
 import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
 import { isTranscriptPath } from "../transcript/useTranscripts.js";
+import { elementOf, listenEverywhere } from "../windows.js";
 
 const SAVE_DELAY_MS = 300;
 /** How long an "Ask agent" notice stays in the status bar, ms. */
@@ -25,7 +27,12 @@ const isMac = navigator.userAgent.includes("Mac");
 /** Keyboard toggles; Mod = Cmd on macOS, Ctrl elsewhere. */
 const SHORTCUTS: Record<string, PanelId> = { b: "sidebar", j: "timeline", "\\": "terminal" };
 
-/** Project window: SPEC §10 layout with resizable, collapsible, per-project persisted panels. */
+/**
+ * Project window: SPEC §10 layout with resizable, collapsible, per-project
+ * persisted panels. The preview can move to its own window (ADR 0012): its
+ * slot then says so and brings it back. Which panels are detached is global
+ * and kept by main, so the project opens with them where they were.
+ */
 export function Workspace({ project }: { project: ProjectView }) {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [tabs, setTabs] = useState<string[]>([]);
@@ -38,6 +45,25 @@ export function Workspace({ project }: { project: ProjectView }) {
   const terminals = useRef<AgentTerminal>(null);
   const terminalCollapsed = useRef(false);
   terminalCollapsed.current = layout?.panels.terminal.collapsed ?? false;
+  const [detached, setDetached] = useState<ReadonlySet<DetachablePanel>>(new Set());
+  const setPanelDetached = useCallback(
+    (panel: DetachablePanel, out: boolean) =>
+      setDetached((current) => {
+        if (current.has(panel) === out) return current;
+        const next = new Set(current);
+        if (out) next.add(panel);
+        else next.delete(panel);
+        return next;
+      }),
+    [],
+  );
+  const previewWindow = usePanelWindow(detached.has("preview") ? "preview" : null, `Preview — ${project.name}`, () =>
+    setPanelDetached("preview", false),
+  );
+
+  useEffect(() => {
+    void window.frameshell.panels.detached().then((panels) => setDetached(new Set(panels)));
+  }, [project.dir]);
 
   useEffect(() => {
     void window.frameshell.layout.load().then(setLayout);
@@ -103,8 +129,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       event.stopPropagation();
       toggle(panel);
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return listenEverywhere("keydown", onKey, true);
   }, [toggle]);
 
   const openFile = useCallback((path: string) => {
@@ -131,12 +156,12 @@ export function Workspace({ project }: { project: ProjectView }) {
       event.stopPropagation();
       showTranscript();
     };
-    window.addEventListener("keydown", onKey, true);
+    const offKeys = listenEverywhere("keydown", onKey, true);
     const offMenu = window.frameshell.menu.onCommand((command) => {
       if (command === "showTranscript") showTranscript();
     });
     return () => {
-      window.removeEventListener("keydown", onKey, true);
+      offKeys();
       offMenu();
     };
   }, [showTranscript]);
@@ -213,8 +238,19 @@ export function Workspace({ project }: { project: ProjectView }) {
         <div className="center-column">
           <div className="center-row" ref={centerRow}>
             <div className="panel preview" style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
-              <PreviewPanel project={project} />
+              {detached.has("preview") ? (
+                <DockedElsewhere title="Preview" onBringBack={() => setPanelDetached("preview", false)} />
+              ) : (
+                <PreviewPanel project={project} detached={false} onDetach={() => setPanelDetached("preview", true)} />
+              )}
             </div>
+            {previewWindow &&
+              createPortal(
+                <div className="panel preview">
+                  <PreviewPanel project={project} detached onDetach={() => setPanelDetached("preview", false)} />
+                </div>,
+                previewWindow,
+              )}
             <Splitter
               orientation="vertical"
               label="Resize preview and editor"
@@ -276,9 +312,24 @@ export function Workspace({ project }: { project: ProjectView }) {
  * Windows, Ctrl+L stays the shell's clear-screen.
  */
 function askKeyApplies(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return true;
-  if (target.closest(".monaco-editor")) return false;
-  return isMac || !target.closest(".xterm");
+  const element = elementOf(target);
+  if (!element) return true;
+  if (element.closest(".monaco-editor")) return false;
+  return isMac || !element.closest(".xterm");
+}
+
+/** A detached panel's slot (ADR 0012): where the panel went, and a way back. */
+function DockedElsewhere({ title, onBringBack }: { title: string; onBringBack: () => void }) {
+  return (
+    <div className="panel-docked-elsewhere" data-testid="panel-docked-elsewhere">
+      <p>
+        <strong>{title}</strong> is docked in another window
+      </p>
+      <button className="button" onClick={onBringBack}>
+        Bring back
+      </button>
+    </div>
+  );
 }
 
 function CollapsedRail({ side, label, onExpand }: { side: "left" | "right"; label: string; onExpand: () => void }) {

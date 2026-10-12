@@ -128,3 +128,28 @@ export async function laidOutBox(locator: Locator): Promise<{ x: number; y: numb
   if (!seen.box) throw new Error("unreachable: polled until laid out");
   return seen.box;
 }
+
+/**
+ * The window of a detached panel (ADR 0012), once it shows the panel: an
+ * `about:blank` page the project window's renderer draws into. Waits for it,
+ * so a call may start before the click that opens it.
+ */
+export async function panelWindow(app: ElectronApplication, panel: string, timeout = 20_000): Promise<Page> {
+  const seen: { page: Page | null } = { page: null };
+  await expect
+    .poll(
+      async () => {
+        for (const candidate of app.windows()) {
+          if (candidate.isClosed() || candidate.url() !== "about:blank") continue;
+          if ((await candidate.locator(`[data-testid="panel-window-${panel}"]`).count().catch(() => 0)) > 0) {
+            seen.page = candidate;
+            return true;
+          }
+        }
+        return false;
+      },
+      { timeout },
+    )
+    .toBe(true);
+  return seen.page!;
+}
