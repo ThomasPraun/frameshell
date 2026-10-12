@@ -138,7 +138,11 @@ export interface LivePage {
    * load; never written to disk. It must define
    * `window.frameshellLive = { ready: Promise<void>, seek(seconds): void | Promise<void> }`,
    * where `seek` shows composition time `seconds` (as file time `seconds` of
-   * a render), muted.
+   * a render), muted. It may also define `describe(element)`, returning a
+   * JSON-safe object of facts the app cannot read from the DOM (ADR 0011):
+   * the file the element comes from as `source` (project-relative), the
+   * components rendering it as `components` (outermost first). The Pick
+   * tool and `inspect` put them under the element's `adapter`.
    */
   head: string;
 }

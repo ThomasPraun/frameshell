@@ -1,6 +1,6 @@
 import { PROBE_MAX_ELEMENTS, type ProbedElement } from "@frameshell/protocol/probe";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
-import { type PickResult, elementBox, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
+import { type PickResult, elementBox, markGenerated, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
 import { PickPages } from "../preview/pick-pages.js";
 import type { Program } from "../preview/program.js";
 import { type FrameBox, layerBox, layersIn } from "../preview/transform-edit.js";
@@ -120,7 +120,7 @@ export function PickLayer({
       at: frame / fps,
       layers: result.layers,
       target: result.target,
-      elements: result.elements.slice(depth),
+      elements: await markGenerated(result.elements.slice(depth), readSource),
       unavailable: result.unavailable,
     };
     if (add) selection.addPoint(picked, "preview");
@@ -140,7 +140,7 @@ export function PickLayer({
       const b = pagePoint(target.box, program.resolution, { x: rect.x1, y: rect.y1 });
       try {
         const elements = await opened.probeRect(target, { x0: a.x, y0: a.y, x1: b.x, y1: b.y }, PROBE_MAX_ELEMENTS - found.length);
-        found.push(...elements.map((element) => ({ clip: hit.clip, element })));
+        found.push(...(await markGenerated(elements, readSource)).map((element) => ({ clip: hit.clip, element })));
       } catch {
         // No live page: the region still names the clip.
       }
@@ -260,6 +260,9 @@ export function PickLayer({
     </div>
   );
 }
+
+/** A project file's text, for {@link markGenerated}. */
+const readSource = (path: string) => window.frameshell.files.read(path);
 
 /** Where to outline a hover, and its label: the element at the chosen depth, else the target clip's picture. */
 function outlineOf(hover: Hover, program: Program): { box: FrameBox; label: string; clip: string; element: ProbedElement | null } | null {

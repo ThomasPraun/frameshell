@@ -7,7 +7,7 @@ frameshell plugin install @frameshell/hyperframes
 frameshell hyperframes new title --duration 4
 ```
 
-While a clip renders, the Frameshell desktop preview plays its composition live at the playhead (ADR 0010); export always uses the render.
+While a clip renders, the Frameshell desktop preview plays its composition live at the playhead (ADR 0010); export always uses the render. When the user picks an element of a clip with the Pick tool (ADR 0011), the live page names the file it comes from, the composition or one of its `data-composition-src` sub-compositions.
 
 Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Headless Chrome downloads on the first render. Usage for agents: [`skills/hyperframes/SKILL.md`](skills/hyperframes/SKILL.md).
 

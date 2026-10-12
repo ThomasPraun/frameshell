@@ -20,7 +20,7 @@ The project's `remotion.config.ts` (or `.js`) applies as with Remotion's CLI: it
 
 Renders use the headless Chrome Frameshell manages, never a browser Remotion would download.
 
-While a clip renders, the Frameshell desktop preview plays its bundle live at the playhead (ADR 0010); export always uses the render. Live preview drives the bundle page through Remotion's internal globals (`remotion_setBundleMode`, `remotion_setFrame`), as `@remotion/renderer` does. A Remotion release without them leaves the preview on its progress slate, and renders still work. Your licence covers live preview as it covers rendering.
+While a clip renders, the Frameshell desktop preview plays its bundle live at the playhead (ADR 0010); export always uses the render. Live preview drives the bundle page through Remotion's internal globals (`remotion_setBundleMode`, `remotion_setFrame`), as `@remotion/renderer` does. A Remotion release without them leaves the preview on its progress slate, and renders still work. Your licence covers live preview as it covers rendering. When the user picks an element of a clip with the Pick tool (ADR 0011), the live page names the React components rendering it, read from React's fiber on the DOM node.
 
 The plugin runs inside the Frameshell daemon with full Node access, like every plugin: a project's plugins load only after you trust the project.
 

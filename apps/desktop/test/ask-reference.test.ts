@@ -150,6 +150,12 @@ describe("reference lines", () => {
     expect(referenceLines({ ...blank, points: [locked], origin: "preview" }, view, { framePending: true, sources: extras.sources })).toEqual([
       "[frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 remotion src/index.ts · elements unavailable: the project's plugins are not trusted · under c_0002 media · frame pending",
     ]);
+    // A HyperFrames sub-composition's element, created by its script: the line says where, and that it is not markup.
+    const scripted = { ...element, selector: "#outro > span", text: "", adapter: { source: "comp/scenes/outro.html" }, generated: true };
+    const hf = { ...picked, layers: [{ clip: "c_0100", type: "hyperframes", paints: true }], elements: [scripted] };
+    expect(referenceLines({ ...blank, points: [hf], origin: "preview" }, view, { sources: new Map([["c_0100", "comp/index.html"]]) })).toEqual([
+      "[frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 hyperframes comp/index.html · element #outro > span in comp/scenes/outro.html (created by a script)",
+    ]);
     const dark = { x: 0.5, y: 0.5, at: 1, layers: [], target: null, elements: [], unavailable: null };
     expect(referenceLines({ ...blank, points: [dark], origin: "preview" }, view)).toEqual(["[frameshell] point (0.50,0.50) @ 00:00:01.00 · black"]);
   });

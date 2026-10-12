@@ -32,6 +32,13 @@ export interface ProbedElement {
   data: Record<string, string>;
   /** What the adapter's `frameshellLive.describe(element)` added (ADR 0011); null when it has none or it threw. */
   adapter: Record<string, unknown> | null;
+  /**
+   * Set by the app, not the page, when the adapter names the element's
+   * `source` file: true when neither its id, its classes nor its text occur
+   * in that file, so a script created it; false when one does. Absent when
+   * unknown (no source, nothing to look for, file unreadable).
+   */
+  generated?: boolean;
 }
 
 /** Most ancestors a point probe returns after the hit element. */

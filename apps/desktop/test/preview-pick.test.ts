@@ -1,6 +1,6 @@
 import type { ProbedElement } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { elementBox, pagePoint, pickTarget, resolvePick } from "../src/renderer/src/preview/pick.js";
+import { elementBox, markGenerated, pagePoint, pickTarget, resolvePick } from "../src/renderer/src/preview/pick.js";
 import type { Program } from "../src/renderer/src/preview/program.js";
 
 // Seam under test: what the Pick tool points at (ADR 0011), with a fake page probe standing in for the live page.
@@ -106,5 +106,28 @@ describe("resolvePick", () => {
   it("finds nothing over black", async () => {
     const result = await resolvePick({ ...program, layers: [] }, 60, { x: 0.5, y: 0.5 }, opaque, async () => [h1]);
     expect(result).toEqual({ layers: [], target: null, elements: [], unavailable: null, page: null });
+  });
+});
+
+describe("markGenerated", () => {
+  const source = '<div id="scene-2"><div class="card"><h1>Launch day</h1></div></div>';
+  const of = (id: string | null, classes: string[], text: string, adapter: Record<string, unknown> | null = { source: "comp/index.html" }) => ({ ...h1, id, classes, text, adapter });
+
+  it("marks elements whose id, classes and text are all missing from their source file, reading each file once", async () => {
+    const reads: string[] = [];
+    const read = async (path: string) => (reads.push(path), source);
+    const marked = await markGenerated(
+      [of("scene-2", [], ""), of(null, ["card"], ""), of(null, [], "Launch day"), of(null, ["gsap-line"], "Line 3"), of(null, [], ""), of("x", [], "", null)],
+      read,
+    );
+    expect(marked.map((element) => element.generated)).toEqual([false, false, false, true, undefined, undefined]);
+    expect(reads).toEqual(["comp/index.html"]);
+  });
+
+  it("leaves elements unmarked when the source cannot be read", async () => {
+    const [element] = await markGenerated([of(null, ["gsap-line"], "")], async () => {
+      throw new Error("ENOENT");
+    });
+    expect(element!.generated).toBeUndefined();
   });
 });

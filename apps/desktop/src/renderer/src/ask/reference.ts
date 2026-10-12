@@ -115,7 +115,18 @@ function pointLine(point: SelectedPoint, view: TimelineView | null, extras: Refe
     parts.push([`clip ${target.clip} ${target.type}`, source].filter(Boolean).join(" "));
     const [element] = point.elements;
     if (element) {
-      parts.push([`element ${shortSelector(element.selector)}`, element.text ? quote(element.text) : null].filter(Boolean).join(" "));
+      // A sub-composition's element lives in another file than the clip's source.
+      const file = element.adapter?.["source"];
+      parts.push(
+        [
+          `element ${shortSelector(element.selector)}`,
+          element.text ? quote(element.text) : null,
+          typeof file === "string" && file !== source ? `in ${file}` : null,
+          element.generated ? "(created by a script)" : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
       const components = element.adapter?.["components"];
       if (Array.isArray(components) && components.length > 0) parts.push(`react ${components.join(" > ")}`);
     } else if (point.unavailable) {

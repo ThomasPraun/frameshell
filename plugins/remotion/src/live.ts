@@ -6,6 +6,9 @@ import type { RemotionComposition } from "./remotion.js";
 /** How long `frameshellLive.ready`, and each seek, wait for the page before failing. */
 export const LIVE_TIMEOUT_MS = 30_000;
 
+/** Most React components `describe` names, innermost kept: the composition's own, nearest the element. */
+export const DESCRIBE_COMPONENTS = 8;
+
 /**
  * Bundle globals live preview calls. They are Remotion internals, not public
  * API (`make-page.js`, `seek-to-frame.js` in @remotion/renderer 4.0.527).
@@ -61,6 +64,9 @@ export interface LiveComposition {
  * shows frame `round(t × fps)` through `remotion_setFrame` and waits until it
  * is rendered. The body is transparent, as for a PNG frame of a render, and
  * the page is scaled to the project size when the render would be.
+ * `describe(element)` (ADR 0011) names the React components rendering an
+ * element, outermost first, from React's fiber on the DOM node: the
+ * production bundle is not minified, so function names survive.
  */
 export function liveHead(live: LiveComposition): string {
   const { composition, scale } = live;
@@ -217,6 +223,17 @@ export function liveHead(live: LiveComposition): string {
         })
         .then(function () { return document.fonts.ready; })
         .then(function () {});
+    },
+    describe: function (element) {
+      var key = element ? Object.keys(element).filter(function (k) { return k.indexOf("__reactFiber$") === 0; })[0] : null;
+      var names = [];
+      for (var fiber = key ? element[key] : null; fiber; fiber = fiber.return) {
+        var type = fiber.type;
+        var inner = type && typeof type === "object" ? type.render || type.type : null;
+        var name = typeof type === "function" ? type.displayName || type.name : type && typeof type === "object" ? type.displayName || (inner && (inner.displayName || inner.name)) : null;
+        if (name && /^[A-Z]/.test(name) && names[0] !== name) names.unshift(name);
+      }
+      return names.length > 0 ? { components: names.slice(-${DESCRIBE_COMPONENTS}) } : {};
     },
   };
 })();`;

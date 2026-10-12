@@ -185,7 +185,7 @@ describe("hyperframes live preview (ADR 0010)", () => {
   const adapter = (runtime = RUNTIME) => createHyperframesAdapter({ projectDir: project, producer: async () => fakeProducer().producer, runtime: async () => runtime });
 
   /** Runs `head` against a minimal page, as the host's `<script>` would, and returns that page's window. */
-  function load(head: string, media: { muted: boolean }[] = []) {
+  function load(head: string, media: { muted: boolean }[] = [], extra: Record<string, unknown> = {}) {
     const listeners: Record<string, ((event: { target: unknown }) => void)[]> = {};
     const window: Record<string, unknown> = { seeks: [] as number[] };
     const document = {
@@ -194,8 +194,8 @@ describe("hyperframes live preview (ADR 0010)", () => {
     };
     window["window"] = window;
     window["setTimeout"] = setTimeout;
-    runInNewContext(head, { window, document, setTimeout, Date, Promise, Number, Math, Error });
-    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void> };
+    runInNewContext(head, { window, document, setTimeout, Date, Promise, Number, Math, Error, ...extra });
+    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void>; describe(element: unknown): unknown };
     return { window, page, play: (target: unknown) => listeners["play"]?.forEach((listener) => listener({ target })) };
   }
 
@@ -235,6 +235,15 @@ describe("hyperframes live preview (ADR 0010)", () => {
 
   it("refuses a runtime that would close the host's <script>", async () => {
     await expect(adapter("var s = '</SCRIPT>';").livePreview!({ id: "c_1", source: SOURCE }, live)).rejects.toThrow(/cannot be inlined/);
+  });
+
+  it("describes an element's file: its sub-composition host's, else the entry, project-relative (ADR 0011)", async () => {
+    const { head } = await adapter().livePreview!({ id: "c_1", source: SOURCE }, { ...live, projectDir: project });
+    const location = { pathname: "/index.html", href: "frameshell-live://t0k3n/index.html" };
+    const { page } = load(head, [], { location, URL, decodeURIComponent });
+    const host = { getAttribute: (name: string) => (name === "data-composition-src" ? "scenes/out%20ro.html" : null) };
+    expect(page.describe({ closest: () => host })).toEqual({ source: "compositions/hyperframes/intro/scenes/out ro.html" });
+    expect(page.describe({ closest: () => null })).toEqual({ source: SOURCE });
   });
 
   it("seeks with renderSeek once the runtime is ready, clamping bad times to 0 and keeping media muted", async () => {
