@@ -129,10 +129,11 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       const dir = await compositionDir(projectDir, { id, source });
       await refuseObjectDeclarations(id, dir);
       const name = posix.basename(source);
+      const root = dir.rel === "" ? "." : dir.rel;
       return {
-        root: dir.rel === "" ? "." : dir.rel,
+        root,
         entry: dir.rel === "" ? name : `${dir.rel}/${name}`,
-        head: liveHead(props ?? {}, await loadRuntime()),
+        head: liveHead(props ?? {}, await loadRuntime(), root),
       };
     },
   };

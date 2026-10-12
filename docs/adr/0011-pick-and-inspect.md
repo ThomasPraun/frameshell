@@ -90,6 +90,10 @@ Found while building the parts; the decision above stands.
   - The probe script lives in `@frameshell/protocol/probe` (browser-safe subpath): the app's bridge injects it now, the daemon's `inspect.point` will.
   - The renderer may not write under `.frameshell/`, so details files go through a new internal daemon method, `context.write` (`PROTOCOL_VERSION` 31).
   - `generated` (element absent from the source files) moves to part 3 with the adapters' source facts.
+- **Part 3 (2026-10-11):**
+  - `generated` is decided in the app against the file the adapter names (`source`): HyperFrames elements only, since a Remotion element's source file is unknown. True only when the element's id, classes and leading text all miss that file; unknown (absent) when there is nothing to look for.
+  - Remotion `components` keep Remotion's own components (`Sequence`, `AbsoluteFill`): the composition's components cannot be told from them in a production bundle. At most 8, innermost kept.
+  - The point line adds `in <file>` when the element comes from another file than the clip's source.
 
 ## Considered options
 

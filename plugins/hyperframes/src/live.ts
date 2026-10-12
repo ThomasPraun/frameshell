@@ -8,7 +8,10 @@ export const LIVE_READY_TIMEOUT_MS = 30_000;
  * runtime has bound the timeline (`__renderReady`) and exposes
  * `__player.renderSeek`, the render-accurate seek the producer uses, and
  * rejects after {@link LIVE_READY_TIMEOUT_MS}. Media is kept muted: renders
- * carry no audio (ADR 0002).
+ * carry no audio (ADR 0002). `describe(element)` (ADR 0011) names the file an
+ * element comes from: the `data-composition-src` of its nearest host (a
+ * sub-composition the runtime inlined), else the entry, project-relative
+ * through `ROOT`, the page's root.
  */
 const GLUE = `(function () {
   var setTimer = window.setTimeout.bind(window);
@@ -35,6 +38,19 @@ const GLUE = `(function () {
         document.querySelectorAll("audio, video").forEach(mute);
       });
     },
+    describe: function (element) {
+      var host = element && element.closest ? element.closest("[data-composition-src]") : null;
+      var path = location.pathname;
+      if (host) {
+        try {
+          path = new URL(host.getAttribute("data-composition-src"), location.href).pathname;
+        } catch (error) {
+          path = location.pathname;
+        }
+      }
+      var inRoot = decodeURIComponent(path.replace(/^\\/+/, ""));
+      return { source: ROOT === "." ? inRoot : ROOT + "/" + inRoot };
+    },
   };
 })();`;
 
@@ -42,14 +58,15 @@ const GLUE = `(function () {
  * `head` of a HyperFrames live page (ADR 0010): the clip's variables, the
  * glue, then the HyperFrames runtime the producer injects when rendering.
  * Variables are set only when there are some, as the producer does, so the
- * page sees exactly what a render sees. The host wraps the text in a
- * `<script>` element, so nothing in it may close one.
+ * page sees exactly what a render sees. `root` is the page's root,
+ * project-relative (`.` for the project), for `describe`. The host wraps the
+ * text in a `<script>` element, so nothing in it may close one.
  */
-export function liveHead(variables: Record<string, unknown>, runtime: string): string {
+export function liveHead(variables: Record<string, unknown>, runtime: string, root = "."): string {
   if (/<\/script/i.test(runtime)) throw new Error("The HyperFrames runtime script contains `</script`, so it cannot be inlined into a live page.");
   const parts: string[] = [];
   if (Object.keys(variables).length > 0) parts.push(`window.__hfVariables = ${scriptJson(variables)};`);
-  parts.push(GLUE, runtime);
+  parts.push(GLUE.replace("(function () {", `(function () {\n  var ROOT = ${scriptJson(root)};`), runtime);
   return parts.join("\n");
 }
 

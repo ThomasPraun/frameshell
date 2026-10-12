@@ -452,6 +452,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 
 - **Files:** `root` and `entry` are project-relative, and the page loads nothing from the project outside `root`. The network stays reachable.
 - **`head`:** JavaScript text, not HTML. The app inserts it in a `<script>` at the start of the entry's `<head>` on every load. It must not contain `</script`, and it must define `window.frameshellLive = { ready, seek(seconds) }`.
+- **`describe(element)`** (optional, ADR 0011): facts about a DOM element the Pick tool picked, as a JSON-safe object: `source` (project-relative file it comes from) and `components` (names of the components rendering it, outermost first). The app adds them to what it reports to the agent.
 - **`seek`:** shows composition time `seconds`, as file time `seconds` of a render. The app sends only the latest seek while one runs.
 - **Opaque origin:** no `localStorage`, `sessionStorage` or cookies (reading them throws), and no access to the app.
 - **Sound:** keep the page muted; renders carry no audio.

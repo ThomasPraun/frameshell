@@ -384,9 +384,34 @@ describe("remotion adapter live preview (ADR 0010)", () => {
         setTimeout(() => (window["remotion_renderReady"] = true), 1);
       };
     };
-    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void> };
+    const page = window["frameshellLive"] as { ready: Promise<void>; seek(seconds: number): Promise<void>; describe(element: unknown): unknown };
     return { window, page, bundle, calls, styles, listeners };
   }
+
+  it("describes an element by the React components rendering it, outermost first (ADR 0011)", async () => {
+    withInternals();
+    const { load: loadRemotion } = fakeRemotion();
+    const { head } = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, live);
+    const { page } = load(head);
+    // A fiber chain as React builds it: host element, memo and forwardRef wrappers, function components, repeats.
+    function Title() {}
+    function Card() {}
+    function Scene() {}
+    const chain = [
+      { type: "h1" },
+      { type: Title },
+      { type: { $$typeof: "memo", type: Card } },
+      { type: Card },
+      { type: { displayName: "Sequence", render: () => null } },
+      { type: "div" },
+      { type: Scene },
+      { type: function lowercase() {} },
+    ];
+    chain.reduce((child, fiber) => (Object.assign(child, { return: fiber }), fiber));
+    const element = { "__reactFiber$abc123": chain[0] };
+    expect(page.describe(element)).toEqual({ components: ["Scene", "Sequence", "Card", "Title"] });
+    expect(page.describe({})).toEqual({});
+  });
 
   it("serves the clip's current bundle, its index.html as entry, inside the project", async () => {
     withInternals();
