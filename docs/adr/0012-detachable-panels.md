@@ -73,7 +73,7 @@ The preview and terminals ship first; the others follow in the same mechanism. A
 - **Per project, as today** (`layout-store`): panel sizes, collapse state, `centerSplit`.
 - **Global, in `configDir`** (`resolveAppDirs`, a user decision): which panels are detached, plus their window's display, bounds and full-screen state. Saved per set of connected displays. A window whose display is gone opens on the primary display.
 
-**8. Spike first.** Before part 1, a throwaway branch checks the risks of point 1:
+**8. Spike first.** Before part 1, a throwaway branch checks the risks of point 1 (done, see Spike results):
 - rAF and timers in a child window while the project window is minimized or hidden;
 - WebCodecs, `OffscreenCanvas` transfer and the `AudioWorklet` from a canvas living in the child document;
 - xterm and its WebGL renderer in a child document;
@@ -81,6 +81,15 @@ The preview and terminals ship first; the others follow in the same mechanism. A
 - copied styles and fullscreen.
 
 If one of these fails without a workaround, this ADR is revisited before any panel ships.
+
+## Spike results (2026-10-11, #160)
+
+The spike portalled the preview and a terminal into child windows and ran on macOS, Linux and Windows CI. Point 1 holds: playback, the live page, fullscreen and xterm all work in a child window, and stylesheets copy correctly. What it added to point 1:
+
+- **`backgroundThrottling: false` on project windows.** Without it, playback in a child window stalled on Linux and Windows while the project window was hidden.
+- **Timing from the owner window.** On Windows the project window's `requestAnimationFrame` dropped to about once a second while minimized, so the playhead followed suit. The player's loop and clock timer must come from the canvas's own window.
+- **The live bridge also accepts `window.parent.opener`.** Seeks are posted by code in the project renderer, so they reach a live page in a child window with the project window as `event.source`, not the child. The opener is that same renderer, so this grants nothing new. Live pages listen for `message` on their owner window too.
+- **Keys:** keys typed in a child window do not reach listeners on the project window, as expected. Point 1's per-window key handling is required.
 
 ## Considered options
 
@@ -98,7 +107,7 @@ If one of these fails without a workaround, this ADR is revisited before any pan
 
 ## Implementation plan (each part ships and is tested alone)
 
-0. **Spike** (label `spike`). The point 8 checks, in a throwaway branch, reported on its issue.
+0. **Spike** (label `spike`, #160, done). The point 8 checks, in a throwaway branch, reported on its issue.
 1. **Mechanism + preview.**
    - Main: the window-open allowlist and child registration under `WindowState`; menu routing.
    - Renderer: the portal host; the owner-window rule in preview code.
