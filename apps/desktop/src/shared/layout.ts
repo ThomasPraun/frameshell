@@ -6,18 +6,22 @@
 /** Panels with a draggable edge. The center (preview + editor) takes the rest. */
 export type PanelId = "sidebar" | "terminal" | "timeline";
 
-/** Panels that can move out to their own window (ADR 0012). Each terminal tab moves on its own, in a window of its own. */
-export type DetachablePanel = "preview" | "terminal";
+/**
+ * Panels that can move out to their own window (ADR 0012). Each terminal tab
+ * moves on its own, in a window of its own; so does each sidebar view
+ * (`explorer`, `history`, `plugins`). The editor moves with all its tabs.
+ */
+export type DetachablePanel = "preview" | "terminal" | "timeline" | "editor" | SidebarView;
 
 /** Every {@link DetachablePanel}, for validating stored and requested names. */
-export const DETACHABLE_PANELS: readonly DetachablePanel[] = ["preview", "terminal"];
+export const DETACHABLE_PANELS: readonly DetachablePanel[] = ["preview", "terminal", "timeline", "editor", "explorer", "history", "plugins"];
 
 /**
  * Panels whose window opens again with the project. A terminal's session
  * ends with its project window, so the project reopens with one new
  * terminal, docked; a terminal window still opens where the last one was.
  */
-export const REOPENED_PANELS: readonly DetachablePanel[] = ["preview"];
+export const REOPENED_PANELS: readonly DetachablePanel[] = DETACHABLE_PANELS.filter((panel) => panel !== "terminal");
 
 /** Frame name prefix of a detached panel's `window.open` (`frameshell-panel:<panel>/<n>`); main allows no other popup. */
 export const PANEL_WINDOW_PREFIX = "frameshell-panel:";

@@ -34,10 +34,10 @@ export function DetachButton({
   );
 }
 
-/** What stays in a detached panel's slot: where the panel went, and a way back. */
-export function DockedElsewhere({ title, onBringBack }: { title: string; onBringBack: () => void }) {
+/** What stays in a detached panel's slot: where the panel went, and a way back. `compact` fits it on one line. */
+export function DockedElsewhere({ title, onBringBack, compact = false }: { title: string; onBringBack: () => void; compact?: boolean }) {
   return (
-    <div className="panel-docked-elsewhere" data-testid="panel-docked-elsewhere">
+    <div className={`panel-docked-elsewhere${compact ? " is-compact" : ""}`} data-testid="panel-docked-elsewhere">
       <p>
         <strong>{title}</strong> is docked in another window
       </p>

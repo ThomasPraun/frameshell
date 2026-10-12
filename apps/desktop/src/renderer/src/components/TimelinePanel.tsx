@@ -52,6 +52,7 @@ import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { uiLink } from "../ui-link.js";
+import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
 
@@ -126,11 +127,18 @@ export function TimelinePanel({
   collapsed,
   onToggle,
   onShowTranscript,
+  detached = false,
+  onDetach,
 }: {
   collapsed: boolean;
-  onToggle: () => void;
+  /** Collapse or expand; absent in the timeline's own window, which does not collapse. */
+  onToggle?: () => void;
   /** Open the transcript view: the header's "Transcript" button. */
   onShowTranscript?: () => void;
+  /** The panel is in its own window (ADR 0012). */
+  detached?: boolean;
+  /** Move the panel to its own window, or dock it back while `detached`. */
+  onDetach?: () => void;
 }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
@@ -199,6 +207,7 @@ export function TimelinePanel({
   return (
     <>
       <PanelHeader
+        actions={onDetach && <DetachButton name="timeline" detached={detached} onClick={onDetach} testId="timeline-detach" />}
         onCollapse={onToggle}
         collapseLabel={collapsed ? "Show timeline" : "Hide timeline"}
         collapseSide={collapsed ? "up" : "down"}
@@ -290,6 +299,8 @@ function TimelineCanvas({
   const heads = useRef<HTMLDivElement>(null);
   const state = useRef<ViewState>({ pxPerSecond: 10, fit: true, scrollLeft: 0, scrollTop: 0, width: 0, height: 0 });
   const frame = useRef(0);
+  /** Window whose `requestAnimationFrame` gave {@link frame}: the canvas's own (ADR 0012), so a cancel reaches it. */
+  const frameView = useRef<Window>(window);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
   const { clips: selectedClips, range, reveal, track: selectedTrack } = useSelection();
@@ -327,7 +338,7 @@ function TimelineCanvas({
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
-    const ratio = window.devicePixelRatio || 1;
+    const ratio = (element.ownerDocument.defaultView ?? window).devicePixelRatio || 1;
     const pixelWidth = Math.round(view.width * ratio);
     const pixelHeight = Math.round(view.height * ratio);
     if (element.width !== pixelWidth || element.height !== pixelHeight) {
@@ -364,7 +375,9 @@ function TimelineCanvas({
   }, []);
 
   const schedule = useCallback(() => {
-    if (!frame.current) frame.current = requestAnimationFrame(draw);
+    if (frame.current) return;
+    frameView.current = canvas.current?.ownerDocument.defaultView ?? window;
+    frame.current = frameView.current.requestAnimationFrame(draw);
   }, [draw]);
 
   const mediaRef = useRef<MediaCache | null>(null);
@@ -416,7 +429,7 @@ function TimelineCanvas({
     if (pending?.until != null && revision !== null && revision >= pending.until) ghost.current = null;
     settleNudges();
     settle();
-    if (frame.current) cancelAnimationFrame(frame.current);
+    if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
     draw();
   }, [layout, revision, selected, range, diff, cues, selectedTrack, settle, settleNudges, draw]);
 
@@ -527,7 +540,7 @@ function TimelineCanvas({
       state.current.height = box.clientHeight;
       settle();
     };
-    const observer = new ResizeObserver(measure);
+    const observer = new (box.ownerDocument.defaultView ?? window).ResizeObserver(measure);
     observer.observe(box);
     // Scrollbars appearing or going change the client box without resizing the element.
     observer.observe(sizer.current!);

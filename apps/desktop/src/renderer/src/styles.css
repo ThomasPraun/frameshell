@@ -2225,6 +2225,45 @@ button.track-head:focus-visible {
   min-width: 0;
 }
 
+/* The slot of the detached timeline: one line, so the preview and editor get the height back. */
+.panel-docked-elsewhere.is-compact {
+  flex: none;
+  flex-direction: row;
+  padding: 6px 16px;
+}
+
+/* A sidebar view shown in its own window. */
+.view-tab.is-detached {
+  font-style: italic;
+}
+
+/* The editor's detach button, at the right end of its tab strip. */
+.tab-strip-actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  position: sticky;
+  right: 0;
+  background: var(--bg-app);
+}
+
+/*
+ * Cmd/Ctrl+Shift+Enter (ADR 0012): one panel fills the project window. The
+ * others only hide: terminals, the player and the editor stay mounted.
+ */
+.workspace.is-maximized .main-row > :not(.is-maximized, .center-column:has(.is-maximized)),
+.workspace.is-maximized .center-column > :not(.is-maximized, .center-row:has(.is-maximized)),
+.workspace.is-maximized .center-row > :not(.is-maximized) {
+  display: none !important;
+}
+
+.workspace.is-maximized .panel.is-maximized {
+  flex: 1 1 auto !important;
+  height: auto !important;
+}
+
 /* A detached terminal tab's window. */
 .terminal-window {
   background: var(--bg-term);
