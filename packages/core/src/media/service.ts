@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, link, mkdir, readdir, realpath, rm, stat, symlink } from "node:fs/promises";
+import { chmod, copyFile, link, mkdir, readdir, realpath, rm, stat, symlink } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import {
@@ -455,6 +455,10 @@ export class MediaService {
           // Clone on APFS/Btrfs/ReFS: instant and no extra space; plain copy elsewhere.
           await copyFile(source, temp, constants.COPYFILE_FICLONE);
           await renameRetrying(temp, target);
+          // The project's own copy of the footage: read-only, so an agent or a tool cannot overwrite it by mistake (#186).
+          // Never for links, which share the user's original file. After the rename: a read-only temp file left by a
+          // failed rename could not be removed on Windows.
+          await chmod(target, 0o444);
         } finally {
           await rm(temp, { force: true });
         }

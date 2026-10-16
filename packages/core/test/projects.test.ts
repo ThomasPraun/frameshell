@@ -67,7 +67,29 @@ describe("project.init", () => {
     writeFileSync(join(customized, ".claude", "skills", "frameshell", "SKILL.md"), "tuned by the user");
     const second = await conn.request("project.init", { dir: customized });
     expect(readFileSync(join(customized, ".claude", "skills", "frameshell", "SKILL.md"), "utf8")).toBe("tuned by the user");
-    expect(second.created.some((path) => path.startsWith(".claude/"))).toBe(false);
+    expect(second.created.some((path) => path.startsWith(".claude/skills/"))).toBe(false);
+  });
+
+  it("writes AGENTS.md, GEMINI.md and Claude Code permissions, keeping the user's own", async () => {
+    const dir = tempDir();
+    const { created } = await conn.request("project.init", { dir });
+    expect(created).toEqual(expect.arrayContaining(["AGENTS.md", "GEMINI.md", ".claude/settings.json"]));
+    const instructions = readFileSync(join(dir, "AGENTS.md"), "utf8");
+    expect(instructions).toContain(".claude/skills/frameshell/SKILL.md");
+    expect(readFileSync(join(dir, "GEMINI.md"), "utf8")).toBe(instructions);
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8"))).toEqual({
+      permissions: { allow: ["Bash(frameshell *)", "mcp__frameshell"], ask: ["Bash(rm *)"] },
+    });
+
+    const own = tempDir();
+    writeFileSync(join(own, "AGENTS.md"), "house rules");
+    mkdirSync(join(own, ".claude"));
+    writeFileSync(join(own, ".claude", "settings.json"), "{}");
+    const second = await conn.request("project.init", { dir: own });
+    expect(readFileSync(join(own, "AGENTS.md"), "utf8")).toBe("house rules");
+    expect(readFileSync(join(own, ".claude", "settings.json"), "utf8")).toBe("{}");
+    expect(second.created).toContain("GEMINI.md");
+    expect(second.created).not.toContain("AGENTS.md");
   });
 
   it("refuses to overwrite an existing project", async () => {
