@@ -38,6 +38,7 @@ import { probeMedia } from "./media/ffmpeg.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
+import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { outlineScript } from "./scripts/outline.js";
@@ -380,6 +381,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         daemon: { ...identity, uptimeMs: Date.now() - startedAt, clients: clients.size, socketPath },
         project,
         trust,
+        synced: project ? syncedFolder(project.dir) : null,
         openProjects: projects.list(),
         rejections: project ? await timelines.rejections(project.dir) : [],
         jobs: project ? listJobs({ project: project.dir }) : [],

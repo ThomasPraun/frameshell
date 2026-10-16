@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 32;
+export const PROTOCOL_VERSION = 33;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -471,6 +471,17 @@ export const methods = {
         .object({ state: TrustStateSchema, plugins: PinsSchema })
         .nullable()
         .describe("Plugin trust of `project`; null when there is no project."),
+      synced: z
+        .object({
+          service: z.string().describe("Sync service, e.g. `Dropbox`, `iCloud Drive`, `OneDrive`, `Google Drive`."),
+          root: z.string().describe("The service's folder holding the project."),
+        })
+        .nullable()
+        .describe(
+          "Set when `project` is inside a folder a cloud service syncs: its `.frameshell/` (proxies, renders, history, " +
+            "often several GB) syncs too, and a sync client can corrupt the history journal. Suggest moving the " +
+            "project out of it. Null when not, or no project.",
+        ),
       openProjects: z.array(ProjectSummarySchema).describe("Every project the daemon holds open."),
       rejections: z
         .array(RejectionRecordSchema)

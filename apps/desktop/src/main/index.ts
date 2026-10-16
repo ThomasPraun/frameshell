@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BaseWindow, BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
@@ -91,6 +91,8 @@ daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 /** Detached panels and their windows' placement (ADR 0012): a user decision, global, so in `configDir`. */
 const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
+/** Projects whose synced-folder warning the user dismissed (#187): a user decision, so in `configDir`. */
+const syncWarningsFile = join(resolveAppDirs(process.env).configDir, "sync-warnings-dismissed.json");
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
@@ -342,6 +344,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     name: status.project.name,
     daemon: { version: status.daemon.daemonVersion, pid: status.daemon.pid, socketPath: status.daemon.socketPath },
     mediaUrl: mediaRoots.issue(status.project.dir),
+    synced: status.synced && !(await readDismissedSync()).includes(status.project.dir) ? status.synced : null,
   };
   await state.files?.close();
   await Promise.all(state.daemonEvents.splice(0).map((subscription) => subscription.unsubscribe()));
@@ -395,6 +398,21 @@ async function openFromWindow(state: WindowState, dir: string): Promise<OpenOutc
   if (existing) existing.window.focus();
   else createWindow(dir);
   return { status: "cancelled" };
+}
+
+async function readDismissedSync(): Promise<string[]> {
+  try {
+    const list: unknown = JSON.parse(await readFile(syncWarningsFile, "utf8"));
+    return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function dismissSync(dir: string): Promise<void> {
+  const list = [...new Set([...(await readDismissedSync()), dir])];
+  await mkdir(dirname(syncWarningsFile), { recursive: true });
+  await writeFile(syncWarningsFile, JSON.stringify(list, null, 2));
 }
 
 async function readRecent(): Promise<string[]> {
@@ -553,6 +571,12 @@ function registerIpc(): void {
     return state.project;
   });
   ipcMain.handle(Channel.projectRecent, () => readRecent());
+  ipcMain.handle(Channel.projectDismissSync, async (event) => {
+    const state = stateOf(event.sender);
+    const { project } = await requireProject(state);
+    await dismissSync(project.dir);
+    state.project = { ...project, synced: null };
+  });
   ipcMain.handle(Channel.projectOpen, (event, dir: string) => openFromWindow(stateOf(event.sender), dir));
   ipcMain.handle(Channel.projectOpenFolder, async (event): Promise<OpenOutcome> => {
     const state = stateOf(event.sender);

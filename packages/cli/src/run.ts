@@ -764,6 +764,13 @@ function formatStatus(status: StatusResult, cwd: string): string {
       ? `Project: ${project.name} (${project.dir}) · schema v${project.schemaVersion}`
       : `Project: none in ${cwd}. Run \`frameshell init\` to create one.`,
   ];
+  if (status.synced) {
+    lines.push(
+      `Warning: the project is in a ${status.synced.service} folder (${status.synced.root}). Its .frameshell/ ` +
+        "(proxies, renders, history, often several GB) syncs too, and syncing can corrupt the history. " +
+        "Move the project out of that folder.",
+    );
+  }
   if (trust && trust.state !== "not-required") {
     const count = Object.keys(trust.plugins).length;
     lines.push(`Plugins: ${count} declared, ${trustLabel(trust.state)}`);
