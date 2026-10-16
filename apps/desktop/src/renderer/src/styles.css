@@ -310,6 +310,23 @@ code {
   accent-color: var(--accent);
 }
 
+.welcome-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.welcome-check input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.welcome-check small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .welcome-recent {
   margin-top: 36px;
 }
@@ -2658,4 +2675,56 @@ button.track-head:focus-visible {
   color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Background setup of a new project (#188): transcription plugin, downloads, transcribing. */
+.status-setup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 50vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-setup.is-failed {
+  color: var(--danger);
+}
+
+.setup-bar {
+  flex: none;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.setup-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.setup-bar > .is-indeterminate {
+  width: 40%;
+  animation: setup-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes setup-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-bar > .is-indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
 }

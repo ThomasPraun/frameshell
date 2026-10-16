@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
-import type { ProjectView } from "../../../shared/api.js";
+import type { ProjectSetup, ProjectView } from "../../../shared/api.js";
 import {
   type DetachablePanel,
   type Layout,
@@ -56,6 +56,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const setup = useProjectSetup();
   const dragBase = useRef<Layout | null>(null);
   const centerRow = useRef<HTMLDivElement>(null);
   const terminals = useRef<AgentTerminal>(null);
@@ -395,6 +396,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         activeFile={active === TRANSCRIPT_TAB ? "Transcript" : active}
         session={activeSession}
         notice={notice}
+        setup={setup}
       />
       {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={`${label} — ${project.name}`} onClosed={() => setPanelDetached(id, false)}>
@@ -456,4 +458,22 @@ function SyncWarning({ synced }: { synced: { service: string; root: string } }) 
       </button>
     </div>
   );
+}
+
+/** How long a finished setup's last line stays in the status bar, ms. A failure stays until the next change. */
+const SETUP_DONE_MS = 8000;
+
+/** Background setup of a project created from videos (#188), as main reports it. */
+function useProjectSetup(): ProjectSetup | null {
+  const [setup, setSetup] = useState<ProjectSetup | null>(null);
+  useEffect(() => {
+    void window.frameshell.project.setup().then(setSetup);
+    return window.frameshell.project.onSetup(setSetup);
+  }, []);
+  useEffect(() => {
+    if (setup?.state !== "done") return;
+    const timer = setTimeout(() => setSetup(null), SETUP_DONE_MS);
+    return () => clearTimeout(timer);
+  }, [setup]);
+  return setup;
 }

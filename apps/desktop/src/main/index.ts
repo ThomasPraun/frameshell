@@ -23,6 +23,7 @@ import {
   type ProjectView,
   type TimelineChange,
   type TimelineEdit,
+  type ProjectSetup,
   type VideoProjectPlan,
 } from "../shared/api.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
@@ -455,17 +456,67 @@ async function createFromVideos(
   state: WindowState,
   request: Pick<VideoProjectPlan, "files" | "parent" | "name">,
   mode: "copy" | "link",
+  transcribe: boolean,
 ): Promise<OpenOutcome> {
   try {
     // Planned again: the folder may have appeared since the renderer showed the plan.
     const plan = await planVideoProject(request.files, { parent: request.parent, name: request.name });
+    let assets: string[] = [];
     if (!plan.existing) {
       await daemon.request("project.init", { dir: plan.dir, name: plan.name });
-      await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
+      const { imported } = await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
+      assets = imported.map((item) => item.asset);
     }
-    return await openFromWindow(state, plan.dir);
+    const opened = await openFromWindow(state, plan.dir);
+    if (transcribe && assets.length > 0) void setUpTranscription(plan.dir, assets);
+    return opened;
   } catch (error) {
     return { status: "error", message: (error as Error).message };
+  }
+}
+
+/** Official transcription plugin a project made from videos gets (#188). */
+const TRANSCRIPTION_PLUGIN = "@frameshell/whisper-cpp";
+/** Setup of each project created from videos, by project dir, while it runs and as it ended. */
+const setups = new Map<string, ProjectSetup>();
+
+function reportSetup(dir: string, setup: ProjectSetup): void {
+  setups.set(dir, setup);
+  for (const state of windows.values()) {
+    if (state.project?.dir === dir) send(state.window.webContents, Channel.projectSetupChanged, setup);
+  }
+}
+
+/**
+ * Install the transcription plugin into the new project at `dir` and
+ * transcribe `assets`, in the background, reporting each step (#188). The
+ * user created the project, so the plugin is trusted as `plugin.install`
+ * trusts it. Fails softly: the project stays usable and the agent can retry.
+ */
+async function setUpTranscription(dir: string, assets: string[]): Promise<void> {
+  const name = (asset: string) => asset.split("/").pop() ?? asset;
+  const running = (message: string, fraction: number | null = null) =>
+    reportSetup(dir, { message, detail: null, fraction, state: "running" });
+  // Said in the user's terms; the daemon's message goes to the tooltip.
+  let failure = "Could not download the transcription plugin. Check the internet connection, then ask the agent to transcribe the videos.";
+  try {
+    running("Setting up transcription…");
+    const { plugins } = await daemon.request("plugin.list", { cwd: dir });
+    if (!plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN)) {
+      await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
+    }
+    for (const asset of assets) {
+      failure = `Could not transcribe ${name(asset)}. Ask the agent to transcribe it.`;
+      running(`Transcribing ${name(asset)}…`);
+      await daemon.request(
+        "transcribe",
+        { cwd: dir, asset },
+        { onProgress: (update) => running(`${name(asset)}: ${update.message}`, update.fraction ?? null) },
+      );
+    }
+    reportSetup(dir, { message: `Transcribed ${assets.map(name).join(", ")}.`, detail: null, fraction: null, state: "done" });
+  } catch (error) {
+    reportSetup(dir, { message: failure, detail: (error as Error).message, fraction: null, state: "failed" });
   }
 }
 
@@ -619,9 +670,13 @@ function registerIpc(): void {
   });
   ipcMain.handle(
     Channel.projectFromVideos,
-    (event, plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link") =>
-      createFromVideos(stateOf(event.sender), plan, mode === "link" ? "link" : "copy"),
+    (event, plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link", options?: { transcribe?: boolean }) =>
+      createFromVideos(stateOf(event.sender), plan, mode === "link" ? "link" : "copy", options?.transcribe === true),
   );
+  ipcMain.handle(Channel.projectSetup, async (event) => {
+    const { project } = await requireProject(stateOf(event.sender));
+    return setups.get(project.dir) ?? null;
+  });
 
   ipcMain.handle(Channel.mediaImport, (event, paths: string[]) =>
     outcome(async () => {

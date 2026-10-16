@@ -100,9 +100,13 @@ export class DaemonLink {
    * when the first attempt was applied but its reply lost, the daemon answers
    * the retry with that result instead of applying the change twice.
    */
-  async request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
+  async request<M extends MethodName>(
+    method: M,
+    params: MethodParams<M>,
+    { onProgress }: { onProgress?: (progress: { message: string; fraction?: number | undefined }) => void } = {},
+  ): Promise<MethodResult<M>> {
     const spec: MethodSpec = methods[method];
-    const options = spec.mutating ? { idempotencyKey: randomUUID() } : {};
+    const options = { ...(spec.mutating ? { idempotencyKey: randomUUID() } : {}), onProgress };
     try {
       return await (await this.#connect()).request(method, params, options);
     } catch (error) {

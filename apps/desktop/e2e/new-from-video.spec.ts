@@ -36,6 +36,8 @@ test("choosing a video creates its project beside it and opens it", async () => 
     await expect(form.getByLabel("Project name")).toHaveValue("interview");
     await expect(form.locator(".welcome-place code")).toHaveText(join(home, "interview"));
 
+    // Transcription would download the plugin and a 574 MB model: covered with a dead registry in new-from-video.
+    await form.getByLabel("Transcribe what is said").uncheck();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("interview", { timeout: 60_000 });
     await page.locator(".tree-row", { hasText: "assets" }).click();
@@ -64,6 +66,36 @@ test("choosing a video creates its project beside it and opens it", async () => 
       [notes, broll],
     );
     expect(mixed).toMatchObject({ plan: { files: [broll] }, refused: [notes] });
+  } finally {
+    await app.close();
+  }
+});
+
+test("with transcription on, the setup runs in the background and its outcome shows in the status bar", async () => {
+  // Its own sandbox: the daemon runs npm, and one still up from an earlier test would lack this env and download for real.
+  const own = sandbox("demo");
+  const folder = join(dirname(own.projectDir), "videos");
+  mkdirSync(folder, { recursive: true });
+  const take = join(folder, "talk.mp4");
+  writeFileSync(take, Buffer.alloc(1024, 9));
+  // npm offline with an empty cache: the plugin install fails at once (ENOTCACHED), with no network, which proves the
+  // setup runs and reports.
+  const { app, page } = await launch(
+    { ...own, projectDir: folder },
+    { env: { npm_config_offline: "true", npm_config_cache: join(dirname(own.projectDir), "npm-cache") } },
+  );
+  try {
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [take]);
+    await page.getByRole("button", { name: "New from video…" }).click();
+    const form = page.getByRole("form", { name: "New project from video" });
+    await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
+    const setup = page.getByTestId("project-setup");
+    await expect(setup).toContainText("Could not download the transcription plugin.", { timeout: 120_000 });
+    await expect(setup).toHaveAttribute("title", /npm install failed/);
   } finally {
     await app.close();
   }
