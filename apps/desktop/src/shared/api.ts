@@ -362,7 +362,24 @@ export interface FrameshellApi {
      */
     live(timeline: string, clip: string): Promise<LiveClipPage>;
   };
+  updates: {
+    /** The update to show in the banner; null when none, or dismissed this session. */
+    status(): Promise<UpdateStatus | null>;
+    /** Called on every change of {@link status}. Returns an unsubscribe function. */
+    onStatus(listener: (status: UpdateStatus | null) => void): () => void;
+    /** Quit, install the downloaded update and start the new version. Only for `ready`. */
+    restart(): void;
+    /** Hide the banner in every window until the app restarts. */
+    dismiss(): void;
+  };
 }
+
+/**
+ * An update of the app (#193), for the banner. `available`: a newer release
+ * to download from `url` (Windows, `.deb`, or where installing failed).
+ * `ready`: downloaded and installed on restart (macOS, AppImage).
+ */
+export type UpdateStatus = { state: "available"; version: string; url: string } | { state: "ready"; version: string };
 
 /** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */
 export interface LiveClipPage {
@@ -427,4 +444,8 @@ export const Channel = {
   clipsRenders: "clips:renders",
   clipsJob: "clips:job",
   clipsLive: "clips:live",
+  updatesStatus: "updates:status",
+  updatesChanged: "updates:changed",
+  updatesRestart: "updates:restart",
+  updatesDismiss: "updates:dismiss",
 } as const;

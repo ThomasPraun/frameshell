@@ -56,6 +56,9 @@ import { UiBridge } from "./ui-bridge.js";
 import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
+import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
+import { UpdatePreferences, updateMode } from "./update-check.js";
+import { Updater } from "./updater.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
@@ -107,6 +110,16 @@ const languageFile = join(resolveAppDirs(process.env).configDir, "language.json"
 let languageChoice: LanguageChoice = readLanguageChoice(languageFile);
 /** UI strings in the app's language; set once the app is ready (`app.getLocale()`), English before. */
 let text: Dict = strings("en");
+/** Update check (#193); its opt-out is a user decision, so in `configDir`. */
+const updater = new Updater({
+  mode: updateMode({ packaged: app.isPackaged, platform: process.platform, version: APP_VERSION, env: process.env }),
+  preferences: new UpdatePreferences(join(resolveAppDirs(process.env).configDir, "updates.json")),
+  version: APP_VERSION,
+  broadcast: (status) => {
+    for (const state of windows.values()) send(state.window.webContents, Channel.updatesChanged, status);
+  },
+  text: () => text.app.updates,
+});
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
@@ -848,6 +861,9 @@ function registerIpc(): void {
     if (project) void layouts.save(project.dir, normalizeLayout(layout));
   });
   ipcMain.handle(Channel.panelsDetached, () => panelWindows.detached());
+  ipcMain.handle(Channel.updatesStatus, () => updater.status());
+  ipcMain.on(Channel.updatesRestart, () => void updater.restart());
+  ipcMain.on(Channel.updatesDismiss, () => updater.dismiss());
 }
 
 function buildMenu(): void {
@@ -868,6 +884,16 @@ function buildMenu(): void {
   };
   const said = text.app.menu;
   const mac = process.platform === "darwin";
+  const updateItems: Electron.MenuItemConstructorOptions[] = [
+    { id: "check-updates", label: said.checkUpdates, click: () => void updater.checkFromMenu() },
+    {
+      id: "auto-updates",
+      label: said.autoUpdates,
+      type: "checkbox",
+      checked: updater.automatic,
+      click: (item) => void updater.setAutomatic(item.checked),
+    },
+  ];
   // Roles get explicit labels: Electron words them in English whatever the language.
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(mac
@@ -876,6 +902,8 @@ function buildMenu(): void {
             label: app.name,
             submenu: [
               { role: "about" as const, label: said.about },
+              { type: "separator" as const },
+              ...updateItems,
               { type: "separator" as const },
               { role: "services" as const, label: said.services },
               { type: "separator" as const },
@@ -951,6 +979,8 @@ function buildMenu(): void {
       submenu: [
         { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
         { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
+        // macOS has them in the app menu.
+        ...(mac ? [] : [{ type: "separator" as const }, ...updateItems]),
       ],
     },
   ];
@@ -1082,8 +1112,15 @@ app.whenReady().then(async () => {
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   await panelWindows.load();
   text = strings(uiLanguage(languageChoice, app.getLocale()));
+  await updater.load();
+  // First start after an update: a daemon of the old version may still run (SPEC §13 "version skew after
+  // update"). Packaged only: a dev build shares userData with the installed app and would stop its daemon.
+  if (app.isPackaged && (await versionChanged(join(app.getPath("userData"), "last-version"), APP_VERSION))) {
+    await stopStaleDaemon({ socketPath, client: `desktop/${APP_VERSION}`, cwd: homedir() }).catch(() => undefined);
+  }
   registerIpc();
   buildMenu();
+  updater.start();
   const startDir = projectArg(process.argv);
   const opened = [...launchPaths(process.argv, app.isPackaged ? 1 : 2, process.cwd()), ...earlyOpens];
   ready = true;
