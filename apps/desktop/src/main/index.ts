@@ -502,7 +502,7 @@ async function openPaths(paths: string[]): Promise<void> {
   target.window.focus();
 }
 
-const openLater = pathBatcher((paths) => void openPaths(paths));
+const openLater = pathBatcher((paths) => void openPaths(paths), 500);
 /** `open-file` paths from before the app was ready: they replace the empty startup window. */
 const earlyOpens: string[] = [];
 let ready = false;
@@ -515,7 +515,8 @@ app.on("open-file", (event, path) => {
 app.on("second-instance", (_event, argv, workingDirectory) => {
   const paths = launchPaths(argv, 1, workingDirectory);
   if (paths.length > 0) {
-    void openPaths(paths);
+    // Explorer starts one process per file of a multi-file "Edit with Frameshell": gather them into one project.
+    for (const path of paths) openLater(path);
     return;
   }
   const [any] = windows.values();
