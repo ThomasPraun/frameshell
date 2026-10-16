@@ -49,12 +49,21 @@ test("choosing a video creates its project beside it and opens it", async () => 
       (file) => (window as unknown as { frameshell: FrameshellApi }).frameshell.project.planVideos([file]),
       interview,
     );
-    expect(again).toMatchObject({ dir: join(home, "interview"), existing: true });
+    expect(again.plan).toMatchObject({ dir: join(home, "interview"), existing: true });
     const other = await page.evaluate(
       (file) => (window as unknown as { frameshell: FrameshellApi }).frameshell.project.planVideos([file]),
       broll,
     );
-    expect(other).toMatchObject({ dir: join(home, "broll"), existing: false });
+    expect(other.plan).toMatchObject({ dir: join(home, "broll"), existing: false });
+
+    // A drop plans the videos among the files and names the rest (#183).
+    const notes = join(home, "notes.pdf");
+    writeFileSync(notes, "%PDF");
+    const mixed = await page.evaluate(
+      (files) => (window as unknown as { frameshell: FrameshellApi }).frameshell.project.planVideos(files),
+      [notes, broll],
+    );
+    expect(mixed).toMatchObject({ plan: { files: [broll] }, refused: [notes] });
   } finally {
     await app.close();
   }

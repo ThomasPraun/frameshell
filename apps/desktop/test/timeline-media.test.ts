@@ -28,6 +28,7 @@ function fakeMedia(files: Record<string, unknown> = {}) {
     assets: () => new Promise((resolve) => replies.push(resolve)),
     read: async (path) => new TextEncoder().encode(JSON.stringify(files[path] ?? PEAKS)),
     onChanged: () => () => undefined,
+    import: async () => ({ imported: [], refused: [] }),
   };
   return { api, reply: (assets: AssetInfo[]) => replies.shift()!(assets) };
 }

@@ -49,7 +49,8 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
-import { VIDEO_EXTENSIONS, planVideoProject } from "./video-project.js";
+import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "./media-files.js";
+import { planVideoProject } from "./video-project.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
@@ -490,7 +491,10 @@ function registerIpc(): void {
     }),
   );
   ipcMain.handle(Channel.projectPlanVideos, (_event, files: string[], place?: { parent?: string; name?: string }) =>
-    outcome(() => planVideoProject(files, place)),
+    outcome(async () => {
+      const { accepted, refused } = await partitionFiles(files, VIDEO_EXTENSIONS);
+      return { plan: accepted.length > 0 ? await planVideoProject(accepted, place) : null, refused };
+    }),
   );
   ipcMain.handle(Channel.projectChooseParent, async (event) => {
     const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
@@ -505,7 +509,17 @@ function registerIpc(): void {
       createFromVideos(stateOf(event.sender), plan, mode === "link" ? "link" : "copy"),
   );
 
-  ipcMain.handle(Channel.filesTree, async (event) => (await requireProject(stateOf(event.sender))).files.tree());
+  ipcMain.handle(Channel.mediaImport, (event, paths: string[]) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const { accepted, refused } = await partitionFiles(paths, MEDIA_EXTENSIONS);
+      if (accepted.length === 0) return { imported: [], refused };
+      const result = await daemon.request("asset.import", { cwd: project.dir, files: accepted, mode: "copy" });
+      return { imported: result.imported.map((item) => item.asset), refused };
+    }),
+  );
+
+    ipcMain.handle(Channel.filesTree, async (event) => (await requireProject(stateOf(event.sender))).files.tree());
   ipcMain.handle(Channel.filesRead, async (event, path: string) =>
     (await requireProject(stateOf(event.sender))).files.read(path),
   );

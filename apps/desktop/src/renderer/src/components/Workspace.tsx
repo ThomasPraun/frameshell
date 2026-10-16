@@ -11,6 +11,7 @@ import {
   togglePanel,
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
+import { importNotice, useFileDrop } from "../file-drop.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
@@ -145,6 +146,17 @@ export function Workspace({ project }: { project: ProjectView }) {
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  // Media dropped from the OS goes into assets/ (#183). The terminal keeps drops for itself.
+  const dropping = useFileDrop(
+    useCallback((paths: string[]) => {
+      void window.frameshell.media.import(paths).then(
+        ({ imported, refused }) => setNotice(importNotice(imported, refused)),
+        (error: Error) => setNotice(error.message),
+      );
+    }, []),
+    { ignore: ".terminal-view" },
+  );
 
   // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
   useEffect(() => {
@@ -389,6 +401,11 @@ export function Workspace({ project }: { project: ProjectView }) {
         </PanelWindow>
       ))}
       <ContextMenuHost />
+      {dropping && (
+        <div className="drop-target" aria-hidden="true">
+          <p>Drop to import into assets/</p>
+        </div>
+      )}
     </div>
   );
 }
