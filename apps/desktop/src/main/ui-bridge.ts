@@ -31,10 +31,14 @@ interface Published {
  * flight, carrying the newest state: a playing preview reports far more often
  * than the socket needs. The last state is kept to register again after a
  * reconnect ({@link UiBridge.resync}). Windows are keyed by a stable id.
+ * Each publish says whether its window is the one focused last, so the daemon
+ * ranks it active (ADR 0014) and a window playing in the background does not.
  */
 export class UiBridge {
   readonly #options: UiBridgeOptions;
   readonly #windows = new Map<string, Published>();
+  /** Project window the user focused last; kept while the app is in the background. */
+  #focused: string | null = null;
 
   constructor(options: UiBridgeOptions) {
     this.#options = options;
@@ -46,6 +50,17 @@ export class UiBridge {
     if (known) Object.assign(known, { cwd, state, dirty: known.sending });
     else this.#windows.set(view, { cwd, state, sending: false, dirty: false, detached: false });
     if (!known?.sending) void this.#send(view);
+  }
+
+  /** The user focused window `view` (or a panel window of it): report it again, now as the active window. */
+  focus(view: string): void {
+    if (this.#focused === view) return;
+    this.#focused = view;
+    // Not published yet: its first publish carries the focus.
+    const known = this.#windows.get(view);
+    if (!known) return;
+    if (known.sending) known.dirty = true;
+    else void this.#send(view);
   }
 
   /** Window `view` answers command `id`; `error` null when done. Best effort: the daemon times out otherwise. */
@@ -86,7 +101,7 @@ export class UiBridge {
     known.sending = true;
     known.dirty = false;
     try {
-      await this.#options.request("ui.publish", { cwd: known.cwd, view, state: known.state });
+      await this.#options.request("ui.publish", { cwd: known.cwd, view, state: known.state, focused: this.#focused === view });
     } catch {
       // Daemon unreachable or project gone: the next change or reconnect publishes again.
     }

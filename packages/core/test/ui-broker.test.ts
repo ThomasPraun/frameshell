@@ -99,6 +99,31 @@ describe("UiBroker", () => {
     expect(broker.state(A.key)).toEqual({ connected: false });
   });
 
+  it("names the active window's project across projects: focused last, else reported last", () => {
+    const broker = new UiBroker();
+    expect(broker.active()).toBeUndefined();
+    const app = sink();
+    broker.publish(app, "w1", A, view(), false);
+    broker.publish(app, "w2", B, view(), false);
+    expect(broker.active()).toEqual(B);
+    broker.publish(app, "w1", A, view());
+    expect(broker.active()).toEqual(A);
+    // A background report (playing in the other window) does not take over.
+    broker.publish(app, "w2", B, view({ playing: true, playhead: 1 }), false);
+    expect(broker.active()).toEqual(A);
+    broker.detach(app, "w1");
+    expect(broker.active()).toEqual(B);
+  });
+
+  it("routes a project's commands to its focused window over one reporting in the background", () => {
+    const broker = new UiBroker();
+    const app = sink();
+    broker.publish(app, "w1", A, view());
+    broker.publish(app, "w2", A, view({ playing: true }), false);
+    void broker.command(A.key, { kind: "pause" }).catch(() => {});
+    expect(app.commands.map((command) => command.view)).toEqual(["w1"]);
+  });
+
   it("remembers where each window registered, so a republish need not resolve its project again", () => {
     const broker = new UiBroker();
     const app = sink();
