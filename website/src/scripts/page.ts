@@ -1,4 +1,18 @@
 import { ASSETS, assetUrl } from "../site";
+import { runtime } from "./i18n";
+
+const strs = runtime();
+
+// The header's language switch: remember the choice so the English page stops redirecting.
+document.addEventListener("click", (e) => {
+  const link = (e.target as Element).closest<HTMLAnchorElement>("a[data-lang]");
+  if (!link) return;
+  try {
+    localStorage.setItem("lang", link.dataset.lang!);
+  } catch {
+    // Storage blocked: the switch still navigates; a Spanish browser lands on /es/ next visit.
+  }
+});
 
 /* Copy buttons next to shell commands. */
 document.addEventListener("click", async (e) => {
@@ -8,10 +22,10 @@ document.addEventListener("click", async (e) => {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    button.textContent = "Copied";
+    button.textContent = strs.copied;
     button.dataset.copied = "";
     setTimeout(() => {
-      button.textContent = "Copy";
+      button.textContent = strs.copy;
       delete button.dataset.copied;
     }, 1600);
   } catch {
@@ -25,9 +39,9 @@ type AssetKey = keyof typeof ASSETS;
 function platform(): { key: AssetKey; label: string } | null {
   const ua = navigator.userAgent;
   if (/Android|iPhone|iPad/i.test(ua)) return null;
-  if (/Mac/i.test(ua)) return { key: "macArm", label: "Download for macOS" };
-  if (/Windows/i.test(ua)) return { key: "windows", label: "Download for Windows" };
-  if (/Linux/i.test(ua)) return { key: "appImage", label: "Download for Linux" };
+  if (/Mac/i.test(ua)) return { key: "macArm", label: strs.downloadFor.mac };
+  if (/Windows/i.test(ua)) return { key: "windows", label: strs.downloadFor.windows };
+  if (/Linux/i.test(ua)) return { key: "appImage", label: strs.downloadFor.linux };
   return null;
 }
 

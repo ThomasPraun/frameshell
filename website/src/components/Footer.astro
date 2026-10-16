@@ -1,6 +1,9 @@
 ---
 import Logo from "./Logo.astro";
 import { REPO } from "../site";
+import { strings } from "../i18n";
+
+const t = strings(Astro.currentLocale).footer;
 ---
 
 <footer class="footer">
@@ -9,15 +12,15 @@ import { REPO } from "../site";
       <Logo size={22} />
       <span>frameshell</span>
     </div>
-    <nav aria-label="Footer">
+    <nav aria-label={t.nav}>
       <a href={REPO}>GitHub</a>
-      <a href={`${REPO}/blob/main/docs/SPEC.md`}>Specification</a>
-      <a href={`${REPO}/blob/main/docs/mcp.md`}>MCP server</a>
-      <a href={`${REPO}/blob/main/LICENSE`}>License</a>
+      <a href={`${REPO}/blob/main/docs/SPEC.md`}>{t.spec}</a>
+      <a href={`${REPO}/blob/main/docs/mcp.md`}>{t.mcp}</a>
+      <a href={`${REPO}/blob/main/LICENSE`}>{t.license}</a>
     </nav>
   </div>
   <p class="wrap legal">
-    Apache License 2.0. "Frameshell" and its logo are trademarks of the project; forks must use a different name.
+    {t.legal}
   </p>
 </footer>
 

@@ -1,24 +1,28 @@
 ---
 import { REPO, RELEASES } from "../site";
+import { strings } from "../i18n";
 
 interface Props {
   version: string;
 }
 const { version } = Astro.props;
+const t = strings(Astro.currentLocale).hero;
 ---
 
-<section class="hero" data-marker="Intro">
+<section class="hero" data-marker={t.marker}>
   <div class="wrap">
     <h1 class="display headline">
-      <span class="trim"><span>An IDE</span></span>
-      <span class="trim"><span>for video.</span></span>
+      {
+        t.lines.map((line) => (
+          <span class="trim">
+            <span>{line}</span>
+          </span>
+        ))
+      }
     </h1>
 
     <div class="intro">
-      <p class="lede">
-        Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles, your logo and zooms, and turns one
-        recording into vertical shorts. You watch every change in the preview and the timeline, and fix anything by hand.
-      </p>
+      <p class="lede">{t.lede}</p>
       <div class="actions">
         <a class="btn btn-primary" href={RELEASES} data-download>
           <svg viewBox="0 0 20 20" aria-hidden="true"
@@ -30,14 +34,14 @@ const { version } = Astro.props;
               stroke-linecap="round"
               stroke-linejoin="round"></path></svg
           >
-          <span data-download-label>Download</span>
+          <span data-download-label>{t.download}</span>
         </a>
-        <a class="btn" href={REPO}>View source on GitHub</a>
+        <a class="btn" href={REPO}>{t.source}</a>
       </div>
       <p class="meta">
-        <span data-version>v{version}</span> for macOS, Windows and Linux. Free and open source,{" "}
+        <span data-version>v{version}</span> {t.platforms}{" "}
         <a href={`${REPO}/blob/main/LICENSE`}>Apache 2.0</a>.
-        {" "}<a href="#start">Other downloads</a>
+        {" "}<a href="#start">{t.otherDownloads}</a>
       </p>
     </div>
   </div>
@@ -51,6 +55,11 @@ const { version } = Astro.props;
   .headline {
     font-size: clamp(3.4rem, 12.5vw, 11.5rem);
     line-height: 0.88;
+  }
+
+  /* "para video." is about 20% wider than "for video."; keep it on one line. */
+  .headline:lang(es) {
+    font-size: clamp(3.1rem, 11.4vw, 10.5rem);
   }
 
   /*
