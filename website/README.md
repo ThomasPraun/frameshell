@@ -16,7 +16,8 @@ Needs Node >= 22.22 (Astro's minimum), pinned in `.node-version`.
 
 | File | What |
 |---|---|
-| `src/pages/index.astro` | Section order |
+| `src/components/Landing.astro` | Section order; `src/pages/index.astro` (English) and `src/pages/es/index.astro` (Spanish) both render it |
+| `src/i18n/en.ts`, `src/i18n/es.ts` | Every visible string, one file per language |
 | `src/components/Showcase.astro`, `src/scripts/showcase.ts` | Hero carousel (one clip, a layer per part) and the project tree it leads into |
 | `src/styles/showcase.css` | Carousel and tree styles, scoped under `.sc` |
 | `public/media/podcast.mp4`, `podcast-poster.jpg` | The clip the carousel edits (AI-generated, 9.4 s) |
@@ -24,6 +25,14 @@ Needs Node >= 22.22 (Astro's minimum), pinned in `.node-version`.
 | `src/styles/global.css` | Colour tokens, shared with the app's palette |
 
 Download links use the latest GitHub release: read at build time, refreshed in the visitor's browser, so a new release shows up without a redeploy. Asset names live in `ASSETS` in `src/site.ts`; update them if the release file names change.
+
+## Languages
+
+English lives at `/`, Spanish at `/es/`. Components read their strings with `strings(Astro.currentLocale)`; client scripts read theirs (`runtime` in the dictionary) from the `#i18n` JSON that `Base.astro` embeds. `es.ts` is typed against `en.ts`, and the build fails when a list has a different number of items in each language, because the markup pairs several lists by position.
+
+On the English page, a first visit from a browser set to Spanish redirects to `/es/`. The header's language link stores the choice in `localStorage` (`lang`), which wins from then on. The clip's audio is English, so its subtitles and quotes stay in English on both pages.
+
+Adding a language: copy `es.ts`, add the locale to `i18n` in `astro.config.mjs` and to `src/i18n/index.ts`, and add a page under `src/pages/<lang>/`.
 
 ## The carousel clip
 
@@ -42,7 +51,7 @@ Live at [frameshell.pages.dev](https://frameshell.pages.dev). The project is a P
 | Build output directory | `dist` |
 | Variable `SKIP_DEPENDENCY_INSTALL` | `1` |
 | Variable `NODE_VERSION` | `22.22.0` (same as `.node-version`) |
-| Build watch paths (Settings, Builds) | include `website/**` |
+| Build watch paths (Settings, Builds) | include `website/*` (one `*` also matches subfolders) |
 
 Why the build command installs on its own: Cloudflare sees the repo's pnpm workspace and would run `pnpm install` for the whole monorepo (Electron, node-pty), which never installs this site's dependencies because `website/` is outside the workspace. `SKIP_DEPENDENCY_INSTALL` turns that step off and `npm ci` installs from this folder's lockfile.
 

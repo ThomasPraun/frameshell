@@ -1,33 +1,31 @@
-<section class="flows" data-marker="Workflows">
+---
+import { strings } from "../i18n";
+
+const t = strings(Astro.currentLocale).workflows;
+// Tag colour per op, by position: Subtitles is a subtitle track, Shorts a video export.
+const opClass = ["", "", "sub", "", "vid"];
+---
+
+<section class="flows" data-marker={t.marker}>
   <div class="wrap">
-    <h2 class="display">Two ways to make a video.</h2>
+    <h2 class="display">{t.title}</h2>
     <div class="pair">
       <article>
-        <h3>From a recording</h3>
-        <p>
-          Vlogs, interviews, podcasts, classes. The agent removes silences and repeated takes, trims the intro, adds subtitles,
-          evens out loudness and cuts shorts for social media. You review the result and restore anything it shouldn't have cut.
-        </p>
+        <h3>{t.recording.title}</h3>
+        <p>{t.recording.body}</p>
         <ul class="ops">
-          <li>Silences</li>
-          <li>Retakes</li>
-          <li class="sub">Subtitles</li>
-          <li>Loudness</li>
-          <li class="vid">Shorts</li>
+          {t.recording.ops.map((op, i) => <li class={opClass[i] || undefined}>{op}</li>)}
         </ul>
       </article>
       <article>
-        <h3>From a script</h3>
-        <p>
-          Explainers, product demos, shorts. Write the script, drop in your clips and a voice-over, and let the agent build the
-          titles and animations.
-        </p>
-        <pre class="doc"><code><span class="h">## Hook</span>
-Three cafés, one street.
-<span class="m">![](clips/street.mov)</span>
+        <h3>{t.script.title}</h3>
+        <p>{t.script.body}</p>
+        <pre class="doc"><code><span class="h">{t.script.hook}</span>
+{t.script.hookLine}
+<span class="m">{t.script.clip}</span>
 
-<span class="h">## The secret spot</span>
-Show the sign, then my reaction.</code></pre>
+<span class="h">{t.script.spot}</span>
+{t.script.spotLine}</code></pre>
       </article>
     </div>
   </div>

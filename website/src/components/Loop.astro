@@ -1,37 +1,18 @@
 ---
-const steps = [
-  {
-    who: "Agent",
-    title: "Ask for the edit",
-    body: "Describe what you want in your own words. Claude Code, Codex, Gemini CLI or any other agent runs inside Frameshell and makes the change.",
-  },
-  {
-    who: "You",
-    title: "Watch it build",
-    body: "The preview and the timeline update as each change lands. Titles and animations render in the background.",
-  },
-  {
-    who: "You",
-    title: "Fix it by hand",
-    body: "Trim, move or split clips, or click a word in the transcript to restore it. Your edits and the agent's live in the same project.",
-  },
-  {
-    who: "Agent",
-    title: "Pick up from there",
-    body: "The agent works from the timeline as it is now. Each of its changes can be reviewed and undone.",
-  },
-];
+import { strings } from "../i18n";
+
+const t = strings(Astro.currentLocale).loop;
 ---
 
-<section class="loop" data-marker="Loop">
+<section class="loop" data-marker={t.marker}>
   <div class="wrap">
-    <h2 class="display">You and the agent<br />share one timeline.</h2>
+    <h2 class="display" set:html={t.title} />
     <ol class="lane">
       {
-        steps.map((s, i) => (
-          <li class:list={["step", s.who === "You" ? "you" : "agent"]} style={`--i:${i}`}>
+        t.steps.map((s, i) => (
+          <li class:list={["step", s.you ? "you" : "agent"]} style={`--i:${i}`}>
             <span class="who">
-              {i + 1}. {s.who}
+              {i + 1}. {s.you ? t.you : t.agent}
             </span>
             <h3>{s.title}</h3>
             <p>{s.body}</p>

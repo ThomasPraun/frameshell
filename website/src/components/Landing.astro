@@ -1,0 +1,35 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "./Header.astro";
+import Hero from "./Hero.astro";
+import Showcase from "./Showcase.astro";
+import Loop from "./Loop.astro";
+import Features from "./Features.astro";
+import Workflows from "./Workflows.astro";
+import GetStarted from "./GetStarted.astro";
+import OpenSource from "./OpenSource.astro";
+import Footer from "./Footer.astro";
+import Ruler from "./Ruler.astro";
+import { latestVersion } from "../site";
+
+const version = await latestVersion();
+---
+
+<Base>
+  <Header />
+  <main>
+    <Hero version={version} />
+    <Showcase />
+    <Loop />
+    <Features />
+    <Workflows />
+    <GetStarted version={version} />
+    <OpenSource />
+  </main>
+  <Footer />
+  <Ruler />
+</Base>
+
+<script>
+  import "../scripts/page";
+</script>

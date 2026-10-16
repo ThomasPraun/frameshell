@@ -1,34 +1,19 @@
 ---
-const words: [string, number, boolean][] = [
-  ["So", 0.3, true],
-  ["um,", 0.5, true],
-  ["today", 0.4, false],
-  ["we", 0.2, false],
-  ["talk", 0.4, false],
-  ["the", 0.2, true],
-  ["the", 0.3, false],
-  ["best", 0.3, false],
-  ["timelines.", 0.6, false],
-  ["You", 0.3, true],
-  ["know,", 0.4, true],
-  ["for", 0.3, false],
-  ["video.", 0.7, false],
-];
+import { strings } from "../i18n";
 
-const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
+const t = strings(Astro.currentLocale).features;
+const words = t.transcript.words;
+const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)", "var(--gen)"];
 ---
 
-<section id="features" class="features" data-marker="Features">
+<section id="features" class="features" data-marker={t.marker}>
   <div class="wrap">
-    <h2 class="display">Everything an edit needs, readable by an agent.</h2>
+    <h2 class="display">{t.title}</h2>
 
     <div class="grid">
       <article class="cell span-2">
-        <h3>Edit by transcript</h3>
-        <p>
-          A word-level transcript synced with the timeline. The agent cuts filler words and repeated takes; click a struck
-          word to bring its audio back.
-        </p>
+        <h3>{t.transcript.title}</h3>
+        <p>{t.transcript.body}</p>
         <div class="tx" data-tx>
           <p class="tx-words">
             {
@@ -47,44 +32,40 @@ const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
       </article>
 
       <article class="cell">
-        <h3>Review what the agent did</h3>
-        <p>Agent changes are grouped into steps, labelled with the agent that made them. Undo any of them.</p>
+        <h3>{t.review.title}</h3>
+        <p>{t.review.body}</p>
         <ol class="hist" data-hist>
-          <li>
-            <span class="by agent">claude</span><span class="what">Cut 1.8 s of silence</span><button type="button">Revert</button>
-          </li>
-          <li>
-            <span class="by you">you</span><span class="what">Move the logo</span><button type="button">Revert</button>
-          </li>
-          <li>
-            <span class="by agent">claude</span><span class="what">Add 13 subtitles</span><button type="button">Revert</button>
-          </li>
+          {
+            t.review.steps.map((what, i) => (
+              <li>
+                <span class:list={["by", i === 1 ? "you" : "agent"]}>{i === 1 ? t.review.you : "claude"}</span>
+                <span class="what">{what}</span>
+                <button type="button">{t.review.revert}</button>
+              </li>
+            ))
+          }
         </ol>
       </article>
 
       <article class="cell">
-        <h3>Layers without limits</h3>
-        <p>Footage, music, voice-over, logos, subtitles, titles and animations, each on its own track.</p>
+        <h3>{t.layers.title}</h3>
+        <p>{t.layers.body}</p>
         <ul class="engines layers">
-          <li style="--c: var(--video)">Video</li>
-          <li style="--c: var(--audio)">Audio</li>
-          <li style="--c: var(--sub)">Subtitles</li>
-          <li style="--c: var(--tally)">Logos</li>
-          <li style="--c: var(--gen)">Titles</li>
+          {t.layers.items.map((item, i) => <li style={`--c: ${layerColors[i]}`}>{item}</li>)}
         </ul>
       </article>
 
       <article class="cell">
-        <h3>Any video engine</h3>
-        <p>Clips come from your footage, HTML animations, React components, including your own app's code, or a plugin.</p>
+        <h3>{t.engines.title}</h3>
+        <p>{t.engines.body}</p>
         <ul class="engines">
-          {engines.map((e) => <li>{e}</li>)}
+          {t.engines.items.map((e) => <li>{e}</li>)}
         </ul>
       </article>
 
       <article class="cell">
-        <h3>Export for every platform</h3>
-        <p>YouTube 1080p and 1440p, or vertical for Shorts, Reels and TikTok. Subtitles burn in and loudness is evened out.</p>
+        <h3>{t.export.title}</h3>
+        <p>{t.export.body}</p>
         <ul class="engines presets">
           <li>youtube-1080p</li>
           <li>youtube-1440p</li>
@@ -93,13 +74,13 @@ const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
       </article>
 
       <article class="cell">
-        <h3>A project is a JSON file</h3>
-        <p>For developers: the timeline has a published schema. You, the agent and the CLI all edit the same file, and git diffs it.</p>
+        <h3>{t.json.title}</h3>
+        <p>{t.json.body}</p>
       </article>
 
       <article class="cell span-2">
-        <h3>MCP server</h3>
-        <p>Drive a project from Claude Code or any MCP client, frames included.</p>
+        <h3>{t.mcp.title}</h3>
+        <p>{t.mcp.body}</p>
         <div class="cmd mini"><code>claude mcp add frameshell -- frameshell mcp</code></div>
       </article>
     </div>
@@ -386,6 +367,9 @@ const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
 </style>
 
 <script>
+  import { runtime } from "../scripts/i18n";
+
+  const strs = runtime();
   const tx = document.querySelector<HTMLElement>("[data-tx]");
   if (tx) {
     const buttons = [...tx.querySelectorAll<HTMLButtonElement>("button")];
@@ -395,7 +379,7 @@ const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
     const total = bars.reduce((a, b) => a + dur(b), 0);
     const render = () => {
       const kept = bars.filter((b) => !b.classList.contains("gone")).reduce((a, b) => a + dur(b), 0);
-      out.textContent = `${kept.toFixed(1)} s kept of ${total.toFixed(1)} s`;
+      out.textContent = strs.kept.replace("{kept}", kept.toFixed(1)).replace("{total}", total.toFixed(1));
     };
     buttons.forEach((b, i) =>
       b.addEventListener("click", () => {
@@ -418,8 +402,10 @@ const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
     row.classList.add("reverted");
     button.disabled = true;
     const undo = document.createElement("li");
-    undo.innerHTML = '<span class="by you">you</span><span class="what"></span><button type="button" disabled>Revert</button>';
-    undo.querySelector(".what")!.textContent = `Revert "${what}"`;
+    undo.innerHTML = '<span class="by you"></span><span class="what"></span><button type="button" disabled></button>';
+    undo.querySelector(".by")!.textContent = strs.you;
+    undo.querySelector(".what")!.textContent = strs.revertOf.replace("{what}", what ?? "");
+    undo.querySelector("button")!.textContent = strs.revert;
     hist.prepend(undo);
     while (hist.children.length > 4) hist.lastElementChild!.remove();
   });

@@ -1,33 +1,47 @@
 ---
 import "../styles/global.css";
+import { strings, pathFor, type Lang } from "../i18n";
 
-interface Props {
-  title: string;
-  description: string;
-}
-
-const { title, description } = Astro.props;
-const canonical = new URL(Astro.url.pathname, Astro.site);
+const lang = (Astro.currentLocale ?? "en") as Lang;
+const t = strings(lang);
+const canonical = new URL(pathFor(lang), Astro.site);
+// English page only: a first visit with a Spanish browser goes to /es/; a choice made with the
+// header's language switch (localStorage "lang") wins after that.
+const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(pathFor(l), Astro.site) }));
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={lang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-    <meta name="description" content={description} />
+    {
+      lang === "en" && (
+        <script is:inline>
+          try {
+            var pick = localStorage.getItem("lang");
+            if (pick ? pick === "es" : /^es\b/i.test(navigator.language)) location.replace("/es/" + location.hash);
+          } catch (e) {}
+        </script>
+      )
+    }
+    <title>{t.meta.title}</title>
+    <meta name="description" content={t.meta.description} />
     <link rel="canonical" href={canonical} />
+    {alternates.map((a) => <link rel="alternate" hreflang={a.lang} href={a.href} />)}
+    <link rel="alternate" hreflang="x-default" href={new URL("/", Astro.site)} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#141517" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
+    <meta property="og:title" content={t.meta.title} />
+    <meta property="og:description" content={t.meta.description} />
     <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content={t.meta.ogLocale} />
     <meta property="og:image" content={new URL("/apple-touch-icon.png", Astro.site)} />
     <meta name="twitter:card" content="summary" />
     <meta name="generator" content={Astro.generator} />
+    <script type="application/json" id="i18n" set:html={JSON.stringify(t.runtime)} />
   </head>
   <body>
     <slot />

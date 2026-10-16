@@ -8,6 +8,8 @@
  * data-list containers are filled here, data-on names a click handler.
  */
 
+import { runtime } from "./i18n";
+
 const TOTAL = 9.44;
 const GAP_IN = 1.36;
 const GAP_OUT = 3.18;
@@ -21,24 +23,9 @@ const TITLE_MS = 700;
 const REPLY_HOLD_MS = 1200;
 const FILE_MS = 4200;
 
-const LABELS = [
-  "Subtitles",
-  "Cut the pauses",
-  "Focus on the speaker",
-  "Sponsor logo",
-  "Vertical short",
-  "Draw over it",
-  "Explain with animations",
-];
-const ASKS = [
-  "Add subtitles from what they say, two words at a time.",
-  "Cut the dead air after her question.",
-  "Zoom in on whoever is talking.",
-  "Put our sponsor's logo next to her when she mentions them.",
-  "Make a vertical short of his answer for Reels and TikTok.",
-  "Draw the table in chalk, point out who's who, and put the show's title on the wall.",
-  "Make a new explainer video: pull this clip out of full screen, drop it into its project folder and open the folder to show what we made from it.",
-];
+const STR = runtime();
+const LABELS = STR.labels;
+const ASKS = STR.asks;
 
 interface Cue {
   a: number;
@@ -63,14 +50,15 @@ const CUES: Cue[] = [
 ];
 // Hard-cut punch-ins: wide question, close on him, wide, close on her.
 const SHOTS = [
-  { a: 0, b: GAP_IN, zoom: "wide", label: "Wide" },
-  { a: GAP_OUT, b: 6.32, zoom: "him", label: "Zoom on him" },
-  { a: 6.32, b: 7.6, zoom: "wide", label: "Wide" },
-  { a: 7.6, b: TOTAL, zoom: "her", label: "Zoom on her" },
+  { a: 0, b: GAP_IN, zoom: "wide", label: STR.shots[0] },
+  { a: GAP_OUT, b: 6.32, zoom: "him", label: STR.shots[1] },
+  { a: 6.32, b: 7.6, zoom: "wide", label: STR.shots[2] },
+  { a: 7.6, b: TOTAL, zoom: "her", label: STR.shots[3] },
 ];
 
 // Project folder; `f` is the preview a file opens, `by` who made it.
-const TREE: { p: string; name: string; dir?: boolean; f?: number; by?: string }[] = [
+type By = keyof typeof STR.by;
+const TREE: { p: string; name: string; dir?: boolean; f?: number; by?: By }[] = [
   { p: "", name: "podcast-ep12/", dir: true },
   { p: "├─ ", name: "frameshell.json", f: -1 },
   { p: "├─ ", name: "assets/", dir: true },
@@ -78,9 +66,9 @@ const TREE: { p: string; name: string; dir?: boolean; f?: number; by?: string }[
   { p: "├─ ", name: "transcripts/", dir: true },
   { p: "│  └─ ", name: "podcast-ep12.words.json", f: 1, by: "auto" },
   { p: "├─ ", name: "scripts/", dir: true },
-  { p: "│  └─ ", name: "episode-12.md", f: 2, by: "you + agent" },
+  { p: "│  └─ ", name: "episode-12.md", f: 2, by: "youAgent" },
   { p: "├─ ", name: "timelines/", dir: true },
-  { p: "│  ├─ ", name: "main.json", f: 3, by: "agent + you" },
+  { p: "│  ├─ ", name: "main.json", f: 3, by: "agentYou" },
   { p: "│  └─ ", name: "short-guest.json", f: 4, by: "agent" },
   { p: "├─ ", name: "compositions/", dir: true },
   { p: "│  ├─ ", name: "hyperframes/sketch/index.html", f: 5, by: "agent" },
@@ -90,30 +78,23 @@ const TREE: { p: string; name: string; dir?: boolean; f?: number; by?: string }[
   { p: "   ├─ ", name: "short-guest-vertical-1080x1920.mp4", f: 8, by: "render" },
   { p: "   └─ ", name: "explainer.mp4", f: 6, by: "render" },
 ];
-const FILES: { path: string; note: string; live?: boolean }[] = [
-  { path: "assets/podcast-ep12.mp4", note: "Your recording, untouched. The only file you bring; everything else branches off it." },
-  { path: "transcripts/podcast-ep12.words.json", note: "Every spoken word with its time, written by the transcription plugin. Subtitles and clean cuts come from here." },
-  { path: "scripts/episode-12.md", note: "The plan, kept as plain text next to the video. Write it yourself or ask the agent to; clips point back to the scene they play." },
-  { path: "timelines/main.json", note: "The edited episode as one JSON file: every layer, every cut. You edit it in the timeline, the agent through the CLI." },
-  { path: "timelines/short-guest.json", note: "A second timeline from the same recording. Make as many shorts as you want; none of them copies the footage." },
-  {
-    path: "compositions/hyperframes/sketch/index.html",
-    note: "HyperFrames: the chalk table, the pointers and the show title from part 06, written in HTML and CSS and rendered with transparency over the footage. It plays live while it renders.",
-    live: true,
-  },
-  {
-    path: "compositions/remotion/src/Explainer.tsx",
-    note: "Remotion: the explainer from part 07, written in React. It uses your clip as footage and renders to exports/explainer.mp4. It can even use components from your own app.",
-    live: true,
-  },
-  { path: "exports/main-youtube-1080p.mp4", note: "The finished episode, rendered through ffmpeg with subtitles burned in and loudness evened out." },
-  { path: "exports/short-guest-vertical-1080x1920.mp4", note: "The short, ready to post. Re-export any time the episode changes." },
+// Preview per file, by position; notes are translated (STR.notes).
+const FILES: { path: string; live?: boolean }[] = [
+  { path: "assets/podcast-ep12.mp4" },
+  { path: "transcripts/podcast-ep12.words.json" },
+  { path: "scripts/episode-12.md" },
+  { path: "timelines/main.json" },
+  { path: "timelines/short-guest.json" },
+  { path: "compositions/hyperframes/sketch/index.html", live: true },
+  { path: "compositions/remotion/src/Explainer.tsx", live: true },
+  { path: "exports/main-youtube-1080p.mp4" },
+  { path: "exports/short-guest-vertical-1080x1920.mp4" },
 ];
-const BY_COLOR: Record<string, string> = {
+const BY_COLOR: Record<By, string> = {
   you: "#e3a53c",
   auto: "#a3a49f",
-  "you + agent": "#e3a53c",
-  "agent + you": "#66c2e0",
+  youAgent: "#e3a53c",
+  agentYou: "#66c2e0",
   agent: "#66c2e0",
   render: "#6fae8b",
 };
@@ -332,7 +313,7 @@ export function startShowcase(): void {
               text: "podcast-ep12.mp4",
               style: box(0, GAP_IN) + VIDEO + (cut ? " border-radius: 3px; border-right: 2px solid #1d1e20" : " border-radius: 3px 0 0 3px"),
             },
-            { text: s === 1 && !cut && applied ? "silence" : "", style: gapStyle(VIDEO) + " color: #ffd2cc" },
+            { text: s === 1 && !cut && applied ? STR.silence : "", style: gapStyle(VIDEO) + " color: #ffd2cc" },
             { text: "", style: box(GAP_OUT, TOTAL) + VIDEO + (cut ? " border-radius: 3px" : " border-radius: 0 3px 3px 0") },
           ];
     const voiceSegs = [
@@ -383,7 +364,7 @@ export function startShowcase(): void {
       tree: state.fi,
       treeSeen: state.treeSeen,
       filePath: file.path,
-      fileNote: file.note,
+      fileNote: STR.notes[state.fi],
       fileLive: !!file.live,
       intro,
       introNum: String(s + 1).padStart(2, "0"),
@@ -429,11 +410,11 @@ export function startShowcase(): void {
       playheadStyle: "top: -" + reach + "px; left: " + pct(t).toFixed(2) + "%",
       playing: state.playing,
       paused: !state.playing,
-      playLabel: state.ended ? "Watch again from the start" : state.playing ? "Pause" : "Play",
+      playLabel: state.ended ? STR.watchAgain : state.playing ? STR.pause : STR.play,
       showTimeline: s !== 6,
       soundOn: state.soundOn,
       soundOff: !state.soundOn,
-      soundLabel: state.soundOn ? "Mute" : "Turn sound on",
+      soundLabel: state.soundOn ? STR.mute : STR.soundOn,
     };
     for (let i = 0; i < 7; i++) vals["s" + i] = s === i;
     for (let i = 0; i < 9; i++) vals["f" + i] = state.fi === i;
@@ -518,7 +499,7 @@ export function startShowcase(): void {
     if (!ul.children.length) {
       ul.innerHTML = TREE.map((r, i) => {
         const selectable = typeof r.f === "number" && r.f >= 0;
-        const color = BY_COLOR[r.by ?? ""] ?? "#6b6c70";
+        const color = r.by ? BY_COLOR[r.by] : "#6b6c70";
         if (r.dir)
           return `<li class="beat" style="--d: ${(i * 0.07).toFixed(2)}s"><span style="display: block; padding: 7px 8px; color: #a3a49f; white-space: nowrap"><span style="color: #4a4b50; white-space: pre">${r.p}</span>${r.name}</span></li>`;
         return (
@@ -526,7 +507,7 @@ export function startShowcase(): void {
           `<span style="color: #4a4b50; white-space: pre">${r.p}</span>` +
           `<span style="flex: none; width: 7px; height: 7px; border-radius: 2px; background: ${selectable ? color : "#4a4b50"}"></span>` +
           `<span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">${r.name}</span>` +
-          `<span style="flex: none; font-size: 10.5px; color: ${color}">${r.by ?? ""}</span></button></li>`
+          `<span style="flex: none; font-size: 10.5px; color: ${color}">${r.by ? STR.by[r.by] : ""}</span></button></li>`
         );
       }).join("");
     }

@@ -1,40 +1,33 @@
 ---
 import { REPO } from "../site";
+import { strings } from "../i18n";
+
+const t = strings(Astro.currentLocale).oss;
+const links = [
+  [REPO, t.star],
+  [`${REPO}/blob/main/CONTRIBUTING.md`, t.contribute],
+  [`${REPO}/issues`, t.bug],
+  [`${REPO}/blob/main/CHANGELOG.md`, t.changelog],
+] as const;
 ---
 
-<section class="oss" data-marker="Open source">
+<section class="oss" data-marker={t.marker}>
   <div class="wrap">
     <div class="head">
-      <h2 class="display">Open source,<br />Apache 2.0.</h2>
-      <p class="lede">
-        Frameshell is free and built in the open. The specification, the decisions behind it and every release live on GitHub.
-      </p>
+      <h2 class="display" set:html={t.title} />
+      <p class="lede">{t.lede}</p>
     </div>
     <ul class="links">
-      <li>
-        <a href={REPO}>
-          <strong>Star the repo</strong>
-          <span>Follow releases and the roadmap.</span>
-        </a>
-      </li>
-      <li>
-        <a href={`${REPO}/blob/main/CONTRIBUTING.md`}>
-          <strong>Contribute</strong>
-          <span>Pick an open issue. Commits are signed off under the DCO, no CLA.</span>
-        </a>
-      </li>
-      <li>
-        <a href={`${REPO}/issues`}>
-          <strong>Report a bug</strong>
-          <span>It's alpha. Rough edges are expected; tell us where.</span>
-        </a>
-      </li>
-      <li>
-        <a href={`${REPO}/blob/main/CHANGELOG.md`}>
-          <strong>Changelog</strong>
-          <span>What changed in each version.</span>
-        </a>
-      </li>
+      {
+        links.map(([href, [title, body]]) => (
+          <li>
+            <a href={href}>
+              <strong>{title}</strong>
+              <span>{body}</span>
+            </a>
+          </li>
+        ))
+      }
     </ul>
   </div>
 </section>

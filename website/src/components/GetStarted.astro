@@ -1,31 +1,36 @@
 ---
 import { RELEASES, assetUrl } from "../site";
+import { strings } from "../i18n";
 
 interface Props {
   version: string;
 }
 const { version } = Astro.props;
+const all = strings(Astro.currentLocale);
+const t = all.start;
+const d = t.download;
+const copy = all.runtime.copy;
 
 const downloads = [
-  { os: "macOS", items: [["Apple silicon", "macArm"], ["Intel", "macIntel"]], note: "Signed and notarized." },
-  { os: "Windows", items: [["x64 installer", "windows"]], note: 'Unsigned for now: SmartScreen asks once ("More info", then "Run anyway").' },
-  { os: "Linux", items: [[".deb", "deb"], ["AppImage", "appImage"]], note: "x64. Beta: tested in CI, not yet by hand." },
+  { os: "macOS", items: [[d.appleSilicon, "macArm"], [d.intel, "macIntel"]], note: d.macNote },
+  { os: "Windows", items: [[d.windowsInstaller, "windows"]], note: d.windowsNote },
+  { os: "Linux", items: [[".deb", "deb"], ["AppImage", "appImage"]], note: d.linuxNote },
 ] as const;
 
 const plugins = [
-  ["@frameshell/whisper-cpp", "Subtitles from speech"],
-  ["@frameshell/hyperframes", "HTML titles and animations"],
-  ["@frameshell/remotion", "Remotion (React) compositions"],
+  ["@frameshell/whisper-cpp", t.plugins.whisper],
+  ["@frameshell/hyperframes", t.plugins.hyperframes],
+  ["@frameshell/remotion", t.plugins.remotion],
 ];
 ---
 
-<section id="start" class="start" data-marker="Get started">
+<section id="start" class="start" data-marker={t.marker}>
   <div class="wrap">
-    <h2 class="display">Start in a minute.</h2>
+    <h2 class="display">{t.title}</h2>
 
     <ol class="steps">
       <li>
-        <h3>Download the app</h3>
+        <h3>{d.title}</h3>
         <div class="dl">
           {
             downloads.map((d) => (
@@ -43,24 +48,24 @@ const plugins = [
             ))
           }
         </div>
-        <p class="all">All files and checksums are on the <a href={RELEASES}>release page</a>.</p>
+        <p class="all">{d.allBefore} <a href={RELEASES}>{d.releasePage}</a>{d.allAfter}</p>
       </li>
       <li>
-        <h3>Open a folder with your clips</h3>
-        <p>Open the folder in Frameshell, then in its terminal:</p>
-        <div class="cmd"><code>frameshell init</code><button type="button" data-copy>Copy</button></div>
-        <p class="aside">The tools it needs (ffmpeg, whisper.cpp, headless Chrome) download on first use.</p>
+        <h3>{t.folder.title}</h3>
+        <p>{t.folder.body}</p>
+        <div class="cmd"><code>frameshell init</code><button type="button" data-copy>{copy}</button></div>
+        <p class="aside">{t.folder.aside}</p>
       </li>
       <li>
-        <h3>Add what you need</h3>
-        <p>Official plugins install per project:</p>
+        <h3>{t.plugins.title}</h3>
+        <p>{t.plugins.body}</p>
         <div class="plugins">
           {
             plugins.map(([name, what]) => (
               <div>
                 <div class="cmd">
                   <code>frameshell plugin install {name}</code>
-                  <button type="button" data-copy>Copy</button>
+                  <button type="button" data-copy>{copy}</button>
                 </div>
                 <span class="aside">{what}</span>
               </div>
@@ -69,12 +74,8 @@ const plugins = [
         </div>
       </li>
       <li>
-        <h3>Ask for your edit</h3>
-        <p>
-          Start Claude Code, Codex or Gemini CLI in the same terminal and describe the video you want, like you would to an
-          editor. The <code>frameshell</code> command is already on its PATH, and the skill <code>frameshell init</code> wrote
-          into the project teaches it the CLI.
-        </p>
+        <h3>{t.ask.title}</h3>
+        <p set:html={t.ask.body} />
       </li>
     </ol>
   </div>
