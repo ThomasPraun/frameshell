@@ -1,11 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { mismatchPid, stoppable, versionChanged } from "../src/main/stale-daemon.js";
+import { mismatchPid, stopStaleDaemon, stoppable, versionChanged } from "../src/main/stale-daemon.js";
 import { DOWNLOAD_PAGE, UpdatePreferences, compareVersions, isNewer, releaseFromGitHub, updateMode } from "../src/main/update-check.js";
 
+const socketPath = () =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\frameshell-stale-test-${randomUUID().slice(0, 8)}`
+    : join(mkdtempSync(join(tmpdir(), "fs-stale-")), "d.sock");
 const tempFile = (name: string) => join(mkdtempSync(join(tmpdir(), "frameshell-updates-")), name);
 
 describe("compareVersions", () => {
@@ -108,6 +114,28 @@ describe("stale daemon after an update", () => {
     expect(stoppable(2, [])).toBe(false);
     expect(stoppable(1, [{ state: "running" }])).toBe(false);
     expect(stoppable(1, [{ state: "queued" }])).toBe(false);
+  });
+
+  it("gives up on a daemon that never answers within its budget and stops nothing", async () => {
+    const path = socketPath();
+    const held: Socket[] = [];
+    const server = createServer((socket) => void held.push(socket));
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    try {
+      const killed: number[] = [];
+      const started = Date.now();
+      const outcome = await stopStaleDaemon({ socketPath: path, client: "test", cwd: tmpdir(), kill: (pid) => killed.push(pid), timeoutMs: 300 });
+      expect(outcome).toBe("kept");
+      expect(Date.now() - started).toBeLessThan(1500);
+      expect(killed).toEqual([]);
+    } finally {
+      for (const socket of held) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reports no daemon when nobody listens", async () => {
+    expect(await stopStaleDaemon({ socketPath: socketPath(), client: "test", cwd: tmpdir(), timeoutMs: 300 })).toBe("none");
   });
 
   it("reads the pid of a daemon speaking another protocol", () => {

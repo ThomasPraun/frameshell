@@ -39,12 +39,19 @@ export function mismatchPid(error: unknown): number | null {
 /** Outcome of {@link stopStaleDaemon}. */
 export type StaleDaemonOutcome = "none" | "stopped" | "kept";
 
+/** Longest the app's startup waits on {@link stopStaleDaemon}, connect included: the window opens after it. */
+export const STALE_DAEMON_BUDGET_MS = 2000;
+
 /**
  * Stop the daemon at `socketPath` when it is {@link stoppable}, or speaks
- * another protocol (the app cannot use it at all), and wait up to `waitMs`
- * for it to exit; the app's link then starts a daemon of this version. A
- * busy daemon is kept: it exits on its idle timer once its clients and jobs are done.
- * Waits, up to `waitMs`, for other clients to leave: the old app may still be quitting.
+ * another protocol (the app cannot use it at all), and wait for it to exit;
+ * the app's link then starts a daemon of this version. A busy daemon is
+ * kept: it exits on its idle timer once its clients and jobs are done.
+ * Waits for other clients to leave, as the old app may still be quitting.
+ *
+ * Settles within `timeoutMs` whatever the daemon does (a slow or silent one
+ * is `kept`): the caller awaits it before its own link connects, so the link
+ * never reaches the old daemon before this decided, and a late answer kills nothing.
  */
 export async function stopStaleDaemon(options: {
   socketPath: string;
@@ -52,24 +59,52 @@ export async function stopStaleDaemon(options: {
   /** Directory for `status` (any; e.g. the home dir). */
   cwd: string;
   kill?: (pid: number) => void;
-  waitMs?: number;
+  timeoutMs?: number;
 }): Promise<StaleDaemonOutcome> {
-  const { socketPath, client, cwd, kill = (pid) => process.kill(pid, "SIGTERM"), waitMs = 5000 } = options;
-  const deadline = Date.now() + waitMs;
+  const { timeoutMs = STALE_DAEMON_BUDGET_MS } = options;
+  const run: Run = { deadline: Date.now() + timeoutMs, abandoned: false, connection: null };
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<StaleDaemonOutcome>((resolve) => (timer = setTimeout(() => resolve("kept"), timeoutMs)));
+  try {
+    return await Promise.race([check(options, run).catch((): StaleDaemonOutcome => "kept"), timeout]);
+  } finally {
+    clearTimeout(timer);
+    run.abandoned = true;
+    // Pending requests reject, ending the check; a connection still opening is closed when it lands.
+    run.connection?.close();
+  }
+}
+
+/** State of one {@link stopStaleDaemon} call; `abandoned` once it settled, so a late step does nothing. */
+interface Run {
+  deadline: number;
+  abandoned: boolean;
+  connection: DaemonConnection | null;
+}
+
+async function check(
+  { socketPath, client, cwd, kill = (pid) => process.kill(pid, "SIGTERM") }: { socketPath: string; client: string; cwd: string; kill?: (pid: number) => void },
+  run: Run,
+): Promise<StaleDaemonOutcome> {
   let connection: DaemonConnection;
   try {
     connection = await connectToDaemon(socketPath, { client });
   } catch (error) {
     if (isDaemonUnavailable(error)) return "none";
     const pid = mismatchPid(error);
-    if (pid === null) return "kept";
-    return (await stopPid(pid, kill, deadline)) ? "stopped" : "kept";
+    if (pid === null || run.abandoned) return "kept";
+    return (await stopPid(pid, kill, run)) ? "stopped" : "kept";
   }
-  const pid = await idlePid(connection, cwd, deadline)
+  if (run.abandoned) {
+    connection.close();
+    return "kept";
+  }
+  run.connection = connection;
+  const pid = await idlePid(connection, cwd, run.deadline)
     .catch(() => null)
     .finally(() => connection.close());
-  if (pid === null) return "kept";
-  return (await stopPid(pid, kill, deadline)) ? "stopped" : "kept";
+  if (pid === null || run.abandoned) return "kept";
+  return (await stopPid(pid, kill, run)) ? "stopped" : "kept";
 }
 
 /** The daemon's pid once it is {@link stoppable}; null when it has jobs, or other clients stay past `deadline`. */
@@ -86,13 +121,13 @@ async function idlePid(connection: DaemonConnection, cwd: string, deadline: numb
   }
 }
 
-async function stopPid(pid: number, kill: (pid: number) => void, deadline: number): Promise<boolean> {
+async function stopPid(pid: number, kill: (pid: number) => void, run: Run): Promise<boolean> {
   try {
     kill(pid);
   } catch {
     return false;
   }
-  while (Date.now() < deadline) {
+  while (Date.now() < run.deadline && !run.abandoned) {
     if (!alive(pid)) return true;
     await sleep(100);
   }
