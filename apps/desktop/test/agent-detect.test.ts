@@ -7,12 +7,14 @@ describe("agentOfCommand", () => {
     expect(agentOfCommand(["claude"])).toBe("claude");
     expect(agentOfCommand(["/Users/ana/.local/bin/claude", "--resume"])).toBe("claude");
     expect(agentOfCommand(["codex", "exec", "tighten the intro"])).toBe("codex");
+    expect(agentOfCommand(["pi", "--continue"])).toBe("pi");
     expect(agentOfCommand(["C:\\Users\\ana\\AppData\\Roaming\\npm\\gemini.cmd"])).toBe("gemini");
   });
 
   it("names agent CLIs run as scripts of an interpreter, skipping its flags", () => {
     expect(agentOfCommand(["node", "/opt/homebrew/bin/codex"])).toBe("codex");
     expect(agentOfCommand(["node", "--no-warnings", "/opt/homebrew/bin/gemini"])).toBe("gemini");
+    expect(agentOfCommand(["node", "/opt/homebrew/bin/pi"])).toBe("pi");
     expect(agentOfCommand(["python3", "-m", "aider"])).toBe("aider");
     expect(agentOfCommand(["python3", "/home/ana/.local/bin/aider"])).toBe("aider");
   });
@@ -33,6 +35,11 @@ describe("agentOfCommand", () => {
 describe("agentCommands", () => {
   it("knows the common agent CLIs", () => {
     expect(agentCommands({})).toMatchObject({ claude: "claude", codex: "codex", gemini: "gemini" });
+  });
+
+  it("lets FRAMESHELL_AGENT_COMMANDS=pi= turn Pi detection off", () => {
+    expect(agentCommands({}).pi).toBe("pi");
+    expect(agentCommands({ FRAMESHELL_AGENT_COMMANDS: "pi=" }).pi).toBeUndefined();
   });
 
   it("adds, relabels and removes commands from FRAMESHELL_AGENT_COMMANDS", () => {
