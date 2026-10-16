@@ -28,36 +28,50 @@ export function claudeDesktopConfigPath(platform: NodeJS.Platform, home: string,
   return undefined;
 }
 
+/** Frameshell's server as Claude Desktop runs it. */
+export interface ServerEntry {
+  command: string;
+  args: string[];
+}
+
+/**
+ * The entry running `shim mcp`. On Windows through `cmd /c`: Claude Desktop starts servers without a shell, which
+ * cannot run a `.cmd` file directly.
+ */
+export function serverEntry(shim: string, platform: NodeJS.Platform): ServerEntry {
+  return platform === "win32" ? { command: "cmd", args: ["/c", shim, "mcp"] } : { command: shim, args: ["mcp"] };
+}
+
 /** What the config says about Frameshell. */
 export interface ClaudeDesktopState {
   /** Claude Desktop's folder exists: it is (or was) installed. */
   installed: boolean;
-  /** The config has a `frameshell` server running `shim`. */
+  /** The config has the `frameshell` server `entry`. */
   connected: boolean;
 }
 
-/** Read the state of the config at `file` for `shim`. */
-export async function claudeDesktopState(file: string, shim: string): Promise<ClaudeDesktopState> {
+/** Read the state of the config at `file` for `entry`. */
+export async function claudeDesktopState(file: string, entry: ServerEntry): Promise<ClaudeDesktopState> {
   const installed = await stat(dirname(file)).then(
     (info) => info.isDirectory(),
     () => false,
   );
   const text = await readFile(file, "utf8").catch(() => null);
   if (text === null) return { installed, connected: false };
-  const entry = (parseConfig(text, file)["mcpServers"] as Record<string, unknown> | undefined)?.[SERVER_KEY] as
+  const current = (parseConfig(text, file)["mcpServers"] as Record<string, unknown> | undefined)?.[SERVER_KEY] as
     | { command?: unknown; args?: unknown }
     | undefined;
-  const connected = entry?.command === shim && JSON.stringify(entry.args) === JSON.stringify(["mcp"]);
+  const connected = current?.command === entry.command && JSON.stringify(current.args) === JSON.stringify(entry.args);
   return { installed, connected };
 }
 
 /**
- * Add (or point again) the `frameshell` server at `shim mcp`. Edits only that key, so the rest of the file keeps
+ * Add (or point again) the `frameshell` server as `entry`. Edits only that key, so the rest of the file keeps
  * its bytes; the file as it was goes to `<file>.frameshell-backup` first. Returns the backup path, or null when
  * there was no file.
  */
-export async function connectClaudeDesktop(file: string, shim: string): Promise<string | null> {
-  return edit(file, { command: shim, args: ["mcp"] });
+export async function connectClaudeDesktop(file: string, entry: ServerEntry): Promise<string | null> {
+  return edit(file, entry);
 }
 
 /** Remove the `frameshell` server, and nothing else. Returns the backup path, or null when there was no file. */
@@ -65,7 +79,7 @@ export async function disconnectClaudeDesktop(file: string): Promise<string | nu
   return edit(file, undefined);
 }
 
-async function edit(file: string, server: { command: string; args: string[] } | undefined): Promise<string | null> {
+async function edit(file: string, server: ServerEntry | undefined): Promise<string | null> {
   const before = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -93,7 +107,7 @@ async function edit(file: string, server: { command: string; args: string[] } | 
  * other byte as it was (checked by taking the entry out again); else inserted as is, unformatted, so a file
  * someone formatted by hand keeps its layout.
  */
-function withServer(text: string, server: { command: string; args: string[] } | undefined): string {
+function withServer(text: string, server: ServerEntry | undefined): string {
   const path = ["mcpServers", SERVER_KEY];
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: text.includes("\r\n") ? "\r\n" : "\n" };
   const formatted = applyEdits(text, modify(text, path, server, { formattingOptions }));
