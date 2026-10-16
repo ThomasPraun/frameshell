@@ -1,0 +1,221 @@
+---
+import { RELEASES, assetUrl } from "../site";
+
+interface Props {
+  version: string;
+}
+const { version } = Astro.props;
+
+const downloads = [
+  { os: "macOS", items: [["Apple silicon", "macArm"], ["Intel", "macIntel"]], note: "Signed and notarized." },
+  { os: "Windows", items: [["x64 installer", "windows"]], note: 'Unsigned for now: SmartScreen asks once ("More info", then "Run anyway").' },
+  { os: "Linux", items: [[".deb", "deb"], ["AppImage", "appImage"]], note: "x64. Beta: tested in CI, not yet by hand." },
+] as const;
+
+const plugins = [
+  ["@frameshell/whisper-cpp", "Subtitles from speech"],
+  ["@frameshell/hyperframes", "HTML titles and animations"],
+  ["@frameshell/remotion", "Remotion (React) compositions"],
+];
+---
+
+<section id="start" class="start" data-marker="Get started">
+  <div class="wrap">
+    <h2 class="display">Start in a minute.</h2>
+
+    <ol class="steps">
+      <li>
+        <h3>Download the app</h3>
+        <div class="dl">
+          {
+            downloads.map((d) => (
+              <div class="dl-row">
+                <span class="os">{d.os}</span>
+                <span class="links">
+                  {d.items.map(([label, key]) => (
+                    <a href={assetUrl(version, key)} data-asset={key}>
+                      {label}
+                    </a>
+                  ))}
+                </span>
+                <span class="note">{d.note}</span>
+              </div>
+            ))
+          }
+        </div>
+        <p class="all">All files and checksums are on the <a href={RELEASES}>release page</a>.</p>
+      </li>
+      <li>
+        <h3>Open a folder with your clips</h3>
+        <p>Open the folder in Frameshell, then in its terminal:</p>
+        <div class="cmd"><code>frameshell init</code><button type="button" data-copy>Copy</button></div>
+        <p class="aside">The tools it needs (ffmpeg, whisper.cpp, headless Chrome) download on first use.</p>
+      </li>
+      <li>
+        <h3>Add what you need</h3>
+        <p>Official plugins install per project:</p>
+        <div class="plugins">
+          {
+            plugins.map(([name, what]) => (
+              <div>
+                <div class="cmd">
+                  <code>frameshell plugin install {name}</code>
+                  <button type="button" data-copy>Copy</button>
+                </div>
+                <span class="aside">{what}</span>
+              </div>
+            ))
+          }
+        </div>
+      </li>
+      <li>
+        <h3>Ask for your edit</h3>
+        <p>
+          Start Claude Code, Codex or Gemini CLI in the same terminal and describe the video you want, like you would to an
+          editor. The <code>frameshell</code> command is already on its PATH, and the skill <code>frameshell init</code> wrote
+          into the project teaches it the CLI.
+        </p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<style>
+  .start {
+    padding-block: clamp(56px, 8vw, 110px);
+  }
+
+  h2 {
+    font-size: clamp(2.3rem, 6vw, 5rem);
+  }
+
+  .steps {
+    margin: clamp(40px, 6vw, 72px) 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+
+  .steps > li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 10px 40px;
+    padding: 28px 0 32px;
+    border-top: 1px solid var(--line);
+    counter-increment: step;
+  }
+
+  .steps > li > :not(h3) {
+    grid-column: 2;
+  }
+
+  h3 {
+    grid-row: 1 / span 4;
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    font-stretch: 112%;
+    line-height: 1.25;
+  }
+
+  h3::before {
+    content: counter(step);
+    display: block;
+    margin-bottom: 6px;
+    color: var(--tally);
+    font: 500 14px var(--mono);
+  }
+
+  p {
+    margin: 0;
+    max-width: 62ch;
+    color: var(--muted);
+  }
+
+  p code {
+    color: var(--text);
+  }
+
+  .aside {
+    color: var(--faint);
+    font-size: 14px;
+  }
+
+  .dl {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  .dl-row {
+    display: grid;
+    grid-template-columns: 110px auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px 24px;
+    padding: 14px 18px;
+  }
+
+  .dl-row + .dl-row {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .os {
+    font-weight: 700;
+    font-stretch: 110%;
+  }
+
+  .links {
+    display: flex;
+    gap: 16px;
+  }
+
+  .links a {
+    color: var(--tally);
+    text-underline-offset: 3px;
+    white-space: nowrap;
+  }
+
+  .note {
+    color: var(--faint);
+    font-size: 14px;
+  }
+
+  .all {
+    font-size: 14px;
+  }
+
+  .plugins {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .plugins .aside {
+    display: block;
+    margin-top: 4px;
+  }
+
+  @media (max-width: 760px) {
+    .steps > li {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .steps > li > :not(h3) {
+      grid-column: 1;
+    }
+
+    h3 {
+      grid-row: auto;
+    }
+
+    .dl-row {
+      grid-template-columns: 90px minmax(0, 1fr);
+    }
+
+    .note {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

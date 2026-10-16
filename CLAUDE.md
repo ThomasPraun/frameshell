@@ -44,6 +44,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | MCP UI state + navigation (`ui_*`, broker daemon → app window) | `docs/mcp.md`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
+| Landing page frameshell.dev (Astro, own npm, Cloudflare Pages, hero video slot) | `website/README.md` |
 | Agent skill (content, bundle into core, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/`, `core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 
 ## Rules
@@ -53,7 +54,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
-- Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media.
+- Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media. Only exception: landing assets in `website/public/media/`, each < 25 MB.
 - Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused. Clip cache entry layout or key recipe changed: bump `CACHE_LAYOUT_VERSION` (`clips/cache-key.ts`).
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
 - Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
@@ -65,7 +66,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Wire change: bump `PROTOCOL_VERSION`.
 - `skills/frameshell/` changed: run `pnpm gen:skill`, commit `packages/core/src/skills/core-skill.ts`. Drift test fails otherwise.
 - CLI command, flag or MCP tool added or renamed: update skill. `skill-docs.test.ts` fails on names that do not exist or commands skill misses.
-- Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*`.
+- Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*` or `website/` (own npm + lockfile, Node >= 22.22).
 - User-level storage: only via `resolveAppDirs()` (`packages/protocol/src/app-dirs.ts`). Downloads, caches, app state = `dataDir`; user decisions, global config = `configDir`. Overrides: `FRAMESHELL_DATA_DIR`, `FRAMESHELL_CONFIG_DIR` only.
 
 ## Agent skills

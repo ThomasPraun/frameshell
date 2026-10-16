@@ -1,0 +1,193 @@
+<nav class="ruler" aria-label="Sections" data-ruler>
+  <span class="ticks" aria-hidden="true"></span>
+  <ol data-markers></ol>
+  <span class="head" data-ruler-head aria-hidden="true"
+    ><span class="readout"><b data-ruler-name></b><span data-ruler-tc>00:00:00</span></span></span
+  >
+</nav>
+<span class="progress" data-progress aria-hidden="true"></span>
+
+<style>
+  /* The page as a timeline: scroll position is the playhead, sections are markers. */
+  .ruler {
+    position: fixed;
+    top: 96px;
+    bottom: 40px;
+    right: 0;
+    z-index: 10;
+    width: 64px;
+    display: none;
+  }
+
+  @media (min-width: 1440px) {
+    .ruler {
+      display: block;
+    }
+
+    .progress {
+      display: none;
+    }
+  }
+
+  .ticks {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 16px;
+    background:
+      repeating-linear-gradient(180deg, var(--faint) 0 1px, transparent 1px 60px) right / 16px 100%,
+      repeating-linear-gradient(180deg, var(--line) 0 1px, transparent 1px 12px) right / 7px 100%;
+    background-repeat: no-repeat;
+  }
+
+  ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  ol :global(li) {
+    position: absolute;
+    right: 20px;
+    transform: translateY(-50%);
+  }
+
+  ol :global(a) {
+    display: block;
+    padding: 2px 0;
+    color: transparent;
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.2s;
+  }
+
+  ol :global(a)::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -20px;
+    width: 9px;
+    height: 9px;
+    transform: translate(50%, -50%) rotate(45deg) scale(0.8);
+    margin-right: 8px;
+    background: var(--line);
+    transition: background-color 0.2s;
+  }
+
+  .ruler:hover :global(a),
+  ol :global(a:focus-visible) {
+    color: var(--faint);
+  }
+
+  .ruler:hover .readout {
+    opacity: 0;
+  }
+
+  ol :global(a:hover) {
+    color: var(--text);
+  }
+
+  ol :global(a.passed)::after {
+    background: var(--tally);
+  }
+
+  .head {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 30px;
+    height: 2px;
+    background: var(--tally);
+    will-change: transform;
+  }
+
+  .readout {
+    position: absolute;
+    right: 20px;
+    bottom: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    white-space: nowrap;
+    transition: opacity 0.2s;
+  }
+
+  .readout b {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .readout span {
+    color: var(--tally);
+    font: 500 10px var(--mono);
+  }
+
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    height: 2px;
+    background: var(--tally);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+</style>
+
+<script>
+  const ruler = document.querySelector<HTMLElement>("[data-ruler]")!;
+  const head = ruler.querySelector<HTMLElement>("[data-ruler-head]")!;
+  const tc = ruler.querySelector<HTMLElement>("[data-ruler-tc]")!;
+  const name = ruler.querySelector<HTMLElement>("[data-ruler-name]")!;
+  const list = ruler.querySelector<HTMLOListElement>("[data-markers]")!;
+  const bar = document.querySelector<HTMLElement>("[data-progress]")!;
+  const sections = [...document.querySelectorAll<HTMLElement>("[data-marker]")];
+  /** Whole page as 90 seconds of timecode. */
+  const PAGE_SECONDS = 90;
+
+  const links = sections.map((s, i) => {
+    if (!s.id) s.id = `s-${i}`;
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = `#${s.id}`;
+    a.textContent = s.dataset.marker!;
+    li.append(a);
+    list.append(li);
+    return { s, li, a };
+  });
+
+  let at: number[] = [];
+
+  function layout() {
+    const span = document.documentElement.scrollHeight - innerHeight;
+    at = links.map(({ s }) => Math.min(1, Math.max(0, (s.offsetTop - 80) / span)));
+    links.forEach(({ li }, i) => (li.style.top = `${at[i] * 100}%`));
+    update();
+  }
+
+  function update() {
+    const span = document.documentElement.scrollHeight - innerHeight;
+    const p = span > 0 ? Math.min(1, Math.max(0, scrollY / span)) : 0;
+    head.style.transform = `translateY(${p * ruler.clientHeight}px)`;
+    bar.style.transform = `scaleX(${p})`;
+    const t = p * PAGE_SECONDS;
+    const pad = (n: number) => String(Math.floor(n)).padStart(2, "0");
+    tc.textContent = `00:${pad(t / 60)}:${pad(t % 60)}`;
+    let active = 0;
+    at.forEach((a, i) => {
+      if (p >= a - 0.001) active = i;
+      links[i].a.classList.toggle("passed", p >= a - 0.001);
+    });
+    links.forEach(({ a }, i) => a.classList.toggle("active", i === active));
+    name.textContent = links[active]?.s.dataset.marker ?? "";
+    document.documentElement.classList.toggle("scrolled", scrollY > 8);
+  }
+
+  addEventListener("scroll", update, { passive: true });
+  addEventListener("resize", layout);
+  addEventListener("load", layout);
+  layout();
+</script>

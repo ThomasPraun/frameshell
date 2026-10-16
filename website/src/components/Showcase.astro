@@ -1,0 +1,527 @@
+---
+// Hero carousel (one real clip, a layer per part) and the project tree it leads into.
+// Markup ported from the design canvas; src/scripts/showcase.ts drives every data-* hook.
+import "../styles/showcase.css";
+---
+
+<div class="sc" data-showcase>
+    <!-- Use-case carousel: one podcast clip, a new layer per slide -->
+    <div class="rise" style="max-width: 1240px; margin: clamp(40px, 7vw, 80px) auto 0; padding: 0 clamp(16px, 4vw, 48px)">
+      <section aria-roledescription="carousel" aria-label="One podcast clip, edited layer by layer" style="display: flex; flex-direction: column; gap: 18px">
+
+        <div class="tabs" role="tablist" aria-label="Edits" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px">
+          <div data-list="slides" style="display: contents"></div>
+        </div>
+
+        <div style="border: 1px solid #34363a; border-radius: 14px; overflow: hidden; background: #1d1e20; box-shadow: 0 40px 120px -40px rgba(0,0,0,0.8)">
+          <div class="stage-grid" style="display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr)">
+
+            <!-- Preview -->
+            <div style="padding: 20px; background: #161719; min-width: 0">
+              <div data-class="frameCls" style="position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: #0b0b0c; container-type: inline-size">
+                <template data-if="isVertical">
+                  <img src="/media/podcast-poster.jpg" alt="" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.22; filter: grayscale(1)">
+                  <span class="beat mono" style="--d: .2s; position: absolute; left: 3%; top: 5%; padding: 0.5cqw 1cqw; border-radius: 0.6cqw; background: rgba(15,15,18,0.7); color: #a3a49f; font-size: 1.5cqw">16:9 original</span>
+                  <span class="beat mono" style="--d: .4s; position: absolute; right: 3%; top: 5%; padding: 0.5cqw 1cqw; border-radius: 0.6cqw; background: rgba(227,165,60,0.18); color: #e3a53c; font-size: 1.5cqw">Short 1080 × 1920</span>
+                </template>
+
+                <div data-style="viewStyle">
+                  <video data-ref="video" src="/media/podcast.mp4" poster="/media/podcast-poster.jpg" muted="" playsinline="" preload="auto" data-style="videoStyle"></video>
+
+                  <template data-if="showLogo">
+                    <div class="pop" style="position: absolute; left: 60%; top: 30%; display: flex; flex-direction: column; gap: 1cqw; padding: 1.6cqw 2cqw; border-radius: 1.4cqw; background: rgba(15,15,18,0.45); backdrop-filter: blur(4px)">
+                      <span style="font-size: 1.5cqw; color: #c9c9c4">Sponsored by</span>
+                      <span style="display: flex; align-items: center; gap: 1cqw">
+                        <svg viewBox="200 230 624 564" aria-hidden="true" style="width: 4.6cqw; height: 4.6cqw">
+                          <g fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"><path d="M232 352 V262 H322"></path><path d="M702 262 H792 V352"></path><path d="M792 672 V762 H702"></path><path d="M322 762 H232 V672"></path></g>
+                          <path d="M372 392 L532 512 L372 632" fill="none" stroke="url(#fs-accent)" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"></path>
+                          <rect x="560" y="600" width="130" height="58" rx="29" fill="url(#fs-accent)"></rect>
+                        </svg>
+                        <strong style="font-size: 3.4cqw; font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; color: #ffffff">frameshell</strong>
+                      </span>
+                    </div>
+                  </template>
+
+                  <!-- Draw over it: chalk table, pointers and the show's title on the empty wall, live over the footage -->
+                  <template data-if="drawOn">
+                    <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%">
+                      <path class="draw" pathLength="1" style="--d: .2s" d="M195 1080 L667 757 L1282 757 L1755 1080" stroke="#e3a53c" stroke-width="7"></path>
+                      <path class="draw" pathLength="1" style="--d: .6s" d="M960 757 L960 1080" stroke="#e3a53c" stroke-width="5"></path>
+                      <g fill="#e3a53c">
+                        <rect class="bar" x="824" y="430" width="20" height="130" rx="10" style="--d: 0s"></rect>
+                        <rect class="bar" x="858" y="400" width="20" height="190" rx="10" style="--d: .15s"></rect>
+                        <rect class="bar" x="892" y="375" width="20" height="240" rx="10" style="--d: .3s"></rect>
+                        <rect class="bar" x="926" y="410" width="20" height="170" rx="10" style="--d: .05s"></rect>
+                        <rect class="bar" x="960" y="365" width="20" height="260" rx="10" style="--d: .25s"></rect>
+                        <rect class="bar" x="994" y="405" width="20" height="180" rx="10" style="--d: .4s"></rect>
+                        <rect class="bar" x="1028" y="385" width="20" height="220" rx="10" style="--d: .1s"></rect>
+                        <rect class="bar" x="1062" y="420" width="20" height="150" rx="10" style="--d: .35s"></rect>
+                        <rect class="bar" x="1096" y="445" width="20" height="100" rx="10" style="--d: .2s"></rect>
+                      </g>
+                      <path class="draw" pathLength="1" style="--d: 2.2s" d="M1150 690 C1250 650 1330 600 1395 505 M1365 513 L1397 501 L1403 535" stroke="#fff3df" stroke-width="5"></path>
+                      <path class="draw" pathLength="1" style="--d: 2.4s" d="M770 690 C670 650 590 600 525 505 M555 513 L523 501 L517 535" stroke="#fff3df" stroke-width="5"></path>
+                    </svg>
+                    <div style="position: absolute; left: 0; right: 0; top: 11%; display: flex; flex-direction: column; align-items: center; gap: 1cqw">
+                      <p style="margin: 0; font-size: 4.6cqw; font-weight: 900; font-stretch: 125%; letter-spacing: -0.03em; line-height: 1; color: #fff3df; text-shadow: 0 0.35cqw 0 #8d5f33, 0 0 2cqw rgba(0,0,0,0.5)">
+                        <span class="letter" style="--d: .8s">T</span><span class="letter" style="--d: .86s">I</span><span class="letter" style="--d: .92s">M</span><span class="letter" style="--d: .98s">E</span><span class="letter" style="--d: 1.04s">L</span><span class="letter" style="--d: 1.1s">I</span><span class="letter" style="--d: 1.16s">N</span><span class="letter" style="--d: 1.22s">E</span>
+                        <span class="letter" style="--d: 1.4s; color: #e3a53c">T</span><span class="letter" style="--d: 1.46s; color: #e3a53c">A</span><span class="letter" style="--d: 1.52s; color: #e3a53c">L</span><span class="letter" style="--d: 1.58s; color: #e3a53c">K</span><span class="letter" style="--d: 1.64s; color: #e3a53c">S</span>
+                      </p>
+                      <span class="slide-up mono" style="--d: 1.9s; padding: 0.4cqw 1.2cqw; border-radius: 99px; background: #e3a53c; color: #1a1408; font-size: 1.4cqw; font-weight: 700">Episode 12</span>
+                    </div>
+                    <p class="hand write" style="--d: 2.6s; position: absolute; left: 36%; top: 62%; margin: 0; font-size: 3cqw; color: #fff3df">the host</p>
+                    <p class="hand write" style="--d: 2.8s; position: absolute; left: 54%; top: 62%; margin: 0; font-size: 3cqw; color: #fff3df">the guest</p>
+                  </template>
+
+                  <template data-if="showCaption">
+                    <p class="cap" data-style="captionStyle"><span data-text="caption"></span></p>
+                  </template>
+                </div>
+
+                <!-- Into the project: a mouse pulls the clip out of full screen into the app, drops it into its folder and opens it -->
+                <template data-if="tourOn">
+                  <div class="app7" style="position: absolute; inset: 0; z-index: 2; background: #1d1e20; font-size: 1.3cqw; color: #e4e3dc">
+                    <div style="position: absolute; left: 0; right: 0; top: 0; height: 5%; display: flex; align-items: center; gap: 0.6cqw; padding: 0 1.2cqw; background: #19191b; border-bottom: 1px solid #34363a">
+                      <span style="width: 0.9cqw; height: 0.9cqw; border-radius: 50%; background: #303135"></span><span style="width: 0.9cqw; height: 0.9cqw; border-radius: 50%; background: #303135"></span><span style="width: 0.9cqw; height: 0.9cqw; border-radius: 50%; background: #303135"></span>
+                      <span style="flex: 1; text-align: center; color: #8a8b8f; font-size: 1.1cqw">frameshell</span>
+                    </div>
+                    <div style="position: absolute; left: 0; top: 5%; bottom: 0; width: 22%; background: #18191b; border-right: 1px solid #34363a">
+                      <span style="position: absolute; left: 1.2cqw; top: 2.5%; color: #8a8b8f; font-size: 1.1cqw">Explorer</span>
+                    </div>
+                    <div style="position: absolute; left: 25%; top: 9%; width: 70%; height: 70%; border-radius: 0.6cqw; background: #0b0b0c; box-shadow: inset 0 0 0 1px #34363a"></div>
+                    <div style="position: absolute; left: 25%; right: 5%; top: 82%; display: flex; flex-direction: column; gap: 0.5cqw">
+                      <span style="height: 1.6cqw; width: 78%; border-radius: 0.3cqw; background: #4a3a55"></span>
+                      <span style="height: 1.6cqw; width: 78%; border-radius: 0.3cqw; background: #3f5373"></span>
+                      <span style="height: 1.6cqw; width: 78%; border-radius: 0.3cqw; background: #2f4a3c"></span>
+                    </div>
+
+                    <!-- the folder the clip goes into -->
+                    <div class="folder7" style="position: absolute; left: 1.4%; top: 13%; width: 19%; height: 11%; display: flex; align-items: center; gap: 0.8cqw; padding: 0 0.8cqw; border-radius: 0.6cqw">
+                      <svg class="folder7-icon" viewBox="0 0 64 52" aria-hidden="true" style="flex: none; width: 4.2cqw; height: 3.4cqw"><path d="M2 8a6 6 0 0 1 6-6h16l6 7h26a6 6 0 0 1 6 6v29a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6z" fill="#e3a53c"></path><path d="M2 18h60v26a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6z" fill="#f0b75a"></path></svg>
+                      <span style="font-weight: 700">podcast-ep12</span>
+                      <span class="badge7" style="margin-left: auto; min-width: 1.8cqw; height: 1.8cqw; border-radius: 99px; background: #e0675f; color: #ffffff; font-size: 1.1cqw; font-weight: 700; display: grid; place-items: center">1</span>
+                    </div>
+
+                    <!-- the tree, unfolding after the click -->
+                    <div class="mono" style="position: absolute; left: 1.2cqw; right: 1cqw; top: 26%; display: flex; flex-direction: column; font-size: 1.15cqw">
+                      <span class="row7" style="--d: 5.6s">▾ assets/</span>
+                      <span class="row7 sub pick-mp4" style="--d: 5.7s"><img src="/media/podcast-poster.jpg" alt="" style="height: 1.6cqw; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 0.2cqw">podcast-ep12.mp4</span>
+                      <span class="row7" style="--d: 5.8s">▸ transcripts/</span>
+                      <span class="row7" style="--d: 5.9s">▸ scripts/</span>
+                      <span class="row7" style="--d: 6s">▾ timelines/</span>
+                      <span class="row7 sub" style="--d: 6.1s">main.json</span>
+                      <span class="row7 sub pick-a" style="--d: 6.2s">short-guest.json</span>
+                      <span class="row7" style="--d: 6.3s">▾ compositions/</span>
+                      <span class="row7 sub" style="--d: 6.4s">sketch/index.html</span>
+                      <span class="row7 sub" style="--d: 6.5s; color: #66c2e0">Explainer.tsx</span>
+                      <span class="row7" style="--d: 6.6s">▾ exports/</span>
+                      <span class="row7 sub" style="--d: 6.7s; color: #66c2e0">explainer.mp4</span>
+                    </div>
+
+                    <!-- what the clicks open in the preview -->
+                    <div class="show-a" style="position: absolute; left: 25%; top: 9%; width: 70%; height: 70%; display: flex; align-items: center; justify-content: center; border-radius: 0.6cqw; overflow: hidden; background: #0b0b0c">
+                      <div style="position: relative; height: 92%; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 0.8cqw; box-shadow: 0 0 0 0.2cqw #e3a53c">
+                        <img src="/media/podcast-poster.jpg" alt="" style="width: 100%; height: 100%; object-fit: cover; object-position: 84% 50%">
+                        <p style="position: absolute; left: 5%; right: 5%; bottom: 18%; margin: 0; text-align: center; font-size: 2.2cqw; font-weight: 900; font-stretch: 112%; line-height: 1.05; text-transform: uppercase; color: #ffffff; text-shadow: 0 0.3cqw 1cqw rgba(0,0,0,0.8)">Your video's <span style="color: #e3a53c">a mess.</span></p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- the mouse -->
+                  <span class="cursor7" aria-hidden="true" style="position: absolute; z-index: 7; width: 2.2cqw; height: 2.8cqw; pointer-events: none">
+                    <span class="press7" style="position: absolute; left: -1.2cqw; top: -1.2cqw; width: 2.4cqw; height: 2.4cqw; border-radius: 50%; background: rgba(227,165,60,0.55)"></span>
+                    <svg viewBox="0 0 16 20" style="position: absolute; inset: 0; width: 100%; height: 100%"><path d="M1 1v15l4-4 3 7 3-1.4-3-6.6h6z" fill="#ffffff" stroke="#000000" stroke-width="1"></path></svg>
+                  </span>
+                </template>
+
+                <!-- Step title before each part -->
+                <div class="intro-veil" data-style="veilStyle">
+                  <template data-if="intro">
+                    <span class="mono beat" style="font-size: 1.8cqw; color: #e3a53c"><span data-text="introNum"></span></span>
+                    <p class="intro-title"><span class="trim"><span><span data-text="introTitle"></span></span></span></p>
+                  </template>
+                </div>
+
+                <template data-if="tourBadge">
+                  <span class="beat" style="position: absolute; left: 2.5%; top: 4%; z-index: 8; display: flex; align-items: center; gap: 0.8cqw; padding: 0.6cqw 1.2cqw; border-radius: 99px; background: rgba(15,15,18,0.78); font-size: 1.4cqw; color: #e4e3dc">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" style="width: 1.4cqw; height: 1.4cqw"><path d="M5 3l8 5-8 5z" fill="#e3a53c"></path></svg>
+                    <span>Playing <span class="mono" style="color: #e3a53c">explainer.mp4</span>, made with Remotion</span>
+                  </span>
+                </template>
+
+                <!-- Player bar: elapsed, progress, length -->
+                <div style="position: absolute; left: 2.5%; right: 2.5%; bottom: 1.6%; z-index: 8; display: flex; align-items: center; gap: 1cqw; pointer-events: none">
+                  <span class="mono" style="font-size: 1.2cqw; color: #e4e3dc; text-shadow: 0 0 0.6cqw rgba(0,0,0,0.9)"><span data-text="clock"></span></span>
+                  <span style="flex: 1; height: 0.35cqw; border-radius: 1cqw; background: rgba(255,255,255,0.22); overflow: hidden"><span data-style="progressStyle"></span></span>
+                </div>
+
+                <div style="position: absolute; right: 2.5%; bottom: 5%; display: flex; gap: 8px; z-index: 8">
+                  <button type="button" class="ctl" data-on="togglePlay" data-aria="playLabel">
+                    <template data-if="playing">
+                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
+                    </template>
+                    <template data-if="paused">
+                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z" fill="currentColor"></path></svg>
+                    </template>
+                  </button>
+                  <template data-if="soundAvail">
+                    <button type="button" class="ctl" data-on="toggleSound" data-aria="soundLabel">
+                      <template data-if="soundOn">
+                        <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3V5L6 8z" fill="currentColor"></path><path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+                      </template>
+                      <template data-if="soundOff">
+                        <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3V5L6 8z" fill="currentColor"></path><path d="M13 8l4 4m0-4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+                      </template>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ask panel -->
+            <div class="ask-pane" style="display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 22px; border-left: 1px solid #34363a">
+              <span style="color: #8a8b8f; font-size: 13px">Ask in plain words</span>
+              <p style="margin: 0; min-height: 3em; padding: 12px 14px; border-radius: 12px 12px 12px 3px; background: #2b2c30; font-size: 16px; line-height: 1.45"><span data-text="askTyped"></span><template data-if="typing"><span class="caret7"></span></template></p>
+              <template data-if="s0">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Added 13 subtitles from the transcript on their own track. Click any word to fix a typo.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s1">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Cut 1.8 s of silence and an "um". The cut lands in the pause, so no word is clipped.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s2">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Split the shot in four: wide for her question, close on his answer, wide again, then close on her.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s3">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Logo added on its own layer for the sponsor line, on the empty wall beside her.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s4">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Short ready: his answer framed on him, 1080 × 1920, with big subtitles. The original stays as it is.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s5">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Built as an HTML animation (HyperFrames) on a transparent layer above the video. It plays live in the preview while it renders. Remotion works the same way, in React.</span>
+                </div>
+                </template>
+              </template>
+              <template data-if="s6">
+                <template data-if="replyOn">
+                  <div class="beat" style="--d: .15s; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px 12px 3px 12px; background: rgba(102,194,224,0.1); box-shadow: inset 0 0 0 1px rgba(102,194,224,0.25)">
+                  <span style="color: #66c2e0; font-size: 13px; font-weight: 600">Agent</span>
+                  <span style="font-size: 15px; line-height: 1.5">Made explainer.mp4: a 10-second Remotion animation that uses your clip as footage, silent so you can add a voice-over. It is playing now.</span>
+                </div>
+                </template>
+                <template data-if="replyOn"><a class="beat" href="#project" style="--d: .9s; color: #e3a53c; font-size: 15px; font-weight: 600; text-underline-offset: 4px">See how the project is organized</a></template>
+              </template>
+              <template data-if="replyOn"><div class="beat" style="--d: .6s; margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px">
+                <span style="padding: 6px 10px; border-radius: 4px; background: #26272a; color: #a3a49f; font-size: 13px">Undo</span>
+                <span style="padding: 6px 10px; border-radius: 4px; background: #26272a; color: #a3a49f; font-size: 13px">Edit by hand</span>
+              </div></template>
+            </div>
+          </div>
+
+          <!-- Timeline, in source seconds (0 to 9.4 s); cut parts close up to the left -->
+          <template data-if="showTimeline">
+          <div style="border-top: 1px solid #34363a; padding: 14px 20px 18px; display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 6px 12px; font-size: 12px; color: rgba(255,255,255,0.9)">
+            <template data-if="rowSubs">
+            <span style="color: #b48acb; font-weight: 600; line-height: 26px">Subtitles</span>
+            <div style="position: relative; height: 26px">
+              <div data-list="cues" style="display: contents"></div>
+            </div>
+
+            </template>
+
+            <template data-if="hasLogo">
+            <span style="color: #e3a53c; font-weight: 600; line-height: 26px">Logo</span>
+            <div style="position: relative; height: 26px">
+              <template data-if="hasLogo">
+                <span class="seg grow" data-style="logoStyle">frameshell.png</span>
+              </template>
+            </div>
+
+            </template>
+
+            <template data-if="hasAnim">
+            <span style="color: #66c2e0; font-weight: 600; line-height: 26px">Animation</span>
+            <div style="position: relative; height: 26px">
+              <template data-if="hasAnim">
+                <span class="seg grow" data-style="animStyle"><span data-text="animLabel"></span></span>
+              </template>
+            </div>
+
+            </template>
+
+            <span style="color: #7092c4; font-weight: 600; line-height: 26px">Video</span>
+            <div data-style="videoRowStyle">
+              <div data-list="videoSegs" style="display: contents"></div>
+            </div>
+
+            <span style="color: #6fae8b; font-weight: 600; line-height: 26px">Voice</span>
+            <div style="position: relative; height: 26px">
+              <div data-list="voiceSegs" style="display: contents"></div>
+              <template data-if="shortOn">
+                <span class="beat" data-style="shortStyle"></span>
+              </template>
+              <span class="playhead" data-style="playheadStyle"></span>
+            </div>
+          </div>
+          </template>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px">
+          <p style="margin: 0; color: #e4e3dc; font-size: 16px; font-weight: 600">Every step above happens inside Frameshell, and you can do each one: one folder, your agent, plain words.</p>
+          <p style="margin: 0; color: #8a8b8f; font-size: 13px">Footage generated with AI for this demo.</p>
+        </div>
+      </section>
+    </div>
+</div>
+
+<div class="sc" data-showcase-project>
+  <!-- One recording branches into a whole project folder -->
+  <section id="project" data-marker="Project" style="padding: clamp(96px, 14vw, 180px) 0 clamp(48px, 8vw, 96px)">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px)">
+      <h2 class="display" style="max-width: 15ch; font-size: clamp(2.3rem, 6vw, 5rem)">One recording becomes a whole project.</h2>
+      <p style="margin: 28px 0 0; max-width: 62ch; color: #a3a49f; font-size: 18px; line-height: 1.6">Everything lives as plain files in one folder: your footage, its transcript, the script as text, one timeline per video and the animations as code. Shorts branch off the same recording, so nothing gets copied or lost.</p>
+
+      <div data-ref="tree" class="gen-grid" style="display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.3fr); gap: 0; margin-top: clamp(40px, 6vw, 72px); border: 1px solid #34363a; border-radius: 14px; overflow: hidden; background: #1d1e20">
+
+        <!-- File tree -->
+        <div style="display: flex; flex-direction: column; min-width: 0; padding: 18px 10px 18px 18px; background: #18191b; border-right: 1px solid #34363a">
+          <span style="padding: 0 8px 12px; color: #8a8b8f; font-size: 13px">Explorer</span>
+          <template data-if="treeSeen">
+            <ul class="mono" style="margin: 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.2" data-list="tree"></ul>
+          </template>
+        </div>
+
+        <!-- What the selected file is -->
+        <div style="display: flex; flex-direction: column; min-width: 0">
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 20px; border-bottom: 1px solid #34363a">
+            <span class="mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e4e3dc; font-size: 13px"><span data-text="filePath"></span></span>
+            <template data-if="fileLive">
+              <span style="display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; background: rgba(224,103,95,0.14); color: #f0a49e; font-size: 12px; font-weight: 600"><span class="live-dot"></span>Live</span>
+            </template>
+          </div>
+
+          <div style="flex: 1; min-height: 420px; position: relative; display: flex; flex-direction: column">
+            <!-- f0: the recording -->
+            <template data-if="f0">
+              <div class="slide-up" style="padding: 24px; display: flex; flex-direction: column; gap: 14px">
+                <img src="/media/podcast-poster.jpg" alt="Wide shot of the podcast: host on the left, guest on the right" style="width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px">
+                <div class="mono" style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #a3a49f">
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">1920 × 1080</span>
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">9.4 s</span>
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">24 fps</span>
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">voice</span>
+                </div>
+              </div>
+            </template>
+            <!-- f1: transcript -->
+            <template data-if="f1">
+              <pre class="code type-in" style="flex: 1">[
+  <span class="c">// one entry per spoken word, in source seconds</span>
+  &#123; <span class="a">"text"</span>: <span class="s">"What"</span>,      <span class="a">"start"</span>: <span class="n">0.18</span>, <span class="a">"end"</span>: <span class="n">0.20</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"can't"</span>,     <span class="a">"start"</span>: <span class="n">0.20</span>, <span class="a">"end"</span>: <span class="n">0.47</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"you"</span>,       <span class="a">"start"</span>: <span class="n">0.47</span>, <span class="a">"end"</span>: <span class="n">0.64</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"edit"</span>,      <span class="a">"start"</span>: <span class="n">0.64</span>, <span class="a">"end"</span>: <span class="n">0.81</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"without?"</span>,  <span class="a">"start"</span>: <span class="n">0.81</span>, <span class="a">"end"</span>: <span class="n">1.36</span> &#125;,
+  <span class="c">// 1.8 s of silence here: the cut goes in it</span>
+  &#123; <span class="a">"text"</span>: <span class="s">"A"</span>,         <span class="a">"start"</span>: <span class="n">3.18</span>, <span class="a">"end"</span>: <span class="n">3.36</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"good"</span>,      <span class="a">"start"</span>: <span class="n">3.36</span>, <span class="a">"end"</span>: <span class="n">3.90</span> &#125;,
+  &#123; <span class="a">"text"</span>: <span class="s">"timeline."</span>, <span class="a">"start"</span>: <span class="n">3.90</span>, <span class="a">"end"</span>: <span class="n">4.44</span> &#125;,
+  <span class="c">// …</span>
+]</pre>
+            </template>
+            <!-- f2: the script as text -->
+            <template data-if="f2">
+              <pre class="code type-in" style="flex: 1; white-space: pre-wrap; font-size: 13.5px"><span class="k" style="font-weight: 700"># Episode 12: What can't you edit without?</span>
+
+<span class="k" style="font-weight: 700">## Question</span>
+She asks the one thing he can't edit without.
+Wide shot, both in frame.
+
+<span class="k" style="font-weight: 700">## Answer</span>
+"If your timeline's a mess, your video's a mess."
+Close on him. <span class="n">This is the short.</span>
+
+<span class="k" style="font-weight: 700">## Sponsor</span>
+Close on her, logo on the wall beside her.
+
+<span class="c">Each clip on the timeline points back to the scene it plays.</span></pre>
+            </template>
+            <!-- f3: main timeline -->
+            <template data-if="f3">
+              <div class="slide-up" style="padding: 24px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: rgba(255,255,255,0.9)">
+                <div style="display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 6px 10px; align-items: center">
+                  <span style="color: #b48acb">Subtitles</span>
+                  <div style="display: flex; gap: 2px; height: 22px"><span class="grow" style="--d: .1s; flex: 0 0 14%; border-radius: 3px; background: #4a3a55"></span><span class="grow" style="--d: .15s; flex: 0 0 18%; border-radius: 3px; background: #4a3a55"></span><span class="grow" style="--d: .2s; flex: 0 0 22%; border-radius: 3px; background: #4a3a55"></span><span class="grow" style="--d: .25s; flex: 0 0 20%; border-radius: 3px; background: #4a3a55"></span><span class="grow" style="--d: .3s; flex: 0 0 18%; border-radius: 3px; background: #4a3a55"></span></div>
+                  <span style="color: #e3a53c">Logo</span>
+                  <div style="display: flex; height: 22px"><span style="flex: 0 0 76%"></span><span class="grow" style="--d: .4s; flex: 0 0 24%; border-radius: 3px; background: #5a4a2a; padding: 0 6px; line-height: 22px; overflow: hidden">frameshell.png</span></div>
+                  <span style="color: #66c2e0">Animation</span>
+                  <div style="display: flex; height: 22px"><span class="grow" style="--d: .5s; flex: 0 0 100%; border-radius: 3px; background: #2b5260; padding: 0 6px; line-height: 22px; overflow: hidden">sketch/index.html</span></div>
+                  <span style="color: #7092c4">Video</span>
+                  <div style="display: flex; gap: 2px; height: 22px"><span class="grow" style="--d: .6s; flex: 0 0 18%; border-radius: 3px; background: #3f5373; padding: 0 6px; line-height: 22px; overflow: hidden">Wide</span><span class="grow" style="--d: .65s; flex: 0 0 40%; border-radius: 3px; background: #3f5373; padding: 0 6px; line-height: 22px; overflow: hidden">Zoom on him</span><span class="grow" style="--d: .7s; flex: 0 0 17%; border-radius: 3px; background: #3f5373; padding: 0 6px; line-height: 22px; overflow: hidden">Wide</span><span class="grow" style="--d: .75s; flex: 0 0 24%; border-radius: 3px; background: #3f5373; padding: 0 6px; line-height: 22px; overflow: hidden">Zoom on her</span></div>
+                  <span style="color: #6fae8b">Voice</span>
+                  <div style="display: flex; height: 22px"><span class="grow" style="--d: .8s; flex: 0 0 100%; border-radius: 3px; background: repeating-linear-gradient(90deg, rgba(143,209,171,0.55) 0 3px, transparent 3px 6px) center / 100% 70% no-repeat, #2f4a3c"></span></div>
+                </div>
+                <p style="margin: 14px 0 0; color: #a3a49f; font-size: 14px">The edited episode: five layers, 7.6 s after the cut. Exported as <span class="mono">main-youtube-1080p.mp4</span>.</p>
+              </div>
+            </template>
+            <!-- f4: the short -->
+            <template data-if="f4">
+              <div class="slide-up" style="padding: 24px; display: flex; gap: 24px; align-items: center; justify-content: center; flex-wrap: wrap">
+                <div style="position: relative; width: 210px; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 14px; box-shadow: 0 0 0 2px #e3a53c, 0 24px 60px rgba(0,0,0,0.6); container-type: inline-size">
+                  <img src="/media/podcast-poster.jpg" alt="Vertical crop framed on the guest" style="width: 100%; height: 100%; object-fit: cover; object-position: 84% 50%">
+                  <p class="beat" style="--d: .5s; position: absolute; left: 6%; right: 6%; bottom: 20%; margin: 0; text-align: center; font-size: 11cqw; font-weight: 900; font-stretch: 112%; line-height: 1.05; text-transform: uppercase; color: #ffffff; text-shadow: 0 1cqw 3cqw rgba(0,0,0,0.8)">Your video's <span style="color: #e3a53c">a mess.</span></p>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px; max-width: 280px">
+                  <span style="font-size: 18px; font-weight: 700; font-stretch: 112%">A short is its own timeline</span>
+                  <span style="color: #a3a49f; font-size: 14.5px; line-height: 1.55">Cut from the same recording (3.2 s to 7.6 s), framed on him, with its own subtitles. Fixing the original transcript fixes both.</span>
+                  <span class="mono" style="color: #e3a53c; font-size: 12px">vertical-1080x1920</span>
+                </div>
+              </div>
+            </template>
+            <!-- f5: HyperFrames composition (the overlay from part 06) -->
+            <template data-if="f5">
+              <div style="display: grid; grid-template-rows: auto auto; flex: 1">
+                <pre class="code type-in" style="border-bottom: 1px solid #34363a">&lt;<span class="k">div</span> <span class="a">data-composition-id</span>=<span class="s">"sketch"</span>
+     <span class="a">data-width</span>=<span class="s">"1920"</span> <span class="a">data-height</span>=<span class="s">"1080"</span>
+     <span class="a">data-duration</span>=<span class="s">"9"</span> <span class="a">data-no-timeline</span>&gt;
+  &lt;<span class="k">svg</span>&gt;&lt;<span class="k">path</span> <span class="a">class</span>=<span class="s">"chalk"</span> <span class="a">d</span>=<span class="s">"M195 1080 L667 757 L1282 757 …"</span>/&gt;&lt;/<span class="k">svg</span>&gt;
+  &lt;<span class="k">h1</span> <span class="a">class</span>=<span class="s">"title"</span>&gt;TIMELINE &lt;<span class="k">em</span>&gt;TALKS&lt;/<span class="k">em</span>&gt;&lt;/<span class="k">h1</span>&gt;
+  &lt;<span class="k">span</span> <span class="a">class</span>=<span class="s">"badge"</span>&gt;Episode 12&lt;/<span class="k">span</span>&gt;
+  &lt;<span class="k">div</span> <span class="a">class</span>=<span class="s">"equalizer"</span>&gt;…&lt;/<span class="k">div</span>&gt;
+  &lt;<span class="k">p</span> <span class="a">class</span>=<span class="s">"note"</span>&gt;the host&lt;/<span class="k">p</span>&gt; &lt;<span class="k">p</span> <span class="a">class</span>=<span class="s">"note"</span>&gt;the guest&lt;/<span class="k">p</span>&gt;
+&lt;/<span class="k">div</span>&gt;</pre>
+                <div style="position: relative; margin: 18px 20px 20px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: #0b0b0c; container-type: inline-size">
+                  <img src="/media/podcast-poster.jpg" alt="" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover">
+                  <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%">
+                    <path class="draw" pathLength="1" style="--d: .2s" d="M195 1080 L667 757 L1282 757 L1755 1080" stroke="#e3a53c" stroke-width="7"></path>
+                    <path class="draw" pathLength="1" style="--d: .6s" d="M960 757 L960 1080" stroke="#e3a53c" stroke-width="5"></path>
+                    <g fill="#e3a53c">
+                      <rect class="bar" x="824" y="430" width="20" height="130" rx="10" style="--d: 0s"></rect>
+                      <rect class="bar" x="858" y="400" width="20" height="190" rx="10" style="--d: .15s"></rect>
+                      <rect class="bar" x="892" y="375" width="20" height="240" rx="10" style="--d: .3s"></rect>
+                      <rect class="bar" x="926" y="410" width="20" height="170" rx="10" style="--d: .05s"></rect>
+                      <rect class="bar" x="960" y="365" width="20" height="260" rx="10" style="--d: .25s"></rect>
+                      <rect class="bar" x="994" y="405" width="20" height="180" rx="10" style="--d: .4s"></rect>
+                      <rect class="bar" x="1028" y="385" width="20" height="220" rx="10" style="--d: .1s"></rect>
+                      <rect class="bar" x="1062" y="420" width="20" height="150" rx="10" style="--d: .35s"></rect>
+                      <rect class="bar" x="1096" y="445" width="20" height="100" rx="10" style="--d: .2s"></rect>
+                    </g>
+                    <path class="draw" pathLength="1" style="--d: 1.6s" d="M1150 690 C1250 650 1330 600 1395 505 M1365 513 L1397 501 L1403 535" stroke="#fff3df" stroke-width="5"></path>
+                    <path class="draw" pathLength="1" style="--d: 1.8s" d="M770 690 C670 650 590 600 525 505 M555 513 L523 501 L517 535" stroke="#fff3df" stroke-width="5"></path>
+                  </svg>
+                  <div style="position: absolute; left: 0; right: 0; top: 11%; display: flex; flex-direction: column; align-items: center; gap: 1cqw">
+                    <p style="margin: 0; font-size: 4.6cqw; font-weight: 900; font-stretch: 125%; letter-spacing: -0.03em; line-height: 1; color: #fff3df; text-shadow: 0 0.35cqw 0 #8d5f33, 0 0 2cqw rgba(0,0,0,0.5)">
+                      <span class="letter" style="--d: .5s">T</span><span class="letter" style="--d: .56s">I</span><span class="letter" style="--d: .62s">M</span><span class="letter" style="--d: .68s">E</span><span class="letter" style="--d: .74s">L</span><span class="letter" style="--d: .8s">I</span><span class="letter" style="--d: .86s">N</span><span class="letter" style="--d: .92s">E</span>
+                      <span class="letter" style="--d: 1.1s; color: #e3a53c">T</span><span class="letter" style="--d: 1.16s; color: #e3a53c">A</span><span class="letter" style="--d: 1.22s; color: #e3a53c">L</span><span class="letter" style="--d: 1.28s; color: #e3a53c">K</span><span class="letter" style="--d: 1.34s; color: #e3a53c">S</span>
+                    </p>
+                    <span class="slide-up mono" style="--d: 1.5s; padding: 0.4cqw 1.2cqw; border-radius: 99px; background: #e3a53c; color: #1a1408; font-size: 1.4cqw; font-weight: 700">Episode 12</span>
+                  </div>
+                  <p class="hand write" style="--d: 2s; position: absolute; left: 36%; top: 62%; margin: 0; font-size: 3cqw; color: #fff3df">the host</p>
+                  <p class="hand write" style="--d: 2.2s; position: absolute; left: 54%; top: 62%; margin: 0; font-size: 3cqw; color: #fff3df">the guest</p>
+                </div>
+              </div>
+            </template>
+            <!-- f6: Remotion composition (the explainer from part 07) -->
+            <template data-if="f6">
+              <div style="display: grid; grid-template-rows: auto auto; flex: 1">
+                <pre class="code type-in" style="border-bottom: 1px solid #34363a"><span class="k">export const</span> <span class="n">Explainer</span> = () =&gt; &#123;
+  <span class="k">const</span> frame = <span class="a">useCurrentFrame</span>();
+  <span class="k">const</span> &#123; fps &#125; = <span class="a">useVideoConfig</span>();
+  <span class="c">// the real clip leaves full screen, then drops into its folder</span>
+  <span class="k">const</span> shrink = <span class="a">spring</span>(&#123; frame: frame - <span class="n">1</span> * fps, fps &#125;);
+  <span class="k">const</span> drop = <span class="a">spring</span>(&#123; frame: frame - <span class="n">3</span> * fps, fps &#125;);
+  <span class="k">return</span> (
+    &lt;<span class="n">AppWindow</span>&gt;
+      &lt;<span class="n">Clip</span> <span class="a">src</span>=&#123;<span class="a">staticFile</span>(<span class="s">"podcast-ep12.mp4"</span>)&#125; <span class="a">shrink</span>=&#123;shrink&#125; <span class="a">into</span>=&#123;drop&#125; /&gt;
+      &lt;<span class="n">Folder</span> <span class="a">name</span>=<span class="s">"podcast-ep12"</span> <span class="a">open</span>=&#123;frame &gt; <span class="n">5</span> * fps&#125; /&gt;
+    &lt;/<span class="n">AppWindow</span>&gt;
+  );
+&#125;;</pre>
+                <div style="position: relative; margin: 18px 20px 20px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: #1d1e20; container-type: inline-size; font-size: 1.6cqw; color: #e4e3dc">
+                  <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 26%; background: #18191b; border-right: 1px solid #34363a; padding: 3cqw 1.6cqw; display: flex; flex-direction: column; gap: 0.6cqw">
+                    <span class="slide-up" style="--d: .2s; display: flex; align-items: center; gap: 0.8cqw; font-weight: 700"><svg viewBox="0 0 64 52" aria-hidden="true" style="width: 3.4cqw; height: 2.8cqw"><path d="M2 8a6 6 0 0 1 6-6h16l6 7h26a6 6 0 0 1 6 6v29a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6z" fill="#e3a53c"></path><path d="M2 18h60v26a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6z" fill="#f0b75a"></path></svg>podcast-ep12</span>
+                    <span class="slide-up mono" style="--d: .5s; font-size: 1.3cqw; color: #c9c9c4">▾ assets/</span>
+                    <span class="slide-up mono" style="--d: .6s; font-size: 1.3cqw; padding-left: 1.4cqw; color: #e3a53c">podcast-ep12.mp4</span>
+                    <span class="slide-up mono" style="--d: .7s; font-size: 1.3cqw; color: #c9c9c4">▸ transcripts/</span>
+                    <span class="slide-up mono" style="--d: .8s; font-size: 1.3cqw; color: #c9c9c4">▸ timelines/</span>
+                    <span class="slide-up mono" style="--d: .9s; font-size: 1.3cqw; color: #c9c9c4">▸ compositions/</span>
+                    <span class="slide-up mono" style="--d: 1s; font-size: 1.3cqw; color: #c9c9c4">▸ exports/</span>
+                  </div>
+                  <div style="position: absolute; left: 30%; top: 12%; width: 66%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 0.8cqw; box-shadow: 0 1cqw 4cqw rgba(0,0,0,0.6)">
+                    <img src="/media/podcast-poster.jpg" alt="The clip, small inside the app" style="width: 100%; height: 100%; object-fit: cover">
+                  </div>
+                  <span class="mono" style="position: absolute; left: 30%; bottom: 6%; color: #a3a49f; font-size: 1.3cqw">10 s, silent, renders to exports/explainer.mp4</span>
+                </div>
+              </div>
+            </template>
+<!-- f7, f8: exports -->
+            <template data-if="f7">
+              <div class="slide-up" style="padding: 24px; display: flex; flex-direction: column; gap: 14px">
+                <div style="position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; container-type: inline-size">
+                  <img src="/media/podcast-poster.jpg" alt="Exported episode, horizontal" style="width: 100%; height: 100%; object-fit: cover; transform: scale(1.6); transform-origin: 6% 36%">
+                  <div style="position: absolute; left: 60%; top: 30%; display: flex; flex-direction: column; gap: 1cqw; padding: 1.6cqw 2cqw; border-radius: 1.4cqw; background: rgba(15,15,18,0.45)">
+                    <span style="font-size: 1.5cqw; color: #c9c9c4">Sponsored by</span>
+                    <strong style="font-size: 3.4cqw; font-weight: 800; font-stretch: 125%; color: #ffffff">frameshell</strong>
+                  </div>
+                  <p style="position: absolute; left: 0; right: 0; bottom: 7%; margin: 0; text-align: center; font-size: 3.8cqw; font-weight: 900; font-stretch: 112%; text-transform: uppercase; color: #e3a53c; text-shadow: 0 0.3cqw 1.2cqw rgba(0,0,0,0.75)">our sponsor.</p>
+                </div>
+                <div class="mono" style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #a3a49f">
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">youtube-1080p</span>
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">H.264 + AAC</span>
+                  <span style="padding: 4px 9px; border-radius: 4px; background: #26272a">loudness evened out</span>
+                </div>
+              </div>
+            </template>
+            <template data-if="f8">
+              <div class="slide-up" style="padding: 24px; display: flex; gap: 24px; align-items: center; justify-content: center; flex-wrap: wrap">
+                <div style="position: relative; width: 200px; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 22px; border: 6px solid #2b2c30; container-type: inline-size">
+                  <img src="/media/podcast-poster.jpg" alt="Exported vertical short" style="width: 100%; height: 100%; object-fit: cover; object-position: 84% 50%">
+                  <p style="position: absolute; left: 6%; right: 6%; bottom: 20%; margin: 0; text-align: center; font-size: 11cqw; font-weight: 900; font-stretch: 112%; line-height: 1.05; text-transform: uppercase; color: #ffffff; text-shadow: 0 1cqw 3cqw rgba(0,0,0,0.8)">A good <span style="color: #e3a53c">timeline.</span></p>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px; max-width: 260px">
+                  <span style="font-size: 18px; font-weight: 700; font-stretch: 112%">Ready for Shorts, Reels and TikTok</span>
+                  <span style="color: #a3a49f; font-size: 14.5px; line-height: 1.55">1080 × 1920 from a 16:9 recording. Same folder, same transcript, one more file.</span>
+                </div>
+              </div>
+            </template>
+            <p style="margin: auto 0 0; padding: 14px 20px 18px; border-top: 1px solid #26272b; color: #a3a49f; font-size: 14.5px; line-height: 1.5"><span data-text="fileNote"></span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  import { startShowcase } from "../scripts/showcase";
+
+  startShowcase();
+</script>

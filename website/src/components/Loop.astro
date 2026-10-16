@@ -1,0 +1,138 @@
+---
+const steps = [
+  {
+    who: "Agent",
+    title: "Ask for the edit",
+    body: "Describe what you want in your own words. Claude Code, Codex, Gemini CLI or any other agent runs inside Frameshell and makes the change.",
+  },
+  {
+    who: "You",
+    title: "Watch it build",
+    body: "The preview and the timeline update as each change lands. Titles and animations render in the background.",
+  },
+  {
+    who: "You",
+    title: "Fix it by hand",
+    body: "Trim, move or split clips, or click a word in the transcript to restore it. Your edits and the agent's live in the same project.",
+  },
+  {
+    who: "Agent",
+    title: "Pick up from there",
+    body: "The agent works from the timeline as it is now. Each of its changes can be reviewed and undone.",
+  },
+];
+---
+
+<section class="loop" data-marker="Loop">
+  <div class="wrap">
+    <h2 class="display">You and the agent<br />share one timeline.</h2>
+    <ol class="lane">
+      {
+        steps.map((s, i) => (
+          <li class:list={["step", s.who === "You" ? "you" : "agent"]} style={`--i:${i}`}>
+            <span class="who">
+              {i + 1}. {s.who}
+            </span>
+            <h3>{s.title}</h3>
+            <p>{s.body}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<style>
+  .loop {
+    padding-block: clamp(96px, 14vw, 180px) clamp(48px, 8vw, 96px);
+  }
+
+  h2 {
+    font-size: clamp(2.3rem, 6vw, 5rem);
+  }
+
+  .lane {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
+    margin: clamp(40px, 6vw, 72px) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .step {
+    padding: 20px 20px 24px;
+    border-radius: 4px;
+    background: var(--panel);
+    box-shadow: inset 0 3px 0 var(--c);
+  }
+
+  .agent {
+    --c: var(--gen);
+  }
+
+  .you {
+    --c: var(--tally);
+  }
+
+  .who {
+    display: block;
+    color: var(--c);
+    font: 500 13px var(--mono);
+  }
+
+  h3 {
+    margin: 16px 0 8px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    font-stretch: 112%;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+
+  /* Clips fall onto the lane in order when the section scrolls in. */
+  @supports (animation-timeline: view()) {
+    .step {
+      animation: drop linear both;
+      animation-timeline: view();
+      animation-range: entry calc(5% + var(--i) * 8%) entry calc(45% + var(--i) * 8%);
+    }
+
+    @keyframes drop {
+      from {
+        opacity: 0;
+        transform: translateX(-24px);
+        clip-path: inset(0 100% 0 0);
+      }
+      to {
+        opacity: 1;
+        transform: none;
+        clip-path: inset(0 0 0 0);
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .step {
+      animation: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .lane {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 520px) {
+    .lane {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

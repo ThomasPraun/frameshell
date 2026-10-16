@@ -12,6 +12,7 @@ export default tseslint.config(
       "apps/desktop/release/**",
       "apps/desktop/test-results/**",
       "apps/desktop/playwright-report/**",
+      "website/.astro/**",
     ],
   },
   js.configs.recommended,

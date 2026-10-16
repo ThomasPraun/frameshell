@@ -1,0 +1,138 @@
+<section class="flows" data-marker="Workflows">
+  <div class="wrap">
+    <h2 class="display">Two ways to make a video.</h2>
+    <div class="pair">
+      <article>
+        <h3>From a recording</h3>
+        <p>
+          Vlogs, interviews, podcasts, classes. The agent removes silences and repeated takes, trims the intro, adds subtitles,
+          evens out loudness and cuts shorts for social media. You review the result and restore anything it shouldn't have cut.
+        </p>
+        <ul class="ops">
+          <li>Silences</li>
+          <li>Retakes</li>
+          <li class="sub">Subtitles</li>
+          <li>Loudness</li>
+          <li class="vid">Shorts</li>
+        </ul>
+      </article>
+      <article>
+        <h3>From a script</h3>
+        <p>
+          Explainers, product demos, shorts. Write the script, drop in your clips and a voice-over, and let the agent build the
+          titles and animations.
+        </p>
+        <pre class="doc"><code><span class="h">## Hook</span>
+Three cafés, one street.
+<span class="m">![](clips/street.mov)</span>
+
+<span class="h">## The secret spot</span>
+Show the sign, then my reaction.</code></pre>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .flows {
+    padding-block: clamp(56px, 8vw, 110px);
+  }
+
+  h2 {
+    font-size: clamp(2.3rem, 6vw, 5rem);
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(32px, 5vw, 72px);
+    margin-top: clamp(40px, 6vw, 72px);
+  }
+
+  article {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+  }
+
+  h3 {
+    margin: 0;
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    font-weight: 700;
+    font-stretch: 118%;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  p {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--muted);
+  }
+
+  .doc {
+    margin: 10px 0 0;
+    padding: 18px 20px;
+    border-left: 3px solid var(--sub);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 13.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+
+  .h {
+    color: var(--sub);
+    font-weight: 700;
+  }
+
+  .m {
+    color: var(--faint);
+  }
+
+  .ops {
+    display: flex;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    gap: 3px;
+  }
+
+  .ops li {
+    flex: 1;
+    min-width: 0;
+    padding: 34px 10px 10px;
+    border-radius: 3px;
+    background: #2f4a3c;
+    box-shadow: inset 0 3px 0 var(--audio);
+    font-size: 13.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ops li.sub {
+    background: #4a3a55;
+    box-shadow: inset 0 3px 0 var(--sub);
+  }
+
+  .ops li.vid {
+    background: #3f5373;
+    box-shadow: inset 0 3px 0 var(--video);
+  }
+
+  @media (max-width: 760px) {
+    .pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ops {
+      flex-wrap: wrap;
+    }
+
+    .ops li {
+      flex: 1 1 30%;
+    }
+  }
+</style>

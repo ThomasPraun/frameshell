@@ -1,0 +1,228 @@
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+
+/*
+ * Same graphite + tally amber as the app (apps/desktop/src/renderer/src/styles.css).
+ * Amber marks the playhead, focus and the primary action; track colours appear only on media.
+ */
+:root {
+  color-scheme: dark;
+  --ink: #141517;
+  --panel: #1d1e20;
+  --raised: #26272a;
+  --hover: #303135;
+  --line: #34363a;
+  --line-soft: #26272b;
+  --text: #e4e3dc;
+  --muted: #a3a49f;
+  --faint: #6b6c70;
+  --tally: #e3a53c;
+  --tally-soft: rgba(227, 165, 60, 0.14);
+  --video: #7092c4;
+  --audio: #6fae8b;
+  --sub: #b48acb;
+  --gen: #66c2e0;
+  --danger: #e0675f;
+
+  --sans: "Archivo Variable", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono Variable", Menlo, Consolas, monospace;
+
+  --gutter: clamp(16px, 4vw, 48px);
+  --max: 1240px;
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font: 400 17px/1.6 var(--sans);
+  font-stretch: 100%;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--tally);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--tally);
+  color: var(--ink);
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+.wrap {
+  width: 100%;
+  max-width: var(--max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Section heading: wide Archivo, the page's one display voice. */
+.display {
+  margin: 0;
+  font-weight: 800;
+  font-stretch: 125%;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+
+/* Section headings widen into place as they scroll in, echoing the hero's load moment. */
+@supports (animation-timeline: view()) {
+  h2.display {
+    animation: widen linear both;
+    animation-timeline: view();
+    animation-range: entry 10% cover 40%;
+  }
+
+  @keyframes widen {
+    from {
+      font-stretch: 72%;
+      opacity: 0.25;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  h2.display {
+    animation: none !important;
+  }
+}
+
+.lede {
+  color: var(--muted);
+  max-width: 60ch;
+  font-size: 1.12rem;
+  text-wrap: pretty;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: 600 15px/1 var(--sans);
+  font-stretch: 110%;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn:hover {
+  border-color: var(--faint);
+  background: var(--panel);
+}
+
+.btn-primary {
+  border-color: var(--tally);
+  background: var(--tally);
+  color: #1a1408;
+}
+
+.btn-primary:hover {
+  border-color: #f0b75a;
+  background: #f0b75a;
+}
+
+.btn svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+/* Copyable shell command. */
+.cmd {
+  display: flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: 14px/1.4 var(--mono);
+}
+
+.cmd code {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: inherit;
+}
+
+.cmd code::before {
+  content: "$ ";
+  color: var(--tally);
+}
+
+.cmd button {
+  flex: none;
+  padding: 0 14px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font: 500 13px var(--sans);
+  cursor: pointer;
+}
+
+.cmd button:hover {
+  color: var(--text);
+}
+
+.cmd button[data-copied] {
+  color: var(--tally);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,167 @@
+---
+import { REPO, RELEASES } from "../site";
+
+interface Props {
+  version: string;
+}
+const { version } = Astro.props;
+---
+
+<section class="hero" data-marker="Intro">
+  <div class="wrap">
+    <h1 class="display headline">
+      <span class="trim"><span>An IDE</span></span>
+      <span class="trim"><span>for video.</span></span>
+    </h1>
+
+    <div class="intro">
+      <p class="lede">
+        Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles, your logo and zooms, and turns one
+        recording into vertical shorts. You watch every change in the preview and the timeline, and fix anything by hand.
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href={RELEASES} data-download>
+          <svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path
+              d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"></path></svg
+          >
+          <span data-download-label>Download</span>
+        </a>
+        <a class="btn" href={REPO}>View source on GitHub</a>
+      </div>
+      <p class="meta">
+        <span data-version>v{version}</span> for macOS, Windows and Linux. Free and open source,{" "}
+        <a href={`${REPO}/blob/main/LICENSE`}>Apache 2.0</a>.
+        {" "}<a href="#start">Other downloads</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    padding-top: clamp(48px, 9vh, 110px);
+  }
+
+  .headline {
+    font-size: clamp(3.4rem, 12.5vw, 11.5rem);
+    line-height: 0.88;
+  }
+
+  /*
+   * Load moment: each line opens like a clip trimmed out from its in-point, the amber handle
+   * leading, while the type widens from condensed to wide.
+   */
+  .trim {
+    position: relative;
+    display: block;
+    width: fit-content;
+  }
+
+  .trim > span {
+    display: block;
+    padding-bottom: 0.06em;
+    animation:
+      trim-open 1.1s var(--ease) both,
+      stretch 1.3s var(--ease) both;
+  }
+
+  .trim::after {
+    content: "";
+    position: absolute;
+    top: 0.08em;
+    bottom: 0.06em;
+    left: 0;
+    width: 0.09em;
+    border-radius: 0.03em;
+    background: var(--tally);
+    animation: handle 1.1s var(--ease) both;
+  }
+
+  .trim:nth-child(2) > span,
+  .trim:nth-child(2)::after {
+    animation-delay: 0.22s;
+  }
+
+  @keyframes trim-open {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 -0.2em 0 0);
+    }
+  }
+
+  @keyframes stretch {
+    from {
+      font-stretch: 70%;
+    }
+  }
+
+  @keyframes handle {
+    0% {
+      left: 0;
+      opacity: 1;
+    }
+    80% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% + 0.08em);
+      opacity: 0;
+    }
+  }
+
+  .intro {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 20px 48px;
+    margin-top: clamp(28px, 4vw, 48px);
+  }
+
+  .lede {
+    margin: 0;
+    grid-column: 1;
+  }
+
+  .actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .meta {
+    grid-column: 1;
+    margin: 0;
+    color: var(--faint);
+    font-size: 14px;
+  }
+
+  .meta a {
+    color: var(--muted);
+    text-underline-offset: 3px;
+  }
+
+  .meta a + a {
+    margin-left: 10px;
+  }
+
+  @media (max-width: 900px) {
+    .intro {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .actions {
+      grid-column: 1;
+      grid-row: auto;
+    }
+  }
+</style>

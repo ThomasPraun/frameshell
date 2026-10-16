@@ -1,0 +1,69 @@
+---
+import Logo from "./Logo.astro";
+import { REPO } from "../site";
+---
+
+<footer class="footer">
+  <div class="wrap row">
+    <div class="brand">
+      <Logo size={22} />
+      <span>frameshell</span>
+    </div>
+    <nav aria-label="Footer">
+      <a href={REPO}>GitHub</a>
+      <a href={`${REPO}/blob/main/docs/SPEC.md`}>Specification</a>
+      <a href={`${REPO}/blob/main/docs/mcp.md`}>MCP server</a>
+      <a href={`${REPO}/blob/main/LICENSE`}>License</a>
+    </nav>
+  </div>
+  <p class="wrap legal">
+    Apache License 2.0. "Frameshell" and its logo are trademarks of the project; forks must use a different name.
+  </p>
+</footer>
+
+<style>
+  .footer {
+    padding-block: 40px 48px;
+    border-top: 1px solid var(--line-soft);
+    font-size: 14px;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 800;
+    font-stretch: 125%;
+    font-size: 16px;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+  }
+
+  nav a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  nav a:hover {
+    color: var(--text);
+  }
+
+  .legal {
+    margin-top: 24px;
+    margin-bottom: 0;
+    color: var(--faint);
+    font-size: 13px;
+  }
+</style>

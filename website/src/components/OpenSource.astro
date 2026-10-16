@@ -1,0 +1,137 @@
+---
+import { REPO } from "../site";
+---
+
+<section class="oss" data-marker="Open source">
+  <div class="wrap">
+    <div class="head">
+      <h2 class="display">Open source,<br />Apache 2.0.</h2>
+      <p class="lede">
+        Frameshell is free and built in the open. The specification, the decisions behind it and every release live on GitHub.
+      </p>
+    </div>
+    <ul class="links">
+      <li>
+        <a href={REPO}>
+          <strong>Star the repo</strong>
+          <span>Follow releases and the roadmap.</span>
+        </a>
+      </li>
+      <li>
+        <a href={`${REPO}/blob/main/CONTRIBUTING.md`}>
+          <strong>Contribute</strong>
+          <span>Pick an open issue. Commits are signed off under the DCO, no CLA.</span>
+        </a>
+      </li>
+      <li>
+        <a href={`${REPO}/issues`}>
+          <strong>Report a bug</strong>
+          <span>It's alpha. Rough edges are expected; tell us where.</span>
+        </a>
+      </li>
+      <li>
+        <a href={`${REPO}/blob/main/CHANGELOG.md`}>
+          <strong>Changelog</strong>
+          <span>What changed in each version.</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .oss {
+    padding-block: clamp(64px, 10vw, 140px);
+    border-top: 1px solid var(--line-soft);
+    background:
+      repeating-linear-gradient(90deg, transparent 0 79px, var(--line-soft) 79px 80px) top / 100% 14px no-repeat,
+      var(--ink);
+  }
+
+  .head {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    align-items: end;
+    gap: 24px 64px;
+  }
+
+  h2 {
+    font-size: clamp(2.3rem, 6vw, 5rem);
+  }
+
+  .lede {
+    margin: 0;
+  }
+
+  .links {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: clamp(40px, 6vw, 72px) 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .links li + li {
+    border-left: 1px solid var(--line);
+  }
+
+  .links a {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 22px 22px 26px;
+    text-decoration: none;
+    transition: background-color 0.2s;
+  }
+
+  .links a:hover {
+    background: var(--panel);
+  }
+
+  .links a:hover strong {
+    color: var(--tally);
+  }
+
+  strong {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-stretch: 112%;
+    transition: color 0.2s;
+  }
+
+  .links span {
+    color: var(--muted);
+    font-size: 15px;
+  }
+
+  @media (max-width: 900px) {
+    .head {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .links {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .links li:nth-child(3) {
+      border-left: 0;
+    }
+
+    .links li:nth-child(n + 3) {
+      border-top: 1px solid var(--line);
+    }
+  }
+
+  @media (max-width: 520px) {
+    .links {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .links li + li {
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+  }
+</style>
