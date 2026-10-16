@@ -1,6 +1,7 @@
 import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { TimelineView } from "@frameshell/protocol";
 import { openAskMenu } from "../ask/ask-agent.js";
+import { rich, t } from "../i18n.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, selection, unionRange, useSelection } from "../selection.js";
 import { formatTimecode, layoutTimeline } from "../timeline/layout.js";
@@ -149,7 +150,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     const plan = restorePlan(current.view, current.model, keys);
     if (!plan) return;
     const texts = plan.keys.map((key) => textOf(current.model!, key));
-    const what = texts.length === 1 ? `“${texts[0]}”` : `${texts.length} words`;
+    const what = texts.length === 1 ? `“${texts[0]}”` : t.transcript.words(texts.length);
     setRestoring(new Set(plan.keys));
     try {
       await window.frameshell.timeline.edit(SELECTION_TIMELINE, plan.edits);
@@ -159,19 +160,18 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       if (left.length > 0) {
         await window.frameshell.timeline.undo(SELECTION_TIMELINE);
         const which = left.map((key) => `“${textOf(current.model!, key)}”`).join(", ");
-        setStatus({ tone: "error", text: `${what} not restored: the edit left ${which} cut, so it was undone.` });
+        setStatus({ tone: "error", text: t.transcript.notRestoredLeft(what, which) });
         return;
       }
       const [step] = plan.steps;
-      const how = plan.steps.length === 1 ? `: ${step!.how === "extend" ? `extended ${step!.clip}` : `inserted after ${step!.clip}`}` : "";
+      const how =
+        plan.steps.length === 1 ? (step!.how === "extend" ? t.transcript.stepExtended(step!.clip) : t.transcript.stepInserted(step!.clip)) : "";
       const held =
-        plan.held.length === 0
-          ? ""
-          : `. ${trackLabels(current.view, plan.held)} kept in place so no gap opened: check their sync after this point.`;
-      setStatus({ tone: held ? "warning" : "info", text: `Restored ${what}${how}${held}` });
+        plan.held.length === 0 ? "" : t.transcript.held(trackLabels(current.view, plan.held));
+      setStatus({ tone: held ? "warning" : "info", text: t.transcript.restored(what, how, held) });
       setMarked(null);
     } catch (failure) {
-      setStatus({ tone: "error", text: `${what} not restored: ${(failure as Error).message}` });
+      setStatus({ tone: "error", text: t.transcript.notRestored(what, (failure as Error).message) });
     } finally {
       setRestoring(new Set());
     }
@@ -187,11 +187,11 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       await window.frameshell.files.write(path, withWordText(content, word.id, text));
       setStatus(
         text.trim() === ""
-          ? { tone: "info", text: `“${word.text}” reads as transcribed again.` }
-          : { tone: "info", text: `Corrected “${word.text}” to “${text.trim()}”.` },
+          ? { tone: "info", text: t.transcript.readsAgain(word.text) }
+          : { tone: "info", text: t.transcript.corrected(word.text, text.trim()) },
       );
     } catch (failure) {
-      setStatus({ tone: "error", text: `“${word.text}” not corrected: ${(failure as Error).message}` });
+      setStatus({ tone: "error", text: t.transcript.notCorrected(word.text, (failure as Error).message) });
     }
   };
 
@@ -219,25 +219,25 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     if (!struck && !selected.has(word.key)) selectRange(asset, index, index, false);
     const items: MenuItem[] = [];
     if (inMarked && markedStruck.length > 1) {
-      items.push({ label: `Restore ${markedStruck.length} cut words`, run: () => void restore(markedStruck.map((w) => w.key)) });
+      items.push({ label: t.transcript.restoreCut(markedStruck.length), run: () => void restore(markedStruck.map((w) => w.key)) });
     } else if (struck) {
       const run = struckRun(asset.words, index);
-      items.push({ label: `Restore “${word.text}”`, run: () => void restore([word.key]) });
-      if (run.length > 1) items.push({ label: `Restore cut passage (${run.length} words)`, run: () => void restore(run) });
+      items.push({ label: t.transcript.restoreWord(word.text), run: () => void restore([word.key]) });
+      if (run.length > 1) items.push({ label: t.transcript.restorePassage(run.length), run: () => void restore(run) });
     }
-    items.push({ label: "Edit text…", shortcut: "F2", run: () => setEditing(word.key) });
+    items.push({ label: t.transcript.editText, shortcut: "F2", run: () => setEditing(word.key) });
     openAskMenu(event, items);
   };
 
   const fps = view?.fps ?? 30;
   let body: ReactNode;
   if (!model) {
-    body = <div className="empty editor-empty">{error ?? "Reading the timeline…"}</div>;
+    body = <div className="empty editor-empty">{error ?? t.transcript.reading}</div>;
   } else if (model.assets.length === 0 && model.missing.length === 0) {
     body = (
       <div className="empty editor-empty">
-        <p>No media on the timeline yet.</p>
-        <p className="hint">Clips from assets/ show their spoken words here once transcribed.</p>
+        <p>{t.transcript.noMedia}</p>
+        <p className="hint">{t.transcript.noMediaHint}</p>
       </div>
     );
   } else {
@@ -268,13 +268,13 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
               <span className="transcript-asset-name">{asset}</span>
             </header>
             <p className="hint">
-              Not transcribed yet. Run <code>frameshell transcribe {asset}</code> in the terminal.
+              {rich(t.transcript.notTranscribed, { command: <code>frameshell transcribe {asset}</code> })}
             </p>
           </section>
         ))}
         {broken.map(({ path, message }) => (
           <div key={path} className="editor-notice is-error" role="alert">
-            {`${path} cannot be read: ${message}`}
+            {t.transcript.cannotRead(path, message)}
           </div>
         ))}
       </>
@@ -286,11 +286,11 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       <div className="transcript-toolbar">
         {markedStruck.length > 0 ? (
           <button className="link transcript-restore-marked" disabled={restoring.size > 0} onClick={() => void restore(markedStruck.map((word) => word.key))}>
-            {`Restore ${markedStruck.length} cut ${markedStruck.length === 1 ? "word" : "words"}`}
+            {t.transcript.restoreCut(markedStruck.length)}
           </button>
         ) : (
           <span className="hint">
-            Click a struck word to restore it, ↺ for a whole cut passage. Click or drag to select; double-click a word to fix its text.
+            {t.transcript.hint}
           </span>
         )}
         <span
@@ -307,7 +307,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
         data-testid="transcript"
         tabIndex={0}
         role="region"
-        aria-label="Transcript. Click a struck word to restore it; click or drag over words to select them; F2 edits the selected word; Escape clears."
+        aria-label={t.transcript.region}
         onWheel={() => (lastUserScroll.current = performance.now())}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
@@ -366,14 +366,14 @@ function AssetSection({
     <section className="transcript-asset" data-transcript={asset.path}>
       <header className="transcript-asset-head">
         <span className="transcript-asset-name">{asset.asset}</span>
-        <span className="panel-meta">{`${kept} of ${asset.words.length} words on the timeline`}</span>
+        <span className="panel-meta">{t.transcript.onTimeline(kept, asset.words.length)}</span>
         <button className="link" onClick={() => onOpenFile(asset.path)}>
-          Open JSON
+          {t.transcript.openJson}
         </button>
       </header>
       {stale && (
         <div className="editor-notice" role="status">
-          {`${asset.asset} changed after it was transcribed: words may sit at the wrong times. Run frameshell transcribe ${asset.asset} again.`}
+          {t.transcript.stale(asset.asset)}
         </div>
       )}
       {paragraphs(asset.words).map((words) => {
@@ -381,7 +381,7 @@ function AssetSection({
         return (
           <p key={words[0]!.key} className="transcript-para">
             <span className="transcript-time" aria-hidden="true">
-              {first ? formatTimecode(first.from, fps) : "cut"}
+              {first ? formatTimecode(first.from, fps) : t.transcript.cut}
             </span>
             <span className="transcript-words">
               {words.map((word) => {
@@ -405,14 +405,14 @@ function AssetSection({
                   struck && inMarked ? "is-marked" : "",
                   restoring.has(word.key) ? "is-restoring" : "",
                 ];
-                const hidden = word.speechInside ? " Holds more speech than this word; do not cut inside it." : "";
+                const hidden = word.speechInside ? t.transcript.speechInside : "";
                 return (
                   <span key={word.key}>
                     {run.length > 1 && (
                       <button
                         className="transcript-restore-run"
-                        aria-label={`Restore ${run.length} cut words`}
-                        title={`Restore these ${run.length} cut words in one step`}
+                        aria-label={t.transcript.restoreCut(run.length)}
+                        title={t.transcript.restoreRunTitle(run.length)}
                         disabled={restoring.size > 0}
                         onClick={() => onRestore(run)}
                       >
@@ -424,7 +424,7 @@ function AssetSection({
                       data-key={word.key}
                       data-word={word.id}
                       data-state={struck ? "struck" : "kept"}
-                      title={(struck ? "Cut from the timeline. Click to restore." : `${formatTimecode(word.placements[0]!.from, fps)} · double-click to fix the text`) + hidden}
+                      title={(struck ? t.transcript.struckTitle : t.transcript.keptTitle(formatTimecode(word.placements[0]!.from, fps))) + hidden}
                       onPointerDown={(event) => onPointerDown(event, asset, i)}
                       onPointerEnter={(event) => onPointerEnter(event, asset, i)}
                       onContextMenu={(event) => onContextMenu(event, asset, i)}
@@ -461,7 +461,7 @@ function WordEditor({ text, onDone }: { text: string; onDone: (text: string | nu
     <input
       ref={input}
       className="tw-edit"
-      aria-label={`Text of “${text}”`}
+      aria-label={t.transcript.wordLabel(text)}
       defaultValue={text}
       size={Math.max(text.length + 2, 6)}
       onPointerDown={(event) => event.stopPropagation()}

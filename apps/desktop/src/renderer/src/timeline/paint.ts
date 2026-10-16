@@ -1,5 +1,6 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
+import { t } from "../i18n.js";
 import type { CueBox } from "../subtitles/model.js";
 import {
   type ClipBox,
@@ -439,7 +440,7 @@ function paintLabel<Img>(ctx: Paint2D<Img>, clip: ClipBox, left: number, w: numb
   ctx.fillStyle = theme.text;
   ctx.fillText(clip.name, textX, y + 11);
   const nameWidth = ctx.measureText(clip.name).width;
-  const detail = clip.problem ? "length unknown" : [formatDuration(clip.end - clip.start), ...clipBadges(clip)].join(", ");
+  const detail = clip.problem ? t.timeline.lengthUnknownShort : [formatDuration(clip.end - clip.start), ...clipBadges(clip)].join(", ");
   ctx.font = `10px ${theme.fontMono}`;
   if (nameWidth + 8 + ctx.measureText(detail).width <= room) {
     ctx.fillStyle = clip.problem ? theme.danger : theme.textMuted;
@@ -481,11 +482,11 @@ function paintThumbnails<Img>(
 /** Non-default audio and transform settings, short, for the clip label. */
 export function clipBadges(clip: ClipBox): string[] {
   const badges: string[] = [];
-  if (clip.muted) badges.push("muted");
+  if (clip.muted) badges.push(t.timeline.muted);
   else if (clip.gain !== 0) badges.push(`${clip.gain > 0 ? "+" : ""}${Number(clip.gain.toFixed(1))} dB`);
-  const t = clip.transform;
-  if (t && (t.x !== 0 || t.y !== 0 || t.scale !== 1)) badges.push(`${Math.round(t.scale * 100)}%`);
-  if (t && t.opacity !== 1) badges.push(`${Math.round(t.opacity * 100)}% opacity`);
+  const tr = clip.transform;
+  if (tr && (tr.x !== 0 || tr.y !== 0 || tr.scale !== 1)) badges.push(`${Math.round(tr.scale * 100)}%`);
+  if (tr && tr.opacity !== 1) badges.push(t.timeline.opacity(Math.round(tr.opacity * 100)));
   return badges;
 }
 
@@ -552,7 +553,7 @@ function paintSubtitleLane<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: 
   ctx.textAlign = "left";
   if (cues.length === 0) {
     ctx.fillStyle = theme.textFaint;
-    ctx.fillText(`Words show here once the clips of ${row.followsLabel ?? "the followed track"} are transcribed`, 8, top + row.height / 2);
+    ctx.fillText(t.timeline.wordsShowHere(row.followsLabel ?? t.timeline.followedTrack), 8, top + row.height / 2);
     return 0;
   }
   const y = top + CLIP_INSET_Y;

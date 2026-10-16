@@ -15,6 +15,7 @@ import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/
 import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
+import { rich, t } from "../i18n.js";
 import { listenEverywhere } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
@@ -170,7 +171,7 @@ export function TimelinePanel({
     (direction: HistoryCommand) =>
       run(async () => {
         const result = await window.frameshell.timeline[direction](TIMELINE);
-        if (!result) setStatus({ tone: "info", text: direction === "undo" ? "Nothing to undo" : "Nothing to redo" });
+        if (!result) setStatus({ tone: "info", text: direction === "undo" ? t.timeline.nothingToUndo : t.timeline.nothingToRedo });
         return result;
       }),
     [run],
@@ -207,36 +208,35 @@ export function TimelinePanel({
   return (
     <>
       <PanelHeader
-        actions={onDetach && <DetachButton name="timeline" detached={detached} onClick={onDetach} testId="timeline-detach" />}
+        actions={onDetach && <DetachButton name={t.workspace.timeline.toLowerCase()} detached={detached} onClick={onDetach} testId="timeline-detach" />}
         onCollapse={onToggle}
-        collapseLabel={collapsed ? "Show timeline" : "Hide timeline"}
+        collapseLabel={collapsed ? t.timeline.showTimeline : t.timeline.hideTimeline}
         collapseSide={collapsed ? "up" : "down"}
       >
-        <span className="panel-title">Timeline</span>
+        <span className="panel-title">{t.workspace.timeline}</span>
         <span className="panel-meta">{TIMELINE}</span>
         <span className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
           {status?.text ?? ""}
         </span>
         {history !== null && <DiffLegend target={history} marks={marks} />}
         {onShowTranscript && (
-          <button className="link" aria-label="Show transcript" title={`Open the transcript view (${TRANSCRIPT_SHORTCUT})`} onClick={onShowTranscript}>
-            Transcript
+          <button className="link" aria-label={t.timeline.showTranscript} title={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
+            {t.workspace.transcript}
           </button>
         )}
         {view && layout && (
           <span className="panel-meta timeline-summary">
-            {`${layout.clipCount} ${layout.clipCount === 1 ? "clip" : "clips"}, ${formatTimecode(layout.duration, view.fps)}`}
+            {`${t.workspace.clips(layout.clipCount)}, ${formatTimecode(layout.duration, view.fps)}`}
           </span>
         )}
       </PanelHeader>
       {!collapsed && rejection && (
         <div className="editor-notice is-error timeline-rejection" role="alert">
           <span>
-            {`Edit of timelines/${rejection.timeline}.json rejected (${rejection.reason}); the timeline was restored. ` +
-              `Your version is kept at ${rejection.preserved}.\n${rejection.message}`}
+            {t.timeline.rejected(rejection.timeline, rejection.reason, rejection.preserved, rejection.message)}
           </span>
           <button className="link" onClick={dismissRejection}>
-            Dismiss
+            {t.timeline.dismiss}
           </button>
         </div>
       )}
@@ -252,9 +252,7 @@ export function TimelinePanel({
             error && !view ? (
               <p className="timeline-error">{error}</p>
             ) : empty || (layout && layout.rows.length === 0) ? (
-              <p>
-                Ask the agent in the terminal to cut your footage, or drop media into <code>assets/</code>.
-              </p>
+              <p>{rich(t.timeline.emptyHint, { assets: <code>assets/</code> })}</p>
             ) : null
           }
         />
@@ -264,15 +262,7 @@ export function TimelinePanel({
 }
 
 /** Screen-reader summary of the lanes' mouse and keyboard controls. */
-const KEYS_LABEL =
-  "Timeline lanes. Click selects a clip, Shift or " +
-  `${isMac ? "Command" : "Control"}+click adds or removes one, ${isMac ? "Command" : "Control"}+A selects all; ` +
-  "drag moves the selected clips, drag an edge to trim (Shift when pressing it, or R, ripple trims: later clips follow); " +
-  "drag over empty space selects a time range; the ruler moves the playhead. " +
-  "Click a subtitle cue to select its words, or a subtitle lane to set its style. " +
-  "S splits at the playhead, [ and ] trim to it, comma and period nudge a frame, Delete removes, Shift+Delete ripple deletes, " +
-  "arrows move the playhead, N toggles snapping, Escape clears. Plus and minus zoom, 0 fits the timeline. " +
-  `${isMac ? "Command" : "Control"}+Z undoes, ${isMac ? "Command+Shift+Z" : "Control+Y"} redoes, also from the Edit menu.`;
+const KEYS_LABEL = t.timeline.keysLabel(isMac);
 
 function TimelineCanvas({
   layout,
@@ -763,7 +753,7 @@ function TimelineCanvas({
   const addSubtitles = () => {
     const follows = subtitleSource(latest.current.layout, selectedClips, subtitles);
     if (!follows) {
-      onStatus({ tone: "info", text: "Add a video or audio track first: subtitles follow one" });
+      onStatus({ tone: "info", text: t.timeline.addTrackFirst });
       return;
     }
     send([{ op: "track.add", args: { kind: "subtitles", follows, style: { preset: "big-keyword" } } }], (result) => {
@@ -841,7 +831,7 @@ function TimelineCanvas({
       schedule();
       // Sent, one member's refusal would leave the others moved: say why instead.
       if (current.preview?.blocked && current.preview.others.length > 0) {
-        onStatus({ tone: "error", text: `Not moved: ${current.preview.others.length + 1} clips would overlap a clip that stays` });
+        onStatus({ tone: "error", text: t.timeline.notMoved(current.preview.others.length + 1) });
       }
       return;
     }
@@ -874,27 +864,27 @@ function TimelineCanvas({
     <div className="timeline-body">
       <div className="timeline-heads">
         <div className="ruler-spacer">
-          <div className="timeline-zoom" role="group" aria-label="Timeline zoom and snapping">
-            <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" onClick={() => zoom(1 / ZOOM_STEP)}>
+          <div className="timeline-zoom" role="group" aria-label={t.timeline.zoomGroup}>
+            <button className="icon-button" aria-label={t.timeline.zoomOut} title={t.timeline.zoomOutTitle} onClick={() => zoom(1 / ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
-            <button className="icon-button" aria-label="Zoom to fit" title="Zoom to fit (0)" onClick={fit}>
+            <button className="icon-button" aria-label={t.timeline.zoomFit} title={t.timeline.zoomFitTitle} onClick={fit}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
-            <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" onClick={() => zoom(ZOOM_STEP)}>
+            <button className="icon-button" aria-label={t.timeline.zoomIn} title={t.timeline.zoomInTitle} onClick={() => zoom(ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8M8 4v8" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
             <button
               className={`icon-button snap-toggle${snapping ? " on" : ""}`}
-              aria-label="Snapping"
+              aria-label={t.timeline.snapping}
               aria-pressed={snapping}
-              title={`Snap to clip edges and the playhead (N; hold ${isMac ? "Option" : "Alt"} to invert)`}
+              title={t.timeline.snappingTitle(isMac)}
               onClick={() => setSnapping((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -903,9 +893,9 @@ function TimelineCanvas({
             </button>
             <button
               className={`icon-button snap-toggle${rippling ? " on" : ""}`}
-              aria-label="Ripple trim"
+              aria-label={t.timeline.rippleTrim}
               aria-pressed={rippling}
-              title="Ripple trim: edge drags move later clips along, leaving no gap (R; hold Shift when pressing an edge to invert)"
+              title={t.timeline.rippleTrimTitle}
               onClick={() => setRippling((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -914,8 +904,8 @@ function TimelineCanvas({
             </button>
             <button
               className="icon-button"
-              aria-label="Add subtitle track"
-              title="Add subtitles: the transcript words of the selected clip's track (or the first transcribed one)"
+              aria-label={t.timeline.addSubtitleTrack}
+              title={t.timeline.addSubtitleTitle}
               disabled={!layout?.rows.some((row) => row.kind !== "subtitles")}
               onClick={addSubtitles}
             >
@@ -934,13 +924,13 @@ function TimelineCanvas({
                   key={row.id}
                   className={`track-head track-${row.kind}${selectedTrack === row.id ? " is-selected" : ""}`}
                   style={{ height: row.height }}
-                  title={`${row.id}: select to set its style`}
+                  title={t.timeline.subtitleHeadTitle(row.id)}
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
                 >
                   <span className="track-id">{row.label}</span>
-                  <span className="track-label">{row.name ?? `Words of ${row.followsLabel ?? "?"}`}</span>
+                  <span className="track-label">{row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}</span>
                 </button>
               ) : (
                 <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>
@@ -996,14 +986,14 @@ function DiffLegend({ target, marks }: { target: string; marks: readonly ClipDif
   const counts = marks ? diffCounts(marks) : null;
   return (
     <span className="timeline-diff-legend" data-history={target}>
-      <span className="panel-meta" title={`Changes of ${target}`}>
+      <span className="panel-meta" title={t.timeline.changesOf(target)}>
         {target}
       </span>
       {counts &&
         (["added", "removed", "moved", "changed"] as const)
           .filter((kind) => counts[kind] > 0)
-          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${kind}`}</span>)}
-      <button className="icon-button" aria-label="Stop showing these changes" title="Stop showing these changes (Esc on the lanes)" onClick={() => selection.clear()}>
+          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${t.timeline.diffKinds[kind]}`}</span>)}
+      <button className="icon-button" aria-label={t.timeline.stopShowing} title={t.timeline.stopShowingTitle} onClick={() => selection.clear()}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
@@ -1031,24 +1021,24 @@ function describe(result: OperationResult, fps: number, clips: number): Status {
   if (rough) {
     return {
       tone: "error",
-      text: `No pause within ${rough.window} s of ${formatTimecode(rough.applied, fps)}: speech may be clipped there`,
+      text: t.timeline.roughSnap(rough.window, formatTimecode(rough.applied, fps)),
     };
   }
   const moved = result.snaps.find((snap) => Math.abs(snap.applied - snap.requested) >= 0.0005);
-  if (moved) return { tone: "info", text: `Edge snapped ${formatDuration(Math.abs(moved.applied - moved.requested))} into a pause` };
+  if (moved) return { tone: "info", text: t.timeline.edgeSnapped(formatDuration(Math.abs(moved.applied - moved.requested))) };
   const label = OP_LABELS[result.operation.op] ?? result.operation.op;
-  return { tone: "info", text: clips > 1 ? `${label} of ${clips} clips saved as one step` : `${label} saved` };
+  return { tone: "info", text: clips > 1 ? t.timeline.savedMany(label, clips) : t.timeline.saved(label) };
 }
 
 const OP_LABELS: Record<string, string> = {
-  "clip.move": "Move",
-  "clip.trim": "Trim",
-  "clip.split": "Split",
-  "clip.remove": "Delete",
-  cut: "Ripple delete",
-  revert: "Undo",
-  "track.add": "New track",
-  "track.set": "Track change",
+  "clip.move": t.timeline.ops.move,
+  "clip.trim": t.timeline.ops.trim,
+  "clip.split": t.timeline.ops.split,
+  "clip.remove": t.timeline.ops.remove,
+  cut: t.timeline.ops.cut,
+  revert: t.timeline.ops.revert,
+  "track.add": t.timeline.ops.trackAdd,
+  "track.set": t.timeline.ops.trackSet,
 };
 
 /**
@@ -1070,10 +1060,10 @@ function nothingToDo(command: EditCommand, anySelected: boolean): string {
   switch (command.kind) {
     case "split":
     case "trim":
-      return anySelected ? "No selected clip under the playhead" : "No clip under the playhead";
+      return anySelected ? t.timeline.noSelectedUnderPlayhead : t.timeline.noClipUnderPlayhead;
     case "nudge":
     case "delete":
-      return anySelected ? "Nothing to change" : "Select a clip first";
+      return anySelected ? t.timeline.nothingToChange : t.timeline.selectClipFirst;
   }
 }
 
@@ -1083,10 +1073,10 @@ function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x:
     <div className="clip-tooltip" style={{ left: hover.x + 12, top: hover.y + 14 }} role="tooltip">
       <strong>{clip.name}</strong>
       <span>
-        {formatTimecode(clip.start, fps)} to {formatTimecode(clip.end, fps)}
+        {t.timeline.range(formatTimecode(clip.start, fps), formatTimecode(clip.end, fps))}
       </span>
       <span className="clip-tooltip-faint">
-        {clip.problem ? clip.problem : `${formatDuration(clip.end - clip.start)} on ${row.label}, ${clip.type}`}
+        {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clip.type)}
       </span>
       <span className="clip-tooltip-faint">{clip.id}</span>
     </div>
@@ -1096,9 +1086,9 @@ function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x:
 /** Where the dragged clip or edge would land, next to the pointer. */
 function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; y: number; fps: number }) {
   const { part, clip, row } = preview;
-  const moved = preview.others.length > 0 ? `${preview.others.length + 1} clips` : clip.name;
-  const trim = preview.ripple ? "Ripple trim" : "Trim";
-  const title = part === "body" ? `Move ${moved}` : `${trim} ${part === "head" ? "start" : "end"} of ${clip.name}`;
+  const moved = preview.others.length > 0 ? t.timeline.clipsCount(preview.others.length + 1) : clip.name;
+  const title =
+    part === "body" ? t.timeline.moveTitle(moved) : (part === "head" ? t.timeline.trimStart : t.timeline.trimEnd)(preview.ripple, clip.name);
   // A ripple head trim keeps the clip's left edge: its source in moves instead.
   const shift = part === "head" && preview.ripple ? (preview.edge - clip.start) * clip.speed : null;
   const time = part === "tail" ? preview.end : preview.start;
@@ -1106,14 +1096,14 @@ function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; 
     <div className="clip-tooltip drag-tooltip" style={{ left: x + 12, top: y + 14 }} role="tooltip">
       <strong>{title}</strong>
       <span>
-        {shift !== null ? `Source in ${shift < 0 ? "-" : "+"}${formatDuration(Math.abs(shift))}` : formatTimecode(time, fps)}
-        {part === "body" && row.id !== preview.from.id ? ` on ${row.label}` : ""}
+        {shift !== null ? t.timeline.sourceIn(shift < 0 ? "-" : "+", formatDuration(Math.abs(shift))) : formatTimecode(time, fps)}
+        {part === "body" && row.id !== preview.from.id ? t.timeline.onTrack(row.label) : ""}
       </span>
       <span className={preview.blocked ? "clip-tooltip-danger" : "clip-tooltip-faint"}>
         {preview.blocked
-          ? "Overlaps a clip: will be refused"
+          ? t.timeline.overlapRefused
           : preview.snapped
-            ? `Snapped to ${preview.snapped.kind === "playhead" ? "the playhead" : "a clip edge"}`
+            ? preview.snapped.kind === "playhead" ? t.timeline.snappedPlayhead : t.timeline.snappedEdge
             : formatDuration(preview.end - preview.start)}
       </span>
     </div>
@@ -1134,7 +1124,7 @@ function ClipList({
 }) {
   if (!layout) return null;
   return (
-    <ul className="sr-only" aria-label="Timeline clips">
+    <ul className="sr-only" aria-label={t.timeline.clipListLabel}>
       {layout.rows.flatMap((row) =>
         row.kind === "subtitles"
           ? (cues.get(row.id) ?? []).map((cue) => (
@@ -1147,7 +1137,7 @@ function ClipList({
                 {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
                 {clip.problem ? `, ${clip.problem}` : ""}
                 {clipBadges(clip).map((badge) => `, ${badge}`).join("")}
-                {selected.has(clip.id) ? ", selected" : ""}
+                {selected.has(clip.id) ? `, ${t.timeline.selected}` : ""}
               </li>
             )),
       )}

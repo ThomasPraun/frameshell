@@ -523,6 +523,7 @@ code {
 .panel-title {
   font-weight: 600;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .panel-meta {
@@ -606,13 +607,14 @@ code {
 
 .view-switch {
   display: flex;
-  gap: 2px;
+  gap: 0;
 }
 
 .view-tab {
   border: 0;
   background: none;
-  padding: 3px 8px;
+  padding: 3px 5px;
+  white-space: nowrap;
   border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
@@ -1341,6 +1343,12 @@ code {
 .clip-inspector.is-empty {
   color: var(--text-faint);
   font-size: 11.5px;
+}
+
+/* Longer translations wrap instead of running past the panel. */
+.clip-inspector.is-empty > span {
+  min-width: 0;
+  white-space: normal;
 }
 
 .clip-inspector-name {
@@ -2727,4 +2735,11 @@ button.track-head:focus-visible {
     width: 100%;
     opacity: 0.5;
   }
+}
+
+.preview-duration {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }

@@ -7,6 +7,7 @@ import { type FrameBox, layerBox, layersIn } from "../preview/transform-edit.js"
 import { transport } from "../preview/transport.js";
 import { type SelectedPoint, type SelectedRegion, selection, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
+import { t } from "../i18n.js";
 
 /** Smaller drags than this (fraction of the frame, both ways) are a click: a pick, not a region. */
 const MIN_REGION = 0.01;
@@ -274,7 +275,7 @@ function outlineOf(hover: Hover, program: Program): { box: FrameBox; label: stri
   }
   const picture = layerBox(program, hover.frame, result.target);
   if (!picture) return null;
-  const note = result.unavailable ? " · no live page" : "";
+  const note = result.unavailable ? ` · ${t.preview.noLivePage}` : "";
   return { box: picture.box, label: `${result.target}${note}`, clip: result.target, element: null };
 }
 

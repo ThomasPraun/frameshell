@@ -24,6 +24,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Generated clips (render cache, keys, background renders, export layers) | `packages/core/src/clips/renderer.ts`, `clips/cache-key.ts`; adapters `plugins/hyperframes` (ADR 0002), `plugins/remotion` (bundle as cache input, outside-project code, `refreshRenders`; ADR 0009); SPEC §6.5 |
 | Plugin host, install, trust; npm the app bundles for machines without Node | `packages/core/src/plugins/host.ts`, `plugins/npm-runtime.ts`, `apps/desktop/scripts/bundle-npm.mjs`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
+| Desktop UI strings (en + es, language choice, parity test) | `apps/desktop/src/shared/i18n/`, renderer `t`/`rich` in `renderer/src/i18n.ts`, main `src/main/language.ts`; `apps/desktop/test/i18n.test.ts` |
 | New project from video (folder beside video, name clash, clone test), drops, Open with (single instance, `open-file`, Windows registry) | `apps/desktop/src/main/video-project.ts`, `main/media-files.ts`, `main/open-paths.ts`, `build/installer.nsh`, `renderer/src/components/Welcome.tsx`, `renderer/src/file-drop.ts`; ADR 0013 |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
@@ -51,7 +52,8 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 ## Rules
 
 - SPEC decisions settled. Want to change one: ask user first, then record ADR.
-- English for code, comments, docs, CLAUDE.md, UI strings (i18n-ready). Talk to user in Spanish.
+- English for code, comments, docs, CLAUDE.md. Talk to user in Spanish.
+- Desktop UI strings: never literal in components. Add to area file in `apps/desktop/src/shared/i18n/`, English + Spanish (neutral Latin American, "tú"). Agent-facing text (CLI, skill, daemon errors, Ask references, journal labels) stays English. e2e pin English (`--lang=en`).
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
 - Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.

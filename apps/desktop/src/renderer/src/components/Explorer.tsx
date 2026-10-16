@@ -1,5 +1,6 @@
 import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import type { FileNode } from "../../../shared/api.js";
+import { t } from "../i18n.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
 
@@ -43,7 +44,7 @@ export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string
   }, []);
 
   if (!tree) return null;
-  if (tree.length === 0) return <p className="empty">This folder is empty.</p>;
+  if (tree.length === 0) return <p className="empty">{t.editor.folderEmpty}</p>;
 
   const toggle = (path: string) =>
     setOpen((current) => {
@@ -54,7 +55,7 @@ export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string
     });
 
   return (
-    <ul className="tree" role="tree" aria-label="Project files">
+    <ul className="tree" role="tree" aria-label={t.editor.projectFiles}>
       <Nodes nodes={tree} depth={0} open={open} onToggle={toggle} onOpenFile={onOpenFile} activeFile={activeFile} picked={picked} />
     </ul>
   );

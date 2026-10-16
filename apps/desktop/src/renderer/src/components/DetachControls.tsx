@@ -1,5 +1,7 @@
 // Controls of detachable panels (ADR 0012): moving a panel to its own window and back.
 
+import { rich, t } from "../i18n.js";
+
 /**
  * Header button that moves a panel to its own window (`detached` false) or
  * docks it back (`detached` true). `name` completes the labels ("Open
@@ -18,7 +20,7 @@ export function DetachButton({
   testId: string;
   disabled?: boolean;
 }) {
-  const label = detached ? `Dock ${name} back` : `Open ${name} in its own window`;
+  const label = detached ? t.workspace.dockBack(name) : t.workspace.openInWindow(name);
   return (
     <button className="icon-button" aria-label={label} title={label} onClick={onClick} disabled={disabled} data-testid={testId}>
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -38,11 +40,9 @@ export function DetachButton({
 export function DockedElsewhere({ title, onBringBack, compact = false }: { title: string; onBringBack: () => void; compact?: boolean }) {
   return (
     <div className={`panel-docked-elsewhere${compact ? " is-compact" : ""}`} data-testid="panel-docked-elsewhere">
-      <p>
-        <strong>{title}</strong> is docked in another window
-      </p>
+      <p>{rich(t.workspace.dockedElsewhere, { panel: <strong>{title}</strong> })}</p>
       <button className="button" onClick={onBringBack}>
-        Bring back
+        {t.workspace.bringBack}
       </button>
     </div>
   );

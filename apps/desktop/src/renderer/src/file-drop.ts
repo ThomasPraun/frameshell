@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listenEverywhere } from "./windows.js";
+import { t } from "./i18n.js";
 
 /**
  * Accept files dragged in from the OS on every project window (ADR 0012),
@@ -59,7 +60,7 @@ export function useFileDrop(onDrop: (paths: string[]) => void, { ignore }: { ign
 export function importNotice(imported: string[], refused: string[]): string {
   const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
   const parts: string[] = [];
-  if (imported.length > 0) parts.push(`Imported ${imported.map(name).join(", ")} into assets/.`);
-  if (refused.length > 0) parts.push(`Not media: ${refused.map(name).join(", ")}.`);
+  if (imported.length > 0) parts.push(t.workspace.imported(imported.map(name).join(", ")));
+  if (refused.length > 0) parts.push(t.workspace.notMedia(refused.map(name).join(", ")));
   return parts.join(" ");
 }

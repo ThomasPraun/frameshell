@@ -1,6 +1,7 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { abortedTransactions, authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
+import { t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -64,12 +65,12 @@ export function HistoryPanel() {
         setNotice({
           target,
           tone: "error",
-          text: "Later changes touch the same clips. Revert them first, newest first, or edit forward.",
+          text: t.history.conflict,
           conflicts: [...outcome.conflicts].reverse(),
         });
         return;
       }
-      setNotice({ target, tone: "info", text: `Reverted as ${outcome.result.operation.id}.`, conflicts: [] });
+      setNotice({ target, tone: "info", text: t.history.reverted(outcome.result.operation.id), conflicts: [] });
       // Show what the revert itself changed.
       void select(outcome.result.operation.tx, outcome.result.revision);
     } catch (failure) {
@@ -90,7 +91,7 @@ export function HistoryPanel() {
   if (error && !history) return <p className="empty timeline-error">{error}</p>;
   if (!history) return null;
   if (history.transactions.length === 0) {
-    return <p className="empty">No changes yet. Edits you make, the agent&apos;s commands and direct file edits are listed here.</p>;
+    return <p className="empty">{t.history.none}</p>;
   }
 
   const rows = newestFirst(history.transactions);
@@ -102,7 +103,7 @@ export function HistoryPanel() {
     <ul
       ref={list}
       className="history"
-      aria-label={`History of timeline ${TIMELINE}`}
+      aria-label={t.history.listLabel(TIMELINE)}
       onKeyDown={(event) => {
         if (event.key === "Escape") selection.clear();
       }}
@@ -132,11 +133,11 @@ export function HistoryPanel() {
             />
             {notice && notice.target === tx.tx && <NoticeBox notice={notice} onShow={(id) => void select(id)} />}
             {open && (
-              <ul className="history-ops" aria-label={`Operations of ${tx.tx}`}>
+              <ul className="history-ops" aria-label={t.history.opsLabel(tx.tx)}>
                 {tx.operations.map((op) => (
                   <li key={op.id} data-op={op.id} data-selected={selected === op.id || undefined}>
                     <div className={`history-op${selected === op.id ? " is-active" : ""}`}>
-                      <button className="history-op-main" onClick={() => void select(op.id)} title={`${op.id}, revision ${op.revision}`}>
+                      <button className="history-op-main" onClick={() => void select(op.id)} title={t.history.opTitle(op.id, op.revision)}>
                         <span className="history-op-title">{operationTitle(op)}</span>
                         <span className="history-op-touched">{op.touched.join(" ")}</span>
                       </button>
@@ -145,9 +146,9 @@ export function HistoryPanel() {
                           className="history-revert"
                           disabled={busy !== null}
                           onClick={() => void revert(op.id)}
-                          aria-label={`Revert operation ${op.id}`}
+                          aria-label={t.history.revertOp(op.id)}
                         >
-                          Revert
+                          {t.history.revert}
                         </button>
                       )}
                     </div>
@@ -194,8 +195,8 @@ function TransactionRow({
         <button
           className="history-expand"
           aria-expanded={open}
-          aria-label={open ? "Hide operations" : "Show operations"}
-          title={open ? "Hide operations" : "Show operations"}
+          aria-label={open ? t.history.hideOps : t.history.showOps}
+          title={open ? t.history.hideOps : t.history.showOps}
           onClick={onToggle}
         >
           <span className={`tree-glyph ${open ? "dir-open" : "dir"}`} />
@@ -207,10 +208,10 @@ function TransactionRow({
               {author.name}
               {author.detail && <span className="history-author-detail">{author.detail}</span>}
             </span>
-            <span className="history-count">{`${count} ${count === 1 ? "op" : "ops"}`}</span>
+            <span className="history-count">{t.history.opCount(count)}</span>
             {aborted && (
-              <span className="history-aborted" title="Aborted: its last operation undid the rest, so it changed nothing.">
-                aborted
+              <span className="history-aborted" title={t.history.abortedTitle}>
+                {t.history.aborted}
               </span>
             )}
           </span>
@@ -220,8 +221,8 @@ function TransactionRow({
             {clock(tx.at)}
           </time>
           {!aborted && (
-            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={`Revert ${tx.tx}`}>
-              {busy === tx.tx ? "Reverting" : "Revert"}
+            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={t.history.revertTx(tx.tx)}>
+              {busy === tx.tx ? t.history.reverting : t.history.revert}
             </button>
           )}
         </div>
@@ -233,18 +234,18 @@ function TransactionRow({
 
 /** What the selected entry changed, in the colors and glyphs the timeline marks it with. */
 function DiffSummary({ diff }: { diff: readonly ClipDiff[] }) {
-  if (diff.length === 0) return <p className="history-diff">No clip changes left to show.</p>;
+  if (diff.length === 0) return <p className="history-diff">{t.history.noClipChanges}</p>;
   const counts = diffCounts(diff);
   const parts = (
     [
-      ["added", "+", "added"],
-      ["removed", "−", "removed"],
-      ["moved", "↔", "moved"],
-      ["changed", "~", "changed"],
+      ["added", "+", t.history.added],
+      ["removed", "−", t.history.removed],
+      ["moved", "↔", t.history.moved],
+      ["changed", "~", t.history.changed],
     ] as const
   ).filter(([kind]) => counts[kind] > 0);
   return (
-    <p className="history-diff" aria-label="Changes shown on the timeline">
+    <p className="history-diff" aria-label={t.history.changesLabel}>
       {parts.map(([kind, glyph, word]) => (
         <span key={kind} className={`diff-count diff-${kind}`}>
           <span className="diff-glyph" aria-hidden="true">
@@ -262,10 +263,10 @@ function NoticeBox({ notice, onShow }: { notice: Notice; onShow: (id: string) =>
     <div className={`history-notice${notice.tone === "error" ? " is-error" : ""}`} role={notice.tone === "error" ? "alert" : "status"}>
       <span>{notice.text}</span>
       {notice.conflicts.length > 0 && (
-        <ul className="history-conflicts" aria-label="Conflicting operations">
+        <ul className="history-conflicts" aria-label={t.history.conflictsLabel}>
           {notice.conflicts.map((conflict) => (
             <li key={conflict.id} data-conflict={conflict.id}>
-              <button className="link" onClick={() => onShow(conflict.id)} title={`Show ${conflict.id} on the timeline`}>
+              <button className="link" onClick={() => onShow(conflict.id)} title={t.history.showOnTimeline(conflict.id)}>
                 {`${operationTitle({ op: conflict.op, args: {} })} (${authorOf(conflict.author).name})`}
               </button>
               <span className="history-conflict-ids">{conflict.ids.join(" ")}</span>

@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import type { TerminalInfo } from "../../../shared/api.js";
 import { askTarget } from "../ask/ask-target.js";
 import { agentInput } from "../ask/reference.js";
+import { t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
@@ -237,7 +238,7 @@ export function TerminalPanel({
 
   const label = (tab: Tab, index: number) => {
     const agent = tab.info ? agents.get(tab.info.id) : undefined;
-    return tab.info ? `${agent ?? tab.info.shell} ${index + 1}` : "starting…";
+    return tab.info ? `${agent ?? tab.info.shell} ${index + 1}` : t.terminal.starting;
   };
 
   const view = (tab: Tab, shown: boolean) => (
@@ -257,11 +258,11 @@ export function TerminalPanel({
     <>
       <PanelHeader
         onCollapse={onCollapse}
-        collapseLabel="Hide terminal"
+        collapseLabel={t.terminal.hideTerminal}
         collapseSide="right"
         actions={
           <DetachButton
-            name="terminal"
+            name={t.terminal.terminalName}
             detached={false}
             disabled={!activeTab || activeTab.detached}
             onClick={() => setDetached(active, true)}
@@ -269,10 +270,9 @@ export function TerminalPanel({
           />
         }
       >
-        <div className="terminal-tabs" role="tablist" aria-label="Terminals">
+        <div className="terminal-tabs" role="tablist" aria-label={t.terminal.terminals}>
           {tabs.map((tab, index) => {
             const agent = tab.info ? agents.get(tab.info.id) : undefined;
-            const where = tab.detached ? ", in its own window" : "";
             return (
               <div
                 key={tab.key}
@@ -282,13 +282,13 @@ export function TerminalPanel({
                 data-agent={agent}
                 data-flashing={flashing === tab.key || undefined}
                 className={`terminal-tab${tab.key === active ? " is-active" : ""}${tab.exitCode !== null ? " has-exited" : ""}${agent ? " is-agent" : ""}${tab.detached ? " is-detached" : ""}${flashing === tab.key ? " is-flashing" : ""}`}
-                title={tab.info ? `${agent ? `Agent ${agent} in session` : "Session"} ${tab.info.session}${where}` : undefined}
+                title={tab.info ? t.terminal.sessionTitle(tab.info.session, agent, tab.detached) : undefined}
                 onClick={() => setActive(tab.key)}
               >
                 <span>{label(tab, index)}</span>
                 <button
                   className="terminal-tab-close"
-                  aria-label="Close terminal"
+                  aria-label={t.terminal.closeTerminal}
                   onClick={(event) => {
                     event.stopPropagation();
                     close(tab.key);
@@ -297,7 +297,7 @@ export function TerminalPanel({
               </div>
             );
           })}
-          <button className="icon-button" aria-label="New terminal" title="New terminal" onClick={add}>
+          <button className="icon-button" aria-label={t.terminal.newTerminal} title={t.terminal.newTerminal} onClick={add}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.5" />
             </svg>
@@ -310,14 +310,14 @@ export function TerminalPanel({
             view(tab, visible && tab.key === active)
           ) : (
             tab.key === active && (
-              <DockedElsewhere key={tab.key} title={`Terminal ${label(tab, index)}`} onBringBack={() => setDetached(tab.key, false)} />
+              <DockedElsewhere key={tab.key} title={`${t.terminal.terminal} ${label(tab, index)}`} onBringBack={() => setDetached(tab.key, false)} />
             )
           ),
         )}
         {tabs.length === 0 && (
           <div className="empty terminal-empty">
             <button className="button" onClick={add}>
-              New terminal
+              {t.terminal.newTerminal}
             </button>
           </div>
         )}
@@ -358,7 +358,7 @@ function TerminalWindow({
   if (!host) return null;
   return createPortal(
     <div className="panel terminal-window">
-      <PanelHeader actions={<DetachButton name="terminal" detached onClick={onDock} testId="terminal-detach" />}>
+      <PanelHeader actions={<DetachButton name={t.terminal.terminalName} detached onClick={onDock} testId="terminal-detach" />}>
         <span className={`panel-title terminal-window-title${flashing ? " is-flashing" : ""}`} data-flashing={flashing || undefined}>
           {label}
         </span>
@@ -492,7 +492,7 @@ function TerminalView({
   }, [active]);
 
   useEffect(() => {
-    if (attached && exitCode !== null) term.current?.write(`\r\n\x1b[2m[process exited with code ${exitCode}]\x1b[0m\r\n`);
+    if (attached && exitCode !== null) term.current?.write(`\r\n\x1b[2m[${t.terminal.processExited(exitCode)}]\x1b[0m\r\n`);
   }, [attached, exitCode]);
 
   return (

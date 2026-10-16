@@ -1,3 +1,4 @@
+import type { Lang } from "./i18n/index.js";
 import type {
   AssetInfo,
   ClipRendersResult,
@@ -167,6 +168,8 @@ export type MenuCommand = "showTranscript";
  * the preload. The renderer never touches Node or the file system directly.
  */
 export interface FrameshellApi {
+  /** UI language of the app (#189); main reloads the windows when the user changes it. */
+  readonly lang: Lang;
   project: {
     /** Project of this window; null shows the welcome screen. */
     current(): Promise<ProjectView | null>;
@@ -371,6 +374,7 @@ export interface LiveClipPage {
 
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
+  lang: "app:lang",
   projectCurrent: "project:current",
   projectOpenFolder: "project:open-folder",
   projectOpen: "project:open",

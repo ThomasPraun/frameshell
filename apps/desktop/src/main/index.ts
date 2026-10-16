@@ -26,6 +26,7 @@ import {
   type ProjectSetup,
   type VideoProjectPlan,
 } from "../shared/api.js";
+import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import {
   type CliInstallHost,
@@ -40,6 +41,7 @@ import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { editMenu } from "./edit-menu.js";
+import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
 import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
@@ -94,6 +96,11 @@ const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
 /** Projects whose synced-folder warning the user dismissed (#187): a user decision, so in `configDir`. */
 const syncWarningsFile = join(resolveAppDirs(process.env).configDir, "sync-warnings-dismissed.json");
+/** UI language picked in View > Language (#189): a user decision, global, so in `configDir`. */
+const languageFile = join(resolveAppDirs(process.env).configDir, "language.json");
+let languageChoice: LanguageChoice = readLanguageChoice(languageFile);
+/** UI strings in the app's language; set once the app is ready (`app.getLocale()`), English before. */
+let text: Dict = strings("en");
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
@@ -433,7 +440,7 @@ async function rememberRecent(dir: string): Promise<void> {
 
 async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   const result = await dialog.showOpenDialog(window, {
-    title: "Open project folder",
+    title: text.app.dialogs.openFolder,
     properties: ["openDirectory", "createDirectory"],
   });
   return result.canceled ? undefined : result.filePaths[0];
@@ -441,11 +448,11 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
 
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
-    title: "Choose videos",
+    title: text.app.dialogs.chooseVideos,
     properties: ["openFile", "multiSelections"],
     filters: [
-      { name: "Videos", extensions: [...VIDEO_EXTENSIONS] },
-      { name: "All files", extensions: ["*"] },
+      { name: text.app.dialogs.videos, extensions: [...VIDEO_EXTENSIONS] },
+      { name: text.app.dialogs.allFiles, extensions: ["*"] },
     ],
   });
   return result.canceled ? [] : result.filePaths;
@@ -523,23 +530,24 @@ async function setUpTranscription(dir: string, assets: string[]): Promise<void> 
   const running = (message: string, fraction: number | null = null) =>
     reportSetup(dir, { message, detail: null, fraction, state: "running" });
   // Said in the user's terms; the daemon's message goes to the tooltip.
-  let failure = "Could not download the transcription plugin. Check the internet connection, then ask the agent to transcribe the videos.";
+  const said = text.app.setup;
+  let failure = said.downloadFailed;
   try {
-    running("Setting up transcription…");
+    running(said.starting);
     const { plugins } = await daemon.request("plugin.list", { cwd: dir });
     if (!plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN)) {
       await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
     }
     for (const asset of assets) {
-      failure = `Could not transcribe ${name(asset)}. Ask the agent to transcribe it.`;
-      running(`Transcribing ${name(asset)}…`);
+      failure = said.transcribeFailed(name(asset));
+      running(said.transcribing(name(asset)));
       await daemon.request(
         "transcribe",
         { cwd: dir, asset },
         { onProgress: (update) => running(`${name(asset)}: ${update.message}`, update.fraction ?? null) },
       );
     }
-    reportSetup(dir, { message: `Transcribed ${assets.map(name).join(", ")}.`, detail: null, fraction: null, state: "done" });
+    reportSetup(dir, { message: said.transcribed(assets.map(name).join(", ")), detail: null, fraction: null, state: "done" });
   } catch (error) {
     reportSetup(dir, { message: failure, detail: (error as Error).message, fraction: null, state: "failed" });
   }
@@ -641,6 +649,7 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
 }
 
 function registerIpc(): void {
+  ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
   ipcMain.handle(Channel.projectCurrent, async (event) => {
     const state = stateOf(event.sender);
     await state.opening;
@@ -688,7 +697,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.projectChooseParent, async (event) => {
     const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
-      title: "Choose where the project goes",
+      title: text.app.dialogs.chooseParent,
       properties: ["openDirectory", "createDirectory"],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
@@ -851,18 +860,38 @@ function buildMenu(): void {
     const state = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow());
     if (state) send(state.window.webContents, Channel.menuCommand, name);
   };
+  const said = text.app.menu;
+  const mac = process.platform === "darwin";
+  // Roles get explicit labels: Electron words them in English whatever the language.
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+    ...(mac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" as const, label: said.about },
+              { type: "separator" as const },
+              { role: "services" as const, label: said.services },
+              { type: "separator" as const },
+              { role: "hide" as const, label: said.hide },
+              { role: "hideOthers" as const, label: said.hideOthers },
+              { role: "unhide" as const, label: said.showAll },
+              { type: "separator" as const },
+              { role: "quit" as const, label: said.quit },
+            ],
+          },
+        ]
+      : []),
     {
-      label: "File",
+      label: said.file,
       submenu: [
-        { label: "Open Folder…", accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
-        { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
+        { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
-        { label: "Install 'frameshell' Command in PATH", click: () => void cliCommand(installCli) },
-        { label: "Uninstall 'frameshell' Command from PATH", click: () => void cliCommand(uninstallCli) },
+        { label: said.installCli, click: () => void cliCommand(installCli) },
+        { label: said.uninstallCli, click: () => void cliCommand(uninstallCli) },
         { type: "separator" },
-        process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+        mac ? { role: "close", label: said.close } : { role: "quit", label: said.exit },
       ],
     },
     editMenu(process.platform, (history: HistoryCommand, focused) => {
@@ -870,26 +899,62 @@ function buildMenu(): void {
       const all = [...windows.values()];
       const target = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow()) ?? (all.length === 1 ? all[0] : undefined);
       if (target) send(target.window.webContents, Channel.timelineHistoryCommand, history);
-    }),
+    }, said),
     {
-      label: "View",
+      label: said.view,
       submenu: [
-        { id: "view-transcript", label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
         { type: "separator" },
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
+        {
+          label: said.language,
+          submenu: [
+            { id: "language-system", label: said.systemLanguage, type: "radio", checked: languageChoice === "system", click: () => void setLanguage("system") },
+            ...LANGUAGES.map(({ id, name }) => ({
+              id: `language-${id}`,
+              label: name,
+              type: "radio" as const,
+              checked: languageChoice === id,
+              click: () => void setLanguage(id),
+            })),
+          ],
+        },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { role: "reload", label: said.reload },
+        { role: "forceReload", label: said.forceReload },
+        { role: "toggleDevTools", label: said.devTools },
         { type: "separator" },
-        { role: "togglefullscreen" },
+        { role: "resetZoom", label: said.resetZoom },
+        { role: "zoomIn", label: said.zoomIn },
+        { role: "zoomOut", label: said.zoomOut },
+        { type: "separator" },
+        { role: "togglefullscreen", label: said.fullScreen },
       ],
     },
-    { role: "windowMenu" },
+    {
+      role: "windowMenu",
+      label: said.window,
+      submenu: [
+        { role: "minimize", label: said.minimize },
+        { role: "zoom", label: said.zoom },
+        ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * Switch the UI language (#189): save the choice, rebuild the menus, and reload the project windows so the
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ */
+async function setLanguage(choice: LanguageChoice): Promise<void> {
+  languageChoice = choice;
+  await writeLanguageChoice(languageFile, choice);
+  const next = strings(uiLanguage(choice, app.getLocale()));
+  const changed = next !== text;
+  text = next;
+  buildMenu();
+  if (changed) for (const state of windows.values()) state.window.webContents.reload();
 }
 
 /** Runs the File menu's install or uninstall of the system-wide CLI (#139) and reports the outcome in a message box. */
@@ -897,30 +962,32 @@ async function cliCommand(action: (shim: string, host: CliInstallHost) => Promis
   const parent = BrowserWindow.getFocusedWindow() ?? undefined;
   const box = (options: Electron.MessageBoxOptions) =>
     parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+  const said = text.app.cli;
   const host = systemCliInstallHost({
     home: homedir(),
+    text: said,
     confirmReplace: async (link, target) =>
       (
         await box({
           type: "question",
-          message: `Replace the existing 'frameshell' command?`,
-          detail: `${link} points at ${target}, which another install put there.`,
-          buttons: ["Replace", "Cancel"],
+          message: said.replace,
+          detail: said.replaceDetail(link, target),
+          buttons: [said.replaceButton, said.cancel],
           defaultId: 0,
           cancelId: 1,
         })
       ).response === 0,
   });
-  const blocker = action === installCli ? cliInstallBlocker(process.platform, process.execPath, process.env) : undefined;
+  const blocker = action === installCli ? cliInstallBlocker(process.platform, process.execPath, process.env, said) : undefined;
   if (blocker) {
-    await box({ type: "warning", message: "Cannot install the 'frameshell' command from here.", detail: blocker });
+    await box({ type: "warning", message: said.cannotInstall, detail: blocker });
     return;
   }
   try {
     const outcome = await action(cliShim, host);
     await box({ type: "info", message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) });
   } catch (error) {
-    await box({ type: "error", message: "Could not change the 'frameshell' command.", detail: (error as Error).message });
+    await box({ type: "error", message: said.failed, detail: (error as Error).message });
   }
 }
 
@@ -937,6 +1004,7 @@ app.whenReady().then(async () => {
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   await panelWindows.load();
+  text = strings(uiLanguage(languageChoice, app.getLocale()));
   registerIpc();
   buildMenu();
   const startDir = projectArg(process.argv);

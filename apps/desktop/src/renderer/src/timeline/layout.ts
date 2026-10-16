@@ -1,5 +1,6 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
+import { t } from "../i18n.js";
 
 /** Height of the time ruler above the lanes, px. */
 export const RULER_HEIGHT = 22;
@@ -147,7 +148,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     asset,
     in: num("in", 0),
     speed: num("speed", 1),
-    problem: clip.end === null ? (problem ?? "Length unknown") : null,
+    problem: clip.end === null ? (problem ?? t.timeline.lengthUnknown) : null,
     gain: typeof audio.gain === "number" ? audio.gain : 0,
     muted: audio.muted === true,
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,

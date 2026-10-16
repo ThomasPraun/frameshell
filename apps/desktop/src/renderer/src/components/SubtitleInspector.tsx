@@ -2,6 +2,7 @@ import { SUBTITLE_POSITIONS, type SubtitlePosition, type SubtitlePresetId, resol
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
 import { SELECTION_TIMELINE } from "../selection.js";
+import { t } from "../i18n.js";
 import { useSubtitles } from "../subtitles/useSubtitles.js";
 import { layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -9,11 +10,11 @@ import { sendClipEdit } from "./clip-edits.js";
 
 /** Preset names as the user reads them. */
 const PRESET_LABELS: Record<SubtitlePresetId, { label: string; title: string }> = {
-  "big-keyword": { label: "Big keyword", title: "A few large words, the spoken one highlighted" },
-  plain: { label: "Plain", title: "Sentence-length lines, no highlight" },
+  "big-keyword": { label: t.inspector.presetBigKeyword, title: t.inspector.presetBigKeywordTitle },
+  plain: { label: t.inspector.presetPlain, title: t.inspector.presetPlainTitle },
 };
 
-const POSITION_LABELS: Record<SubtitlePosition, string> = { top: "Top", center: "Center", bottom: "Bottom" };
+const POSITION_LABELS: Record<SubtitlePosition, string> = { top: t.inspector.positionTop, center: t.inspector.positionCenter, bottom: t.inspector.positionBottom };
 
 /**
  * Settings of the selected subtitle track (SPEC §5.3): the track whose words
@@ -40,14 +41,14 @@ export function SubtitleInspector({ track }: { track: string }) {
   const sources = layout.rows.filter((candidate) => candidate.kind !== "subtitles");
 
   return (
-    <div className="clip-inspector subtitle-inspector" role="group" aria-label={`Settings of subtitle track ${row.label}`} data-track={track}>
+    <div className="clip-inspector subtitle-inspector" role="group" aria-label={t.inspector.settingsOfSubtitleTrack(row.label)} data-track={track}>
       <span className="clip-inspector-name" title={track}>
         <span className="clip-inspector-track track-subtitles">{row.label}</span>
-        {row.name ?? "Subtitles"}
+        {row.name ?? t.inspector.subtitles}
       </span>
-      <label className="clip-field" title="Track whose clips' transcript words show">
-        <span className="clip-field-label is-static">Words of</span>
-        <select className="clip-field-select" aria-label="Words of" value={stored.follows ?? ""} onChange={(event) => send({ track, follows: event.target.value })}>
+      <label className="clip-field" title={t.inspector.wordsOfTitle}>
+        <span className="clip-field-label is-static">{t.inspector.wordsOf}</span>
+        <select className="clip-field-select" aria-label={t.inspector.wordsOf} value={stored.follows ?? ""} onChange={(event) => send({ track, follows: event.target.value })}>
           {sources.map((source) => (
             <option key={source.id} value={source.id}>
               {source.name ? `${source.label} ${source.name}` : source.label}
@@ -56,20 +57,20 @@ export function SubtitleInspector({ track }: { track: string }) {
         </select>
       </label>
       <Choice
-        label="Style"
+        label={t.inspector.style}
         options={Object.entries(PRESET_LABELS).map(([id, { label, title }]) => ({ id, label, title }))}
         value={style.preset}
         onPick={(preset) => send({ track, style: { preset: preset as SubtitlePresetId } })}
       />
       <Choice
-        label="Position"
-        options={SUBTITLE_POSITIONS.map((id) => ({ id, label: POSITION_LABELS[id], title: `Show the words at the ${id === "center" ? "center" : id} of the frame` }))}
+        label={t.inspector.position}
+        options={SUBTITLE_POSITIONS.map((id) => ({ id, label: POSITION_LABELS[id], title: t.inspector.positionTitle(POSITION_LABELS[id].toLowerCase()) }))}
         value={style.position}
         onPick={(position) => send({ track, style: { position: position as SubtitlePosition } })}
       />
       {missing.length > 0 && (
         <span className="clip-inspector-hint" title={missing.join("\n")}>
-          {`No transcript for ${missing.length === 1 ? missing[0] : `${missing.length} clips' assets`}: run frameshell transcribe`}
+          {t.inspector.noTranscript(missing.length === 1 ? missing[0]! : t.inspector.clipsAssets(missing.length))}
         </span>
       )}
       {error && (
