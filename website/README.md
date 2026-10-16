@@ -31,17 +31,21 @@ The carousel's timings (subtitle cues, the cut, the zooms, the short) come from 
 
 ## Deploy: Cloudflare Pages
 
-Connected once in the Cloudflare dashboard (Workers & Pages, Create, Pages, Connect to Git, `ThomasPraun/frameshell`):
+Live at [frameshell.pages.dev](https://frameshell.pages.dev). The project is a Pages project (Workers & Pages, Create application, "Looking to deploy Pages?"), connected to `ThomasPraun/frameshell`:
 
 | Setting | Value |
 |---|---|
 | Production branch | `main` |
 | Framework preset | Astro |
 | Root directory | `website` |
-| Build command | `npm run build` |
+| Build command | `npm ci && npm run build` |
 | Build output directory | `dist` |
+| Variable `SKIP_DEPENDENCY_INSTALL` | `1` |
+| Variable `NODE_VERSION` | `22.22.0` (same as `.node-version`) |
 | Build watch paths (Settings, Builds) | include `website/**` |
 
-Then Custom domains: add `frameshell.dev` (and `www.frameshell.dev` redirecting to it). With the domain's DNS on Cloudflare the records are created for you.
+Why the build command installs on its own: Cloudflare sees the repo's pnpm workspace and would run `pnpm install` for the whole monorepo (Electron, node-pty), which never installs this site's dependencies because `website/` is outside the workspace. `SKIP_DEPENDENCY_INSTALL` turns that step off and `npm ci` installs from this folder's lockfile.
+
+Custom domain: Custom domains, add `frameshell.dev` (and `www.frameshell.dev` redirecting to it). With the domain's DNS on Cloudflare the records are created for you.
 
 Pull requests that touch `website/` get preview deployments automatically. `public/_headers` sets long caching for hashed assets.
