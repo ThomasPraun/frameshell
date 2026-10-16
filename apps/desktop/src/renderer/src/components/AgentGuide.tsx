@@ -28,11 +28,14 @@ function writeHidden(hidden: boolean): void {
  */
 export function AgentGuide({
   agent,
+  compact,
   onRun,
   onType,
 }: {
   /** Label of the agent in the active terminal; null when its shell runs. */
   agent: string | null;
+  /** The shell is in use: only the way to open the guide shows, until opened. */
+  compact: boolean;
   /** Run `command` in the active terminal (typed, then Enter). */
   onRun: (command: string) => void;
   /** Type `text` at the active terminal's prompt without sending it. */
@@ -42,6 +45,7 @@ export function AgentGuide({
   const [choices, setChoices] = useState<AgentChoice[] | null>(null);
   const [claude, setClaude] = useState<ClaudeDesktopStatus | null>(null);
   const [installTyped, setInstallTyped] = useState(false);
+  const [opened, setOpened] = useState(false);
 
   const detect = useCallback(() => {
     void window.frameshell.agents.detect().then(setChoices);
@@ -51,13 +55,14 @@ export function AgentGuide({
 
   const hide = (value: boolean) => {
     setHidden(value);
+    setOpened(!value);
     writeHidden(value);
   };
 
-  if (hidden) {
+  if (hidden || (compact && !agent && !opened)) {
     return (
       <div className="agent-guide is-hidden">
-        <button className="link" onClick={() => hide(false)} data-testid="agent-guide-show">
+        <button className="link" onClick={() => (hidden ? hide(false) : setOpened(true))} data-testid="agent-guide-show">
           {t.agents.show}
         </button>
       </div>

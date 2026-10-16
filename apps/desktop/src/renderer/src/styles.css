@@ -2754,6 +2754,9 @@ button.track-head:focus-visible {
   border-bottom: 1px solid var(--line-soft);
   background: var(--bg-panel);
   font-size: 12.5px;
+  /* The terminal keeps most of the column whatever the guide lists. */
+  max-height: 45%;
+  overflow-y: auto;
 }
 
 .agent-guide.is-hidden {
@@ -2868,4 +2871,8 @@ button.track-head:focus-visible {
 .chip:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.agent-guide-list .button {
+  padding: 3px 10px;
 }

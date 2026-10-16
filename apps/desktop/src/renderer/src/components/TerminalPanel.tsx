@@ -110,6 +110,9 @@ export function TerminalPanel({
   /** Agent CLI running in each terminal, by terminal id; absent when none. */
   const [agents, setAgents] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [flashing, setFlashing] = useState<number | null>(null);
+  /** Tabs whose shell the user ran something in: the agent guide shrinks there to leave the terminal its rows. */
+  const [used, setUsed] = useState<ReadonlySet<number>>(() => new Set());
+  const markUsed = useCallback((key: number) => setUsed((current) => (current.has(key) ? current : new Set(current).add(key))), []);
   const route = useTerminalRouter();
   /** Attached views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -250,6 +253,7 @@ export function TerminalPanel({
       register={register}
       route={route}
       onFocus={focused}
+      onEnter={markUsed}
       active={shown}
       exitCode={tab.exitCode}
     />
@@ -308,6 +312,7 @@ export function TerminalPanel({
       {activeTab && !activeTab.detached && activeTab.exitCode === null && (
         <AgentGuide
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
+          compact={used.has(activeTab.key)}
           onRun={(command) => {
             if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);
           }}
@@ -397,6 +402,7 @@ function TerminalView({
   register,
   route,
   onFocus,
+  onEnter,
   active,
   exitCode,
 }: {
@@ -407,9 +413,13 @@ function TerminalView({
   register: (key: number, view: ViewHandle) => () => void;
   route: (id: string, sink: (data: string) => void) => () => void;
   onFocus: (key: number) => void;
+  /** The user pressed Enter in this view: the shell is in use. */
+  onEnter: (key: number) => void;
   active: boolean;
   exitCode: number | null;
 }) {
+  const enter = useRef(onEnter);
+  enter.current = onEnter;
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -457,7 +467,10 @@ function TerminalView({
       if (disposed) return;
       if (replay) xterm.write(replay);
       live = true;
-      xterm.onData((data) => window.frameshell.terminals.write(info.id, data));
+      xterm.onData((data) => {
+        window.frameshell.terminals.write(info.id, data);
+        if (data.includes("\r")) enter.current(tabKey);
+      });
       xterm.onResize(({ cols, rows }) => window.frameshell.terminals.resize(info.id, cols, rows));
       // The last view's grid may have been another size: the program redraws for this one.
       window.frameshell.terminals.resize(info.id, xterm.cols, xterm.rows);
