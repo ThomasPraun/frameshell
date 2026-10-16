@@ -168,6 +168,10 @@ export interface FrameshellApi {
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
+    /** Videos the OS asked to open in this window (Open with, #184), once: null when none or already taken. */
+    takeOffered(): Promise<VideoProjectPlan | null>;
+    /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
+    onVideosOffered(listener: () => void): () => void;
     /** Pick the folder a new project goes in; null when cancelled. */
     chooseParent(): Promise<string | null>;
     /**
@@ -344,6 +348,8 @@ export const Channel = {
   projectPlanVideos: "project:plan-videos",
   projectChooseParent: "project:choose-parent",
   projectFromVideos: "project:from-videos",
+  projectTakeOffered: "project:take-offered",
+  projectVideosOffered: "project:videos-offered",
   mediaImport: "media:import",
   filesTree: "files:tree",
   filesRead: "files:read",

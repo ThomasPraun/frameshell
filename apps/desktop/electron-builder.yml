@@ -27,6 +27,12 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Open with Frameshell for videos (#184). Alternate rank: listed in Finder's Open with, never the default player.
+  fileAssociations:
+    - ext: [mp4, mov, m4v, mkv, webm]
+      name: Video
+      role: Viewer
+      rank: Alternate
 dmg:
   writeUpdateInfo: false
 
@@ -43,6 +49,9 @@ linux:
   description: Agent edits the project from the terminal, human corrects in the timeline.
   maintainer: Frameshell <92462502+ThomasPraun@users.noreply.github.com>
   vendor: Frameshell
+  # Listed in the .desktop file's MimeType: offered in Open with, the default player stays the user's (#184). Not
+  # fileAssociations: on Linux those also install a mime package that redefines these types with a document icon.
+  mimeTypes: [video/mp4, video/quicktime, video/x-m4v, video/x-matroska, video/webm]
 deb:
   # Same as electron-builder's defaults, except /usr/bin/frameshell: a script running the bundled CLI, not a link to
   # the app binary (#143).
@@ -55,6 +64,9 @@ win:
     - target: nsis
       arch: [x64]
 nsis:
+  # Open with for videos (#184): registry entries in HKCU, never the default handler. fileAssociations would need
+  # perMachine and claim the extensions.
+  include: build/installer.nsh
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
