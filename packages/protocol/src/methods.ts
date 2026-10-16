@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 33;
+export const PROTOCOL_VERSION = 34;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -530,6 +530,11 @@ export const methods = {
         .boolean()
         .default(true)
         .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`, plus the agent files. Default true."),
+      like: AbsolutePath.optional().describe(
+        "Media file whose format the project takes instead of the defaults: its display size (even), frame rate snapped " +
+          "to the nearest standard one, and sample rate. Probed first, downloading ffprobe on first use. Example: " +
+          "`/home/ana/Movies/talk.mp4`. Fails with AssetNotFound when it is not a readable media file.",
+      ),
     }),
     result: z.object({
       project: ProjectSummarySchema,

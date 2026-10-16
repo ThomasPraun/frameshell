@@ -1,14 +1,17 @@
 // page.evaluate bodies run in the renderer, app.evaluate bodies in main.
 /// <reference lib="dom" />
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
+import { makeSource, testFfmpeg, useTestBinaries } from "./media.js";
 
 // Projects created from a video (ADR 0013, #182): the welcome screen plans the folder beside the video, creates the
 // project and imports the video without the terminal. The native file dialog is replaced in main.
 const box = sandbox("demo");
+// New projects probe their first video: the shared ffprobe, not a download per sandbox.
+test.beforeAll(() => useTestBinaries(box.configDir));
 const home = join(dirname(box.projectDir), "desktop");
 mkdirSync(home, { recursive: true });
 // Ingest of these bytes fails; the flow under test ends before it matters.
@@ -74,6 +77,7 @@ test("choosing a video creates its project beside it and opens it", async () => 
 test("with transcription on, the setup runs in the background and its outcome shows in the status bar", async () => {
   // Its own sandbox: the daemon runs npm, and one still up from an earlier test would lack this env and download for real.
   const own = sandbox("demo");
+  await useTestBinaries(own.configDir);
   const folder = join(dirname(own.projectDir), "videos");
   mkdirSync(folder, { recursive: true });
   const take = join(folder, "talk.mp4");
@@ -96,6 +100,34 @@ test("with transcription on, the setup runs in the background and its outcome sh
     const setup = page.getByTestId("project-setup");
     await expect(setup).toContainText("Could not download the transcription plugin.", { timeout: 120_000 });
     await expect(setup).toHaveAttribute("title", /npm install failed/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("the project takes the first video's format and starts with the videos on its timeline", async () => {
+  const own = sandbox("demo");
+  await useTestBinaries(own.configDir);
+  const folder = join(dirname(own.projectDir), "clips");
+  mkdirSync(folder, { recursive: true });
+  const first = join(folder, "intro.mp4");
+  const second = join(folder, "outro.mp4");
+  const ffmpeg = await testFfmpeg();
+  await makeSource(ffmpeg, first, { seconds: 1, fps: 25, width: 640, height: 360 });
+  await makeSource(ffmpeg, second, { seconds: 1, fps: 25, width: 640, height: 360 });
+  const { app, page } = await launch({ ...own, projectDir: folder });
+  try {
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [first, second]);
+    await page.getByRole("button", { name: "New from video…" }).click();
+    const form = page.getByRole("form", { name: "New project from video" });
+    await form.getByLabel("Transcribe what is said").uncheck();
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("intro", { timeout: 60_000 });
+    const config = JSON.parse(readFileSync(join(folder, "intro", "frameshell.json"), "utf8"));
+    expect(config).toMatchObject({ fps: 25, resolution: { width: 640, height: 360 } });
+    await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "2", { timeout: 30_000 });
   } finally {
     await app.close();
   }

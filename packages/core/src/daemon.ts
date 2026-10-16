@@ -35,6 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
+import { projectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
@@ -389,7 +390,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
     },
-    "project.init": (params) => projects.init(params.dir, params.name, params.agentSkill),
+    "project.init": async (params) => {
+      let format = {};
+      if (params.like) {
+        const probe = await probeMedia(await binaries.ensure("ffprobe"), params.like).catch((error: unknown) => {
+          throw new RpcError(ErrorCode.AssetNotFound, `${params.like} is not a media file ffprobe can read: ${(error as Error).message}`, {
+            path: params.like,
+          });
+        });
+        format = projectFormat(probe);
+      }
+      return projects.init(params.dir, params.name, params.agentSkill, format);
+    },
     doctor: async ({ cwd, install }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;

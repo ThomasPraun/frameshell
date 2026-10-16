@@ -3,10 +3,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
+import { useTestBinaries } from "./media.js";
 
 // Videos the OS asks the app to open (#184): launch arguments on Windows and Linux, `open-file` on macOS. Both end
 // in the same routing; launch arguments are what an e2e can pass.
 const box = sandbox("demo");
+// New projects probe their first video: the shared ffprobe, not a download per sandbox.
+test.beforeAll(() => useTestBinaries(box.configDir));
 const home = join(dirname(box.projectDir), "videos");
 mkdirSync(home, { recursive: true });
 const take = join(home, "take.mp4");

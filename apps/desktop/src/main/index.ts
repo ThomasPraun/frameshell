@@ -463,9 +463,14 @@ async function createFromVideos(
     const plan = await planVideoProject(request.files, { parent: request.parent, name: request.name });
     let assets: string[] = [];
     if (!plan.existing) {
-      await daemon.request("project.init", { dir: plan.dir, name: plan.name });
+      // The project takes the first video's size, frame rate and sample rate (#197); the defaults when ffprobe
+      // cannot read it, so an odd file never blocks the project.
+      await daemon
+        .request("project.init", { dir: plan.dir, name: plan.name, like: plan.files[0] })
+        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name }));
       const { imported } = await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
       assets = imported.map((item) => item.asset);
+      await placeOnTimeline(plan.dir, assets);
     }
     const opened = await openFromWindow(state, plan.dir);
     if (transcribe && assets.length > 0) void setUpTranscription(plan.dir, assets);
@@ -473,6 +478,26 @@ async function createFromVideos(
   } catch (error) {
     return { status: "error", message: (error as Error).message };
   }
+}
+
+/**
+ * Put `assets` one after another on a new video track of the main timeline,
+ * as one `ui` transaction, so a single undo takes them off (#197). A video
+ * that cannot be placed (unreadable) is skipped; the rest still go in.
+ */
+async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
+  await editor.alone(async () => {
+    await daemon.request("tx.begin", { label: "Place the videos", autoCommitAfter: 30 });
+    try {
+      const track = await daemon.request("track.add", { cwd: dir, timeline: "main", kind: "video", name: "Video" });
+      const id = track.changes.added[0];
+      if (id) {
+        for (const asset of assets) await daemon.request("clip.add", { cwd: dir, timeline: "main", track: id, asset }).catch(() => undefined);
+      }
+    } finally {
+      await daemon.request("tx.commit", {}).catch(() => undefined);
+    }
+  });
 }
 
 /** Official transcription plugin a project made from videos gets (#188). */
