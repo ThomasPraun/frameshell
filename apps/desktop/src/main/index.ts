@@ -18,6 +18,8 @@ import {
   type HistoryCommand,
   type LiveClipPage,
   type MenuCommand,
+  type AgentChoice,
+  type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -40,6 +42,15 @@ import { writeCliShim } from "./cli-shim.js";
 import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
+import {
+  InvalidConfigError,
+  SERVER_KEY,
+  claudeDesktopConfigPath,
+  claudeDesktopState,
+  connectClaudeDesktop,
+  disconnectClaudeDesktop,
+} from "./claude-desktop.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
@@ -655,6 +666,11 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
 
 function registerIpc(): void {
   ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
+  ipcMain.handle(Channel.agentsDetect, () => findAgents());
+  ipcMain.handle(Channel.agentsInstallCli, () => cliCommand(installCli));
+  ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
+  ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
+  ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
   ipcMain.handle(Channel.projectCurrent, async (event) => {
     const state = stateOf(event.sender);
     await state.opening;
@@ -946,6 +962,68 @@ function buildMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * Agent CLIs of the agent guide (#190), searched on the app's PATH, the login shell's (what the app's terminals
+ * get) and the usual install folders. Started by path: the one found runs, whatever the terminal's PATH holds.
+ */
+async function findAgents(): Promise<AgentChoice[]> {
+  const platform = process.platform;
+  const delimiter = platform === "win32" ? ";" : ":";
+  const appPath = process.env["PATH"] ?? "";
+  const shellPath = platform === "win32" ? appPath : await loginShellPath(process.env["SHELL"] || "/bin/zsh", appPath);
+  const dirs = [...new Set([...appPath.split(delimiter), ...shellPath.split(delimiter), ...extraAgentDirs(platform, homedir(), process.env)])];
+  const found = await detectAgents(dirs, platform);
+  return found.map((agent) => (agent.path ? { ...agent, command: startCommand(agent.path, platform) } : agent));
+}
+
+/** Claude Desktop's config file, where it has one (#191). */
+const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(), process.env);
+
+async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
+  if (!claudeDesktopConfig) return { available: false, installed: false, connected: false };
+  const state = await claudeDesktopState(claudeDesktopConfig, cliShim).catch(() => ({ installed: true, connected: false }));
+  return { available: true, ...state };
+}
+
+/**
+ * Add (after showing the entry) or remove Frameshell's server in Claude Desktop's config, through the stable
+ * `frameshell` shim so app updates keep it working (#191). Message boxes say what changed and to restart Claude.
+ */
+async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promise<ClaudeDesktopStatus> {
+  const said = text.agents.dialog;
+  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
+  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  const file = claudeDesktopConfig;
+  if (!file) return claudeDesktopStatus();
+  try {
+    if (connect) {
+      if (!(await claudeDesktopStatus()).installed) {
+        await box({ type: "info", message: said.notInstalled });
+        return claudeDesktopStatus();
+      }
+      const entry = JSON.stringify({ [SERVER_KEY]: { command: cliShim, args: ["mcp"] } }, null, 2);
+      const { response } = await box({
+        type: "question",
+        message: said.connect,
+        detail: said.connectDetail(file, entry),
+        buttons: [said.connectButton, said.cancel],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response !== 0) return claudeDesktopStatus();
+      const backup = await connectClaudeDesktop(file, cliShim);
+      await box({ type: "info", message: said.connected, ...(backup ? { detail: said.backup(backup) } : {}) });
+    } else {
+      const backup = await disconnectClaudeDesktop(file);
+      await box({ type: "info", message: said.disconnected, ...(backup ? { detail: said.backup(backup) } : {}) });
+    }
+  } catch (error) {
+    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
+    await box({ type: "error", message: said.failed, detail });
+  }
+  return claudeDesktopStatus();
 }
 
 /**

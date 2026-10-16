@@ -76,6 +76,13 @@ const api: FrameshellApi = {
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
   },
+  agents: {
+    detect: () => ipcRenderer.invoke(Channel.agentsDetect),
+    installCli: () => ipcRenderer.invoke(Channel.agentsInstallCli),
+    claudeDesktop: () => ipcRenderer.invoke(Channel.agentsClaudeDesktop),
+    connectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsConnectClaudeDesktop),
+    disconnectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsDisconnectClaudeDesktop),
+  },
   menu: {
     onCommand: (listener) => subscribe(Channel.menuCommand, listener),
   },
