@@ -72,6 +72,8 @@ export async function launch(
       FRAMESHELL_DATA_DIR: box.dataDir,
       FRAMESHELL_CONFIG_DIR: box.configDir,
       FRAMESHELL_IDLE_TIMEOUT_MS: "3000",
+      // A packaged release under test must not reach GitHub for updates.
+      FRAMESHELL_UPDATE_CHECK: "0",
       ...env,
     },
   });

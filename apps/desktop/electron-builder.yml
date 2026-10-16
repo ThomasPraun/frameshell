@@ -20,10 +20,20 @@ afterPack: scripts/bundle-npm.mjs
 # The bundled CLI and daemon run as `Frameshell --run-as-node` (ELECTRON_RUN_AS_NODE). Keep the RunAsNode fuse
 # enabled: disabling it breaks `frameshell` in the terminal and daemon auto-start.
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+# Update check (#193): electron-updater reads latest-mac.yml / latest-linux.yml from the published GitHub release.
+# Builds still run with --publish never: the release workflow uploads those files with the installers.
+publish:
+  provider: github
+  owner: ThomasPraun
+  repo: frameshell
+  releaseType: release
 
 mac:
   target:
     - target: dmg
+      arch: [arm64, x64]
+    # What electron-updater installs on macOS; the DMG is for first installs.
+    - target: zip
       arch: [arm64, x64]
   category: public.app-category.video
   icon: build/icon.png
@@ -37,6 +47,7 @@ mac:
       role: Viewer
       rank: Alternate
 dmg:
+  # latest-mac.yml lists the zips only.
   writeUpdateInfo: false
 
 linux:

@@ -30,6 +30,8 @@ describe("protocol handshake", () => {
         new RegExp(`client.*${PROTOCOL_VERSION + 1}.*frameshelld.*${PROTOCOL_VERSION}.*[Uu]pgrade`, "s"),
       ),
     });
+    // The desktop app stops a stale daemon by this pid after an update (`mismatchPid`, apps/desktop/src/main/stale-daemon.ts).
+    await expect(attempt).rejects.toMatchObject({ message: expect.stringContaining(`(pid ${process.pid})`) });
   });
 
   it("refuses other methods before the handshake", async () => {
