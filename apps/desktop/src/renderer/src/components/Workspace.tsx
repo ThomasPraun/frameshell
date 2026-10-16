@@ -287,6 +287,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         <span className="titlebar-project">{project.name}</span>
         <span className="titlebar-path">{project.dir}</span>
       </header>
+      {project.synced && <SyncWarning synced={project.synced} />}
 
       <div className="main-row">
         {sidebar.collapsed ? (
@@ -434,5 +435,25 @@ function CollapsedRail({ side, label, onExpand }: { side: "left" | "right"; labe
         <path d={side === "left" ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5"} fill="none" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     </button>
+  );
+}
+
+/** The project is in a folder a cloud service syncs (#187): say what that costs, until dismissed. */
+function SyncWarning({ synced }: { synced: { service: string; root: string } }) {
+  const [shown, setShown] = useState(true);
+  if (!shown) return null;
+  return (
+    <div className="sync-warning" role="status">
+      <p>
+        This project is in your {synced.service} folder. Its previews and renders (often several GB) sync too, and syncing
+        can damage the edit history. Move the project folder out of <code>{synced.root}</code> to avoid it.
+      </p>
+      <button className="link" onClick={() => setShown(false)}>
+        Hide
+      </button>
+      <button className="link" onClick={() => void window.frameshell.project.dismissSyncWarning().then(() => setShown(false))}>
+        Don&apos;t show again for this project
+      </button>
+    </div>
   );
 }

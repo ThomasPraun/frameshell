@@ -9,18 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Core: `frameshell init` and the app's new projects also write `AGENTS.md` and `GEMINI.md`, which point Codex, OpenCode, Pi and Gemini CLI at the Frameshell skill, and `.claude/settings.json`, which lets Claude Code run `frameshell` commands and MCP tools without asking while deleting files still asks (#186). Files already there are kept; `--no-skill` writes none of them.
-
-### Changed
-
-- Core: files imported into `assets/` by copy are read-only, so an agent or a tool cannot overwrite the project's footage by mistake (#186). Linked imports (`--link`) keep the original's permissions. Replacing an asset means deleting it and writing the new file, which the daemon ingests as before.
-
-### Added
-
 - Desktop: **New from video…** on the welcome screen (#182, ADR 0013). Choose one or more videos and the project is made in a folder beside the first one, named after it (`interview.mp4` becomes `interview/`), with the videos imported into `assets/`; no terminal needed. The name and the place can be changed before creating. The originals stay where they are: the project gets a clone where the disk supports it (no extra space), and when it does not and the videos pass 2 GB, the app asks whether to keep a copy or use them in place. Choosing a video that already has its project there opens that project; a folder of that name holding something else gets `interview (2)`.
 - Desktop: drop videos from Finder or Explorer on the welcome screen to start a project from them, and drop videos, audio or images on a project window to import them into `assets/` (#183). The status bar names what was imported and what was not media. Drops on a terminal are left to the terminal.
 - Desktop: Frameshell is offered in **Open with** for videos (`mp4`, `mov`, `m4v`, `mkv`, `webm`) in Finder, Explorer and Linux file managers, without becoming their default player (#184). Opening a video shows its new project for confirmation; a video that already has its project, or a project folder, opens it. A second launch hands its files to the running app instead of starting another one.
 - Windows: the installer has an option, checked by default, to add **Edit with Frameshell** to the right-click menu of videos (#185). Updates keep the choice; uninstalling removes the entry. Several videos edited at once make one project. On Windows 11 the entry is under "Show more options".
+- Core: `frameshell init` and the app's new projects also write `AGENTS.md` and `GEMINI.md`, which point Codex, OpenCode, Pi and Gemini CLI at the Frameshell skill, and `.claude/settings.json`, which lets Claude Code run `frameshell` commands and MCP tools without asking while deleting files still asks (#186). Files already there are kept; `--no-skill` writes none of them.
+- Core, CLI, desktop: a warning when a project is inside a folder a cloud service syncs: iCloud Drive (including a synced Desktop or Documents), Dropbox, OneDrive, Google Drive, Box (#187). Its `.frameshell/` (proxies, renders, history, often several GB) would sync too, and syncing can corrupt the history. `frameshell status` prints it, `status` reports it as `synced` (protocol v33), and the app shows it above the workspace until "Don't show again for this project".
+
+### Changed
+
+- Core: files imported into `assets/` by copy are read-only, so an agent or a tool cannot overwrite the project's footage by mistake (#186). Linked imports (`--link`) keep the original's permissions. Replacing an asset means deleting it and writing the new file, which the daemon ingests as before.
 
 ## [0.6.0] - 2026-10-12
 

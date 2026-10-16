@@ -30,6 +30,11 @@ export interface ProjectView {
    * project-relative paths `asset.list` reports. Valid while the window shows the project.
    */
   mediaUrl: string;
+  /**
+   * The cloud sync folder holding the project (daemon `status.synced`), for
+   * the warning above the workspace; null when none or the user dismissed it.
+   */
+  synced: { service: string; root: string } | null;
 }
 
 /** Outcome of opening a folder. `not-a-project` lets the UI offer `project.init`. */
@@ -160,6 +165,8 @@ export interface FrameshellApi {
     init(dir: string): Promise<OpenOutcome>;
     /** Recently opened project folders, newest first. */
     recent(): Promise<string[]>;
+    /** Stop warning that this window's project is in a synced folder (#187); kept per project in the config dir. */
+    dismissSyncWarning(): Promise<void>;
     /** Choose videos with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
     chooseVideos(): Promise<VideoProjectPlan | null>;
     /**
@@ -344,6 +351,7 @@ export const Channel = {
   projectOpen: "project:open",
   projectInit: "project:init",
   projectRecent: "project:recent",
+  projectDismissSync: "project:dismiss-sync",
   projectChooseVideos: "project:choose-videos",
   projectPlanVideos: "project:plan-videos",
   projectChooseParent: "project:choose-parent",
