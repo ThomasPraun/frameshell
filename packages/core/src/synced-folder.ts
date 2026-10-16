@@ -2,7 +2,7 @@
 // renders, and a sync client rewriting the history journal mid-write can corrupt it.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 
 /** A sync service's folder holding a project. */
 export interface SyncedFolder {
@@ -22,6 +22,7 @@ export interface SyncHost {
   readText(path: string): string | null;
 }
 
+/** The machine the daemon runs on. */
 export const realSyncHost = (): SyncHost => ({
   platform: process.platform,
   env: process.env,
@@ -41,12 +42,12 @@ const CLOUD_STORAGE: [prefix: string, service: string][] = [
 /** The sync service folder holding `dir`, or null. Only well-known locations are checked; no guessing. */
 export function syncedFolder(dir: string, host: SyncHost = realSyncHost()): SyncedFolder | null {
   const windows = host.platform === "win32";
-  // Windows paths are checked with win32 rules on any OS, so tests can fake them.
-  const relativeTo = windows ? win32.relative : relative;
+  // Path rules of the platform checked, not of the one running: tests fake each on any OS.
+  const { join, relative } = windows ? win32 : posix;
   const caseless = windows || host.platform === "darwin";
   const fold = (path: string) => (caseless ? path.toLowerCase() : path);
   const inside = (root: string) => {
-    const rel = relativeTo(fold(root), fold(dir));
+    const rel = relative(fold(root), fold(dir));
     return rel === "" || (!rel.startsWith("..") && !(windows ? win32.isAbsolute(rel) : rel.startsWith("/")));
   };
   const found = (service: string, root: string): SyncedFolder | null => (inside(root) ? { service, root } : null);
@@ -73,7 +74,7 @@ export function syncedFolder(dir: string, host: SyncHost = realSyncHost()): Sync
       const root = host.env[key];
       if (root) candidates.push(found("OneDrive", root));
     }
-    candidates.push(found("iCloud Drive", win32.join(host.home, "iCloudDrive")));
+    candidates.push(found("iCloud Drive", join(host.home, "iCloudDrive")));
     // Google Drive for desktop mounts a virtual drive: G:\My Drive, G:\Shared drives.
     const drive = /^([a-z]:\\(?:my drive|shared drives))(?:\\|$)/i.exec(dir);
     if (drive?.[1]) candidates.push({ service: "Google Drive", root: drive[1] });
@@ -81,7 +82,7 @@ export function syncedFolder(dir: string, host: SyncHost = realSyncHost()): Sync
 
   // Dropbox writes where its folders are (personal, business) to info.json.
   const infoFiles = windows
-    ? [host.env["APPDATA"], host.env["LOCALAPPDATA"]].filter(Boolean).map((base) => win32.join(base ?? "", "Dropbox", "info.json"))
+    ? [host.env["APPDATA"], host.env["LOCALAPPDATA"]].filter(Boolean).map((base) => join(base ?? "", "Dropbox", "info.json"))
     : [join(host.home, ".dropbox", "info.json")];
   for (const file of infoFiles) {
     const text = host.readText(file);
