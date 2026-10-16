@@ -271,7 +271,7 @@ export const es: Dict = {
     },
     terminal: {
       title: "La terminal dentro de Frameshell",
-      body: "Todos los agentes menos Claude Desktop corren en el panel de la derecha de la ventana del proyecto. Solo escribes ahí el nombre del agente una vez; después le hablas con palabras normales. El comando <code>frameshell</code> ya está disponible para que el agente lo use.",
+      body: "Todos los agentes menos Claude Desktop corren en el panel de la derecha de la ventana del proyecto. Arriba de la terminal, el panel <strong>Habla con un agente</strong> muestra los agentes que tienes instalados, cada uno con un botón para abrirlo, y escribe el comando de instalación de los que faltan. Después le hablas con palabras normales. El comando <code>frameshell</code> ya está disponible para que el agente lo use.",
     },
     sections: [
       {
@@ -286,13 +286,13 @@ export const es: Dict = {
             cmds: [],
           },
           {
-            title: "Instala el comando frameshell",
-            body: "En Frameshell, elige <strong>File → Install 'frameshell' Command in PATH</strong>. El paquete .deb de Linux ya lo trae.",
+            title: "Conecta Frameshell con Claude",
+            body: "En Frameshell 0.8 o posterior, abre un proyecto y haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal. Frameshell te muestra lo que agrega a la configuración de Claude, deja los demás servidores como están y guarda una copia antes.",
             cmds: [],
           },
           {
-            title: "Agrega Frameshell a Claude",
-            body: "En Claude, abre <strong>Settings → Developer → Edit Config</strong>. Pon esto en el archivo, sin borrar lo que ya haya en <code>mcpServers</code>, y guárdalo:",
+            title: "O agrégalo a mano",
+            body: "En Linux o con una versión anterior: en Frameshell elige <strong>Archivo → Instalar el comando 'frameshell' en el PATH</strong> (el paquete .deb ya lo trae). Luego, en Claude, abre <strong>Settings → Developer → Edit Config</strong>, pon esto en el archivo sin borrar lo que ya haya en <code>mcpServers</code> y guárdalo:",
             cmds: [
               { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
               { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
@@ -306,7 +306,7 @@ export const es: Dict = {
           },
           {
             title: "Pruébalo",
-            body: "Con tu proyecto abierto en Frameshell, dile a Claude dónde está: <em>“Mi proyecto de Frameshell está en Escritorio/entrevista. ¿Qué videos tiene?”</em>",
+            body: "Con tu proyecto abierto en Frameshell, pregúntale a Claude: <em>“¿Qué videos tiene mi proyecto de Frameshell?”</em> Claude trabaja en el proyecto de la ventana de Frameshell que usaste por última vez. Con versiones anteriores a la 0.8, dile dónde está el proyecto.",
             cmds: [],
           },
         ],

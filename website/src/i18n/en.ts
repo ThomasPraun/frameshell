@@ -268,7 +268,7 @@ export const en = {
     },
     terminal: {
       title: "Using the terminal inside Frameshell",
-      body: "Every agent except Claude Desktop runs in the panel on the right of a project window. You only type the agent's name there once; after that you talk to it in plain words. The <code>frameshell</code> command is already there for the agent to use.",
+      body: "Every agent except Claude Desktop runs in the panel on the right of a project window. Above the terminal, the <strong>Talk to an agent</strong> panel lists the agents you have, each with a button to start it, and types the install command of the ones you lack. After that you talk to it in plain words. The <code>frameshell</code> command is already there for the agent to use.",
     },
     sections: [
       {
@@ -283,13 +283,13 @@ export const en = {
             cmds: [],
           },
           {
-            title: "Install the frameshell command",
-            body: "In Frameshell, choose <strong>File → Install 'frameshell' Command in PATH</strong>. The Linux .deb package has it already.",
+            title: "Connect Frameshell to Claude",
+            body: "In Frameshell 0.8 or later, open a project and click <strong>Connect Claude Desktop</strong> above the terminal. Frameshell shows what it adds to Claude's settings, keeps the other servers as they are, and backs the file up first.",
             cmds: [],
           },
           {
-            title: "Add Frameshell to Claude",
-            body: "In Claude, open <strong>Settings → Developer → Edit Config</strong>. Put this in the file, keeping anything already in <code>mcpServers</code>, and save:",
+            title: "Or add it by hand",
+            body: "On Linux or with an earlier version: in Frameshell choose <strong>File → Install 'frameshell' Command in PATH</strong> (the .deb package has it already). Then in Claude open <strong>Settings → Developer → Edit Config</strong>, put this in the file, keeping anything already in <code>mcpServers</code>, and save:",
             cmds: [
               { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
               { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
@@ -303,7 +303,7 @@ export const en = {
           },
           {
             title: "Try it",
-            body: "With your project open in Frameshell, tell Claude where it is: <em>“My Frameshell project is in Desktop/interview. What videos does it have?”</em>",
+            body: "With your project open in Frameshell, ask Claude: <em>“What videos does my Frameshell project have?”</em> Claude works on the project of the Frameshell window you used last. With versions before 0.8, tell it where the project is.",
             cmds: [],
           },
         ],
