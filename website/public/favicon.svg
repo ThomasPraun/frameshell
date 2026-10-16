@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Frameshell app icon: viewfinder corners (frame) around a shell prompt ">_" (shell). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2030"/>
+      <stop offset="1" stop-color="#0c0e14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffb347"/>
+      <stop offset="0.55" stop-color="#ff6a3d"/>
+      <stop offset="1" stop-color="#e8336f"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="184.5" fill="none" stroke="url(#rim)" stroke-width="3"/>
+  <g fill="none" stroke="#e9ecf4" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
+    <path d="M232 352 V262 H322"/>
+    <path d="M702 262 H792 V352"/>
+    <path d="M792 672 V762 H702"/>
+    <path d="M322 762 H232 V672"/>
+  </g>
+  <path d="M372 392 L532 512 L372 632" fill="none" stroke="url(#accent)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="560" y="600" width="130" height="58" rx="29" fill="url(#accent)"/>
+</svg>

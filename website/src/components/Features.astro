@@ -1,0 +1,426 @@
+---
+const words: [string, number, boolean][] = [
+  ["So", 0.3, true],
+  ["um,", 0.5, true],
+  ["today", 0.4, false],
+  ["we", 0.2, false],
+  ["talk", 0.4, false],
+  ["the", 0.2, true],
+  ["the", 0.3, false],
+  ["best", 0.3, false],
+  ["timelines.", 0.6, false],
+  ["You", 0.3, true],
+  ["know,", 0.4, true],
+  ["for", 0.3, false],
+  ["video.", 0.7, false],
+];
+
+const engines = ["Footage", "HyperFrames", "Remotion", "Your plugin"];
+---
+
+<section id="features" class="features" data-marker="Features">
+  <div class="wrap">
+    <h2 class="display">Everything an edit needs, readable by an agent.</h2>
+
+    <div class="grid">
+      <article class="cell span-2">
+        <h3>Edit by transcript</h3>
+        <p>
+          A word-level transcript synced with the timeline. The agent cuts filler words and repeated takes; click a struck
+          word to bring its audio back.
+        </p>
+        <div class="tx" data-tx>
+          <p class="tx-words">
+            {
+              words.map(([w, , cut], i) => (
+                <button type="button" class:list={{ struck: cut }} data-i={i} aria-pressed={cut ? "true" : "false"}>
+                  {w}
+                </button>
+              ))
+            }
+          </p>
+          <div class="tx-bar" aria-hidden="true">
+            {words.map(([, d, cut]) => <span style={`--d:${d}`} class:list={{ gone: cut }} />)}
+          </div>
+          <p class="tx-dur" aria-live="polite" data-tx-dur></p>
+        </div>
+      </article>
+
+      <article class="cell">
+        <h3>Review what the agent did</h3>
+        <p>Agent changes are grouped into steps, labelled with the agent that made them. Undo any of them.</p>
+        <ol class="hist" data-hist>
+          <li>
+            <span class="by agent">claude</span><span class="what">Cut 1.8 s of silence</span><button type="button">Revert</button>
+          </li>
+          <li>
+            <span class="by you">you</span><span class="what">Move the logo</span><button type="button">Revert</button>
+          </li>
+          <li>
+            <span class="by agent">claude</span><span class="what">Add 13 subtitles</span><button type="button">Revert</button>
+          </li>
+        </ol>
+      </article>
+
+      <article class="cell">
+        <h3>Layers without limits</h3>
+        <p>Footage, music, voice-over, logos, subtitles, titles and animations, each on its own track.</p>
+        <ul class="engines layers">
+          <li style="--c: var(--video)">Video</li>
+          <li style="--c: var(--audio)">Audio</li>
+          <li style="--c: var(--sub)">Subtitles</li>
+          <li style="--c: var(--tally)">Logos</li>
+          <li style="--c: var(--gen)">Titles</li>
+        </ul>
+      </article>
+
+      <article class="cell">
+        <h3>Any video engine</h3>
+        <p>Clips come from your footage, HTML animations, React components, including your own app's code, or a plugin.</p>
+        <ul class="engines">
+          {engines.map((e) => <li>{e}</li>)}
+        </ul>
+      </article>
+
+      <article class="cell">
+        <h3>Export for every platform</h3>
+        <p>YouTube 1080p and 1440p, or vertical for Shorts, Reels and TikTok. Subtitles burn in and loudness is evened out.</p>
+        <ul class="engines presets">
+          <li>youtube-1080p</li>
+          <li>youtube-1440p</li>
+          <li>vertical-1080x1920</li>
+        </ul>
+      </article>
+
+      <article class="cell">
+        <h3>A project is a JSON file</h3>
+        <p>For developers: the timeline has a published schema. You, the agent and the CLI all edit the same file, and git diffs it.</p>
+      </article>
+
+      <article class="cell span-2">
+        <h3>MCP server</h3>
+        <p>Drive a project from Claude Code or any MCP client, frames included.</p>
+        <div class="cmd mini"><code>claude mcp add frameshell -- frameshell mcp</code></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .features {
+    padding-block: clamp(56px, 8vw, 110px);
+  }
+
+  h2 {
+    max-width: 16ch;
+    font-size: clamp(2.3rem, 6vw, 5rem);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    margin-top: clamp(40px, 6vw, 72px);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--line);
+  }
+
+  .cell {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: clamp(22px, 2.6vw, 34px);
+    background: var(--ink);
+  }
+
+  .span-2 {
+    grid-column: span 2;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    font-stretch: 112%;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  .cell > p {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+
+  /* Transcript */
+  .tx {
+    margin-top: auto;
+    padding-top: 18px;
+  }
+
+  .tx-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 0;
+    margin: 0;
+    font-size: clamp(1.25rem, 2.3vw, 1.75rem);
+    font-weight: 600;
+    font-stretch: 105%;
+  }
+
+  .tx-words button {
+    padding: 0 0.16em;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    cursor: default;
+    transition:
+      color 0.2s,
+      background-color 0.4s;
+  }
+
+  .tx-words button.struck {
+    color: var(--faint);
+    text-decoration: line-through 2px var(--danger);
+    cursor: pointer;
+  }
+
+  .tx-words button.struck:hover {
+    background: var(--panel);
+  }
+
+  .tx-words button.restored {
+    background: var(--tally-soft);
+  }
+
+  .tx-bar {
+    display: flex;
+    gap: 2px;
+    height: 22px;
+    margin-top: 16px;
+  }
+
+  .tx-bar span {
+    flex: var(--d) 0 0;
+    border-radius: 2px;
+    background: #2f4a3c;
+    box-shadow: inset 0 2px 0 var(--audio);
+    transition:
+      flex-grow 0.6s var(--ease),
+      margin 0.6s var(--ease);
+  }
+
+  .tx-bar span.gone {
+    flex-grow: 0;
+    margin-right: -2px;
+  }
+
+  .tx-dur {
+    margin: 8px 0 0;
+    color: var(--faint);
+    font: 12.5px var(--mono);
+  }
+
+  /* History */
+  .hist {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: auto 0 0;
+    padding: 18px 0 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .hist :global(li) {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px 7px 10px;
+    border-radius: 4px;
+    background: var(--panel);
+    animation: slot 0.4s var(--ease);
+  }
+
+  @keyframes slot {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+  }
+
+  .hist :global(li.reverted .what) {
+    color: var(--faint);
+    text-decoration: line-through;
+  }
+
+  .hist :global(.by) {
+    font: 500 12px var(--mono);
+  }
+
+  .hist :global(.by.agent) {
+    color: var(--gen);
+  }
+
+  .hist :global(.by.you) {
+    color: var(--tally);
+  }
+
+  .hist :global(.what) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hist :global(button) {
+    padding: 3px 9px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    font: 500 12.5px var(--sans);
+    cursor: pointer;
+  }
+
+  .hist :global(button:hover:not(:disabled)) {
+    border-color: var(--faint);
+    color: var(--text);
+  }
+
+  .hist :global(button:disabled) {
+    visibility: hidden;
+  }
+
+  .code {
+    margin: auto 0 0;
+    padding: 14px 16px;
+    overflow-x: auto;
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .k {
+    color: var(--video);
+  }
+
+  .s {
+    color: var(--audio);
+  }
+
+  .n {
+    color: var(--tally);
+  }
+
+  .engines {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: auto 0 0;
+    padding: 12px 0 0;
+    list-style: none;
+  }
+
+  .engines li {
+    padding: 5px 10px;
+    border-radius: 3px;
+    background: var(--panel);
+    box-shadow: inset 0 2px 0 var(--gen);
+    font-size: 13.5px;
+  }
+
+  .engines li:first-child {
+    box-shadow: inset 0 2px 0 var(--video);
+  }
+
+  .layers li,
+  .layers li:first-child,
+  .layers li:last-child {
+    box-shadow: inset 0 2px 0 var(--c);
+    color: var(--text);
+  }
+
+  .presets li,
+  .presets li:first-child,
+  .presets li:last-child {
+    box-shadow: none;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+
+  .engines li:last-child {
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--muted);
+  }
+
+  .mini {
+    margin-top: auto;
+    font-size: 12.5px;
+  }
+
+  @media (max-width: 960px) {
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 620px) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .span-2 {
+      grid-column: auto;
+    }
+  }
+</style>
+
+<script>
+  const tx = document.querySelector<HTMLElement>("[data-tx]");
+  if (tx) {
+    const buttons = [...tx.querySelectorAll<HTMLButtonElement>("button")];
+    const bars = [...tx.querySelectorAll<HTMLElement>(".tx-bar span")];
+    const out = tx.querySelector<HTMLElement>("[data-tx-dur]")!;
+    const dur = (el: HTMLElement) => Number(el.style.getPropertyValue("--d"));
+    const total = bars.reduce((a, b) => a + dur(b), 0);
+    const render = () => {
+      const kept = bars.filter((b) => !b.classList.contains("gone")).reduce((a, b) => a + dur(b), 0);
+      out.textContent = `${kept.toFixed(1)} s kept of ${total.toFixed(1)} s`;
+    };
+    buttons.forEach((b, i) =>
+      b.addEventListener("click", () => {
+        if (!b.classList.contains("struck")) return;
+        b.classList.replace("struck", "restored");
+        b.setAttribute("aria-pressed", "false");
+        bars[i].classList.remove("gone");
+        render();
+      }),
+    );
+    render();
+  }
+
+  const hist = document.querySelector<HTMLOListElement>("[data-hist]");
+  hist?.addEventListener("click", (e) => {
+    const button = (e.target as Element).closest("button");
+    const row = button?.closest("li");
+    if (!button || !row) return;
+    const what = row.querySelector(".what")!.textContent;
+    row.classList.add("reverted");
+    button.disabled = true;
+    const undo = document.createElement("li");
+    undo.innerHTML = '<span class="by you">you</span><span class="what"></span><button type="button" disabled>Revert</button>';
+    undo.querySelector(".what")!.textContent = `Revert "${what}"`;
+    hist.prepend(undo);
+    while (hist.children.length > 4) hist.lastElementChild!.remove();
+  });
+</script>
