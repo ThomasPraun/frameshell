@@ -45,6 +45,19 @@ export type OpenOutcome =
   | { status: "error"; message: string };
 
 /**
+ * Background setup of a project created from videos (#188): installing the
+ * transcription plugin, first-run downloads, transcribing. `fraction` is of
+ * the current step when known. `state` `done` and `failed` end it.
+ */
+export interface ProjectSetup {
+  message: string;
+  /** The technical reason of a failure (daemon error), for the tooltip; null otherwise. */
+  detail: string | null;
+  fraction: number | null;
+  state: "running" | "done" | "failed";
+}
+
+/**
  * Project to create from video files (ADR 0013), as main planned it. The
  * renderer shows it for confirmation and passes `files`, `parent` and `name`
  * back; main plans again before creating.
@@ -186,7 +199,19 @@ export interface FrameshellApi {
      * then `asset.import` of the files (`copy` clones where possible; `link`
      * uses them in place). Opens the project instead when the plan says it exists.
      */
-    fromVideos(plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link"): Promise<OpenOutcome>;
+    fromVideos(
+      plan: Pick<VideoProjectPlan, "files" | "parent" | "name">,
+      mode: "copy" | "link",
+      options?: { transcribe?: boolean },
+    ): Promise<OpenOutcome>;
+    /**
+     * Setup still running, or just ended, for this window's project (#188);
+     * null when none. With `transcribe`, {@link fromVideos} installs the
+     * transcription plugin and transcribes the videos in the background.
+     */
+    setup(): Promise<ProjectSetup | null>;
+    /** Called on every change of {@link setup}. Returns an unsubscribe function. */
+    onSetup(listener: (setup: ProjectSetup | null) => void): () => void;
   };
   files: {
     tree(): Promise<FileNode[]>;
@@ -356,6 +381,8 @@ export const Channel = {
   projectPlanVideos: "project:plan-videos",
   projectChooseParent: "project:choose-parent",
   projectFromVideos: "project:from-videos",
+  projectSetup: "project:setup",
+  projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",
   projectVideosOffered: "project:videos-offered",
   mediaImport: "media:import",

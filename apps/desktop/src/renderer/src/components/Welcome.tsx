@@ -88,7 +88,9 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
             onPlan={setPlan}
             onError={setError}
             onCancel={() => setPlan(null)}
-            onCreate={(mode, name) => void run(() => window.frameshell.project.fromVideos({ ...plan, name }, mode))}
+            onCreate={(mode, name, transcribe) =>
+              void run(() => window.frameshell.project.fromVideos({ ...plan, name }, mode, { transcribe }))
+            }
           />
         ) : (
           <div className="welcome-actions">
@@ -152,10 +154,11 @@ function NewFromVideo({
   onError: (message: string | null) => void;
   onCancel: () => void;
   /** `name` as typed: it may not be replanned yet. */
-  onCreate: (mode: "copy" | "link", name: string) => void;
+  onCreate: (mode: "copy" | "link", name: string, transcribe: boolean) => void;
 }) {
   const [name, setName] = useState(plan.name);
   const [mode, setMode] = useState<"copy" | "link">("copy");
+  const [transcribe, setTranscribe] = useState(true);
   // Replans only for the latest edit: a slow answer for an older name must not overwrite a newer one.
   const latest = useRef(0);
 
@@ -185,7 +188,7 @@ function NewFromVideo({
       aria-label="New project from video"
       onSubmit={(event) => {
         event.preventDefault();
-        onCreate(mode, name);
+        onCreate(mode, name, transcribe);
       }}
     >
       <p className="welcome-new-source">{videos}</p>
@@ -228,6 +231,16 @@ function NewFromVideo({
         </fieldset>
       ) : (
         <p className="welcome-hint">Your videos stay where they are; the project keeps its own copy.</p>
+      )}
+
+      {!plan.existing && (
+        <label className="welcome-check">
+          <input type="checkbox" checked={transcribe} onChange={(event) => setTranscribe(event.target.checked)} />
+          <span>
+            Transcribe what is said
+            <small>The first time, this downloads the transcription engine and model (about 600 MB).</small>
+          </span>
+        </label>
       )}
 
       <div className="welcome-actions">

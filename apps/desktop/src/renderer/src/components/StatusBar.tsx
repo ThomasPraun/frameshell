@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ProjectView } from "../../../shared/api.js";
+import type { ProjectSetup, ProjectView } from "../../../shared/api.js";
 import { useAgentNotice } from "../ui-link.js";
 
 /** How long the last agent navigation stays in the status bar. */
@@ -8,18 +8,21 @@ const AGENT_NOTICE_MS = 6_000;
 /**
  * Bottom strip: which daemon serves the project, which terminal session CLI
  * calls are attributed to, a transient `notice` (e.g. why "Ask agent" did nothing),
- * and briefly what the agent just did to the view (MCP navigation).
+ * the background `setup` of a new project (#188), and briefly what the agent
+ * just did to the view (MCP navigation).
  */
 export function StatusBar({
   project,
   activeFile,
   session,
   notice = null,
+  setup = null,
 }: {
   project: ProjectView;
   activeFile: string | null;
   session: string | null;
   notice?: string | null;
+  setup?: ProjectSetup | null;
 }) {
   const agent = useAgentNotice();
   const [shown, setShown] = useState(agent);
@@ -37,6 +40,17 @@ export function StatusBar({
       </span>
       {activeFile && <span className="status-item">{activeFile}</span>}
       <span className="status-spacer" />
+      {setup && (
+        <span className={`status-item status-setup is-${setup.state}`} role="status" data-testid="project-setup" title={setup.detail ?? setup.message}>
+          {setup.state === "running" && (
+            <span className="setup-bar" aria-hidden="true">
+              <span style={{ width: setup.fraction === null ? undefined : `${Math.round(setup.fraction * 100)}%` }} className={setup.fraction === null ? "is-indeterminate" : ""} />
+            </span>
+          )}
+          {setup.message}
+          {setup.state === "running" && setup.fraction !== null && ` ${Math.round(setup.fraction * 100)}%`}
+        </span>
+      )}
       <span className="status-item status-notice" role="status" aria-live="polite" data-testid="status-notice">
         {notice ?? ""}
       </span>

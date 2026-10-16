@@ -20,6 +20,8 @@ test("a video opened from the OS is offered as a new project on the welcome scre
     const form = page.getByRole("form", { name: "New project from video" });
     await expect(form.getByText("take.mp4")).toBeVisible();
     await expect(form.getByLabel("Project name")).toHaveValue("take");
+    // Transcription would download the plugin and a 574 MB model: covered with a dead registry in new-from-video.
+    await form.getByLabel("Transcribe what is said").uncheck();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("take", { timeout: 60_000 });
     expect(app.windows()).toHaveLength(1);
