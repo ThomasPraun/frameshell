@@ -57,7 +57,8 @@ test("a second launch hands its video to the running app", async () => {
     const env = { ...process.env, FRAMESHELL_SOCKET: box.socketPath, FRAMESHELL_DATA_DIR: box.dataDir, FRAMESHELL_CONFIG_DIR: box.configDir };
     // The second process finds the lock taken, passes its argv on and quits.
     await new Promise<void>((resolve, reject) =>
-      execFile(packaged ?? "", [second], { env, timeout: 30_000 }, (error) => (error ? reject(error) : resolve())),
+      // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs, as in the harness.
+      execFile(packaged ?? "", [...(process.platform === "linux" ? ["--no-sandbox"] : []), second], { env, timeout: 30_000 }, (error) => (error ? reject(error) : resolve())),
     );
     const form = page.getByRole("form", { name: "New project from video" });
     await expect(form.getByLabel("Project name")).toHaveValue("second");

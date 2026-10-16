@@ -1,5 +1,5 @@
 // Files and folders the OS asks the app to open (#184): launch arguments, a second launch, macOS open-file.
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 /**
  * Paths to open from a launch command line, absolute against `cwd`. `argv`
@@ -16,7 +16,8 @@ export function launchPaths(argv: readonly string[], skip: number, cwd: string):
       continue;
     }
     if (arg === "" || arg.startsWith("-")) continue;
-    paths.push(isAbsolute(arg) ? arg : resolve(cwd, arg));
+    // resolve, not isAbsolute: on Windows `/media/x.mp4` is absolute yet has no drive.
+    paths.push(resolve(cwd, arg));
   }
   return paths;
 }
