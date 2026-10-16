@@ -14,6 +14,9 @@ files:
   - "!node_modules/@frameshell/*/{src,test,scripts}/**"
 # node-pty is N-API: one prebuilt binary serves Electron. No electron-rebuild (see scripts/prepare-native.mjs).
 npmRebuild: false
+# npm for plugin installs on machines without Node (#204), copied to resources/npm/ by the hook: as a dependency or
+# extraResources, electron-builder drops the packages npm bundles inside itself.
+afterPack: scripts/bundle-npm.mjs
 # The bundled CLI and daemon run as `Frameshell --run-as-node` (ELECTRON_RUN_AS_NODE). Keep the RunAsNode fuse
 # enabled: disabling it breaks `frameshell` in the terminal and daemon auto-start.
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}

@@ -5,6 +5,7 @@ import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { PluginPins } from "@frameshell/protocol";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
+import { electronNpmEnv, npmCliCandidates } from "./npm-runtime.js";
 import { type PluginSpec, formatTarballPin, parseTarballPin } from "./spec.js";
 import { tarballPackageName } from "./tarball.js";
 
@@ -223,14 +224,16 @@ function samePins(a: unknown, b: PluginPins): boolean {
 
 /**
  * Run npm with the running Node. Prefers the npm bundled next to that Node,
- * so no shell (Windows `.cmd` shims need one) and no PATH lookup is involved.
+ * or with the app (see {@link npmCliCandidates}), so no shell (Windows `.cmd`
+ * shims need one) and no PATH lookup is involved.
  */
-function npm(args: string[], cwd: string): Promise<void> {
+async function npm(args: string[], cwd: string): Promise<void> {
   const flags = ["--no-audit", "--no-fund", "--loglevel=error", "--update-notifier=false"];
   const cli = bundledNpmCli();
+  const env = process.versions.electron ? await electronNpmEnv(process.execPath, process.env) : process.env;
   const child = cli
-    ? spawn(process.execPath, [cli, ...args, ...flags], { cwd, windowsHide: true })
-    : spawn("npm", [...args, ...flags], { cwd, windowsHide: true, shell: process.platform === "win32" });
+    ? spawn(process.execPath, [cli, ...args, ...flags], { cwd, env, windowsHide: true })
+    : spawn("npm", [...args, ...flags], { cwd, env, windowsHide: true, shell: process.platform === "win32" });
   let stderr = "";
   child.stdout.resume();
   child.stderr.setEncoding("utf8");
@@ -248,11 +251,6 @@ function npm(args: string[], cwd: string): Promise<void> {
 let npmCli: string | null | undefined;
 function bundledNpmCli(): string | null {
   if (npmCli !== undefined) return npmCli;
-  const bin = dirname(realpathSync(process.execPath));
-  const candidates = [
-    join(bin, "node_modules", "npm", "bin", "npm-cli.js"), // Windows layout
-    join(bin, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), // Unix layout
-  ];
-  npmCli = candidates.find((path) => existsSync(path)) ?? null;
+  npmCli = npmCliCandidates(dirname(realpathSync(process.execPath))).find((path) => existsSync(path)) ?? null;
   return npmCli;
 }
