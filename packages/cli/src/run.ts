@@ -48,7 +48,8 @@ const USAGE = `Usage: frameshell <command> [options]
 Commands:
   init [dir] [--name <name>] [--no-skill]
                                Scaffold a project in dir (default: current directory) with the agent skill
-                               in .claude/skills/frameshell/ (asked first on a terminal; --no-skill: none)
+                               in .claude/skills/frameshell/, AGENTS.md, GEMINI.md and .claude/settings.json
+                               (asked first on a terminal; --no-skill: none)
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
   doctor [--install] [--json]  Check binaries, encoders and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first
@@ -558,7 +559,8 @@ async function offerSkill(io: CliIo): Promise<boolean> {
   if (!io.prompt) return true;
   const answer = await io.prompt(
     `Install the Frameshell agent skill in ${SKILL_DIR}/? It teaches Claude Code and compatible agents ` +
-      "this project's CLI, history and review loop. [Y/n] ",
+      "this project's CLI, history and review loop. AGENTS.md and GEMINI.md point other agents at it, and " +
+      ".claude/settings.json lets Claude Code run frameshell commands without asking. [Y/n] ",
   );
   return !/^\s*n(o)?\s*$/i.test(answer);
 }

@@ -18,6 +18,7 @@ import {
   parseTranscript,
 } from "@frameshell/schema";
 import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
+import { installAgentFiles } from "./skills/agent-files.js";
 import { installCoreSkill } from "./skills/install.js";
 
 /** Project config file name; its directory is the project root. */
@@ -63,7 +64,8 @@ export class ProjectRegistry {
 
   /**
    * Scaffold a project in `dir` (created if missing) and open it, with the
-   * core agent skill unless `agentSkill` is false.
+   * core agent skill and the agent files (`AGENTS.md`, `GEMINI.md`,
+   * `.claude/settings.json`) unless `agentSkill` is false.
    * Throws `ProjectExists` instead of overwriting an existing `frameshell.json`.
    */
   async init(dir: string, name?: string, agentSkill = true): Promise<ProjectInitResult> {
@@ -86,7 +88,7 @@ export class ProjectRegistry {
       await writeFile(ignorePath, ".frameshell/\n");
       created.push(".gitignore");
     }
-    if (agentSkill) created.push(...(await installCoreSkill(root)));
+    if (agentSkill) created.push(...(await installCoreSkill(root)), ...(await installAgentFiles(root)));
     // Config last: its presence marks a complete project.
     await writeJsonAtomic(configPath, config);
     created.push(PROJECT_FILE);

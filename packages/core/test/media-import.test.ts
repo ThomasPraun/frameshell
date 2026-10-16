@@ -390,6 +390,21 @@ describe("asset import", () => {
     expect((await assetInfo("assets/notes.mp4")).state).toBe("failed");
   });
 
+  it("makes the project's copy read-only, never the original or a linked file", async () => {
+    const source = join(tempDir(), "take.mp4");
+    writeFileSync(source, "footage");
+    const { imported } = await conn.request("asset.import", { cwd: project, files: [source] });
+    const writable = (path: string) => (statSync(path).mode & 0o222) !== 0;
+    expect(writable(join(project, imported[0]?.asset ?? ""))).toBe(false);
+    expect(writable(source)).toBe(true);
+
+    const linked = join(tempDir(), "linked.mp4");
+    writeFileSync(linked, "other footage");
+    const link = await conn.request("asset.import", { cwd: project, files: [linked], mode: "link" });
+    expect(writable(join(project, link.imported[0]?.asset ?? ""))).toBe(true);
+    expect(writable(linked)).toBe(true);
+  });
+
   it("rejects a missing source with AssetNotFound and imports nothing", async () => {
     const missing = join(tempDir(), "nope.mp4");
     await expect(conn.request("asset.import", { cwd: project, files: [missing] })).rejects.toMatchObject({

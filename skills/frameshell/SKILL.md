@@ -10,6 +10,7 @@ Frameshell is an IDE for video. You edit the project from the terminal; the huma
 ## Ground rules
 
 - **Change the project through `frameshell` commands or MCP tools.** Read any project file freely. Direct edits of `timelines/*.json` are guarded (see [project-model.md](reference/project-model.md)); the commands validate, snap and journal for you.
+- **The media in `assets/` is the person's footage.** Never edit, move, overwrite or delete it (imported copies are read-only). Write derived media under a new name and import it.
 - **Read before you edit.** `frameshell timeline show --json` lists every track and clip with ids and times. Use those ids; after each change, take new ids from the command's output (`changes.added`).
 - **Two clocks, both in seconds.** Timeline time: `start`, `cut --from/--to`, `frame --at`, `[frameshell]` lines. Source time: a clip's `in`/`out` and every transcript word. A source time `s` inside a clip plays at timeline time `clip.start + (s - clip.in) / speed`.
 - **Parse `--json`.** On failure the JSON carries `error.code`, `error.message` and `error.data` (valid range, available ids, the fix). Apply the fix and retry.

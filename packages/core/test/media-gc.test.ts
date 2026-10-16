@@ -273,6 +273,8 @@ describe("gc through the daemon", () => {
       const b = await ready("assets/b.mp4");
       // b deleted, a replaced by other content: the watcher ingests the new a.
       rmSync(join(project, "assets", "b.mp4"));
+      // Imported copies are read-only: a changed asset is a replaced file, as an export over it makes.
+      rmSync(join(project, "assets", "a.mp4"));
       writeFileSync(join(project, "assets", "a.mp4"), readFileSync(join(sources, "a2.mp4")));
       const newA = await ready("assets/a.mp4", oldA.hash);
       for (;;) {

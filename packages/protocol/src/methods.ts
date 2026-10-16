@@ -508,8 +508,9 @@ export const methods = {
     description:
       "Create a new Frameshell project: scaffold the directory layout, a default `frameshell.json` " +
       "(1080p, 30 fps, 48 kHz) and an empty `main` timeline, then open it. Also writes the `frameshell` agent skill " +
-      "to `.claude/skills/frameshell/`, where agents such as Claude Code load it, unless `agentSkill` is false or " +
-      "that directory exists. " +
+      "to `.claude/skills/frameshell/`, where agents such as Claude Code load it (kept when that directory exists), and " +
+      "agent files kept when present: `AGENTS.md` and `GEMINI.md` pointing other agents at it, and `.claude/settings.json` " +
+      "letting Claude Code run `frameshell` commands and tools without asking. None of these when `agentSkill` is false. " +
       "Fails with ProjectExists when the directory already holds `frameshell.json`; never overwrites.",
     params: z.strictObject({
       dir: AbsolutePath.describe("Absolute project directory; created if missing. Example: `/home/ana/videos/launch`."),
@@ -517,7 +518,7 @@ export const methods = {
       agentSkill: z
         .boolean()
         .default(true)
-        .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`. Default true."),
+        .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`, plus the agent files. Default true."),
     }),
     result: z.object({
       project: ProjectSummarySchema,

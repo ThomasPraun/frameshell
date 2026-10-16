@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: `frameshell init` and the app's new projects also write `AGENTS.md` and `GEMINI.md`, which point Codex, OpenCode, Pi and Gemini CLI at the Frameshell skill, and `.claude/settings.json`, which lets Claude Code run `frameshell` commands and MCP tools without asking while deleting files still asks (#186). Files already there are kept; `--no-skill` writes none of them.
+
+### Changed
+
+- Core: files imported into `assets/` by copy are read-only, so an agent or a tool cannot overwrite the project's footage by mistake (#186). Linked imports (`--link`) keep the original's permissions. Replacing an asset means deleting it and writing the new file, which the daemon ingests as before.
+
+### Added
+
 - Desktop: **New from video…** on the welcome screen (#182, ADR 0013). Choose one or more videos and the project is made in a folder beside the first one, named after it (`interview.mp4` becomes `interview/`), with the videos imported into `assets/`; no terminal needed. The name and the place can be changed before creating. The originals stay where they are: the project gets a clone where the disk supports it (no extra space), and when it does not and the videos pass 2 GB, the app asks whether to keep a copy or use them in place. Choosing a video that already has its project there opens that project; a folder of that name holding something else gets `interview (2)`.
 - Desktop: drop videos from Finder or Explorer on the welcome screen to start a project from them, and drop videos, audio or images on a project window to import them into `assets/` (#183). The status bar names what was imported and what was not media. Drops on a terminal are left to the terminal.
 
