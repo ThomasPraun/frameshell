@@ -6,7 +6,7 @@ The desktop app ships as a macOS DMG (arm64 and x64), a Linux AppImage and `.deb
 
 | Trigger | Builds and smoke-tests | Signs macOS | Publishes |
 |---|---|---|---|
-| Push of a tag `v<major>.<minor>.<patch>[-pre]` | yes | if the secrets exist | a **draft** GitHub release with the installers and `SHA256SUMS.txt` |
+| Push of a tag `v<major>.<minor>.<patch>[-pre]` | yes | if the secrets exist | a **draft** GitHub release with the installers, the update files (see [Updates](#updates)) and `SHA256SUMS.txt` |
 | Actions → Release → Run workflow (`workflow_dispatch`) | yes | if the secrets exist | nothing: installers are workflow artifacts (14 days) |
 | Pull request that touches packaging files | yes | never (no secrets on PRs) | nothing |
 | **Publish** of that draft release (by hand) | no | no | the official plugins to npm (see [npm plugins](#npm-plugins)) |
@@ -26,6 +26,31 @@ Before drafting, the publish job checks the ffmpeg mirror: the GitHub release na
 `@frameshell/cli` and `@frameshell/core` are dependencies of the app, so they ship inside `app.asar`. At startup the app writes a `frameshell` shim into `<userData>/bin` that runs the CLI with the app's own executable in Node mode (`ELECTRON_RUN_AS_NODE`). Integrated terminals put that directory first on `PATH`. The daemon is started the same way, from a short-lived utility process (`out/main/daemon-spawner.js`) so it holds none of the app's stdio handles (#112). The app does not install `frameshell` system-wide.
 
 Keep Electron's `RunAsNode` fuse enabled. Turning it off breaks the CLI in the terminal and daemon auto-start.
+
+## Updates
+
+The app checks GitHub Releases for a newer version 10 s after start and then daily (#193; `apps/desktop/src/main/updater.ts`, pure parts in `update-check.ts`). Only **published** releases count: a draft is invisible, and a prerelease is never offered to a release build.
+
+| Build | What the user sees |
+|---|---|
+| macOS (notarized) | electron-updater downloads the zip in the background, then a banner "Restart to Update". The update is also installed on the next quit. |
+| Linux AppImage | Same as macOS, installed only through "Restart to Update". |
+| Windows (unsigned), Linux `.deb` | A banner "Frameshell X is available." with a link to the release page. Installing is by hand. |
+| Dev, e2e, CI and local packages (`0.0.0-*`) | No check. `FRAMESHELL_UPDATE_CHECK=1` forces one (an unpackaged build only shows the banner), `=0` turns it off. |
+
+When downloading or installing fails (an unsigned macOS build, the app run from the DMG or another read-only volume), the app shows the download banner instead. The menu (macOS: app menu; Windows and Linux: Help) has **Check for Updates…** and the checkbox **Check for Updates Automatically**, stored in `configDir/updates.json`.
+
+**Files on the release.** electron-builder writes the update files because `electron-builder.yml` has a `publish` entry (provider `github`); `--publish never` still keeps it from uploading. The `package` job uploads them with the installers and the draft release carries them:
+
+- `latest-mac.yml` and `Frameshell-<version>-mac-{arm64,x64}.zip` (+ `.zip.blockmap`): the macOS update. The zip target exists for the updater; the DMG is for first installs (`dmg.writeUpdateInfo: false`).
+- `latest-linux.yml`: the AppImage update (its block map is inside the AppImage).
+- Windows `latest.yml` is not uploaded: Windows only gets the banner.
+
+Never rename or re-zip these files by hand: `latest-*.yml` holds their names, sizes and SHA-512.
+
+**Daemon after an update.** The first start of a new version stops a daemon of the old version when nobody else is connected and no job is queued or running, or when it speaks another protocol; the app then starts its own (`apps/desktop/src/main/stale-daemon.ts`). A busy daemon is kept and exits on its idle timer.
+
+**Test with a real release** (manual, needs two tagged versions): install version N, publish N+1, start N. macOS and AppImage: the banner says "ready" within a minute; Restart to Update must come back as N+1 (About), and `frameshell status` in its terminal must name a new daemon pid. Windows and `.deb`: the banner links to N+1's release page.
 
 ## npm plugins
 
@@ -176,4 +201,4 @@ Local builds are unsigned unless you export the signing variables above. Output 
 ## Not done yet
 
 - **Linux arm64 and Windows arm64** are not built.
-- **Auto-update** is not set up: no update metadata is published.
+- **Windows auto-update**: Windows stays unsigned, so it only shows the banner (see [Updates](#updates)).

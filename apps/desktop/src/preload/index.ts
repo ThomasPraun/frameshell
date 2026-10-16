@@ -97,6 +97,12 @@ const api: FrameshellApi = {
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
     live: (timeline, clip) => invokeOutcome(Channel.clipsLive, timeline, clip),
   },
+  updates: {
+    status: () => ipcRenderer.invoke(Channel.updatesStatus),
+    onStatus: (listener) => subscribe(Channel.updatesChanged, listener),
+    restart: () => ipcRenderer.send(Channel.updatesRestart),
+    dismiss: () => ipcRenderer.send(Channel.updatesDismiss),
+  },
 };
 
 contextBridge.exposeInMainWorld("frameshell", api);

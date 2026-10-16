@@ -53,6 +53,9 @@ import { UiBridge } from "./ui-bridge.js";
 import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
+import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
+import { UPDATE_TEXT, UpdatePreferences, updateMode } from "./update-check.js";
+import { Updater } from "./updater.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
@@ -94,6 +97,15 @@ const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
 /** Projects whose synced-folder warning the user dismissed (#187): a user decision, so in `configDir`. */
 const syncWarningsFile = join(resolveAppDirs(process.env).configDir, "sync-warnings-dismissed.json");
+/** Update check (#193); its opt-out is a user decision, so in `configDir`. */
+const updater = new Updater({
+  mode: updateMode({ packaged: app.isPackaged, platform: process.platform, version: APP_VERSION, env: process.env }),
+  preferences: new UpdatePreferences(join(resolveAppDirs(process.env).configDir, "updates.json")),
+  version: APP_VERSION,
+  broadcast: (status) => {
+    for (const state of windows.values()) send(state.window.webContents, Channel.updatesChanged, status);
+  },
+});
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
@@ -833,6 +845,9 @@ function registerIpc(): void {
     if (project) void layouts.save(project.dir, normalizeLayout(layout));
   });
   ipcMain.handle(Channel.panelsDetached, () => panelWindows.detached());
+  ipcMain.handle(Channel.updatesStatus, () => updater.status());
+  ipcMain.on(Channel.updatesRestart, () => void updater.restart());
+  ipcMain.on(Channel.updatesDismiss, () => updater.dismiss());
 }
 
 function buildMenu(): void {
@@ -851,8 +866,37 @@ function buildMenu(): void {
     const state = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow());
     if (state) send(state.window.webContents, Channel.menuCommand, name);
   };
+  const updateItems: Electron.MenuItemConstructorOptions[] = [
+    { id: "check-updates", label: UPDATE_TEXT.menuCheck, click: () => void updater.checkFromMenu() },
+    {
+      id: "auto-updates",
+      label: UPDATE_TEXT.menuAutomatic,
+      type: "checkbox",
+      checked: updater.automatic,
+      click: (item) => void updater.setAutomatic(item.checked),
+    },
+  ];
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" as const },
+              { type: "separator" as const },
+              ...updateItems,
+              { type: "separator" as const },
+              { role: "services" as const },
+              { type: "separator" as const },
+              { role: "hide" as const },
+              { role: "hideOthers" as const },
+              { role: "unhide" as const },
+              { type: "separator" as const },
+              { role: "quit" as const },
+            ],
+          },
+        ]
+      : []),
     {
       label: "File",
       submenu: [
@@ -888,6 +932,7 @@ function buildMenu(): void {
       ],
     },
     { role: "windowMenu" },
+    ...(process.platform === "darwin" ? [] : [{ label: UPDATE_TEXT.menuHelp, submenu: updateItems }]),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -937,8 +982,15 @@ app.whenReady().then(async () => {
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   await panelWindows.load();
+  await updater.load();
+  // First start after an update: a daemon of the old version may still run (SPEC §13 "version skew after
+  // update"). Packaged only: a dev build shares userData with the installed app and would stop its daemon.
+  if (app.isPackaged && (await versionChanged(join(app.getPath("userData"), "last-version"), APP_VERSION))) {
+    await stopStaleDaemon({ socketPath, client: `desktop/${APP_VERSION}`, cwd: homedir() }).catch(() => undefined);
+  }
   registerIpc();
   buildMenu();
+  updater.start();
   const startDir = projectArg(process.argv);
   const opened = [...launchPaths(process.argv, app.isPackaged ? 1 : 2, process.cwd()), ...earlyOpens];
   ready = true;

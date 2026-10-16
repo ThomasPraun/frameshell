@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OpenOutcome, ProjectView } from "../../shared/api.js";
+import { UpdateBanner } from "./components/UpdateBanner.js";
 import { Welcome } from "./components/Welcome.js";
 import { Workspace } from "./components/Workspace.js";
 import { listenHistoryCommands } from "./history-commands.js";
@@ -20,6 +21,10 @@ export function App() {
   }, []);
 
   if (project === undefined) return <div className="boot" />;
-  if (!project) return <Welcome onOutcome={onOutcome} />;
-  return <Workspace project={project} />;
+  return (
+    <>
+      {project ? <Workspace project={project} /> : <Welcome onOutcome={onOutcome} />}
+      <UpdateBanner />
+    </>
+  );
 }

@@ -108,6 +108,12 @@ jobs:
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
             apps/desktop/release/*.exe
+            # Update metadata for electron-updater (#193): macOS installs the zips, Linux the AppImage. Windows only
+            # gets a banner, so its latest.yml stays out.
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.zip.blockmap
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/latest-linux.yml
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4

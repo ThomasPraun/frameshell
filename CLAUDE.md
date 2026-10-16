@@ -45,6 +45,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | MCP server (tools from registry, resources, frame images) | `docs/mcp.md`; `packages/mcp/src/server.ts` |
 | MCP UI state + navigation (`ui_*`, broker daemon → app window) | `docs/mcp.md`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
+| Update check (mode per platform, opt-out, release update files, stale daemon after update) | `docs/release.md` "Updates"; `apps/desktop/src/main/updater.ts`, `main/update-check.ts`, `main/stale-daemon.ts` |
 | Landing page frameshell.dev (Astro, own npm, Cloudflare Pages, hero video slot) | `website/README.md` |
 | Agent skill (content, bundle into core, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/`, `core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 

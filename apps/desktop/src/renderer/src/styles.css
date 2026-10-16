@@ -395,6 +395,31 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Update found (#193): floats above the status bar, so no layout moves. */
+.update-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 10px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.update-banner p {
+  margin: 0;
+}
+
+.update-banner a.button {
+  text-decoration: none;
+}
+
 /* Files dragged in from the OS (#183): the whole window is the target. */
 .drop-target {
   position: fixed;
