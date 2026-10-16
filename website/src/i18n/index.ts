@@ -10,9 +10,13 @@ export function strings(locale: string | undefined): Dict {
   return dicts[locale as Lang] ?? en;
 }
 
-/** Page path for `lang`: English at the root, Spanish under /es/. */
-export function pathFor(lang: Lang): string {
-  return lang === "en" ? "/" : `/${lang}/`;
+/** Pages of the site, each in every language. */
+export type Page = "home" | "agents";
+
+/** Path of `page` in `lang`: English at the root, Spanish under /es/. */
+export function pathFor(lang: Lang, page: Page = "home"): string {
+  const root = lang === "en" ? "/" : `/${lang}/`;
+  return page === "home" ? root : `${root}${page}/`;
 }
 
 // The markup indexes lists by position (tabs, replies, layer colours), so a translation with a

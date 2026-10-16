@@ -1,6 +1,6 @@
 ---
 import { RELEASES, assetUrl } from "../site";
-import { strings } from "../i18n";
+import { strings, pathFor, type Lang } from "../i18n";
 
 interface Props {
   version: string;
@@ -76,6 +76,7 @@ const plugins = [
       <li>
         <h3>{t.ask.title}</h3>
         <p set:html={t.ask.body} />
+        <p class="all"><a href={pathFor((Astro.currentLocale ?? "en") as Lang, "agents")}>{t.ask.more}</a></p>
       </li>
     </ol>
   </div>

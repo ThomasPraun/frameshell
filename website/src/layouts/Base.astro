@@ -1,13 +1,18 @@
 ---
 import "../styles/global.css";
-import { strings, pathFor, type Lang } from "../i18n";
+import { strings, pathFor, type Lang, type Page } from "../i18n";
 
+interface Props {
+  page?: Page;
+}
+const { page = "home" } = Astro.props;
 const lang = (Astro.currentLocale ?? "en") as Lang;
 const t = strings(lang);
-const canonical = new URL(pathFor(lang), Astro.site);
-// English page only: a first visit with a Spanish browser goes to /es/; a choice made with the
-// header's language switch (localStorage "lang") wins after that.
-const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(pathFor(l), Astro.site) }));
+const meta = page === "agents" ? t.agents.meta : t.meta;
+const canonical = new URL(pathFor(lang, page), Astro.site);
+// English pages only: a first visit with a Spanish browser goes to the /es/ twin; a choice made with
+// the header's language switch (localStorage "lang") wins after that.
+const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(pathFor(l, page), Astro.site) }));
 ---
 
 <!doctype html>
@@ -20,22 +25,22 @@ const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(
         <script is:inline>
           try {
             var pick = localStorage.getItem("lang");
-            if (pick ? pick === "es" : /^es\b/i.test(navigator.language)) location.replace("/es/" + location.hash);
+            if (pick ? pick === "es" : /^es\b/i.test(navigator.language)) location.replace("/es" + location.pathname + location.hash);
           } catch (e) {}
         </script>
       )
     }
-    <title>{t.meta.title}</title>
-    <meta name="description" content={t.meta.description} />
+    <title>{meta.title}</title>
+    <meta name="description" content={meta.description} />
     <link rel="canonical" href={canonical} />
     {alternates.map((a) => <link rel="alternate" hreflang={a.lang} href={a.href} />)}
-    <link rel="alternate" hreflang="x-default" href={new URL("/", Astro.site)} />
+    <link rel="alternate" hreflang="x-default" href={new URL(pathFor("en", page), Astro.site)} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#141517" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content={t.meta.title} />
-    <meta property="og:description" content={t.meta.description} />
+    <meta property="og:title" content={meta.title} />
+    <meta property="og:description" content={meta.description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:locale" content={t.meta.ogLocale} />
     <meta property="og:image" content={new URL("/apple-touch-icon.png", Astro.site)} />

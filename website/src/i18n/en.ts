@@ -15,6 +15,7 @@ export const en = {
     start: "Get started",
     docs: "Docs",
     download: "Download",
+    agents: "Agents",
     switchLabel: "ES",
     switchAria: "Ver en español",
   },
@@ -219,6 +220,7 @@ export const en = {
       remotion: "Remotion (React) compositions",
     },
     ask: {
+      more: "How to install and connect each agent",
       title: "Ask for your edit",
       body: "Start Claude Code, Codex or Gemini CLI in the same terminal and describe the video you want, like you would to an editor. The <code>frameshell</code> command is already on its PATH, and the skill <code>frameshell init</code> wrote into the project teaches it the CLI.",
     },
@@ -241,6 +243,212 @@ export const en = {
   },
   ruler: { label: "Sections" },
   // Read by the client scripts from the page's #i18n JSON.
+  agents: {
+    meta: {
+      title: "Connect your agent: Frameshell",
+      description:
+        "How to connect an AI agent to Frameshell, step by step: Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode and Pi. What each needs, how to install it and the first things to ask.",
+    },
+    marker: "Agents",
+    title: "Connect your agent.",
+    lede: "Frameshell has no AI of its own. You bring the agent you already use, or pick one below; it edits the video while you watch it in the app. Set it up once and it works in every project.",
+    pick: {
+      title: "Which one?",
+      body: "All of them can edit your video. The difference is the app you talk to it in and the account it needs.",
+      head: ["Agent", "You talk to it in", "Account it needs"],
+      rows: [
+        ["Claude Desktop", "Claude's chat app. No terminal.", "A Claude account"],
+        ["Claude Code", "The terminal inside Frameshell", "Claude Pro, Max, Team or Enterprise, or an Anthropic API key"],
+        ["Codex", "The terminal inside Frameshell", "ChatGPT Plus, Pro or Business, or an OpenAI API key"],
+        ["Gemini CLI", "The terminal inside Frameshell", "A Gemini API key or a paid Google plan"],
+        ["OpenCode", "The terminal inside Frameshell", "An account with any model provider it supports"],
+        ["Pi", "The terminal inside Frameshell", "An account with any model provider it supports"],
+      ],
+      note: "New to all this? Start with Claude Desktop if you have a Claude account, or Claude Code if you pay for Claude.",
+    },
+    terminal: {
+      title: "Using the terminal inside Frameshell",
+      body: "Every agent except Claude Desktop runs in the panel on the right of a project window. You only type the agent's name there once; after that you talk to it in plain words. The <code>frameshell</code> command is already there for the agent to use.",
+    },
+    sections: [
+      {
+        id: "claude-desktop",
+        name: "Claude Desktop",
+        tag: "Easiest",
+        intro: "You chat with Claude in its own app, and it edits the project open in Frameshell through Frameshell's MCP connection.",
+        steps: [
+          {
+            title: "Install Claude",
+            body: 'Download it from <a href="https://claude.com/download">claude.com/download</a> and sign in. macOS and Windows; on Linux there is a beta for Ubuntu and Debian.',
+            cmds: [],
+          },
+          {
+            title: "Install the frameshell command",
+            body: "In Frameshell, choose <strong>File → Install 'frameshell' Command in PATH</strong>. The Linux .deb package has it already.",
+            cmds: [],
+          },
+          {
+            title: "Add Frameshell to Claude",
+            body: "In Claude, open <strong>Settings → Developer → Edit Config</strong>. Put this in the file, keeping anything already in <code>mcpServers</code>, and save:",
+            cmds: [
+              { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
+              { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
+              { os: "Linux", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/bin/frameshell", "args": ["mcp"] } } }' },
+            ],
+          },
+          {
+            title: "Restart Claude",
+            body: "Quit Claude completely and open it again. Frameshell then shows among its connectors.",
+            cmds: [],
+          },
+          {
+            title: "Try it",
+            body: "With your project open in Frameshell, tell Claude where it is: <em>“My Frameshell project is in Desktop/interview. What videos does it have?”</em>",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "claude-code",
+        name: "Claude Code",
+        tag: "",
+        intro: "Anthropic's agent for the terminal. It finds the Frameshell skill in your project by itself.",
+        steps: [
+          {
+            title: "Install it",
+            body: "Paste one line in a terminal: Terminal on macOS, PowerShell on Windows. It needs no other software.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://claude.ai/install.sh | bash" },
+              { os: "Windows", cmd: "irm https://claude.ai/install.ps1 | iex" },
+            ],
+          },
+          {
+            title: "Start it in Frameshell",
+            body: "Open your project, click into the terminal panel, type <code>claude</code> and press Enter. The first time, it opens your browser to sign in.",
+            cmds: [],
+          },
+          {
+            title: "Ask",
+            body: "<em>“Remove the silences and the takes I repeated.”</em> It asks before running commands; from Frameshell 0.7, new projects let it run Frameshell's own without asking.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "codex",
+        name: "Codex",
+        tag: "",
+        intro: "OpenAI's agent for the terminal. It reads the project's AGENTS.md, which points it at the Frameshell skill.",
+        steps: [
+          {
+            title: "Install it",
+            body: "Paste one line in a terminal.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://chatgpt.com/codex/install.sh | sh" },
+              { os: "Windows", cmd: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"' },
+            ],
+          },
+          {
+            title: "Start it in Frameshell",
+            body: "In the project's terminal type <code>codex</code>. Choose <strong>Sign in with ChatGPT</strong> the first time.",
+            cmds: [],
+          },
+          {
+            title: "Ask",
+            body: "In a project made before Frameshell 0.7, start with <em>“Read .claude/skills/frameshell/SKILL.md first.”</em> Newer projects tell it themselves.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "gemini",
+        name: "Gemini CLI",
+        tag: "",
+        intro: "Google's agent for the terminal. It reads the project's GEMINI.md. Google replaced it with Antigravity CLI for free accounts in June 2026; with an API key or a paid plan it keeps working.",
+        steps: [
+          {
+            title: "Install it",
+            body: "With Homebrew on macOS, or with npm where Node.js is installed.",
+            cmds: [
+              { os: "macOS", cmd: "brew install gemini-cli" },
+              { os: "Any", cmd: "npm install -g @google/gemini-cli" },
+            ],
+          },
+          {
+            title: "Start it in Frameshell",
+            body: "In the project's terminal type <code>gemini</code> and choose how to sign in.",
+            cmds: [],
+          },
+          {
+            title: "Ask",
+            body: "As with Codex, a project made before Frameshell 0.7 needs <em>“Read .claude/skills/frameshell/SKILL.md first.”</em>",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "opencode",
+        name: "OpenCode",
+        tag: "",
+        intro: "An open source agent that works with many model providers. It loads the Frameshell skill from the project by itself.",
+        steps: [
+          {
+            title: "Install it",
+            body: "Paste one line in a terminal. On Windows, Scoop or Chocolatey install it too.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://opencode.ai/install | bash" },
+              { os: "Windows", cmd: "scoop install opencode" },
+            ],
+          },
+          {
+            title: "Start it and pick a model",
+            body: "In the project's terminal type <code>opencode</code>, then <code>/connect</code> to sign in to a provider and <code>/models</code> to choose one.",
+            cmds: [],
+          },
+          {
+            title: "Ask",
+            body: "<em>“Add subtitles from what is said.”</em>",
+            cmds: [],
+          },
+        ],
+      },
+    ],
+    advanced: {
+      title: "For advanced users: Pi",
+      body: "Pi is a small open source agent that works with many providers. <strong>It runs commands without asking first</strong>, so it can change or delete files on its own. Use it if you are comfortable with that, or inside a container.",
+      cmds: [
+        { os: "macOS, Linux", cmd: "curl -fsSL https://pi.dev/install.sh | sh" },
+        { os: "Windows", cmd: 'powershell -c "irm https://pi.dev/install.ps1 | iex"' },
+      ],
+      after: "In the project's terminal type <code>pi</code>, then <code>/login</code>. It reads AGENTS.md; in older projects, ask it to read <code>.claude/skills/frameshell/SKILL.md</code> first.",
+    },
+    asks: {
+      title: "Things to ask",
+      body: "Talk to it like you would to an editor. It works in steps and you see each one on the timeline.",
+      items: [
+        "Remove the long pauses and the takes I repeated.",
+        "Add subtitles, two words at a time, at the bottom.",
+        "Make a vertical version for Reels and TikTok.",
+        "Put a title card with the episode name at the start.",
+        "Export it for YouTube.",
+      ],
+      undo: "Changed your mind? Open History in Frameshell and revert any change, yours or the agent's.",
+    },
+    windows: {
+      title: "Windows: the first start",
+      body: "Frameshell is not signed for Windows yet, so the first time Windows protects you with a blue SmartScreen window. Click <strong>More info</strong>, then <strong>Run anyway</strong>. It asks once.",
+    },
+    trouble: {
+      title: "If something does not work",
+      items: [
+        "<strong>“frameshell: command not found”</strong> outside Frameshell: choose File → Install 'frameshell' Command in PATH, then open a new terminal.",
+        "<strong>The agent does not know Frameshell:</strong> start it from the terminal inside Frameshell, in the project folder, or ask it to read <code>.claude/skills/frameshell/SKILL.md</code>.",
+        "<strong>Claude Desktop does not list Frameshell:</strong> check the config file is valid JSON, then quit Claude completely and open it again.",
+        "<strong>Anything else:</strong> run <code>frameshell doctor</code> in the project's terminal and send what it prints in a GitHub issue.",
+      ],
+      issues: "Open an issue",
+    },
+  },
   runtime: {
     copy: "Copy",
     copied: "Copied",
