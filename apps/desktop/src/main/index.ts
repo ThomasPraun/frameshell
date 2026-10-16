@@ -51,6 +51,7 @@ import {
   claudeDesktopState,
   connectClaudeDesktop,
   disconnectClaudeDesktop,
+  serverEntry,
 } from "./claude-desktop.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
@@ -992,7 +993,7 @@ const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(),
 
 async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
   if (!claudeDesktopConfig) return { available: false, installed: false, connected: false };
-  const state = await claudeDesktopState(claudeDesktopConfig, cliShim).catch(() => ({ installed: true, connected: false }));
+  const state = await claudeDesktopState(claudeDesktopConfig, serverEntry(cliShim, process.platform)).catch(() => ({ installed: true, connected: false }));
   return { available: true, ...state };
 }
 
@@ -1012,7 +1013,7 @@ async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promi
         await box({ type: "info", message: said.notInstalled });
         return claudeDesktopStatus();
       }
-      const entry = JSON.stringify({ [SERVER_KEY]: { command: cliShim, args: ["mcp"] } }, null, 2);
+      const entry = JSON.stringify({ [SERVER_KEY]: serverEntry(cliShim, process.platform) }, null, 2);
       const { response } = await box({
         type: "question",
         message: said.connect,
@@ -1022,7 +1023,7 @@ async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promi
         cancelId: 1,
       });
       if (response !== 0) return claudeDesktopStatus();
-      const backup = await connectClaudeDesktop(file, cliShim);
+      const backup = await connectClaudeDesktop(file, serverEntry(cliShim, process.platform));
       await box({ type: "info", message: said.connected, ...(backup ? { detail: said.backup(backup) } : {}) });
     } else {
       const backup = await disconnectClaudeDesktop(file);
