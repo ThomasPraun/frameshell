@@ -9,6 +9,7 @@ import { askTarget } from "../ask/ask-target.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
+import { AgentGuide } from "./AgentGuide.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 
@@ -304,6 +305,19 @@ export function TerminalPanel({
           </button>
         </div>
       </PanelHeader>
+      {activeTab && !activeTab.detached && activeTab.exitCode === null && (
+        <AgentGuide
+          agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
+          onRun={(command) => {
+            if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);
+          }}
+          onType={(text) => {
+            const view = views.current.get(activeTab.key);
+            if (view) view.type([text]);
+            else pending.current.set(activeTab.key, [text]);
+          }}
+        />
+      )}
       <div className="terminal-stack">
         {tabs.map((tab, index) =>
           !tab.detached ? (

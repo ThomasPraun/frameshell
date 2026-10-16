@@ -18,6 +18,8 @@ claude mcp add frameshell -- node /path/to/frameshell/packages/cli/dist/bin/fram
 
 Other clients (Codex, Cursor…) take the same command: `frameshell mcp`, stdio transport.
 
+Claude Desktop (macOS, Windows): **Connect Claude Desktop** in the app's agent guide, above the terminals, adds the server to `claude_desktop_config.json` (`main/claude-desktop.ts`): only the `mcpServers.frameshell` key changes, through the stable `frameshell` shim in the app's data directory, and the old file goes to `claude_desktop_config.json.frameshell-backup`. Claude Desktop starts the server outside any project, so tools act on the project of the app window the user works in.
+
 Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. They are journaled as `agent:<label>:<session>` when `FRAMESHELL_AGENT` names the agent, or when the app detected one in its terminal. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
 
 ## Tools
