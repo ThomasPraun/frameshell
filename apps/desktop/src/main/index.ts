@@ -4,10 +4,10 @@
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { arch, homedir, release, type } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type BaseWindow, BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
+import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
@@ -37,6 +37,7 @@ import {
   uninstallCli,
 } from "./cli-install.js";
 import { writeCliShim } from "./cli-shim.js";
+import { type DiagnosticsInput, buildDiagnostics } from "./diagnostics.js";
 import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
@@ -944,6 +945,14 @@ function buildMenu(): void {
         ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
       ],
     },
+    {
+      ...(mac ? { role: "help" as const } : {}),
+      label: said.help,
+      submenu: [
+        { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
+        { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -960,6 +969,69 @@ async function setLanguage(choice: LanguageChoice): Promise<void> {
   text = next;
   buildMenu();
   if (changed) for (const state of windows.values()) state.window.webContents.reload();
+}
+
+const BUG_REPORT_URL = "https://github.com/ThomasPraun/frameshell/issues/new?template=bug.yml";
+
+/** Help > Copy Diagnostics (#194): puts the report on the clipboard, then offers to open the bug form. No telemetry. */
+async function copyDiagnostics(): Promise<void> {
+  const parent = BrowserWindow.getFocusedWindow() ?? undefined;
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  const dirs = resolveAppDirs(process.env);
+  const state = projectWindowOf(parent ?? null);
+  const [daemonStatus, doctor, project] = await Promise.all([
+    daemon.request("status", { cwd: dirs.dataDir }).then(
+      (status) => ({ daemonVersion: status.daemon.daemonVersion, protocolVersion: status.daemon.protocolVersion }),
+      (error: unknown) => ({ error: message(error) }),
+    ),
+    withTimeout(daemon.request("doctor", { cwd: state?.project?.dir ?? dirs.dataDir }), 20_000).catch((error: unknown) => ({ error: message(error) })),
+    state?.project
+      ? daemon.request("status", { cwd: state.project.dir }).then(
+          (status) =>
+            status.project
+              ? {
+                  dir: status.project.dir,
+                  schemaVersion: status.project.schemaVersion,
+                  jobs: status.jobs,
+                  rejections: status.rejections.length,
+                  transactions: status.transactions.length,
+                  openProjects: status.openProjects.length,
+                  synced: status.synced,
+                }
+              : null,
+          (error: unknown) => ({ error: message(error) }),
+        )
+      : Promise.resolve(null),
+  ]);
+  const input: DiagnosticsInput = {
+    appVersion: APP_VERSION,
+    versions: { electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", node: process.versions.node },
+    os: { platform: type(), release: release(), arch: arch() },
+    home: homedir(),
+    dataDir: dirs.dataDir,
+    daemon: daemonStatus,
+    doctor,
+    project,
+  };
+  clipboard.writeText(buildDiagnostics(input));
+  const said = text.app.diagnostics;
+  const options: Electron.MessageBoxOptions = {
+    type: "info",
+    message: said.copied,
+    detail: said.copiedDetail,
+    buttons: [said.reportButton, said.closeButton],
+    defaultId: 0,
+    cancelId: 1,
+  };
+  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  if (response === 0) await shell.openExternal(BUG_REPORT_URL);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms / 1000} s`)), ms);
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
 }
 
 /** Runs the File menu's install or uninstall of the system-wide CLI (#139) and reports the outcome in a message box. */

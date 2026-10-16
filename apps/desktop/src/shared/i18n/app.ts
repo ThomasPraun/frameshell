@@ -40,6 +40,15 @@ const en = {
     minimize: "Minimize",
     zoom: "Zoom",
     front: "Bring All to Front",
+    help: "Help",
+    copyDiagnostics: "Copy Diagnostics",
+    reportProblem: "Report a Problem…",
+  },
+  diagnostics: {
+    copied: "Diagnostics copied",
+    copiedDetail: "Paste them into the bug report so we can see your setup. They hold no file contents and no secrets.",
+    reportButton: "Report a Problem",
+    closeButton: "Close",
   },
   dialogs: {
     openFolder: "Open project folder",
@@ -123,6 +132,15 @@ const es: typeof en = {
     minimize: "Minimizar",
     zoom: "Zoom",
     front: "Traer todo al frente",
+    help: "Ayuda",
+    copyDiagnostics: "Copiar diagnóstico",
+    reportProblem: "Informar un problema…",
+  },
+  diagnostics: {
+    copied: "Diagnóstico copiado",
+    copiedDetail: "Pégalo en el informe del problema para que podamos ver tu configuración. No incluye contenido de archivos ni secretos.",
+    reportButton: "Informar un problema",
+    closeButton: "Cerrar",
   },
   dialogs: {
     openFolder: "Abrir la carpeta de un proyecto",
