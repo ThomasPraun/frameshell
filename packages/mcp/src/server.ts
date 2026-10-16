@@ -21,12 +21,17 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { contactSheet, decodePng, encodePng, fitWithin } from "./png.js";
+import { ProjectResolver, type ResolvedProject, appProjectNote } from "./project.js";
 import { ProjectResources, historyUri, timelineUri, transcriptUri } from "./resources.js";
 import { CAPTURE_MAX_SIDE, FramesStripParams, STRIP_MAX_WIDTH, type ToolSpec, buildTools } from "./tools.js";
 
 /** Options for {@link createMcpServer}. */
 export interface McpServerOptions {
-  /** Directory the server works in: default `cwd` of every tool, and the project resources come from. */
+  /**
+   * Directory the server started in. Its project is the default of tools
+   * without `cwd` and of resources; when it is in no project, the project of
+   * the app window the user works in is (ADR 0014).
+   */
   cwd: string;
   /**
    * Open a handshaken daemon connection. Called lazily on the first tool call
@@ -45,7 +50,10 @@ const INSTRUCTIONS =
   "group several operations. Look at what you built with `frame_capture` and `frames_strip`. `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
-  "Tools default `cwd` to the project this server runs in.";
+  "Tools without `cwd` act on the project enclosing the directory this server started in; when that is in no " +
+  "project (one server for every project, e.g. Claude Desktop), on the project open in the Frameshell app window " +
+  "the user used last, and the result then names it in a `Project: <dir>` line: check it is the project you mean, " +
+  "since it follows the user switching windows. No project either way: open one in Frameshell, or pass `cwd`.";
 
 /**
  * Stdio-agnostic MCP server over frameshelld (SPEC §7b): every public registry
@@ -77,7 +85,23 @@ export function createMcpServer(options: McpServerOptions): Server {
     // Events may have been missed while disconnected.
     onResync: () => notify([...subscribed], true),
   });
-  const resources = new ProjectResources(cwd, () => link.get());
+  const resolver = new ProjectResolver(cwd, () => link.get());
+  let current: string | null = null;
+  /** The default project now; a switch (the user moved to another window) re-announces every resource. */
+  const resolve = async (): Promise<ResolvedProject> => {
+    const project = await resolver.resolve();
+    if (project.root !== current) {
+      const switched = current !== null;
+      current = project.root;
+      if (switched) {
+        known.clear();
+        if (subscribed.size > 0) await link.watch(project.root).catch(() => {});
+        notify([...subscribed], true);
+      }
+    }
+    return project;
+  };
+  const resources = new ProjectResources(resolve, () => link.get());
   const watch = async () => {
     const root = await resources.root();
     if (root) await link.watch(root);
@@ -91,7 +115,6 @@ export function createMcpServer(options: McpServerOptions): Server {
     const tool = byName.get(request.params.name);
     if (!tool) return failure(`Unknown tool \`${request.params.name}\`. Available: ${[...byName.keys()].join(", ")}.`);
     const args: Record<string, unknown> = { ...request.params.arguments };
-    if (tool.takesCwd && args["cwd"] === undefined) args["cwd"] = cwd;
     const token = request.params._meta?.progressToken;
     let step = 0;
     const onProgress =
@@ -102,18 +125,30 @@ export function createMcpServer(options: McpServerOptions): Server {
               .sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++step, message } })
               .catch(() => {});
     try {
-      if (tool.name === "frame_capture") return await capture(await link.get(), args);
-      if (tool.name === "frames_strip") return await strip(await link.get(), args);
-      const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
-      if (tool.method === "transcribe") {
-        const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
-        notify([transcriptUri(transcript)], true);
+      let note: string | null = null;
+      if (tool.takesCwd && args["cwd"] === undefined) {
+        const project = await resolve();
+        args["cwd"] = project.cwd;
+        if (project.source === "app") note = appProjectNote(project.root);
       }
-      return { content: [{ type: "text", text: compact(result) }] };
+      const result = await run(tool, args, onProgress);
+      if (note) result.content.push({ type: "text", text: note });
+      return result;
     } catch (error) {
       return failure(describe(error, tool));
     }
   });
+
+  const run = async (tool: ToolSpec, args: Record<string, unknown>, onProgress?: (progress: Progress) => void): Promise<CallToolResult> => {
+    if (tool.name === "frame_capture") return capture(await link.get(), args);
+    if (tool.name === "frames_strip") return strip(await link.get(), args);
+    const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
+    if (tool.method === "transcribe") {
+      const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
+      notify([transcriptUri(transcript)], true);
+    }
+    return { content: [{ type: "text", text: compact(result) }] };
+  };
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const { resources: list, timelines } = await resources.list();
@@ -279,12 +314,15 @@ class DaemonLink {
     return attempt;
   }
 
-  /** Follow `timeline.changed` of the project at `root` from now on, across reconnects. */
+  /** Follow `timeline.changed` of the project at `root` from now on, instead of the one before, across reconnects. */
   async watch(root: string): Promise<void> {
     if (this.#watched === root) return;
+    const previous = this.#watched;
     this.#watched = root;
     const conn = await this.get();
     await this.#subscribe(conn, root);
+    // Its events are filtered out anyway; dropping the subscription spares the daemon the sends.
+    if (previous) await conn.request("events.unsubscribe", { cwd: previous, events: ["timeline.changed"] }).catch(() => {});
   }
 
   close(): void {

@@ -1,6 +1,6 @@
 # MCP tools
 
-`frameshell mcp` serves every daemon operation as a typed MCP tool, plus images and the app's UI state. Register it once per project (Claude Code: `claude mcp add frameshell -- frameshell mcp`); the tools act on the project the server started in (each takes an optional `cwd` for another one).
+`frameshell mcp` serves every daemon operation as a typed MCP tool, plus images and the app's UI state. Register it once per project (Claude Code: `claude mcp add frameshell -- frameshell mcp`); the tools act on the project the server started in (each takes an optional `cwd` for another one). A server started outside any project (Claude Desktop runs one for all projects) acts on the project open in the app window the user used last, and each result ends with `Project: <dir>`: check it is the project you mean, since it follows the user switching windows; pass that dir as `cwd` to stay on it. No window open: ask the user to open the project in Frameshell, or pass `cwd`.
 
 ## CLI or MCP
 

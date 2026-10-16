@@ -18,6 +18,16 @@ claude mcp add frameshell -- node /path/to/frameshell/packages/cli/dist/bin/fram
 
 Other clients (Codex, Cursor…) take the same command: `frameshell mcp`, stdio transport.
 
+### Which project (ADR 0014)
+
+A call without `cwd`, and every resource, acts on:
+
+1. the project enclosing the server's directory, when there is one;
+2. else the project of the app window the user focused last (a detached panel counts as its project's window; it stays active while the app is in the background). This is how one global server works, e.g. Claude Desktop's, started outside any project: switching windows switches the project. The result then ends with a line `Project: <dir> (…)`, and subscribed resources are marked updated (plus `list_changed`) when the project changes;
+3. else nothing: tools fail with `ProjectNotFound` ("Open a project in Frameshell, or pass cwd"), and resources list only `frameshell://status`.
+
+An explicit `cwd` always wins. The daemon answers step 2 with the internal `ui.active`; the app sends `focused` with each `ui.publish` (main `ui-bridge.ts`, `browser-window-focus`), so a window playing in the background does not take over. Resolution: `packages/mcp/src/project.ts`.
+
 Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. They are journaled as `agent:<label>:<session>` when `FRAMESHELL_AGENT` names the agent, or when the app detected one in its terminal. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
 
 ## Tools
@@ -26,7 +36,7 @@ One tool per public method of the daemon registry (`methods` in `packages/protoc
 
 - Name: method name in snake case, `.` replaced by `_` (`clip.add` → `clip_add`, `ui.openFile` → `ui_open_file`). `frame` is exposed as `frame_capture`.
 - Description: the registry's model-facing description; method names in backticks are rewritten to tool names.
-- Input schema: the method's Zod params as JSON Schema. `cwd` is optional and defaults to the server's directory.
+- Input schema: the method's Zod params as JSON Schema. `cwd` is optional and defaults as in [Which project](#which-project-adr-0014).
 - Output: the method's result as compact JSON. Mutating tools return `revision` and `operation.tx` (and `operation.id`); `inverse` patches are left out, since `revert` takes the tx or op id.
 - Errors: tool results with `isError: true` and text `<ErrorCode>: <message>` plus `data` (valid ranges, available ids, the fix). Protocol errors are only for malformed MCP requests.
 
@@ -52,7 +62,7 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 | `ui_open_file(file)` | Open a project file in an active editor tab. |
 | `ui_show_tx_diff(target)` | History panel on a `tx_…`/`op_…`, its changes marked on the timeline. |
 
-Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one that reported last gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach` and the `ui.command` notification carry it.
+Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one focused last (else the one that reported last) gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach`, `ui.active` and the `ui.command` notification carry it.
 
 ## Resources
 
