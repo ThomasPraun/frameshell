@@ -1,5 +1,6 @@
 // UI strings of the desktop app (#189), shared by main (menus, dialogs) and the renderer. One file per area holds
 // both languages: English is the source, the Spanish object is typed by it, so a missing key fails typecheck.
+import { agents } from "./agents.js";
 import { app } from "./app.js";
 import { editor } from "./editor.js";
 import { history } from "./history.js";
@@ -21,7 +22,7 @@ export const LANGUAGES: readonly { id: Lang; name: string }[] = [
 ];
 
 /** Every area's strings in both languages; the parity test walks it. */
-export const AREAS = { app, editor, history, inspector, preview, terminal, timeline, transcript, welcome, workspace };
+export const AREAS = { agents, app, editor, history, inspector, preview, terminal, timeline, transcript, welcome, workspace };
 
 /** All UI strings of one language, by area. */
 export type Dict = { [Area in keyof typeof AREAS]: (typeof AREAS)[Area]["en"] };

@@ -25,6 +25,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Plugin host, install, trust; npm the app bundles for machines without Node | `packages/core/src/plugins/host.ts`, `plugins/npm-runtime.ts`, `apps/desktop/scripts/bundle-npm.mjs`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | Desktop UI strings (en + es, language choice, parity test) | `apps/desktop/src/shared/i18n/`, renderer `t`/`rich` in `renderer/src/i18n.ts`, main `src/main/language.ts`; `apps/desktop/test/i18n.test.ts` |
+| Agent guide above terminals (agent catalog, install commands, Start by path, suggestions), Connect Claude Desktop (config edit keeps other bytes) | `apps/desktop/src/main/agent-catalog.ts`, `main/claude-desktop.ts`, `renderer/src/components/AgentGuide.tsx` |
 | New project from video (folder beside video, name clash, clone test), drops, Open with (single instance, `open-file`, Windows registry) | `apps/desktop/src/main/video-project.ts`, `main/media-files.ts`, `main/open-paths.ts`, `build/installer.nsh`, `renderer/src/components/Welcome.tsx`, `renderer/src/file-drop.ts`; ADR 0013 |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |

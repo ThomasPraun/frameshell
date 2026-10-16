@@ -28,6 +28,7 @@
     "@frameshell/schema": "workspace:*",
     "chokidar": "^5.0.0",
     "electron-updater": "6.8.10",
+    "jsonc-parser": "3.3.1",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

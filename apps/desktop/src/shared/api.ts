@@ -301,6 +301,16 @@ export interface FrameshellApi {
      */
     revert(timeline: string, target: string): Promise<RevertOutcome>;
   };
+  agents: {
+    /** Agent CLIs the guide offers, with where each is installed (the login shell's PATH and usual folders). */
+    detect(): Promise<AgentChoice[]>;
+    /** Install the `frameshell` command for terminals outside the app (the File menu's command, with its dialogs). */
+    installCli(): Promise<void>;
+    claudeDesktop(): Promise<ClaudeDesktopStatus>;
+    /** Ask, then add Frameshell to Claude Desktop's config; resolves with the state after (unchanged if declined). */
+    connectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
+    disconnectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
+  };
   menu: {
     /** Called with each application menu command aimed at this window. Returns an unsubscribe function. */
     onCommand(listener: (command: MenuCommand) => void): () => void;
@@ -389,9 +399,39 @@ export interface LiveClipPage {
   key: string;
 }
 
+/** An agent CLI the agent guide offers (#190), and where it was found. */
+export interface AgentChoice {
+  /** Also the label `agent-detect.ts` gives a terminal running it. */
+  id: string;
+  name: string;
+  /** Typed into a terminal to start it. */
+  command: string;
+  /** Official install command for this platform's terminal shell. */
+  install: string;
+  /** Runs shell commands without asking first. */
+  unattended: boolean;
+  /** Where it is installed; null when not found. */
+  path: string | null;
+}
+
+/** Frameshell's entry in Claude Desktop's MCP config (#191). */
+export interface ClaudeDesktopStatus {
+  /** Claude Desktop exists on this platform (macOS, Windows). */
+  available: boolean;
+  /** Its settings folder exists: it is installed, or was. */
+  installed: boolean;
+  /** Its config runs this app's `frameshell mcp`. */
+  connected: boolean;
+}
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
+  agentsDetect: "agents:detect",
+  agentsInstallCli: "agents:install-cli",
+  agentsClaudeDesktop: "agents:claude-desktop",
+  agentsConnectClaudeDesktop: "agents:connect-claude-desktop",
+  agentsDisconnectClaudeDesktop: "agents:disconnect-claude-desktop",
   projectCurrent: "project:current",
   projectOpenFolder: "project:open-folder",
   projectOpen: "project:open",
