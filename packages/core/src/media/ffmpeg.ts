@@ -91,6 +91,7 @@ interface FfprobeStream {
   pix_fmt?: string;
   disposition?: { attached_pic?: number };
   tags?: Record<string, string>;
+  side_data_list?: { side_data_type?: string; rotation?: number }[];
 }
 
 /** ffmpeg pixel formats with an alpha plane or channel. */
@@ -137,14 +138,17 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
   const still = /(^|,)(image2|\w+_pipe)(,|$)/.test(format);
   const avg = rate(video?.avg_frame_rate);
   const real = rate(video?.r_frame_rate);
+  // Phones store portrait video as landscape frames plus a rotation, which ffmpeg applies when it decodes: report
+  // the size every proxy, frame and export sees (#207).
+  const turned = video ? quarterTurned(video) : false;
   const media: MediaProbe = {
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     format,
     video: video
       ? {
           codec: video.codec_name ?? "unknown",
-          width: video.width ?? 0,
-          height: video.height ?? 0,
+          width: (turned ? video.height : video.width) ?? 0,
+          height: (turned ? video.width : video.height) ?? 0,
           fps: still ? null : avg,
           // Containers report the tick rate as r_frame_rate; a lower average means irregular frame intervals.
           vfr: !still && avg !== null && real !== null && Math.abs(avg - real) > 0.01,
@@ -163,6 +167,13 @@ function alphaOf(stream: FfprobeStream): SourceAlpha | null {
   if (tagged && stream.codec_name === "vp9") return { decoder: "libvpx-vp9" };
   if (tagged && stream.codec_name === "vp8") return { decoder: "libvpx" };
   return ALPHA_PIX_FMT.test(stream.pix_fmt ?? "") ? { decoder: null } : null;
+}
+
+/** True when the stream is displayed rotated by 90 or 270 degrees: display matrix side data, else the old `rotate` tag. */
+function quarterTurned(stream: FfprobeStream): boolean {
+  const matrix = stream.side_data_list?.find((data) => typeof data.rotation === "number")?.rotation;
+  const degrees = matrix ?? Number(stream.tags?.["rotate"] ?? 0);
+  return Math.abs(Math.round(degrees / 90)) % 2 === 1;
 }
 
 /** `30000/1001` → 29.97; null for `0/0` or garbage. */
