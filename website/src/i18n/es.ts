@@ -17,6 +17,7 @@ export const es: Dict = {
     start: "Empezar",
     docs: "Docs",
     download: "Descargar",
+    agents: "Agentes",
     switchLabel: "EN",
     switchAria: "View in English",
   },
@@ -223,6 +224,7 @@ export const es: Dict = {
       remotion: "Composiciones de Remotion (React)",
     },
     ask: {
+      more: "Cómo instalar y conectar cada agente",
       title: "Pide tu edición",
       body: "Abre Claude Code, Codex o Gemini CLI en la misma terminal y describe el video que quieres, como se lo dirías a un editor. El comando <code>frameshell</code> ya está en su PATH, y el skill que <code>frameshell init</code> escribió en el proyecto le enseña la CLI.",
     },
@@ -244,6 +246,212 @@ export const es: Dict = {
     legal: "Licencia Apache 2.0. «Frameshell» y su logo son marcas del proyecto; los forks deben usar otro nombre.",
   },
   ruler: { label: "Secciones" },
+  agents: {
+    meta: {
+      title: "Conecta tu agente: Frameshell",
+      description:
+        "Cómo conectar un agente de IA a Frameshell, paso a paso: Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode y Pi. Qué necesita cada uno, cómo instalarlo y qué pedirle primero.",
+    },
+    marker: "Agentes",
+    title: "Conecta tu agente.",
+    lede: "Frameshell no trae una IA propia. Usas el agente que ya tienes, o eliges uno de abajo, y edita el video mientras lo ves en la app. Lo configuras una vez y funciona en todos tus proyectos.",
+    pick: {
+      title: "¿Cuál elijo?",
+      body: "Todos pueden editar tu video. Cambia la app en la que hablas con él y la cuenta que necesita.",
+      head: ["Agente", "Hablas con él en", "Cuenta que necesita"],
+      rows: [
+        ["Claude Desktop", "La app de chat de Claude. Sin terminal.", "Una cuenta de Claude"],
+        ["Claude Code", "La terminal dentro de Frameshell", "Claude Pro, Max, Team o Enterprise, o una API key de Anthropic"],
+        ["Codex", "La terminal dentro de Frameshell", "ChatGPT Plus, Pro o Business, o una API key de OpenAI"],
+        ["Gemini CLI", "La terminal dentro de Frameshell", "Una API key de Gemini o un plan pago de Google"],
+        ["OpenCode", "La terminal dentro de Frameshell", "Una cuenta en cualquiera de los proveedores de modelos que admite"],
+        ["Pi", "La terminal dentro de Frameshell", "Una cuenta en cualquiera de los proveedores de modelos que admite"],
+      ],
+      note: "¿Es tu primera vez? Empieza con Claude Desktop si tienes cuenta de Claude, o con Claude Code si pagas Claude.",
+    },
+    terminal: {
+      title: "La terminal dentro de Frameshell",
+      body: "Todos los agentes menos Claude Desktop corren en el panel de la derecha de la ventana del proyecto. Arriba de la terminal, el panel <strong>Habla con un agente</strong> muestra los agentes que tienes instalados, cada uno con un botón para abrirlo, y escribe el comando de instalación de los que faltan. Después le hablas con palabras normales. El comando <code>frameshell</code> ya está disponible para que el agente lo use.",
+    },
+    sections: [
+      {
+        id: "claude-desktop",
+        name: "Claude Desktop",
+        tag: "El más fácil",
+        intro: "Chateas con Claude en su propia app y edita el proyecto abierto en Frameshell a través de la conexión MCP de Frameshell.",
+        steps: [
+          {
+            title: "Instala Claude",
+            body: 'Descárgalo de <a href="https://claude.com/download">claude.com/download</a> e inicia sesión. macOS y Windows; en Linux hay una beta para Ubuntu y Debian.',
+            cmds: [],
+          },
+          {
+            title: "Conecta Frameshell con Claude",
+            body: "En Frameshell 0.8 o posterior, abre un proyecto y haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal. Frameshell te muestra lo que agrega a la configuración de Claude, deja los demás servidores como están y guarda una copia antes.",
+            cmds: [],
+          },
+          {
+            title: "O agrégalo a mano",
+            body: "En Linux o con una versión anterior: en Frameshell elige <strong>Archivo → Instalar el comando 'frameshell' en el PATH</strong> (el paquete .deb ya lo trae). Luego, en Claude, abre <strong>Settings → Developer → Edit Config</strong>, pon esto en el archivo sin borrar lo que ya haya en <code>mcpServers</code> y guárdalo:",
+            cmds: [
+              { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
+              { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
+              { os: "Linux", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/bin/frameshell", "args": ["mcp"] } } }' },
+            ],
+          },
+          {
+            title: "Reinicia Claude",
+            body: "Cierra Claude por completo y vuelve a abrirlo. Frameshell aparece entonces entre sus conectores.",
+            cmds: [],
+          },
+          {
+            title: "Pruébalo",
+            body: "Con tu proyecto abierto en Frameshell, pregúntale a Claude: <em>“¿Qué videos tiene mi proyecto de Frameshell?”</em> Claude trabaja en el proyecto de la ventana de Frameshell que usaste por última vez. Con versiones anteriores a la 0.8, dile dónde está el proyecto.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "claude-code",
+        name: "Claude Code",
+        tag: "",
+        intro: "El agente de Anthropic para la terminal. Encuentra solo la skill de Frameshell en tu proyecto.",
+        steps: [
+          {
+            title: "Instálalo",
+            body: "Pega una línea en una terminal: Terminal en macOS, PowerShell en Windows. No necesita nada más.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://claude.ai/install.sh | bash" },
+              { os: "Windows", cmd: "irm https://claude.ai/install.ps1 | iex" },
+            ],
+          },
+          {
+            title: "Ábrelo en Frameshell",
+            body: "Abre tu proyecto, haz clic en el panel de la terminal, escribe <code>claude</code> y presiona Enter. La primera vez abre tu navegador para iniciar sesión.",
+            cmds: [],
+          },
+          {
+            title: "Pídele",
+            body: "<em>“Quita los silencios y las tomas que repetí.”</em> Pregunta antes de ejecutar comandos; desde Frameshell 0.7, los proyectos nuevos le dejan usar los de Frameshell sin preguntar.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "codex",
+        name: "Codex",
+        tag: "",
+        intro: "El agente de OpenAI para la terminal. Lee el AGENTS.md del proyecto, que lo lleva a la skill de Frameshell.",
+        steps: [
+          {
+            title: "Instálalo",
+            body: "Pega una línea en una terminal.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://chatgpt.com/codex/install.sh | sh" },
+              { os: "Windows", cmd: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"' },
+            ],
+          },
+          {
+            title: "Ábrelo en Frameshell",
+            body: "En la terminal del proyecto escribe <code>codex</code>. La primera vez elige <strong>Sign in with ChatGPT</strong>.",
+            cmds: [],
+          },
+          {
+            title: "Pídele",
+            body: "En un proyecto creado antes de Frameshell 0.7, empieza con <em>“Lee primero .claude/skills/frameshell/SKILL.md.”</em> Los proyectos nuevos se lo indican solos.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "gemini",
+        name: "Gemini CLI",
+        tag: "",
+        intro: "El agente de Google para la terminal. Lee el GEMINI.md del proyecto. En junio de 2026 Google lo reemplazó por Antigravity CLI para las cuentas gratuitas; con una API key o un plan pago sigue funcionando.",
+        steps: [
+          {
+            title: "Instálalo",
+            body: "Con Homebrew en macOS, o con npm donde tengas Node.js.",
+            cmds: [
+              { os: "macOS", cmd: "brew install gemini-cli" },
+              { os: "Cualquiera", cmd: "npm install -g @google/gemini-cli" },
+            ],
+          },
+          {
+            title: "Ábrelo en Frameshell",
+            body: "En la terminal del proyecto escribe <code>gemini</code> y elige cómo iniciar sesión.",
+            cmds: [],
+          },
+          {
+            title: "Pídele",
+            body: "Igual que con Codex, en un proyecto creado antes de Frameshell 0.7 dile <em>“Lee primero .claude/skills/frameshell/SKILL.md.”</em>",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "opencode",
+        name: "OpenCode",
+        tag: "",
+        intro: "Un agente de código abierto que funciona con muchos proveedores de modelos. Carga solo la skill de Frameshell del proyecto.",
+        steps: [
+          {
+            title: "Instálalo",
+            body: "Pega una línea en una terminal. En Windows también se instala con Scoop o Chocolatey.",
+            cmds: [
+              { os: "macOS, Linux", cmd: "curl -fsSL https://opencode.ai/install | bash" },
+              { os: "Windows", cmd: "scoop install opencode" },
+            ],
+          },
+          {
+            title: "Ábrelo y elige un modelo",
+            body: "En la terminal del proyecto escribe <code>opencode</code>, luego <code>/connect</code> para entrar a un proveedor y <code>/models</code> para elegir uno.",
+            cmds: [],
+          },
+          {
+            title: "Pídele",
+            body: "<em>“Agrega subtítulos con lo que se dice.”</em>",
+            cmds: [],
+          },
+        ],
+      },
+    ],
+    advanced: {
+      title: "Para usuarios avanzados: Pi",
+      body: "Pi es un agente de código abierto pequeño que funciona con muchos proveedores. <strong>Ejecuta comandos sin preguntar antes</strong>, así que puede cambiar o borrar archivos por su cuenta. Úsalo si eso no te molesta, o dentro de un contenedor.",
+      cmds: [
+        { os: "macOS, Linux", cmd: "curl -fsSL https://pi.dev/install.sh | sh" },
+        { os: "Windows", cmd: 'powershell -c "irm https://pi.dev/install.ps1 | iex"' },
+      ],
+      after: "En la terminal del proyecto escribe <code>pi</code> y luego <code>/login</code>. Lee el AGENTS.md; en proyectos anteriores, pídele que lea primero <code>.claude/skills/frameshell/SKILL.md</code>.",
+    },
+    asks: {
+      title: "Qué pedirle",
+      body: "Háblale como a un editor. Trabaja por pasos y ves cada uno en la línea de tiempo.",
+      items: [
+        "Quita las pausas largas y las tomas que repetí.",
+        "Agrega subtítulos abajo, de dos palabras a la vez.",
+        "Haz una versión vertical para Reels y TikTok.",
+        "Pon al principio una placa con el nombre del episodio.",
+        "Expórtalo para YouTube.",
+      ],
+      undo: "¿Cambiaste de idea? Abre History en Frameshell y revierte cualquier cambio, tuyo o del agente.",
+    },
+    windows: {
+      title: "Windows: la primera vez",
+      body: "Frameshell todavía no está firmado para Windows, así que la primera vez Windows te protege con una ventana azul de SmartScreen. Haz clic en <strong>Más información</strong> y luego en <strong>Ejecutar de todas formas</strong>. Lo pregunta una sola vez.",
+    },
+    trouble: {
+      title: "Si algo no funciona",
+      items: [
+        "<strong>“frameshell: command not found”</strong> fuera de Frameshell: elige File → Install 'frameshell' Command in PATH y abre una terminal nueva.",
+        "<strong>El agente no conoce Frameshell:</strong> ábrelo desde la terminal de Frameshell, en la carpeta del proyecto, o pídele que lea <code>.claude/skills/frameshell/SKILL.md</code>.",
+        "<strong>Claude Desktop no muestra Frameshell:</strong> revisa que el archivo de configuración sea JSON válido, cierra Claude por completo y vuelve a abrirlo.",
+        "<strong>Cualquier otra cosa:</strong> ejecuta <code>frameshell doctor</code> en la terminal del proyecto y envía lo que muestra en un issue de GitHub.",
+      ],
+      issues: "Abrir un issue",
+    },
+  },
   runtime: {
     copy: "Copiar",
     copied: "Copiado",

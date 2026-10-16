@@ -1,0 +1,373 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "./Header.astro";
+import Footer from "./Footer.astro";
+import { REPO } from "../site";
+import { strings } from "../i18n";
+
+const all = strings(Astro.currentLocale);
+const t = all.agents;
+const copy = all.runtime.copy;
+// Where each chooser row links: the agents with a section of their own, Pi to the advanced part.
+const anchors = [...t.sections.map((s) => s.id), "pi"];
+---
+
+<Base page="agents">
+  <Header page="agents" />
+  <main>
+    <section class="intro" data-marker={t.marker}>
+      <div class="wrap">
+        <h1 class="display">{t.title}</h1>
+        <p class="lede">{t.lede}</p>
+      </div>
+    </section>
+
+    <section class="pick">
+      <div class="wrap">
+        <h2>{t.pick.title}</h2>
+        <p>{t.pick.body}</p>
+        <div class="table" role="table" aria-label={t.pick.title}>
+          <div class="row head" role="row">
+            {t.pick.head.map((cell) => <span role="columnheader">{cell}</span>)}
+          </div>
+          {
+            t.pick.rows.map(([name, where, account], i) => (
+              <div class="row" role="row">
+                <a role="cell" href={`#${anchors[i]}`}>
+                  {name}
+                </a>
+                <span role="cell">{where}</span>
+                <span role="cell" class="account">
+                  {account}
+                </span>
+              </div>
+            ))
+          }
+        </div>
+        <p class="note">{t.pick.note}</p>
+        <aside class="terminal">
+          <h3>{t.terminal.title}</h3>
+          <p set:html={t.terminal.body} />
+        </aside>
+      </div>
+    </section>
+
+    {
+      t.sections.map((section) => (
+        <section class="agent" id={section.id}>
+          <div class="wrap">
+            <h2>
+              {section.name}
+              {section.tag && <span class="tag">{section.tag}</span>}
+            </h2>
+            <p class="agent-intro">{section.intro}</p>
+            <ol class="steps">
+              {section.steps.map((step) => (
+                <li>
+                  <h3>{step.title}</h3>
+                  <p set:html={step.body} />
+                  {step.cmds.map(({ os, cmd }) => (
+                    <div class="cmd-row">
+                      <span class="os">{os}</span>
+                      <div class={`cmd${cmd.startsWith("{") ? " file" : ""}`}>
+                        <code>{cmd}</code>
+                        <button type="button" data-copy>
+                          {copy}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      ))
+    }
+
+    <section class="agent advanced" id="pi">
+      <div class="wrap">
+        <h2>{t.advanced.title}</h2>
+        <p class="warn" set:html={t.advanced.body} />
+        {
+          t.advanced.cmds.map(({ os, cmd }) => (
+            <div class="cmd-row">
+              <span class="os">{os}</span>
+              <div class="cmd">
+                <code>{cmd}</code>
+                <button type="button" data-copy>
+                  {copy}
+                </button>
+              </div>
+            </div>
+          ))
+        }
+        <p set:html={t.advanced.after} />
+      </div>
+    </section>
+
+    <section class="asks">
+      <div class="wrap">
+        <h2>{t.asks.title}</h2>
+        <p>{t.asks.body}</p>
+        <ul>
+          {t.asks.items.map((item) => <li>“{item}”</li>)}
+        </ul>
+        <p class="note">{t.asks.undo}</p>
+      </div>
+    </section>
+
+    <section class="help">
+      <div class="wrap columns">
+        <div>
+          <h2>{t.windows.title}</h2>
+          <p set:html={t.windows.body} />
+        </div>
+        <div>
+          <h2>{t.trouble.title}</h2>
+          <ul>
+            {t.trouble.items.map((item) => <li set:html={item} />)}
+          </ul>
+          <p>
+            <a href={`${REPO}/issues/new`}>{t.trouble.issues}</a>
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Base>
+
+<script>
+  import "../scripts/page";
+</script>
+
+<style>
+  section {
+    padding-block: clamp(40px, 6vw, 72px);
+  }
+
+  .intro {
+    padding-top: clamp(48px, 9vh, 110px);
+  }
+
+  h1 {
+    font-size: clamp(2.8rem, 9vw, 7.5rem);
+  }
+
+  .intro .lede {
+    margin: clamp(20px, 3vw, 32px) 0 0;
+  }
+
+  h2 {
+    margin: 0 0 12px;
+    font-size: clamp(1.7rem, 3.4vw, 2.6rem);
+    font-weight: 800;
+    font-stretch: 118%;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+
+  h3 {
+    margin: 0 0 6px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-stretch: 110%;
+  }
+
+  p {
+    margin: 0;
+    max-width: 66ch;
+    color: var(--muted);
+  }
+
+  p :global(code),
+  li :global(code) {
+    color: var(--text);
+  }
+
+  p :global(a),
+  li :global(a),
+  .help a {
+    color: var(--tally);
+    text-underline-offset: 3px;
+  }
+
+  p :global(strong),
+  li :global(strong) {
+    color: var(--text);
+  }
+
+  .note {
+    margin-top: 16px;
+    color: var(--faint);
+    font-size: 15px;
+  }
+
+  .agent,
+  .asks,
+  .help {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  /* Chooser: three columns on wide screens, one block per agent on phones. */
+  .table {
+    margin-top: 28px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: 6px 24px;
+    padding: 14px 18px;
+  }
+
+  .row + .row {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .row.head {
+    color: var(--faint);
+    font-size: 13px;
+  }
+
+  .row a {
+    color: var(--text);
+    font-weight: 700;
+    font-stretch: 110%;
+    text-decoration: none;
+  }
+
+  .row a:hover {
+    color: var(--tally);
+  }
+
+  .row span {
+    color: var(--muted);
+  }
+
+  .terminal {
+    margin-top: 32px;
+    padding: 18px 20px;
+    border-left: 2px solid var(--tally);
+    background: var(--panel);
+  }
+
+  .tag {
+    margin-left: 12px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--tally-soft);
+    color: var(--tally);
+    font: 600 13px var(--sans);
+    letter-spacing: 0;
+    vertical-align: middle;
+  }
+
+  .agent-intro {
+    margin-bottom: 8px;
+  }
+
+  .steps {
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+
+  .steps > li {
+    position: relative;
+    padding: 18px 0 20px 44px;
+    border-top: 1px solid var(--line-soft);
+    counter-increment: step;
+  }
+
+  .steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 19px;
+    color: var(--tally);
+    font: 500 14px var(--mono);
+  }
+
+  .cmd-row {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px 16px;
+    margin-top: 12px;
+  }
+
+  .os {
+    color: var(--faint);
+    font-size: 14px;
+  }
+
+  .cmd.file code::before {
+    content: none;
+  }
+
+  .advanced .warn {
+    padding: 14px 16px;
+    border-left: 2px solid var(--danger);
+    background: var(--panel);
+  }
+
+  .advanced p + .cmd-row {
+    margin-top: 20px;
+  }
+
+  .advanced .cmd-row + p {
+    margin-top: 16px;
+  }
+
+  ul {
+    margin: 16px 0 0;
+    padding-left: 1.2em;
+    color: var(--muted);
+    max-width: 66ch;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  .asks li {
+    color: var(--text);
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 40px 64px;
+  }
+
+  .help p + p {
+    margin-top: 16px;
+  }
+
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .row.head {
+      display: none;
+    }
+
+    .account {
+      font-size: 14px;
+    }
+
+    .cmd-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .columns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

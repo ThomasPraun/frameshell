@@ -17,6 +17,7 @@ Needs Node >= 22.22 (Astro's minimum), pinned in `.node-version`.
 | File | What |
 |---|---|
 | `src/components/Landing.astro` | Section order; `src/pages/index.astro` (English) and `src/pages/es/index.astro` (Spanish) both render it |
+| `src/components/AgentsPage.astro` | "Connect your agent" page (`/agents/`, `/es/agents/`): install and connect each agent. Its commands and config paths come from each agent's docs and Frameshell's CLI install paths; recheck both when either changes |
 | `src/i18n/en.ts`, `src/i18n/es.ts` | Every visible string, one file per language |
 | `src/components/Showcase.astro`, `src/scripts/showcase.ts` | Hero carousel (one clip, a layer per part) and the project tree it leads into |
 | `src/styles/showcase.css` | Carousel and tree styles, scoped under `.sc` |
@@ -28,9 +29,9 @@ Download links use the latest GitHub release: read at build time, refreshed in t
 
 ## Languages
 
-English lives at `/`, Spanish at `/es/`. Components read their strings with `strings(Astro.currentLocale)`; client scripts read theirs (`runtime` in the dictionary) from the `#i18n` JSON that `Base.astro` embeds. `es.ts` is typed against `en.ts`, and the build fails when a list has a different number of items in each language, because the markup pairs several lists by position.
+English lives at `/` and `/agents/`, Spanish at `/es/` and `/es/agents/` (`pathFor(lang, page)` in `src/i18n/index.ts`; `Base.astro` and `Header.astro` take the `page`). Components read their strings with `strings(Astro.currentLocale)`; client scripts read theirs (`runtime` in the dictionary) from the `#i18n` JSON that `Base.astro` embeds. `es.ts` is typed against `en.ts`, and the build fails when a list has a different number of items in each language, because the markup pairs several lists by position.
 
-On the English page, a first visit from a browser set to Spanish redirects to `/es/`. The header's language link stores the choice in `localStorage` (`lang`), which wins from then on. The clip's audio is English, so its subtitles and quotes stay in English on both pages.
+On an English page, a first visit from a browser set to Spanish redirects to its `/es/` twin. The header's language link stores the choice in `localStorage` (`lang`), which wins from then on. The clip's audio is English, so its subtitles and quotes stay in English on both pages.
 
 Adding a language: copy `es.ts`, add the locale to `i18n` in `astro.config.mjs` and to `src/i18n/index.ts`, and add a page under `src/pages/<lang>/`.
 
