@@ -1186,7 +1186,8 @@ function projectArg(argv: string[]): string | undefined {
 app.whenReady().then(async () => {
   if (!primary) return;
   const cliEntry = fileURLToPath(import.meta.resolve("@frameshell/cli/frameshell"));
-  await writeCliShim(binDir, { runtime: process.execPath, cliEntry });
+  // The shim points at this app's daemon even when its caller drops TMPDIR (Claude Desktop runs MCP servers so).
+  await writeCliShim(binDir, { runtime: process.execPath, cliEntry, ...(process.platform === "win32" ? {} : { socket: socketPath }) });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   await panelWindows.load();
