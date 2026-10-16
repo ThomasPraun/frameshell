@@ -31,9 +31,11 @@ describe("electronNpmEnv", () => {
   it("puts a node command first on PATH, keeping Windows' Path key", async () => {
     const env = await electronNpmEnv(process.execPath, { PATH: "/usr/bin" }, "linux");
     expect(env["ELECTRON_RUN_AS_NODE"]).toBe("1");
-    const [dir, rest] = (env["PATH"] ?? "").split(":");
-    expect(rest).toBe("/usr/bin");
-    expect(readFileSync(join(dir ?? "", "node"), "utf8")).toBe(nodeShimScript(process.execPath, "linux"));
+    // The temp dir may hold a drive colon (Windows runners): split at the last separator.
+    const path = env["PATH"] ?? "";
+    expect(path.endsWith(":/usr/bin")).toBe(true);
+    const dir = path.slice(0, -":/usr/bin".length);
+    expect(readFileSync(join(dir, "node"), "utf8")).toBe(nodeShimScript(process.execPath, "linux"));
 
     const windows = await electronNpmEnv("C:\\F\\Frameshell.exe", { Path: "C:\\Windows" }, "win32");
     expect(Object.keys(windows).filter((key) => key.toUpperCase() === "PATH")).toEqual(["Path"]);
