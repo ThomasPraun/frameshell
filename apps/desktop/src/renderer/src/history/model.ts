@@ -1,5 +1,6 @@
 // History panel model (SPEC §6.2): pure, DOM-free, so rows and selections are unit tested.
 import type { ClipDiff, HistoryTransaction } from "@frameshell/protocol";
+import { t } from "../i18n.js";
 import type { RevealRequest } from "../selection.js";
 
 /** SPEC §6.2 author, split for display. */
@@ -16,34 +17,34 @@ export interface AuthorView {
  * `agent:<label>:<session>`, `file`, `plugin:<name>`).
  */
 export function authorOf(author: string): AuthorView {
-  if (author === "ui") return { kind: "ui", name: "You", detail: null };
-  if (author === "file") return { kind: "file", name: "File", detail: null };
-  if (author.startsWith("plugin:")) return { kind: "plugin", name: "Plugin", detail: author.slice("plugin:".length) };
+  if (author === "ui") return { kind: "ui", name: t.history.you, detail: null };
+  if (author === "file") return { kind: "file", name: t.history.file, detail: null };
+  if (author.startsWith("plugin:")) return { kind: "plugin", name: t.history.plugin, detail: author.slice("plugin:".length) };
   const agent = /^agent:([^:]+)(?::(.+))?$/.exec(author);
-  if (agent) return { kind: "agent", name: `agent: ${agent[1]}`, detail: agent[2] ?? null };
+  if (agent) return { kind: "agent", name: t.history.agent(agent[1]!), detail: agent[2] ?? null };
   const session = author.startsWith("cli:") ? author.slice("cli:".length) : null;
-  return { kind: "cli", name: "Terminal", detail: session };
+  return { kind: "cli", name: t.history.terminal, detail: session };
 }
 
 /** Verbs for operation names; others show as named. */
 const VERBS: Record<string, string> = {
-  "clip.add": "Add clip",
-  "clip.move": "Move",
-  "clip.trim": "Trim",
-  "clip.split": "Split",
-  "clip.remove": "Delete",
-  "clip.set": "Change clip",
-  cut: "Ripple delete",
-  "track.add": "Add track",
-  "track.remove": "Remove track",
-  "track.set": "Change track",
-  "timeline.patch": "Direct edit",
+  "clip.add": t.history.verbs.addClip,
+  "clip.move": t.history.verbs.move,
+  "clip.trim": t.history.verbs.trim,
+  "clip.split": t.history.verbs.split,
+  "clip.remove": t.history.verbs.delete,
+  "clip.set": t.history.verbs.changeClip,
+  cut: t.history.verbs.rippleDelete,
+  "track.add": t.history.verbs.addTrack,
+  "track.remove": t.history.verbs.removeTrack,
+  "track.set": t.history.verbs.changeTrack,
+  "timeline.patch": t.history.verbs.directEdit,
 };
 
 /** One operation in words: its verb, `Revert <target>` for reverts. */
 export function operationTitle(op: { op: string; args: Record<string, unknown> }): string {
   const target = op.args["target"];
-  if (op.op === "revert") return typeof target === "string" ? `Revert ${target}` : "Revert";
+  if (op.op === "revert") return typeof target === "string" ? t.history.revertTarget(target) : t.history.revert;
   return VERBS[op.op] ?? op.op;
 }
 
@@ -63,7 +64,7 @@ export function transactionTitle(tx: HistoryTransaction): string {
     const word = index === 0 || /[._]/.test(title) ? title : title[0]!.toLowerCase() + title.slice(1);
     return count > 1 ? `${word} ×${count}` : word;
   });
-  return parts.join(", ") || "Empty";
+  return parts.join(", ") || t.history.empty;
 }
 
 /**

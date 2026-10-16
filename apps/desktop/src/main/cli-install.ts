@@ -3,8 +3,10 @@ import { lstat, mkdir, readFile, readlink, rename, rm, symlink } from "node:fs/p
 import { dirname, join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import { parseCliShim } from "@frameshell/protocol";
+import { type Dict, strings } from "../shared/i18n/index.js";
 
 const run = promisify(execFile);
+const english = strings("en").app.cli;
 
 /**
  * The system the install talks to. Injected so tests never touch the real
@@ -30,7 +32,12 @@ export interface CliInstallHost {
   readUserPath(): Promise<string>;
   /** Replaces the user PATH on Windows and tells running programs it changed. */
   writeUserPath(value: string): Promise<void>;
+  /** Wording of the outcomes, in the UI language; English when absent. */
+  text?: CliText;
 }
+
+/** Wording of the CLI install's messages. */
+export type CliText = Dict["app"]["cli"];
 
 /** What an install or uninstall did, worded for a message box. */
 export interface CliInstallOutcome {
@@ -66,12 +73,11 @@ export function cliInstallBlocker(
   platform: NodeJS.Platform,
   execPath: string,
   env: NodeJS.ProcessEnv,
+  text: CliText = english,
 ): string | undefined {
-  if (platform === "linux" && env["APPIMAGE"]) {
-    return "The AppImage runs from a different path on every start. Install the .deb package to use 'frameshell' outside the app.";
-  }
+  if (platform === "linux" && env["APPIMAGE"]) return text.appImage;
   if (platform === "darwin" && (execPath.startsWith("/Volumes/") || execPath.includes("/AppTranslocation/"))) {
-    return "Frameshell is running from a temporary location. Move it to the Applications folder, open it from there, and try again.";
+    return text.translocated;
   }
   return undefined;
 }
@@ -85,28 +91,29 @@ export function cliInstallBlocker(
  * ({@link CliInstallHost.packageCommand}), nothing is added.
  */
 export async function installCli(shim: string, host: CliInstallHost): Promise<CliInstallOutcome> {
+  const text = host.text ?? english;
   if (host.platform === "win32") {
     const dir = win32.dirname(shim);
     const current = await host.readUserPath();
     const next = addPathEntry(current, dir);
-    if (next === current) return { changed: false, message: "The 'frameshell' command is already on your PATH." };
+    if (next === current) return { changed: false, message: text.onPath };
     await host.writeUserPath(next);
     return {
       changed: true,
-      message: "Added the 'frameshell' command to your PATH.",
-      detail: `${dir} is now on your user PATH. Terminals opened before this keep their old PATH: open a new one.`,
+      message: text.addedToPath,
+      detail: text.addedDetail(dir),
     };
   }
   const packaged = await packageCommandOf(shim, host);
-  if (packaged) return { changed: false, message: `The 'frameshell' command is already installed at ${packaged} by the Frameshell package.` };
+  if (packaged) return { changed: false, message: text.byPackage(packaged) };
   const link = join(requireLinkDir(host), "frameshell");
   const existing = await inspectLink(link, shim);
-  if (existing.kind === "file") throw new Error(`${link} exists and is not a link. Remove it, then install again.`);
+  if (existing.kind === "file") throw new Error(text.notALink(link));
   if (existing.kind === "ours" && existing.target === shim) {
-    return { changed: false, message: `The 'frameshell' command is already installed at ${link}.` };
+    return { changed: false, message: text.installedAlready(link) };
   }
   if (existing.kind === "foreign" && !(await host.confirmReplace(link, existing.target))) {
-    return { changed: false, message: "The 'frameshell' command was left as it was." };
+    return { changed: false, message: text.leftAsItWas };
   }
   await withAdminFallback(host, `mkdir -p ${shQuote(dirname(link))} && ln -sfn ${shQuote(shim)} ${shQuote(link)}`, () =>
     replaceLink(link, shim),
@@ -114,10 +121,8 @@ export async function installCli(shim: string, host: CliInstallHost): Promise<Cl
   const onPath = host.path.split(":").includes(dirname(link));
   return {
     changed: true,
-    message: `Installed the 'frameshell' command at ${link}.`,
-    ...(host.platform === "linux" && !onPath
-      ? { detail: `${dirname(link)} is not on your PATH: add it in your shell profile.` }
-      : {}),
+    message: text.installed(link),
+    ...(host.platform === "linux" && !onPath ? { detail: text.dirNotOnPath(dirname(link)) } : {}),
   };
 }
 
@@ -127,23 +132,24 @@ export async function installCli(shim: string, host: CliInstallHost): Promise<Cl
  * a source checkout) is never removed.
  */
 export async function uninstallCli(shim: string, host: CliInstallHost): Promise<CliInstallOutcome> {
+  const text = host.text ?? english;
   if (host.platform === "win32") {
     const current = await host.readUserPath();
     const next = removePathEntry(current, win32.dirname(shim));
-    if (next === current) return { changed: false, message: "The 'frameshell' command is not on your PATH." };
+    if (next === current) return { changed: false, message: text.notOnPath };
     await host.writeUserPath(next);
-    return { changed: true, message: "Removed the 'frameshell' command from your PATH." };
+    return { changed: true, message: text.removedFromPath };
   }
   const link = join(requireLinkDir(host), "frameshell");
   const existing = await inspectLink(link, shim);
   const packaged = await packageCommandOf(shim, host);
-  const stays = packaged ? { detail: `${packaged} comes with the Frameshell package: removing the package removes it.` } : {};
-  if (existing.kind === "missing") return { changed: false, message: `No 'frameshell' command at ${link}.`, ...stays };
+  const stays = packaged ? { detail: text.packageKeeps(packaged) } : {};
+  if (existing.kind === "missing") return { changed: false, message: text.missing(link), ...stays };
   if (existing.kind !== "ours") {
-    return { changed: false, message: `${link} was not installed by Frameshell: left in place.`, ...stays };
+    return { changed: false, message: text.notOurs(link), ...stays };
   }
   await withAdminFallback(host, `rm -f ${shQuote(link)}`, () => rm(link, { force: true }));
-  return { changed: true, message: `Removed the 'frameshell' command from ${link}.`, ...stays };
+  return { changed: true, message: text.removed(link), ...stays };
 }
 
 /**
@@ -171,6 +177,7 @@ export function removePathEntry(path: string, dir: string): string {
 export function systemCliInstallHost(options: {
   home: string;
   confirmReplace: CliInstallHost["confirmReplace"];
+  text?: CliText;
 }): CliInstallHost {
   const platform = process.platform;
   const linkDir = cliLinkDir(platform, options.home);
@@ -180,6 +187,7 @@ export function systemCliInstallHost(options: {
     ...(platform === "linux" ? { packageCommand: LINUX_PACKAGE_COMMAND } : {}),
     path: process.env["PATH"] ?? "",
     confirmReplace: options.confirmReplace,
+    ...(options.text ? { text: options.text } : {}),
     runAsAdmin: async (script) => {
       try {
         await run("osascript", ["-e", `do shell script "${appleScriptString(script)}" with administrator privileges`]);

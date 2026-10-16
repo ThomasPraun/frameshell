@@ -4,6 +4,7 @@ import type { TimeRange, TimelineView, UiCommand, UiView, WordRef } from "@frame
 import { parseTranscript } from "@frameshell/schema";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { selectHistoryEntry } from "./history/useHistory.js";
+import { t } from "./i18n.js";
 import { type TransportState, createTransport, transport } from "./preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, type Selection, selection, unionRange } from "./selection.js";
 import { formatTimecode } from "./timeline/layout.js";
@@ -131,16 +132,16 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
   switch (command.kind) {
     case "seek": {
       player.seek(command.at);
-      return `Agent moved the playhead to ${formatTimecode(player.get().time, player.get().fps)}`;
+      return t.workspace.agentSeek(formatTimecode(player.get().time, player.get().fps));
     }
     case "play": {
       player.play();
       if (!player.get().playing) throw new Error("The timeline is empty: there is nothing to play.");
-      return "Agent started playback";
+      return t.workspace.agentPlay;
     }
     case "pause":
       player.pause();
-      return "Agent paused playback";
+      return t.workspace.agentPause;
     case "select": {
       if (command.points.length > 0) {
         // Inspected by the daemon: shown as picks, at the first one's time.
@@ -150,7 +151,7 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
         }));
         selection.selectPoints(points, "agent");
         if (command.reveal && !targets.transport.get().playing) targets.transport.seek(command.points[0]!.at);
-        return `Agent picked ${command.points.length} point${command.points.length === 1 ? "" : "s"} in the preview`;
+        return t.workspace.agentPicked(command.points.length);
       }
       if (command.clips.length > 0) {
         const view = targets.timelineView(SELECTION_TIMELINE);
@@ -169,7 +170,7 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
       // Without an explicit range, the words' own span, as the transcript view selects them.
       const range = command.range ?? (view && words.length > 0 ? unionRange(words.map((word) => placeWord(view, word))) : null);
       selection.select({ clips, words, range }, "agent", { reveal });
-      return `Agent selected ${describeSelection(clips.length, words.length, command.range !== null)}`;
+      return t.workspace.agentSelected(describeSelection(clips.length, words.length, command.range !== null));
     }
     case "openFile":
       try {
@@ -178,14 +179,14 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
         throw new Error(`Cannot open ${command.path}: ${(error as Error).message}`, { cause: error });
       }
       host.openFile(command.path);
-      return `Agent opened ${command.path}`;
+      return t.workspace.agentOpened(command.path);
     case "showTxDiff":
       if (command.timeline !== SELECTION_TIMELINE) {
         throw new Error(`The app shows the history of timeline ${SELECTION_TIMELINE} only, not ${command.timeline}.`);
       }
       await targets.selectHistory(command.timeline, command.target);
       host.showHistory();
-      return `Agent is showing the changes of ${command.target}`;
+      return t.workspace.agentDiff(command.target);
   }
 }
 
@@ -225,12 +226,12 @@ export async function resolveWords(refs: readonly WordRef[], readFile: (path: st
 
 function describeSelection(clips: number, words: number, range: boolean): string {
   const parts = [
-    clips > 0 ? `${clips} ${clips === 1 ? "clip" : "clips"}` : "",
-    words > 0 ? `${words} ${words === 1 ? "word" : "words"}` : "",
-    range ? "a time range" : "",
+    clips > 0 ? t.workspace.clips(clips) : "",
+    words > 0 ? t.workspace.words(words) : "",
+    range ? t.workspace.timeRange : "",
   ].filter(Boolean);
-  if (parts.length === 0) return "nothing";
-  return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  if (parts.length === 0) return t.workspace.nothing;
+  return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} ${t.workspace.and} ${parts.at(-1)}`;
 }
 
 /** Latest agent action shown in the status bar, and when. */

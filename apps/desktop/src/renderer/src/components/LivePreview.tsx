@@ -2,6 +2,7 @@ import type { Size } from "@frameshell/schema/composite";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type LiveTarget, liveSeconds } from "../preview/live.js";
 import { livePage } from "../preview/live-pages.js";
+import { t } from "../i18n.js";
 
 /** `source` of the messages the preview posts to a live page and the page's bridge posts back (main's `LIVE_MESSAGE`). */
 const TO_PAGE = "frameshell-preview";
@@ -153,7 +154,7 @@ function LiveFrame({
       <iframe
         ref={frame}
         src={url}
-        title={`Live preview of clip ${target.clip}`}
+        title={t.preview.liveFrame(target.clip)}
         sandbox="allow-scripts"
         allow="autoplay 'none'"
         referrerPolicy="no-referrer"

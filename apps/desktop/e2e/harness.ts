@@ -45,17 +45,24 @@ const OPEN_TIMEOUT_MS = 60_000;
  * screen gave way to the project, or to the welcome screen), so a spec's first assertion measures what it tests, not
  * a cold daemon. `settled: false` returns while the boot screen may still show. `env` adds to or overrides the app's
  * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`). `paths` are passed as files to open, like Open with does,
- * instead of `--project`.
+ * instead of `--project`. `lang` is the OS language the app sees (`--lang`); English unless a spec asks, so text
+ * selectors hold on any machine.
  */
 export async function launch(
   box: Sandbox,
-  { settled = true, env = {}, paths }: { settled?: boolean; env?: Record<string, string>; paths?: string[] } = {},
+  {
+    settled = true,
+    env = {},
+    paths,
+    lang = "en",
+  }: { settled?: boolean; env?: Record<string, string>; paths?: string[]; lang?: string } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.
     args: [
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      `--lang=${lang}`,
       ...(packagedApp ? [] : [mainEntry]),
       ...(paths ?? ["--project", box.projectDir]),
     ],

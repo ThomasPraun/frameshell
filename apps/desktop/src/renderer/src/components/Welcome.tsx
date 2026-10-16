@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
 import { useFileDrop } from "../file-drop.js";
+import { rich, t } from "../i18n.js";
 
 /** First screen of a window with no project: start from a video, open a folder, reopen a recent one, or create a project. */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
@@ -51,7 +52,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
           setPlan(next);
           setNotProject(null);
         }
-        if (refused.length > 0) setError(`Not a video: ${refused.map(fileName).join(", ")}`);
+        if (refused.length > 0) setError(t.welcome.notVideo(refused.map(fileName).join(", ")));
       } catch (failure) {
         setError((failure as Error).message);
       }
@@ -78,8 +79,8 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
       <div className="welcome-card no-drag">
         <FrameMark />
         <h1>Frameshell</h1>
-        <p className="welcome-lede">Start from a video. Your agent edits it from the terminal, you review on the timeline.</p>
-        {dragging && <p className="welcome-drop">Drop videos to start a project</p>}
+        <p className="welcome-lede">{t.welcome.lede}</p>
+        {dragging && <p className="welcome-drop">{t.welcome.dropHere}</p>}
 
         {plan ? (
           <NewFromVideo
@@ -95,21 +96,19 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
         ) : (
           <div className="welcome-actions">
             <button className="button primary" disabled={busy} onClick={() => void chooseVideos()}>
-              New from video…
+              {t.welcome.newFromVideo}
             </button>
             <button className="button" disabled={busy} onClick={() => void run(window.frameshell.project.openFolder)}>
-              Open folder…
+              {t.welcome.openFolder}
             </button>
           </div>
         )}
 
         {notProject && (
           <div className="welcome-notice" role="status">
-            <p>
-              <code>{notProject}</code> has no <code>frameshell.json</code> yet.
-            </p>
+            <p>{rich(t.welcome.notProject, { dir: <code>{notProject}</code>, file: <code>frameshell.json</code> })}</p>
             <button className="button" disabled={busy} onClick={() => void run(() => window.frameshell.project.init(notProject))}>
-              Create a project here
+              {t.welcome.createHere}
             </button>
           </div>
         )}
@@ -120,8 +119,8 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
         )}
 
         {recent.length > 0 && !plan && (
-          <section className="welcome-recent" aria-label="Recent projects">
-            <h2>Recent</h2>
+          <section className="welcome-recent" aria-label={t.welcome.recentProjects}>
+            <h2>{t.welcome.recent}</h2>
             <ul>
               {recent.map((dir) => (
                 <li key={dir}>
@@ -181,11 +180,11 @@ function NewFromVideo({
   };
 
   const names = plan.files.map(fileName);
-  const videos = names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+  const videos = names.length <= 3 ? names.join(", ") : t.welcome.andMore(names.slice(0, 2).join(", "), names.length - 2);
   return (
     <form
       className="welcome-new"
-      aria-label="New project from video"
+      aria-label={t.welcome.form}
       onSubmit={(event) => {
         event.preventDefault();
         onCreate(mode, name, transcribe);
@@ -193,7 +192,7 @@ function NewFromVideo({
     >
       <p className="welcome-new-source">{videos}</p>
       <label className="welcome-field">
-        <span>Project name</span>
+        <span>{t.welcome.projectName}</span>
         <input
           value={name}
           disabled={busy}
@@ -203,52 +202,52 @@ function NewFromVideo({
         />
       </label>
       <div className="welcome-field">
-        <span>Folder</span>
+        <span>{t.welcome.folder}</span>
         <div className="welcome-place">
           {/* Cut from the start, so the project folder at the end stays visible. */}
           <code title={plan.dir}>
             <bdi dir="ltr">{plan.dir}</bdi>
           </code>
           <button type="button" className="link" disabled={busy} onClick={() => void changeParent()}>
-            Change…
+            {t.welcome.change}
           </button>
         </div>
       </div>
 
       {plan.existing ? (
-        <p className="welcome-hint">A project for this video already exists in that folder.</p>
+        <p className="welcome-hint">{t.welcome.exists}</p>
       ) : plan.askMode ? (
         <fieldset className="welcome-mode">
-          <legend>Your videos stay where they are. The project can:</legend>
+          <legend>{t.welcome.modeLegend}</legend>
           <label>
             <input type="radio" name="mode" checked={mode === "copy"} onChange={() => setMode("copy")} />
-            Keep its own copy ({formatBytes(plan.totalBytes)} more disk space)
+            {t.welcome.modeCopy(formatBytes(plan.totalBytes))}
           </label>
           <label>
             <input type="radio" name="mode" checked={mode === "link"} onChange={() => setMode("link")} />
-            Use the videos in place (do not move or delete them)
+            {t.welcome.modeLink}
           </label>
         </fieldset>
       ) : (
-        <p className="welcome-hint">Your videos stay where they are; the project keeps its own copy.</p>
+        <p className="welcome-hint">{t.welcome.copyHint}</p>
       )}
 
       {!plan.existing && (
         <label className="welcome-check">
           <input type="checkbox" checked={transcribe} onChange={(event) => setTranscribe(event.target.checked)} />
           <span>
-            Transcribe what is said
-            <small>The first time, this downloads the transcription engine and model (about 600 MB).</small>
+            {t.welcome.transcribe}
+            <small>{t.welcome.transcribeHint}</small>
           </span>
         </label>
       )}
 
       <div className="welcome-actions">
         <button type="submit" className="button primary" disabled={busy}>
-          {plan.existing ? "Open project" : busy ? "Creating…" : "Create project"}
+          {plan.existing ? t.welcome.openProject : busy ? t.welcome.creating : t.welcome.createProject}
         </button>
         <button type="button" className="button" disabled={busy} onClick={onCancel}>
-          Cancel
+          {t.welcome.cancel}
         </button>
       </div>
     </form>

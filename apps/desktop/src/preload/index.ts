@@ -16,6 +16,8 @@ async function invokeOutcome<T>(channel: string, ...args: unknown[]): Promise<T>
 }
 
 const api: FrameshellApi = {
+  // Synchronous: the renderer's modules read the language as they load.
+  lang: ipcRenderer.sendSync(Channel.lang) as FrameshellApi["lang"],
   project: {
     current: () => ipcRenderer.invoke(Channel.projectCurrent),
     openFolder: () => ipcRenderer.invoke(Channel.projectOpenFolder),

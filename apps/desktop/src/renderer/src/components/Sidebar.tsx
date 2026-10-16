@@ -1,4 +1,5 @@
 import type { SidebarView } from "../../../shared/layout.js";
+import { t } from "../i18n.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
@@ -6,9 +7,9 @@ import { PanelHeader } from "./PanelHeader.js";
 
 /** The sidebar's views, in tab order, with their names. */
 export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
-  { id: "explorer", label: "Explorer" },
-  { id: "history", label: "History" },
-  { id: "plugins", label: "Plugins" },
+  { id: "explorer", label: t.workspace.explorer },
+  { id: "history", label: t.workspace.history },
+  { id: "plugins", label: t.workspace.plugins },
 ];
 
 /** Name of a sidebar view, as its tab shows it. */
@@ -44,20 +45,20 @@ export function Sidebar({
     <>
       <PanelHeader
         onCollapse={onCollapse}
-        collapseLabel="Hide sidebar"
+        collapseLabel={t.workspace.hideSidebar}
         collapseSide="left"
         actions={
           <DetachButton name={label} detached={false} disabled={detached.has(view)} onClick={() => onDetach(view, true)} testId="sidebar-detach" />
         }
       >
-        <div className="view-switch" role="tablist" aria-label="Sidebar views">
+        <div className="view-switch" role="tablist" aria-label={t.workspace.sidebarViews}>
           {SIDEBAR_VIEWS.map(({ id, label: name }) => (
             <button
               key={id}
               role="tab"
               aria-selected={view === id}
               className={`view-tab${view === id ? " is-active" : ""}${detached.has(id) ? " is-detached" : ""}`}
-              title={detached.has(id) ? `${name}, in its own window` : undefined}
+              title={detached.has(id) ? t.workspace.inOwnWindow(name) : undefined}
               onClick={() => onView(id)}
             >
               {name}
@@ -106,8 +107,7 @@ function SidebarViewBody({ view, onOpenFile, activeFile }: { view: SidebarView; 
   if (view === "history") return <HistoryPanel />;
   return (
     <p className="empty">
-      No plugins yet. Adapters such as HyperFrames and providers such as whisper.cpp will show up here with their trust
-      state.
+      {t.workspace.noPlugins}
     </p>
   );
 }

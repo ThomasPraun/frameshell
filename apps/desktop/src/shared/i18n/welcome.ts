@@ -1,0 +1,61 @@
+// Welcome screen and new project from videos (renderer/src/components/Welcome.tsx, file-drop.ts).
+
+const en = {
+  lede: "Start from a video. Your agent edits it from the terminal, you review on the timeline.",
+  dropHere: "Drop videos to start a project",
+  newFromVideo: "New from video…",
+  openFolder: "Open folder…",
+  /** Slots: `{dir}`, `{file}`. */
+  notProject: "{dir} has no {file} yet.",
+  createHere: "Create a project here",
+  recent: "Recent",
+  recentProjects: "Recent projects",
+  notVideo: (names: string) => `Not a video: ${names}`,
+  form: "New project from video",
+  /** Three or more chosen videos: the first two named, the rest counted. */
+  andMore: (first: string, more: number) => `${first} and ${more} more`,
+  projectName: "Project name",
+  folder: "Folder",
+  change: "Change…",
+  exists: "A project for this video already exists in that folder.",
+  modeLegend: "Your videos stay where they are. The project can:",
+  modeCopy: (size: string) => `Keep its own copy (${size} more disk space)`,
+  modeLink: "Use the videos in place (do not move or delete them)",
+  copyHint: "Your videos stay where they are; the project keeps its own copy.",
+  transcribe: "Transcribe what is said",
+  transcribeHint: "The first time, this downloads the transcription engine and model (about 600 MB).",
+  openProject: "Open project",
+  creating: "Creating…",
+  createProject: "Create project",
+  cancel: "Cancel",
+};
+
+const es: typeof en = {
+  lede: "Empieza con un video. Tu agente lo edita desde la terminal y tú lo revisas en la línea de tiempo.",
+  dropHere: "Suelta videos para crear un proyecto",
+  newFromVideo: "Nuevo desde un video…",
+  openFolder: "Abrir carpeta…",
+  notProject: "{dir} todavía no tiene {file}.",
+  createHere: "Crear un proyecto aquí",
+  recent: "Recientes",
+  recentProjects: "Proyectos recientes",
+  notVideo: (names) => `No es un video: ${names}`,
+  form: "Nuevo proyecto desde un video",
+  andMore: (first, more) => `${first} y ${more} más`,
+  projectName: "Nombre del proyecto",
+  folder: "Carpeta",
+  change: "Cambiar…",
+  exists: "Ya hay un proyecto para este video en esa carpeta.",
+  modeLegend: "Tus videos se quedan donde están. El proyecto puede:",
+  modeCopy: (size) => `Guardar su propia copia (${size} más de espacio en disco)`,
+  modeLink: "Usar los videos donde están (no los muevas ni los borres)",
+  copyHint: "Tus videos se quedan donde están; el proyecto guarda su propia copia.",
+  transcribe: "Transcribir lo que se dice",
+  transcribeHint: "La primera vez se descargan el motor de transcripción y el modelo (unos 600 MB).",
+  openProject: "Abrir proyecto",
+  creating: "Creando…",
+  createProject: "Crear proyecto",
+  cancel: "Cancelar",
+};
+
+export const welcome = { en, es };

@@ -7,6 +7,7 @@ import type { Anchor, ClockSample, EngineStats, FromEngine, LayerAlpha, ToEngine
 import { heardTime, programSample } from "./engine-protocol.js";
 import { PROGRAM_SAMPLE_RATE, type Program } from "./program.js";
 import type { TransportPlayer } from "./transport.js";
+import { t } from "../i18n.js";
 
 /** Program start is scheduled this far after play: the first audio chunk is read and the worklet fed by then. */
 const START_LEAD_S = 0.12;
@@ -75,7 +76,7 @@ export class PreviewPlayer implements TransportPlayer {
     this.#probe = options.probe ? new Probe(this) : null;
     this.#audioReady = this.#setupAudio().catch((error: unknown) => {
       this.#context = null;
-      this.#events.onError?.(`Preview audio unavailable: ${(error as Error).message}`);
+      this.#events.onError?.(t.preview.audioUnavailable((error as Error).message));
     });
   }
 

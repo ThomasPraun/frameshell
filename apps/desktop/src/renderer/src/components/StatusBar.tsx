@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ProjectSetup, ProjectView } from "../../../shared/api.js";
+import { t } from "../i18n.js";
 import { useAgentNotice } from "../ui-link.js";
 
 /** How long the last agent navigation stays in the status bar. */
@@ -60,7 +61,7 @@ export function StatusBar({
         </span>
       )}
       {session && (
-        <span className="status-item" data-testid="active-session" title="FRAMESHELL_SESSION of the active terminal">
+        <span className="status-item" data-testid="active-session" title={t.workspace.activeSessionTitle}>
           {session}
         </span>
       )}
