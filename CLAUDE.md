@@ -22,7 +22,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Direct timeline file edits (watcher, stale/invalid rejection, `.frameshell/rejected/`, offline-edit catch-up) | `TimelineService.reconcile` in `packages/core/src/timeline/service.ts`, `timeline/watcher.ts`, `timeline/rejections.ts`; SPEC §6.4 |
 | Cut snapping to audio energy (pauses, envelope cache) | `packages/core/src/media/energy.ts`, `media/energy-store.ts`, `timeline/snap.ts`; ADR 0003 |
 | Generated clips (render cache, keys, background renders, export layers) | `packages/core/src/clips/renderer.ts`, `clips/cache-key.ts`; adapters `plugins/hyperframes` (ADR 0002), `plugins/remotion` (bundle as cache input, outside-project code, `refreshRenders`; ADR 0009); SPEC §6.5 |
-| Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
+| Plugin host, install, trust; npm the app bundles for machines without Node | `packages/core/src/plugins/host.ts`, `plugins/npm-runtime.ts`, `apps/desktop/scripts/bundle-npm.mjs`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
 | New project from video (folder beside video, name clash, clone test), drops, Open with (single instance, `open-file`, Windows registry) | `apps/desktop/src/main/video-project.ts`, `main/media-files.ts`, `main/open-paths.ts`, `build/installer.nsh`, `renderer/src/components/Welcome.tsx`, `renderer/src/file-drop.ts`; ADR 0013 |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |

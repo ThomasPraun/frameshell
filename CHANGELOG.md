@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core: files imported into `assets/` by copy are read-only, so an agent or a tool cannot overwrite the project's footage by mistake (#186). Linked imports (`--link`) keep the original's permissions. Replacing an asset means deleting it and writing the new file, which the daemon ingests as before.
 
+### Fixed
+
+- Desktop: plugin installs work on machines without Node.js (#204). The app ships npm 11.21.0 in its resources and the daemon runs it with the app's own Node; dependencies' install scripts get a `node` command that does the same. Before, `frameshell plugin install` from the installed app needed a system npm, so transcription could not be set up without Node. The app is about 18 MB larger.
+
 ## [0.6.0] - 2026-10-12
 
 Detachable panels (ADR 0012): any panel moves to its own window and back, for a second monitor, sharing the playhead, the selection and the keys with the project window. Terminals keep running through the move, "Ask agent" finds the terminal running the agent in any window, the preview goes full screen with `F`, and Cmd/Ctrl+Shift+Enter maximizes a panel in place. No protocol change: the CLI and the daemon of 0.5.0 work with this app. The official plugins are unchanged.
