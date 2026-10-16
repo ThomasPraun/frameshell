@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Desktop: plugin installs work on machines without Node.js (#204). The app ships npm 11.21.0 in its resources and the daemon runs it with the app's own Node; dependencies' install scripts get a `node` command that does the same. Before, `frameshell plugin install` from the installed app needed a system npm, so transcription could not be set up without Node. The app is about 18 MB larger.
+- Core: rotated videos, as phones record portrait video, are reported at the size they play: `asset.list` and the export used the stored landscape size while ffmpeg decodes them upright (#207). Assets ingested before keep the old size until re-ingested.
 
 ## [0.6.0] - 2026-10-12
 
