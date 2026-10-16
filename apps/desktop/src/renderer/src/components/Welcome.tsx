@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
+import { useFileDrop } from "../file-drop.js";
 
 /** First screen of a window with no project: start from a video, open a folder, reopen a recent one, or create a project. */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
@@ -27,6 +28,25 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     }
   };
 
+  const dropped = useCallback(
+    async (paths: string[]) => {
+      if (busy) return;
+      setError(null);
+      try {
+        const { plan: next, refused } = await window.frameshell.project.planVideos(paths);
+        if (next) {
+          setPlan(next);
+          setNotProject(null);
+        }
+        if (refused.length > 0) setError(`Not a video: ${refused.map(fileName).join(", ")}`);
+      } catch (failure) {
+        setError((failure as Error).message);
+      }
+    },
+    [busy],
+  );
+  const dragging = useFileDrop(useCallback((paths: string[]) => void dropped(paths), [dropped]));
+
   const chooseVideos = async () => {
     setError(null);
     try {
@@ -41,11 +61,12 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   };
 
   return (
-    <main className="welcome drag">
+    <main className={`welcome drag${dragging ? " is-dropping" : ""}`}>
       <div className="welcome-card no-drag">
         <FrameMark />
         <h1>Frameshell</h1>
         <p className="welcome-lede">Start from a video. Your agent edits it from the terminal, you review on the timeline.</p>
+        {dragging && <p className="welcome-drop">Drop videos to start a project</p>}
 
         {plan ? (
           <NewFromVideo
@@ -128,8 +149,8 @@ function NewFromVideo({
   const replan = async (place: { parent?: string; name?: string }) => {
     const ticket = ++latest.current;
     try {
-      const next = await window.frameshell.project.planVideos(plan.files, { parent: plan.parent, name, ...place });
-      if (ticket === latest.current) {
+      const { plan: next } = await window.frameshell.project.planVideos(plan.files, { parent: plan.parent, name, ...place });
+      if (ticket === latest.current && next) {
         onPlan(next);
         onError(null);
       }

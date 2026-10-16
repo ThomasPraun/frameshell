@@ -208,6 +208,18 @@ code {
   user-select: text;
 }
 
+.welcome.is-dropping .welcome-card {
+  outline: 2px dashed var(--accent);
+  outline-offset: 24px;
+  border-radius: 4px;
+}
+
+.welcome-drop {
+  margin: 0 0 16px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .welcome-actions {
   display: flex;
   flex-wrap: wrap;
@@ -343,6 +355,25 @@ code {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* Files dragged in from the OS (#183): the whole window is the target. */
+.drop-target {
+  position: fixed;
+  inset: 8px;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(29, 30, 32, 0.82);
+  pointer-events: none;
+}
+
+.drop-target p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .titlebar {

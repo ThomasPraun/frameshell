@@ -5,9 +5,6 @@ import { copyFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { VideoProjectPlan } from "../shared/api.js";
 
-/** Extensions offered by the Choose video dialog and accepted from drops and Open with. */
-export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "mts"] as const;
-
 /** Above this total, and when no clone is possible, the user picks copy or use in place: a copy then costs real disk space. */
 export const ASK_COPY_BYTES = 2 * 1024 ** 3;
 

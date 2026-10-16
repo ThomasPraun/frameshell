@@ -1,5 +1,5 @@
 // Bridge: the only surface the sandboxed renderer gets. Mirrors `FrameshellApi`.
-import { type IpcRendererEvent, contextBridge, ipcRenderer } from "electron";
+import { type IpcRendererEvent, contextBridge, ipcRenderer, webUtils } from "electron";
 import { Channel, type FrameshellApi, type Outcome } from "../shared/api.js";
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
@@ -36,6 +36,7 @@ const api: FrameshellApi = {
       if (reply.error) throw new Error(reply.error);
     },
     onChanged: (listener) => subscribe(Channel.filesChanged, listener),
+    pathOf: (file) => webUtils.getPathForFile(file),
   },
   terminals: {
     create: (size) => ipcRenderer.invoke(Channel.terminalCreate, size),
@@ -80,6 +81,7 @@ const api: FrameshellApi = {
     assets: () => invokeOutcome(Channel.mediaAssets),
     read: (path) => invokeOutcome(Channel.mediaRead, path),
     onChanged: (listener) => subscribe(Channel.mediaChanged, listener),
+    import: (paths) => invokeOutcome(Channel.mediaImport, paths),
   },
   context: {
     captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),

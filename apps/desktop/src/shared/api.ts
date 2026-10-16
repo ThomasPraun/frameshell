@@ -162,8 +162,12 @@ export interface FrameshellApi {
     recent(): Promise<string[]>;
     /** Choose videos with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
     chooseVideos(): Promise<VideoProjectPlan | null>;
-    /** Plan the project for `files` (e.g. dropped), optionally in another `parent` or under another `name`. */
-    planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<VideoProjectPlan>;
+    /**
+     * Plan the project for the videos among `files` (e.g. dropped), optionally
+     * in another `parent` or under another `name`. `refused` lists what is not
+     * a video file; `plan` is null when nothing is.
+     */
+    planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
     /** Pick the folder a new project goes in; null when cancelled. */
     chooseParent(): Promise<string | null>;
     /**
@@ -180,6 +184,8 @@ export interface FrameshellApi {
     write(path: string, content: string): Promise<void>;
     /** Called with changed project-relative paths. Returns an unsubscribe function. */
     onChanged(listener: (paths: string[]) => void): () => void;
+    /** Absolute path of a file dropped from the OS; empty for a file that is not on disk. */
+    pathOf(file: File): string;
   };
   terminals: {
     create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
@@ -278,6 +284,12 @@ export interface FrameshellApi {
     read(path: string): Promise<Uint8Array>;
     /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
     onChanged(listener: (change: AssetChange) => void): () => void;
+    /**
+     * Import the media files among `paths` (videos, audio, images) into the
+     * project's `assets/` (`asset.import`, copied). Resolves with the asset
+     * paths made and the paths refused as not media. Rejects with the daemon's message.
+     */
+    import(paths: string[]): Promise<{ imported: string[]; refused: string[] }>;
   };
   context: {
     /**
@@ -332,6 +344,7 @@ export const Channel = {
   projectPlanVideos: "project:plan-videos",
   projectChooseParent: "project:choose-parent",
   projectFromVideos: "project:from-videos",
+  mediaImport: "media:import",
   filesTree: "files:tree",
   filesRead: "files:read",
   filesWrite: "files:write",
