@@ -101,6 +101,11 @@ const ui = new UiBridge({
   },
 });
 daemon.on("ui.command", (params) => ui.command(params));
+// ADR 0014: the window focused last is the project MCP calls without `cwd` act on; a panel window counts as its project's.
+app.on("browser-window-focus", (_event, focused) => {
+  const state = projectWindowOf(focused);
+  if (state) ui.focus(String(state.window.webContents.id));
+});
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 /** Detached panels and their windows' placement (ADR 0012): a user decision, global, so in `configDir`. */

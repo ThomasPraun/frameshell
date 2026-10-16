@@ -97,6 +97,21 @@ describe("UiBridge", () => {
     await expect.poll(() => mcp.request("ui.state", { cwd: dir })).toEqual({ connected: false });
   });
 
+  it("makes the window focused last the daemon's active one, which a window playing behind it does not take over", async () => {
+    const { dir, mcp, bridge } = await setup();
+    const other = join(dir, "..", "teaser");
+    await mcp.request("project.init", { dir: other });
+    bridge.publish("1", dir, idle);
+    bridge.publish("2", other, idle);
+    bridge.focus("1");
+    await expect.poll(() => mcp.request("ui.active", {})).toEqual({ dir });
+    bridge.publish("2", other, { ...idle, playing: true, playhead: 3 });
+    await expect.poll(() => mcp.request("ui.state", { cwd: other })).toMatchObject({ playhead: 3 });
+    await expect(mcp.request("ui.active", {})).resolves.toEqual({ dir });
+    bridge.focus("2");
+    await expect.poll(() => mcp.request("ui.active", {})).toEqual({ dir: other });
+  });
+
   it("registers the windows again after the daemon restarts", async () => {
     const { dir, bridge, link, restart } = await setup();
     // Reconnects happen while an event subscription exists, as for every window showing a project.

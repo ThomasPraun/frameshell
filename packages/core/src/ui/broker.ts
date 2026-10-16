@@ -36,8 +36,10 @@ interface Window {
   project: UiProject;
   state: UiView;
   updatedAt: Date;
-  /** Order of the last publish: the newest window of a project gets its commands. */
+  /** Order of the last publish. */
   seq: number;
+  /** Order of the last focused publish; 0 when it only ever reported in the background. Ranks before `seq`. */
+  focusSeq: number;
 }
 
 interface Pending {
@@ -50,10 +52,11 @@ interface Pending {
 
 /**
  * Daemon side of SPEC §7b UI state and navigation. App windows publish what
- * they show per project; `ui.state` answers from the newest one; navigation
- * commands go to it as `ui.command` notifications and resolve with the state
- * it replies. The only broker between MCP and the app: neither talks to the
- * other directly.
+ * they show per project; `ui.state` answers from the active one (focused last,
+ * else reported last); navigation commands go to it as `ui.command`
+ * notifications and resolve with the state it replies. {@link UiBroker.active}
+ * is the active window across projects (ADR 0014). The only broker between MCP
+ * and the app: neither talks to the other directly.
  */
 export class UiBroker {
   readonly #timeoutMs: number;
@@ -72,20 +75,30 @@ export class UiBroker {
     return this.#windows.get(sink)?.get(view)?.project;
   }
 
-  /** Record what window `view` of `sink` shows for `project`; it becomes the project's newest window. */
-  publish(sink: UiSink, view: string, project: UiProject, state: UiView): void {
+  /**
+   * Record what window `view` of `sink` shows for `project`. `focused` (the
+   * user's last focused window) makes it the active window; a background
+   * report (`focused: false`) only updates its state.
+   */
+  publish(sink: UiSink, view: string, project: UiProject, state: UiView, focused = true): void {
     let views = this.#windows.get(sink);
     if (!views) this.#windows.set(sink, (views = new Map()));
-    const update = { project, state, updatedAt: new Date(), seq: ++this.#seq };
-    // Updated in place: a pending command keeps pointing at its window.
     const window = views.get(view);
+    const seq = ++this.#seq;
+    const update = { project, state, updatedAt: new Date(), seq, focusSeq: focused ? seq : (window?.focusSeq ?? 0) };
+    // Updated in place: a pending command keeps pointing at its window.
     if (window) Object.assign(window, update);
     else views.set(view, { sink, view, ...update });
   }
 
+  /** Project of the active window across all projects; undefined when no window shows one. */
+  active(): UiProject | undefined {
+    return this.#newest(() => true)?.project;
+  }
+
   /** `ui.state` of the project keyed `key`. */
   state(key: string): MethodResult<"ui.state"> {
-    const window = this.#newest(key);
+    const window = this.#newest((project) => project.key === key);
     return window ? { connected: true, ...snapshot(window) } : { connected: false };
   }
 
@@ -95,7 +108,7 @@ export class UiBroker {
    * `UiCommandFailed` (refused, or no reply within the timeout).
    */
   command(key: string, command: UiCommand): Promise<UiState> {
-    const window = this.#newest(key);
+    const window = this.#newest((project) => project.key === key);
     if (!window) return Promise.reject(notConnected(key));
     const id = `u_${++this.#ids}`;
     return new Promise<UiState>((resolve, reject) => {
@@ -138,11 +151,15 @@ export class UiBroker {
     for (const window of views.values()) this.#abandon(window);
   }
 
-  #newest(key: string): Window | undefined {
+  /** Active window among those `matches` accepts: focused last, ties (never focused) broken by last report. */
+  #newest(matches: (project: UiProject) => boolean): Window | undefined {
     let newest: Window | undefined;
     for (const views of this.#windows.values()) {
       for (const window of views.values()) {
-        if (window.project.key === key && (!newest || window.seq > newest.seq)) newest = window;
+        if (!matches(window.project)) continue;
+        if (!newest || window.focusSeq > newest.focusSeq || (window.focusSeq === newest.focusSeq && window.seq > newest.seq)) {
+          newest = window;
+        }
       }
     }
     return newest;
