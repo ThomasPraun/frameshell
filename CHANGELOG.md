@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Desktop: **New from video…** on the welcome screen (#182, ADR 0013). Choose one or more videos and the project is made in a folder beside the first one, named after it (`interview.mp4` becomes `interview/`), with the videos imported into `assets/`; no terminal needed. The name and the place can be changed before creating. The originals stay where they are: the project gets a clone where the disk supports it (no extra space), and when it does not and the videos pass 2 GB, the app asks whether to keep a copy or use them in place. Choosing a video that already has its project there opens that project; a folder of that name holding something else gets `interview (2)`.
 - Desktop: drop videos from Finder or Explorer on the welcome screen to start a project from them, and drop videos, audio or images on a project window to import them into `assets/` (#183). The status bar names what was imported and what was not media. Drops on a terminal are left to the terminal.
+- Desktop: Frameshell is offered in **Open with** for videos (`mp4`, `mov`, `m4v`, `mkv`, `webm`) in Finder, Explorer and Linux file managers, without becoming their default player (#184). Opening a video shows its new project for confirmation; a video that already has its project, or a project folder, opens it. A second launch hands its files to the running app instead of starting another one.
 
 ## [0.6.0] - 2026-10-12
 

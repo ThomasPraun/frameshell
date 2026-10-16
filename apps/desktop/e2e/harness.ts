@@ -44,11 +44,12 @@ const OPEN_TIMEOUT_MS = 60_000;
  * Start the app on the sandbox project, in a laptop-sized window. Resolves once the startup open settled (the boot
  * screen gave way to the project, or to the welcome screen), so a spec's first assertion measures what it tests, not
  * a cold daemon. `settled: false` returns while the boot screen may still show. `env` adds to or overrides the app's
- * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`).
+ * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`). `paths` are passed as files to open, like Open with does,
+ * instead of `--project`.
  */
 export async function launch(
   box: Sandbox,
-  { settled = true, env = {} }: { settled?: boolean; env?: Record<string, string> } = {},
+  { settled = true, env = {}, paths }: { settled?: boolean; env?: Record<string, string>; paths?: string[] } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
@@ -56,8 +57,7 @@ export async function launch(
     args: [
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       ...(packagedApp ? [] : [mainEntry]),
-      "--project",
-      box.projectDir,
+      ...(paths ?? ["--project", box.projectDir]),
     ],
     env: {
       ...process.env,

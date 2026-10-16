@@ -3,7 +3,7 @@
 // FRAMESHELL_PREVIEW_PROBE=1 exposes preview measurement hooks (ADR 0001 harness) and keeps hidden windows at full rate.
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,10 +50,15 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
 import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "./media-files.js";
+import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
+// One packaged app per user data dir: a second launch (Open with, a click in Explorer) hands its files to this one
+// (#184). Unpackaged builds skip it, so a dev build runs beside the installed app.
+const primary = !app.isPackaged || app.requestSingleInstanceLock();
+if (!primary) app.quit();
 
 const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
@@ -142,6 +147,10 @@ interface WindowState {
    * and never send IPC; the menu routes their commands to this window.
    */
   panels: Map<BrowserWindow, DetachablePanel>;
+  /** Folder the window was created to open; unset for a window made to show the welcome screen. */
+  startDir: string | undefined;
+  /** Videos the OS asked to open (#184), waiting for the welcome screen to take them; null when none. */
+  offered: VideoProjectPlan | null;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -184,6 +193,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     live: new Map(),
     opening: Promise.resolve(),
     panels: new Map(),
+    startDir: projectDir,
+    offered: null,
     closingPanels: false,
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
@@ -440,6 +451,78 @@ async function createFromVideos(
   }
 }
 
+/** Focus the window showing project `dir`; else open it in the welcome window; else in a new window. */
+function showProject(dir: string): void {
+  const existing = [...windows.values()].find((state) => state.project?.dir === dir || state.startDir === dir);
+  if (existing) {
+    existing.window.focus();
+    return;
+  }
+  const welcome = welcomeWindow();
+  if (!welcome) {
+    createWindow(dir);
+    return;
+  }
+  // Reloaded: the new page's `project.current` waits for this open, as at a `--project` start.
+  welcome.startDir = dir;
+  welcome.opening = openInWindow(welcome, dir).catch(() => undefined);
+  welcome.window.webContents.reload();
+  welcome.window.focus();
+}
+
+/** A window on the welcome screen with nothing pending: where what the OS opens goes first. */
+function welcomeWindow(): WindowState | undefined {
+  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered);
+}
+
+/**
+ * Open what the OS handed the app (#184): folders as projects; videos as a
+ * project made from them, offered on a welcome screen for confirmation, or
+ * opened at once when their project exists already (ADR 0013). Other files are ignored.
+ */
+async function openPaths(paths: string[]): Promise<void> {
+  const files: string[] = [];
+  for (const path of paths) {
+    const info = await stat(path).catch(() => null);
+    if (info?.isDirectory()) showProject(path);
+    else if (info?.isFile()) files.push(path);
+  }
+  const { accepted } = await partitionFiles(files, VIDEO_EXTENSIONS);
+  if (accepted.length === 0) return;
+  const plan = await planVideoProject(accepted).catch(() => null);
+  if (!plan) return;
+  if (plan.existing) {
+    showProject(plan.dir);
+    return;
+  }
+  const target = welcomeWindow() ?? windows.get(createWindow().webContents.id);
+  if (!target) return;
+  target.offered = plan;
+  send(target.window.webContents, Channel.projectVideosOffered);
+  target.window.focus();
+}
+
+const openLater = pathBatcher((paths) => void openPaths(paths));
+/** `open-file` paths from before the app was ready: they replace the empty startup window. */
+const earlyOpens: string[] = [];
+let ready = false;
+// macOS: Open with, a drop on the Dock icon, `open -a Frameshell clip.mp4`. May fire before `ready`.
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  if (ready) openLater(path);
+  else earlyOpens.push(path);
+});
+app.on("second-instance", (_event, argv, workingDirectory) => {
+  const paths = launchPaths(argv, 1, workingDirectory);
+  if (paths.length > 0) {
+    void openPaths(paths);
+    return;
+  }
+  const [any] = windows.values();
+  if (any) any.window.focus();
+  else createWindow();
+});
+
 function stateOf(sender: WebContents): WindowState {
   const state = windows.get(sender.id) ?? panelOwners.get(sender.id);
   if (!state) throw new Error("IPC from an unknown window");
@@ -484,6 +567,12 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
+  ipcMain.handle(Channel.projectTakeOffered, (event) => {
+    const state = stateOf(event.sender);
+    const plan = state.offered;
+    state.offered = null;
+    return plan;
+  });
   ipcMain.handle(Channel.projectChooseVideos, (event) =>
     outcome(async () => {
       const files = await pickVideos(stateOf(event.sender).window);
@@ -737,6 +826,7 @@ function projectArg(argv: string[]): string | undefined {
 }
 
 app.whenReady().then(async () => {
+  if (!primary) return;
   const cliEntry = fileURLToPath(import.meta.resolve("@frameshell/cli/frameshell"));
   await writeCliShim(binDir, { runtime: process.execPath, cliEntry });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
@@ -744,7 +834,11 @@ app.whenReady().then(async () => {
   await panelWindows.load();
   registerIpc();
   buildMenu();
-  createWindow(projectArg(process.argv));
+  const startDir = projectArg(process.argv);
+  const opened = [...launchPaths(process.argv, app.isPackaged ? 1 : 2, process.cwd()), ...earlyOpens];
+  ready = true;
+  if (startDir || opened.length === 0) createWindow(startDir);
+  if (opened.length > 0) await openPaths(opened);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
