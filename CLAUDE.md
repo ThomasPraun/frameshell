@@ -24,6 +24,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Generated clips (render cache, keys, background renders, export layers) | `packages/core/src/clips/renderer.ts`, `clips/cache-key.ts`; adapters `plugins/hyperframes` (ADR 0002), `plugins/remotion` (bundle as cache input, outside-project code, `refreshRenders`; ADR 0009); SPEC §6.5 |
 | Plugin host, install, trust | `packages/core/src/plugins/host.ts`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
+| New project from video (folder beside video, name clash, clone test) | `apps/desktop/src/main/video-project.ts`, `renderer/src/components/Welcome.tsx`; ADR 0013 |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |

@@ -208,6 +208,96 @@ code {
   user-select: text;
 }
 
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.welcome-new {
+  display: grid;
+  gap: 14px;
+}
+
+.welcome-new-source {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.welcome-field {
+  display: grid;
+  gap: 5px;
+}
+
+.welcome-field > span,
+.welcome-mode legend {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.welcome-field input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 9px;
+}
+
+.welcome-field input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.welcome-place {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.welcome-place code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--text-muted);
+  user-select: text;
+}
+
+.welcome-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.welcome-mode {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.welcome-mode legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.welcome-mode label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-mode input {
+  accent-color: var(--accent);
+}
+
 .welcome-recent {
   margin-top: 36px;
 }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: **New from video…** on the welcome screen (#182, ADR 0013). Choose one or more videos and the project is made in a folder beside the first one, named after it (`interview.mp4` becomes `interview/`), with the videos imported into `assets/`; no terminal needed. The name and the place can be changed before creating. The originals stay where they are: the project gets a clone where the disk supports it (no extra space), and when it does not and the videos pass 2 GB, the app asks whether to keep a copy or use them in place. Choosing a video that already has its project there opens that project; a folder of that name holding something else gets `interview (2)`.
+
 ## [0.6.0] - 2026-10-12
 
 Detachable panels (ADR 0012): any panel moves to its own window and back, for a second monitor, sharing the playhead, the selection and the keys with the project window. Terminals keep running through the move, "Ask agent" finds the terminal running the agent in any window, the preview goes full screen with `F`, and Cmd/Ctrl+Shift+Enter maximizes a panel in place. No protocol change: the CLI and the daemon of 0.5.0 work with this app. The official plugins are unchanged.
