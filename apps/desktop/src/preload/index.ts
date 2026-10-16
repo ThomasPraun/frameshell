@@ -22,6 +22,10 @@ const api: FrameshellApi = {
     open: (dir) => ipcRenderer.invoke(Channel.projectOpen, dir),
     init: (dir) => ipcRenderer.invoke(Channel.projectInit, dir),
     recent: () => ipcRenderer.invoke(Channel.projectRecent),
+    chooseVideos: () => invokeOutcome(Channel.projectChooseVideos),
+    planVideos: (files, place) => invokeOutcome(Channel.projectPlanVideos, files, place),
+    chooseParent: () => ipcRenderer.invoke(Channel.projectChooseParent),
+    fromVideos: (plan, mode) => ipcRenderer.invoke(Channel.projectFromVideos, plan, mode),
   },
   files: {
     tree: () => ipcRenderer.invoke(Channel.filesTree),

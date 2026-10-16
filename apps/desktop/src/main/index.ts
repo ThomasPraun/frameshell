@@ -23,6 +23,7 @@ import {
   type ProjectView,
   type TimelineChange,
   type TimelineEdit,
+  type VideoProjectPlan,
 } from "../shared/api.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import {
@@ -48,6 +49,7 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
+import { VIDEO_EXTENSIONS, planVideoProject } from "./video-project.js";
 
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
@@ -406,6 +408,37 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   return result.canceled ? undefined : result.filePaths[0];
 }
 
+async function pickVideos(window: BrowserWindow): Promise<string[]> {
+  const result = await dialog.showOpenDialog(window, {
+    title: "Choose videos",
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      { name: "Videos", extensions: [...VIDEO_EXTENSIONS] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  });
+  return result.canceled ? [] : result.filePaths;
+}
+
+/** Create the project a video plan names, or open it when it already exists (ADR 0013). */
+async function createFromVideos(
+  state: WindowState,
+  request: Pick<VideoProjectPlan, "files" | "parent" | "name">,
+  mode: "copy" | "link",
+): Promise<OpenOutcome> {
+  try {
+    // Planned again: the folder may have appeared since the renderer showed the plan.
+    const plan = await planVideoProject(request.files, { parent: request.parent, name: request.name });
+    if (!plan.existing) {
+      await daemon.request("project.init", { dir: plan.dir, name: plan.name });
+      await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
+    }
+    return await openFromWindow(state, plan.dir);
+  } catch (error) {
+    return { status: "error", message: (error as Error).message };
+  }
+}
+
 function stateOf(sender: WebContents): WindowState {
   const state = windows.get(sender.id) ?? panelOwners.get(sender.id);
   if (!state) throw new Error("IPC from an unknown window");
@@ -449,6 +482,28 @@ function registerIpc(): void {
     }
     return openFromWindow(stateOf(event.sender), dir);
   });
+
+  ipcMain.handle(Channel.projectChooseVideos, (event) =>
+    outcome(async () => {
+      const files = await pickVideos(stateOf(event.sender).window);
+      return files.length > 0 ? planVideoProject(files) : null;
+    }),
+  );
+  ipcMain.handle(Channel.projectPlanVideos, (_event, files: string[], place?: { parent?: string; name?: string }) =>
+    outcome(() => planVideoProject(files, place)),
+  );
+  ipcMain.handle(Channel.projectChooseParent, async (event) => {
+    const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
+      title: "Choose where the project goes",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(
+    Channel.projectFromVideos,
+    (event, plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link") =>
+      createFromVideos(stateOf(event.sender), plan, mode === "link" ? "link" : "copy"),
+  );
 
   ipcMain.handle(Channel.filesTree, async (event) => (await requireProject(stateOf(event.sender))).files.tree());
   ipcMain.handle(Channel.filesRead, async (event, path: string) =>

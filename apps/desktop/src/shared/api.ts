@@ -39,6 +39,30 @@ export type OpenOutcome =
   | { status: "not-a-project"; dir: string }
   | { status: "error"; message: string };
 
+/**
+ * Project to create from video files (ADR 0013), as main planned it. The
+ * renderer shows it for confirmation and passes `files`, `parent` and `name`
+ * back; main plans again before creating.
+ */
+export interface VideoProjectPlan {
+  /** Absolute paths of the videos, in the order chosen. */
+  files: string[];
+  /** Folder the project folder goes in: the first video's by default. */
+  parent: string;
+  /** Project name, also the folder name unless taken. */
+  name: string;
+  /** Absolute project folder: `parent`/`name`, or `name (2)`… when taken. */
+  dir: string;
+  /** `dir` is a project already made from the first video: create opens it. */
+  existing: boolean;
+  /** Bytes of all files. */
+  totalBytes: number;
+  /** The volume clones files, so the import copies them using no extra space. */
+  clones: boolean;
+  /** No clone and over 2 GB: the user picks copy or use in place before creating. */
+  askMode: boolean;
+}
+
 /** A live terminal. `session` is its `FRAMESHELL_SESSION`. */
 export interface TerminalInfo {
   id: string;
@@ -136,6 +160,18 @@ export interface FrameshellApi {
     init(dir: string): Promise<OpenOutcome>;
     /** Recently opened project folders, newest first. */
     recent(): Promise<string[]>;
+    /** Choose videos with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
+    chooseVideos(): Promise<VideoProjectPlan | null>;
+    /** Plan the project for `files` (e.g. dropped), optionally in another `parent` or under another `name`. */
+    planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<VideoProjectPlan>;
+    /** Pick the folder a new project goes in; null when cancelled. */
+    chooseParent(): Promise<string | null>;
+    /**
+     * Create the planned project and open it in this window: `project.init`,
+     * then `asset.import` of the files (`copy` clones where possible; `link`
+     * uses them in place). Opens the project instead when the plan says it exists.
+     */
+    fromVideos(plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link"): Promise<OpenOutcome>;
   };
   files: {
     tree(): Promise<FileNode[]>;
@@ -292,6 +328,10 @@ export const Channel = {
   projectOpen: "project:open",
   projectInit: "project:init",
   projectRecent: "project:recent",
+  projectChooseVideos: "project:choose-videos",
+  projectPlanVideos: "project:plan-videos",
+  projectChooseParent: "project:choose-parent",
+  projectFromVideos: "project:from-videos",
   filesTree: "files:tree",
   filesRead: "files:read",
   filesWrite: "files:write",
