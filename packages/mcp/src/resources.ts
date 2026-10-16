@@ -1,7 +1,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { type DaemonConnection, type MethodName, isMethodName } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode as RpcErrorCode, type MethodName, RpcError, isMethodName } from "@frameshell/protocol";
 import { ErrorCode, McpError, type Resource, type ResourceTemplate } from "@modelcontextprotocol/sdk/types.js";
+import type { ResolvedProject } from "./project.js";
 
 /** URI scheme of every resource this server serves. */
 const SCHEME = "frameshell://";
@@ -34,9 +35,11 @@ const JSON_MIME = "application/json";
  * history, transcripts and script outlines, as the compact JSON of the
  * matching `--json` CLI output. Everything but transcripts is a daemon call;
  * transcripts are plain project files the daemon wrote, read as they are.
+ * The project is the server's default, resolved on every read like a tool
+ * call without `cwd` (ADR 0014).
  */
 export class ProjectResources {
-  readonly #cwd: string;
+  readonly #project: () => Promise<ResolvedProject>;
   readonly #daemon: () => Promise<DaemonConnection>;
   readonly #hasMethod: (method: string) => boolean;
 
@@ -45,16 +48,24 @@ export class ProjectResources {
    * to the linked protocol registry. Tests stub it to cover a registry without
    * `script.outline`.
    */
-  constructor(cwd: string, daemon: () => Promise<DaemonConnection>, hasMethod: (method: string) => boolean = isMethodName) {
-    this.#cwd = cwd;
+  constructor(
+    project: () => Promise<ResolvedProject>,
+    daemon: () => Promise<DaemonConnection>,
+    hasMethod: (method: string) => boolean = isMethodName,
+  ) {
+    this.#project = project;
     this.#daemon = daemon;
     this.#hasMethod = hasMethod;
   }
 
-  /** Root of the project enclosing the server's directory; null when there is none. */
+  /** Root of the server's default project; null when there is none. */
   async root(): Promise<string | null> {
-    const status = await (await this.#daemon()).request("status", { cwd: this.#cwd });
-    return status.project?.dir ?? null;
+    try {
+      return (await this.#project()).root;
+    } catch (error) {
+      if (error instanceof RpcError && error.code === RpcErrorCode.ProjectNotFound) return null;
+      throw error;
+    }
   }
 
   /** Concrete resources of the project: one per timeline file, transcript and script. */
@@ -97,7 +108,7 @@ export class ProjectResources {
 
   /** Compact JSON text of `uri`. Throws {@link McpError} for unknown URIs or a missing project. */
   async read(uri: string): Promise<string> {
-    if (uri === STATUS_URI) return JSON.stringify(await (await this.#daemon()).request("status", { cwd: this.#cwd }));
+    if (uri === STATUS_URI) return JSON.stringify(await (await this.#daemon()).request("status", { cwd: await this.#cwd() }));
     const path = uri.startsWith(SCHEME) ? uri.slice(SCHEME.length).split("/") : [];
     const [kind, rawName, rest, ...extra] = path;
     const name = rawName === undefined ? undefined : safeDecode(rawName);
@@ -111,9 +122,10 @@ export class ProjectResources {
   }
 
   async #call(method: MethodName, params: Record<string, unknown>): Promise<string> {
+    const cwd = await this.#cwd();
     const conn = await this.#daemon();
     // Params are validated by the daemon against the registry.
-    return JSON.stringify(await conn.request(method, { cwd: this.#cwd, ...params } as never));
+    return JSON.stringify(await conn.request(method, { cwd, ...params } as never));
   }
 
   async #transcript(file: string): Promise<string> {
@@ -134,9 +146,21 @@ export class ProjectResources {
   }
 
   async #requireRoot(): Promise<string> {
-    const root = await this.root();
-    if (!root) throw new McpError(ErrorCode.InvalidParams, `No Frameshell project encloses ${this.#cwd}. Create one with the \`project_init\` tool.`);
-    return root;
+    return (await this.#resolve()).root;
+  }
+
+  async #cwd(): Promise<string> {
+    return (await this.#resolve()).cwd;
+  }
+
+  /** The default project; its absence is a resource error the client shows, not a daemon error. */
+  async #resolve(): Promise<ResolvedProject> {
+    try {
+      return await this.#project();
+    } catch (error) {
+      if (error instanceof RpcError && error.code === RpcErrorCode.ProjectNotFound) throw new McpError(ErrorCode.InvalidParams, error.message);
+      throw error;
+    }
   }
 }
 

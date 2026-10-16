@@ -61,7 +61,8 @@ const CAPTURE_SUFFIX =
 /**
  * Every tool: one per public registry method, input schema generated from the
  * method's Zod params, plus the composed `frames_strip`. `cwd` becomes
- * optional and documents `defaultCwd`, the directory the server started in.
+ * optional and documents its default: the project of `defaultCwd`, the
+ * directory the server started in, else the app's active window (ADR 0014).
  */
 export function buildTools(defaultCwd: string): ToolSpec[] {
   const schemas = methodJsonSchemas();
@@ -98,7 +99,8 @@ function withDefaultCwd(params: Record<string, unknown>, defaultCwd: string): { 
   cwd.type = "string";
   cwd.description =
     "Absolute directory inside the project; the project is found searching upwards. " +
-    `Default: \`${defaultCwd}\`, where this MCP server was started. Omit it unless working on another project.`;
+    `Default: the project enclosing \`${defaultCwd}\`, where this MCP server was started, else the project open in ` +
+    "the Frameshell app window the user used last (the result then names it). Omit it unless working on another project.";
   return { schema, takesCwd: true };
 }
 

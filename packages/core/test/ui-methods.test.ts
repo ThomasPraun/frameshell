@@ -92,3 +92,28 @@ describe("ui.* methods", () => {
     await expect(app.request("ui.state", { cwd: dir })).resolves.toEqual({ connected: false });
   });
 });
+
+describe("ui.active", () => {
+  it("answers the project of the window focused last, null when no window shows one", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const mcp = await connect("mcp/test");
+    const app = await connect("desktop/test");
+    const one = join(tempDir(), "one");
+    const two = join(tempDir(), "two");
+    await mcp.request("project.init", { dir: one });
+    await mcp.request("project.init", { dir: two });
+    await expect(mcp.request("ui.active", {})).resolves.toEqual({ dir: null });
+
+    await app.request("ui.publish", { cwd: one, view: "w1", state: idle, focused: true });
+    await app.request("ui.publish", { cwd: join(two, "scripts"), view: "w2", state: idle, focused: false });
+    await expect(mcp.request("ui.active", {})).resolves.toEqual({ dir: one });
+    await app.request("ui.publish", { cwd: join(two, "scripts"), view: "w2", state: idle, focused: true });
+    await expect(mcp.request("ui.active", {})).resolves.toEqual({ dir: two });
+
+    await app.request("ui.detach", { view: "w2" });
+    await expect(mcp.request("ui.active", {})).resolves.toEqual({ dir: one });
+    app.close();
+    await app.closed;
+    await expect.poll(() => mcp.request("ui.active", {})).toEqual({ dir: null });
+  });
+});

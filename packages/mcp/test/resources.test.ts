@@ -21,6 +21,7 @@ function fakeDaemon(): DaemonConnection {
 }
 
 const withOutline = (method: string) => method === "script.outline" || isMethodName(method);
+const serverProject = async () => ({ cwd: root, root, source: "server" as const });
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "fs-mcp-res-"));
@@ -37,7 +38,7 @@ afterEach(async () => {
 
 describe("script outline resource", () => {
   it("lists one outline per scripts/**/*.md and a template when the registry has script.outline", async () => {
-    const resources = new ProjectResources(root, async () => fakeDaemon(), withOutline);
+    const resources = new ProjectResources(serverProject, async () => fakeDaemon(), withOutline);
     const uris = (await resources.list()).resources.map((r) => r.uri);
     expect(uris).toContain(outlineUri("launch.md"));
     expect(uris).toContain(outlineUri("act1/open.md"));
@@ -46,14 +47,14 @@ describe("script outline resource", () => {
   });
 
   it("reads an outline through script.outline with the file under scripts/", async () => {
-    const resources = new ProjectResources(root, async () => fakeDaemon(), withOutline);
+    const resources = new ProjectResources(serverProject, async () => fakeDaemon(), withOutline);
     const text = await resources.read(outlineUri("act1/open.md"));
     expect(JSON.parse(text)).toEqual({ scenes: [{ id: "s1", title: "Intro" }] });
     expect(calls.at(-1)).toEqual({ method: "script.outline", params: { cwd: root, file: "scripts/act1/open.md" } });
   });
 
   it("serves no outline while the registry lacks script.outline", async () => {
-    const resources = new ProjectResources(root, async () => fakeDaemon(), () => false);
+    const resources = new ProjectResources(serverProject, async () => fakeDaemon(), () => false);
     const uris = (await resources.list()).resources.map((r) => r.uri);
     expect(uris.some((uri) => uri.includes("/outline"))).toBe(false);
     expect(resources.templates().map((t) => t.uriTemplate)).not.toContain("frameshell://scripts/{file}/outline");

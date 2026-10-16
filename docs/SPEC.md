@@ -414,6 +414,7 @@ Design rules:
 - Tool outputs stay compact (ids, revision, changed ranges); large data goes through resources.
 - Every mutating tool reports the new `revision` and transaction id, so the model can revert its own work.
 - The UI publishes its state to the daemon; the daemon is the only broker. MCP never talks to Electron directly.
+- Default project of a call without `cwd`: the project enclosing the server's directory; when that is in no project (one global server, e.g. Claude Desktop), the project of the app window focused last, named in the result. No window: the call fails asking to open a project or pass `cwd` (ADR 0014).
 - CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
 
 ## 8. Plugin system

@@ -549,17 +549,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return ui.command(await canonicalPath(dir), { kind: "openFile", path: projectRelative(dir, file) });
     },
     "ui.showTxDiff": async ({ cwd, timeline, target }) => ui.command(await projectKey(cwd), { kind: "showTxDiff", timeline, target }),
-    "ui.publish": async ({ cwd, view, state }, _caller, request) => {
+    "ui.publish": async ({ cwd, view, state, focused }, _caller, request) => {
       // Sent on every change: resolve the project once per window and cwd, not per playhead move.
       const known = ui.registered(request.sink, view);
       if (known?.cwd === cwd) {
-        ui.publish(request.sink, view, known, state);
+        ui.publish(request.sink, view, known, state, focused);
         return { dir: known.dir };
       }
       const dir = await root(cwd);
-      ui.publish(request.sink, view, { key: await canonicalPath(dir), dir, cwd }, state);
+      ui.publish(request.sink, view, { key: await canonicalPath(dir), dir, cwd }, state, focused);
       return { dir };
     },
+    "ui.active": async () => ({ dir: ui.active()?.dir ?? null }),
     "ui.reply": async ({ view, id, error, state }, _caller, request) => {
       ui.reply(request.sink, view, id, error, state);
       return {};
