@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 33;
+export const PROTOCOL_VERSION = 35;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -530,6 +530,11 @@ export const methods = {
         .boolean()
         .default(true)
         .describe("Install the `frameshell` agent skill into `.claude/skills/frameshell/`, plus the agent files. Default true."),
+      like: AbsolutePath.optional().describe(
+        "Media file whose format the project takes instead of the defaults: its display size (even), frame rate snapped " +
+          "to the nearest standard one, and sample rate. Probed first, downloading ffprobe on first use. Example: " +
+          "`/home/ana/Movies/talk.mp4`. Fails with AssetNotFound when it is not a readable media file.",
+      ),
     }),
     result: z.object({
       project: ProjectSummarySchema,
@@ -1412,8 +1417,30 @@ export const methods = {
       "App window reports what it shows for the project enclosing `cwd`: registers the window (`view`) as that " +
       "project's UI, so `ui.state` answers from it and navigation commands reach it as `ui.command`. Send on every change.",
     internal: true,
-    params: z.strictObject({ cwd: CwdParam, view: UiViewIdSchema, state: UiViewSchema }),
+    params: z.strictObject({
+      cwd: CwdParam,
+      view: UiViewIdSchema,
+      state: UiViewSchema,
+      focused: z
+        .boolean()
+        .optional()
+        .describe(
+          "The window is the one the user focused last among the app's project windows (still true after the app loses " +
+            "focus). False: it reports in the background, e.g. while playing, and does not become `ui.active`. Default true.",
+        ),
+    }),
     result: z.object({ dir: z.string().describe("Project root the window is registered for.") }),
+  },
+  "ui.active": {
+    description:
+      "Project of the app window the user works in: the one focused last (else the one that reported last), the same " +
+      "window `ui.*` commands for that project reach. `dir` is null when no app window shows a project. The MCP server " +
+      "resolves a call without `cwd` to it when the server's own directory is in no project (ADR 0014).",
+    internal: true,
+    params: z.strictObject({}),
+    result: z.object({
+      dir: z.string().nullable().describe("Absolute project root the window shows; null when no window shows one."),
+    }),
   },
   "ui.reply": {
     description:

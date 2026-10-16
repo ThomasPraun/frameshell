@@ -4,10 +4,10 @@
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { arch, homedir, release, type } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type BaseWindow, BrowserWindow, Menu, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
+import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
@@ -18,6 +18,8 @@ import {
   type HistoryCommand,
   type LiveClipPage,
   type MenuCommand,
+  type AgentChoice,
+  type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -26,6 +28,7 @@ import {
   type ProjectSetup,
   type VideoProjectPlan,
 } from "../shared/api.js";
+import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import {
   type CliInstallHost,
@@ -36,10 +39,21 @@ import {
   uninstallCli,
 } from "./cli-install.js";
 import { writeCliShim } from "./cli-shim.js";
+import { type DiagnosticsInput, buildDiagnostics } from "./diagnostics.js";
 import { captureContextFrame } from "./context-frames.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
+import {
+  InvalidConfigError,
+  SERVER_KEY,
+  claudeDesktopConfigPath,
+  claudeDesktopState,
+  connectClaudeDesktop,
+  disconnectClaudeDesktop,
+} from "./claude-desktop.js";
 import { editMenu } from "./edit-menu.js";
+import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
 import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
@@ -88,12 +102,22 @@ const ui = new UiBridge({
   },
 });
 daemon.on("ui.command", (params) => ui.command(params));
+// ADR 0014: the window focused last is the project MCP calls without `cwd` act on; a panel window counts as its project's.
+app.on("browser-window-focus", (_event, focused) => {
+  const state = projectWindowOf(focused);
+  if (state) ui.focus(String(state.window.webContents.id));
+});
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 /** Detached panels and their windows' placement (ADR 0012): a user decision, global, so in `configDir`. */
 const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
 /** Projects whose synced-folder warning the user dismissed (#187): a user decision, so in `configDir`. */
 const syncWarningsFile = join(resolveAppDirs(process.env).configDir, "sync-warnings-dismissed.json");
+/** UI language picked in View > Language (#189): a user decision, global, so in `configDir`. */
+const languageFile = join(resolveAppDirs(process.env).configDir, "language.json");
+let languageChoice: LanguageChoice = readLanguageChoice(languageFile);
+/** UI strings in the app's language; set once the app is ready (`app.getLocale()`), English before. */
+let text: Dict = strings("en");
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
 // A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
@@ -433,7 +457,7 @@ async function rememberRecent(dir: string): Promise<void> {
 
 async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   const result = await dialog.showOpenDialog(window, {
-    title: "Open project folder",
+    title: text.app.dialogs.openFolder,
     properties: ["openDirectory", "createDirectory"],
   });
   return result.canceled ? undefined : result.filePaths[0];
@@ -441,11 +465,11 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
 
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
-    title: "Choose videos",
+    title: text.app.dialogs.chooseVideos,
     properties: ["openFile", "multiSelections"],
     filters: [
-      { name: "Videos", extensions: [...VIDEO_EXTENSIONS] },
-      { name: "All files", extensions: ["*"] },
+      { name: text.app.dialogs.videos, extensions: [...VIDEO_EXTENSIONS] },
+      { name: text.app.dialogs.allFiles, extensions: ["*"] },
     ],
   });
   return result.canceled ? [] : result.filePaths;
@@ -463,9 +487,14 @@ async function createFromVideos(
     const plan = await planVideoProject(request.files, { parent: request.parent, name: request.name });
     let assets: string[] = [];
     if (!plan.existing) {
-      await daemon.request("project.init", { dir: plan.dir, name: plan.name });
+      // The project takes the first video's size, frame rate and sample rate (#197); the defaults when ffprobe
+      // cannot read it, so an odd file never blocks the project.
+      await daemon
+        .request("project.init", { dir: plan.dir, name: plan.name, like: plan.files[0] })
+        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name }));
       const { imported } = await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
       assets = imported.map((item) => item.asset);
+      await placeOnTimeline(plan.dir, assets);
     }
     const opened = await openFromWindow(state, plan.dir);
     if (transcribe && assets.length > 0) void setUpTranscription(plan.dir, assets);
@@ -473,6 +502,26 @@ async function createFromVideos(
   } catch (error) {
     return { status: "error", message: (error as Error).message };
   }
+}
+
+/**
+ * Put `assets` one after another on a new video track of the main timeline,
+ * as one `ui` transaction, so a single undo takes them off (#197). A video
+ * that cannot be placed (unreadable) is skipped; the rest still go in.
+ */
+async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
+  await editor.alone(async () => {
+    await daemon.request("tx.begin", { label: "Place the videos", autoCommitAfter: 30 });
+    try {
+      const track = await daemon.request("track.add", { cwd: dir, timeline: "main", kind: "video", name: "Video" });
+      const id = track.changes.added[0];
+      if (id) {
+        for (const asset of assets) await daemon.request("clip.add", { cwd: dir, timeline: "main", track: id, asset }).catch(() => undefined);
+      }
+    } finally {
+      await daemon.request("tx.commit", {}).catch(() => undefined);
+    }
+  });
 }
 
 /** Official transcription plugin a project made from videos gets (#188). */
@@ -498,23 +547,24 @@ async function setUpTranscription(dir: string, assets: string[]): Promise<void> 
   const running = (message: string, fraction: number | null = null) =>
     reportSetup(dir, { message, detail: null, fraction, state: "running" });
   // Said in the user's terms; the daemon's message goes to the tooltip.
-  let failure = "Could not download the transcription plugin. Check the internet connection, then ask the agent to transcribe the videos.";
+  const said = text.app.setup;
+  let failure = said.downloadFailed;
   try {
-    running("Setting up transcription…");
+    running(said.starting);
     const { plugins } = await daemon.request("plugin.list", { cwd: dir });
     if (!plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN)) {
       await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
     }
     for (const asset of assets) {
-      failure = `Could not transcribe ${name(asset)}. Ask the agent to transcribe it.`;
-      running(`Transcribing ${name(asset)}…`);
+      failure = said.transcribeFailed(name(asset));
+      running(said.transcribing(name(asset)));
       await daemon.request(
         "transcribe",
         { cwd: dir, asset },
         { onProgress: (update) => running(`${name(asset)}: ${update.message}`, update.fraction ?? null) },
       );
     }
-    reportSetup(dir, { message: `Transcribed ${assets.map(name).join(", ")}.`, detail: null, fraction: null, state: "done" });
+    reportSetup(dir, { message: said.transcribed(assets.map(name).join(", ")), detail: null, fraction: null, state: "done" });
   } catch (error) {
     reportSetup(dir, { message: failure, detail: (error as Error).message, fraction: null, state: "failed" });
   }
@@ -616,6 +666,12 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
 }
 
 function registerIpc(): void {
+  ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
+  ipcMain.handle(Channel.agentsDetect, () => findAgents());
+  ipcMain.handle(Channel.agentsInstallCli, () => cliCommand(installCli));
+  ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
+  ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
+  ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
   ipcMain.handle(Channel.projectCurrent, async (event) => {
     const state = stateOf(event.sender);
     await state.opening;
@@ -663,7 +719,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.projectChooseParent, async (event) => {
     const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
-      title: "Choose where the project goes",
+      title: text.app.dialogs.chooseParent,
       properties: ["openDirectory", "createDirectory"],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
@@ -826,18 +882,38 @@ function buildMenu(): void {
     const state = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow());
     if (state) send(state.window.webContents, Channel.menuCommand, name);
   };
+  const said = text.app.menu;
+  const mac = process.platform === "darwin";
+  // Roles get explicit labels: Electron words them in English whatever the language.
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+    ...(mac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" as const, label: said.about },
+              { type: "separator" as const },
+              { role: "services" as const, label: said.services },
+              { type: "separator" as const },
+              { role: "hide" as const, label: said.hide },
+              { role: "hideOthers" as const, label: said.hideOthers },
+              { role: "unhide" as const, label: said.showAll },
+              { type: "separator" as const },
+              { role: "quit" as const, label: said.quit },
+            ],
+          },
+        ]
+      : []),
     {
-      label: "File",
+      label: said.file,
       submenu: [
-        { label: "Open Folder…", accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
-        { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
+        { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
-        { label: "Install 'frameshell' Command in PATH", click: () => void cliCommand(installCli) },
-        { label: "Uninstall 'frameshell' Command from PATH", click: () => void cliCommand(uninstallCli) },
+        { label: said.installCli, click: () => void cliCommand(installCli) },
+        { label: said.uninstallCli, click: () => void cliCommand(uninstallCli) },
         { type: "separator" },
-        process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+        mac ? { role: "close", label: said.close } : { role: "quit", label: said.exit },
       ],
     },
     editMenu(process.platform, (history: HistoryCommand, focused) => {
@@ -845,26 +921,195 @@ function buildMenu(): void {
       const all = [...windows.values()];
       const target = projectWindowOf(focused ?? BrowserWindow.getFocusedWindow()) ?? (all.length === 1 ? all[0] : undefined);
       if (target) send(target.window.webContents, Channel.timelineHistoryCommand, history);
-    }),
+    }, said),
     {
-      label: "View",
+      label: said.view,
       submenu: [
-        { id: "view-transcript", label: "Transcript", accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
         { type: "separator" },
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
+        {
+          label: said.language,
+          submenu: [
+            { id: "language-system", label: said.systemLanguage, type: "radio", checked: languageChoice === "system", click: () => void setLanguage("system") },
+            ...LANGUAGES.map(({ id, name }) => ({
+              id: `language-${id}`,
+              label: name,
+              type: "radio" as const,
+              checked: languageChoice === id,
+              click: () => void setLanguage(id),
+            })),
+          ],
+        },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { role: "reload", label: said.reload },
+        { role: "forceReload", label: said.forceReload },
+        { role: "toggleDevTools", label: said.devTools },
         { type: "separator" },
-        { role: "togglefullscreen" },
+        { role: "resetZoom", label: said.resetZoom },
+        { role: "zoomIn", label: said.zoomIn },
+        { role: "zoomOut", label: said.zoomOut },
+        { type: "separator" },
+        { role: "togglefullscreen", label: said.fullScreen },
       ],
     },
-    { role: "windowMenu" },
+    {
+      role: "windowMenu",
+      label: said.window,
+      submenu: [
+        { role: "minimize", label: said.minimize },
+        { role: "zoom", label: said.zoom },
+        ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+      ],
+    },
+    {
+      ...(mac ? { role: "help" as const } : {}),
+      label: said.help,
+      submenu: [
+        { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
+        { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * Agent CLIs of the agent guide (#190), searched on the app's PATH, the login shell's (what the app's terminals
+ * get) and the usual install folders. Started by path: the one found runs, whatever the terminal's PATH holds.
+ */
+async function findAgents(): Promise<AgentChoice[]> {
+  const platform = process.platform;
+  const delimiter = platform === "win32" ? ";" : ":";
+  const appPath = process.env["PATH"] ?? "";
+  const shellPath = platform === "win32" ? appPath : await loginShellPath(process.env["SHELL"] || "/bin/zsh", appPath);
+  const dirs = [...new Set([...appPath.split(delimiter), ...shellPath.split(delimiter), ...extraAgentDirs(platform, homedir(), process.env)])];
+  const found = await detectAgents(dirs, platform);
+  return found.map((agent) => (agent.path ? { ...agent, command: startCommand(agent.path, platform) } : agent));
+}
+
+/** Claude Desktop's config file, where it has one (#191). */
+const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(), process.env);
+
+async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
+  if (!claudeDesktopConfig) return { available: false, installed: false, connected: false };
+  const state = await claudeDesktopState(claudeDesktopConfig, cliShim).catch(() => ({ installed: true, connected: false }));
+  return { available: true, ...state };
+}
+
+/**
+ * Add (after showing the entry) or remove Frameshell's server in Claude Desktop's config, through the stable
+ * `frameshell` shim so app updates keep it working (#191). Message boxes say what changed and to restart Claude.
+ */
+async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promise<ClaudeDesktopStatus> {
+  const said = text.agents.dialog;
+  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
+  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  const file = claudeDesktopConfig;
+  if (!file) return claudeDesktopStatus();
+  try {
+    if (connect) {
+      if (!(await claudeDesktopStatus()).installed) {
+        await box({ type: "info", message: said.notInstalled });
+        return claudeDesktopStatus();
+      }
+      const entry = JSON.stringify({ [SERVER_KEY]: { command: cliShim, args: ["mcp"] } }, null, 2);
+      const { response } = await box({
+        type: "question",
+        message: said.connect,
+        detail: said.connectDetail(file, entry),
+        buttons: [said.connectButton, said.cancel],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response !== 0) return claudeDesktopStatus();
+      const backup = await connectClaudeDesktop(file, cliShim);
+      await box({ type: "info", message: said.connected, ...(backup ? { detail: said.backup(backup) } : {}) });
+    } else {
+      const backup = await disconnectClaudeDesktop(file);
+      await box({ type: "info", message: said.disconnected, ...(backup ? { detail: said.backup(backup) } : {}) });
+    }
+  } catch (error) {
+    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
+    await box({ type: "error", message: said.failed, detail });
+  }
+  return claudeDesktopStatus();
+}
+
+/**
+ * Switch the UI language (#189): save the choice, rebuild the menus, and reload the project windows so the
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ */
+async function setLanguage(choice: LanguageChoice): Promise<void> {
+  languageChoice = choice;
+  await writeLanguageChoice(languageFile, choice);
+  const next = strings(uiLanguage(choice, app.getLocale()));
+  const changed = next !== text;
+  text = next;
+  buildMenu();
+  if (changed) for (const state of windows.values()) state.window.webContents.reload();
+}
+
+const BUG_REPORT_URL = "https://github.com/ThomasPraun/frameshell/issues/new?template=bug.yml";
+
+/** Help > Copy Diagnostics (#194): puts the report on the clipboard, then offers to open the bug form. No telemetry. */
+async function copyDiagnostics(): Promise<void> {
+  const parent = BrowserWindow.getFocusedWindow() ?? undefined;
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  const dirs = resolveAppDirs(process.env);
+  const state = projectWindowOf(parent ?? null);
+  const [daemonStatus, doctor, project] = await Promise.all([
+    daemon.request("status", { cwd: dirs.dataDir }).then(
+      (status) => ({ daemonVersion: status.daemon.daemonVersion, protocolVersion: status.daemon.protocolVersion }),
+      (error: unknown) => ({ error: message(error) }),
+    ),
+    withTimeout(daemon.request("doctor", { cwd: state?.project?.dir ?? dirs.dataDir }), 20_000).catch((error: unknown) => ({ error: message(error) })),
+    state?.project
+      ? daemon.request("status", { cwd: state.project.dir }).then(
+          (status) =>
+            status.project
+              ? {
+                  dir: status.project.dir,
+                  schemaVersion: status.project.schemaVersion,
+                  jobs: status.jobs,
+                  rejections: status.rejections.length,
+                  transactions: status.transactions.length,
+                  openProjects: status.openProjects.length,
+                  synced: status.synced,
+                }
+              : null,
+          (error: unknown) => ({ error: message(error) }),
+        )
+      : Promise.resolve(null),
+  ]);
+  const input: DiagnosticsInput = {
+    appVersion: APP_VERSION,
+    versions: { electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", node: process.versions.node },
+    os: { platform: type(), release: release(), arch: arch() },
+    home: homedir(),
+    dataDir: dirs.dataDir,
+    daemon: daemonStatus,
+    doctor,
+    project,
+  };
+  clipboard.writeText(buildDiagnostics(input));
+  const said = text.app.diagnostics;
+  const options: Electron.MessageBoxOptions = {
+    type: "info",
+    message: said.copied,
+    detail: said.copiedDetail,
+    buttons: [said.reportButton, said.closeButton],
+    defaultId: 0,
+    cancelId: 1,
+  };
+  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  if (response === 0) await shell.openExternal(BUG_REPORT_URL);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms / 1000} s`)), ms);
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
 }
 
 /** Runs the File menu's install or uninstall of the system-wide CLI (#139) and reports the outcome in a message box. */
@@ -872,30 +1117,32 @@ async function cliCommand(action: (shim: string, host: CliInstallHost) => Promis
   const parent = BrowserWindow.getFocusedWindow() ?? undefined;
   const box = (options: Electron.MessageBoxOptions) =>
     parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+  const said = text.app.cli;
   const host = systemCliInstallHost({
     home: homedir(),
+    text: said,
     confirmReplace: async (link, target) =>
       (
         await box({
           type: "question",
-          message: `Replace the existing 'frameshell' command?`,
-          detail: `${link} points at ${target}, which another install put there.`,
-          buttons: ["Replace", "Cancel"],
+          message: said.replace,
+          detail: said.replaceDetail(link, target),
+          buttons: [said.replaceButton, said.cancel],
           defaultId: 0,
           cancelId: 1,
         })
       ).response === 0,
   });
-  const blocker = action === installCli ? cliInstallBlocker(process.platform, process.execPath, process.env) : undefined;
+  const blocker = action === installCli ? cliInstallBlocker(process.platform, process.execPath, process.env, said) : undefined;
   if (blocker) {
-    await box({ type: "warning", message: "Cannot install the 'frameshell' command from here.", detail: blocker });
+    await box({ type: "warning", message: said.cannotInstall, detail: blocker });
     return;
   }
   try {
     const outcome = await action(cliShim, host);
     await box({ type: "info", message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) });
   } catch (error) {
-    await box({ type: "error", message: "Could not change the 'frameshell' command.", detail: (error as Error).message });
+    await box({ type: "error", message: said.failed, detail: (error as Error).message });
   }
 }
 
@@ -912,6 +1159,7 @@ app.whenReady().then(async () => {
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
   await panelWindows.load();
+  text = strings(uiLanguage(languageChoice, app.getLocale()));
   registerIpc();
   buildMenu();
   const startDir = projectArg(process.argv);

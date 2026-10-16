@@ -35,6 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
+import { projectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
@@ -389,7 +390,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
     },
-    "project.init": (params) => projects.init(params.dir, params.name, params.agentSkill),
+    "project.init": async (params) => {
+      let format = {};
+      if (params.like) {
+        const probe = await probeMedia(await binaries.ensure("ffprobe"), params.like).catch((error: unknown) => {
+          throw new RpcError(ErrorCode.AssetNotFound, `${params.like} is not a media file ffprobe can read: ${(error as Error).message}`, {
+            path: params.like,
+          });
+        });
+        format = projectFormat(probe);
+      }
+      return projects.init(params.dir, params.name, params.agentSkill, format);
+    },
     doctor: async ({ cwd, install }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
@@ -537,17 +549,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return ui.command(await canonicalPath(dir), { kind: "openFile", path: projectRelative(dir, file) });
     },
     "ui.showTxDiff": async ({ cwd, timeline, target }) => ui.command(await projectKey(cwd), { kind: "showTxDiff", timeline, target }),
-    "ui.publish": async ({ cwd, view, state }, _caller, request) => {
+    "ui.publish": async ({ cwd, view, state, focused }, _caller, request) => {
       // Sent on every change: resolve the project once per window and cwd, not per playhead move.
       const known = ui.registered(request.sink, view);
       if (known?.cwd === cwd) {
-        ui.publish(request.sink, view, known, state);
+        ui.publish(request.sink, view, known, state, focused);
         return { dir: known.dir };
       }
       const dir = await root(cwd);
-      ui.publish(request.sink, view, { key: await canonicalPath(dir), dir, cwd }, state);
+      ui.publish(request.sink, view, { key: await canonicalPath(dir), dir, cwd }, state, focused);
       return { dir };
     },
+    "ui.active": async () => ({ dir: ui.active()?.dir ?? null }),
     "ui.reply": async ({ view, id, error, state }, _caller, request) => {
       ui.reply(request.sink, view, id, error, state);
       return {};

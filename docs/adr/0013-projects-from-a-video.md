@@ -22,7 +22,7 @@ Adds a way in to SPEC §3.2 and §10; the project layout of §5.1 does not chang
 4. **The original is never moved.** Import copies it, which is a clone where the volume allows one.
    - Before importing, main tests whether a clone is possible, by force-cloning the first video next to the project folder. The test file is deleted.
    - When no clone is possible and the videos total more than 2 GB, the user chooses between a copy (the size is shown) and using the files in place (`mode: "link"`, so the originals must stay).
-5. **Then** the app runs `project.init` (the agent skill included), then `asset.import`, then opens the project. Ingest starts as usual. Transcription and binary prefetch belong to #188.
+5. **Then** the app runs `project.init` (the agent skill included), then `asset.import`, places the videos, then opens the project. Ingest starts as usual. Transcription: #188.
 
 ## Considered options
 
@@ -34,4 +34,4 @@ Adds a way in to SPEC §3.2 and §10; the project layout of §5.1 does not chang
 
 - No protocol change: the flow composes `status`, `project.init` and `asset.import` from main.
 - Drag and drop (#183) and Open with / the context menu (#184, #185) reuse the same plan and create steps.
-- Follow-up #197: placing the videos on the main timeline and matching the project's resolution and frame rate to the first video. Both need ingest to finish first.
+- #197: the project takes the first video's display size, frame rate (snapped to a standard one) and sample rate (`project.init` `like`, probed before anything is written, so ingest builds proxies at the right rate from the start), and the videos go on a new video track of the main timeline as one undoable step. Operations probe their source themselves, so neither waits for ingest.

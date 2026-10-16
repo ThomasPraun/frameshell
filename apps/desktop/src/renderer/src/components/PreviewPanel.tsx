@@ -23,6 +23,7 @@ import { RenderSlates } from "./RenderSlates.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
+import { rich, t } from "../i18n.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
@@ -30,9 +31,9 @@ const CANVAS_SHORT_SIDE = 540;
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
 const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
-  timeline: "Nested timeline cannot be read",
-  ingest: "Building the preview proxy",
-  unavailable: "No preview for this clip",
+  timeline: t.preview.nestedTimeline,
+  ingest: t.preview.ingest,
+  unavailable: t.preview.noPreview,
 };
 
 /**
@@ -90,7 +91,7 @@ export function PreviewPanel({
         onTime: (at) => transport.report(at),
         onShown: (frame) => box.setAttribute("data-shown", String(frame)),
         onError: (message) => setNotice(message),
-        onSilent: () => setNotice("No audio output: playing without sound"),
+        onSilent: () => setNotice(t.preview.noAudio),
       },
       { probe: PROBE },
     );
@@ -157,12 +158,12 @@ export function PreviewPanel({
   const live = useMemo(() => (program ? liveTarget(program, frame) : null), [program, frame]);
   return (
     <div className="preview-body" ref={body} data-testid="preview-body">
-      <PanelHeader actions={<DetachButton name="preview" detached={detached} onClick={onDetach} testId="preview-detach" />}>
-        <span className="panel-title">Preview</span>
-        <span className="timecode" aria-label="Playhead" data-testid="playhead">
+      <PanelHeader actions={<DetachButton name={t.workspace.preview.toLowerCase()} detached={detached} onClick={onDetach} testId="preview-detach" />}>
+        <span className="panel-title">{t.workspace.preview}</span>
+        <span className="timecode" aria-label={t.preview.playhead} data-testid="playhead">
           {formatTimecode(time, fps)}
         </span>
-        <span className="panel-meta preview-duration" aria-label="Duration">
+        <span className="panel-meta preview-duration" aria-label={t.preview.duration}>
           {formatTimecode(frames / fps, fps)}
         </span>
       </PanelHeader>
@@ -174,12 +175,12 @@ export function PreviewPanel({
           data-testid="preview-frame"
           data-playing={playing || undefined}
           role="img"
-          aria-label={empty ? "Empty program monitor" : `Program monitor at ${formatTimecode(time, fps)}`}
+          aria-label={empty ? t.preview.emptyMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
           onContextMenu={openAskMenu}
         >
           <div className="safe-area action" />
           <div className="safe-area title" />
-          {empty && <p className="preview-caption">Nothing on the timeline yet</p>}
+          {empty && <p className="preview-caption">{t.preview.emptyCaption}</p>}
           {program && <Placeholder program={program} frame={frame} />}
           {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
           <LivePreview target={live} timeline={view?.timeline ?? null} time={time} fps={fps} resolution={resolution} onLive={setLiveClip} />
@@ -285,15 +286,15 @@ function Placeholder({ program, frame }: { program: Program; frame: number }) {
         <div className="preview-placeholder" data-testid="preview-placeholder" data-reason={base.reason}>
           <p>{PLACEHOLDER_TEXT[base.reason]}</p>
           <p className="preview-placeholder-detail">
-            <code>{base.type}</code> clip <code>{base.clip}</code>
+            {rich(t.preview.clipOf, { type: <code>{base.type}</code>, clip: <code>{base.clip}</code> })}
           </p>
         </div>
       )}
       {upper.length > 0 && (
-        <ul className="preview-layer-notes" aria-label="Layers not shown">
+        <ul className="preview-layer-notes" aria-label={t.preview.hiddenLayers}>
           {upper.map(({ span, layer }) => (
             <li key={span.clip} data-testid="preview-layer-placeholder" data-reason={span.reason}>
-              {`V${layer + 1}: ${PLACEHOLDER_TEXT[span.reason]} (${span.type} clip ${span.clip})`}
+              {t.preview.layerNote(layer + 1, PLACEHOLDER_TEXT[span.reason], span.type, span.clip)}
             </li>
           ))}
         </ul>
@@ -403,7 +404,7 @@ function Handles({
           onPointerMove={onHandleMove}
           onPointerUp={onHandleUp}
           onLostPointerCapture={() => (drag.current = null)}
-          title="Drag to move; drag a corner to scale"
+          title={t.preview.dragHandle}
         >
           {(["nw", "ne", "sw", "se"] as const).map((corner) => (
             <span
@@ -439,12 +440,12 @@ function TransportBar({
   onPickTool: () => void;
 }) {
   return (
-    <div className="preview-transport" role="toolbar" aria-label="Transport">
+    <div className="preview-transport" role="toolbar" aria-label={t.preview.transport}>
       <button
         className={`icon-button region-toggle${pickTool ? " on" : ""}`}
-        aria-label="Pick"
+        aria-label={t.preview.pick}
         aria-pressed={pickTool}
-        title="Pick what you mean to ask the agent about: click an element, drag a region (I)"
+        title={t.preview.pickHint}
         disabled={disabled}
         onClick={onPickTool}
       >
@@ -454,20 +455,20 @@ function TransportBar({
         </svg>
       </button>
       <div className="preview-transport-buttons">
-        <button className="icon-button" aria-label="Go to start" title="Go to start (Home)" disabled={disabled} onClick={() => transport.seek(0)}>
+        <button className="icon-button" aria-label={t.preview.goToStart} title={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M4 3v10M12 3.5L6 8l6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
           </svg>
         </button>
-        <button className="icon-button" aria-label="Previous frame" title="Previous frame (Left)" disabled={disabled} onClick={() => transport.step(-1)}>
+        <button className="icon-button" aria-label={t.preview.prevFrame} title={t.preview.prevFrameHint} disabled={disabled} onClick={() => transport.step(-1)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5L4.5 8l5.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
           </svg>
         </button>
         <button
           className={`icon-button preview-play${playing ? " playing" : ""}`}
-          aria-label={playing ? "Pause" : "Play"}
-          title={playing ? "Pause (Space)" : "Play (Space)"}
+          aria-label={playing ? t.preview.pause : t.preview.play}
+          title={playing ? t.preview.pauseHint : t.preview.playHint}
           disabled={disabled}
           onClick={() => transport.toggle()}
         >
@@ -475,12 +476,12 @@ function TransportBar({
             {playing ? <path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /> : <path d="M4.5 2.5v11L13 8z" fill="currentColor" />}
           </svg>
         </button>
-        <button className="icon-button" aria-label="Next frame" title="Next frame (Right)" disabled={disabled} onClick={() => transport.step(1)}>
+        <button className="icon-button" aria-label={t.preview.nextFrame} title={t.preview.nextFrameHint} disabled={disabled} onClick={() => transport.step(1)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M6 3.5L11.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
           </svg>
         </button>
-        <button className="icon-button" aria-label="Go to end" title="Go to end (End)" disabled={disabled} onClick={() => transport.seek(Infinity)}>
+        <button className="icon-button" aria-label={t.preview.goToEnd} title={t.preview.goToEndHint} disabled={disabled} onClick={() => transport.seek(Infinity)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M12 3v10M4 3.5L10 8l-6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
           </svg>

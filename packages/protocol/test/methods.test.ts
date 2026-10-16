@@ -45,7 +45,7 @@ describe("method registry JSON Schema", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)
       .map(([name]) => name);
-    expect(internal).toEqual(["handshake", "session.tag", "clip.live", "context.write", "events.subscribe", "events.unsubscribe", "ui.publish", "ui.reply", "ui.detach"]);
+    expect(internal).toEqual(["handshake", "session.tag", "clip.live", "context.write", "events.subscribe", "events.unsubscribe", "ui.publish", "ui.active", "ui.reply", "ui.detach"]);
   });
 });
 

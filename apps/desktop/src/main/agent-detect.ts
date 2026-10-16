@@ -15,6 +15,8 @@ const KNOWN_AGENTS: Readonly<Record<string, string>> = {
   qwen: "qwen",
   copilot: "copilot",
   crush: "crush",
+  // Short name: `FRAMESHELL_AGENT_COMMANDS=pi=` stops it matching an unrelated `pi` program.
+  pi: "pi",
 };
 
 /** Programs that run a script named by their first non-flag argument. */

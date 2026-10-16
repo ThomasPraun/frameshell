@@ -3,6 +3,7 @@ import type { TimelineEdit } from "../../../shared/api.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { t } from "../i18n.js";
 import { sendClipEdit } from "./clip-edits.js";
 
 /** Gain range the field accepts, dB. */
@@ -28,11 +29,11 @@ interface FieldSpec {
 const round = (value: number, decimals: number) => Number(value.toFixed(decimals));
 
 const FIELDS = {
-  x: { label: "X", title: "Horizontal offset from center, project pixels", unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
-  y: { label: "Y", title: "Vertical offset from center, project pixels", unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
+  x: { label: t.inspector.fieldX, title: t.inspector.fieldXTitle, unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
+  y: { label: t.inspector.fieldY, title: t.inspector.fieldYTitle, unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
   scale: {
-    label: "Scale",
-    title: "Size relative to fitting the frame",
+    label: t.inspector.fieldScale,
+    title: t.inspector.fieldScaleTitle,
     unit: "%",
     show: (v) => round(v * 100, 1),
     store: (v) => (v > 0 ? round(v / 100, 4) : null),
@@ -40,8 +41,8 @@ const FIELDS = {
     decimals: 1,
   },
   opacity: {
-    label: "Opacity",
-    title: "0 % is invisible, 100 % opaque",
+    label: t.inspector.fieldOpacity,
+    title: t.inspector.fieldOpacityTitle,
     unit: "%",
     show: (v) => round(v * 100, 1),
     store: (v) => (v >= 0 && v <= 100 ? round(v / 100, 4) : null),
@@ -49,8 +50,8 @@ const FIELDS = {
     decimals: 1,
   },
   gain: {
-    label: "Gain",
-    title: `Volume change in decibels, ${GAIN_MIN} to +${GAIN_MAX}`,
+    label: t.inspector.fieldGain,
+    title: t.inspector.fieldGainTitle(GAIN_MIN, GAIN_MAX),
     unit: "dB",
     show: (v) => round(v, 1),
     store: (v) => (v >= GAIN_MIN && v <= GAIN_MAX ? round(v, 1) : null),
@@ -78,8 +79,8 @@ export function ClipInspector() {
 
   if (!target) {
     return (
-      <div className="clip-inspector is-empty" role="group" aria-label="Clip settings">
-        <span>{clips.length > 1 ? `${clips.length} clips selected: select one to adjust it` : "Select a clip to adjust its placement and sound"}</span>
+      <div className="clip-inspector is-empty" role="group" aria-label={t.inspector.clipSettings}>
+        <span>{clips.length > 1 ? t.inspector.clipsSelected(clips.length) : t.inspector.selectClip}</span>
       </div>
     );
   }
@@ -96,40 +97,40 @@ export function ClipInspector() {
   const moved = transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1;
 
   return (
-    <div className="clip-inspector" role="group" aria-label={`Settings of clip ${clip.name}`} data-clip={clip.id}>
-      <span className="clip-inspector-name" title={`${clip.id} on ${row.label}`}>
+    <div className="clip-inspector" role="group" aria-label={t.inspector.settingsOfClip(clip.name)} data-clip={clip.id}>
+      <span className="clip-inspector-name" title={t.inspector.clipOnTrack(clip.id, row.label)}>
         <span className={`clip-inspector-track track-${row.kind}`}>{row.label}</span>
         {clip.name}
       </span>
       {placed && (
-        <div className="clip-inspector-group" role="group" aria-label="Placement">
+        <div className="clip-inspector-group" role="group" aria-label={t.inspector.placement}>
           {(["x", "y", "scale", "opacity"] as const).map((name) => (
             <NumberField key={name} name={name} stored={transform[name]} onCommit={(value) => setTransform(name, value)} />
           ))}
           <button
             className="clip-inspector-button"
             disabled={!moved}
-            title="Center, fit and make opaque again"
+            title={t.inspector.resetTitle}
             onClick={() => send({ op: "clip.set", args: { clip: clip.id, transform: { x: 0, y: 0, scale: 1, opacity: 1 } } })}
           >
-            Reset
+            {t.inspector.reset}
           </button>
         </div>
       )}
       {audible && (
-        <div className="clip-inspector-group" role="group" aria-label="Sound">
+        <div className="clip-inspector-group" role="group" aria-label={t.inspector.sound}>
           <NumberField name="gain" stored={clip.gain} disabled={clip.muted} onCommit={(value) => send({ op: "clip.set", args: { clip: clip.id, gain: value } })} />
           <button
             className={`clip-inspector-button clip-inspector-mute${clip.muted ? " on" : ""}`}
             aria-pressed={clip.muted}
-            title={clip.muted ? "Unmute this clip" : "Mute this clip"}
+            title={clip.muted ? t.inspector.unmuteTitle : t.inspector.muteTitle}
             onClick={() => send({ op: "clip.set", args: { clip: clip.id, muted: !clip.muted } })}
           >
-            Mute
+            {t.inspector.mute}
           </button>
         </div>
       )}
-      {!placed && !audible && <span className="clip-inspector-hint">Nothing to adjust on this clip</span>}
+      {!placed && !audible && <span className="clip-inspector-hint">{t.inspector.nothingToAdjust}</span>}
       {error && (
         <span className="clip-inspector-error" role="status" title={error}>
           {error}

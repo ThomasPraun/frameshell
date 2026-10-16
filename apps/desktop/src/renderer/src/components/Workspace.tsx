@@ -12,6 +12,7 @@ import {
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
+import { rich, t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { selection } from "../selection.js";
@@ -74,10 +75,10 @@ export function Workspace({ project }: { project: ProjectView }) {
       }),
     [],
   );
-  const previewWindow = usePanelWindow(detached.has("preview") ? "preview" : null, `Preview — ${project.name}`, () =>
+  const previewWindow = usePanelWindow(detached.has("preview") ? "preview" : null, t.workspace.windowTitle(t.workspace.preview, project.name), () =>
     setPanelDetached("preview", false),
   );
-  const editorWindow = usePanelWindow(detached.has("editor") ? "editor" : null, `Editor — ${project.name}`, () =>
+  const editorWindow = usePanelWindow(detached.has("editor") ? "editor" : null, t.workspace.windowTitle(t.workspace.editor, project.name), () =>
     setPanelDetached("editor", false),
   );
   const detachedViews = useMemo(
@@ -168,7 +169,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       void composeReference()
         .then(({ lines, warning }) => {
           if (lines.length === 0) {
-            setNotice("Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.");
+            setNotice(t.workspace.askNothing);
             return;
           }
           terminals.current?.type(lines, () => {
@@ -292,7 +293,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
       <div className="main-row">
         {sidebar.collapsed ? (
-          <CollapsedRail side="left" label="Show sidebar" onExpand={() => toggle("sidebar")} />
+          <CollapsedRail side="left" label={t.workspace.showSidebar} onExpand={() => toggle("sidebar")} />
         ) : (
           <>
             <div {...slot("sidebar")} style={{ flexBasis: sidebar.size }}>
@@ -306,7 +307,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 onDetach={setPanelDetached}
               />
             </div>
-            <Splitter orientation="vertical" label="Resize sidebar" {...edge("sidebar", 1)} />
+            <Splitter orientation="vertical" label={t.workspace.resizeSidebar} {...edge("sidebar", 1)} />
           </>
         )}
 
@@ -314,7 +315,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           <div className="center-row" ref={centerRow}>
             <div {...slot("preview")} style={{ flexBasis: `${layout.centerSplit * 100}%` }}>
               {detached.has("preview") ? (
-                <DockedElsewhere title="Preview" onBringBack={() => setPanelDetached("preview", false)} />
+                <DockedElsewhere title={t.workspace.preview} onBringBack={() => setPanelDetached("preview", false)} />
               ) : (
                 <PreviewPanel project={project} detached={false} onDetach={() => setPanelDetached("preview", true)} />
               )}
@@ -328,7 +329,7 @@ export function Workspace({ project }: { project: ProjectView }) {
               )}
             <Splitter
               orientation="vertical"
-              label="Resize preview and editor"
+              label={t.workspace.resizePreviewEditor}
               onDragStart={() => (dragBase.current = layout)}
               onDrag={(offset) => {
                 const base = dragBase.current;
@@ -353,11 +354,11 @@ export function Workspace({ project }: { project: ProjectView }) {
           </div>
           {detached.has("timeline") ? (
             <div className="panel timeline">
-              <DockedElsewhere compact title="Timeline" onBringBack={() => setPanelDetached("timeline", false)} />
+              <DockedElsewhere compact title={t.workspace.timeline} onBringBack={() => setPanelDetached("timeline", false)} />
             </div>
           ) : (
             <>
-              {!timeline.collapsed && <Splitter orientation="horizontal" label="Resize timeline" {...edge("timeline", -1)} />}
+              {!timeline.collapsed && <Splitter orientation="horizontal" label={t.workspace.resizeTimeline} {...edge("timeline", -1)} />}
               <div {...slot("timeline")} style={{ height: timeline.collapsed ? undefined : timeline.size }}>
                 <TimelinePanel
                   collapsed={timeline.collapsed}
@@ -369,7 +370,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             </>
           )}
           {detached.has("timeline") && (
-            <PanelWindow panel="timeline" title={`Timeline — ${project.name}`} onClosed={() => setPanelDetached("timeline", false)}>
+            <PanelWindow panel="timeline" title={t.workspace.windowTitle(t.workspace.timeline, project.name)} onClosed={() => setPanelDetached("timeline", false)}>
               <div className="panel timeline">
                 <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
               </div>
@@ -378,8 +379,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         </div>
 
         {/* Terminals stay mounted while collapsed: shells and agents keep running. */}
-        {!terminal.collapsed && <Splitter orientation="vertical" label="Resize terminal" {...edge("terminal", -1)} />}
-        {terminal.collapsed && <CollapsedRail side="right" label="Show terminal" onExpand={() => toggle("terminal")} />}
+        {!terminal.collapsed && <Splitter orientation="vertical" label={t.workspace.resizeTerminal} {...edge("terminal", -1)} />}
+        {terminal.collapsed && <CollapsedRail side="right" label={t.workspace.showTerminal} onExpand={() => toggle("terminal")} />}
         <div {...slot("terminal")} style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}>
           <TerminalPanel
             ref={terminals}
@@ -393,20 +394,20 @@ export function Workspace({ project }: { project: ProjectView }) {
 
       <StatusBar
         project={project}
-        activeFile={active === TRANSCRIPT_TAB ? "Transcript" : active}
+        activeFile={active === TRANSCRIPT_TAB ? t.workspace.transcript : active}
         session={activeSession}
         notice={notice}
         setup={setup}
       />
       {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
-        <PanelWindow key={id} panel={id} title={`${label} — ${project.name}`} onClosed={() => setPanelDetached(id, false)}>
+        <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
           <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} />
         </PanelWindow>
       ))}
       <ContextMenuHost />
       {dropping && (
         <div className="drop-target" aria-hidden="true">
-          <p>Drop to import into assets/</p>
+          <p>{t.workspace.dropToImport}</p>
         </div>
       )}
     </div>
@@ -446,15 +447,12 @@ function SyncWarning({ synced }: { synced: { service: string; root: string } }) 
   if (!shown) return null;
   return (
     <div className="sync-warning" role="status">
-      <p>
-        This project is in your {synced.service} folder. Its previews and renders (often several GB) sync too, and syncing
-        can damage the edit history. Move the project folder out of <code>{synced.root}</code> to avoid it.
-      </p>
+      <p>{rich(t.workspace.synced(synced.service), { root: <code>{synced.root}</code> })}</p>
       <button className="link" onClick={() => setShown(false)}>
-        Hide
+        {t.workspace.hide}
       </button>
       <button className="link" onClick={() => void window.frameshell.project.dismissSyncWarning().then(() => setShown(false))}>
-        Don&apos;t show again for this project
+        {t.workspace.dontShowAgain}
       </button>
     </div>
   );

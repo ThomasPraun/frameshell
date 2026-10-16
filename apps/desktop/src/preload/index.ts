@@ -16,6 +16,8 @@ async function invokeOutcome<T>(channel: string, ...args: unknown[]): Promise<T>
 }
 
 const api: FrameshellApi = {
+  // Synchronous: the renderer's modules read the language as they load.
+  lang: ipcRenderer.sendSync(Channel.lang) as FrameshellApi["lang"],
   project: {
     current: () => ipcRenderer.invoke(Channel.projectCurrent),
     openFolder: () => ipcRenderer.invoke(Channel.projectOpenFolder),
@@ -73,6 +75,13 @@ const api: FrameshellApi = {
     list: (timeline) => invokeOutcome(Channel.historyList, timeline),
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
+  },
+  agents: {
+    detect: () => ipcRenderer.invoke(Channel.agentsDetect),
+    installCli: () => ipcRenderer.invoke(Channel.agentsInstallCli),
+    claudeDesktop: () => ipcRenderer.invoke(Channel.agentsClaudeDesktop),
+    connectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsConnectClaudeDesktop),
+    disconnectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsDisconnectClaudeDesktop),
   },
   menu: {
     onCommand: (listener) => subscribe(Channel.menuCommand, listener),

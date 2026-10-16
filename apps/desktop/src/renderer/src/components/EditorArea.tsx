@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
 import { askAgent } from "../ask/ask-agent.js";
+import { t } from "../i18n.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -117,7 +118,7 @@ export function EditorArea({
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void save());
     const ask = instance.addAction({
       id: "frameshell.askAgent",
-      label: "Ask agent",
+      label: t.workspace.askAgent,
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
       contextMenuGroupId: "navigation",
       contextMenuOrder: 0,
@@ -191,7 +192,7 @@ export function EditorArea({
     const doc: OpenDoc = { model: null, savedVersion: 0, diskNotice: null, error: null, decorations: [] };
     docs.current.set(active, doc);
     if (!language) {
-      doc.error = "This file type has no editor. Media plays in the preview.";
+      doc.error = t.editor.noEditor;
       editor.current?.setModel(null);
       rerender();
       return;
@@ -272,7 +273,7 @@ export function EditorArea({
 
   /** `view`: the window asking, which shows the confirmation. */
   const close = (path: string, view: Window) => {
-    if (isDirty(docs.current.get(path)) && !view.confirm(`Discard unsaved changes to ${path}?`)) return;
+    if (isDirty(docs.current.get(path)) && !view.confirm(t.editor.discard(path))) return;
     onClose(path);
   };
 
@@ -291,7 +292,7 @@ export function EditorArea({
 
   const body = (
     <div className="editor-area">
-      <div className="tab-strip" role="tablist" aria-label="Open files">
+      <div className="tab-strip" role="tablist" aria-label={t.editor.openFiles}>
         {tabs.map((path) => {
           const dirty = isDirty(docs.current.get(path));
           return (
@@ -299,7 +300,7 @@ export function EditorArea({
               key={path}
               role="tab"
               aria-selected={path === active}
-              aria-label={path === TRANSCRIPT_TAB ? "Transcript" : path}
+              aria-label={path === TRANSCRIPT_TAB ? t.workspace.transcript : path}
               className={`file-tab${path === active ? " is-active" : ""}`}
               title={path}
               onMouseDown={(event) => {
@@ -307,10 +308,10 @@ export function EditorArea({
               }}
               onClick={() => onActivate(path)}
             >
-              <span className="file-tab-name">{path === TRANSCRIPT_TAB ? "Transcript" : path.slice(path.lastIndexOf("/") + 1)}</span>
+              <span className="file-tab-name">{path === TRANSCRIPT_TAB ? t.workspace.transcript : path.slice(path.lastIndexOf("/") + 1)}</span>
               <button
                 className={`file-tab-close${dirty ? " is-dirty" : ""}`}
-                aria-label={dirty ? `Close ${path} (unsaved)` : `Close ${path === TRANSCRIPT_TAB ? "Transcript" : path}`}
+                aria-label={dirty ? t.editor.closeTabUnsaved(path) : t.editor.closeTab(path === TRANSCRIPT_TAB ? t.workspace.transcript : path)}
                 onClick={(event) => {
                   event.stopPropagation();
                   close(path, windowOf(event.target));
@@ -322,32 +323,32 @@ export function EditorArea({
         {!tabs.includes(TRANSCRIPT_TAB) && (
           <button
             className="tab-strip-action"
-            title={`Show the transcript of the timeline's media (${TRANSCRIPT_SHORTCUT})`}
+            title={t.editor.showTranscript(TRANSCRIPT_SHORTCUT)}
             onClick={() => onOpenFile(TRANSCRIPT_TAB)}
           >
-            Transcript
+            {t.workspace.transcript}
           </button>
         )}
         <span className="tab-strip-actions">
-          <DetachButton name="editor" detached={detached} onClick={() => onDetach(!detached)} testId="editor-detach" />
+          <DetachButton name={t.workspace.editor.toLowerCase()} detached={detached} onClick={() => onDetach(!detached)} testId="editor-detach" />
         </span>
       </div>
 
       {activeDoc?.diskNotice && active && (
         <div className="editor-notice" role="status">
           {activeDoc.diskNotice === "changed"
-            ? "This file changed on disk while you were editing."
-            : "This file was deleted on disk. Saving recreates it."}
+            ? t.editor.diskChanged
+            : t.editor.diskDeleted}
           {activeDoc.diskNotice === "changed" && (
             <button className="link" onClick={() => reloadFromDisk(active)}>
-              Load disk version
+              {t.editor.loadDisk}
             </button>
           )}
         </div>
       )}
       {saveError && (
         <div className="editor-notice is-error" role="alert">
-          Not saved: {saveError}
+          {t.editor.notSaved(saveError)}
         </div>
       )}
 
@@ -355,8 +356,8 @@ export function EditorArea({
       {active === TRANSCRIPT_TAB && <TranscriptView onOpenFile={onOpenFile} focus={transcriptFocus} />}
       {!active && (
         <div className="empty editor-empty">
-          <p>Open a script or JSON file from the explorer, or the transcript ({TRANSCRIPT_SHORTCUT}).</p>
-          <p className="hint">Saved files go through frameshelld, so the agent sees your edits right away.</p>
+          <p>{t.editor.emptyOpen(TRANSCRIPT_SHORTCUT)}</p>
+          <p className="hint">{t.editor.emptyHint}</p>
         </div>
       )}
       {activeDoc?.error && <div className="empty editor-empty">{activeDoc.error}</div>}
@@ -365,7 +366,7 @@ export function EditorArea({
   if (!detached) return body;
   return (
     <>
-      <DockedElsewhere title="Editor" onBringBack={() => onDetach(false)} />
+      <DockedElsewhere title={t.workspace.editor} onBringBack={() => onDetach(false)} />
       {target && createPortal(<div className="panel editor">{body}</div>, target)}
     </>
   );
@@ -380,7 +381,7 @@ function scriptDecorations(script: ScriptLinks, lineCount: number): monaco.edito
   const whole = script.wholeClips.length;
   const decorations = script.scenes.flatMap((scene) => sceneDecorations(scene, script.wholeSelected));
   if (whole > 0) {
-    const hover = `${whole} clip${whole === 1 ? "" : "s"} linked to the whole script (${script.wholeClips.join(", ")}). Click to select ${whole === 1 ? "it" : "them"}.`;
+    const hover = t.editor.wholeScriptLinked(whole, script.wholeClips.join(", "));
     decorations.push({
       range: new monaco.Range(1, 1, 1, 1),
       options: { glyphMarginClassName: "script-glyph-linked", glyphMarginHoverMessage: { value: hover } },
@@ -397,8 +398,8 @@ function sceneDecorations(scene: SceneLink, wholeSelected: boolean): monaco.edit
   const count = scene.clips.length;
   const hover =
     count > 0
-      ? `Scene \`#${scene.slug}\`: ${count} clip${count === 1 ? "" : "s"} (${scene.clips.join(", ")}). Click the heading to select ${count === 1 ? "it" : "them"}.`
-      : `Scene \`#${scene.slug}\` has no clips yet. Link one with \`frameshell clip set <clip> --script-ref <script>#${scene.slug}\`.`;
+      ? t.editor.sceneLinked(scene.slug, count, scene.clips.join(", "))
+      : t.editor.sceneUnlinked(scene.slug);
   const heading: monaco.editor.IModelDeltaDecoration = {
     range: new monaco.Range(scene.line, 1, scene.line, 1),
     options: {

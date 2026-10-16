@@ -1,4 +1,5 @@
 import { type Program, type VideoSpan, programAt } from "../preview/program.js";
+import { rich, t } from "../i18n.js";
 
 type GeneratedSpan = Extract<VideoSpan, { kind: "generated" }>;
 
@@ -36,11 +37,17 @@ function Slate({ span }: { span: GeneratedSpan }) {
   const state = render?.state ?? "queued";
   const progress = render?.progress ?? 0;
   const title =
-    state === "failed" ? "Render failed" : state === "unavailable" ? "Cannot render this clip" : state === "rendering" ? "Rendering" : "Waiting to render";
+    state === "failed"
+      ? t.preview.renderFailed
+      : state === "unavailable"
+        ? t.preview.cannotRender
+        : state === "rendering"
+          ? t.preview.rendering
+          : t.preview.waitingRender;
   return (
     <div className="preview-layer-pending" data-testid="preview-layer-pending" data-clip={span.clip} data-state={state} role="status">
       <p className="preview-layer-title">
-        {title} <code>{span.type}</code> clip <code>{span.clip}</code>
+        {rich(title, { type: <code>{span.type}</code>, clip: <code>{span.clip}</code> })}
       </p>
       {(state === "rendering" || state === "queued") && (
         <div className="preview-layer-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
@@ -60,10 +67,10 @@ function Slate({ span }: { span: GeneratedSpan }) {
 function LiveLabel({ span }: { span: GeneratedSpan }) {
   const render = span.render && span.render.state !== "ready" ? span.render : null;
   const percent = Math.round((render?.progress ?? 0) * 100);
-  const doing = render?.state === "rendering" ? `rendering ${percent}%` : "waiting to render";
+  const doing = render?.state === "rendering" ? t.preview.liveDoingRendering(percent) : t.preview.liveDoingWaiting;
   return (
-    <p className="preview-live-label" data-testid="preview-live-label" data-clip={span.clip} role="status" title={`Live preview of ${span.type} clip ${span.clip}: export uses the render`}>
-      Live, {doing}
+    <p className="preview-live-label" data-testid="preview-live-label" data-clip={span.clip} role="status" title={t.preview.liveLabelHint(span.type, span.clip)}>
+      {t.preview.liveLabel(doing)}
     </p>
   );
 }

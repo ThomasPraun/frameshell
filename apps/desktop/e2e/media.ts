@@ -1,6 +1,8 @@
 // Synthetic media for preview tests (never committed): frames carry a machine-readable barcode of their index,
 // audio is a clean sine, so what the preview shows and plays can be checked exactly (ADR 0001 harness).
 import { execFile } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { BinaryManager } from "@frameshell/core";
@@ -19,6 +21,18 @@ export function testBinariesDir(): string {
 export async function testFfmpeg(): Promise<string> {
   const dir = testBinariesDir();
   return new BinaryManager({ dataDir: dir, configDir: dir }).ensure("ffmpeg");
+}
+
+/**
+ * Point a sandbox's daemon at the shared managed ffmpeg and ffprobe (its
+ * `config.json` `binaries`), so it never downloads its own copy.
+ */
+export async function useTestBinaries(configDir: string): Promise<void> {
+  const dir = testBinariesDir();
+  const manager = new BinaryManager({ dataDir: dir, configDir: dir });
+  const binaries = { ffmpeg: await manager.ensure("ffmpeg"), ffprobe: await manager.ensure("ffprobe") };
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({ binaries }));
 }
 
 /** Barcode geometry, relative to the frame: 16 cells of 1/24 width; row 0 = bits of the frame index, row 1 = complement. */

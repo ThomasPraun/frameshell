@@ -523,6 +523,7 @@ code {
 .panel-title {
   font-weight: 600;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .panel-meta {
@@ -606,13 +607,14 @@ code {
 
 .view-switch {
   display: flex;
-  gap: 2px;
+  gap: 0;
 }
 
 .view-tab {
   border: 0;
   background: none;
-  padding: 3px 8px;
+  padding: 3px 5px;
+  white-space: nowrap;
   border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
@@ -1341,6 +1343,12 @@ code {
 .clip-inspector.is-empty {
   color: var(--text-faint);
   font-size: 11.5px;
+}
+
+/* Longer translations wrap instead of running past the panel. */
+.clip-inspector.is-empty > span {
+  min-width: 0;
+  white-space: normal;
 }
 
 .clip-inspector-name {
@@ -2727,4 +2735,144 @@ button.track-head:focus-visible {
     width: 100%;
     opacity: 0.5;
   }
+}
+
+.preview-duration {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Agent guide above the terminals (#190): how to start an agent, then what to ask it. */
+.agent-guide {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  font-size: 12.5px;
+  /* The terminal keeps most of the column whatever the guide lists. */
+  max-height: 45%;
+  overflow-y: auto;
+}
+
+.agent-guide.is-hidden {
+  padding: 4px 14px;
+  font-size: 11.5px;
+}
+
+.agent-guide.is-running {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+}
+
+.agent-guide-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-guide-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-guide-lede {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.agent-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-guide-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.agent-guide-list code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.agent-guide-warning {
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.agent-guide-install summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.agent-guide-install > .link {
+  margin-top: 6px;
+}
+
+.agent-guide-hint {
+  margin: 6px 0 0;
+  color: var(--accent);
+}
+
+.agent-guide-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 11.5px;
+}
+
+.agent-guide-more a {
+  text-decoration: none;
+}
+
+.agent-guide-label {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.agent-guide-prompts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chip {
+  flex: none;
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.agent-guide-list .button {
+  padding: 3px 10px;
 }

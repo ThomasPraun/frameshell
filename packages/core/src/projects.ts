@@ -18,6 +18,7 @@ import {
   parseTranscript,
 } from "@frameshell/schema";
 import { exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
+import type { ProjectFormat } from "./media/format.js";
 import { installAgentFiles } from "./skills/agent-files.js";
 import { installCoreSkill } from "./skills/install.js";
 
@@ -65,10 +66,11 @@ export class ProjectRegistry {
   /**
    * Scaffold a project in `dir` (created if missing) and open it, with the
    * core agent skill and the agent files (`AGENTS.md`, `GEMINI.md`,
-   * `.claude/settings.json`) unless `agentSkill` is false.
+   * `.claude/settings.json`) unless `agentSkill` is false. `format` replaces
+   * the default resolution, frame rate and sample rate.
    * Throws `ProjectExists` instead of overwriting an existing `frameshell.json`.
    */
-  async init(dir: string, name?: string, agentSkill = true): Promise<ProjectInitResult> {
+  async init(dir: string, name?: string, agentSkill = true, format: ProjectFormat = {}): Promise<ProjectInitResult> {
     const root = resolve(dir);
     const configPath = join(root, PROJECT_FILE);
     if (await exists(configPath)) {
@@ -79,7 +81,7 @@ export class ProjectRegistry {
       await mkdir(join(root, rel), { recursive: true });
       created.push(rel);
     }
-    const config = createProjectConfig(name?.trim() || basename(root) || "Untitled");
+    const config = { ...createProjectConfig(name?.trim() || basename(root) || "Untitled"), ...format };
     await writeJsonAtomic(join(root, config.main), createTimeline("main"));
     created.push(config.main);
     // .frameshell/ holds only regenerable or machine-local state (SPEC §2 cross-cutting rules).

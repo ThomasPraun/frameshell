@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
 import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
+import { t } from "../i18n.js";
 import { windowOf } from "../windows.js";
 import { referenceLines } from "./reference.js";
 
@@ -72,7 +73,7 @@ export async function composeReference(): Promise<{ lines: string[]; warning: st
       try {
         frames.set(at, await window.frameshell.context.captureFrame(at));
       } catch (error) {
-        warnings.push(`Frame not captured: ${(error as Error).message}`);
+        warnings.push(t.workspace.frameNotCaptured((error as Error).message));
         break;
       }
     }
@@ -84,7 +85,7 @@ export async function composeReference(): Promise<{ lines: string[]; warning: st
     try {
       return await window.frameshell.context.writeDetails(file, `${JSON.stringify(content, null, 2)}\n`);
     } catch (error) {
-      warnings.push(`Details not saved: ${(error as Error).message}`);
+      warnings.push(t.workspace.detailsNotSaved((error as Error).message));
       return null;
     }
   };
@@ -118,6 +119,6 @@ async function clipRenders(): Promise<ClipRenderInfo[]> {
  */
 export function openAskMenu(event: MouseEvent, extra: readonly MenuItem[] = []): void {
   event.preventDefault();
-  const items: MenuItem[] = [{ label: "Ask agent", shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() }, ...extra];
+  const items: MenuItem[] = [{ label: t.workspace.askAgent, shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() }, ...extra];
   contextMenu.open(event.clientX, event.clientY, items, windowOf(event.target));
 }
