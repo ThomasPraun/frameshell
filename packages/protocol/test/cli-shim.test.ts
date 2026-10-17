@@ -16,6 +16,8 @@ describe("cli shim format", () => {
     const withSocket = { ...target, socket: "/var/folders/x y/T/frameshelld-501.sock" };
     const script = cliShimScript(withSocket, "darwin");
     expect(parseCliShim(script)).toEqual(withSocket);
+    // POSIX shims only run under a POSIX shell.
+    if (process.platform === "win32") return;
     const { execFileSync } = await import("node:child_process");
     const run = (env: Record<string, string>) =>
       execFileSync("/bin/sh", ["-c", `${script.split("\n").slice(1, 3).join("\n")}\nprintf %s "$FRAMESHELL_SOCKET"`], { env }).toString();
