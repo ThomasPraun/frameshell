@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Desktop: Claude Desktop, connected with **Connect Claude Desktop**, now reaches the app's daemon on macOS and Linux, so its tools act on the project open in the app. MCP clients start servers without `TMPDIR`, which the default daemon socket path depends on, so `frameshell mcp` started a second daemon that showed no window. The app's `frameshell` command now uses the app's socket when its caller sets no `FRAMESHELL_SOCKET`.
+
 ## [0.8.0] - 2026-10-16
 
 Frameshell for people who never used a terminal. This release ships the 0.7 and 0.8 milestones together. Start from a video: **New from video…**, a drop, or **Open with** / **Edit with Frameshell** make a project beside it, in the video's format, with the video on the timeline and its speech transcribed. The app speaks Spanish. An agent guide above the terminal starts or installs Claude Code, Codex, Gemini CLI, OpenCode or Pi and suggests what to ask; **Connect Claude Desktop** links Claude's chat app, whose MCP server follows the app window in use. The app checks for updates, and **Help > Copy Diagnostics** helps report a problem. Plugin installs no longer need Node.js. Protocol v35: the app stops a 0.6 daemon left running and starts its own, and the app's `frameshell` command updates with it; a CLI from another install must be updated to talk to this daemon. The official plugins are unchanged.

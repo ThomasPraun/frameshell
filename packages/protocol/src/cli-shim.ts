@@ -7,6 +7,11 @@ export interface CliShimTarget {
   runtime: string;
   /** Absolute path of the CLI's JS entry. */
   cliEntry: string;
+  /**
+   * Daemon socket the shim uses when the caller sets no `FRAMESHELL_SOCKET` (POSIX only). The default path
+   * depends on `TMPDIR`, which MCP clients such as Claude Desktop leave out of a server's environment.
+   */
+  socket?: string;
 }
 
 /** File name of the shim: `frameshell.cmd` on Windows, `frameshell` elsewhere. */
@@ -22,16 +27,21 @@ export function cliShimScript(target: CliShimTarget, platform: NodeJS.Platform):
   if (platform === "win32") {
     return ["@echo off", "setlocal", "set ELECTRON_RUN_AS_NODE=1", `"${target.runtime}" "${target.cliEntry}" %*`, ""].join("\r\n");
   }
-  return `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shQuote(target.runtime)} ${shQuote(target.cliEntry)} "$@"\n`;
+  const socket = target.socket ? `: \${FRAMESHELL_SOCKET:=${shQuote(target.socket)}}\nexport FRAMESHELL_SOCKET\n` : "";
+  return `#!/bin/sh\n${socket}ELECTRON_RUN_AS_NODE=1 exec ${shQuote(target.runtime)} ${shQuote(target.cliEntry)} "$@"\n`;
 }
 
 const POSIX_SHIM = /^ELECTRON_RUN_AS_NODE=1 exec ('(?:[^']|'\\'')*') ('(?:[^']|'\\'')*') "\$@"$/m;
+const POSIX_SOCKET = /^: \$\{FRAMESHELL_SOCKET:=('(?:[^']|'\\'')*')\}$/m;
 const WINDOWS_SHIM = /^"([^"]*)" "([^"]*)" %\*\r?$/m;
 
 /** The target of a shim {@link cliShimScript} wrote, either platform's form; null for any other file. */
 export function parseCliShim(text: string): CliShimTarget | null {
   const posix = POSIX_SHIM.exec(text);
-  if (posix) return { runtime: shUnquote(posix[1]!), cliEntry: shUnquote(posix[2]!) };
+  if (posix) {
+    const socket = POSIX_SOCKET.exec(text);
+    return { runtime: shUnquote(posix[1]!), cliEntry: shUnquote(posix[2]!), ...(socket ? { socket: shUnquote(socket[1]!) } : {}) };
+  }
   if (!/^set ELECTRON_RUN_AS_NODE=1\r?$/m.test(text)) return null;
   const windows = WINDOWS_SHIM.exec(text);
   return windows ? { runtime: windows[1]!, cliEntry: windows[2]! } : null;
