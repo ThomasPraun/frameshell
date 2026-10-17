@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-17
+
+Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the project open in the app. Installing it is enough: an existing connection keeps working, restart Claude Desktop once. No protocol change; the official plugins are unchanged.
+
 ### Fixed
 
 - Desktop: Claude Desktop, connected with **Connect Claude Desktop**, now reaches the app's daemon on macOS and Linux, so its tools act on the project open in the app. MCP clients start servers without `TMPDIR`, which the default daemon socket path depends on, so `frameshell mcp` started a second daemon that showed no window. The app's `frameshell` command now uses the app's socket when its caller sets no `FRAMESHELL_SOCKET`.
@@ -213,7 +217,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.1
 [0.8.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.0
 [0.6.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.5.0
