@@ -35,6 +35,17 @@ const crop = (label: string, title: string): FieldSpec => ({
   decimals: 1,
 });
 
+/** A reframe point: stored as a fraction of the picture, shown in percent, 0 to 100. */
+const point = (label: string, title: string): FieldSpec => ({
+  label,
+  title,
+  unit: "%",
+  show: (v) => round(v * 100, 1),
+  store: (v) => (v >= 0 && v <= 100 ? round(v / 100, 4) : null),
+  step: 1,
+  decimals: 1,
+});
+
 const FIELDS = {
   x: { label: t.inspector.fieldX, title: t.inspector.fieldXTitle, unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
   y: { label: t.inspector.fieldY, title: t.inspector.fieldYTitle, unit: "px", show: (v) => v, store: (v) => Math.round(v), step: 1, decimals: 0 },
@@ -78,6 +89,8 @@ const FIELDS = {
   cropTop: crop(t.inspector.fieldCropTop, t.inspector.fieldCropTitle(t.inspector.sideTop)),
   cropRight: crop(t.inspector.fieldCropRight, t.inspector.fieldCropTitle(t.inspector.sideRight)),
   cropBottom: crop(t.inspector.fieldCropBottom, t.inspector.fieldCropTitle(t.inspector.sideBottom)),
+  reframeX: point(t.inspector.fieldReframeX, t.inspector.fieldReframeXTitle),
+  reframeY: point(t.inspector.fieldReframeY, t.inspector.fieldReframeYTitle),
 } satisfies Record<string, FieldSpec>;
 
 /** A numeric setting {@link NumberField} knows how to show and store. */

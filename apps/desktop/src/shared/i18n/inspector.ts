@@ -85,6 +85,19 @@ const en = {
   screen: "Screen",
   screenAngleTitle: "Mark this angle as a screen share: the director shows it while it moves, never as a speaker",
   unscreenAngleTitle: "This angle is a screen share; click to treat it as a person again",
+  reframe: "Reframe",
+  reframeGroupTitle: "Where a tile that cuts each angle's picture centers it, like a solo in a 9:16 export; see it with the preview's 9:16 frame",
+  reframeRow: (name: string) => `Reframe ${name}`,
+  fieldReframeX: "X",
+  fieldReframeXTitle: "Point to center on across the picture at the playhead (0% left edge, 100% right edge); a change sets a key there",
+  fieldReframeY: "Y",
+  fieldReframeYTitle: "Point to center on down the picture at the playhead (0% top, 100% bottom); a change sets a key there",
+  reframeKeys: (count: number) => (count === 0 ? "centered" : count === 1 ? "1 key" : `${count} keys`),
+  reframeKeysTitle: "Keys on the group clock: the point moves in a straight line between them and holds outside them; every shot of this angle follows them",
+  removeKey: "Remove key",
+  removeKeyTitle: "Remove the key at the playhead",
+  clearKeys: "Center",
+  clearKeysTitle: "Remove every key of this angle: its picture is cut centered again",
 };
 
 const es: typeof en = {
@@ -172,6 +185,19 @@ const es: typeof en = {
   screen: "Pantalla",
   screenAngleTitle: "Marcar este ángulo como pantalla compartida: el director lo muestra mientras se mueve y nunca como hablante",
   unscreenAngleTitle: "Este ángulo es una pantalla compartida; haz clic para tratarlo otra vez como una persona",
+  reframe: "Reencuadre",
+  reframeGroupTitle: "Dónde centra la imagen de cada ángulo un recuadro que la recorta, como un plano solo en una exportación 9:16; míralo con el cuadro 9:16 de la vista previa",
+  reframeRow: (name) => `Reencuadre de ${name}`,
+  fieldReframeX: "X",
+  fieldReframeXTitle: "Punto en el que centrar a lo ancho de la imagen en el cabezal (0 % borde izquierdo, 100 % borde derecho); un cambio pone una clave ahí",
+  fieldReframeY: "Y",
+  fieldReframeYTitle: "Punto en el que centrar a lo alto de la imagen en el cabezal (0 % arriba, 100 % abajo); un cambio pone una clave ahí",
+  reframeKeys: (count) => (count === 0 ? "centrado" : count === 1 ? "1 clave" : `${count} claves`),
+  reframeKeysTitle: "Claves en el reloj del grupo: el punto se mueve en línea recta entre ellas y se mantiene fuera de ellas; todos los planos de este ángulo las siguen",
+  removeKey: "Quitar clave",
+  removeKeyTitle: "Quitar la clave del cabezal",
+  clearKeys: "Centrar",
+  clearKeysTitle: "Quitar todas las claves de este ángulo: su imagen se recorta centrada otra vez",
 };
 
 export const inspector = { en, es };

@@ -427,6 +427,8 @@ interface Part {
   placement: Placement;
   /** A shot's angle: drawn cut into its tile instead of placed. */
   angle: AngleSpan | null;
+  /** Program frame shown: a reframed angle's cut depends on it. */
+  frame: number;
 }
 
 class Engine implements LayerHost {
@@ -656,7 +658,7 @@ class Engine implements LayerHost {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement, angle: null });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement, angle: null, frame: want });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -669,9 +671,9 @@ class Engine implements LayerHost {
         const decoded = { width: frame.displayWidth, height: frame.displayHeight };
         if (span.kind === "angle") {
           // Shots fill opaque tiles: an angle's alpha plane is not used.
-          parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span, frame: want });
         } else {
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement: span.placement, angle: null });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement: span.placement, angle: null, frame: want });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -725,7 +727,7 @@ class Engine implements LayerHost {
     context.fillRect(0, 0, output.width, output.height);
     for (const part of parts) {
       if (part.angle) {
-        const layer = angleLayer(part.angle, output);
+        const layer = angleLayer(part.angle, output, part.frame / this.#program!.fps);
         if (!layer) continue;
         // The crop is in probed source pixels; the proxy frame is smaller.
         const fx = part.size.width / layer.source.width;

@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 44;
+export const PROTOCOL_VERSION = 45;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1258,6 +1258,23 @@ export const methods = {
       "Fails with InvalidOperation when the group, angle or mic does not exist, nothing is given, gain or muted is given for an angle that takes its sound from a mic or none, or the crop would leave no picture " +
       "(left + right, top + bottom must stay below 1).",
     params: operationArgs["multicam.angle"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "multicam.reframe": {
+    mutating: true,
+    description:
+      "Reframe one angle of a multicam group over time: set or remove a key of its `reframe`, the point of its picture (`x`, `y`: " +
+      "fractions of the source width and height) that a tile cutting the picture to its aspect centers on. This is how a 9:16 export " +
+      "(`vertical-1080x1920`) of 16:9 cameras keeps each face in its solo and two-up shots. Keys live in the group, on the group clock, " +
+      "so every shot of that angle follows them and ripple cuts keep them on the same picture; between keys the point moves in a " +
+      "straight line, before the first and after the last it holds. Give the key time as `at` (group seconds) or `time` (timeline " +
+      "seconds, mapped through the program track's shot playing then). A key in the same frame is replaced; an omitted `x` or `y` " +
+      "keeps the point there now. `remove: true` deletes the key in that frame, `clear: true` every key. A 16:9 frame of 16:9 " +
+      "cameras is not cut, so keys change nothing there; screens are never cut. " +
+      "Example: `{ group: \"g_1a2b3c\", angle: \"ana\", time: 12.5, x: 0.32 }`. " +
+      "Fails with InvalidOperation when the group or angle does not exist, neither or both of `at` and `time` are given, no shot of " +
+      "the group plays at `time`, nothing is given to set, or `remove` finds no key in that frame.",
+    params: operationArgs["multicam.reframe"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "shot.set": {

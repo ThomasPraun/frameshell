@@ -28,6 +28,8 @@ import { rich, t } from "../i18n.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
+/** Frame of the `vertical-1080x1920` export preset, which the 9:16 view shows. */
+const VERTICAL_FRAME = { width: 1080, height: 1920 };
 /** `FRAMESHELL_PREVIEW_PROBE=1` (main adds `?probe=1`): expose measurement hooks (ADR 0001 harness). */
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
@@ -51,6 +53,9 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * playhead's time; Escape clears it. Right-click opens "Ask agent".
  * A generated clip whose render is not ready plays its composition live
  * when it is the topmost picture and its adapter supports it (ADR 0010).
+ * The 9:16 button shows the frame as a 9:16 export cuts it (multicam shots
+ * reframed, other clips fitted as export fits them); handles, picking and
+ * live pages stay in the project frame, so they are off there.
  * The header's button moves the panel to its own window and back
  * (ADR 0012); F, pressed in the window it shows in, toggles full screen.
  * The playback keys work from every window of the project.
@@ -83,6 +88,11 @@ export function PreviewPanel({
   }, []);
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const [liveClip, setLiveClip] = useState<string | null>(null);
+  const [verticalOn, setVerticalOn] = useState(false);
+  /** Offered for frames wider than tall: a portrait project already is 9:16 or close to it. */
+  const verticalOffered = resolution.width > resolution.height;
+  const vertical = verticalOn && verticalOffered;
+  const shownFrame = vertical ? VERTICAL_FRAME : resolution;
 
   useEffect(() => {
     const box = frameBox.current!;
@@ -121,12 +131,12 @@ export function PreviewPanel({
     [],
   );
 
-  const aspect = resolution.width / resolution.height;
+  const aspect = shownFrame.width / shownFrame.height;
   const canvasSize = useMemo(() => {
-    const scale = CANVAS_SHORT_SIDE / Math.min(resolution.width, resolution.height);
+    const scale = CANVAS_SHORT_SIDE / Math.min(shownFrame.width, shownFrame.height);
     const even = (n: number) => Math.max(2, Math.round((n * scale) / 2) * 2);
-    return { width: even(resolution.width), height: even(resolution.height) };
-  }, [resolution.width, resolution.height]);
+    return { width: even(shownFrame.width), height: even(shownFrame.height) };
+  }, [shownFrame.width, shownFrame.height]);
   useEffect(() => {
     player.current?.setSize(canvasSize.width, canvasSize.height);
   }, [canvasSize]);
@@ -157,7 +167,7 @@ export function PreviewPanel({
 
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
-  const live = useMemo(() => (program ? liveTarget(program, frame) : null), [program, frame]);
+  const live = useMemo(() => (program && !vertical ? liveTarget(program, frame) : null), [program, frame, vertical]);
   return (
     <div className="preview-body" ref={body} data-testid="preview-body">
       <PanelHeader actions={<DetachButton name={t.workspace.preview.toLowerCase()} detached={detached} onClick={onDetach} testId="preview-detach" />}>
@@ -176,6 +186,7 @@ export function PreviewPanel({
           style={{ "--frame-aspect": aspect } as CSSProperties}
           data-testid="preview-frame"
           data-playing={playing || undefined}
+          data-vertical={vertical || undefined}
           role="img"
           aria-label={empty ? t.preview.emptyMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
           onContextMenu={openAskMenu}
@@ -183,14 +194,14 @@ export function PreviewPanel({
           <div className="safe-area action" />
           <div className="safe-area title" />
           {empty && <p className="preview-caption">{t.preview.emptyCaption}</p>}
-          {program && <Placeholder program={program} frame={frame} />}
+          {program && <Placeholder program={program} frame={frame} output={shownFrame} />}
           {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
           <LivePreview target={live} timeline={view?.timeline ?? null} time={time} fps={fps} resolution={resolution} onLive={setLiveClip} />
           {program && <RenderSlates program={program} frame={frame} live={liveClip} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
-          {program && !playing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
-          <PickLayer active={pickTool && !empty} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} />
+          {program && !playing && !vertical && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
+          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} />
         </div>
       </div>
       <Inspector />
@@ -198,8 +209,13 @@ export function PreviewPanel({
         playing={playing}
         disabled={frames === 0}
         notice={notice}
-        pickTool={pickTool}
+        pickTool={pickTool && !vertical}
         onPickTool={togglePick}
+        vertical={verticalOffered ? vertical : null}
+        onVertical={() => {
+          setPickTool(false);
+          setVerticalOn((on) => !on);
+        }}
       />
     </div>
   );
@@ -284,9 +300,9 @@ function SubtitleOverlay({ size, frame }: { size: Size; frame: number }) {
  * The base layer's placeholder fills the frame; a shot's angle with no picture yet fills its tile; upper layers'
  * are listed small, over the picture.
  */
-function Placeholder({ program, frame }: { program: Program; frame: number }) {
-  const { base, tiles, notes } = placeholdersAt(program, frame);
-  const { width, height } = program.resolution;
+function Placeholder({ program, frame, output }: { program: Program; frame: number; output: Size }) {
+  const { base, tiles, notes } = placeholdersAt(program, frame, output);
+  const { width, height } = output;
   const slate = (span: PlaceholderSpan) => (
     <>
       <p>{PLACEHOLDER_TEXT[span.reason]}</p>
@@ -456,28 +472,46 @@ function TransportBar({
   notice,
   pickTool,
   onPickTool,
+  vertical,
+  onVertical,
 }: {
   playing: boolean;
   disabled: boolean;
   notice: string | null;
   pickTool: boolean;
   onPickTool: () => void;
+  /** 9:16 view on; null when not offered. */
+  vertical: boolean | null;
+  onVertical: () => void;
 }) {
   return (
     <div className="preview-transport" role="toolbar" aria-label={t.preview.transport}>
-      <button
-        className={`icon-button region-toggle${pickTool ? " on" : ""}`}
-        aria-label={t.preview.pick}
-        aria-pressed={pickTool}
-        title={t.preview.pickHint}
-        disabled={disabled}
-        onClick={onPickTool}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M8 6v4M6 8h4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-      </button>
+      <div className="preview-transport-tools">
+        <button
+          className={`icon-button region-toggle${pickTool ? " on" : ""}`}
+          aria-label={t.preview.pick}
+          aria-pressed={pickTool}
+          title={t.preview.pickHint}
+          disabled={disabled || vertical === true}
+          onClick={onPickTool}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M8 6v4M6 8h4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+        </button>
+        {vertical !== null && (
+          <button
+            className={`icon-button preview-vertical${vertical ? " on" : ""}`}
+            aria-pressed={vertical}
+            title={t.preview.verticalFrameHint}
+            data-testid="preview-vertical"
+            onClick={onVertical}
+          >
+            {t.preview.verticalFrame}
+          </button>
+        )}
+      </div>
       <div className="preview-transport-buttons">
         <button className="icon-button" aria-label={t.preview.goToStart} title={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">

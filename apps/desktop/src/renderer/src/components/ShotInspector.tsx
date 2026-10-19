@@ -1,8 +1,9 @@
 import type { TimelineView } from "@frameshell/protocol";
-import { DEFAULT_SHOT_CORNER, SHOT_ANGLE_COUNTS, SHOT_CORNERS, SHOT_LAYOUTS, type ShotCorner, type ShotLayout } from "@frameshell/schema";
+import { DEFAULT_SHOT_CORNER, SHOT_ANGLE_COUNTS, SHOT_CORNERS, SHOT_LAYOUTS, type ShotCorner, type ShotLayout, reframePointAt } from "@frameshell/schema";
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
 import { t } from "../i18n.js";
+import { useTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { ANGLE_COLOR_COUNT, type ClipBox, type ShotBox, type TrackRow, layoutName, layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -51,8 +52,9 @@ function Swatch({ color }: { color: number }) {
 
 /**
  * Settings of a selected shot (ADR 0016): its layout and the angles it shows,
- * each change one `shot.set` by `ui`; the director's confidence and reason;
- * and, folded out, its group's angles ({@link GroupAngles}).
+ * each change one `shot.set` by `ui`; where it cuts each angle
+ * ({@link ShotReframe}); the director's confidence and reason; and, folded
+ * out, its group's angles ({@link GroupAngles}).
  */
 export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: ClipBox; shot: ShotBox; view: TimelineView }) {
   const { error, send } = useSender(clip.id);
@@ -138,6 +140,7 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
           </select>
         )}
       </div>
+      {group && <ShotReframe clip={clip} shot={shot} group={group} />}
       {shot.confidence !== null && (
         <span className={`clip-inspector-hint shot-verdict${shot.doubtful ? " is-doubtful" : ""}`} title={t.inspector.directorTitle}>
           {t.inspector.director(Math.round(shot.confidence * 100), shot.reason)}
@@ -155,6 +158,57 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
       )}
       <ErrorLine error={error} />
       {group && anglesOpen && <GroupAngles group={group} colors={angleColors(group)} />}
+    </div>
+  );
+}
+
+/**
+ * The reframe point of each angle the shot cuts to its tile (every angle but
+ * a `screen` shot's and a `pip` shot's screen) at the playhead, or at the
+ * shot's first frame while the playhead is outside it. A change sets one
+ * `multicam.reframe` key there; keys live in the group, so every shot of the
+ * angle follows them. Nothing moves at the pictures' own aspect: the preview's
+ * 9:16 frame shows the cut.
+ */
+function ShotReframe({ clip, shot, group }: { clip: ClipBox; shot: ShotBox; group: Group }) {
+  const { error, send } = useSender(`${clip.id}/reframe`);
+  const { time, fps } = useTransport();
+  const at = time >= clip.start && time < clip.end ? time : clip.start;
+  const groupSecond = clip.in + (at - clip.start);
+  const cut = shot.layout === "screen" ? [] : shot.layout === "pip" ? shot.angles.slice(1) : shot.angles;
+  const angles = cut.flatMap((shown) => group.angles.find((angle) => angle.id === shown.id) ?? []);
+  if (angles.length === 0) return null;
+  const reframe = (angle: Angle, change: Omit<Extract<TimelineEdit, { op: "multicam.reframe" }>["args"], "group" | "angle">) =>
+    send({ op: "multicam.reframe", args: { group: group.id, angle: angle.id, ...change } });
+  return (
+    <div className="clip-inspector-group shot-reframe" role="group" aria-label={t.inspector.reframe} title={t.inspector.reframeGroupTitle}>
+      <span className="clip-field-label is-static">{t.inspector.reframe}</span>
+      {angles.map((angle) => {
+        const point = reframePointAt(angle, groupSecond);
+        const keys = angle.reframe ?? [];
+        const keyHere = keys.some((key) => Math.abs(key.at - groupSecond) < 0.5 / fps);
+        return (
+          <span key={angle.id} className="angle-slot reframe-row" role="group" aria-label={t.inspector.reframeRow(angle.name)} data-angle={angle.id}>
+            <span className="clip-inspector-hint">{angle.name}</span>
+            <NumberField name="reframeX" stored={point.x} onCommit={(x) => reframe(angle, { time: at, x })} />
+            <NumberField name="reframeY" stored={point.y} onCommit={(y) => reframe(angle, { time: at, y })} />
+            <span className="clip-inspector-hint" title={t.inspector.reframeKeysTitle} data-testid="reframe-keys">
+              {t.inspector.reframeKeys(keys.length)}
+            </span>
+            {keyHere && (
+              <button className="clip-inspector-button" title={t.inspector.removeKeyTitle} onClick={() => reframe(angle, { time: at, remove: true })}>
+                {t.inspector.removeKey}
+              </button>
+            )}
+            {keys.length > 0 && (
+              <button className="clip-inspector-button" title={t.inspector.clearKeysTitle} onClick={() => reframe(angle, { clear: true })}>
+                {t.inspector.clearKeys}
+              </button>
+            )}
+          </span>
+        );
+      })}
+      <ErrorLine error={error} />
     </div>
   );
 }

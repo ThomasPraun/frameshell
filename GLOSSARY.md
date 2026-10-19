@@ -14,6 +14,10 @@ _Avoid_: storyboard, shot list
 One synced picture of a multicam group (usually one person), with its offset and crop. Its sound is its own file's, a mic's, or none.
 _Avoid_: camera, feed, participant
 
+**Reframe**:
+An angle's keys over group time saying which point of its picture a tile centers on when it cuts the picture to its aspect (a solo in a 9:16 export of a 16:9 camera).
+_Avoid_: pan, crop track, auto-crop
+
 **Mic**:
 A separate sound file of a multicam group with its own offset and gain. Angles pick one; one mic may serve several angles and plays once.
 _Avoid_: audio track, recorder

@@ -3,6 +3,7 @@ import {
   type AdapterClip,
   type Clip,
   type ClipTrack,
+  type CropPath,
   type ExportPreset,
   type LayerRect,
   type MediaClip,
@@ -226,8 +227,11 @@ interface Placed {
   /**
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
+   * `move`: the angle's reframe moves the crop, and `clock` is the group second
+   * at timeline second 0 (the shot's `in - start`). `exact`: the angle has a
+   * reframe, so its still crop keeps odd edges like the moving one.
    */
-  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean };
+  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean; exact?: boolean; move?: { path: CropPath; clock: number } };
 }
 
 /** What export v1 renders of a timeline. */
@@ -617,7 +621,13 @@ function placeShots(shots: readonly ShotClip[], group: MulticamGroup, context: S
         in: Math.round((from + skipped) * fps),
         speed: 1,
         placement: placementOf(undefined),
-        tile: { crop: layer.crop, rect: layer.tile, backdrop: layer.backdrop },
+        tile: {
+          crop: layer.crop,
+          rect: layer.tile,
+          backdrop: layer.backdrop,
+          ...(angle.reframe ? { exact: true } : {}),
+          ...(layer.reframe ? { move: { path: layer.reframe, clock: shot.in - shot.start } } : {}),
+        },
       });
     }
   });
@@ -746,9 +756,10 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
     const { opacity } = placed.placement;
     const crop = placed.tile?.crop;
+    const move = placed.tile?.move;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
-      ...(crop ? [`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`] : []),
+      ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
@@ -760,6 +771,46 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
+}
+
+/**
+ * `crop` filter cutting `crop`. Chroma subsampling rounds an odd edge down;
+ * `exact` keeps it, only when asked and needed so unreframed output stays as it was.
+ */
+function staticCrop(crop: LayerRect, exact: boolean): string {
+  const odd = crop.left % 2 !== 0 || crop.top % 2 !== 0;
+  return `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}${exact && odd ? ":exact=1" : ""}`;
+}
+
+/**
+ * `crop` filter cutting `path` ({@link cropAt} in `@frameshell/schema`) for a
+ * piece whose first frame shows group second `from` and that lasts `length`
+ * seconds: the group second is `from + t` (piece timestamps start at 0), the
+ * edges are the same straight lines between keys, rounded and clamped. Keys
+ * outside the piece are left out but for the one on each side. `exact`
+ * keeps odd edges, which chroma subsampling would otherwise round down.
+ */
+function movingCrop(path: CropPath, from: number, length: number): string {
+  const to = from + length;
+  const before = path.keys.filter((key) => key.at <= from).at(-1);
+  const after = path.keys.find((key) => key.at >= to);
+  const keys = [...(before ? [before] : []), ...path.keys.filter((key) => key.at > from && key.at < to), ...(after && after !== before ? [after] : [])];
+  const group = `(${num(from)}+t)`;
+  const edge = (value: (key: CropPath["keys"][number]) => number, size: number, [lo, hi]: readonly [number, number]) => {
+    if (lo === hi) return String(lo);
+    const at = (index: number) => num(keys[index]!.at);
+    const v = (index: number) => value(keys[index]!);
+    let line = num(v(keys.length - 1));
+    for (let index = keys.length - 2; index >= 0; index--) {
+      const slope = (v(index + 1) - v(index)) / (keys[index + 1]!.at - keys[index]!.at);
+      line = `if(lt(${group},${at(index + 1)}),${num(v(index))}+${num(slope)}*(${group}-${at(index)}),${line})`;
+    }
+    if (keys.length > 1) line = `if(lt(${group},${at(0)}),${num(v(0))},${line})`;
+    return `'clip(round(${line}-${num(size / 2)}),${lo},${hi})'`;
+  };
+  const x = edge((key) => key.x, path.width, path.left);
+  const y = edge((key) => key.y, path.height, path.top);
+  return `crop=w=${path.width}:h=${path.height}:x=${x}:y=${y}:exact=1`;
 }
 
 /**

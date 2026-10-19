@@ -180,6 +180,16 @@ export const AngleCropSchema = z
   })
   .describe("Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it.");
 
+/**
+ * One key of an angle's reframing: from group second `at`, tiles that cut the
+ * angle's picture to their aspect keep the part centered on (`x`, `y`).
+ */
+export const ReframeKeySchema = z.strictObject({
+  at: Seconds.describe("Group-clock second of the key."),
+  x: z.number().min(0).max(1).describe("Point to center on across the picture: fraction of the source width, 0 left edge, 1 right edge."),
+  y: z.number().min(0).max(1).describe("Point to center on down the picture: fraction of the source height, 0 top edge, 1 bottom edge."),
+});
+
 /** Ids a mic cannot take: `multicam.angle` reads them as "the camera's own sound" and "no sound". */
 export const RESERVED_MIC_IDS: readonly string[] = ["camera", "none"];
 
@@ -190,6 +200,15 @@ export const AngleSchema = z.strictObject({
   asset: z.string().min(1).describe("Project-relative media file, e.g. `assets/ana.mp4`."),
   offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
   crop: AngleCropSchema.optional(),
+  reframe: z
+    .array(ReframeKeySchema)
+    .min(1)
+    .optional()
+    .describe(
+      "Where the picture is cut when a tile's aspect differs from it (a solo of a 16:9 camera in a 9:16 export): keys sorted by " +
+        "`at`, the point moving in a straight line between keys and held before the first and after the last; the cut never " +
+        "leaves the cropped picture. Absent: centered. Screens (`screen` shots, a `pip` screen) are never cut.",
+    ),
   audio: ClipAudioSchema.optional().describe(
     "Gain and mute of the sound of this angle's own file, which plays under every shot. Absent with `mic` set: the mic carries the level.",
   ),
@@ -239,6 +258,12 @@ export const MulticamGroupSchema = z
       mics.add(mic.id);
     });
     group.angles.forEach((angle, a) => {
+      angle.reframe?.forEach((key, k) => {
+        const previous = angle.reframe![k - 1];
+        if (previous && key.at <= previous.at) {
+          ctx.addIssue({ code: "custom", message: `reframe keys of angle "${angle.id}" must be sorted by \`at\`, each later than the one before`, path: ["angles", a, "reframe", k, "at"] });
+        }
+      });
       if (typeof angle.mic === "string" && !mics.has(angle.mic)) {
         const known = group.mics?.map((mic) => mic.id).join(", ");
         ctx.addIssue({ code: "custom", message: `angle "${angle.id}" names mic "${angle.mic}", which the group does not have${known ? ` (mics: ${known})` : ""}`, path: ["angles", a, "mic"] });
@@ -414,6 +439,8 @@ export type Mic = z.infer<typeof MicSchema>;
 export type Angle = z.infer<typeof AngleSchema>;
 /** Crop of an {@link Angle}'s picture. */
 export type AngleCrop = z.infer<typeof AngleCropSchema>;
+/** One key of an {@link Angle}'s `reframe`. */
+export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 /** Clip overlay placement. */
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */
