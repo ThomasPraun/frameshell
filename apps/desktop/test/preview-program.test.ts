@@ -415,6 +415,18 @@ describe("compileProgram with a multicam program track", () => {
     ]);
   });
 
+  it("places sub-frame offsets at the same exact samples as export", () => {
+    // Mirrors packages/core/test/export-multicam.test.ts "multicam sound at exact samples".
+    const room = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0.01 }, { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.025 }] };
+    const program = compileProgram(
+      { ...view([programTrack([shot("c_1", 0, 0.0105, 1.0105, "solo", ["ana"]), shot("c_2", 1, 1.0105, 2.0105, "solo", ["ben"])])]), groups: [room] },
+      angles,
+    );
+    const spans = (name: string) => program.audio.filter((s) => s.sidecar === sidecar(name)).map((s) => [s.start, s.end, s.in]);
+    expect(spans("ana")).toEqual([[0, 96_000, 24]]);
+    expect(spans("ben")).toEqual([[696, 96_000, 0]]);
+  });
+
   it("splits an angle's sound where the group clock jumps (a ripple cut), and leaves muted angles out", () => {
     const muted = { ...group, angles: group.angles.map((a) => (a.id === "ben" ? { ...a, audio: { muted: true } } : a)) };
     const program = compileProgram(

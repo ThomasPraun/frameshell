@@ -526,6 +526,29 @@ export function shotSound(shot: ShotClip, group: MulticamGroup): MediaClip[] {
   return groupSounds(group).flatMap((sound) => soundClip(shot, sound) ?? []);
 }
 
+/** Where a {@link shotSound} clip plays, in samples. */
+export interface SoundSamples {
+  /** First program sample, at the program rate. */
+  start: number;
+  /** Program sample after the last. */
+  end: number;
+  /** First source sample, at the source's own rate. */
+  in: number;
+}
+
+/**
+ * `clip` (from {@link shotSound}) in exact samples: its seconds rounded once
+ * to `rate`, never through frames, so sounds of one room stay aligned however
+ * they sit against the frame grid. Preview and export both place sound here.
+ */
+export function soundSamples(clip: MediaClip, rate: number, sourceRate = rate): SoundSamples {
+  return {
+    start: Math.round(clip.start * rate),
+    end: Math.round((clip.start + clip.out - clip.in) * rate),
+    in: Math.round(clip.in * sourceRate),
+  };
+}
+
 /**
  * Sound of a program track showing `group`: one audio track per sound
  * (`<track>/<sound id>`, {@link groupSounds} order) holding its

@@ -131,6 +131,8 @@ export {
   coverCrop,
   shotLayers,
   shotSound,
+  soundSamples,
+  type SoundSamples,
   groupSounds,
   type GroupSound,
   programSound,

@@ -41,6 +41,7 @@ Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the proje
 
 ### Fixed
 
+- Export places a multicam program's sound at exact samples, like the preview (ADR 0016): each angle's or mic's file starts at `round(seconds * 48 kHz)` of its offset instead of a frame-rounded start, so mics of one room no longer drift up to half a frame apart (`soundSamples` in `composite.ts`, shared by both). A sound that runs on across a shot change is one mix item, without the edge fade at the shot change, as in the preview.
 - Desktop: Claude Desktop, connected with **Connect Claude Desktop**, now reaches the app's daemon on macOS and Linux, so its tools act on the project open in the app. MCP clients start servers without `TMPDIR`, which the default daemon socket path depends on, so `frameshell mcp` started a second daemon that showed no window. The app's `frameshell` command now uses the app's socket when its caller sets no `FRAMESHELL_SOCKET`.
 
 ## [0.8.0] - 2026-10-16
