@@ -81,7 +81,10 @@ test.beforeAll(async () => {
   timeline.groups = [
     {
       id: "g_talk",
-      angles: ["red", "lime"].map((colour) => ({ id: colour, name: colour, asset: asset(colour), offset: 0 })),
+      angles: [
+        ...["red", "lime"].map((colour) => ({ id: colour, name: colour, asset: asset(colour), offset: 0 })),
+        { id: "dub", name: "dub", asset: asset("red"), offset: 0, mic: null },
+      ],
     },
   ];
   timeline.tracks = [
@@ -174,4 +177,12 @@ test("a crop the daemon refuses shows the error, and the field the saved value a
   await expect(page.getByRole("group", { name: "Angles of program track P1" }).getByRole("status")).toBeVisible();
   await expect(lime.getByRole("textbox", { name: "L (%)" })).toHaveValue("0");
   expect(saved().angles[1]!["crop"]).toEqual({ right: 0.5 });
+});
+
+test("an angle heard through a mic (or none) cannot take gain or mute here", async () => {
+  const dub = page.getByRole("group", { name: "Angles of program track P1" }).locator('[data-angle="dub"]');
+  await expect(dub.getByRole("textbox", { name: "Gain (dB)" })).toBeDisabled();
+  const mute = dub.getByRole("button", { name: "Mute" });
+  await expect(mute).toBeDisabled();
+  await expect(mute).toHaveAttribute("title", "This angle is heard through a mic (or none): its level is set on the mic");
 });

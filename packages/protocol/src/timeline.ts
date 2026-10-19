@@ -451,7 +451,10 @@ export const OperationResultSchema = z.object({
 /** See {@link OperationResultSchema}. */
 export type OperationResult = z.output<typeof OperationResultSchema>;
 
-/** Below this a measured sync is not trusted: the angle starts with the first file and a warning is given. */
+/**
+ * Below this a measured sync is not trusted: the file starts with the reference (the first file with sound)
+ * and a warning is given.
+ */
 export const SYNC_LOW_CONFIDENCE = 0.5;
 
 /** How one file was synced (`multicam.create`). */
@@ -472,7 +475,7 @@ export const AngleSyncSchema = z.object({
     .boolean()
     .describe(
       "False when the confidence is below 0.5 against every other file: no trustworthy match, so the offset was not measured (the file starts with the reference) " +
-        "and a warning says so. Fix it with `multicam.offset`.",
+        "and a warning says so. Fix it with `multicam.offset` (camera) or `multicam.mic` (mic).",
     ),
 });
 

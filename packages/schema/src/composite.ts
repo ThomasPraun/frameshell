@@ -425,11 +425,13 @@ export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, s
 export interface GroupSound {
   /** Angle id (its own file's sound) or mic id; unique in the group. */
   id: string;
+  /** Display name of the angle or mic. */
   name: string;
   /** Project-relative file. */
   asset: string;
   /** Group-clock second at which the file's time 0 plays. */
   offset: number;
+  /** Gain and mute of this sound under every shot. */
   audio?: ClipAudio;
 }
 
