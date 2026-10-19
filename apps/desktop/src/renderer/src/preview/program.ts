@@ -98,7 +98,16 @@ export type VideoSpan =
       /** Shared by every angle span of one shot. */
       layout: ShotFrame;
     }
-  | { kind: "placeholder"; clip: string; start: number; end: number; reason: PlaceholderReason; type: string };
+  | {
+      kind: "placeholder";
+      clip: string;
+      start: number;
+      end: number;
+      reason: PlaceholderReason;
+      type: string;
+      /** Set when it stands in for one angle of a shot: it shows in that angle's tile, not over the whole frame. */
+      angle?: { id: string; layout: ShotFrame };
+    };
 
 /** What {@link angleLayer} needs to lay a shot out at any frame size, as export does (`shotLayers`). */
 export interface ShotFrame {
@@ -250,6 +259,34 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   return { fps, sampleRate: rate, resolution, frames, layers, audio };
 }
 
+/** A placeholder span. */
+export type PlaceholderSpan = Extract<VideoSpan, { kind: "placeholder" }>;
+
+/** Placeholders showing at a frame, by where the preview draws them. */
+export interface PlaceholdersAt {
+  /** The base layer's, over the whole frame; null when layer 0 has none or it stands in for a shot's angle. */
+  base: PlaceholderSpan | null;
+  /** Angles of a shot with no picture yet, each in its own tile (project pixels). */
+  tiles: { span: PlaceholderSpan; layer: number; tile: LayerRect }[];
+  /** Upper layers' placeholders, listed small over the picture. */
+  notes: { span: PlaceholderSpan; layer: number }[];
+}
+
+/** Where the placeholders at program frame `frame` show: a shot's angle never covers the frame, only its tile. */
+export function placeholdersAt(program: Program, frame: number): PlaceholdersAt {
+  const found: PlaceholdersAt = { base: null, tiles: [], notes: [] };
+  program.layers.forEach((_, layer) => {
+    const span = programAt(program, frame, layer);
+    if (span?.kind !== "placeholder") return;
+    if (span.angle) {
+      const shown = angleLayer({ angle: span.angle.id, layout: span.angle.layout }, program.resolution);
+      if (shown) found.tiles.push({ span, layer, tile: shown.tile });
+    } else if (layer === 0) found.base = span;
+    else found.notes.push({ span, layer });
+  });
+  return found;
+}
+
 /** Span of `layer` (0 = base) at program frame `frame`; null in gaps, past the end and for a missing layer. */
 export function programAt(program: Program, frame: number, layer = 0): VideoSpan | null {
   return spanAt(program.layers[layer] ?? [], frame);
@@ -372,7 +409,7 @@ export type AngleSpan = Extract<VideoSpan, { kind: "angle" }>;
  * its source pixels fill it (`shotLayers`, as export lays shots out); null
  * when its shot does not show that angle.
  */
-export function angleLayer(span: AngleSpan, output: Size): AngleLayer | null {
+export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Size): AngleLayer | null {
   const { shot, group, sizes } = span.layout;
   const size = (asset: string) => sizes[asset] ?? output;
   const layer = shotLayers(shot, group, output, size).find((candidate) => candidate.angle === span.angle);
@@ -443,7 +480,7 @@ function angleSlots(shots: readonly PlacedShot[], group: MulticamGroup, assets: 
 /** The picture of `angle` under `placed`: its proxy, a placeholder while it has none, null for no picture. */
 function angleSpan(placed: PlacedShot, angle: Angle, layout: ShotFrame, info: AssetInfo | undefined, fps: number): VideoSpan | null {
   const { shot, start, end } = placed;
-  const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: shot.id, start, end, reason, type: shot.type });
+  const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: shot.id, start, end, reason, type: shot.type, angle: { id: angle.id, layout } });
   if (!info || info.media?.video?.still) return placeholder("unavailable");
   if (!info.proxy) {
     if (info.state === "pending" || info.state === "processing") return placeholder("ingest");

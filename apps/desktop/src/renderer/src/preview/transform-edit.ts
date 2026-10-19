@@ -40,6 +40,26 @@ export function layerBox(program: Program, frame: number, clip: string): LayerBo
   return null;
 }
 
+/**
+ * Box to outline for `clip` at `frame` under `point` (fractions of the
+ * frame): its topmost picture holding the point, for a shot the tile of the
+ * angle there, else its topmost picture. Unlike {@link layerBox} it covers
+ * shots, which have no handles but can be pointed at.
+ */
+export function pictureBox(program: Program, frame: number, clip: string, point: { x: number; y: number }): LayerBox | null {
+  let fallback: LayerBox | null = null;
+  for (let layer = program.layers.length - 1; layer >= 0; layer--) {
+    const span = programAt(program, frame, layer);
+    if (!span || span.clip !== clip) continue;
+    const found = spanBox(program, span, layer);
+    if (!found) continue;
+    const { left, top, width, height } = found.box;
+    if (point.x >= left && point.x < left + width && point.y >= top && point.y < top + height) return found;
+    fallback ??= found;
+  }
+  return fallback;
+}
+
 /** Where `span` (on `layer`) shows; null for a placeholder or media of unknown size. A shot's angle shows in its tile. */
 function spanBox(program: Program, span: VideoSpan, layer: number): LayerBox | null {
   if (span.kind === "placeholder") return null;
@@ -135,14 +155,14 @@ export function layerAt(
 
 /**
  * Clips whose visible box meets the rectangle `rect` (fractions of the
- * frame, `x0 <= x1`, `y0 <= y1`) at `frame`, topmost first. Layers at
- * opacity 0 are left out.
+ * frame, `x0 <= x1`, `y0 <= y1`) at `frame`, topmost first, each once (a
+ * shot at its topmost angle in the rectangle). Layers at opacity 0 are left out.
  */
 export function layersIn(program: Program, frame: number, rect: { x0: number; y0: number; x1: number; y1: number }): LayerHit[] {
   const hits: LayerHit[] = [];
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
-    if (!span || span.kind === "placeholder") continue;
+    if (!span || span.kind === "placeholder" || hits.some((hit) => hit.clip === span.clip)) continue;
     const found = spanBox(program, span, layer);
     if (!found || found.placement.opacity < PAINT_MIN) continue;
     const { left, top, width, height } = found.box;

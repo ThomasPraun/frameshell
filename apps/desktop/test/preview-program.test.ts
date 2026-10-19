@@ -8,6 +8,7 @@ import {
   compileProgram,
   firstAudioDifference,
   firstVideoDifference,
+  placeholdersAt,
   programAt,
 } from "../src/renderer/src/preview/program.js";
 
@@ -430,6 +431,11 @@ describe("compileProgram with a multicam program track", () => {
     const ingesting = assets(asset("assets/ana.mp4"), asset("assets/ben.mp4", { state: "processing", proxy: null }), asset("assets/eva.mp4"));
     const program = compileProgram(talk([programTrack([SHOTS[1]!])]), ingesting);
     expect(program.layers.map(brief)).toEqual([["s2:ingest@30-60"], ["s2:ana@30-60<30"]]);
+    // Ben's slot is layer 0, yet his slate covers only his tile: Ana's half still shows.
+    const shown = placeholdersAt(program, 45);
+    expect(shown.base).toBeNull();
+    expect(shown.notes).toEqual([]);
+    expect(shown.tiles.map(({ span, layer, tile }) => [span.angle?.id, layer, tile])).toEqual([["ben", 0, { left: 0, top: 0, width: 960, height: 1080 }]]);
   });
 
   it("stacks above the video tracks under it and does not restart an angle's decode at a layout change", () => {

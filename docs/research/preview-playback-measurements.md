@@ -106,3 +106,14 @@ Reading:
 - Pure CPU load does not reproduce the drops on this machine, even at load average 160. Range reads during playback stayed under 170 ms there, well inside the old 0.4 s. The slow reads seen under load (up to 916 ms) were the 1 MB index read when a proxy opens, before playback. Decode latency spikes (up to 647 ms) came at decoder start-up.
 - Which load made the main process answer range reads late on the shared machine was not identified. The change removes range-read latency up to about 3 s from the picture's critical path, and the delayed-read loop shows it. The 5 drops in the shared full run (with 5 starved ticks) were not probed; they are within threshold 3.
 - Some misses are on the page, not in the engine. In one probed run before #105 (uncontrolled load, load average 84-117), the engine drew the frame for 32.6 ms, but the page's own rAF stalled for 40 ms and never sampled it. The harness counts that as dropped. No engine change helps there.
+
+## Multicam grids (#238, 2026-10-19)
+
+Each program-track angle slot is one decoder (ADR 0016). `EngineStats` from `e2e/multicam-preview.spec.ts`, which runs in the normal e2e suite (not opt-in): 960x540 project at 30 fps, solid-colour 4 s angles with a tone, 90 frames played from the start. Apple M3, macOS 26.3, shared with other agents' runs (1-min load average 47-76 before the run).
+
+| run | decoders | decoded | drawn | starved | discarded | decoder restarts |
+|---|---|---|---|---|---|---|
+| 3 angles: solo → two-up → grid | 3 | 415 | 96 | 0 | 42 | 22 |
+| 4 angles: grid | 4 | 360 | 90 | 0 | 12 | 0 |
+
+No frame starved with 3 or 4 decoders under this load. These are synthetic sources, far cheaper to decode than camera footage, so they bound the decoder count, not the decode cost of real 4-angle footage.
