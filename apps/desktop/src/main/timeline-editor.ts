@@ -8,7 +8,7 @@ import {
   type RevertConflict,
   type RpcError,
 } from "@frameshell/protocol";
-import { EDIT_OPTION_MAX_LENGTH, type EditOptions, type RevertOutcome, TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
+import { EDIT_BURST_GAP_MAX_MS, EDIT_OPTION_MAX_LENGTH, type EditOptions, type RevertOutcome, TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
 
 /** A typed daemon request, e.g. {@link DaemonLink.request} bound to the app's link. */
 export type DaemonRequest = <M extends MethodName>(method: M, params: MethodParams<M>) => Promise<MethodResult<M>>;
@@ -64,6 +64,8 @@ export interface TimelineEditorOptions {
 /** The gesture burst whose transaction is open between calls. */
 interface Burst {
   key: string;
+  /** How long the transaction stays open after the latest edit, ms. */
+  gap: number;
   cwd: string;
   timeline: string;
   timer: NodeJS.Timeout | undefined;
@@ -129,7 +131,11 @@ export class TimelineEditor {
       const sent = edits.length === 0 ? "an empty batch" : String(foreign);
       return Promise.reject(new Error(`The timeline panel cannot send ${sent}; it sends ${TIMELINE_EDIT_OPS.join(", ")}.`));
     }
-    const { label, burst } = (options ?? {}) as { label?: unknown; burst?: unknown };
+    const { label, burst, burstGap } = (options ?? {}) as { label?: unknown; burst?: unknown; burstGap?: unknown };
+    if (burstGap !== undefined && (!Number.isInteger(burstGap) || (burstGap as number) < 1 || (burstGap as number) > EDIT_BURST_GAP_MAX_MS)) {
+      return Promise.reject(new Error(`An edit burstGap must be a whole number of ms from 1 to ${EDIT_BURST_GAP_MAX_MS}.`));
+    }
+    const gap = (burstGap as number | undefined) ?? this.#burstGapMs;
     for (const [name, value] of [
       ["label", label],
       ["burst", burst],
@@ -142,11 +148,12 @@ export class TimelineEditor {
       const open = this.#burst;
       if (burst !== undefined && open?.key === burst && open.cwd === cwd && open.timeline === timeline) {
         clearTimeout(open.timer);
+        open.gap = gap;
         return this.#sendBurst(cwd, timeline, edits, open);
       }
       await this.#endBurst();
       await this.#commitOrphan();
-      await this.#begin((label as string | undefined) ?? editLabel(edits));
+      await this.#begin((label as string | undefined) ?? editLabel(edits), burstGap === undefined ? BATCH_AUTO_COMMIT_S : BATCH_AUTO_COMMIT_S + gap / 1000);
       if (burst === undefined) {
         let applied = 0;
         let last: OperationResult | undefined;
@@ -163,7 +170,7 @@ export class TimelineEditor {
         await this.#commit();
         return last!;
       }
-      const begun: Burst = { key: burst as string, cwd, timeline, timer: undefined };
+      const begun: Burst = { key: burst as string, gap, cwd, timeline, timer: undefined };
       this.#burst = begun;
       return this.#sendBurst(cwd, timeline, edits, begun);
     });
@@ -242,7 +249,7 @@ export class TimelineEditor {
         void this.#serial(async () => {
           if (this.#burst === burst) await this.#endBurst();
         }).catch(() => undefined);
-      }, this.#burstGapMs);
+      }, burst.gap);
       burst.timer.unref?.();
     }
     return last!;
@@ -294,8 +301,8 @@ export class TimelineEditor {
    * opened by another app process since {@link TimelineEditor.#commitOrphan}
    * ran: commit it rather than fail the edit.
    */
-  async #begin(label: string): Promise<void> {
-    const begin = () => this.request("tx.begin", { label, autoCommitAfter: BATCH_AUTO_COMMIT_S });
+  async #begin(label: string, autoCommitAfter: number): Promise<void> {
+    const begin = () => this.request("tx.begin", { label, autoCommitAfter });
     try {
       await begin();
     } catch (error) {

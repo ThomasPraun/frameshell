@@ -15,6 +15,8 @@ import { importNotice, useFileDrop } from "../file-drop.js";
 import { rich, t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
+import { cutToAngle } from "../timeline/angle-cut.js";
+import { angleKey } from "../timeline/angle-keys.js";
 import { selection } from "../selection.js";
 import { ContextMenuHost } from "./ContextMenu.js";
 import { DockedElsewhere } from "./DetachControls.js";
@@ -148,6 +150,22 @@ export function Workspace({ project }: { project: ProjectView }) {
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  // Keys 1-9 cut to that angle at the playhead, also while playing; Shift adds it to the shot (#242).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const key = angleKey(event);
+      if (!key) return;
+      void cutToAngle(key.number, key.additive).then(
+        (outcome) => {
+          if (outcome.kind === "no-shot") setNotice(t.workspace.angleNoShot);
+          else if (outcome.kind === "no-angle") setNotice(t.workspace.angleNoAngle(outcome.number, outcome.count));
+        },
+        (error: Error) => setNotice(error.message),
+      );
+    };
+    return listenEverywhere("keydown", onKey);
+  }, []);
 
   // Media dropped from the OS goes into assets/ (#183). The terminal keeps drops for itself.
   const dropping = useFileDrop(

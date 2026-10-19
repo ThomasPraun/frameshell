@@ -68,6 +68,7 @@ const api: FrameshellApi = {
     onRejected: (listener) => subscribe(Channel.timelineRejected, listener),
     edit: (timeline, edits, options) => invokeOutcome(Channel.timelineEdit, timeline, edits, options),
     replaceImage: (timeline, clip) => invokeOutcome(Channel.timelineReplaceImage, timeline, clip),
+    settle: () => invokeOutcome(Channel.timelineSettle),
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
     redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),
     onHistoryCommand: (listener) => subscribe(Channel.timelineHistoryCommand, listener),
