@@ -163,6 +163,33 @@ export {
   motionStretches,
   pictureDifferences,
 } from "./multicam/motion.js";
+export {
+  type GalleryAnalysis,
+  type GalleryLayout,
+  type GallerySample,
+  type GalleryStretch,
+  type GalleryTile,
+  type GrayFrame,
+  MIN_LAYOUT_SAMPLES,
+  type TileRect,
+  analyseGallery,
+  detectTiles,
+  galleryFrameSize,
+  galleryInterval,
+  galleryLayouts,
+  gutterLevels,
+  sampleGallery,
+  tileCrop,
+} from "./multicam/gallery.js";
+export {
+  GALLERY_LOW_CONFIDENCE,
+  type GalleryPlan,
+  type GalleryReport,
+  type GalleryRequest,
+  type GallerySource,
+  galleryReport,
+  planGallery,
+} from "./multicam/gallery-plan.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 export { BLEED_DB, MERGE_GAP_S, MIN_TURN_S, type SpokenWord, TURN_FRAME_S, type Turn, type TurnInput, speakingTurns, wordTurns } from "./multicam/turns.js";

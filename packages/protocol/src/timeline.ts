@@ -263,6 +263,21 @@ export const operationArgs = {
       .describe("Separate sound files, synced like the cameras; angles pick one with `mic`."),
     name: z.string().min(1).optional().describe("Group and program track name. Default: the track is named `Multicam`."),
   }),
+  "multicam.gallery": z.strictObject({
+    asset: z.string().min(1).describe("Project-relative gallery-view call recording with a picture, e.g. `assets/call.mp4`."),
+    tiles: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1).optional().describe("Person in the tile, e.g. `Ana`. Default `Tile <n>`, in reading order."),
+          crop: z
+            .strictObject({ left: CropSide, top: CropSide, right: CropSide, bottom: CropSide })
+            .describe("Fractions of the recording's picture cut off each side to keep this tile."),
+        }),
+      )
+      .min(2)
+      .describe("One angle per tile, each a crop of `asset`. The `multicam.gallery` method finds the tiles and passes them here."),
+    name: z.string().min(1).optional().describe("Group and program track name. Default: the track is named `Multicam`."),
+  }),
   "multicam.offset": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     angle: z.string().min(1).describe("Angle id of that group."),
@@ -555,6 +570,46 @@ export const MulticamCreateResultSchema = OperationResultSchema.extend({
 
 /** See {@link MulticamCreateResultSchema}. */
 export type MulticamCreateResult = z.output<typeof MulticamCreateResultSchema>;
+
+/** Result of `multicam.gallery`: the operation plus the tiles found and the layouts of the call. */
+export const MulticamGalleryResultSchema = OperationResultSchema.extend({
+  group: z.string().describe("Id of the new group."),
+  track: z.string().describe("Id of the new program track."),
+  clip: z.string().describe("Id of the initial `grid` shot, which covers the whole recording."),
+  mic: z
+    .string()
+    .nullable()
+    .describe("Id of the group mic that plays the recording's sound once for every tile; null when the file has no sound (tiles are then silent)."),
+  confidence: z.number().describe("Lowest tile confidence, 0 to 1. Below 0.5: look at the tiles before directing."),
+  samples: z.int().describe("Frames analysed, evenly spread over the whole recording."),
+  tiles: z
+    .array(
+      z.object({
+        angle: z.string().describe("Angle id."),
+        name: z.string(),
+        crop: z
+          .object({ left: z.number().optional(), top: z.number().optional(), right: z.number().optional(), bottom: z.number().optional() })
+          .describe("Fractions of the picture cut off each side, as stored on the angle."),
+        confidence: z
+          .number()
+          .describe("0 to 1: share of the frames of this layout that showed this tile, lowered when its size differs from the other tiles'."),
+      }),
+    )
+    .describe("One per angle, in reading order (rows top to bottom, each left to right)."),
+  layouts: z
+    .array(
+      z.object({
+        start: z.number().describe("Recording seconds (= group seconds: the angles start at 0)."),
+        end: z.number(),
+        tiles: z.int().describe("Tiles of the grid in this stretch; 0 where no tile grid was found (speaker view, a shared screen)."),
+        used: z.boolean().describe("True for stretches with the layout the group's angles were cut from."),
+      }),
+    )
+    .describe("The recording from start to end, one entry per stretch with one layout; more than one entry means the layout changed mid-call."),
+});
+
+/** See {@link MulticamGalleryResultSchema}. */
+export type MulticamGalleryResult = z.output<typeof MulticamGalleryResultSchema>;
 
 /** One stretch of speech of one angle's person, on the group clock. */
 export const SpeakingTurnSchema = z.object({

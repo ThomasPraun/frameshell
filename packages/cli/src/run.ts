@@ -228,8 +228,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       return 2;
     }
     const { positionals } = parsed;
-    // Only `multicam create` takes `--name` several times (one per angle); elsewhere it is one string.
-    const perAngle = positionals[0] === "multicam" && positionals[1] === "create";
+    // Only `multicam create` and `multicam gallery` take `--name` several times (one per angle); elsewhere it is one string.
+    const perAngle = positionals[0] === "multicam" && (positionals[1] === "create" || positionals[1] === "gallery");
     const names = parsed.values.name;
     if (!perAngle && names !== undefined && names.length > 1) {
       io.stderr(`--name was given ${names.length} times; \`frameshell ${positionals.slice(0, 2).join(" ")}\` takes one.\n\n${USAGE}`);

@@ -3,6 +3,7 @@ import type {
   HistoryResult,
   MulticamCreateResult,
   MulticamDirectResult,
+  MulticamGalleryResult,
   MulticamTurnsResult,
   MethodName,
   MethodResult,
@@ -42,6 +43,15 @@ mutations print the new revision):
                                --sound once per camera, in order: a mic number (1 = first --mic-file), none (wide
                                camera, no sound) or camera (its own file); default: camera n takes mic n. One mic
                                may serve several cameras
+  multicam gallery <asset> [--name <tile>…] [--group-name n] [--at s]
+                               One gallery-view call recording (Zoom, Meet, Teams): finds the tile grid by its
+                               gutters on frames sampled over the whole file, adds one angle per tile (a crop of the
+                               same file, rows top to bottom, each left to right), a program track and one grid shot.
+                               The file's sound plays once, through one group mic all tiles share. Prints each tile's
+                               crop and confidence and every layout change (someone joins, a screen share) with its
+                               time; the tiles follow the layout held longest, or the one playing at --at. --name
+                               once per tile, in that order (default Tile 1, Tile 2…). Fix a tile with multicam angle
+                               --crop-*
   multicam offset <group> <angle> <seconds>
                                Fix one angle's sync by hand: the group second at which its file's time 0 plays
                                (absolute, >= 0; a smaller number plays the angle earlier)
@@ -211,6 +221,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
+  "multicam gallery": ["name", "group-name", "at"],
   "multicam offset": [],
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen", "speaker", "clear-speaker"],
   "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
@@ -241,6 +252,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip remove": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
+  "multicam gallery": [1, 1],
   "multicam offset": [3, 3],
   "multicam angle": [2, 2],
   "multicam mic": [2, 2],
@@ -441,6 +453,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { assets: args, names, mics: micFiles, micNames, soundOf: list("sound"), name: str("group-name") });
       break;
     }
+    case "multicam gallery":
+      method = "multicam.gallery";
+      Object.assign(params, { asset: args[0], names: list("name"), name: str("group-name"), at: num("at") });
+      break;
     case "multicam offset":
       method = "multicam.offset";
       Object.assign(params, { group: args[0], angle: args[1], offset: seconds(args[2]!, "<seconds>") });
@@ -594,6 +610,7 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
     return `Aborted ${tx} "${label}"${reverted.length === 0 ? " (nothing to undo)" : ", changes undone:"}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
+  if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   return formatOperation(result as OperationResult);
@@ -625,6 +642,26 @@ function formatMulticamCreate(result: MulticamCreateResult): string {
     const match = angle.confidence === null ? "reference" : `confidence ${Math.round(angle.confidence * 100)}%${angle.synced ? against : " (not synced)"}`;
     lines.push(`  ${angle.kind === "mic" ? "mic " : ""}${angle.angle}  ${angle.name}  ${angle.asset}  offset ${angle.offset} s  ${match}`);
   }
+  return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatMulticamGallery(result: MulticamGalleryResult): string {
+  const percent = (value: number) => `${Math.round(value * 100)}%`;
+  const lines = [
+    `Multicam group ${result.group} · program track ${result.track} · shot ${result.clip} (grid, whole length) · ` +
+      `${result.tiles.length} tiles from ${result.samples} frames, confidence ${percent(result.confidence)}`,
+  ];
+  for (const tile of result.tiles) {
+    const crop = (["left", "top", "right", "bottom"] as const).map((side) => `${side} ${tile.crop[side] ?? 0}`).join(" ");
+    lines.push(`  ${tile.angle}  ${tile.name}  crop ${crop}  confidence ${percent(tile.confidence)}`);
+  }
+  if (result.layouts.length > 1) {
+    lines.push("Layouts:");
+    for (const layout of result.layouts) {
+      lines.push(`  ${layout.start}–${layout.end} s  ${layout.tiles === 0 ? "no tile grid" : `${layout.tiles} tiles`}${layout.used ? "  (used)" : ""}`);
+    }
+  }
+  if (result.mic) lines.push(`Sound: mic ${result.mic} (the recording's own track, once for every tile)`);
   return `${lines.join("\n")}\n${formatOperation(result)}`;
 }
 

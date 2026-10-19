@@ -40,6 +40,8 @@ import { MotionStore, groupMotion } from "./multicam/motion.js";
 import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
+import { analyseGallery } from "./multicam/gallery.js";
+import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
@@ -199,20 +201,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     // Plugins see changes the project watcher cannot (code outside the project): `clips` exists by the time any plugin loads.
     refreshRenders: (root) => void clips.refresh(root).catch(() => {}),
   });
+  /** Managed (or project-overridden) ffmpeg for the project around `dir`. */
+  const projectFfmpeg = async (dir: string) => {
+    const project = await readEnclosingProject(dir);
+    return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
+  };
   const energy = new EnergyStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
-    ffmpeg: async (dir) => {
-      const project = await readEnclosingProject(dir);
-      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
-    },
+    ffmpeg: projectFfmpeg,
     extractAudio: options.extractAudio,
   });
-  const motion = new MotionStore({
-    ffmpeg: async (dir) => {
-      const project = await readEnclosingProject(dir);
-      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
-    },
-  });
+  const motion = new MotionStore({ ffmpeg: projectFfmpeg });
+  const gallery: GallerySource = {
+    probe: (dir, asset) => media.probe(dir, asset),
+    analyse: async (dir, asset, picture) => analyseGallery(await projectFfmpeg(dir), join(dir, ...asset.split("/")), picture),
+  };
   const transactions = new TransactionTracker({
     idleGapMs: options.txIdleGapMs,
     ...(options.txNow ? { now: options.txNow } : {}),
@@ -607,6 +610,30 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the operation wrote no new group");
       const { sync, warnings } = syncReport(group, measured.plan);
       return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
+    },
+    "multicam.gallery": async ({ cwd, timeline, asset, names, name, at }, caller) => {
+      const dir = await root(cwd);
+      const plan = await planGallery(gallery, { root: dir, cwd, asset, names, at });
+      let written: Timeline | undefined;
+      const result = await operate("multicam.gallery", { cwd, timeline, asset: plan.asset, tiles: plan.tiles, ...(name ? { name } : {}) }, caller, (after) => {
+        written = after;
+      });
+      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
+      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
+      if (!group || !track || track.kind !== "program") throw new Error("multicam.gallery: the operation wrote no new group");
+      const report = galleryReport(group, plan);
+      return {
+        ...result,
+        group: group.id,
+        track: track.id,
+        clip: track.clips[0]!.id,
+        mic: group.mics?.[0]?.id ?? null,
+        confidence: report.confidence,
+        samples: plan.analysis.samples,
+        tiles: report.tiles,
+        layouts: report.layouts,
+        warnings: [...result.warnings, ...report.warnings],
+      };
     },
     "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
     "multicam.angle": (params, caller) => operate("multicam.angle", params, caller),
