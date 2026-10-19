@@ -90,11 +90,12 @@ describe("multicam plan", () => {
     const [ana, ben, eva] = plan.audio.tracks;
     expect(plan.audio.tracks).toHaveLength(3);
     const clips = (items: typeof ana) => items!.filter((item) => item.kind === "clip");
-    expect(clips(ana)).toHaveLength(5);
+    // Ana plays on unbroken across the five shots: one item, no edge fade at a shot change.
+    expect(clips(ana)).toHaveLength(1);
     expect(clips(eva).every((item) => item.kind === "clip" && item.gainDb === -6)).toBe(true);
     // Shot c_s1 plays group 0-1 s: Ben's recording starts at 0.5, so his first clip starts then and reads his 0 s.
     expect(ben![0]).toEqual({ kind: "silence", samples: 24_000 });
-    expect(clips(ben)[0]).toMatchObject({ clip: "c_s1/ben", from: 0, samples: 24_000 });
+    expect(clips(ben)[0]).toMatchObject({ clip: "c_s1/ben", from: 0, samples: 216_000 }); // runs on through the later shots
     expect(new Set(plan.audio.inputs)).toEqual(new Set(["/project/assets/ana.mp4", "/project/assets/ben.mp4", "/project/assets/eva.mp4"]));
     for (const track of plan.audio.tracks) expect(track.reduce((sum, item) => sum + item.samples, 0)).toBe(plan.audio.samples);
   });
@@ -201,6 +202,57 @@ describe("multicam plan with separate mics", () => {
   it("still draws every angle's picture", () => {
     expect(plan.warnings).toEqual([]);
     for (const input of ["ana", "ben", "eva"]) expect(JSON.stringify(plan.segments)).toContain(`assets/${input}.mp4`);
+  });
+});
+
+describe("multicam sound at exact samples", () => {
+  // Mics of one room offset by fractions of a 30 fps frame (33.3 ms): export must not round them to frames.
+  const room: MulticamGroup = {
+    id: "g_talk",
+    angles: [
+      { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0.01 },
+      { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.025 },
+    ],
+  };
+  const plan = (clips: ShotClip[]) =>
+    compileRender({
+      timeline: { ...timeline, tracks: [{ id: "t_p", kind: "program", group: "g_talk", clips }], groups: [room] },
+      fps: 30,
+      preset: youtube1080,
+      loudness: -17,
+      sources,
+      resolution,
+    });
+
+  it("places each angle's sound at round(seconds * 48 kHz), the same samples as the preview", () => {
+    const { audio } = plan([shot("c_1", 0, "solo", ["ana"], 0.0105, 1.0105), shot("c_2", 1, "solo", ["ben"], 1.0105, 2.0105)]);
+    expect(audio.samples).toBe(96_000);
+    const [ana, ben] = audio.tracks;
+    // Ana's file starts 0.01 s into the group, so the first shot reads from its sample 24 (0.0005 s) and her sound runs on into the second shot.
+    expect(ana).toEqual([{ kind: "clip", clip: "c_1/ana", input: 0, from: 24, to: 96_024, speed: 1, gainDb: 0, samples: 96_000 }]);
+    // Ben's file starts 0.025 s in: 0.0145 s (696 samples) after the first shot begins.
+    expect(ben![0]).toEqual({ kind: "silence", samples: 696 });
+    expect(ben![1]).toMatchObject({ kind: "clip", clip: "c_1/ben", from: 0, samples: 96_000 - 696 });
+  });
+
+  it("keeps a sound running across shot changes as one item and splits it where the group clock jumps", () => {
+    const { audio } = plan([shot("c_1", 0, "solo", ["ana"], 0, 1), shot("c_2", 1, "solo", ["ana"], 3, 4)]);
+    const [ana] = audio.tracks;
+    expect(ana![0]).toEqual({ kind: "silence", samples: 480 });
+    expect(ana!.filter((item) => item.kind === "clip").map((item) => item.kind === "clip" && [item.from, item.to, item.samples])).toEqual([
+      [0, 47_520, 47_520],
+      [143_520, 191_520, 48_000],
+    ]);
+  });
+
+  it("lets the later of two overlapping shots win the sound from its own start, at its own source position", () => {
+    const { audio } = plan([shot("c_1", 0, "solo", ["ana"], 0, 2), shot("c_2", 1, "solo", ["ana"], 5, 6)]);
+    const clips = audio.tracks[0]!.filter((item) => item.kind === "clip");
+    // Ana's file starts 0.01 s in: shot 1 plays until the group second 1 (47 520 samples), shot 2 reads from source second 5 - 0.01.
+    expect(clips.map((item) => item.kind === "clip" && [item.clip, item.from, item.samples])).toEqual([
+      ["c_1/ana", 0, 47_520],
+      ["c_2/ana", 239_520, 48_000],
+    ]);
   });
 });
 

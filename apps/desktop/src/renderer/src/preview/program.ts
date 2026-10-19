@@ -12,6 +12,7 @@ import {
   programGroup,
   shotLayers,
   shotSound,
+  soundSamples,
 } from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -517,13 +518,14 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
     for (const clip of shotSound(shot, group)) {
       const sidecar = assets.get(clip.asset)?.sidecar;
       if (clip.audio?.muted === true || !sidecar) continue;
+      const samples = soundSamples(clip, rate, sidecar.sampleRate);
       const span: AudioSpan = {
         clip: clip.id,
-        start: Math.round(clip.start * rate),
-        end: Math.round((clip.start + clip.out - clip.in) * rate),
+        start: samples.start,
+        end: samples.end,
         sidecar: sidecar.path,
         channels: sidecar.channels,
-        in: Math.round(clip.in * sidecar.sampleRate),
+        in: samples.in,
         speed: 1,
         gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
       };
