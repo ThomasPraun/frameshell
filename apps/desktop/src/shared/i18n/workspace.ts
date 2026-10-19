@@ -27,6 +27,7 @@ const en = {
   explorer: "Explorer",
   history: "History",
   plugins: "Plugins",
+  angles: "Angles",
   sidebarViews: "Sidebar views",
   inOwnWindow: (view: string) => `${view}, in its own window`,
   noPlugins:
@@ -84,6 +85,7 @@ const es: typeof en = {
   explorer: "Archivos",
   history: "Cambios",
   plugins: "Plugins",
+  angles: "Ángulos",
   sidebarViews: "Vistas de la barra lateral",
   inOwnWindow: (view) => `${view}, en su propia ventana`,
   noPlugins:

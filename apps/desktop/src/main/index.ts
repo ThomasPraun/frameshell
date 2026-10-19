@@ -903,6 +903,9 @@ function registerIpc(): void {
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
     outcome(async () => daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
   );
+  ipcMain.handle(Channel.multicamTurns, (event, timeline: string, group: string) =>
+    outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),
+  );
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
   );

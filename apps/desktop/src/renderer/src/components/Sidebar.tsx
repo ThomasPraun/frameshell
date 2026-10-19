@@ -1,5 +1,6 @@
 import type { SidebarView } from "../../../shared/layout.js";
 import { t } from "../i18n.js";
+import { AngleViewer } from "./AngleViewer.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
@@ -10,6 +11,7 @@ export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
   { id: "explorer", label: t.workspace.explorer },
   { id: "history", label: t.workspace.history },
   { id: "plugins", label: t.workspace.plugins },
+  { id: "angles", label: t.workspace.angles },
 ];
 
 /** Name of a sidebar view, as its tab shows it. */
@@ -27,6 +29,7 @@ export function Sidebar({
   onCollapse,
   onOpenFile,
   activeFile,
+  mediaUrl,
   detached,
   onDetach,
 }: {
@@ -35,6 +38,8 @@ export function Sidebar({
   onCollapse: () => void;
   onOpenFile: (path: string) => void;
   activeFile: string | null;
+  /** Base URL of the project's derived media, for the angle viewer. */
+  mediaUrl: string;
   /** Views shown in their own window. */
   detached: ReadonlySet<SidebarView>;
   /** Move a view to its own window (`true`) or dock it back. */
@@ -70,7 +75,7 @@ export function Sidebar({
         {detached.has(view) ? (
           <DockedElsewhere title={sidebarLabel(view)} onBringBack={() => onDetach(view, false)} />
         ) : (
-          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} />
+          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} />
         )}
       </div>
     </>
@@ -83,11 +88,13 @@ export function SidebarWindow({
   onDock,
   onOpenFile,
   activeFile,
+  mediaUrl,
 }: {
   view: SidebarView;
   onDock: () => void;
   onOpenFile: (path: string) => void;
   activeFile: string | null;
+  mediaUrl: string;
 }) {
   const label = sidebarLabel(view);
   return (
@@ -96,15 +103,26 @@ export function SidebarWindow({
         <span className="panel-title">{label}</span>
       </PanelHeader>
       <div className="panel-body">
-        <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} />
+        <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} />
       </div>
     </div>
   );
 }
 
-function SidebarViewBody({ view, onOpenFile, activeFile }: { view: SidebarView; onOpenFile: (path: string) => void; activeFile: string | null }) {
+function SidebarViewBody({
+  view,
+  onOpenFile,
+  activeFile,
+  mediaUrl,
+}: {
+  view: SidebarView;
+  onOpenFile: (path: string) => void;
+  activeFile: string | null;
+  mediaUrl: string;
+}) {
   if (view === "explorer") return <Explorer onOpenFile={onOpenFile} activeFile={activeFile} />;
   if (view === "history") return <HistoryPanel />;
+  if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
   return (
     <p className="empty">
       {t.workspace.noPlugins}

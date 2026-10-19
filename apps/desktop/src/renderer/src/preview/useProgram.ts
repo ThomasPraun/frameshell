@@ -81,7 +81,8 @@ export function useNestedViews(root: TimelineView | null): ReadonlyMap<string, T
   }, [reachable]);
 }
 
-function useAssets(revision: number | null): ReadonlyMap<string, AssetInfo> | null {
+/** `asset.list` of the project, re-read on each timeline `revision` and while proxies are being built; null until known. */
+export function useAssets(revision: number | null): ReadonlyMap<string, AssetInfo> | null {
   const [assets, setAssets] = useState<{ key: string; map: ReadonlyMap<string, AssetInfo> } | null>(null);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
