@@ -535,6 +535,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
     },
     "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
+    "multicam.angle": (params, caller) => operate("multicam.angle", params, caller),
+    "shot.set": (params, caller) => operate("shot.set", params, caller),
     "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
       const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;

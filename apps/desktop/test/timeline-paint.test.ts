@@ -6,7 +6,7 @@ import { DEFAULT_THEME, type MediaLookup, type Paint2D, paintTimeline } from "..
 // Seam under test: `paintTimeline` against a recording 2D context, the way the panel calls it each frame.
 
 /** Records what a canvas would draw; no pixels. */
-function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rects: number; bars: number[] } {
+function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rects: number; bars: number[]; fills: string[] } {
   const noop = () => {};
   const ctx = {
     texts: [] as string[],
@@ -14,7 +14,9 @@ function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rect
     rects: 0,
     /** Heights of 1 px wide fills: waveform bars. */
     bars: [] as number[],
-    fillStyle: "",
+    /** `fillStyle` of every fillRect. */
+    fills: [] as string[],
+    fillStyle: "" as string | object,
     strokeStyle: "",
     lineWidth: 1,
     globalAlpha: 1,
@@ -38,6 +40,7 @@ function recorder(): Paint2D<string> & { texts: string[]; images: string[]; rect
     strokeRect: noop,
     fillRect: (_x: number, _y: number, w: number, h: number) => {
       ctx.rects++;
+      ctx.fills.push(String(ctx.fillStyle));
       if (w === 1) ctx.bars.push(h);
     },
     fillText: (text: string) => void ctx.texts.push(text),
@@ -66,6 +69,49 @@ function longTimeline(clips: number): TimelineView {
 }
 
 const viewport = (pxPerSecond: number, scrollLeft = 0) => ({ pxPerSecond, scrollLeft, scrollTop: 0, width: 600, height: 200 });
+
+describe("paintTimeline on a program track", () => {
+  const group = {
+    id: "g_talk",
+    angles: [
+      { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+      { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0 },
+    ],
+  };
+  const program = (clips: Record<string, unknown>[]): TimelineView => ({
+    timeline: "main",
+    path: "timelines/main.json",
+    revision: 1,
+    fps: 30,
+    duration: 8,
+    tracks: [{ id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips: clips as TimelineView["tracks"][number]["clips"] }],
+    groups: [group],
+    problems: [],
+  });
+  const paint = (clips: Record<string, unknown>[]) => {
+    const ctx = recorder();
+    paintTimeline(ctx, { layout: layoutTimeline(program(clips)), viewport: viewport(60), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+    return ctx;
+  };
+  const [anaColor, benColor] = DEFAULT_THEME.angles;
+
+  it("paints a solo shot in its angle's colour and a two-up striped with both, in layout order", () => {
+    const solo = paint([{ id: "c_s", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "solo", angles: ["ben"] }]);
+    expect(solo.fills).toContain(benColor);
+    expect(solo.fills).not.toContain(anaColor);
+    const twoUp = paint([{ id: "c_s", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "two-up", angles: ["ben", "ana"] }]);
+    const order = twoUp.fills.filter((fill) => fill === anaColor || fill === benColor);
+    expect(order).toEqual([benColor, anaColor]);
+  });
+
+  it("flags a doubtful director's shot and says how sure it was", () => {
+    const doubtful = paint([{ id: "c_s", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "solo", angles: ["ana"], confidence: 0.25 }]);
+    expect(doubtful.texts).toEqual(expect.arrayContaining(["Solo · Ana"]));
+    expect(doubtful.texts.join(" ")).toContain("25% sure");
+    const sure = paint([{ id: "c_s", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "solo", angles: ["ana"], confidence: 0.9 }]);
+    expect(sure.texts.join(" ")).not.toContain("sure");
+  });
+});
 
 describe("paintTimeline", () => {
   it("draws only the clips inside the viewport, however long the timeline", () => {

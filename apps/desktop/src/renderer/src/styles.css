@@ -21,6 +21,14 @@
   --track-video: #7092c4;
   --track-audio: #6fae8b;
   --track-sub: #b48acb;
+  --track-program: #7092c4;
+  /* Multicam angles, by place in their group: timeline stripes and inspector swatches (paint.ts DEFAULT_THEME.angles). */
+  --angle-1: #d9895b;
+  --angle-2: #5bb5c9;
+  --angle-3: #c9c25b;
+  --angle-4: #c97bb4;
+  --angle-5: #7fc97b;
+  --angle-6: #8f86d9;
   /* History diff marks: what a transaction did. Removed uses --danger. */
   --diff-added: #79d39a;
   --diff-moved: #66c2e0;
@@ -1550,6 +1558,47 @@ code {
   font-size: 11.5px;
 }
 
+.clip-inspector-button.is-open {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.clip-field-input.is-text {
+  width: 84px;
+  text-align: left;
+  font-family: var(--font-ui);
+}
+
+/* An angle's colour, as the program track paints it. */
+.angle-swatch {
+  flex: none;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+}
+
+.angle-slot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.angle-remove {
+  padding: 0 5px;
+}
+
+.shot-verdict.is-doubtful {
+  color: var(--danger);
+}
+
+/* The group's angles take whole rows under the shot's settings. */
+.group-angles {
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .clip-inspector-error {
   min-width: 0;
   overflow: hidden;
@@ -2112,6 +2161,10 @@ button.track-head:focus-visible {
 
 .track-subtitles {
   --track-color: var(--track-sub);
+}
+
+.track-program {
+  --track-color: var(--track-program);
 }
 
 .track-id {

@@ -524,6 +524,7 @@ function TimelineCanvas({
       video: read("--track-video", DEFAULT_THEME.video),
       audio: read("--track-audio", DEFAULT_THEME.audio),
       subtitles: read("--track-sub", DEFAULT_THEME.subtitles),
+      angles: DEFAULT_THEME.angles.map((fallback, index) => read(`--angle-${index + 1}`, fallback)),
       diffAdded: read("--diff-added", DEFAULT_THEME.diffAdded),
       diffMoved: read("--diff-moved", DEFAULT_THEME.diffMoved),
       diffChanged: read("--diff-changed", DEFAULT_THEME.diffChanged),
@@ -956,18 +957,18 @@ function TimelineCanvas({
         <div className="timeline-heads-rows">
           <div ref={heads}>
             {layout?.rows.map((row) =>
-              row.kind === "subtitles" ? (
+              row.kind === "subtitles" || row.kind === "program" ? (
                 <button
                   key={row.id}
                   className={`track-head track-${row.kind}${selectedTrack === row.id ? " is-selected" : ""}`}
                   style={{ height: row.height }}
-                  title={t.timeline.subtitleHeadTitle(row.id)}
+                  title={row.kind === "program" ? t.timeline.programHeadTitle(row.id) : t.timeline.subtitleHeadTitle(row.id)}
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
                 >
                   <span className="track-id">{row.label}</span>
-                  <span className="track-label">{row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}</span>
+                  <span className="track-label">{row.kind === "program" ? (row.name ?? "") : (row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?"))}</span>
                 </button>
               ) : (
                 <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>

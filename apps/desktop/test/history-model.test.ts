@@ -52,6 +52,9 @@ describe("history rows", () => {
     expect(transactionTitle(tx("tx_00000004", null, [op("op_1", "revert", { target: "tx_00000002" })]))).toBe("Revert tx_00000002");
     expect(transactionTitle(tx("tx_00000005", null, [op("op_1", "timeline.patch")], "file"))).toBe("Direct edit");
     expect(transactionTitle(tx("tx_00000006", null, [op("op_1", "track.rename")]))).toBe("track.rename");
+    expect(transactionTitle(tx("tx_00000007", null, [op("op_1", "shot.set"), op("op_2", "multicam.angle"), op("op_3", "multicam.offset")]))).toBe(
+      "Change shot, change angle, sync angle",
+    );
   });
 
   it("lists newest first, keeping a transaction split by others' operations as separate rows", () => {

@@ -312,7 +312,7 @@ Rules:
   - Invariants: a program track names a group in `groups`, one program track per group; shots never overlap; angle ids are unique in their group, group ids unique among the file's ids. Subtitle tracks follow video or audio tracks only.
   - Layout (`composite.ts`, shared by export and preview): tiles cover the frame without gaps; each angle's cropped picture fills its tile, cut to the tile's aspect, centered. `two-up` is side by side, stacked when the frame is taller than wide; `grid` picks the columns whose tiles are closest to the pictures' aspect, the last row centered. A nested timeline's program track becomes a program track above its host video track (a renamed copy of its group carries the host's gain), or its angles' sound on an audio host. Export refuses (`ExportUnsupported`) a program track nested under a video host clip with a transform: shots fill the frame and are not placed under one.
   - **Creating a group (`frameshell multicam create`):** the first file sets the clock. Each other file's offset comes from the cross-correlation of the files' audio energy envelopes (`media/energy.ts`, the cache cut snapping uses; first 10 minutes of each file, 10 ms steps refined below one step), then all shift so the earliest starts at 0. Every file reports a confidence from 0 to 1; below 0.5 the file is not shifted, starts with the first file, and a warning says so. One operation (`multicam.create`) adds the group, a program track on top and one `grid` shot over the group's whole length. `multicam offset` sets one angle's offset by hand.
-  - Operations treat shots as clips: `cut` ripples the program track like any other (energy snapping listens to the angles' sound), `clip trim`/`split`/`move`/`remove` work on the group clock, `clip set` takes only `scriptRef`. Groups change through `timeline.patch` (direct edits).
+  - Operations treat shots as clips: `cut` ripples the program track like any other (energy snapping listens to the angles' sound), `clip trim`/`split`/`move`/`remove` work on the group clock, `clip set` takes only `scriptRef`. `shot.set` changes a shot's layout and angles (only a layout: angles kept, cut or filled from the group in group order; only angles: the layout follows the count when it does not fit) and removes `confidence` and `reason`: the shot is now a person's. `multicam.angle` changes an angle's name, crop and sound, `multicam.offset` its sync; anything else in a group changes through `timeline.patch` (direct edits).
 - Timeline duration is derived, never stored.
 
 ### 5.4 Transcript (`transcripts/*.words.json`)
@@ -403,6 +403,8 @@ frameshell track add|remove|list …
 frameshell clip add|move|trim|split|remove|set …
 frameshell multicam create <asset>… [--name <angle>…]   # group + program track + grid shot, files synced by audio (ADR 0016)
 frameshell multicam offset <group> <angle> <seconds>     # fix one angle's sync by hand
+frameshell multicam angle <group> <angle> [--name n] [--crop-left f …] [--gain dB]   # rename, crop, sound
+frameshell shot set <shot> [--layout solo|two-up|grid] [--angles a,b]                # change a shot
 frameshell cut [--track <id>…] --from <s> --to <s> [--no-snap] [--snap-window <s>]  # ripple cut; default: all video and audio tracks; edges snap to pauses (ADR 0003), window >= 0.5 s, default from editing.snapWindow
 frameshell timeline show [--json]             # compact dump for agents
 

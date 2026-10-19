@@ -1,5 +1,6 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
+import { SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
 import { t } from "../i18n.js";
 
 /** Height of the time ruler above the lanes, px. */
@@ -22,6 +23,9 @@ const MIN_MINOR_SPACING = 6;
 
 /** Most zoomed in: one frame this wide, px. */
 const FRAME_PX_MAX = 24;
+
+/** Angle colours the timeline and inspector cycle through, by an angle's place in its group. */
+export const ANGLE_COLOR_COUNT = 6;
 
 /** Track kind as the daemon reports it. */
 export type TrackKind = TimelineView["tracks"][number]["kind"];
@@ -54,6 +58,30 @@ export interface ClipBox {
   muted: boolean;
   /** Stored `transform` with defaults filled; null when the clip has none. */
   transform: { x: number; y: number; scale: number; opacity: number } | null;
+  /** Shots: what they show; null for other clips. */
+  shot: ShotBox | null;
+}
+
+/** One angle a shot shows. */
+export interface ShotAngle {
+  id: string;
+  /** Angle name from the group; the id when the group does not list it. */
+  name: string;
+  /** Colour slot, 0 to {@link ANGLE_COLOR_COUNT} - 1: the angle's place in its group, so one person keeps one colour. */
+  color: number;
+}
+
+/** A shot clip's layout and angles, and the director's verdict on it. */
+export interface ShotBox {
+  /** `solo`, `two-up` or `grid` as stored. */
+  layout: string;
+  /** In layout order. */
+  angles: ShotAngle[];
+  /** Director's confidence, 0 to 1; null on a shot a person chose. */
+  confidence: number | null;
+  reason: string | null;
+  /** Below `SHOT_LOW_CONFIDENCE`: worth a look. */
+  doubtful: boolean;
 }
 
 /** One lane, in display order. */
@@ -65,6 +93,8 @@ export interface TrackRow {
   name: string | null;
   /** Subtitle tracks: label of the followed track; null otherwise. */
   followsLabel: string | null;
+  /** Program tracks: id of the multicam group they show; null otherwise. */
+  group: string | null;
   /** Top edge in content px (ruler included). */
   top: number;
   height: number;
@@ -124,8 +154,9 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
   let duration = view.duration ?? 0;
   let clipCount = 0;
   const rows = ordered.map((track): TrackRow => {
+    const group = track.kind === "program" ? view.groups?.find((candidate) => candidate.id === track.group) : undefined;
     const clips = track.clips.map((clip, index) => {
-      const box = clipBox(clip, track.clips[index + 1]?.start, problems.get(clip.id) ?? null);
+      const box = clipBox(clip, track.clips[index + 1]?.start, problems.get(clip.id) ?? null, group);
       duration = Math.max(duration, box.end);
       return box;
     });
@@ -137,6 +168,7 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
       label: labels.get(track.id)!,
       name: track.name,
       followsLabel: track.follows ? (labels.get(track.follows) ?? track.follows) : null,
+      group: track.kind === "program" ? (track.group ?? null) : null,
       top,
       height,
       clips,
@@ -148,8 +180,30 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
 }
 
 type ClipView = TimelineView["tracks"][number]["clips"][number];
+type GroupView = NonNullable<TimelineView["groups"]>[number];
 
-function clipBox(clip: ClipView, nextStart: number | undefined, problem: string | null): ClipBox {
+/** Layout names as the user reads them; an unknown one shows as stored. */
+export function layoutName(layout: string): string {
+  return (t.timeline.layouts as Record<string, string>)[layout] ?? layout;
+}
+
+function shotBox(fields: Record<string, unknown>, group: GroupView | undefined): ShotBox {
+  const ids = Array.isArray(fields["angles"]) ? (fields["angles"] as unknown[]).filter((angle): angle is string => typeof angle === "string") : [];
+  const angles = ids.map((id, index): ShotAngle => {
+    const at = group ? group.angles.findIndex((angle) => angle.id === id) : -1;
+    return { id, name: at >= 0 ? group!.angles[at]!.name : id, color: (at >= 0 ? at : index) % ANGLE_COLOR_COUNT };
+  });
+  const confidence = typeof fields["confidence"] === "number" ? (fields["confidence"] as number) : null;
+  return {
+    layout: typeof fields["shot"] === "string" ? (fields["shot"] as string) : "",
+    angles,
+    confidence,
+    reason: typeof fields["reason"] === "string" ? (fields["reason"] as string) : null,
+    doubtful: confidence !== null && confidence < SHOT_LOW_CONFIDENCE,
+  };
+}
+
+function clipBox(clip: ClipView, nextStart: number | undefined, problem: string | null, group?: GroupView): ClipBox {
   const fields = clip as Record<string, unknown>;
   const text = (key: string) => (typeof fields[key] === "string" ? (fields[key] as string) : null);
   const num = (key: string, fallback: number) => (typeof fields[key] === "number" ? (fields[key] as number) : fallback);
@@ -157,9 +211,9 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
   const asset = kind === "media" ? text("asset") : null;
   const source = text("source");
   let name: string;
-  const angles = Array.isArray(fields["angles"]) ? (fields["angles"] as unknown[]).filter((angle) => typeof angle === "string") : [];
+  const shot = kind === "shot" ? shotBox(fields, group) : null;
   if (asset) name = baseName(asset);
-  else if (kind === "shot") name = [text("shot") ?? "shot", angles.join(", ")].filter(Boolean).join(" · ");
+  else if (shot) name = [layoutName(shot.layout), shot.angles.map((angle) => angle.name).join(", ")].filter(Boolean).join(" · ");
   else if (kind === "timeline" && source) name = baseName(source).replace(/\.json$/, "");
   else if (source) name = /^index\.[a-z]+$/i.test(baseName(source)) ? baseName(parentDir(source)) : baseName(source);
   else name = clip.type;
@@ -181,6 +235,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     gain: typeof audio.gain === "number" ? audio.gain : 0,
     muted: audio.muted === true,
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
+    shot,
   };
 }
 

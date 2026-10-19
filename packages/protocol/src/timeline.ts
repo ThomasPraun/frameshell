@@ -4,6 +4,7 @@ import {
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
+  SHOT_LAYOUTS,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
   type SubtitlePosition,
@@ -23,6 +24,7 @@ import { AGENT_LABEL_PATTERN } from "./agents.js";
 const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Seconds; snapped to the project frame grid, 3 decimals.`);
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
+const CropSide = z.number().min(0).lt(1).optional();
 
 /** Snapping args shared by `cut` and `clip.trim` (ADR 0003). */
 const snapArgs = {
@@ -246,6 +248,32 @@ export const operationArgs = {
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     angle: z.string().min(1).describe("Angle id of that group."),
     offset: Seconds("New group-clock second at which the angle's asset time 0 plays (absolute, not a nudge)."),
+  }),
+  "multicam.angle": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    angle: z.string().min(1).describe("Angle id of that group; it never changes, shots keep naming it."),
+    name: z.string().min(1).optional().describe("New display name, e.g. `Ana`."),
+    crop: z
+      .strictObject({
+        left: CropSide,
+        top: CropSide,
+        right: CropSide,
+        bottom: CropSide,
+      })
+      .nullable()
+      .optional()
+      .describe("Sides to change, fractions of the picture cut off (0 to below 1); omitted sides keep their value, null removes the crop."),
+    gain: z.number().optional().describe("Gain of the angle's sound in dB, under every shot. 0 = unchanged level."),
+    muted: z.boolean().optional().describe("Mute the angle's sound under every shot."),
+  }),
+  "shot.set": z.strictObject({
+    clip: ClipRef.describe("Shot id: a clip of a program track, from `timeline.show`."),
+    shot: z.enum(SHOT_LAYOUTS).optional().describe("New layout: `solo` (one angle), `two-up` (two), `grid` (two or more). Default: unchanged."),
+    angles: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe("Angle ids of the track's group to show, in layout order (left to right, then top to bottom). Default: unchanged."),
   }),
 } as const;
 

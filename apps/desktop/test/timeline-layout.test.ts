@@ -241,7 +241,42 @@ describe("layoutTimeline with a program track", () => {
       ["t_v1", "V1", "video", LANE_HEIGHT.video],
       ["t_a1", "A1", "audio", LANE_HEIGHT.audio],
     ]);
-    expect(layout.rows[0]!.clips[0]).toMatchObject({ id: "c_s", kind: "shot", name: "two-up · ana, ben", asset: null, start: 0, end: 4 });
+    expect(layout.rows[0]!.clips[0]).toMatchObject({ id: "c_s", kind: "shot", name: "Two-up · ana, ben", asset: null, start: 0, end: 4 });
+    expect(layout.rows[0]!.group).toBe("g_talk");
+  });
+
+  it("names a shot's angles from the group and colours each by its place there, flagging doubtful director's shots", () => {
+    const shots = [
+      { id: "c_a", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "two-up", angles: ["ben", "ana"], confidence: 0.3, reason: "quick exchange" },
+      { id: "c_b", type: "shot", start: 4, end: 6, in: 4, out: 6, shot: "solo", angles: ["cleo"], confidence: 0.8 },
+      { id: "c_c", type: "shot", start: 6, end: 8, in: 6, out: 8, shot: "solo", angles: ["ana"] },
+    ];
+    const group = {
+      id: "g_talk",
+      angles: [
+        { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+        { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0 },
+        { id: "cleo", name: "Cleo", asset: "assets/cleo.mp4", offset: 0 },
+      ],
+    };
+    const layout = layoutTimeline(view([{ id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips: shots }], { groups: [group] }));
+    const [a, b, c] = layout.rows[0]!.clips;
+    expect(a).toMatchObject({
+      name: "Two-up · Ben, Ana",
+      shot: {
+        layout: "two-up",
+        angles: [
+          { id: "ben", name: "Ben", color: 1 },
+          { id: "ana", name: "Ana", color: 0 },
+        ],
+        confidence: 0.3,
+        reason: "quick exchange",
+        doubtful: true,
+      },
+    });
+    expect(b!.shot).toMatchObject({ angles: [{ id: "cleo", color: 2 }], doubtful: false });
+    expect(c!.shot).toMatchObject({ confidence: null, reason: null, doubtful: false });
+    expect(layout.rows[0]!.clips.every((clip) => clip.kind === "shot")).toBe(true);
   });
 });
 

@@ -14,6 +14,7 @@ export {
   ADAPTER_CLIP_TYPE_PATTERN,
   SHOT_LAYOUTS,
   SHOT_ANGLE_COUNTS,
+  SHOT_LOW_CONFIDENCE,
   TimelineSchema,
   TrackSchema,
   ClipTrackSchema,

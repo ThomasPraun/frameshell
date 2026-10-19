@@ -77,10 +77,37 @@ describe("frameshell multicam", () => {
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("Angles: ana, ben");
   }, 120_000);
+
+  it("changes a shot and an angle, each one undoable step", () => {
+    const json = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    const group = json.groups[0].id as string;
+    const shot = json.tracks.at(-1).clips[0].id as string;
+
+    const solo = frameshell(["shot", "set", shot, "--layout", "solo", "--angles", "ben"]);
+    expect(solo.stderr).toBe("");
+    expect(solo.stdout).toContain("shot.set: updated");
+    const angle = frameshell(["multicam", "angle", group, "ben", "--name", "Benito", "--crop-left", "0.1", "--gain=-3", "--muted"]);
+    expect(angle.code).toBe(0);
+    let after = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    expect(after.tracks.at(-1).clips[0]).toMatchObject({ shot: "solo", angles: ["ben"] });
+    expect(after.groups[0].angles[1]).toMatchObject({ id: "ben", name: "Benito", crop: { left: 0.1 }, audio: { gain: -3, muted: true } });
+
+    const history = JSON.parse(frameshell(["history", "--json"]).stdout) as { transactions: { tx: string; operations: { op: string; id: string }[] }[] };
+    const op = (name: string) => history.transactions.flatMap((tx) => tx.operations).find((candidate) => candidate.op === name)!.id;
+    expect(frameshell(["revert", op("multicam.angle")]).code).toBe(0);
+    expect(frameshell(["revert", op("shot.set")]).code).toBe(0);
+    after = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    expect(after.tracks.at(-1).clips[0]).toMatchObject({ shot: "grid", angles: ["ana", "ben"] });
+    expect(after.groups[0].angles[1]).toEqual(json.groups[0].angles[1]);
+
+    const wrong = frameshell(["shot", "set", shot, "--layout", "two-up", "--angles", "ana"]);
+    expect(wrong.code).toBe(1);
+    expect(wrong.stderr).toContain("a two-up shot takes exactly 2 angles; got 1");
+  }, 120_000);
 });
 
 describe("parsing multicam commands", () => {
-  it("maps arguments to the methods and refuses a wrong name count or a bad number", () => {
+  it("maps arguments to the methods and refuses a wrong name count, a bad number or conflicting flags", () => {
     expect(parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A", "B"] })).toMatchObject({
       method: "multicam.create",
       params: { assets: ["a.mp4", "b.mp4"], names: ["A", "B"] },
@@ -93,5 +120,17 @@ describe("parsing multicam commands", () => {
     });
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "soon"], {})).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "1"], { "group-name": "x" })).toThrow(/does not take --group-name/);
+    expect(parseTimelineCommand(["shot", "set", "c_1"], { layout: "two-up", angles: "ana, ben" })).toMatchObject({
+      method: "shot.set",
+      params: { clip: "c_1", shot: "two-up", angles: ["ana", "ben"] },
+    });
+    expect(() => parseTimelineCommand(["shot", "set", "c_1"], { angles: " , " })).toThrow(/angle ids separated by commas/);
+    expect(parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { "crop-top": "0.2", unmuted: true })).toMatchObject({
+      method: "multicam.angle",
+      params: { group: "g_1", angle: "ben", crop: { top: 0.2 }, muted: false },
+    });
+    expect(parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { "clear-crop": true })).toMatchObject({ params: { crop: null } });
+    expect(() => parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { "clear-crop": true, "crop-left": "0.1" })).toThrow(/not both/);
+    expect(() => parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { muted: true, unmuted: true })).toThrow(/not both/);
   });
 });
