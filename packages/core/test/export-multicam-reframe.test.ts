@@ -44,6 +44,12 @@ describe("reframed shots in the export plan", () => {
     expect(plan.files["seg-0001.filter"]).toContain("crop=608:1080:176:0,scale=1080:1920");
   });
 
+  it("keeps an odd still edge, which chroma subsampling would round down", () => {
+    const still: MulticamGroup = { ...group, angles: [{ ...group.angles[0]!, reframe: [{ at: 0, x: 0.31, y: 0.5 }] }, group.angles[1]!] };
+    const plan = compileRender({ timeline: timeline([solo], [still]), fps: 30, preset: vertical, loudness: -17, sources, resolution, segmentSeconds: 10 });
+    expect(plan.files["seg-0001.filter"]).toContain("crop=608:1080:291:0:exact=1,scale=1080:1920");
+  });
+
   it("moves the crop with an expression of the group second, per segment", () => {
     const plan = compileRender({ timeline: timeline([solo]), fps: 30, preset: vertical, loudness: -17, sources, resolution, segmentSeconds: 1 });
     const first = plan.files["seg-0001.filter"]!;
@@ -129,6 +135,39 @@ describe("reframed shots rendered (real ffmpeg)", () => {
       ] as const) {
         expect(pixel(frame, x), `frame ${frame} column ${x}`).toBe(expected(frame, x));
       }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "cuts a still key at an odd left edge where the shared layout puts it",
+    async () => {
+      // 128x64 at 36x64 out: the crop is 36 wide, scaled 1:1. White columns 0..32, black from 33.
+      const path = join(dir, "edge.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "color=c=white:s=128x64:r=30:d=2,format=rgb24,drawbox=x=33:y=0:w=95:h=64:color=black:t=fill"],
+        ...["-f", "lavfi", "-i", "sine=f=220:r=48000:d=2"],
+        ...["-c:v", "libx264", "-crf", "8", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", path],
+      ]);
+      const source: ExportSource = { path, video: { codec: "h264", still: false, width: 128, height: 64 }, audio: true };
+      const edge = new Map([
+        ["assets/ana.mp4", source],
+        ["assets/ben.mp4", source],
+      ]);
+      const still: MulticamGroup = { ...group, angles: [{ ...group.angles[0]!, reframe: [{ at: 0, x: 19 / 128, y: 0.5 }] }, group.angles[1]!] };
+      const shot: ShotClip = { ...solo, in: 0, out: 1 };
+      const [layer] = shotLayers(shot, still, { width: 36, height: 64 }, () => ({ width: 128, height: 64 }), 0);
+      expect(layer!.reframe).toBeUndefined();
+      expect(layer!.crop).toEqual({ left: 1, top: 0, width: 36, height: 64 });
+      const plan = compileRender({ timeline: timeline([shot], [still]), fps: 30, preset: TALL, loudness: -17, sources: edge, resolution: { width: 64, height: 36 }, segmentSeconds: 10 });
+      const output = join(dir, "edge-out.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-edge"), output });
+      const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:v:0", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"]);
+      const luma = (x: number) => raw[32 * 36 + x]!;
+      // Source column 32 (white) lands on output column 31 and 33 (black) on 32; an even edge would move both one right.
+      expect(luma(31)).toBeGreaterThan(160);
+      expect(luma(32)).toBeLessThan(96);
     },
     MEDIA_TIMEOUT,
   );

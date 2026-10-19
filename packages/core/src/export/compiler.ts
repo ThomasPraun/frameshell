@@ -225,9 +225,10 @@ interface Placed {
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
    * `move`: the angle's reframe moves the crop, and `clock` is the group second
-   * at timeline second 0 (the shot's `in - start`).
+   * at timeline second 0 (the shot's `in - start`). `exact`: the angle has a
+   * reframe, so its still crop keeps odd edges like the moving one.
    */
-  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean; move?: { path: CropPath; clock: number } };
+  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean; exact?: boolean; move?: { path: CropPath; clock: number } };
 }
 
 /** What export v1 renders of a timeline. */
@@ -621,6 +622,7 @@ function placeShots(shots: readonly ShotClip[], group: MulticamGroup, context: S
           crop: layer.crop,
           rect: layer.tile,
           backdrop: layer.backdrop,
+          ...(angle.reframe ? { exact: true } : {}),
           ...(layer.reframe ? { move: { path: layer.reframe, clock: shot.in - shot.start } } : {}),
         },
       });
@@ -754,7 +756,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const move = placed.tile?.move;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
-      ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`] : []),
+      ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
@@ -766,6 +768,15 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
+}
+
+/**
+ * `crop` filter cutting `crop`. Chroma subsampling rounds an odd edge down;
+ * `exact` keeps it, only when asked and needed so unreframed output stays as it was.
+ */
+function staticCrop(crop: LayerRect, exact: boolean): string {
+  const odd = crop.left % 2 !== 0 || crop.top % 2 !== 0;
+  return `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}${exact && odd ? ":exact=1" : ""}`;
 }
 
 /**
