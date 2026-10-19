@@ -1,9 +1,9 @@
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type MulticamDirectResult, connectToDaemon } from "@frameshell/protocol";
 import type { ProgramTrack, Timeline } from "@frameshell/schema";
-import { type Daemon, startDaemon } from "../src/index.js";
+import { type Daemon, ENERGY_DIR, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeVoiceClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
@@ -46,8 +46,8 @@ afterAll(async () => {
   await daemon.close();
 });
 
-async function program(): Promise<ProgramTrack> {
-  const parsed = JSON.parse(await readFile(join(project, "timelines", "main.json"), "utf8")) as Timeline;
+async function program(dir = project): Promise<ProgramTrack> {
+  const parsed = JSON.parse(await readFile(join(dir, "timelines", "main.json"), "utf8")) as Timeline;
   return parsed.tracks.find((track): track is ProgramTrack => track.kind === "program" && track.group === group)!;
 }
 
@@ -94,6 +94,28 @@ describe("multicam.direct", () => {
     const replaced = await agent.request("multicam.direct", { cwd: project, group, replaceHuman: true });
     expect(replaced.kept).toEqual([]);
     expect(pictures(await program())).toEqual(["solo ana", "solo ben", "solo ana"]);
+  }, MEDIA_TIMEOUT);
+
+  it("reports only the kept shots inside the range", async () => {
+    const last = (await program()).clips[2]!;
+    await app.request("shot.set", { cwd: project, clip: last.id, shot: "two-up", angles: ["ana", "ben"] });
+    const narrowed = await agent.request("multicam.direct", { cwd: project, group, from: 0, to: 5 });
+    expect(narrowed.kept).toEqual([]);
+    const whole = await agent.request("multicam.direct", { cwd: project, group });
+    expect(whole.kept).toEqual([last.id]);
+  }, MEDIA_TIMEOUT);
+
+  it("keeps a shot the person sets while the turns are still being measured", async () => {
+    // A copy without the envelope cache decodes every angle again, so the app's change lands first.
+    const copy = tempDir();
+    await cp(project, copy, { recursive: true, filter: (path) => !path.includes(join(...ENERGY_DIR.split("/"))) });
+    const ben = (await program(copy)).clips[1]!;
+    const directing = agent.request("multicam.direct", { cwd: copy, group });
+    const set = await app.request("shot.set", { cwd: copy, clip: ben.id, shot: "two-up", angles: ["ana", "ben"] });
+    const directed = await directing;
+    expect(directed.operation.revisionBefore).toBeGreaterThan(set.operation.revisionBefore);
+    expect(directed.kept).toContain(ben.id);
+    expect((await program(copy)).clips.find((shot) => shot.id === ben.id)).toMatchObject({ shot: "two-up", angles: ["ana", "ben"] });
   }, MEDIA_TIMEOUT);
 
   it("reads director.json on top of the template, and refuses a broken or missing rules file", async () => {

@@ -41,6 +41,7 @@ const VERBS: Record<string, string> = {
   "multicam.create": t.history.verbs.multicamCreate,
   "multicam.offset": t.history.verbs.multicamOffset,
   "multicam.angle": t.history.verbs.multicamAngle,
+  "multicam.direct": t.history.verbs.multicamDirect,
   "shot.set": t.history.verbs.changeShot,
   "timeline.patch": t.history.verbs.directEdit,
 };

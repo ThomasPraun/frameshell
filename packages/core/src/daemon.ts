@@ -24,7 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -299,14 +299,29 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
   };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
-  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string; [arg: string]: unknown }, caller: Caller, onApplied?: (after: Timeline) => void) => {
+  const operate = async (
+    op: OperationRequest["op"],
+    params: { cwd: string; timeline: string; [arg: string]: unknown },
+    caller: Caller,
+    onApplied?: (after: Timeline) => void,
+    prepare?: (current: Timeline, request: OperationRequest) => Promise<OperationRequest>,
+  ) => {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
     const key = authorOf(caller);
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, timeline });
-    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(onApplied ? { onApplied } : {}) });
+    const result = await timelines.apply({
+      root: dir,
+      cwd,
+      timeline,
+      request,
+      author: journalAuthorOf(caller),
+      tx,
+      ...(onApplied ? { onApplied } : {}),
+      ...(prepare ? { prepare: (current: Timeline) => prepare(current, request) } : {}),
+    });
     await transactions.applied(key, tx);
     return result;
   };
@@ -554,22 +569,38 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await timelines.load(dir, timeline);
       const found = groupOf(loaded, group, "multicam.direct");
-      const program = loaded.tracks.find((track): track is ProgramTrack => track.kind === "program" && track.group === group);
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
-      const keep = replaceHuman === true || !program ? [] : humanShots(await readJournal(dir, timeline), program);
       const measured = await groupTurns(turnsSource, dir, found);
       const turns = measured.turns.map(({ angle, start, end }) => ({ angle, start, end }));
       let written: Timeline | undefined;
+      let keep: string[] = [];
       const args = { cwd, timeline, group, from, to, turns, rules: loadedRules.rules, keep };
-      const result = await operate("multicam.direct", args, caller, (after) => {
-        written = after;
-      });
+      // Human shots come from the timeline and journal the operation applies to: measuring turns
+      // can take long, and a shot a person sets meanwhile must still be kept.
+      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+        const program = current.tracks.find((track): track is ProgramTrack => track.kind === "program" && track.group === group);
+        keep = replaceHuman === true || !program ? [] : humanShots(await readJournal(dir, timeline), program);
+        return { ...request, args: { ...request.args, keep } } as OperationRequest;
+      };
+      const result = await operate(
+        "multicam.direct",
+        args,
+        caller,
+        (after) => {
+          written = after;
+        },
+        prepare,
+      );
       const track = written?.tracks.find((candidate): candidate is ProgramTrack => candidate.kind === "program" && candidate.group === group);
       if (!track) throw new Error("multicam.direct: the operation left no program track");
+      const grid = new FrameGrid(fps);
+      const first = grid.frame(grid.snap(from ?? 0));
       // A shot cut by both ends of the range leaves its tail as a new id after `to`: not a directed shot.
-      const end = to === undefined ? Number.POSITIVE_INFINITY : new FrameGrid(fps).snap(to);
+      const end = to === undefined ? Number.POSITIVE_INFINITY : grid.snap(to);
+      const last = to === undefined ? Number.POSITIVE_INFINITY : grid.frame(end);
       const added = new Set(track.clips.filter((shot) => result.changes.added.includes(shot.id) && shot.start < end - 1e-6).map((shot) => shot.id));
       const keptIds = new Set(keep);
+      const inRange = (shot: ShotClip) => grid.frame(shot.start + shot.out - shot.in) > first && grid.frame(shot.start) < last;
       const unknown = unknownWeights(loadedRules.rules, found);
       const warnings = [
         ...result.warnings,
@@ -585,7 +616,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         template: loadedRules.template,
         rulesFile: loadedRules.rulesFile,
         shots: added.size,
-        kept: track.clips.filter((shot) => keptIds.has(shot.id)).map((shot) => shot.id),
+        kept: track.clips.filter((shot) => keptIds.has(shot.id) && inRange(shot)).map((shot) => shot.id),
         low: lowShots(track, added),
         warnings,
       };

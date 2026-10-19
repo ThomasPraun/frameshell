@@ -956,6 +956,8 @@ class Edit {
     const kept: ShotClip[] = [];
     const spans: { start: number; in: number; out: number }[] = [];
     const taken = new Set<string>();
+    /** A shot in the range was left alone because a person chose it. */
+    let chosen = false;
     const freshId = () => {
       for (;;) {
         const id = this.newId("c");
@@ -977,7 +979,9 @@ class Edit {
     }
     for (const shot of track.clips) {
       const end = round(shot.start + shot.out - shot.in);
-      if (keep.has(shot.id) || g.frame(end) <= g.frame(from) || g.frame(shot.start) >= g.frame(to)) {
+      const outside = g.frame(end) <= g.frame(from) || g.frame(shot.start) >= g.frame(to);
+      if (outside || keep.has(shot.id)) {
+        if (!outside) chosen = true;
         kept.push(shot);
         continue;
       }
@@ -995,10 +999,12 @@ class Edit {
       }
     }
     if (spans.length === 0) {
-      const reason = track.clips.some((shot) => keep.has(shot.id)) ? "every shot there is one a person chose" : "the program track has no shot there";
+      const reason = chosen ? "every shot there is one a person chose" : "the program track has no shot there";
       throw this.invalid(`nothing to direct between ${from} and ${to === Number.POSITIVE_INFINITY ? "the end" : `${to} s`}: ${reason}.`, {
-        field: keep.size > 0 ? "replaceHuman" : "from",
-        hint: "Pick a range with shots the director chose, or pass `replaceHuman: true` to redo the people's shots too.",
+        field: chosen ? "replaceHuman" : "from",
+        hint: chosen
+          ? "Pick a range with shots the director chose, or pass `replaceHuman: true` to redo the people's shots too."
+          : "Pick a range with shots on the program track (`timeline.show` lists them).",
       });
     }
     const directed: ShotClip[] = [];

@@ -159,6 +159,10 @@ describe("multicam.direct", () => {
     expect(kept.message).toMatch(/every shot there is one a person chose/);
     expect(kept.data).toMatchObject({ field: "replaceHuman" });
     expect((await rejection(applyOperation(talk([grid("c_a", 0, 0, 20)]), direct({ from: 25 }), context()))).message).toMatch(/no shot there/);
+    // A person's shot elsewhere on the track does not make a range over a gap theirs.
+    const gap = await rejection(applyOperation(talk([grid("c_a", 0, 0, 5), grid("c_b", 10, 10, 15)]), direct({ from: 6, to: 9, keep: ["c_b"] }), context()));
+    expect(gap.message).toMatch(/no shot there/);
+    expect(gap.data).toMatchObject({ field: "from" });
   });
 });
 
@@ -194,5 +198,47 @@ describe("humanShots", () => {
       entry("clip.move", "ui", { clip: "c_moved", start: 9 }, [{ id: "c_moved", clip: solo("c_moved") }]),
     ];
     expect(humanShots(journal, track)).toEqual(["c_ui", "c_piece"]);
+  });
+
+  it("passes nothing on to pieces of a shot a ripple cut only moved", () => {
+    // Split grid G at 10 s, the app set G2, then a 5-8 s cut inside G moved G2 and left G's right piece G3.
+    const track: ProgramTrack = {
+      id: "t_p",
+      kind: "program",
+      group: "g_talk",
+      clips: [grid("c_g", 0, 0, 5), grid("c_g3", 5, 8, 10), solo("c_g2", { start: 7, in: 10, out: 20, angles: ["ben"] })],
+    };
+    const journal = [
+      entry("clip.split", "cli:term-1", { clip: "c_g", at: 10 }, [{ id: "c_g", clip: grid("c_g", 0, 0, 20) }, { id: "c_g2", clip: null }]),
+      entry("shot.set", "ui", { clip: "c_g2" }, [{ id: "c_g2", clip: grid("c_g2", 10, 10, 20) }]),
+      entry("cut", "cli:term-1", { from: 5, to: 8 }, [
+        { id: "c_g", clip: grid("c_g", 0, 0, 10) },
+        { id: "c_g2", clip: solo("c_g2", { start: 10, in: 10, out: 20, angles: ["ben"] }) },
+        { id: "c_g3", clip: null },
+      ]),
+    ];
+    expect(humanShots(journal, track)).toEqual(["c_g2"]);
+  });
+
+  it("hands shots back to the director after --replace-human and an agent's shot set", () => {
+    const track: ProgramTrack = {
+      id: "t_p",
+      kind: "program",
+      group: "g_talk",
+      clips: [solo("c_d1"), solo("c_d2", { start: 5, in: 5, out: 10, confidence: 0.9, reason: "ben speaks" }), solo("c_back", { start: 10, in: 10, out: 15 })],
+    };
+    const directed = (id: string, start: number) => solo(id, { start, in: start, out: start + 5, confidence: 0.9, reason: "speaks" });
+    const journal = [
+      entry("shot.set", "ui", { clip: "c_h" }, [{ id: "c_h", clip: grid("c_h", 0, 0, 10) }]),
+      entry("shot.set", "ui", { clip: "c_back" }, [{ id: "c_back", clip: solo("c_back", { start: 10, in: 10, out: 15 }) }]),
+      entry("multicam.direct", "cli:term-1", { group: "g_talk", keep: [] }, [
+        { id: "c_h", clip: solo("c_h", { out: 10, shot: "two-up", angles: ["ana", "ben"] }) },
+        { id: "c_d1", clip: null },
+        { id: "c_d2", clip: null },
+      ]),
+      entry("shot.set", "agent:claude:term-1", { clip: "c_d1" }, [{ id: "c_d1", clip: directed("c_d1", 0) }]),
+      entry("shot.set", "agent:claude:term-1", { clip: "c_back" }, [{ id: "c_back", clip: solo("c_back", { start: 10, in: 10, out: 15, shot: "grid" }) }]),
+    ];
+    expect(humanShots(journal, track)).toEqual([]);
   });
 });

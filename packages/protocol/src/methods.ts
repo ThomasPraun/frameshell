@@ -1275,7 +1275,8 @@ export const methods = {
       "and longest solo, two-up on quick exchanges and on two people talking at once, wide (`grid`) on silence and laughter, cut " +
       "lead (the voice leads the cut, J-cut), weight per angle. The program track keeps what plays where: each shot in range is " +
       "replaced by directed shots over the same group time, gaps stay gaps; an empty track is filled over the whole group. " +
-      "Shots a person chose in the app (`shot.set` by author `ui`) are kept unless `replaceHuman: true`. Every shot gets " +
+      "Shots a person chose in the app (`shot.set` by author `ui`, and pieces cut out of them) are kept unless " +
+      "`replaceHuman: true`; `kept` lists those in the range. Every shot gets " +
       "`confidence` and `reason`; `low` lists those below 0.5 to review (e.g. a reaction worth holding), then fix them with " +
       "`shot.set`. `operation.args.turns` is the number of turns used (the journal keeps them all). " +
       "Example: `{ group: \"g_1a2b3c\", template: \"podcast-calm\", from: 60, to: 120 }`. Fails with " +
