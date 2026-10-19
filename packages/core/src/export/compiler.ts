@@ -21,6 +21,7 @@ import {
   programGroup,
   programSound,
   shotLayers,
+  soundSamples,
   subtitleTracks,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
@@ -221,6 +222,8 @@ interface Placed {
   in: number;
   speed: number;
   placement: Placement;
+  /** Sound of a program track: placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
+  exact?: true;
   /**
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
@@ -514,7 +517,7 @@ function layoutTimeline(
       for (const edge of shotEdges) frames = Math.max(frames, edge);
       pictures.push({ program: true, placed: layers });
       // Every angle's sound plays under every shot, whatever the shot shows.
-      for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound)));
+      for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound).map((placed) => ({ ...placed, exact: true as const }))));
       continue;
     }
     const placed = placeTrack(track);
@@ -852,15 +855,35 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
   const tracks = layout.audio.map((track) => {
     const items: AudioItem[] = [];
     let cursor = 0;
+    /** Last item when it is a program sound and its start sample, for joining the next shot to it. */
+    let joinable: { item: Extract<AudioItem, { kind: "clip" }>; start: number } | null = null;
     for (const placed of track) {
-      const start = at(placed.start);
-      const end = at(placed.end);
-      if (start > cursor) items.push({ kind: "silence", samples: start - cursor });
+      const exact = placed.exact ? soundSamples(placed.clip, sampleRate) : null;
+      // Program sound: exact samples of the clip's seconds, clamped to the video's length and the previous item.
+      const start = exact ? Math.min(samples, Math.max(cursor, exact.start)) : at(placed.start);
+      const end = exact ? Math.min(samples, exact.end) : at(placed.end);
+      if (exact && end <= start) continue;
+      const from = exact ? exact.in + (start - exact.start) : Math.round((placed.in / fps) * sampleRate);
+      const sourceSamples = exact ? end - start : Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate);
       let input = inputs.indexOf(placed.source.path);
       if (input === -1) input = inputs.push(placed.source.path) - 1;
-      const from = Math.round((placed.in / fps) * sampleRate);
-      const sourceSamples = Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate);
-      items.push({
+      const previous = joinable;
+      // A sound running on across a shot change stays one item: shots switch pictures, the edge fade belongs to real cuts (as in the preview).
+      if (
+        exact &&
+        previous &&
+        start - cursor <= 1 &&
+        previous.item.input === input &&
+        previous.item.gainDb === (placed.clip.audio?.gain ?? 0) &&
+        Math.abs(from - previous.item.to) <= 1
+      ) {
+        previous.item.samples = end - previous.start;
+        previous.item.to = previous.item.from + previous.item.samples;
+        cursor = end;
+        continue;
+      }
+      if (start > cursor) items.push({ kind: "silence", samples: start - cursor });
+      const item: Extract<AudioItem, { kind: "clip" }> = {
         kind: "clip",
         clip: placed.clip.id,
         input,
@@ -869,7 +892,9 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         speed: placed.speed,
         gainDb: placed.clip.audio?.gain ?? 0,
         samples: end - start,
-      });
+      };
+      items.push(item);
+      joinable = exact ? { item, start } : null;
       cursor = end;
     }
     if (samples > cursor) items.push({ kind: "silence", samples: samples - cursor });

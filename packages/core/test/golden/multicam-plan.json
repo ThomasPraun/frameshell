@@ -214,50 +214,10 @@
             "clip": "c_s1/ana",
             "input": 0,
             "from": 0,
-            "to": 48000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s2/ana",
-            "input": 0,
-            "from": 48000,
-            "to": 96000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s3/ana",
-            "input": 0,
-            "from": 96000,
-            "to": 144000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s4/ana",
-            "input": 0,
-            "from": 144000,
-            "to": 192000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s5/ana",
-            "input": 0,
-            "from": 192000,
             "to": 240000,
             "speed": 1,
             "gainDb": 0,
-            "samples": 48000
+            "samples": 240000
           }
         ],
         [
@@ -270,50 +230,10 @@
             "clip": "c_s1/ben",
             "input": 1,
             "from": 0,
-            "to": 24000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 24000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s2/ben",
-            "input": 1,
-            "from": 24000,
-            "to": 72000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s3/ben",
-            "input": 1,
-            "from": 72000,
-            "to": 120000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s4/ben",
-            "input": 1,
-            "from": 120000,
-            "to": 168000,
-            "speed": 1,
-            "gainDb": 0,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s5/ben",
-            "input": 1,
-            "from": 168000,
             "to": 216000,
             "speed": 1,
             "gainDb": 0,
-            "samples": 48000
+            "samples": 216000
           }
         ],
         [
@@ -322,50 +242,10 @@
             "clip": "c_s1/eva",
             "input": 2,
             "from": 0,
-            "to": 48000,
-            "speed": 1,
-            "gainDb": -6,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s2/eva",
-            "input": 2,
-            "from": 48000,
-            "to": 96000,
-            "speed": 1,
-            "gainDb": -6,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s3/eva",
-            "input": 2,
-            "from": 96000,
-            "to": 144000,
-            "speed": 1,
-            "gainDb": -6,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s4/eva",
-            "input": 2,
-            "from": 144000,
-            "to": 192000,
-            "speed": 1,
-            "gainDb": -6,
-            "samples": 48000
-          },
-          {
-            "kind": "clip",
-            "clip": "c_s5/eva",
-            "input": 2,
-            "from": 192000,
             "to": 240000,
             "speed": 1,
             "gainDb": -6,
-            "samples": 48000
+            "samples": 240000
           }
         ]
       ],
@@ -381,7 +261,7 @@
   },
   "mix": {
     "files": {
-      "mix.filter": "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=5[i0c0][i0c1][i0c2][i0c3][i0c4];\n[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=5[i1c0][i1c1][i1c2][i1c3][i1c4];\n[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=5[i2c0][i2c1][i2c2][i2c3][i2c4];\n[i0c0]atrim=start_sample=0:end_sample=48000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i0];\n[i0c1]atrim=start_sample=48000:end_sample=96000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i1];\n[i0c2]atrim=start_sample=96000:end_sample=144000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i2];\n[i0c3]atrim=start_sample=144000:end_sample=192000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i3];\n[i0c4]atrim=start_sample=192000:end_sample=240000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i4];\n[t0i0][t0i1][t0i2][t0i3][t0i4]concat=n=5:v=0:a=1[t0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=24000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t1i0];\n[i1c0]atrim=start_sample=0:end_sample=24000,asetpts=PTS-STARTPTS,apad=whole_len=24000,atrim=end_sample=24000,afade=t=in:ss=0:ns=96,afade=t=out:ss=23904:ns=96[t1i1];\n[i1c1]atrim=start_sample=24000:end_sample=72000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t1i2];\n[i1c2]atrim=start_sample=72000:end_sample=120000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t1i3];\n[i1c3]atrim=start_sample=120000:end_sample=168000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t1i4];\n[i1c4]atrim=start_sample=168000:end_sample=216000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t1i5];\n[t1i0][t1i1][t1i2][t1i3][t1i4][t1i5]concat=n=6:v=0:a=1[t1];\n[i2c0]atrim=start_sample=0:end_sample=48000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t2i0];\n[i2c1]atrim=start_sample=48000:end_sample=96000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t2i1];\n[i2c2]atrim=start_sample=96000:end_sample=144000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t2i2];\n[i2c3]atrim=start_sample=144000:end_sample=192000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t2i3];\n[i2c4]atrim=start_sample=192000:end_sample=240000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t2i4];\n[t2i0][t2i1][t2i2][t2i3][t2i4]concat=n=5:v=0:a=1[t2];\n[t0][t1][t2]amix=inputs=3:duration=longest:normalize=0[mix]\n"
+      "mix.filter": "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i0c0];\n[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i1c0];\n[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i2c0];\n[i0c0]atrim=start_sample=0:end_sample=240000,asetpts=PTS-STARTPTS,apad=whole_len=240000,atrim=end_sample=240000,afade=t=in:ss=0:ns=96,afade=t=out:ss=239904:ns=96[t0i0];\n[t0i0]concat=n=1:v=0:a=1[t0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=24000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t1i0];\n[i1c0]atrim=start_sample=0:end_sample=216000,asetpts=PTS-STARTPTS,apad=whole_len=216000,atrim=end_sample=216000,afade=t=in:ss=0:ns=96,afade=t=out:ss=215904:ns=96[t1i1];\n[t1i0][t1i1]concat=n=2:v=0:a=1[t1];\n[i2c0]atrim=start_sample=0:end_sample=240000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=240000,atrim=end_sample=240000,afade=t=in:ss=0:ns=96,afade=t=out:ss=239904:ns=96[t2i0];\n[t2i0]concat=n=1:v=0:a=1[t2];\n[t0][t1][t2]amix=inputs=3:duration=longest:normalize=0[mix]\n"
     },
     "args": [
       "-hide_banner",
