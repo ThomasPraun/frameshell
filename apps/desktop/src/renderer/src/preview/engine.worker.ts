@@ -732,6 +732,10 @@ class Engine implements LayerHost {
         const fy = part.size.height / layer.source.height;
         const { crop, tile } = layer;
         context.globalAlpha = 1;
+        if (layer.backdrop) {
+          context.fillStyle = "#000";
+          context.fillRect(0, 0, output.width, output.height);
+        }
         context.drawImage(part.image, crop.left * fx, crop.top * fy, crop.width * fx, crop.height * fy, tile.left, tile.top, tile.width, tile.height);
         continue;
       }

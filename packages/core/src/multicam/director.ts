@@ -180,7 +180,8 @@ export function directShots(input: DirectorInput): DirectedShot[] {
 /**
  * Where a screen angle moves (see `rules.screen`), the picture is the screen:
  * `pip` with the person who speaks most in that piece (ties: group order;
- * weight 0 never) when `screen.pip` is on and anyone speaks, else `screen`.
+ * weight 0 never) when `screen.pip` is on and the shot there was a solo or
+ * two-up (so someone speaks), else `screen`.
  * Several screens: the first in group order that moves. Pieces left shorter
  * than `minShot` join their neighbour.
  */
@@ -226,7 +227,8 @@ function showScreens(
     }
     const spoken = (id: string) => turns.reduce((sum, turn) => (turn.angle === id ? sum + Math.max(0, Math.min(turn.end, b) - Math.max(turn.start, a)) : sum), 0);
     const talking = people.filter((id) => weight(id) > 0 && spoken(id) > EPSILON);
-    const speaker = [...talking].sort((x, y) => spoken(y) - spoken(x) || order.get(x)! - order.get(y)!)[0];
+    const speaker =
+      run.shot === "solo" || run.shot === "two-up" ? [...talking].sort((x, y) => spoken(y) - spoken(x) || order.get(x)! - order.get(y)!)[0] : undefined;
     out.push(
       pip && speaker !== undefined
         ? { from: a, to: b, shot: "pip", angles: [screen, speaker], why: "screenSpeaks" }

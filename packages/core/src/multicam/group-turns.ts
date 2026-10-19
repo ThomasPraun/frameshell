@@ -25,6 +25,7 @@ export interface GroupTurns {
  * Turns of every angle of `group` (see {@link speakingTurns}), from the
  * cached energy envelopes of the angles' files. An angle whose file has no
  * sound or cannot be decoded gets no turns and a warning; it does not fail the call.
+ * With a non-screen angle in the group, screen angles are not heard at all.
  * Daemon errors (missing asset, ffmpeg unavailable) are thrown, never turned into warnings.
  */
 export async function groupTurns(source: TurnsSource, root: string, group: MulticamGroup): Promise<GroupTurns> {
@@ -43,7 +44,11 @@ export async function groupTurns(source: TurnsSource, root: string, group: Multi
     inputs.push({ id: angle.id, offset: angle.offset, gain: angle.audio?.gain ?? 0, profile });
   }
   const duration = Math.max(0, ...inputs.map((input) => (input.profile ? input.offset + input.profile.db.length * ENERGY_HOP_S : 0)));
+  // A screen's sound (often the mixed call) must not mask people's turns; its turns are discarded anyway.
+  const people = group.angles.some((angle) => angle.screen !== true);
+  const screens = new Set(group.angles.filter((angle) => angle.screen === true).map((angle) => angle.id));
+  const heard = people ? inputs.map((input) => (screens.has(input.id) ? { ...input, profile: null } : input)) : inputs;
   const names = new Map(group.angles.map((angle) => [angle.id, angle.name]));
-  const turns = speakingTurns(inputs, duration).map((turn) => ({ ...turn, name: names.get(turn.angle)! }));
+  const turns = speakingTurns(heard, duration).map((turn) => ({ ...turn, name: names.get(turn.angle)! }));
   return { duration: Math.round(duration * 1000) / 1000, turns, warnings };
 }

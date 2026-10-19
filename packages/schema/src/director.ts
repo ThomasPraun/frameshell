@@ -53,7 +53,7 @@ export const DirectorCutawaySchema = z.strictObject({
 export const DirectorScreenSchema = z.strictObject({
   motion: Rule(
     "A screen angle that changes for at least this long (a slide, a scroll, a demo) is shown: `screen` while nobody speaks, " +
-      "`pip` (screen with the speaker in an inset) while someone does. Null switches the rule off.",
+      "`pip` (screen with the speaker in an inset) while someone does.",
   ),
   hold: Seconds("Pauses in a screen's motion shorter than this stay inside the stretch, so a still moment mid-demo does not cut away."),
   threshold: z

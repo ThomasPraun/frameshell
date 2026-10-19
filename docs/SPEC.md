@@ -585,8 +585,8 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 | **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
 | **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
 | **v0.9** | Video from audio (ADR 0015): new project from an audio file, built-in subtitles-on-background video, scene plan tied to transcript words |
-| **v0.10** | Multicam (ADR 0016): one file per person, audio sync, multicam group and program track, `solo`/`two-up`/`grid` shots, `frameshell direct` with `director.json`, number-key switching and multicam viewer; `screen` and `pip` shots with director rules for screen motion |
-| **v0.11** | Multicam sources and shots: speaker diarization and `speaker` on words, gallery-view call recordings, camera sets with separate mics, `screen` and picture-in-picture shots, 9:16 reframing |
+| **v0.10** | Multicam (ADR 0016): one file per person, audio sync, multicam group and program track, `solo`/`two-up`/`grid` shots, `frameshell direct` with `director.json`, number-key switching and multicam viewer |
+| **v0.11** | Multicam sources and shots: speaker diarization and `speaker` on words, gallery-view call recordings, camera sets with separate mics, `screen` and picture-in-picture shots with director rules for screen motion, 9:16 reframing |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
 

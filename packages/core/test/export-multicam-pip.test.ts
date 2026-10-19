@@ -30,14 +30,48 @@ describe("screen and pip in the export plan", () => {
   it("fits a screen shot whole, centred, with bars", () => {
     // 1600x1200 fitted into 1920x1080 is 1440x1080 at x=240; nothing of the picture is cut.
     expect(screenShot).toContain("crop=1600:1200:0:0,scale=1440:1080");
-    expect(screenShot).toContain("overlay=x=240:y=0");
-  });
+      });
 
   it("puts the inset over the screen, in the chosen corner", () => {
     expect(pipShot).toContain("crop=1600:1200:0:0,scale=1440:1080");
     // Ana's 16:9 inset: a quarter of the width, 2% margin, top-left.
     expect(pipShot).toContain("scale=480:270");
     expect(pipShot).toContain("overlay=x=38:y=38");
-    expect(pipShot.indexOf("overlay=x=240:y=0")).toBeLessThan(pipShot.indexOf("overlay=x=38:y=38"));
+    expect(pipShot.indexOf("overlay=x=0:y=0")).toBeLessThan(pipShot.indexOf("overlay=x=38:y=38"));
+  });
+
+  it("blacks the bars of a screen shot so a lower track does not show through", () => {
+    expect(screenShot).toContain("pad=1920:1080:240:0:black");
+    expect(screenShot).toContain("overlay=x=0:y=0");
+    expect(pipShot).toContain("pad=1920:1080:240:0:black");
+    expect(plan.files["seg-0001.filter"]).not.toContain("overlay=x=240");
+  });
+
+  it("does not pad a screen that fills the frame", () => {
+    const wide = new Map(sources).set("assets/slides.mp4", video(1920, 1080));
+    const flat = compileRender({ timeline, fps: 30, preset, loudness: -17, sources: wide, resolution: { width: 1920, height: 1080 }, segmentSeconds: 1 });
+    expect(flat.files["seg-0001.filter"]).not.toContain("pad=");
+  });
+
+  it("paints the opaque bars over a video track under the program track", () => {
+    const under = {
+      id: "t_v1",
+      kind: "video" as const,
+      clips: [{ id: "c_b", type: "media" as const, asset: "assets/broll.mp4", start: 0, in: 0, out: 2 }],
+    };
+    const withBroll = new Map(sources).set("assets/broll.mp4", video(1920, 1080));
+    const layered = compileRender({
+      timeline: { ...timeline, tracks: [under, ...timeline.tracks] },
+      fps: 30,
+      preset,
+      loudness: -17,
+      sources: withBroll,
+      resolution: { width: 1920, height: 1080 },
+      segmentSeconds: 1,
+    });
+    const filter = layered.files["seg-0001.filter"]!;
+    // b-roll first, then the screen padded to the whole frame: nothing of b-roll survives the bars.
+    expect(filter.indexOf("scale=1920:1080")).toBeLessThan(filter.indexOf("pad=1920:1080:240:0:black"));
+    expect(filter).toContain("overlay=x=0:y=0");
   });
 });

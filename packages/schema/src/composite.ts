@@ -335,6 +335,8 @@ export interface ShotLayer {
   tile: LayerRect;
   /** Source rectangle scaled into `tile`, integer pixels inside the source frame. */
   crop: LayerRect;
+  /** True: the tile does not cover the frame (a contained screen), so black must fill the rest of the frame behind it. */
+  backdrop: boolean;
 }
 
 /** Width of a `pip` inset as a fraction of the frame width, and the most of the frame height it may take. */
@@ -442,6 +444,8 @@ export function coverCrop(area: LayerRect, tile: Size): LayerRect {
  * {@link coverCrop}); later layers paint over earlier ones. A `screen` shot,
  * and the first angle of a `pip` shot, show the whole cropped picture,
  * centered with black bars where the aspects differ: a screen is never cut.
+ * The bars are black, not what lies below: such a layer has `backdrop` set and
+ * the compositor paints black over the whole frame behind it.
  * A `pip` inset keeps its picture's aspect. `sourceSize` gives each asset's
  * picture size. Angles missing from `group` are skipped (the timeline schema
  * refuses them).
@@ -455,14 +459,15 @@ export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, s
     return angles.map((angle, index) => {
       const area = areas[index]!;
       const tile = index === 0 ? containTile(area, output) : tiles[index]!;
-      return { angle: angle.id, asset: angle.asset, tile, crop: index === 0 ? area : coverCrop(area, tile) };
+      const backdrop = index === 0 && (tile.width < output.width || tile.height < output.height);
+      return { angle: angle.id, asset: angle.asset, tile, crop: index === 0 ? area : coverCrop(area, tile), backdrop };
     });
   }
   const aspect = areas.length > 0 ? areas.reduce((sum, area) => sum + area.width / area.height, 0) / areas.length : 16 / 9;
   const tiles = shotTiles(shot.shot, angles.length, output, aspect);
   return angles.map((angle, index) => {
     const tile = tiles[index]!;
-    return { angle: angle.id, asset: angle.asset, tile, crop: coverCrop(areas[index]!, tile) };
+    return { angle: angle.id, asset: angle.asset, tile, crop: coverCrop(areas[index]!, tile), backdrop: false };
   });
 }
 

@@ -44,15 +44,16 @@ const errorOf = (clips: ShotClip[], groups: MulticamGroup[] = [group]) => {
 describe("screen shot layout", () => {
   it("shows the whole picture centred, with bars where its shape differs", () => {
     expect(shotLayers(shot("screen", ["ana"]), group, landscape, sizes)).toEqual([
-      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1920, height: 1080 }, crop: { left: 0, top: 0, width: 1920, height: 1080 } },
+      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1920, height: 1080 }, crop: { left: 0, top: 0, width: 1920, height: 1080 }, backdrop: false },
     ]);
     // Eva keeps 640x720 of 1280x720: fitted to the height, never cut to 16:9.
     expect(shotLayers(shot("screen", ["eva"]), group, landscape, sizes)).toEqual([
-      { angle: "eva", asset: "assets/eva.mp4", tile: { left: 480, top: 0, width: 960, height: 1080 }, crop: { left: 320, top: 0, width: 640, height: 720 } },
+      { angle: "eva", asset: "assets/eva.mp4", tile: { left: 480, top: 0, width: 960, height: 1080 }, crop: { left: 320, top: 0, width: 640, height: 720 }, backdrop: true },
     ]);
     expect(shotLayers(shot("screen", ["ana"]), group, portrait, sizes)[0]).toMatchObject({
       tile: { left: 0, top: 656, width: 1080, height: 608 },
       crop: { left: 0, top: 0, width: 1920, height: 1080 },
+      backdrop: true,
     });
   });
 });
@@ -67,6 +68,7 @@ describe("pip shot layout", () => {
       asset: "assets/ben.mp4",
       tile: { left: 1402, top: 682, width: 480, height: 360 },
       crop: { left: 480, top: 0, width: 1440, height: 1080 },
+      backdrop: false,
     });
   });
 

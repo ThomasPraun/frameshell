@@ -57,6 +57,13 @@ describe("directShots with a screen angle", () => {
     expect(picture(shots)).toEqual([[0, 12, "solo", "ana"]]);
   });
 
+  it("shows the screen alone where the shot was a wide, as in laughter or cross-talk", () => {
+    const angles = [{ id: "ana", picture: true }, { id: "ben", picture: true }, { id: "cy", picture: true }, ANGLES[2]!];
+    const talk = [turn("ana", 0, 10), turn("ben", 0, 10), turn("cy", 0, 10)];
+    const shots = direct(talk, [turn("slides", 0, 10)], { wide: { silence: null, laughter: 1, together: 3 } }, 10, angles);
+    expect(picture(shots)).toEqual([[0, 10, "screen", "slides"]]);
+  });
+
   it("keeps the person shots when the motion is shorter than the rule, and bridges short stills", () => {
     expect(picture(direct([turn("ana", 0, 12)], [turn("slides", 4, 5.5)]))).toEqual([[0, 12, "solo", "ana"]]);
     const bridged = direct([turn("ana", 0, 12)], [turn("slides", 3, 5), turn("slides", 5.5, 8)]);

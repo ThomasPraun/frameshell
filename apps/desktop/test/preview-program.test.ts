@@ -398,6 +398,7 @@ describe("compileProgram with a multicam program track", () => {
     expect(angleLayer(ana, { width: 960, height: 540 })).toEqual({
       tile: { left: 480, top: 0, width: 480, height: 540 },
       crop: { left: 480, top: 0, width: 960, height: 1080 },
+      backdrop: false,
       source: HD,
     });
     expect(angleLayer(ben, { width: 960, height: 540 })?.tile).toEqual({ left: 0, top: 0, width: 480, height: 540 });

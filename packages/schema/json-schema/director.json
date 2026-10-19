@@ -129,7 +129,7 @@
             {
               "type": "number",
               "minimum": 0,
-              "description": "A screen angle that changes for at least this long (a slide, a scroll, a demo) is shown: `screen` while nobody speaks, `pip` (screen with the speaker in an inset) while someone does. Null switches the rule off. Null switches the rule off. Seconds."
+              "description": "A screen angle that changes for at least this long (a slide, a scroll, a demo) is shown: `screen` while nobody speaks, `pip` (screen with the speaker in an inset) while someone does. Null switches the rule off. Seconds."
             },
             {
               "type": "null"
