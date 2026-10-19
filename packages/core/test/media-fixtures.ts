@@ -143,3 +143,28 @@ export async function makeBurstClip(
     ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
   ]);
 }
+
+/** One person's mic for turns tests: own speech at full level, other people's (bleed) at -20 dB. */
+export interface VoiceOptions {
+  /** Tone bursts (start s, length s, Hz) of this person. */
+  own: readonly (readonly [number, number, number])[];
+  /** Tone bursts of the other people, heard through this mic. */
+  bleed?: readonly (readonly [number, number, number])[];
+  /** As {@link makeBurstClip}: a recording that started this many seconds after the others. */
+  shiftS?: number;
+  durationS?: number;
+}
+
+/** Small video with a {@link VoiceOptions} sound. */
+export async function makeVoiceClip(path: string, { own, bleed = [], shiftS = 0, durationS = 14 }: VoiceOptions): Promise<void> {
+  const { ffmpeg } = await mediaTools();
+  const tone = (list: readonly (readonly [number, number, number])[], amplitude: number) =>
+    list.map(([start, length, hz]) => `between(t+${shiftS},${start},${start + length})*${amplitude}*sin(2*PI*${hz}*t)`);
+  const tones = [...tone(own, 0.5), ...tone(bleed, 0.05), "0"].join("+");
+  await run(ffmpeg, [
+    ...["-hide_banner", "-loglevel", "error", "-y"],
+    ...["-f", "lavfi", "-i", `testsrc2=s=160x120:r=30:d=${durationS}`],
+    ...["-f", "lavfi", "-i", `aevalsrc='${tones}':s=48000:d=${durationS}`],
+    ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+  ]);
+}

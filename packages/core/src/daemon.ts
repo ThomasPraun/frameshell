@@ -35,6 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
+import { groupTurns } from "./multicam/group-turns.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
@@ -535,6 +536,26 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
     },
     "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
+    "multicam.turns": async ({ cwd, timeline, group }) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await timelines.load(dir, timeline);
+      const found = loaded.groups?.find((candidate) => candidate.id === group);
+      if (!found) {
+        const ids = loaded.groups?.map((candidate) => candidate.id).join(", ");
+        throw new RpcError(
+          ErrorCode.InvalidOperation,
+          `multicam.turns: no group "${group}" in this timeline${ids ? ` (groups: ${ids})` : " (it has no multicam groups; make one with `multicam create`)"}.`,
+          {
+            op: "multicam.turns",
+            reason: "unknown group",
+            field: "group",
+            groups: loaded.groups?.map((candidate) => candidate.id) ?? [],
+          },
+        );
+      }
+      const result = await groupTurns({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, dir, found);
+      return { timeline, revision: loaded.revision, group, ...result };
+    },
     "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
       const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;

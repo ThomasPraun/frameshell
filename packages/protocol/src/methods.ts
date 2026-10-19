@@ -5,6 +5,7 @@ import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, Tr
 import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
+  MulticamTurnsResultSchema,
   OpIdSchema,
   OperationResultSchema,
   RejectionRecordSchema,
@@ -30,7 +31,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 39;
+export const PROTOCOL_VERSION = 40;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1222,6 +1223,23 @@ export const methods = {
       "(trim those shots first).",
     params: operationArgs["multicam.offset"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  "multicam.turns": {
+    description:
+      "Who speaks when in a multicam group (ADR 0016): the speaking turns of every angle, from that angle's own mic energy " +
+      "(the cached envelopes cut snapping uses), on the group clock (each angle's `offset` applied). Example: " +
+      "`{ group: \"g_1a2b3c\" }` gives `turns: [{ angle: \"ana\", name: \"Ana\", start: 0.4, end: 5.2 }, …]` sorted by `start`. " +
+      "A voice heard in another person's mic (bleed, more than 12 dB below the loudest mic at that time) does not count as " +
+      "that person's turn; people talking at once keep overlapping turns. Pauses under 0.5 s stay inside a turn, sounds under " +
+      "0.3 s are not turns. Read-only. Each angle's `audio.gain` (dB) is added to its mic level before mics are compared. An angle without sound has no turns and a " +
+      "warning. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
+      "or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      group: z.string().min(1).describe("Group id (`g_…`) from `timeline.show` `groups` or `multicam.create`."),
+    }),
+    result: MulticamTurnsResultSchema,
   },
   "clip.move": {
     mutating: true,
