@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "asset": "assets/talk.mp3",
+  "assetHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "provider": "e2e",
+  "model": "e2e",
+  "words": [
+    { "id": "w_000001", "text": "one", "start": 0.2, "end": 0.7 },
+    { "id": "w_000002", "text": "two", "start": 1.2, "end": 1.7 },
+    { "id": "w_000003", "text": "three", "start": 2.2, "end": 2.7 },
+    { "id": "w_000004", "text": "four", "start": 3.2, "end": 3.7 },
+    { "id": "w_000005", "text": "five", "start": 4.2, "end": 4.7 },
+    { "id": "w_000006", "text": "six", "start": 5.2, "end": 5.7 }
+  ],
+  "edits": {}
+}

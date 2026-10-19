@@ -139,6 +139,8 @@ export interface PaintInput<Img> {
   subtitles?: ReadonlyMap<string, readonly CueBox[]>;
   /** Selected track (shared selection store): its cues are framed in the accent color. */
   selectedTrack?: string | null;
+  /** Selected script scene (shared selection store): its span in the scene band is framed in the accent color. */
+  selectedScene?: { script: string; slug: string } | null;
 }
 
 /** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
@@ -190,11 +192,11 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, RULER_HEIGHT, width, height - RULER_HEIGHT);
+  ctx.rect(0, layout.head, width, height - layout.head);
   ctx.clip();
   layout.rows.forEach((row, index) => {
     const top = row.top - scrollTop;
-    if (top + row.height < RULER_HEIGHT || top > height) return;
+    if (top + row.height < layout.head || top > height) return;
     if (index % 2 === 1) {
       ctx.fillStyle = colors.laneAlt;
       ctx.fillRect(0, top, width, row.height);
@@ -218,11 +220,12 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   const range = input.range ? rangeSpan(input) : null;
   if (range) {
     ctx.fillStyle = withAlpha(theme.accent, RANGE_ALPHA);
-    ctx.fillRect(range.x, RULER_HEIGHT, range.w, height - RULER_HEIGHT);
+    ctx.fillRect(range.x, layout.head, range.w, height - layout.head);
   }
   ctx.restore();
 
   paintRuler(ctx, input);
+  if (layout.scenes.length > 0) paintScenes(ctx, input);
   if (range) {
     ctx.fillStyle = theme.accent;
     ctx.fillRect(range.x, RULER_HEIGHT - RANGE_BAR, range.w, RANGE_BAR);
@@ -421,7 +424,7 @@ function paintDrag<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, drag: DragGho
   }
   if (drag.guide !== null) {
     ctx.fillStyle = theme.accent;
-    ctx.fillRect(Math.round(drag.guide * pxPerSecond - scrollLeft), RULER_HEIGHT, 1, height - RULER_HEIGHT);
+    ctx.fillRect(Math.round(drag.guide * pxPerSecond - scrollLeft), layout.head, 1, height - layout.head);
   }
 }
 
@@ -604,6 +607,59 @@ function paintRuler<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
     ctx.fillRect(x, 0, 1, RULER_HEIGHT - 1);
     ctx.fillStyle = theme.textFaint;
     ctx.fillText(tick.label, x + 4, 4);
+  }
+}
+
+/** Gap kept between neighbouring scene spans, px. */
+const SCENE_GAP = 1;
+
+/**
+ * The scene band under the ruler (ADR 0015): a span per script scene with the
+ * heading as label. A scene with a clip linked to it is filled; one without is
+ * hollow (dashed), still waiting for its footage or composition.
+ */
+function paintScenes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
+  const { layout, theme, viewport } = input;
+  const { pxPerSecond, scrollLeft, width } = viewport;
+  const top = RULER_HEIGHT;
+  const h = layout.head - RULER_HEIGHT;
+  ctx.fillStyle = theme.ruler;
+  ctx.fillRect(0, top, width, h);
+  ctx.fillStyle = theme.lineSoft;
+  ctx.fillRect(0, layout.head - 1, width, 1);
+  ctx.font = `10px ${theme.fontUi}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const chosen = input.selectedScene;
+  for (const scene of layout.scenes) {
+    const x0 = scene.start * pxPerSecond - scrollLeft + SCENE_GAP / 2;
+    const x1 = scene.end * pxPerSecond - scrollLeft - SCENE_GAP / 2;
+    if (x1 < 0 || x0 > width) continue;
+    const left = Math.max(x0, -2);
+    const w = Math.max(1, Math.min(x1, width + 2) - left);
+    const y = top + 2;
+    const boxH = h - 5;
+    const filled = scene.clips.length > 0;
+    const selected = !!chosen && chosen.script === scene.script && chosen.slug === scene.slug;
+    if (filled) {
+      ctx.fillStyle = withAlpha(theme.video, 0.3);
+      ctx.fillRect(left, y, w, boxH);
+    }
+    ctx.strokeStyle = selected ? theme.accent : filled ? withAlpha(theme.video, 0.7) : theme.textFaint;
+    ctx.lineWidth = selected ? 2 : 1;
+    if (!filled) ctx.setLineDash([3, 2]);
+    ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, w - 1), boxH - 1);
+    if (!filled) ctx.setLineDash([]);
+    const textX = Math.max(left, 0) + 5;
+    const room = left + w - textX - 3;
+    if (room <= 8) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(textX, y, room, boxH);
+    ctx.clip();
+    ctx.fillStyle = filled ? theme.text : theme.textMuted;
+    ctx.fillText(scene.title, textX, y + boxH / 2);
+    ctx.restore();
   }
 }
 

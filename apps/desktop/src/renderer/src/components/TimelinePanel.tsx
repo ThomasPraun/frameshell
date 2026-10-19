@@ -19,7 +19,7 @@ import { rich, t } from "../i18n.js";
 import { listenEverywhere } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
-import { SELECTION_TIMELINE, revealSeek, selection, useSelection } from "../selection.js";
+import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
 import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
 import {
@@ -38,6 +38,7 @@ import {
 import {
   type ClipBox,
   RULER_HEIGHT,
+  type SceneBox,
   type TimelineLayout,
   type TrackRow,
   clampScroll,
@@ -46,11 +47,13 @@ import {
   formatDuration,
   formatTimecode,
   layoutTimeline,
+  sceneAt,
   zoomAround,
   zoomLimits,
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTimeline } from "../timeline/paint.js";
+import { useSceneSpans } from "../timeline/scenes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { uiLink } from "../ui-link.js";
 import { DetachButton } from "./DetachControls.js";
@@ -142,7 +145,8 @@ export function TimelinePanel({
   onDetach?: () => void;
 }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
-  const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
+  const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
+  const layout = useMemo(() => (view ? layoutTimeline(view, scenes) : null), [view, scenes]);
   const empty = layout !== null && layout.clipCount === 0;
   const [status, setStatus] = useState<Status | null>(null);
   /** Edits, undo and redo run one after another, in the order they were made. */
@@ -193,6 +197,14 @@ export function TimelinePanel({
       off();
     };
   }, [undoRedo]);
+
+  // A scene picked on the band follows its words when a cut or a new take moves them.
+  useEffect(() => {
+    const picked = selection.get().scene;
+    if (!picked) return;
+    const box = scenes.find((candidate) => candidate.script === picked.script && candidate.slug === picked.slug);
+    selection.retainScene(box ? { range: { from: box.start, to: box.end }, clips: box.clips } : null);
+  }, [scenes]);
 
   // The History panel's pick, marked on the lanes: what that transaction or operation did.
   const { history } = useSelection();
@@ -293,7 +305,7 @@ function TimelineCanvas({
   const frameView = useRef<Window>(window);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, range, reveal, track: selectedTrack } = useSelection();
+  const { clips: selectedClips, range, reveal, track: selectedTrack, scene: selectedScene } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
   const subtitles = useSubtitles();
   const cues = useMemo(() => new Map(subtitles.tracks.map((track) => [track.track, cueBoxes(track, subtitles.fps)] as const)), [subtitles]);
@@ -308,8 +320,8 @@ function TimelineCanvas({
    * are pending, and the latest revision they produced.
    */
   const inFlight = useRef<{ starts: Map<string, number>; pending: number; until: number } | null>(null);
-  const latest = useRef({ layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack });
-  latest.current = { layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack };
+  const latest = useRef({ layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene });
+  latest.current = { layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
@@ -324,7 +336,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks, cues: subtitleCues, selectedTrack: track } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -341,7 +353,7 @@ function TimelineCanvas({
     const started = performance.now();
     const drag = ghost.current?.drag;
     const { mediaDrawn } = paintTimeline(context, {
-      layout: current ?? { rows: [], duration: 0, height: RULER_HEIGHT, clipCount: 0 },
+      layout: current ?? { scenes: [], head: RULER_HEIGHT, rows: [], duration: 0, height: RULER_HEIGHT, clipCount: 0 },
       viewport: view,
       fps: rate,
       playhead: at,
@@ -352,6 +364,7 @@ function TimelineCanvas({
       range: words,
       subtitles: subtitleCues,
       selectedTrack: track,
+      selectedScene: chosenScene,
       ...(drag ? { drag } : {}),
     });
     performance.measure(PAINT_MEASURE, { start: started });
@@ -421,7 +434,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, range, diff, cues, selectedTrack, settle, settleNudges, draw]);
+  }, [layout, revision, selected, range, diff, cues, selectedTrack, selectedScene, settle, settleNudges, draw]);
 
   // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
   useEffect(() => {
@@ -489,8 +502,8 @@ function TimelineCanvas({
     const x0 = clip.start * view.pxPerSecond;
     const x1 = clip.end * view.pxPerSecond;
     if (x0 < view.scrollLeft || x1 > view.scrollLeft + view.width) view.scrollLeft = Math.max(0, x0 - view.width / 4);
-    const lanes = view.height - RULER_HEIGHT;
-    const top = row.top - RULER_HEIGHT;
+    const lanes = view.height - current.head;
+    const top = row.top - current.head;
     if (top < view.scrollTop || top + row.height > view.scrollTop + lanes) view.scrollTop = Math.max(0, top);
     settle();
   }, [reveal, settle]);
@@ -705,6 +718,16 @@ function TimelineCanvas({
       seek(timeAt(at.x), false);
       return;
     }
+    const scene = sceneAt(layout, state.current, at.x, at.y);
+    if (scene) {
+      pickScene(scene);
+      return;
+    }
+    // Over the band but between spans: nothing under it is visible, so nothing is hit.
+    if (at.y < layout.head) {
+      selection.clear();
+      return;
+    }
     const grab = grabAt(layout, state.current, at.x, at.y);
     if (!grab) {
       const row = layout.rows.find((candidate) => at.y + state.current.scrollTop >= candidate.top && at.y + state.current.scrollTop < candidate.top + candidate.height);
@@ -740,6 +763,13 @@ function TimelineCanvas({
     box.setPointerCapture(event.pointerId);
     setHover(null);
   };
+
+  /** A scene span of the band pressed: its time range is selected, with the scene and its clips (Ask agent names `<script>#<slug>`). */
+  const pickScene = (scene: SceneBox) =>
+    selection.selectScene({ script: scene.script, slug: scene.slug, title: scene.title }, scene.clips, {
+      range: { from: scene.start, to: scene.end },
+      origin: "timeline",
+    });
 
   /** A subtitle lane pressed at `time`: its cue's words (the playhead goes there), else the track alone. */
   const pickSubtitle = (track: string, time: number) => {
@@ -855,8 +885,10 @@ function TimelineCanvas({
     const rect = box.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const grab = layout && y >= RULER_HEIGHT ? grabAt(layout, state.current, x, y) : null;
-    if (grab && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    const grab = layout && y >= layout.head ? grabAt(layout, state.current, x, y) : null;
+    const scene = layout && !grab ? sceneAt(layout, state.current, x, y) : null;
+    if (scene) pickScene(scene);
+    else if (grab && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
     openAskMenu(event);
   };
 
@@ -916,6 +948,11 @@ function TimelineCanvas({
             </button>
           </div>
         </div>
+        {layout && layout.scenes.length > 0 && (
+          <div className="scene-spacer" style={{ height: layout.head - RULER_HEIGHT }} title={t.timeline.scenesTitle}>
+            {t.timeline.scenes}
+          </div>
+        )}
         <div className="timeline-heads-rows">
           <div ref={heads}>
             {layout?.rows.map((row) =>
@@ -975,7 +1012,7 @@ function TimelineCanvas({
         </div>
         {overlay && <div className="timeline-empty">{overlay}</div>}
         {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} />}
-        <ClipList layout={layout} fps={fps} selected={selected} cues={cues} />
+        <ClipList layout={layout} fps={fps} selected={selected} cues={cues} scene={selectedScene} />
       </div>
     </div>
   );
@@ -1117,15 +1154,25 @@ function ClipList({
   fps,
   selected,
   cues,
+  scene,
 }: {
   layout: TimelineLayout | null;
   fps: number;
   selected: ReadonlySet<string>;
   cues: ReadonlyMap<string, readonly CueBox[]>;
+  scene: SelectedScene | null;
 }) {
   if (!layout) return null;
   return (
     <ul className="sr-only" aria-label={t.timeline.clipListLabel}>
+      {layout.scenes.map((box) => {
+        const chosen = scene?.script === box.script && scene.slug === box.slug;
+        return (
+          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-selected={chosen || undefined}>
+            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen)}
+          </li>
+        );
+      })}
       {layout.rows.flatMap((row) =>
         row.kind === "subtitles"
           ? (cues.get(row.id) ?? []).map((cue) => (

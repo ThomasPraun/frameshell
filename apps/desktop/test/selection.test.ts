@@ -207,6 +207,33 @@ describe("selection store", () => {
       expect(selection.get().scene).toBeNull();
     });
 
+    it("a scene picked on the timeline's band selects its time range, which follows the scene until it is gone", () => {
+      const scene = { script: "scripts/plan.md", slug: "intro", title: "Intro" };
+      selection.selectScene(scene, ["c_a"], { range: { from: 2, to: 8 }, origin: "timeline" });
+      expect(selection.get()).toEqual({ ...blank, clips: ["c_a"], range: { from: 2, to: 8 }, scene, origin: "timeline" });
+      selection.retainScene({ range: { from: 0, to: 6 }, clips: ["c_a"] });
+      expect(selection.get().range).toEqual({ from: 0, to: 6 });
+      const moved = selection.get();
+      selection.retainScene({ range: { from: 0, to: 6 }, clips: ["c_a"] });
+      expect(selection.get()).toBe(moved);
+      selection.retainScene(null);
+      expect(selection.get()).toMatchObject({ range: null, scene, clips: ["c_a"] });
+      // The span comes back, and a clip linked since the pick joins the selection.
+      selection.retainScene({ range: { from: 1, to: 5 }, clips: ["c_a", "c_b"] });
+      expect(selection.get()).toMatchObject({ range: { from: 1, to: 5 }, scene, clips: ["c_a", "c_b"], origin: "timeline" });
+      // A scene picked from its heading has no range to follow.
+      selection.selectScene(scene, ["c_a"]);
+      selection.retainScene({ range: { from: 1, to: 2 }, clips: ["c_a"] });
+      expect(selection.get().range).toBeNull();
+      // An empty span is no range.
+      selection.selectScene(scene, [], { range: { from: 3, to: 3 }, origin: "timeline" });
+      expect(selection.get().range).toBeNull();
+      // Another kind of range selection is not a scene's.
+      selection.selectRange({ from: 1, to: 2 }, "timeline");
+      selection.retainScene({ range: { from: 5, to: 6 }, clips: [] });
+      expect(selection.get().range).toEqual({ from: 1, to: 2 });
+    });
+
     it("a preview region keeps its normalized corners and timeline time until replaced", () => {
       const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.22, at: 65.2, clips: [{ clip: "c_a", type: "media" }], elements: [] };
       selection.selectRegion(region, "preview");

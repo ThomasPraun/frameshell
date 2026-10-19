@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   LANE_HEIGHT,
   RULER_HEIGHT,
+  SCENE_BAND_HEIGHT,
   clampScroll,
   clipAt,
   contentWidth,
@@ -11,6 +12,7 @@ import {
   formatTimecode,
   layoutTimeline,
   rulerTicks,
+  sceneAt,
   visibleClips,
   zoomAround,
   zoomLimits,
@@ -240,5 +242,53 @@ describe("layoutTimeline with a program track", () => {
       ["t_a1", "A1", "audio", LANE_HEIGHT.audio],
     ]);
     expect(layout.rows[0]!.clips[0]).toMatchObject({ id: "c_s", kind: "shot", name: "two-up · ana, ben", asset: null, start: 0, end: 4 });
+  });
+});
+
+describe("scene band", () => {
+  const tracks = [{ id: "t_v", kind: "video" as const, name: null, follows: null, clips: [media("c_a", 0, 10)] }];
+  const scenes = [
+    { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [] },
+    { script: "scripts/plan.md", slug: "demo", title: "Demo", start: 4, end: 9, clips: ["c_a"] },
+  ];
+  const viewport = { pxPerSecond: 10, scrollLeft: 0, scrollTop: 0 };
+
+  it("adds no band without scenes, so lanes keep their place", () => {
+    const layout = layoutTimeline(view(tracks));
+    expect(layout.head).toBe(RULER_HEIGHT);
+    expect(layout.rows[0]!.top).toBe(RULER_HEIGHT);
+    expect(layout.scenes).toEqual([]);
+  });
+
+  it("pushes the lanes below a band under the ruler", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    expect(layout.head).toBe(RULER_HEIGHT + SCENE_BAND_HEIGHT);
+    expect(layout.rows[0]!.top).toBe(layout.head);
+    expect(layout.height).toBe(layout.head + LANE_HEIGHT.video);
+  });
+
+  it("finds the span under a point of the band only, wherever the lanes are scrolled", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    const inBand = RULER_HEIGHT + 4;
+    expect(sceneAt(layout, viewport, 25, inBand)?.slug).toBe("intro");
+    expect(sceneAt(layout, { ...viewport, scrollTop: 30 }, 45, inBand)?.slug).toBe("demo");
+    // A span starts at its first pixel and ends where the next scene's begins.
+    expect(sceneAt(layout, viewport, 10, inBand)?.slug).toBe("intro");
+    expect(sceneAt(layout, viewport, 40, inBand)?.slug).toBe("demo");
+    expect(sceneAt(layout, viewport, 5, inBand)).toBeNull();
+    expect(sceneAt(layout, viewport, 95, inBand)).toBeNull();
+    expect(sceneAt(layout, viewport, 25, RULER_HEIGHT - 1)).toBeNull();
+    expect(sceneAt(layout, viewport, 25, layout.head)).toBeNull();
+    expect(sceneAt(layout, { ...viewport, scrollLeft: 30 }, 5, inBand)?.slug).toBe("intro");
+  });
+
+  it("hits no clip over the band, even where scrolled lanes would sit under it", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    const inBand = RULER_HEIGHT + 4;
+    const scrolled = { ...viewport, scrollTop: 30 };
+    // x = 95 is past the last span; contentY lands inside the first lane.
+    expect(sceneAt(layout, scrolled, 95, inBand)).toBeNull();
+    expect(clipAt(layout, scrolled, 95, inBand)).toBeNull();
+    expect(clipAt(layout, scrolled, 95, layout.head)?.clip.id).toBe("c_a");
   });
 });
