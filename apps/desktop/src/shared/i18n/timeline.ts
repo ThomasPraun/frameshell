@@ -100,7 +100,7 @@ const en = {
   hideTurnLanes: "Hide the turn lanes",
   turnLanesTitle: (id: string, mac: boolean) =>
     `${id}: who speaks, one lane per angle. Drag on a lane to say that person speaks there and the others do not; ` +
-    `Shift keeps the others, ${mac ? "Option" : "Alt"} marks them silent; right-click goes back to the measured turns.`,
+    `Shift keeps the others, ${mac ? "Option" : "Alt"} marks that person silent; right-click goes back to the measured turns.`,
   turnLaneLabel: (name: string) => `Turns of ${name}`,
   turnLaneTitle: (name: string) => `${name}: speaking turns. Framed: said by hand. Hatched: marked silent by hand.`,
   turnsFailed: (reason: string) => `Turn lanes unavailable: ${reason}`,
@@ -108,7 +108,6 @@ const en = {
   backToMeasured: "Back to measured here",
   clearAnglePainted: (name: string) => `Clear everything painted for ${name}`,
   clearAllPainted: "Clear every painted turn",
-  nothingPainted: "Nothing was painted there",
 };
 
 const es: typeof en = {
@@ -214,7 +213,6 @@ const es: typeof en = {
   backToMeasured: "Volver a lo medido aquí",
   clearAnglePainted: (name) => `Borrar todo lo pintado para ${name}`,
   clearAllPainted: "Borrar todos los turnos pintados",
-  nothingPainted: "No había nada pintado ahí",
 };
 
 export const timeline = { en, es };

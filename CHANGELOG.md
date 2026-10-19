@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Turn lanes: an angle marked as a screen share no longer reports speaking stretches painted before it became a screen, and the English tooltip says Alt marks that person silent.
+
 ### Added
 
 - Correcting who speaks by hand (ADR 0016 decision 3, protocol v47): a group may hold `painted` turns, stretches of the group clock marked as spoken or silent for one angle, set by the new operation `multicam.paint` (`frameshell multicam paint <group> [<angle>] --from s --to s (--speaking [--alone] | --silent | --measured)`, MCP `multicam_paint`, journaled and undoable). They replace the measured turns of their angle for `multicam turns` and `direct`, so re-directing keeps them. Desktop: a toggle on the program track's head opens one turn lane per angle under the shots (measured and painted turns; painted ones framed, silenced ones hatched) that can be painted by dragging (Shift keeps the other angles, Alt marks silent, right-click goes back to measured); the transcript view sets the speaker of any selection of words (picked in the transcript, the timeline or a subtitle cue) from a toolbar picker, also a new speaker, and renames a speaker by double-clicking its name; the angle panel of the shot inspector picks an angle's transcript speaker.

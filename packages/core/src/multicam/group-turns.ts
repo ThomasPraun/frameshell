@@ -158,7 +158,9 @@ export async function groupTurns(source: TurnsSource, root: string, group: Multi
   const screens = new Set(group.angles.filter((angle) => angle.screen === true).map((angle) => angle.id));
   const heard = people ? inputs.map((input) => (screens.has(input.id) ? { ...input, profile: null } : input)) : inputs;
   const names = new Map(group.angles.map((angle) => [angle.id, angle.name]));
-  const turns = applyPainted([...speakingTurns(heard, duration), ...fromSpeakers.turns], group.painted ?? [])
+  // Screens are never speakers, even if speaking stretches were painted before the angle became a screen.
+  const painted = (group.painted ?? []).filter((stretch) => !(people && stretch.speaking && screens.has(stretch.angle)));
+  const turns = applyPainted([...speakingTurns(heard, duration), ...fromSpeakers.turns], painted)
     .map((turn) => ({ ...turn, end: Math.min(turn.end, Math.round(duration * 1000) / 1000), name: names.get(turn.angle)! }))
     .filter((turn) => turn.end > turn.start)
     .sort((a, b) => a.start - b.start || (a.angle < b.angle ? -1 : a.angle > b.angle ? 1 : 0));

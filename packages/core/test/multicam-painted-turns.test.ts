@@ -88,4 +88,11 @@ describe("groupTurns with painted turns", () => {
     expect(ben[0]!.start).toBeGreaterThanOrEqual(7);
     expect(ana[1]!.name).toBe("Ana");
   });
+
+  it("ignores speaking stretches painted on an angle that is now a screen", async () => {
+    const base = group([{ angle: "ben", start: 2, end: 3, speaking: true }]);
+    const screened = { ...base, angles: base.angles.map((angle) => (angle.id === "ben" ? { ...angle, screen: true } : angle)) };
+    const { turns } = await groupTurns(source, "/p", screened);
+    expect(turns.filter((turn) => turn.angle === "ben")).toEqual([]);
+  });
 });
