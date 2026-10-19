@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startDaemon } from "@frameshell/core";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import type { TimelineEdit } from "../src/shared/api.js";
-import { TimelineEditor } from "../src/main/timeline-editor.js";
+import { TimelineEditor, editLabel } from "../src/main/timeline-editor.js";
 
 // Seam under test: main's timeline editor (what the renderer's edits and undo/redo keys reach),
 // against a real daemon. The app's connection is `desktop/…`, so the daemon attributes it to `ui`.
@@ -464,5 +464,19 @@ describe("TimelineEditor.revert (History panel)", () => {
   it("passes other daemon errors through", async () => {
     const { dir, editor } = await setup();
     await expect(editor.revert(dir, "main", "tx_ffffffff")).rejects.toThrow(/tx_ffffffff/);
+  });
+});
+
+describe("editLabel", () => {
+  it("names shots and angles by what the multicam ops change", () => {
+    expect(editLabel([{ op: "shot.set", args: { clip: "c_s", shot: "solo" } }])).toBe("Change shot");
+    expect(editLabel([{ op: "multicam.angle", args: { group: "g_1", angle: "ana", gain: -3 } }])).toBe("Change angle");
+    expect(editLabel([{ op: "multicam.offset", args: { group: "g_1", angle: "ana", offset: 1 } }])).toBe("Sync angle");
+    expect(
+      editLabel([
+        { op: "shot.set", args: { clip: "c_s", shot: "solo" } },
+        { op: "clip.split", args: { clip: "c_s", at: 2 } },
+      ]),
+    ).toBe("Edit 2 clips");
   });
 });

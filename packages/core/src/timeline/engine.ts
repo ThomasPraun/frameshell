@@ -10,6 +10,7 @@ import {
 import { basename } from "node:path/posix";
 import {
   type Angle,
+  type AngleCrop,
   type AnyClip,
   type AnyClipTrack,
   CORE_CLIP_TYPES,
@@ -18,7 +19,9 @@ import {
   type MediaClip,
   type MulticamGroup,
   type ProgramTrack,
+  SHOT_ANGLE_COUNTS,
   type ShotClip,
+  type ShotLayout,
   type TimelineClip,
   type Timeline,
   type Track,
@@ -154,6 +157,11 @@ export async function applyOperation(
   return edit.finish();
 }
 
+/** Layout a shot of `count` angles takes when only its angles are given: 1 `solo`, 2 `two-up`, more `grid`. */
+function layoutFor(count: number): ShotLayout {
+  return count === 1 ? "solo" : count === 2 ? "two-up" : "grid";
+}
+
 /** One operation in progress over a draft copy. */
 class Edit {
   readonly draft: Timeline;
@@ -198,6 +206,10 @@ class Edit {
         return this.multicamCreate(request.args);
       case "multicam.offset":
         return this.multicamOffset(request.args);
+      case "multicam.angle":
+        return this.multicamAngle(request.args);
+      case "shot.set":
+        return this.shotSet(request.args);
       case "timeline.patch":
         return this.patch(request.args);
     }
@@ -798,22 +810,125 @@ class Edit {
 
   /** Set one angle's offset; shots left past the group's new end are refused by {@link Edit.checkShots}. */
   multicamOffset(args: OperationArgs<"multicam.offset">): void {
-    const group = this.draft.groups?.find((candidate) => candidate.id === args.group);
+    const { angle } = this.angle(args.group, args.angle);
+    angle.offset = Math.round(args.offset * 1000) / 1000;
+  }
+
+  /** Name, crop and sound of one angle; fields not given keep their value, defaults are not stored. */
+  multicamAngle(args: OperationArgs<"multicam.angle">): void {
+    const { group, angle } = this.angle(args.group, args.angle);
+    const { name, crop, gain, muted } = args;
+    if ([name, crop, gain, muted].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted. To fix sync use `multicam.offset`." });
+    }
+    if (name !== undefined) angle.name = name;
+    if (crop === null) delete angle.crop;
+    else if (crop !== undefined) {
+      const merged: AngleCrop = { ...angle.crop };
+      for (const side of ["left", "top", "right", "bottom"] as const) {
+        const value = crop[side];
+        if (value === undefined) continue;
+        if (value === 0) delete merged[side];
+        else merged[side] = Math.round(value * 10000) / 10000;
+      }
+      for (const [a, b] of [
+        ["left", "right"],
+        ["top", "bottom"],
+      ] as const) {
+        const sum = (merged[a] ?? 0) + (merged[b] ?? 0);
+        if (sum >= 1) {
+          throw this.invalid(`the crop of angle ${angle.id} (group ${group.id}) would cut its whole picture: ${a} + ${b} = ${Number(sum.toFixed(4))}.`, {
+            field: "crop",
+            hint: `Keep ${a} + ${b} below 1 (fractions of the picture).`,
+          });
+        }
+      }
+      if (Object.keys(merged).length === 0) delete angle.crop;
+      else angle.crop = merged;
+    }
+    if (gain !== undefined || muted !== undefined) {
+      const audio = { ...angle.audio, ...(gain !== undefined ? { gain } : {}), ...(muted !== undefined ? { muted } : {}) };
+      if (audio.gain === 0) delete audio.gain;
+      if (audio.muted === false) delete audio.muted;
+      if (Object.keys(audio).length === 0) delete angle.audio;
+      else angle.audio = audio;
+    }
+  }
+
+  /**
+   * Layout and angles of one shot (see the `shot.set` method). The shot
+   * becomes one a person chose: the director's `confidence` and `reason` go.
+   */
+  shotSet(args: OperationArgs<"shot.set">): void {
+    const { track, clip } = this.clip(args.clip);
+    if (!isShotClip(clip) || track.kind !== "program") {
+      throw this.invalid(`${clip.id} is a ${clip.type} clip; only shots of a program track have a layout and angles.`, {
+        field: "clip",
+        hint: "Use `clip.set` for other clips.",
+      });
+    }
+    if (args.shot === undefined && args.angles === undefined) {
+      throw this.invalid("nothing to set.", { hint: "Pass `shot` (the layout), `angles`, or both." });
+    }
+    const group = programGroup(this.draft, track);
+    if (!group) throw this.invalid(`program track ${track.id} names no group of this timeline.`, { field: "clip" });
+    const known = group.angles.map((angle) => angle.id);
+    const fits = (layout: ShotLayout, count: number) => count >= SHOT_ANGLE_COUNTS[layout][0] && count <= SHOT_ANGLE_COUNTS[layout][1];
+    const takes = (layout: ShotLayout) => {
+      const [min, max] = SHOT_ANGLE_COUNTS[layout];
+      return min === max ? `exactly ${min} angle${min === 1 ? "" : "s"}` : `${min} or more angles`;
+    };
+    let angles: string[];
+    let layout: ShotLayout;
+    if (args.angles !== undefined) {
+      const given = args.angles;
+      const unknown = given.find((id) => !known.includes(id));
+      if (unknown !== undefined) {
+        throw this.invalid(`group ${group.id} has no angle "${unknown}".`, { field: "angles", hint: `Angles: ${known.join(", ")}.` });
+      }
+      const repeated = given.find((id, index) => given.indexOf(id) !== index);
+      if (repeated !== undefined) throw this.invalid(`angle "${repeated}" is listed twice.`, { field: "angles", hint: "Show each angle once." });
+      angles = [...given];
+      layout = args.shot ?? (fits(clip.shot, angles.length) ? clip.shot : layoutFor(angles.length));
+      if (!fits(layout, angles.length)) {
+        throw this.invalid(`a ${layout} shot takes ${takes(layout)}; got ${angles.length}.`, { field: "angles" });
+      }
+    } else {
+      layout = args.shot!;
+      const [min, max] = SHOT_ANGLE_COUNTS[layout];
+      angles = clip.angles.slice(0, max);
+      for (const id of known) if (angles.length < min && !angles.includes(id)) angles.push(id);
+      if (angles.length < min) {
+        throw this.invalid(`a ${layout} shot takes ${takes(layout)}; group ${group.id} has ${known.length}.`, {
+          field: "shot",
+          hint: "Add angles to the group, or pick a layout that takes fewer.",
+        });
+      }
+    }
+    clip.shot = layout;
+    clip.angles = angles;
+    delete clip.confidence;
+    delete clip.reason;
+  }
+
+  /** Group `groupId` and its angle `angleId` in the draft; InvalidOperation naming the ids there are. */
+  angle(groupId: string, angleId: string): { group: MulticamGroup; angle: Angle } {
+    const group = this.draft.groups?.find((candidate) => candidate.id === groupId);
     if (!group) {
       const ids = (this.draft.groups ?? []).map((candidate) => candidate.id);
-      throw this.invalid(`no multicam group "${args.group}" in timeline ${this.draft.id}.`, {
+      throw this.invalid(`no multicam group "${groupId}" in timeline ${this.draft.id}.`, {
         field: "group",
         hint: ids.length > 0 ? `Groups: ${ids.join(", ")}.` : "There are none; make one with `frameshell multicam create`.",
       });
     }
-    const angle = group.angles.find((candidate) => candidate.id === args.angle);
+    const angle = group.angles.find((candidate) => candidate.id === angleId);
     if (!angle) {
-      throw this.invalid(`group ${group.id} has no angle "${args.angle}".`, {
+      throw this.invalid(`group ${group.id} has no angle "${angleId}".`, {
         field: "angle",
         hint: `Angles: ${group.angles.map((candidate) => candidate.id).join(", ")}.`,
       });
     }
-    angle.offset = Math.round(args.offset * 1000) / 1000;
+    return { group, angle };
   }
 
   /** Angle id from a name: lowercase letters, digits, `-` and `_`; a number is appended on a clash. */

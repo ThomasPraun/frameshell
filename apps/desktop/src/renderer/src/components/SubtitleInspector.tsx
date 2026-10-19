@@ -7,6 +7,7 @@ import { useSubtitles } from "../subtitles/useSubtitles.js";
 import { layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { sendClipEdit } from "./clip-edits.js";
+import { Choice } from "./inspector-fields.js";
 
 /** Preset names as the user reads them. */
 const PRESET_LABELS: Record<SubtitlePresetId, { label: string; title: string }> = {
@@ -78,36 +79,6 @@ export function SubtitleInspector({ track }: { track: string }) {
           {error}
         </span>
       )}
-    </div>
-  );
-}
-
-/** Segmented single choice: the current value pressed, a click saves another. */
-function Choice({
-  label,
-  options,
-  value,
-  onPick,
-}: {
-  label: string;
-  options: { id: string; label: string; title: string }[];
-  value: string;
-  onPick: (id: string) => void;
-}) {
-  return (
-    <div className="clip-inspector-group segmented" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button
-          key={option.id}
-          className={`segmented-option${option.id === value ? " on" : ""}`}
-          role="radio"
-          aria-checked={option.id === value}
-          title={option.title}
-          onClick={() => option.id !== value && onPick(option.id)}
-        >
-          {option.label}
-        </button>
-      ))}
     </div>
   );
 }

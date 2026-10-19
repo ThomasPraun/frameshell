@@ -20,6 +20,7 @@ import { DetachButton } from "./DetachControls.js";
 import { LivePreview } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
+import { GroupInspector } from "./ShotInspector.js";
 import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
@@ -235,12 +236,17 @@ function leaveFullScreen(doc: Document): void {
   }, wait);
 }
 
-/** Settings of the selection: a subtitle track's style, else the selected clip's placement and sound. */
+/**
+ * Settings of the selection: a subtitle track's style, a program track's
+ * angles, else the selected clip's placement and sound (or a shot's layout).
+ */
 function Inspector() {
-  const { track } = useSelection();
+  const { track, clips } = useSelection();
   const { view } = useTimelineView(SELECTION_TIMELINE);
-  const subtitles = track !== null && view?.tracks.some((candidate) => candidate.id === track && candidate.kind === "subtitles");
-  return subtitles ? <SubtitleInspector track={track} /> : <ClipInspector />;
+  const kind = track === null ? undefined : view?.tracks.find((candidate) => candidate.id === track)?.kind;
+  if (track !== null && kind === "subtitles") return <SubtitleInspector track={track} />;
+  if (track !== null && kind === "program" && clips.length === 0) return <GroupInspector track={track} />;
+  return <ClipInspector />;
 }
 
 /**

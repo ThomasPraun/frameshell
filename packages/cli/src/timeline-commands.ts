@@ -39,6 +39,14 @@ mutations print the new revision):
   multicam offset <group> <angle> <seconds>
                                Fix one angle's sync by hand: the group second at which its file's time 0 plays
                                (absolute, >= 0; a smaller number plays the angle earlier)
+  multicam angle <group> <angle> [--name n] [--crop-left f] [--crop-top f] [--crop-right f] [--crop-bottom f]
+                 [--clear-crop] [--gain dB] [--muted | --unmuted]
+                               Rename an angle, crop its picture (fractions cut off each side, 0 to below 1) or set
+                               its sound under every shot
+  shot set <shot> [--layout solo|two-up|grid] [--angles a,b,…]
+                               Change a shot's layout and the angles it shows, in layout order. Only --layout: the
+                               angles are kept, cut or filled from the group; only --angles: the layout follows the
+                               count when it does not fit (1 solo, 2 two-up, more grid)
   multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap). Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings}
@@ -68,7 +76,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "cut", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "cut", "tx", "history", "revert"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -109,6 +117,13 @@ export const TIMELINE_OPTIONS = {
   ripple: { type: "boolean" },
   "ripple-track": { type: "string", multiple: true },
   "snap-window": { type: "string" },
+  "crop-left": { type: "string" },
+  "crop-top": { type: "string" },
+  "crop-right": { type: "string" },
+  "crop-bottom": { type: "string" },
+  "clear-crop": { type: "boolean" },
+  layout: { type: "string" },
+  angles: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -142,6 +157,8 @@ const ALLOWED: Record<string, string[]> = {
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
   "multicam create": ["name", "group-name"],
   "multicam offset": [],
+  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted"],
+  "shot set": ["layout", "angles"],
   "multicam turns": [],
   cut: ["from", "to", "no-snap", "snap-window"],
   "tx begin": [],
@@ -166,6 +183,8 @@ const ARITY: Record<string, [number, number]> = {
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam offset": [3, 3],
+  "multicam angle": [2, 2],
+  "shot set": [1, 1],
   "multicam turns": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
   "tx begin": [1, 1],
@@ -358,6 +377,32 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "multicam.offset";
       Object.assign(params, { group: args[0], angle: args[1], offset: seconds(args[2]!, "<seconds>") });
       break;
+    case "multicam angle": {
+      method = "multicam.angle";
+      if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
+      const sides = { left: num("crop-left"), top: num("crop-top"), right: num("crop-right"), bottom: num("crop-bottom") };
+      const cropped = Object.values(sides).some((value) => value !== undefined);
+      if (cropped && values["clear-crop"] === true) throw new UsageError("Pass --crop-<side> or --clear-crop, not both.");
+      Object.assign(params, {
+        group: args[0],
+        angle: args[1],
+        name: str("name"),
+        crop: values["clear-crop"] === true ? null : cropped ? sides : undefined,
+        gain: num("gain"),
+        muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+      });
+      break;
+    }
+    case "shot set": {
+      method = "shot.set";
+      const angles = str("angles")
+        ?.split(",")
+        .map((angle) => angle.trim())
+        .filter((angle) => angle !== "");
+      if (angles !== undefined && angles.length === 0) throw new UsageError("--angles: give angle ids separated by commas, e.g. --angles ana,ben.");
+      Object.assign(params, { clip: args[0], shot: str("layout"), angles });
+      break;
+    }
     case "multicam turns":
       method = "multicam.turns";
       params["group"] = args[0];

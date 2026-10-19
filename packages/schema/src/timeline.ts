@@ -20,6 +20,9 @@ export const SHOT_ANGLE_COUNTS: Readonly<Record<(typeof SHOT_LAYOUTS)[number], r
   grid: [2, Number.POSITIVE_INFINITY],
 };
 
+/** A director's shot below this `confidence` is a doubtful one: the timeline marks it for review. */
+export const SHOT_LOW_CONFIDENCE = 0.5;
+
 const Seconds = z.number().nonnegative();
 const Id = z.string().min(1);
 

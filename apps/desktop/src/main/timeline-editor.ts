@@ -40,7 +40,20 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   cut: "Ripple delete",
   "track.add": "Add",
   "track.set": "Change",
+  "shot.set": "Change",
+  "multicam.angle": "Change",
+  "multicam.offset": "Sync",
 };
+
+/** What the ops of an edit call change, for its label; mixed calls name clips. */
+function editNoun(edits: readonly TimelineEdit[]): string {
+  const prefixes: [string, string][] = [
+    ["track.", "track"],
+    ["shot.", "shot"],
+    ["multicam.", "angle"],
+  ];
+  return prefixes.find(([prefix]) => edits.every((edit) => edit.op.startsWith(prefix)))?.[1] ?? "clip";
+}
 
 /** Options of {@link TimelineEditor}. */
 export interface TimelineEditorOptions {
@@ -316,12 +329,13 @@ export class TimelineEditor {
 
 /**
  * Default history label of an edit call: `Move clip`, `Split 3 clips`,
- * `Edit 3 clips` when ops differ, `Ripple trim clip` for a rippled trim.
+ * `Edit 3 clips` when ops differ, `Ripple trim clip` for a rippled trim,
+ * `Change shot`, `Sync angle`.
  */
 export function editLabel(edits: readonly TimelineEdit[]): string {
   const verbs = edits.map((edit) => (edit.op === "clip.trim" && edit.args.ripple === true ? "Ripple trim" : BATCH_VERBS[edit.op]));
   const verb = verbs.every((candidate) => candidate === verbs[0]) ? verbs[0]! : "Edit";
-  const noun = edits.every((edit) => edit.op.startsWith("track.")) ? "track" : "clip";
+  const noun = editNoun(edits);
   return edits.length === 1 ? `${verb} ${noun}` : `${verb} ${edits.length} ${noun}s`;
 }
 

@@ -59,6 +59,7 @@ const en = {
   addSubtitleTrack: "Add subtitle track",
   addSubtitleTitle: "Add subtitles: the transcript words of the selected clip's track (or the first transcribed one)",
   subtitleHeadTitle: (id: string) => `${id}: select to set its style`,
+  programHeadTitle: (id: string) => `${id}: select to edit its angles`,
   wordsOf: (label: string) => `Words of ${label}`,
   changesOf: (target: string) => `Changes of ${target}`,
   diffKinds: { added: "added", removed: "removed", moved: "moved", changed: "changed" },
@@ -88,6 +89,10 @@ const en = {
   lengthUnknown: "Length unknown",
   muted: "muted",
   opacity: (percent: number) => `${percent}% opacity`,
+  /** Shot layouts (ADR 0016), by stored value. */
+  layouts: { solo: "Solo", "two-up": "Two-up", grid: "Grid" },
+  /** Label badge of a director's shot below the review threshold. */
+  doubtful: (percent: number) => `${percent}% sure`,
   followedTrack: "the followed track",
   wordsShowHere: (track: string) => `Words show here once the clips of ${track} are transcribed`,
 };
@@ -151,6 +156,7 @@ const es: typeof en = {
   addSubtitleTrack: "Agregar pista de subtítulos",
   addSubtitleTitle: "Agregar subtítulos: las palabras de la transcripción de la pista del clip seleccionado (o de la primera transcrita)",
   subtitleHeadTitle: (id) => `${id}: selecciona para definir su estilo`,
+  programHeadTitle: (id) => `${id}: selecciona para editar sus ángulos`,
   wordsOf: (label) => `Palabras de ${label}`,
   changesOf: (target) => `Cambios de ${target}`,
   diffKinds: { added: "agregados", removed: "eliminados", moved: "movidos", changed: "cambiados" },
@@ -177,6 +183,8 @@ const es: typeof en = {
   lengthUnknown: "Duración desconocida",
   muted: "silenciado",
   opacity: (percent) => `${percent}% de opacidad`,
+  layouts: { solo: "Individual", "two-up": "A dos", grid: "Cuadrícula" },
+  doubtful: (percent) => `${percent}% de certeza`,
   followedTrack: "la pista seguida",
   wordsShowHere: (track) => `Aquí aparecerán las palabras cuando se transcriban los clips de ${track}`,
 };

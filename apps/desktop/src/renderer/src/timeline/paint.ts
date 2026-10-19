@@ -5,6 +5,7 @@ import type { CueBox } from "../subtitles/model.js";
 import {
   type ClipBox,
   RULER_HEIGHT,
+  type ShotBox,
   type TimelineLayout,
   type TrackRow,
   formatDuration,
@@ -57,6 +58,8 @@ export interface TimelineTheme {
   video: string;
   audio: string;
   subtitles: string;
+  /** Multicam angles by colour slot (`ShotAngle.color`); at least one. */
+  angles: readonly string[];
   /** History diff marks (see {@link PaintInput.diff}); removed clips use `danger`. */
   diffAdded: string;
   diffMoved: string;
@@ -79,6 +82,7 @@ export const DEFAULT_THEME: TimelineTheme = {
   video: "#7092c4",
   audio: "#6fae8b",
   subtitles: "#b48acb",
+  angles: ["#d9895b", "#5bb5c9", "#c9c25b", "#c97bb4", "#7fc97b", "#8f86d9"],
   diffAdded: "#79d39a",
   diffMoved: "#66c2e0",
   diffChanged: "#d7a8e8",
@@ -170,6 +174,8 @@ const RANGE_BAR = 3;
 const DRAGGED_ALPHA = 0.35;
 /** Stand-in length of a diff place whose end is unknown, s (as `layout.ts` does for clips). */
 const DIFF_UNKNOWN_LENGTH_S = 2;
+/** Side of the corner flag on a doubtful shot, px. */
+const DOUBT_MARK = 8;
 /** Tag drawn in a diff mark's corner, so marks read without relying on color. */
 const DIFF_GLYPHS: Record<ClipDiff["change"], string> = { added: "+", removed: "\u2212", moved: "\u2194", changed: "~" };
 
@@ -237,6 +243,8 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
 interface Palette {
   laneAlt: string;
   kind: Record<"video" | "audio", { fill: string; edge: string; full: string; hatch: string }>;
+  /** Per angle colour slot: stripe fill and full colour. */
+  angles: { fill: string; full: string }[];
   dangerFill: string;
 }
 
@@ -255,6 +263,7 @@ function palette(theme: TimelineTheme): Palette {
     cached = {
       laneAlt: "rgba(255, 255, 255, 0.012)",
       kind: { video: kind(theme.video), audio: kind(theme.audio) },
+      angles: theme.angles.map((color) => ({ fill: withAlpha(color, 0.32), full: color })),
       dangerFill: withAlpha(theme.danger, 0.16),
     };
     palettes.set(theme, cached);
@@ -287,6 +296,7 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
 
   ctx.fillStyle = clip.problem ? colors.dangerFill : kind.fill;
   ctx.fillRect(left, y, w, h);
+  if (clip.shot) paintShot(ctx, clip.shot, left, w, y, h, colors);
 
   ctx.save();
   ctx.beginPath();
@@ -304,9 +314,11 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
     ctx.lineWidth = 1;
     ctx.strokeRect(left + 2.5, y + 4.5, Math.max(0, w - 5), h - 7);
   }
-  // Tally strip along the top in the track color, then the outline.
-  ctx.fillStyle = clip.problem ? theme.danger : kind.full;
-  ctx.fillRect(left, y, w, 2);
+  // Tally strip along the top in the track color (a shot's stripes carry their own), then the outline.
+  if (!clip.shot) {
+    ctx.fillStyle = clip.problem ? theme.danger : kind.full;
+    ctx.fillRect(left, y, w, 2);
+  }
   ctx.strokeStyle = clip.problem ? theme.danger : kind.edge;
   ctx.lineWidth = 1;
   if (clip.problem) ctx.setLineDash([3, 2]);
@@ -319,8 +331,36 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
     ctx.strokeRect(left + 1, y + 1, Math.max(0, w - 2), h - 2);
   }
 
+  if (clip.shot?.doubtful && w > DOUBT_MARK * 2) {
+    // Doubtful director's shot: a corner flag, so a run of them reads at a glance.
+    ctx.fillStyle = theme.danger;
+    ctx.beginPath();
+    ctx.moveTo(left + w - DOUBT_MARK, y);
+    ctx.lineTo(left + w, y);
+    ctx.lineTo(left + w, y + DOUBT_MARK);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
   return media;
+}
+
+/**
+ * A shot's angles as horizontal stripes in their colours, top to bottom in
+ * layout order (a solo shot is one colour), each with a full-colour edge on top.
+ */
+function paintShot<Img>(ctx: Paint2D<Img>, shot: ShotBox, left: number, w: number, y: number, h: number, colors: Palette): void {
+  const count = Math.max(1, shot.angles.length);
+  shot.angles.forEach((angle, index) => {
+    const color = colors.angles[angle.color % colors.angles.length]!;
+    const top = y + Math.round((h * index) / count);
+    const bottom = y + Math.round((h * (index + 1)) / count);
+    ctx.fillStyle = color.fill;
+    ctx.fillRect(left, top, w, bottom - top);
+    ctx.fillStyle = color.full;
+    ctx.fillRect(left, top, w, index === 0 ? 2 : 1);
+  });
 }
 
 /** History diff marks, over the clips; see {@link PaintInput.diff}. */
@@ -490,6 +530,7 @@ export function clipBadges(clip: ClipBox): string[] {
   const tr = clip.transform;
   if (tr && (tr.x !== 0 || tr.y !== 0 || tr.scale !== 1)) badges.push(`${Math.round(tr.scale * 100)}%`);
   if (tr && tr.opacity !== 1) badges.push(t.timeline.opacity(Math.round(tr.opacity * 100)));
+  if (clip.shot?.doubtful && clip.shot.confidence !== null) badges.push(t.timeline.doubtful(Math.round(clip.shot.confidence * 100)));
   return badges;
 }
 
