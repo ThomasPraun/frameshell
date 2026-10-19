@@ -722,7 +722,7 @@ function formatOutline(outline: ScriptOutlineResult): string {
     lines.push(`  ${`#${scene.slug}`.padEnd(slugW)}  ${scene.title.padEnd(titleW)}  line ${String(scene.line).padEnd(lineW)}  ${words}  ${clips}`);
     if (scene.wordRange) {
       const placed = scene.span.map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
-      lines.push(`    spoken ${scene.wordRange.from}..${scene.wordRange.to}  ${placed.length > 0 ? placed.join(", ") : "not on a timeline"}`);
+      lines.push(`    spoken ${scene.wordRange.transcript ? `${scene.wordRange.transcript} ` : ""}${scene.wordRange.from}..${scene.wordRange.to}  ${placed.length > 0 ? placed.join(", ") : "not on a timeline"}`);
     }
   }
   if (outline.unresolved.length > 0) {
