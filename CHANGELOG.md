@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Scripts: a scene can name the transcript words it covers with `<!-- words: w_000010..w_000042 -->` right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids and reversed ranges are warnings. Protocol v36.
+- Scripts: a scene can name the transcript words it covers with `<!-- words: talk.words.json w_000010..w_000042 -->` (transcript file optional while one transcript holds the ids) right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids, ambiguous bare ranges and reversed ranges are warnings. Protocol v36.
 
 ## [0.8.1] - 2026-10-17
 

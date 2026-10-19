@@ -1,5 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import { type MediaClip, type ScriptWordRange, type Timeline, type Transcript, parseTimeline, parseTranscript } from "@frameshell/schema";
 import { visibleClips } from "../transcripts/verify.js";
 
@@ -25,12 +25,16 @@ export interface SceneWords {
 
 /**
  * Timeline time spans of script scenes' word ranges (ADR 0015). A range
- * runs from its first to its last word id in transcript order; it resolves
- * in each transcript that holds both ids. A word is placed by a media clip
+ * runs from its first to its last word id in transcript order. Word ids are
+ * per transcript, so a range names its transcript file; a bare range works
+ * only when exactly one transcript holds both ids (several: a warning, no
+ * span). A word is placed by a media clip
  * of its asset whose visible `[in, out)` holds the word's midpoint (overlaps
  * trimmed as in the export), so a clip cut in the middle of a range
- * shortens its span, and words cut out are not counted. Unknown ids, ids in
- * different transcripts and reversed ranges become warnings, never errors;
+ * shortens its span, and words cut out or muted are not counted; each word
+ * counts once however many tracks place it. Unknown ids or transcripts, ids in
+ * different transcripts, ambiguous bare ranges and reversed ranges become
+ * warnings, never errors;
  * unreadable files are skipped with a warning.
  */
 export async function resolveWordRanges(root: string, scenes: readonly SceneWords[]): Promise<ResolvedWordRanges> {
@@ -43,10 +47,23 @@ export async function resolveWordRanges(root: string, scenes: readonly SceneWord
   scenes.forEach((scene, index) => {
     const range = scene.range;
     if (!range) return;
-    const holders = transcripts.map((transcript) => locate(transcript, range));
+    const named = range.transcript === null ? transcripts : transcripts.filter((transcript) => transcriptMatches(transcript, range.transcript!));
+    if (range.transcript !== null && named.length === 0) {
+      warnings.push(`Scene "${scene.slug}": words ${range.from}..${range.to} name transcript "${range.transcript}", which does not exist (see transcripts/).`);
+      return;
+    }
+    const holders = named.map((transcript) => locate(transcript, range));
     const matched = holders.filter((holder) => holder.from !== -1 && holder.to !== -1);
     if (matched.length === 0) {
       warnings.push(unresolvable(scene.slug, range, transcripts, holders));
+      return;
+    }
+    if (matched.length > 1) {
+      const where = matched.map((holder) => holder.transcript.rel).join(", ");
+      warnings.push(
+        `Scene "${scene.slug}": words ${range.from}..${range.to} are in several transcripts (${where}); ` +
+          `name one: \`<!-- words: ${basename(matched[0]!.transcript.rel)} ${range.from}..${range.to} -->\`. Not placed.`,
+      );
       return;
     }
     for (const { transcript, from, to } of matched) {
@@ -75,6 +92,12 @@ function locate(transcript: ReadTranscript, range: ScriptWordRange): { transcrip
   return { transcript, from: ids.indexOf(range.from), to: ids.indexOf(range.to) };
 }
 
+/** Whether a range's transcript reference (`talk.words.json` or `transcripts/talk.words.json`) names this transcript. */
+function transcriptMatches(transcript: ReadTranscript, name: string): boolean {
+  const wanted = name.replace(/^\.?\//, "");
+  return transcript.rel === wanted || transcript.rel === `transcripts/${wanted}`;
+}
+
 function unresolvable(
   slug: string,
   range: ScriptWordRange,
@@ -83,11 +106,13 @@ function unresolvable(
 ): string {
   const label = `Scene "${slug}": words ${range.from}..${range.to}`;
   if (transcripts.length === 0) return `${label} cannot be placed: the project has no transcripts (transcribe an asset first).`;
-  const partial = holders.filter((holder) => holder.from !== -1 || holder.to !== -1);
-  if (partial.length > 0) {
-    const where = partial.map(({ transcript, from }) => `${from !== -1 ? range.from : range.to} in ${transcript.rel}`).join(", ");
-    return `${label}: the ids are not in one transcript (${where}); a range must stay inside one transcript.`;
+  const fromAt = holders.filter((holder) => holder.from !== -1).map((holder) => holder.transcript.rel);
+  const toAt = holders.filter((holder) => holder.to !== -1).map((holder) => holder.transcript.rel);
+  if (fromAt.length > 0 && toAt.length > 0) {
+    return `${label}: the ids are not in one transcript (${range.from} in ${fromAt.join(", ")}; ${range.to} in ${toAt.join(", ")}); a range must stay inside one transcript.`;
   }
+  if (fromAt.length > 0) return `${label}: unknown word id ${range.to} (${range.from} is in ${fromAt.join(", ")}).`;
+  if (toAt.length > 0) return `${label}: unknown word id ${range.from} (${range.to} is in ${toAt.join(", ")}).`;
   return `${label}: unknown word ids; no transcript has ${range.from} or ${range.to}.`;
 }
 
@@ -95,12 +120,14 @@ function unresolvable(
 function spanOn(id: string, timeline: Timeline, transcript: Transcript, wanted: ReadonlySet<string>): SceneSpan | null {
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
-  let count = 0;
+  const placedIds = new Set<string>();
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
-    const clips = track.clips.filter((clip): clip is MediaClip => clip.type === "media").filter((clip) => clip.asset === transcript.asset);
-    for (const placed of visibleClips(clips)) {
+    // Overlaps trim against every media clip of the track, as in the export and `keptWords`.
+    const visible = visibleClips(track.clips.filter((clip): clip is MediaClip => clip.type === "media"));
+    for (const placed of visible) {
       const { clip, speed } = placed;
+      if (clip.asset !== transcript.asset || clip.audio?.muted === true) continue;
       const toTimeline = (source: number) => clip.start + (source - clip.in) / speed;
       for (const word of transcript.words) {
         if (!wanted.has(word.id)) continue;
@@ -108,11 +135,11 @@ function spanOn(id: string, timeline: Timeline, transcript: Transcript, wanted: 
         if (mid < clip.in || mid >= placed.out) continue;
         start = Math.min(start, toTimeline(Math.max(word.start, clip.in)));
         end = Math.max(end, toTimeline(Math.min(word.end, placed.out)));
-        count++;
+        placedIds.add(word.id);
       }
     }
   }
-  return count === 0 ? null : { timeline: id, start: round(start), end: round(end), words: count };
+  return placedIds.size === 0 ? null : { timeline: id, start: round(start), end: round(end), words: placedIds.size };
 }
 
 function round(seconds: number): number {

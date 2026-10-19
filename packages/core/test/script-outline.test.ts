@@ -269,7 +269,7 @@ describe("script.outline word ranges (ADR 0015)", () => {
     );
     const { scenes, warnings } = await outline();
     const bySlug = Object.fromEntries(scenes.map((scene) => [scene.slug, scene]));
-    expect(bySlug["whole"]!.wordRange).toEqual(ids(1, 10));
+    expect(bySlug["whole"]!.wordRange).toEqual({ transcript: null, ...ids(1, 10) });
     // Words 1-4 sit at 0-3.8 s; words 7-10 at 20-23.8 s.
     expect(bySlug["whole"]!.span).toEqual([{ timeline: "talk", start: 0, end: 23.8, words: 8 }]);
     expect(bySlug["start"]!.span).toEqual([{ timeline: "talk", start: 0, end: 2.8, words: 3 }]);
@@ -323,6 +323,87 @@ describe("script.outline word ranges (ADR 0015)", () => {
       expect.stringMatching(/Scene "reversed": .*reversed in transcripts\/talk\.words\.json/),
       expect.stringMatching(/Scene "split": .*the ids are not in one transcript/),
     ]);
+  });
+
+  function writeTranscript(name: string, asset: string, count: number): void {
+    const words = Array.from({ length: count }, (_, i) => ({ id: `w_${String(i + 1).padStart(6, "0")}`, text: `p${i + 1}`, start: i, end: i + 0.8 }));
+    const transcript = { schemaVersion: 1, asset, assetHash: `sha256:${"d".repeat(64)}`, provider: "fake", model: "m", words, edits: {}, nextWordId: count + 1 };
+    writeFileSync(join(root, "transcripts", `${name}.words.json`), JSON.stringify(transcript));
+  }
+
+  it("needs the transcript name when two transcripts hold the same ids", async () => {
+    writeTalk();
+    writeTranscript("other", "assets/other.wav", 10);
+    const tl = {
+      ...createTimeline("two"),
+      tracks: [
+        { id: "a1", kind: "audio", clips: [{ id: "c_1", type: "media", asset: "assets/talk.wav", start: 0, in: 0, out: 10 }] },
+        { id: "a2", kind: "audio", clips: [{ id: "c_2", type: "media", asset: "assets/other.wav", start: 50, in: 0, out: 10 }] },
+      ],
+    };
+    writeFileSync(join(root, "timelines", "two.json"), JSON.stringify(tl));
+    writeFileSync(
+      join(root, "scripts", "words.md"),
+      scriptWith({
+        Bare: `<!-- words: ${ids(2, 4).from}..${ids(2, 4).to} -->`,
+        Talk: `<!-- words: talk.words.json ${ids(2, 4).from}..${ids(2, 4).to} -->`,
+        Other: `<!-- words: transcripts/other.words.json ${ids(2, 4).from}..${ids(2, 4).to} -->`,
+        Missing: `<!-- words: nope.words.json ${ids(2, 4).from}..${ids(2, 4).to} -->`,
+      }),
+    );
+    const { scenes, warnings } = await outline();
+    const bySlug = Object.fromEntries(scenes.map((scene) => [scene.slug, scene]));
+    expect(bySlug["bare"]!.span).toEqual([]);
+    expect(bySlug["talk"]!.span).toEqual([{ timeline: "two", start: 1, end: 3.8, words: 3 }]);
+    expect(bySlug["other"]!.span).toEqual([{ timeline: "two", start: 51, end: 53.8, words: 3 }]);
+    expect(bySlug["missing"]!.span).toEqual([]);
+    expect(warnings).toEqual([
+      expect.stringMatching(/Scene "bare": .*several transcripts .*talk\.words\.json.*other\.words\.json/),
+      expect.stringMatching(/Scene "missing": .*"nope\.words\.json", which does not exist/),
+    ]);
+  });
+
+  it("trims the talk where a clip of another asset overlaps its tail on the same track", async () => {
+    writeTalk();
+    const tl = {
+      ...createTimeline("over"),
+      tracks: [
+        {
+          id: "a1",
+          kind: "audio",
+          clips: [
+            { id: "c_1", type: "media", asset: "assets/talk.wav", start: 0, in: 0, out: 10 },
+            { id: "c_2", type: "media", asset: "assets/music.wav", start: 5, in: 0, out: 10 },
+          ],
+        },
+      ],
+    };
+    writeFileSync(join(root, "timelines", "over.json"), JSON.stringify(tl));
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ All: `<!-- words: ${ids(1, 10).from}..${ids(1, 10).to} -->` }));
+    // Talk plays 0-5 s only: words 1-5 (word 5 starts at 4).
+    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "over", start: 0, end: 4.8, words: 5 }]);
+  });
+
+  it("counts each word once when the asset sits on two tracks, and skips muted clips", async () => {
+    writeTalk();
+    const clip = (id: string, extra = {}) => ({ id, type: "media", asset: "assets/talk.wav", start: 0, in: 0, out: 4, ...extra });
+    const tl = {
+      ...createTimeline("dup"),
+      tracks: [
+        { id: "v1", kind: "video", clips: [clip("c_1", { audio: { muted: true } })] },
+        { id: "a1", kind: "audio", clips: [clip("c_2")] },
+        { id: "a2", kind: "audio", clips: [clip("c_3")] },
+      ],
+    };
+    writeFileSync(join(root, "timelines", "dup.json"), JSON.stringify(tl));
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ All: `<!-- words: ${ids(1, 10).from}..${ids(1, 10).to} -->` }));
+    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "dup", start: 0, end: 3.8, words: 4 }]);
+  });
+
+  it("says unknown id, not a cross-transcript problem, when one end of the range is a typo", async () => {
+    writeTalk();
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ Typo: "<!-- words: w_000002..w_000999 -->" }));
+    expect((await outline()).warnings).toEqual([expect.stringMatching(/Scene "typo": .*unknown word id w_000999/)]);
   });
 
   it("warns when the project has no transcript at all", async () => {

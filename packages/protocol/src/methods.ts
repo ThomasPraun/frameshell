@@ -356,7 +356,7 @@ const SceneSpanSchema = z.object({
   timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
   start: z.number().describe("Timeline seconds where the first placed word of the range starts."),
   end: z.number().describe("Timeline seconds where the last placed word of the range ends."),
-  words: z.int().describe("Words of the range this timeline places (cut ones are missing)."),
+  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
 });
 
 const ExportPresetResultSchema = z.looseObject({
@@ -1077,9 +1077,9 @@ export const methods = {
       "with `clip.set`) and the clips of every timeline already linked to it. Scenes with empty `clips` still need " +
       "footage or a composition. Top-level `clips` are linked to the whole script (`scriptRef` is the path without " +
       "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
-      "or removed heading). A scene that names transcript words with `<!-- words: w_000010..w_000042 -->` under its heading " +
+      "or removed heading). A scene that names transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` under its heading (word ids repeat across transcripts: name the file; a bare range matching several transcripts is not placed) " +
       "has `wordRange`, and `span`: the timeline seconds those words occupy, per timeline, so you can place or re-place its clips; " +
-      "unknown ids or a reversed range become `warnings`. " +
+      "unknown ids, an ambiguous range or a reversed range become `warnings`. " +
       "Never fails on content: bad frontmatter, duplicate headings or bad word ranges become `warnings`. Fails with " +
       "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
     params: z.strictObject({

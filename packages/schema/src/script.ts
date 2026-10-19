@@ -9,12 +9,17 @@ import { WordIdSchema } from "./transcript.js";
  * a `scriptRef` without `#anchor` refers to the whole script.
  * Optional YAML frontmatter carries `title`, `target_duration`, `aspect`.
  * A scene may name the transcript words it covers with an HTML comment right
- * under its heading, `<!-- words: w_000010..w_000042 -->` (ADR 0015).
+ * under its heading, `<!-- words: talk.words.json w_000010..w_000042 -->`
+ * (ADR 0015); the transcript file may be left out when one transcript holds the ids.
  * Parsing never fails: problems become `warnings`.
  */
 
 /** Transcript words a scene covers: first and last word id, inclusive, in transcript order. */
 export const ScriptWordRangeSchema = z.object({
+  transcript: z
+    .string()
+    .nullable()
+    .describe("Transcript file the ids belong to (`talk.words.json`, under `transcripts/`); null when the comment does not name one. Word ids repeat across transcripts."),
   from: WordIdSchema.describe("First word id."),
   to: WordIdSchema.describe("Last word id; equal to `from` for a single word."),
 });
@@ -32,7 +37,7 @@ export const ScriptSceneSchema = z.object({
   endLine: z.int().describe("1-based last line of the scene: the line before the next scene heading, or the last line."),
   words: z.int().describe("Words in the scene body (heading and `words` comment excluded); rough voice-over length at ~2.5 words/s."),
   wordRange: ScriptWordRangeSchema.nullable().describe(
-    "Transcript words the scene covers, from a `<!-- words: w_000010..w_000042 -->` comment under the heading; null when absent or malformed.",
+    "Transcript words the scene covers, from a `<!-- words: talk.words.json w_000010..w_000042 -->` comment under the heading; null when absent or malformed.",
   ),
 });
 
@@ -194,9 +199,9 @@ function readWordsComment(body: string[], slug: string, warnings: string[]): { w
   if (commentIndex === -1) return none;
   const comment = /^\s*<!--\s*words\s*:(.*?)-->\s*$/i.exec(body[commentIndex]!);
   if (!comment) return /^\s*<!--\s*words\b/i.test(body[commentIndex]!) ? malformed() : none;
-  const range = /^\s*(w_\d{6,})(?:\s*\.\.\s*(w_\d{6,}))?\s*$/.exec(comment[1]!);
-  if (!range) return malformed();
-  return { wordRange: { from: range[1]!, to: range[2] ?? range[1]! }, commentIndex };
+  const range = /^\s*(?:([^\s<>]+)\s+)?(w_\d{6,})(?:\s*\.\.\s*(w_\d{6,}))?\s*$/.exec(comment[1]!);
+  if (!range || (range[1] !== undefined && /^w_\d/.test(range[1]))) return malformed();
+  return { wordRange: { transcript: range[1] ?? null, from: range[2]!, to: range[3] ?? range[2]! }, commentIndex };
 
   function malformed() {
     warnings.push(`Scene "${slug}": malformed words comment; write \`<!-- words: w_000010..w_000042 -->\` on one line. Ignored.`);

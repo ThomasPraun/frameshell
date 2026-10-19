@@ -6,14 +6,15 @@ describe("scene words comment (ADR 0015)", () => {
 
   it("reads a range from the comment under the heading and leaves it out of the word count", () => {
     const found = scene("## Intro\n<!-- words: w_000010..w_000042 -->\nHola a todos.");
-    expect(found.wordRange).toEqual({ from: "w_000010", to: "w_000042" });
+    expect(found.wordRange).toEqual({ transcript: null, from: "w_000010", to: "w_000042" });
     expect(found.words).toBe(3);
     expect(found.endLine).toBe(3);
   });
 
   it("takes a single id as a one-word range, tolerates spacing, case and blank lines before the comment", () => {
-    expect(scene("## A\n\n<!--words : w_000007-->\n").wordRange).toEqual({ from: "w_000007", to: "w_000007" });
-    expect(scene("## A\n<!--  WORDS: w_000001 .. w_000002  -->").wordRange).toEqual({ from: "w_000001", to: "w_000002" });
+    expect(scene("## A\n\n<!--words : w_000007-->\n").wordRange).toEqual({ transcript: null, from: "w_000007", to: "w_000007" });
+    expect(scene("## A\n<!--  WORDS: w_000001 .. w_000002  -->").wordRange).toEqual({ transcript: null, from: "w_000001", to: "w_000002" });
+    expect(scene("## A\n<!-- words: talk.words.json w_000001..w_000002 -->").wordRange).toEqual({ transcript: "talk.words.json", from: "w_000001", to: "w_000002" });
   });
 
   it("is optional: scenes without it behave as before and stay warning-free", () => {
@@ -24,7 +25,7 @@ describe("scene words comment (ADR 0015)", () => {
   });
 
   it("warns and gives no range on a malformed comment, and still drops it from the word count", () => {
-    for (const bad of ["<!-- words: w_1..w_2 -->", "<!-- words: -->", "<!-- words: w_000001..w_000002", "<!-- words: w_000001..w_000002..w_000003 -->"]) {
+    for (const bad of ["<!-- words: w_1..w_2 -->", "<!-- words: -->", "<!-- words: w_000001..w_000002", "<!-- words: w_000001..w_000002..w_000003 -->", "<!-- words: w_000001 w_000002 -->"]) {
       const outline = parseScript(`## Intro\n${bad}\nHola.`);
       expect(outline.scenes[0]!.wordRange).toBeNull();
       expect(outline.scenes[0]!.words).toBe(1);
