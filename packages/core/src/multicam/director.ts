@@ -1,4 +1,4 @@
-import type { DirectorRules, ShotLayout } from "@frameshell/schema";
+import type { DirectorRules, ShotCorner, ShotLayout } from "@frameshell/schema";
 
 /**
  * The rule-based director (ADR 0016 decision 4): speaking turns on the group
@@ -6,7 +6,9 @@ import type { DirectorRules, ShotLayout } from "@frameshell/schema";
  * and span always give the same shots. Steps, in order: laughter and long
  * overlaps; who speaks, silences; short overlaps and pauses keep the shot that
  * was on; quick exchanges; cut lead; minimum shot length; cutaways in long
- * solos; frame grid.
+ * solos; screens in motion; frame grid. Angles marked `screen` are never
+ * speakers: only the screen rule shows them, `screen` while nobody talks and
+ * `pip` (screen with the speaker's inset) while someone does.
  */
 
 /** One angle of the group as the director sees it, in group order. */
@@ -15,6 +17,8 @@ export interface DirectorAngle {
   id: string;
   /** False: the file has no video stream, so no shot can show it. */
   picture: boolean;
+  /** True: a screen share, not a person (`Angle.screen`). Ignored when the group has no other angle with a picture. */
+  screen?: boolean;
 }
 
 /** A stretch of speech of one angle, group-clock seconds; see `Turn`. */
@@ -33,6 +37,8 @@ export interface DirectorInput {
   angles: readonly DirectorAngle[];
   /** Speaking turns of the group's angles, any order; turns of unknown angles are ignored. */
   turns: readonly DirectorTurn[];
+  /** Stretches in which a screen angle's picture changes, group-clock seconds (`angle` is a screen angle) (`multicam/motion.ts`). Default none. */
+  motion?: readonly DirectorTurn[];
   /** Resolved rules (`resolveDirectorRules`). */
   rules: DirectorRules;
   /** Group-clock seconds where the span to fill starts. */
@@ -49,17 +55,19 @@ export interface DirectedShot {
   in: number;
   /** Group-clock seconds just after the last frame. */
   out: number;
-  /** Layout: `solo`, `two-up` or `grid`. */
+  /** Layout: `solo`, `two-up`, `grid`, `screen` or `pip`. */
   shot: ShotLayout;
-  /** Angle ids in layout order (group order). */
+  /** Angle ids in layout order (group order); `pip`: the screen, then the speaker. */
   angles: string[];
+  /** Inset corner of a `pip` shot (`rules.screen.corner`). */
+  corner?: ShotCorner;
   /** 0 (a guess) to 1 (sure), two decimals; see {@link directShots}. */
   confidence: number;
   /** Why, in a few words, e.g. `ana speaks`. */
   reason: string;
 }
 
-type Why = "speaks" | "exchange" | "overlap" | "laughter" | "silence" | "listener" | "wide" | "unclear" | "only";
+type Why = "speaks" | "exchange" | "overlap" | "laughter" | "silence" | "listener" | "wide" | "unclear" | "only" | "screen" | "screenSpeaks";
 
 interface Run {
   from: number;
@@ -87,6 +95,8 @@ const BASE_CONFIDENCE: Record<Why, number> = {
   wide: 0.45,
   unclear: 0.3,
   only: 1,
+  screen: 0.8,
+  screenSpeaks: 0.85,
 };
 
 /**
@@ -97,16 +107,21 @@ const BASE_CONFIDENCE: Record<Why, number> = {
  */
 export function directShots(input: DirectorInput): DirectedShot[] {
   const { rules, from, to } = input;
-  const pictured = input.angles.filter((angle) => angle.picture).map((angle) => angle.id);
-  if (pictured.length === 0) throw new Error("no angle of the group has a picture");
+  const withPicture = input.angles.filter((angle) => angle.picture);
+  if (withPicture.length === 0) throw new Error("no angle of the group has a picture");
   if (to - from <= EPSILON) return [];
+  const people = withPicture.filter((angle) => angle.screen !== true).map((angle) => angle.id);
+  // A group of screens only has nobody to cut between: they count as people.
+  const screens = people.length > 0 ? withPicture.filter((angle) => angle.screen === true).map((angle) => angle.id) : [];
+  const pictured = people.length > 0 ? people : withPicture.map((angle) => angle.id);
   const order = new Map(input.angles.map((angle, index) => [angle.id, index]));
   const weight = (id: string) => rules.weights[id] ?? 1;
   const turns = input.turns
-    .filter((turn) => order.has(turn.angle) && turn.end > from + EPSILON && turn.start < to - EPSILON)
+    .filter((turn) => order.has(turn.angle) && !screens.includes(turn.angle) && turn.end > from + EPSILON && turn.start < to - EPSILON)
     .map((turn) => ({ angle: turn.angle, start: Math.max(turn.start, from), end: Math.min(turn.end, to) }));
+  const withScreens = (runs: Run[]) => (screens.length > 0 ? showScreens(runs, input, screens, pictured, turns, order, weight) : runs);
   if (pictured.length === 1) {
-    return finish([{ from, to, shot: "solo", angles: pictured, why: "only" }], turns, input);
+    return finish(withScreens([{ from, to, shot: "solo", angles: pictured, why: "only" }]), turns, input);
   }
   const eligible = new Set(pictured.filter((id) => weight(id) > 0));
   const byPreference = (ids: Iterable<string>) => [...ids].sort((a, b) => weight(b) - weight(a) || order.get(a)! - order.get(b)!);
@@ -159,7 +174,66 @@ export function directShots(input: DirectorInput): DirectedShot[] {
 
   runs = absorbShort(runs, rules.minShot);
   if (rules.maxShot !== null) runs = cutaways(runs, rules, pictured, (speaker) => byPreference([...eligible].filter((id) => id !== speaker))[0]);
-  return finish(runs, turns, input);
+  return finish(withScreens(runs), turns, input);
+}
+
+/**
+ * Where a screen angle moves (see `rules.screen`), the picture is the screen:
+ * `pip` with the person who speaks most in that piece (ties: group order;
+ * weight 0 never) when `screen.pip` is on and anyone speaks, else `screen`.
+ * Several screens: the first in group order that moves. Pieces left shorter
+ * than `minShot` join their neighbour.
+ */
+function showScreens(
+  runs: Run[],
+  input: DirectorInput,
+  screens: readonly string[],
+  people: readonly string[],
+  turns: readonly DirectorTurn[],
+  order: ReadonlyMap<string, number>,
+  weight: (id: string) => number,
+): Run[] {
+  const { rules, from, to } = input;
+  const { motion: minMotion, hold, pip } = rules.screen;
+  if (minMotion === null || !input.motion) return runs;
+  const stretches: { angle: string; from: number; to: number }[] = [];
+  for (const screen of screens) {
+    const mine = input.motion
+      .filter((span) => span.angle === screen && span.end > from + EPSILON && span.start < to - EPSILON)
+      .map((span) => ({ from: Math.max(span.start, from), to: Math.min(span.end, to) }))
+      .sort((a, b) => a.from - b.from);
+    const merged: { from: number; to: number }[] = [];
+    for (const span of mine) {
+      const last = merged.at(-1);
+      if (last && span.from - last.to < hold - EPSILON) last.to = Math.max(last.to, span.to);
+      else merged.push({ ...span });
+    }
+    for (const span of merged) if (span.to - span.from >= minMotion - EPSILON) stretches.push({ angle: screen, ...span });
+  }
+  if (stretches.length === 0) return runs;
+  const cuts = [...new Set([...runs.flatMap((run) => [run.from, run.to]), ...stretches.flatMap((span) => [span.from, span.to])])].sort((a, b) => a - b);
+  const out: Run[] = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const a = cuts[i]!;
+    const b = cuts[i + 1]!;
+    const run = runs.find((candidate) => candidate.from <= a + EPSILON && candidate.to >= b - EPSILON);
+    if (!run) continue;
+    const moving = stretches.filter((span) => span.from <= a + EPSILON && span.to >= b - EPSILON).map((span) => span.angle);
+    const screen = [...moving].sort((x, y) => order.get(x)! - order.get(y)!)[0];
+    if (screen === undefined) {
+      out.push({ ...run, from: a, to: b, angles: [...run.angles] });
+      continue;
+    }
+    const spoken = (id: string) => turns.reduce((sum, turn) => (turn.angle === id ? sum + Math.max(0, Math.min(turn.end, b) - Math.max(turn.start, a)) : sum), 0);
+    const talking = people.filter((id) => weight(id) > 0 && spoken(id) > EPSILON);
+    const speaker = [...talking].sort((x, y) => spoken(y) - spoken(x) || order.get(x)! - order.get(y)!)[0];
+    out.push(
+      pip && speaker !== undefined
+        ? { from: a, to: b, shot: "pip", angles: [screen, speaker], why: "screenSpeaks" }
+        : { from: a, to: b, shot: "screen", angles: [screen], why: "screen" },
+    );
+  }
+  return absorbShort(mergeSame(out), rules.minShot);
 }
 
 /** `[first, last]` index ranges of consecutive trues. */
@@ -295,6 +369,7 @@ function finish(runs: Run[], turns: DirectorTurn[], input: DirectorInput): Direc
     out: run.to,
     shot: run.shot!,
     angles: run.angles,
+    ...(run.shot === "pip" ? { corner: input.rules.screen.corner } : {}),
     confidence: confidenceOf(run, turns),
     reason: reasonOf(run),
   }));
@@ -313,7 +388,7 @@ function confidenceOf(run: Run, turns: DirectorTurn[]): number {
   }
   const total = [...speech.values()].reduce((sum, value) => sum + value, 0);
   let share = 1;
-  if (run.why === "speaks" || run.why === "exchange" || run.why === "overlap") {
+  if (run.why === "speaks" || run.why === "exchange" || run.why === "overlap" || run.why === "screenSpeaks") {
     share = total > 0 ? run.angles.reduce((sum, id) => sum + (speech.get(id) ?? 0), 0) / total : 0.5;
   } else if (run.why === "silence") {
     share = 1 - covered(pieces) / (run.to - run.from);
@@ -354,5 +429,9 @@ function reasonOf(run: Run): string {
       return "no clear speaker";
     case "only":
       return "only angle with a picture";
+    case "screen":
+      return `${a} moves`;
+    case "screenSpeaks":
+      return `${a} moves, ${b} speaks`;
   }
 }

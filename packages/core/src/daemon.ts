@@ -36,6 +36,7 @@ import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
 import { groupTurns } from "./multicam/group-turns.js";
+import { MotionStore, groupMotion } from "./multicam/motion.js";
 import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
@@ -202,6 +203,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
     },
     extractAudio: options.extractAudio,
+  });
+  const motion = new MotionStore({
+    ffmpeg: async (dir) => {
+      const project = await readEnclosingProject(dir);
+      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
+    },
   });
   const transactions = new TransactionTracker({
     idleGapMs: options.txIdleGapMs,
@@ -572,9 +579,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
       const measured = await groupTurns(turnsSource, dir, found);
       const turns = measured.turns.map(({ angle, start, end }) => ({ angle, start, end }));
+      const screens = loadedRules.rules.screen.motion === null ? null : await groupMotion(motion, dir, found, loadedRules.rules.screen.threshold);
       let written: Timeline | undefined;
       let keep: string[] = [];
-      const args = { cwd, timeline, group, from, to, turns, rules: loadedRules.rules, keep };
+      const args = { cwd, timeline, group, from, to, turns, ...(screens ? { motion: screens.motion } : {}), rules: loadedRules.rules, keep };
       // Human shots come from the timeline and journal the operation applies to: measuring turns
       // can take long, and a shot a person sets meanwhile must still be kept.
       const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
@@ -605,6 +613,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = [
         ...result.warnings,
         ...measured.warnings,
+        ...(screens?.warnings ?? []),
         ...(unknown.length > 0 ? [`weights name ${unknown.join(", ")}, not angles of group ${group} (angles: ${found.angles.map((angle) => angle.id).join(", ")}).`] : []),
       ];
       return {

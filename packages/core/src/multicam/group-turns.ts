@@ -35,7 +35,7 @@ export async function groupTurns(source: TurnsSource, root: string, group: Multi
     try {
       const probe = await source.probe(root, angle.asset);
       if (probe.audio) profile = await source.profile(root, angle.asset);
-      else warnings.push(`${angle.name} (${angle.asset}) has no sound, so it has no turns.`);
+      else if (angle.screen !== true) warnings.push(`${angle.name} (${angle.asset}) has no sound, so it has no turns.`);
     } catch (error) {
       if (error instanceof RpcError) throw error;
       warnings.push(`${angle.name} (${angle.asset}): could not read the sound (${(error as Error).message}), so it has no turns.`);

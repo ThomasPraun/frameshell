@@ -121,6 +121,48 @@
       },
       "additionalProperties": false
     },
+    "screen": {
+      "type": "object",
+      "properties": {
+        "motion": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "description": "A screen angle that changes for at least this long (a slide, a scroll, a demo) is shown: `screen` while nobody speaks, `pip` (screen with the speaker in an inset) while someone does. Null switches the rule off. Null switches the rule off. Seconds."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hold": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Pauses in a screen's motion shorter than this stay inside the stretch, so a still moment mid-demo does not cut away. Seconds."
+        },
+        "threshold": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "How much of the picture must change to count as motion: mean brightness change between two samples (4 per second), 0 to 255."
+        },
+        "pip": {
+          "type": "boolean",
+          "description": "False: show the screen alone, never with an inset."
+        },
+        "corner": {
+          "type": "string",
+          "enum": [
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right"
+          ],
+          "description": "Corner of the inset in `pip` shots."
+        }
+      },
+      "additionalProperties": false
+    },
     "weights": {
       "type": "object",
       "propertyNames": {

@@ -465,6 +465,11 @@ function angleSlots(shots: readonly PlacedShot[], group: MulticamGroup, assets: 
       if (free >= 0) next[free] = id;
       else next.push(id);
     }
+    // Slots paint bottom first: a pip inset (second angle) must sit above its screen (first angle).
+    if (placed.shot.shot === "pip") {
+      const [screen, inset] = [next.indexOf(shown[0] ?? ""), next.indexOf(shown[1] ?? "")];
+      if (screen > inset && inset >= 0) [next[screen], next[inset]] = [next[inset]!, next[screen]!];
+    }
     held = next;
     while (slots.length < next.length) slots.push([]);
     const layout: ShotFrame = { shot: placed.shot, group, sizes };

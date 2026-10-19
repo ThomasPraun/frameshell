@@ -1491,6 +1491,11 @@ code {
   color: var(--danger);
 }
 
+.clip-inspector-screen.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .clip-field-label.is-static {
   cursor: default;
 }

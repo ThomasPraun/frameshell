@@ -23,7 +23,7 @@ The track that holds the shots of a multicam group.
 _Avoid_: switch track, edit track
 
 **Shot**:
-A clip on the program track that shows chosen angles in a layout (`solo`, `two-up`, `grid`) over a time range.
+A clip on the program track that shows chosen angles in a layout (`solo`, `two-up`, `grid`, `screen`, `pip`) over a time range.
 _Avoid_: cut, layout, scene
 
 **Director**:

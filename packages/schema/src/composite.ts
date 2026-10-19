@@ -9,11 +9,13 @@ import type {
   MulticamGroup,
   ProgramTrack,
   ShotClip,
+  ShotCorner,
   ShotLayout,
   Timeline,
   Track,
   Transform,
 } from "./timeline.js";
+import { DEFAULT_SHOT_CORNER } from "./timeline.js";
 
 /** A clip {@link Transform} with every default filled in. */
 export interface Placement {
@@ -335,18 +337,51 @@ export interface ShotLayer {
   crop: LayerRect;
 }
 
+/** Width of a `pip` inset as a fraction of the frame width, and the most of the frame height it may take. */
+const PIP_WIDTH = 0.25;
+const PIP_MAX_HEIGHT = 0.4;
+/** Gap between a `pip` inset and the frame edges, as a fraction of the frame width. */
+const PIP_MARGIN = 0.02;
+
+/** Rectangle of a `pip` inset whose picture has `aspect` (width / height), in the `corner` of an `output` frame. */
+function pipInset(output: Size, aspect: number, corner: ShotCorner): LayerRect {
+  let width = Math.round(output.width * PIP_WIDTH);
+  let height = Math.max(1, Math.round(width / aspect));
+  if (height > output.height * PIP_MAX_HEIGHT) {
+    height = Math.max(1, Math.round(output.height * PIP_MAX_HEIGHT));
+    width = Math.max(1, Math.round(height * aspect));
+  }
+  const margin = Math.round(output.width * PIP_MARGIN);
+  const left = corner.endsWith("left") ? margin : output.width - width - margin;
+  const top = corner.startsWith("top") ? margin : output.height - height - margin;
+  return { left: Math.max(0, left), top: Math.max(0, top), width, height };
+}
+
+/** Largest centered rectangle of `area`'s aspect inside `output`: the whole picture, with bars where the aspects differ. */
+function containTile(area: Size, output: Size): LayerRect {
+  const scale = Math.min(output.width / area.width, output.height / area.height);
+  const width = Math.min(output.width, Math.max(1, Math.round(area.width * scale)));
+  const height = Math.min(output.height, Math.max(1, Math.round(area.height * scale)));
+  return { left: Math.floor((output.width - width) / 2), top: Math.floor((output.height - height) / 2), width, height };
+}
+
 /**
  * Tiles of a `layout` shot with `count` angles in an `output` frame, in
- * angle order. `solo` covers the frame; `two-up` splits it side by side, or
- * stacked when the frame is taller than wide; `grid` picks the columns whose
- * tiles come closest to `aspect` (width / height of the pictures; default
- * 16:9), the last row centered when not full. Edges round to whole pixels,
- * so tiles meet without gaps.
+ * angle order. `solo` and `screen` cover the frame; `two-up` splits it side
+ * by side, or stacked when the frame is taller than wide; `grid` picks the
+ * columns whose tiles come closest to `aspect` (width / height of the
+ * pictures; default 16:9), the last row centered when not full; `pip` is the
+ * whole frame, then an inset of picture aspect `aspect` in `corner` (default
+ * bottom-right). Edges round to whole pixels, so grid tiles meet without gaps.
  */
-export function shotTiles(layout: ShotLayout, count: number, output: Size, aspect = 16 / 9): LayerRect[] {
+export function shotTiles(layout: ShotLayout, count: number, output: Size, aspect = 16 / 9, corner: ShotCorner = DEFAULT_SHOT_CORNER): LayerRect[] {
   if (count < 1) return [];
   const { width, height } = output;
-  if (layout === "solo") return [{ left: 0, top: 0, width, height }];
+  if (layout === "solo" || layout === "screen") return [{ left: 0, top: 0, width, height }];
+  if (layout === "pip") {
+    const whole = { left: 0, top: 0, width, height };
+    return count === 1 ? [whole] : [whole, pipInset(output, aspect, corner)];
+  }
   let cols: number;
   if (layout === "two-up") cols = width >= height ? 2 : 1;
   else cols = gridColumns(count, output, aspect);
@@ -404,12 +439,25 @@ export function coverCrop(area: LayerRect, tile: Size): LayerRect {
 /**
  * Layers of `shot` in an `output` frame: one per angle it shows, in its
  * order, each angle's cropped picture filling its tile ({@link shotTiles},
- * {@link coverCrop}). `sourceSize` gives each asset's picture size. Angles
- * missing from `group` are skipped (the timeline schema refuses them).
+ * {@link coverCrop}); later layers paint over earlier ones. A `screen` shot,
+ * and the first angle of a `pip` shot, show the whole cropped picture,
+ * centered with black bars where the aspects differ: a screen is never cut.
+ * A `pip` inset keeps its picture's aspect. `sourceSize` gives each asset's
+ * picture size. Angles missing from `group` are skipped (the timeline schema
+ * refuses them).
  */
 export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, sourceSize: (asset: string) => Size): ShotLayer[] {
   const angles = shot.angles.flatMap((id) => group.angles.find((angle) => angle.id === id) ?? []);
   const areas = angles.map((angle) => croppedRect(sourceSize(angle.asset), angle.crop));
+  if (shot.shot === "screen" || shot.shot === "pip") {
+    const insetArea = areas[1];
+    const tiles = shotTiles(shot.shot, angles.length, output, insetArea ? insetArea.width / insetArea.height : 16 / 9, shot.corner);
+    return angles.map((angle, index) => {
+      const area = areas[index]!;
+      const tile = index === 0 ? containTile(area, output) : tiles[index]!;
+      return { angle: angle.id, asset: angle.asset, tile, crop: index === 0 ? area : coverCrop(area, tile) };
+    });
+  }
   const aspect = areas.length > 0 ? areas.reduce((sum, area) => sum + area.width / area.height, 0) / areas.length : 16 / 9;
   const tiles = shotTiles(shot.shot, angles.length, output, aspect);
   return angles.map((angle, index) => {
