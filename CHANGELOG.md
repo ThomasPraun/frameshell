@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Scripts: a scene can name the transcript words it covers with `<!-- words: w_000010..w_000042 -->` right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids and reversed ranges are warnings. Protocol v36.
+
 ## [0.8.1] - 2026-10-17
 
 Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the project open in the app. Installing it is enough: an existing connection keeps working, restart Claude Desktop once. No protocol change; the official plugins are unchanged.

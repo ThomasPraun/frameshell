@@ -219,3 +219,114 @@ describe("scriptRef on clip operations", () => {
     });
   }, 10_000);
 });
+
+describe("script.outline word ranges (ADR 0015)", () => {
+  const ids = (from: number, to: number) => ({ from: `w_${String(from).padStart(6, "0")}`, to: `w_${String(to).padStart(6, "0")}` });
+
+  /** Ten words, one per second from 0, on `assets/talk.wav`; cut and placed by the timeline below. */
+  function writeTalk(): void {
+    mkdirSync(join(root, "transcripts"), { recursive: true });
+    const words = Array.from({ length: 10 }, (_, i) => ({ id: `w_${String(i + 1).padStart(6, "0")}`, text: `p${i + 1}`, start: i, end: i + 0.8 }));
+    const transcript = { schemaVersion: 1, asset: "assets/talk.wav", assetHash: `sha256:${"b".repeat(64)}`, provider: "fake", model: "m", words, edits: {}, nextWordId: 11 };
+    writeFileSync(join(root, "transcripts", "talk.words.json"), JSON.stringify(transcript));
+  }
+
+  function writeCut(): void {
+    // Source 0-4 s on the timeline at 0, a gap, then source 6-10 s at 20 s (words 5 and 6 cut out).
+    const talk = {
+      ...createTimeline("talk"),
+      tracks: [
+        {
+          id: "a1",
+          kind: "audio",
+          clips: [
+            { id: "c_1", type: "media", asset: "assets/talk.wav", start: 0, in: 0, out: 4 },
+            { id: "c_2", type: "media", asset: "assets/talk.wav", start: 20, in: 6, out: 10 },
+          ],
+        },
+      ],
+    };
+    writeFileSync(join(root, "timelines", "talk.json"), JSON.stringify(talk));
+  }
+
+  const scriptWith = (comments: Record<string, string>) =>
+    Object.entries(comments).map(([title, comment]) => `## ${title}\n${comment}\nBody.\n`).join("\n");
+
+  const outline = () => conn.request("script.outline", { cwd: root, file: "scripts/words.md" });
+
+  it("resolves a range to the timeline span, through clips cut in the middle of it", async () => {
+    writeTalk();
+    writeCut();
+    writeFileSync(
+      join(root, "scripts", "words.md"),
+      scriptWith({
+        "Whole": `<!-- words: ${ids(1, 10).from}..${ids(1, 10).to} -->`,
+        "Start": `<!-- words: ${ids(1, 3).from}..${ids(1, 3).to} -->`,
+        "Across the cut": `<!-- words: ${ids(3, 8).from}..${ids(3, 8).to} -->`,
+        "Removed": `<!-- words: ${ids(5, 6).from}..${ids(5, 6).to} -->`,
+        "Plain": "",
+      }),
+    );
+    const { scenes, warnings } = await outline();
+    const bySlug = Object.fromEntries(scenes.map((scene) => [scene.slug, scene]));
+    expect(bySlug["whole"]!.wordRange).toEqual(ids(1, 10));
+    // Words 1-4 sit at 0-3.8 s; words 7-10 at 20-23.8 s.
+    expect(bySlug["whole"]!.span).toEqual([{ timeline: "talk", start: 0, end: 23.8, words: 8 }]);
+    expect(bySlug["start"]!.span).toEqual([{ timeline: "talk", start: 0, end: 2.8, words: 3 }]);
+    expect(bySlug["across-the-cut"]!.span).toEqual([{ timeline: "talk", start: 2, end: 21.8, words: 4 }]);
+    expect(bySlug["removed"]!.span).toEqual([]);
+    expect(bySlug["plain"]!.wordRange).toBeNull();
+    expect(bySlug["plain"]!.span).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("maps through clip speed and reports every timeline that places the words", async () => {
+    writeTalk();
+    writeCut();
+    const fast = { ...createTimeline("fast"), tracks: [{ id: "a1", kind: "audio", clips: [{ id: "c_f", type: "media", asset: "assets/talk.wav", start: 10, in: 2, out: 6, speed: 2 }] }] };
+    writeFileSync(join(root, "timelines", "fast.json"), JSON.stringify(fast));
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ Mid: `<!-- words: ${ids(3, 5).from}..${ids(3, 5).to} -->` }));
+    const { scenes } = await outline();
+    // Source 2-6 s at 2x from 10 s: word 3 (2-2.8) at 10-10.4 s, word 5 (4-4.8) at 11-11.4 s.
+    expect(scenes[0]!.span).toEqual([
+      { timeline: "fast", start: 10, end: 11.4, words: 3 },
+      { timeline: "talk", start: 2, end: 3.8, words: 2 },
+    ]);
+  });
+
+  it("gives an empty span when the words are in no timeline", async () => {
+    writeTalk();
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ Mid: `<!-- words: ${ids(3, 5).from}..${ids(3, 5).to} -->` }));
+    const result = await outline();
+    expect(result.scenes[0]!.span).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("reports unknown ids, a reversed range, split transcripts and a malformed comment as warnings, never an error", async () => {
+    writeTalk();
+    const other = { schemaVersion: 1, asset: "assets/other.wav", assetHash: `sha256:${"c".repeat(64)}`, provider: "fake", model: "m", words: [{ id: "w_000050", text: "x", start: 0, end: 1 }], edits: {} };
+    writeFileSync(join(root, "transcripts", "other.words.json"), JSON.stringify(other));
+    writeFileSync(
+      join(root, "scripts", "words.md"),
+      scriptWith({
+        Unknown: "<!-- words: w_000090..w_000091 -->",
+        Reversed: `<!-- words: ${ids(8, 2).from}..${ids(8, 2).to} -->`,
+        Split: "<!-- words: w_000002..w_000050 -->",
+        Bad: "<!-- words: soon -->",
+      }),
+    );
+    const result = await outline();
+    expect(result.scenes.map((scene) => scene.span)).toEqual([[], [], [], []]);
+    expect(result.warnings).toEqual([
+      expect.stringMatching(/Scene "bad": malformed words comment/),
+      expect.stringMatching(/Scene "unknown": .*unknown word ids/),
+      expect.stringMatching(/Scene "reversed": .*reversed in transcripts\/talk\.words\.json/),
+      expect.stringMatching(/Scene "split": .*the ids are not in one transcript/),
+    ]);
+  });
+
+  it("warns when the project has no transcript at all", async () => {
+    writeFileSync(join(root, "scripts", "words.md"), scriptWith({ A: "<!-- words: w_000001..w_000002 -->" }));
+    expect((await outline()).warnings).toEqual([expect.stringMatching(/Scene "a": .*no transcripts/)]);
+  });
+});

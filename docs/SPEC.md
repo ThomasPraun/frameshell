@@ -321,7 +321,8 @@ Plain Markdown. Optional conventions:
 
 - YAML frontmatter: `title`, `target_duration`, `aspect`.
 - Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`). A `scriptRef` without `#anchor` refers to the whole script.
-- `frameshell script outline <file> --json` returns parsed scenes. The UI highlights the scene of the selected clip and flags scenes with no clips.
+- A scene may name the transcript words it covers with an HTML comment right under its heading, `<!-- words: w_000010..w_000042 -->` (ADR 0015). Optional; a single id names one word. The range runs in transcript order and stays inside one transcript.
+- `frameshell script outline <file> --json` returns parsed scenes; a scene with a words comment also gets its `span`: first to last placed word on each timeline. The UI highlights the scene of the selected clip and flags scenes with no clips.
 
 ### 5.6 Schema evolution
 

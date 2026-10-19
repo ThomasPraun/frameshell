@@ -3,6 +3,7 @@ import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ErrorCode, RpcError, type ScriptOutlineResult } from "@frameshell/protocol";
 import { type ScriptOutline, isScriptPath, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
+import { resolveWordRanges } from "./words.js";
 
 /** Largest script read (1 MiB, ~150k words). Bigger files are refused, never loaded whole. */
 export const MAX_SCRIPT_BYTES = 1024 * 1024;
@@ -15,15 +16,21 @@ export const MAX_SCRIPT_BYTES = 1024 * 1024;
 
 /**
  * Outline `file` (absolute, or relative to `cwd`, then to `root`) with the
- * clips of every `timelines/*.json` linked to each scene, and those linked
- * to the whole script (`scriptRef` without `#anchor`). Throws
+ * clips of every `timelines/*.json` linked to each scene, the timeline span of
+ * each scene's `words` range, and the clips linked to the whole script (`scriptRef` without `#anchor`). Throws
  * `OutsideProject` or `ScriptNotFound`.
  */
 export async function outlineScript(root: string, cwd: string, file: string): Promise<ScriptOutlineResult> {
   const { path, text } = await locateScript(root, cwd, file);
   const outline = parseScript(text);
   const { refs, warnings } = await clipRefs(root);
-  const scenes = outline.scenes.map((scene) => ({ ...scene, ref: `${path}#${scene.slug}`, clips: [] as { timeline: string; clip: string }[] }));
+  const resolved = await resolveWordRanges(root, outline.scenes.map((scene) => ({ slug: scene.slug, range: scene.wordRange })));
+  const scenes = outline.scenes.map((scene, index) => ({
+    ...scene,
+    ref: `${path}#${scene.slug}`,
+    clips: [] as { timeline: string; clip: string }[],
+    span: resolved.spans[index]!,
+  }));
   const bySlug = new Map(scenes.map((scene) => [scene.slug, scene]));
   const clips: ScriptOutlineResult["clips"] = [];
   const unresolved: ScriptOutlineResult["unresolved"] = [];
@@ -39,7 +46,7 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
     if (scene) scene.clips.push(location);
     else unresolved.push(ref);
   }
-  return { path, meta: outline.meta, clips, scenes, unresolved, warnings: [...outline.warnings, ...warnings] };
+  return { path, meta: outline.meta, clips, scenes, unresolved, warnings: [...outline.warnings, ...resolved.warnings, ...warnings] };
 }
 
 /**

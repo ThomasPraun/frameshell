@@ -60,6 +60,8 @@ export {
 export {
   ScriptSceneSchema,
   ScriptMetaSchema,
+  ScriptWordRangeSchema,
+  type ScriptWordRange,
   type ScriptScene,
   type ScriptMeta,
   type ScriptOutline,

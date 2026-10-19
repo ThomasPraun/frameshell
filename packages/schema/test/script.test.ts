@@ -1,13 +1,50 @@
 import { describe, expect, it } from "vitest";
 import { isScriptPath, parseScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
 
+describe("scene words comment (ADR 0015)", () => {
+  const scene = (text: string) => parseScript(text).scenes[0]!;
+
+  it("reads a range from the comment under the heading and leaves it out of the word count", () => {
+    const found = scene("## Intro\n<!-- words: w_000010..w_000042 -->\nHola a todos.");
+    expect(found.wordRange).toEqual({ from: "w_000010", to: "w_000042" });
+    expect(found.words).toBe(3);
+    expect(found.endLine).toBe(3);
+  });
+
+  it("takes a single id as a one-word range, tolerates spacing, case and blank lines before the comment", () => {
+    expect(scene("## A\n\n<!--words : w_000007-->\n").wordRange).toEqual({ from: "w_000007", to: "w_000007" });
+    expect(scene("## A\n<!--  WORDS: w_000001 .. w_000002  -->").wordRange).toEqual({ from: "w_000001", to: "w_000002" });
+  });
+
+  it("is optional: scenes without it behave as before and stay warning-free", () => {
+    const outline = parseScript("## A\nBody <!-- words: w_000001 -->\n## B\n<!-- note -->\ntext");
+    expect(outline.scenes.map((s) => s.wordRange)).toEqual([null, null]);
+    expect(outline.scenes[1]!.words).toBe(2);
+    expect(outline.warnings).toEqual([]);
+  });
+
+  it("warns and gives no range on a malformed comment, and still drops it from the word count", () => {
+    for (const bad of ["<!-- words: w_1..w_2 -->", "<!-- words: -->", "<!-- words: w_000001..w_000002", "<!-- words: w_000001..w_000002..w_000003 -->"]) {
+      const outline = parseScript(`## Intro\n${bad}\nHola.`);
+      expect(outline.scenes[0]!.wordRange).toBeNull();
+      expect(outline.scenes[0]!.words).toBe(1);
+      expect(outline.warnings).toEqual([expect.stringMatching(/Scene "intro": malformed words comment/)]);
+    }
+  });
+
+  it("ignores a comment inside a fenced block or not directly under a heading", () => {
+    expect(scene("## A\ntext\n<!-- words: w_000001 -->").wordRange).toBeNull();
+    expect(parseScript("## A\n```\n## B\n<!-- words: w_000001 -->\n```").scenes).toHaveLength(1);
+  });
+});
+
 describe("script outline (scripts/*.md, SPEC §5.5)", () => {
   it("turns each level-2 heading into a scene with a slug, line range and word count", () => {
     const text = ["# Launch", "", "## Intro", "Hola a todos.", "", "## The demo", "Show the app running", "### Detail", "more words here"].join("\n");
     const outline = parseScript(text);
     expect(outline.scenes).toEqual([
-      { title: "Intro", slug: "intro", line: 3, endLine: 5, words: 3 },
-      { title: "The demo", slug: "the-demo", line: 6, endLine: 9, words: 8 },
+      { title: "Intro", slug: "intro", line: 3, endLine: 5, words: 3, wordRange: null },
+      { title: "The demo", slug: "the-demo", line: 6, endLine: 9, words: 8, wordRange: null },
     ]);
     expect(outline.meta).toEqual({ title: null, targetDuration: null, aspect: null });
     expect(outline.warnings).toEqual([]);
@@ -17,7 +54,7 @@ describe("script outline (scripts/*.md, SPEC §5.5)", () => {
     const text = ["---", "title: Launch promo", "target_duration: 60", "aspect: '9:16'", "voice: ana", "---", "## Hook", "Buy it."].join("\n");
     const outline = parseScript(text);
     expect(outline.meta).toEqual({ title: "Launch promo", targetDuration: 60, aspect: "9:16" });
-    expect(outline.scenes).toEqual([{ title: "Hook", slug: "hook", line: 7, endLine: 8, words: 2 }]);
+    expect(outline.scenes).toEqual([{ title: "Hook", slug: "hook", line: 7, endLine: 8, words: 2, wordRange: null }]);
     expect(outline.warnings).toEqual([]);
   });
 
@@ -77,7 +114,7 @@ describe("script outline (scripts/*.md, SPEC §5.5)", () => {
   it("handles CRLF line endings and a BOM", () => {
     const outline = parseScript("\u{FEFF}---\r\ntitle: Hi\r\n---\r\n## Intro\r\nOne two\r\n");
     expect(outline.meta.title).toBe("Hi");
-    expect(outline.scenes).toEqual([{ title: "Intro", slug: "intro", line: 4, endLine: 6, words: 2 }]);
+    expect(outline.scenes).toEqual([{ title: "Intro", slug: "intro", line: 4, endLine: 6, words: 2, wordRange: null }]);
   });
 });
 
