@@ -41,7 +41,7 @@ export interface GalleryPlan {
  * Resolve the recording, find its tile grids and pick one: the layout
  * playing at `at`, else the one held longest (the earliest on a tie). Throws
  * InvalidOperation naming the fix when the file is outside the project, has
- * no picture or no tile grid, `at` falls where there is none, or `names`
+ * no picture or no tile grid, `at` falls where there is none or past the end, or `names`
  * does not have one name per tile; AssetNotFound when it does not exist.
  */
 export async function planGallery(source: GallerySource, request: GalleryRequest): Promise<GalleryPlan> {
@@ -104,7 +104,17 @@ function longestLayout(analysis: GalleryAnalysis, asset: string): number {
 }
 
 function layoutAt(analysis: GalleryAnalysis, asset: string, at: number): number {
-  const stretch = analysis.stretches.find((candidate) => at >= candidate.start && at < candidate.end) ?? analysis.stretches.at(-1);
+  const last = analysis.stretches.at(-1);
+  if (last && at > last.end) {
+    throw new RpcError(ErrorCode.InvalidOperation, `multicam.gallery: ${at} s is past the end of ${asset} (${last.end} s).`, {
+      op: "multicam.gallery",
+      reason: "no grid",
+      field: "at",
+      hint: `Pick a time inside a stretch with tiles: ${describeStretches(analysis)}.`,
+    });
+  }
+  // `at` equal to the end belongs to the last stretch, whose `end` is exclusive.
+  const stretch = analysis.stretches.find((candidate) => at >= candidate.start && at < candidate.end) ?? (at === last?.end ? last : undefined);
   if (!stretch || stretch.layout === null) {
     throw new RpcError(ErrorCode.InvalidOperation, `multicam.gallery: no tile grid at ${at} s of ${asset}.`, {
       op: "multicam.gallery",

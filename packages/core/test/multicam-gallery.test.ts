@@ -175,6 +175,11 @@ describe("planGallery and galleryReport", () => {
     await expect(planGallery({ ...source, analyse: async () => late }, { root, cwd: root, asset: "assets/call.mp4", at: 4 })).rejects.toMatchObject({
       data: expect.objectContaining({ field: "at", hint: expect.stringContaining("0–3 s: 4 tiles, 3–6 s: no tile grid") }),
     });
+    await expect(planGallery(source, { root, cwd: root, asset: "assets/call.mp4", at: 9999 })).rejects.toMatchObject({
+      message: expect.stringContaining("past the end"),
+      data: expect.objectContaining({ field: "at", reason: "no grid", hint: expect.stringContaining("0–3 s: 4 tiles, 3–7 s: 3 tiles") }),
+    });
+    expect((await planGallery(source, { root, cwd: root, asset: "assets/call.mp4", at: 7 })).layout).toBe(1);
   });
 
   it("reports tiles, stretches and warns about the layout change", async () => {
