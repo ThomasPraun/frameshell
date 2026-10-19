@@ -33,8 +33,8 @@ test("choosing a video creates its project beside it and opens it", async () => 
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [interview, broll]);
 
-    await page.getByRole("button", { name: "New from video…" }).click();
-    const form = page.getByRole("form", { name: "New project from video" });
+    await page.getByRole("button", { name: "New from video or audio…" }).click();
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByText("interview.mp4, broll.mov")).toBeVisible();
     await expect(form.getByLabel("Project name")).toHaveValue("interview");
     await expect(form.locator(".welcome-place code")).toHaveText(join(home, "interview"));
@@ -92,8 +92,8 @@ test("with transcription on, the setup runs in the background and its outcome sh
     await app.evaluate(({ dialog }, files) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [take]);
-    await page.getByRole("button", { name: "New from video…" }).click();
-    const form = page.getByRole("form", { name: "New project from video" });
+    await page.getByRole("button", { name: "New from video or audio…" }).click();
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
@@ -120,8 +120,8 @@ test("the project takes the first video's format and starts with the videos on i
     await app.evaluate(({ dialog }, files) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [first, second]);
-    await page.getByRole("button", { name: "New from video…" }).click();
-    const form = page.getByRole("form", { name: "New project from video" });
+    await page.getByRole("button", { name: "New from video or audio…" }).click();
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await form.getByLabel("Transcribe what is said").uncheck();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("intro", { timeout: 60_000 });
@@ -157,8 +157,8 @@ for (const { frame, label, size } of [
       await app.evaluate(({ dialog }, files) => {
         dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
       }, [episode]);
-      await page.getByRole("button", { name: "New from video…" }).click();
-      const form = page.getByRole("form", { name: "New project from video" });
+      await page.getByRole("button", { name: "New from video or audio…" }).click();
+      const form = page.getByRole("form", { name: "New project from video or audio" });
       await expect(form.getByText("This audio has no picture")).toBeVisible();
       // 16:9 is the default.
       await expect(form.getByLabel("Horizontal, 16:9 (1920x1080)")).toBeChecked();
@@ -195,8 +195,8 @@ test("an audio-only project with transcription on runs the setup in the backgrou
     await app.evaluate(({ dialog }, files) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [episode]);
-    await page.getByRole("button", { name: "New from video…" }).click();
-    const form = page.getByRole("form", { name: "New project from video" });
+    await page.getByRole("button", { name: "New from video or audio…" }).click();
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });

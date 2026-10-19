@@ -3,7 +3,7 @@
 const en = {
   lede: "Start from a video or an audio recording. Your agent edits it from the terminal, you review on the timeline.",
   dropHere: "Drop video or audio to start a project",
-  newFromVideo: "New from video…",
+  newFromVideo: "New from video or audio…",
   openFolder: "Open folder…",
   /** Slots: `{dir}`, `{file}`. */
   notProject: "{dir} has no {file} yet.",
@@ -11,7 +11,7 @@ const en = {
   recent: "Recent",
   recentProjects: "Recent projects",
   notVideo: (names: string) => `Not a video or audio file: ${names}`,
-  form: "New project from video",
+  form: "New project from video or audio",
   /** Three or more chosen videos: the first two named, the rest counted. */
   andMore: (first: string, more: number) => `${first} and ${more} more`,
   frameLegend: "This audio has no picture. The video will be:",
@@ -36,14 +36,14 @@ const en = {
 const es: typeof en = {
   lede: "Empieza con un video o una grabación de audio. Tu agente lo edita desde la terminal y tú lo revisas en la línea de tiempo.",
   dropHere: "Suelta video o audio para crear un proyecto",
-  newFromVideo: "Nuevo desde un video…",
+  newFromVideo: "Nuevo desde un video o audio…",
   openFolder: "Abrir carpeta…",
   notProject: "{dir} todavía no tiene {file}.",
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
   recentProjects: "Proyectos recientes",
   notVideo: (names) => `No es un archivo de video ni de audio: ${names}`,
-  form: "Nuevo proyecto desde un video",
+  form: "Nuevo proyecto desde un video o audio",
   andMore: (first, more) => `${first} y ${more} más`,
   frameLegend: "Este audio no tiene imagen. El video será:",
   frameLandscape: "Horizontal, 16:9 (1920x1080)",

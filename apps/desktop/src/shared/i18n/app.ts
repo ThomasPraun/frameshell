@@ -71,6 +71,8 @@ const en = {
     videos: "Video and audio",
     allFiles: "All files",
     chooseParent: "Choose where the project goes",
+    chooseImage: "Choose an image",
+    images: "Images",
   },
   setup: {
     starting: "Setting up transcription…",
@@ -79,6 +81,8 @@ const en = {
     transcribeFailed: (name: string) => `Could not transcribe ${name}. Ask the agent to transcribe it.`,
     transcribing: (name: string) => `Transcribing ${name}…`,
     transcribed: (names: string) => `Transcribed ${names}.`,
+    addingBackground: "Adding the background and subtitles…",
+    backgroundFailed: "Transcribed, but could not add the background and subtitles. Add a subtitle track from the timeline.",
   },
   cli: {
     replace: "Replace the existing 'frameshell' command?",
@@ -177,6 +181,8 @@ const es: typeof en = {
     videos: "Video y audio",
     allFiles: "Todos los archivos",
     chooseParent: "Elegir dónde va el proyecto",
+    chooseImage: "Elegir una imagen",
+    images: "Imágenes",
   },
   setup: {
     starting: "Preparando la transcripción…",
@@ -185,6 +191,8 @@ const es: typeof en = {
     transcribeFailed: (name) => `No se pudo transcribir ${name}. Pídele al agente que lo transcriba.`,
     transcribing: (name) => `Transcribiendo ${name}…`,
     transcribed: (names) => `Se transcribió ${names}.`,
+    addingBackground: "Agregando el fondo y los subtítulos…",
+    backgroundFailed: "Se transcribió, pero no se pudo agregar el fondo ni los subtítulos. Agrega una pista de subtítulos desde la línea de tiempo.",
   },
   cli: {
     replace: "¿Reemplazar el comando 'frameshell' que ya existe?",
