@@ -24,7 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { parseTimeline } from "@frameshell/schema";
+import { type Timeline, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -35,6 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
+import { measureAngles, syncReport } from "./multicam/measure.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
@@ -294,14 +295,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
   };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
-  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string }, caller: Caller) => {
+  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string; [arg: string]: unknown }, caller: Caller, onApplied?: (after: Timeline) => void) => {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
     const key = authorOf(caller);
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, timeline });
-    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx });
+    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(onApplied ? { onApplied } : {}) });
     await transactions.applied(key, tx);
     return result;
   };
@@ -509,6 +510,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
+    "multicam.create": async ({ cwd, timeline, assets, names, name }, caller) => {
+      const dir = await root(cwd);
+      const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
+        root: dir,
+        cwd,
+        assets,
+        names,
+      });
+      const angles = measured.assets.map((asset, i) => ({
+        asset,
+        ...(names ? { name: names[i]! } : {}),
+        offset: measured.plan[i]!.offset,
+      }));
+      // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
+      let written: Timeline | undefined;
+      const result = await operate("multicam.create", { cwd, timeline, angles, ...(name ? { name } : {}) }, caller, (after) => {
+        written = after;
+      });
+      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
+      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
+      if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the operation wrote no new group");
+      const { sync, warnings } = syncReport(group, measured.plan);
+      return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
+    },
+    "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
     "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
       const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;

@@ -22,13 +22,14 @@ export async function makeVfrRecording(path: string, durationS = 2.5): Promise<v
 }
 
 /** Short CFR clip of a given size, test pattern plus tone. */
-export async function makeClip(path: string, { width = 320, height = 240, fps = 30, durationS = 1 } = {}): Promise<void> {
+export async function makeClip(path: string, { width = 320, height = 240, fps = 30, durationS = 1, silent = false } = {}): Promise<void> {
   const { ffmpeg } = await mediaTools();
   await run(ffmpeg, [
     ...["-hide_banner", "-loglevel", "error", "-y"],
     ...["-f", "lavfi", "-i", `testsrc2=s=${width}x${height}:r=${fps}:d=${durationS}`],
-    ...["-f", "lavfi", "-i", `sine=f=440:r=48000:d=${durationS}`],
-    ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+    ...(silent ? [] : ["-f", "lavfi", "-i", `sine=f=440:r=48000:d=${durationS}`]),
+    ...["-c:v", "libx264", "-pix_fmt", "yuv420p"],
+    ...(silent ? ["-an", path] : ["-c:a", "aac", "-shortest", path]),
   ]);
 }
 
@@ -114,4 +115,31 @@ export async function topLevelBoxes(path: string): Promise<string[]> {
   } finally {
     await handle.close();
   }
+}
+
+/** Tone bursts (start s, length s, Hz) on the pattern's own clock, for sync tests. */
+export const SYNC_BURSTS = [
+  [1.0, 0.3, 440],
+  [2.7, 0.15, 660],
+  [5.2, 0.5, 330],
+  [7.9, 0.2, 550],
+  [11.3, 0.4, 440],
+] as const;
+
+/**
+ * Small video whose sound is a burst pattern heard `shiftS` seconds into it: a recording that started
+ * `shiftS` after the one with `shiftS` 0 hears the same bursts that much earlier. Silence in between.
+ */
+export async function makeBurstClip(
+  path: string,
+  { shiftS = 0, durationS = 12, bursts = SYNC_BURSTS }: { shiftS?: number; durationS?: number; bursts?: readonly (readonly [number, number, number])[] } = {},
+): Promise<void> {
+  const { ffmpeg } = await mediaTools();
+  const tones = bursts.map(([start, length, hz]) => `between(t+${shiftS},${start},${start + length})*0.5*sin(2*PI*${hz}*t)`).join("+");
+  await run(ffmpeg, [
+    ...["-hide_banner", "-loglevel", "error", "-y"],
+    ...["-f", "lavfi", "-i", `testsrc2=s=160x120:r=30:d=${durationS}`],
+    ...["-f", "lavfi", "-i", `aevalsrc='${tones}':s=48000:d=${durationS}`],
+    ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+  ]);
 }

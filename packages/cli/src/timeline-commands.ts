@@ -1,6 +1,7 @@
 import type {
   DaemonConnection,
   HistoryResult,
+  MulticamCreateResult,
   MethodName,
   MethodResult,
   OperationResult,
@@ -29,6 +30,14 @@ mutations print the new revision):
   clip remove <clip>
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
+  multicam create <asset> <asset>… [--name <angle>…] [--group-name n]
+                               One file per person (video with sound): measures each file's offset against the
+                               first by audio cross-correlation, adds a group, a program track and one grid shot
+                               over the whole length. Prints every file's confidence; below 0.5 the file is not
+                               shifted and a warning says so. --name once per file, in order (default: file name)
+  multicam offset <group> <angle> <seconds>
+                               Fix one angle's sync by hand: the group second at which its file's time 0 plays
+                               (absolute, >= 0; a smaller number plays the angle earlier)
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
@@ -55,12 +64,13 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "cut", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "cut", "tx", "history", "revert"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
   timeline: { type: "string" },
-  name: { type: "string" },
+  name: { type: "string", multiple: true },
+  "group-name": { type: "string" },
   "clear-name": { type: "boolean" },
   follows: { type: "string" },
   preset: { type: "string" },
@@ -126,6 +136,8 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
+  "multicam create": ["name", "group-name"],
+  "multicam offset": [],
   cut: ["from", "to", "no-snap", "snap-window"],
   "tx begin": [],
   "tx commit": [],
@@ -147,6 +159,8 @@ const ARITY: Record<string, [number, number]> = {
   "clip split": [1, 1],
   "clip remove": [1, 1],
   "clip set": [1, 1],
+  "multicam create": [2, Number.POSITIVE_INFINITY],
+  "multicam offset": [3, 3],
   cut: [0, Number.POSITIVE_INFINITY],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
@@ -201,6 +215,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return value;
   };
   const str = (flag: string) => values[flag] as string | undefined;
+  const list = (flag: string): string[] | undefined => {
+    const raw = values[flag];
+    return raw === undefined ? undefined : ([] as string[]).concat(raw as string | string[]);
+  };
+  const seconds = (raw: string, what: string): number => {
+    const value = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(value)) throw new UsageError(`${what}: expected a number, got "${raw}".`);
+    return value;
+  };
   const json = (flag: string): Record<string, unknown> | undefined => {
     const raw = str(flag);
     if (raw === undefined) return undefined;
@@ -316,6 +339,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       });
       break;
     }
+    case "multicam create": {
+      method = "multicam.create";
+      const names = list("name");
+      if (names !== undefined && names.length !== args.length) {
+        throw new UsageError(`--name: give one per file (${args.length}), in the same order as the files, got ${names.length}.`);
+      }
+      Object.assign(params, { assets: args, names, name: str("group-name") });
+      break;
+    }
+    case "multicam offset":
+      method = "multicam.offset";
+      Object.assign(params, { group: args[0], angle: args[1], offset: seconds(args[2]!, "<seconds>") });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -361,7 +397,17 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
     const lines = reverted.map((r) => `  ${r.timeline}: revision ${r.revision} · op ${r.operation.id}`);
     return `Aborted ${tx} "${label}"${reverted.length === 0 ? " (nothing to undo)" : ", changes undone:"}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
+  if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   return formatOperation(result as OperationResult);
+}
+
+function formatMulticamCreate(result: MulticamCreateResult): string {
+  const lines = [`Multicam group ${result.group} · program track ${result.track} · shot ${result.clip} (grid, whole length)`];
+  for (const angle of result.sync) {
+    const match = angle.confidence === null ? "reference" : `confidence ${Math.round(angle.confidence * 100)}%${angle.synced ? "" : " (not synced)"}`;
+    lines.push(`  ${angle.angle}  ${angle.name}  ${angle.asset}  offset ${angle.offset} s  ${match}`);
+  }
+  return `${lines.join("\n")}\n${formatOperation(result)}`;
 }
 
 function formatHistory(result: HistoryResult): string {
