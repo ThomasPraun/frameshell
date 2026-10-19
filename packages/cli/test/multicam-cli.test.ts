@@ -116,6 +116,29 @@ describe("frameshell multicam", () => {
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("a two-up shot takes exactly 2 angles; got 1");
   }, 120_000);
+
+  it("reframes an angle with keys at timeline seconds, removes one and clears them", () => {
+    const group = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].id as string;
+    const first = frameshell(["multicam", "reframe", group, "ana", "--time", "1", "--x", "0.3"]);
+    expect(first.stderr).toBe("");
+    expect(first.stdout).toContain("multicam.reframe: updated");
+    expect(frameshell(["multicam", "reframe", group, "ana", "--at", "4", "--x", "0.7", "--y", "0.4"]).code).toBe(0);
+    let angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    // The grid shot plays group 0 at timeline 0: timeline 1 is group 1.
+    expect(angle.reframe).toEqual([
+      { at: 1, x: 0.3, y: 0.5 },
+      { at: 4, x: 0.7, y: 0.4 },
+    ]);
+    expect(frameshell(["multicam", "reframe", group, "ana", "--at", "1", "--remove"]).code).toBe(0);
+    angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    expect(angle.reframe).toEqual([{ at: 4, x: 0.7, y: 0.4 }]);
+    const missing = frameshell(["multicam", "reframe", group, "ana", "--at", "2", "--remove"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("Keys at group seconds: 4");
+    expect(frameshell(["multicam", "reframe", group, "ana", "--clear"]).code).toBe(0);
+    angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    expect(angle).not.toHaveProperty("reframe");
+  }, 120_000);
 });
 
 describe("frameshell direct", () => {
@@ -214,5 +237,16 @@ describe("parsing multicam commands", () => {
     expect(parseTimelineCommand(["direct", "g_1"], {})!.params).toEqual({ group: "g_1" });
     expect(() => parseTimelineCommand(["direct"], {})).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["direct", "g_1"], { layout: "solo" })).toThrow(/does not take --layout/);
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { time: "12.5", x: "0.3" })).toMatchObject({
+      method: "multicam.reframe",
+      params: { group: "g_1", angle: "ana", time: 12.5, x: 0.3 },
+    });
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "3", remove: true })).toMatchObject({ params: { at: 3, remove: true } });
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true })!.params).toEqual({ group: "g_1", angle: "ana", clear: true });
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { x: "0.3" })).toThrow(/--time <timeline seconds> or --at/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", time: "1", x: "0.3" })).toThrow(/one of them/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1" })).toThrow(/--x and\/or --y/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", remove: true, x: "0.2" })).toThrow(/without --x/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true, at: "1" })).toThrow(/without --at/);
   });
 });

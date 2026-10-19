@@ -1,6 +1,7 @@
 // How video layers composite (SPEC §3.4, §3.5, §5.3). Pure and shared: the export compiler and the preview place
 // layers with these same functions, so a preview frame matches the exported one.
 import type {
+  Angle,
   AngleCrop,
   Clip,
   ClipAudio,
@@ -8,6 +9,7 @@ import type {
   MediaClip,
   MulticamGroup,
   ProgramTrack,
+  ReframeKey,
   ShotClip,
   ShotCorner,
   ShotLayout,
@@ -325,8 +327,8 @@ function composeAudio(outer: ClipAudio | undefined, inner: ClipAudio | undefined
 }
 
 // Multicam shots (ADR 0016). A shot shows its angles in tiles that cover the frame without gaps; each angle's
-// picture (after its own crop) fills its tile and is cut to the tile's aspect, centered. Sound never depends
-// on the shot: every angle of the group plays under every shot.
+// picture (after its own crop) fills its tile and is cut to the tile's aspect, centered on its reframe point
+// (centered without one). Sound never depends on the shot: every angle of the group plays under every shot.
 
 /** One angle's picture in a shot: which source pixels land in which output rectangle. */
 export interface ShotLayer {
@@ -340,6 +342,94 @@ export interface ShotLayer {
   crop: LayerRect;
   /** True: the tile does not cover the frame (a contained screen), so black must fill the rest of the frame behind it. */
   backdrop: boolean;
+  /** Set when the angle's `reframe` moves `crop` during the shot; `crop` is then its place at the time asked. */
+  reframe?: CropPath;
+}
+
+/**
+ * A reframed angle's cut over group time ({@link cropAt}): a crop of fixed
+ * size centered on its keys' point, moving in a straight line between keys,
+ * its edges rounded to whole pixels and kept inside the cropped picture.
+ */
+export interface CropPath {
+  /** The angle's `reframe` keys with `x`, `y` in source pixels. */
+  keys: ReframeKey[];
+  width: number;
+  height: number;
+  /** Range of the crop's left edge, source pixels: the cut stays in the cropped picture. */
+  left: readonly [number, number];
+  /** Range of the crop's top edge, source pixels. */
+  top: readonly [number, number];
+}
+
+/** Group second `shot` shows at timeline second `seconds`. */
+export function shotGroupTime(shot: ShotClip, seconds: number): number {
+  return shot.in + (seconds - shot.start);
+}
+
+/**
+ * Point the `keys` center on at group second `at` (in the keys' own units):
+ * the first key's before it, the last key's after it, a straight line
+ * between; null without keys.
+ */
+export function reframeAt(keys: readonly ReframeKey[] | undefined, at: number): { x: number; y: number } | null {
+  if (!keys || keys.length === 0) return null;
+  const first = keys[0]!;
+  if (at <= first.at) return { x: first.x, y: first.y };
+  for (let k = 1; k < keys.length; k++) {
+    const b = keys[k]!;
+    if (at >= b.at) continue;
+    const a = keys[k - 1]!;
+    const f = (at - a.at) / (b.at - a.at);
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+  }
+  const last = keys.at(-1)!;
+  return { x: last.x, y: last.y };
+}
+
+/**
+ * Point of `angle`'s picture (fractions of the source frame) a cut tile
+ * centers on at group second `at`: its `reframe` keys', else the center of
+ * what its `crop` leaves.
+ */
+export function reframePointAt(angle: Pick<Angle, "crop" | "reframe">, at: number): { x: number; y: number } {
+  const keyed = reframeAt(angle.reframe, at);
+  if (keyed) return keyed;
+  const { left = 0, top = 0, right = 0, bottom = 0 } = angle.crop ?? {};
+  return { x: left + (1 - left - right) / 2, y: top + (1 - top - bottom) / 2 };
+}
+
+/** Where `path` cuts at group second `at`. The export compiler writes this formula as an ffmpeg expression (`movingCrop` in core `export/compiler.ts`). */
+export function cropAt(path: CropPath, at: number): LayerRect {
+  const point = reframeAt(path.keys, at)!;
+  const edge = (center: number, size: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, Math.round(center - size / 2)));
+  return { left: edge(point.x, path.width, path.left), top: edge(point.y, path.height, path.top), width: path.width, height: path.height };
+}
+
+/**
+ * The cover crop of `angle` in `tile` ({@link coverCrop}), moved by its
+ * `reframe` to where it is at group second `at`; with the path when the cut
+ * moves during `[from, to]`.
+ */
+function reframedCrop(angle: Angle, area: LayerRect, tile: Size, source: Size, at: number, from: number, to: number): { crop: LayerRect; reframe?: CropPath } {
+  const centered = coverCrop(area, tile);
+  if (!angle.reframe) return { crop: centered };
+  const path: CropPath = {
+    keys: angle.reframe.map((key) => ({ at: key.at, x: key.x * source.width, y: key.y * source.height })),
+    width: centered.width,
+    height: centered.height,
+    left: [area.left, area.left + area.width - centered.width],
+    top: [area.top, area.top + area.height - centered.height],
+  };
+  const crop = cropAt(path, at);
+  // Straight lines between keys: the cut moves during the shot when it differs at an end or at a key inside.
+  const start = cropAt(path, from);
+  const times = [to, ...path.keys.map((key) => key.at).filter((time) => time > from && time < to)];
+  const moves = times.some((time) => {
+    const there = cropAt(path, time);
+    return there.left !== start.left || there.top !== start.top;
+  });
+  return moves ? { crop, reframe: path } : { crop };
 }
 
 /** Width of a `pip` inset as a fraction of the frame width, and the most of the frame height it may take. */
@@ -449,13 +539,16 @@ export function coverCrop(area: LayerRect, tile: Size): LayerRect {
  * centered with black bars where the aspects differ: a screen is never cut.
  * The bars are black, not what lies below: such a layer has `backdrop` set and
  * the compositor paints black over the whole frame behind it.
- * A `pip` inset keeps its picture's aspect. `sourceSize` gives each asset's
- * picture size. Angles missing from `group` are skipped (the timeline schema
- * refuses them).
+ * A `pip` inset keeps its picture's aspect. A cut picture centers on its
+ * angle's `reframe` point at group second `at` (default: the shot's `in`).
+ * `sourceSize` gives each asset's picture size. Angles missing from `group`
+ * are skipped (the timeline schema refuses them).
  */
-export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, sourceSize: (asset: string) => Size): ShotLayer[] {
+export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, sourceSize: (asset: string) => Size, at = shot.in): ShotLayer[] {
   const angles = shot.angles.flatMap((id) => group.angles.find((angle) => angle.id === id) ?? []);
-  const areas = angles.map((angle) => croppedRect(sourceSize(angle.asset), angle.crop));
+  const sizes = angles.map((angle) => sourceSize(angle.asset));
+  const areas = angles.map((angle, index) => croppedRect(sizes[index]!, angle.crop));
+  const cut = (index: number, tile: Size) => reframedCrop(angles[index]!, areas[index]!, tile, sizes[index]!, at, shot.in, shot.out);
   if (shot.shot === "screen" || shot.shot === "pip") {
     const insetArea = areas[1];
     const tiles = shotTiles(shot.shot, angles.length, output, insetArea ? insetArea.width / insetArea.height : 16 / 9, shot.corner);
@@ -463,14 +556,15 @@ export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, s
       const area = areas[index]!;
       const tile = index === 0 ? containTile(area, output) : tiles[index]!;
       const backdrop = index === 0 && (tile.width < output.width || tile.height < output.height);
-      return { angle: angle.id, asset: angle.asset, tile, crop: index === 0 ? area : coverCrop(area, tile), backdrop };
+      if (index === 0) return { angle: angle.id, asset: angle.asset, tile, crop: area, backdrop };
+      return { angle: angle.id, asset: angle.asset, tile, ...cut(index, tile), backdrop };
     });
   }
   const aspect = areas.length > 0 ? areas.reduce((sum, area) => sum + area.width / area.height, 0) / areas.length : 16 / 9;
   const tiles = shotTiles(shot.shot, angles.length, output, aspect);
   return angles.map((angle, index) => {
     const tile = tiles[index]!;
-    return { angle: angle.id, asset: angle.asset, tile, crop: coverCrop(areas[index]!, tile), backdrop: false };
+    return { angle: angle.id, asset: angle.asset, tile, ...cut(index, tile), backdrop: false };
   });
 }
 

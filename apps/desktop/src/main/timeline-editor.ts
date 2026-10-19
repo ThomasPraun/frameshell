@@ -43,6 +43,7 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "shot.set": "Change",
   "multicam.angle": "Change",
   "multicam.offset": "Sync",
+  "multicam.reframe": "Reframe",
 };
 
 /** What the ops of an edit call change, for its label; mixed calls name clips. */

@@ -133,6 +133,7 @@ export const TIMELINE_EDIT_OPS = [
   "shot.set",
   "multicam.angle",
   "multicam.offset",
+  "multicam.reframe",
 ] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */

@@ -302,6 +302,26 @@ export const operationArgs = {
       .optional()
       .describe("True marks the angle as a screen share (shown by `screen` and `pip` shots, never a speaker); false clears it."),
   }),
+  "multicam.reframe": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    angle: z.string().min(1).describe("Angle id of that group."),
+    at: Seconds("Group-clock second of the key. Give this or `time`.").optional(),
+    time: Seconds("Timeline second of the key: it goes at the group second the group's program track plays then. Give this or `at`.").optional(),
+    x: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Point to center on across the picture, fraction of the source width (0 left, 1 right). Default: the point there now."),
+    y: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Point to center on down the picture, fraction of the source height (0 top, 1 bottom). Default: the point there now."),
+    remove: z.boolean().optional().describe("True removes the key at `at` or `time` (the one in that frame) instead of setting one."),
+    clear: z.boolean().optional().describe("True removes every key: the picture is cut centered again. Takes no other field."),
+  }),
   "shot.set": z.strictObject({
     clip: ClipRef.describe("Shot id: a clip of a program track, from `timeline.show`."),
     shot: z

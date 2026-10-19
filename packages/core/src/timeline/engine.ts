@@ -21,6 +21,7 @@ import {
   type Mic,
   type MulticamGroup,
   type ProgramTrack,
+  type ReframeKey,
   SHOT_ANGLE_COUNTS,
   type ShotClip,
   type ShotLayout,
@@ -30,6 +31,7 @@ import {
   isShotClip,
   parseTimeline,
   programGroup,
+  reframePointAt,
   scriptRefPathProblem,
   shotSound,
   splitScriptRef,
@@ -40,6 +42,8 @@ import { directShots } from "../multicam/director.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, sortClips } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
+
+const round4 = (value: number) => Math.round(value * 10000) / 10000;
 
 /** What the engine needs to know about a media file. */
 export interface SourceInfo {
@@ -213,6 +217,8 @@ class Edit {
         return this.multicamAngle(request.args);
       case "multicam.mic":
         return this.multicamMic(request.args);
+      case "multicam.reframe":
+        return this.multicamReframe(request.args);
       case "shot.set":
         return this.shotSet(request.args);
       case "multicam.direct":
@@ -1102,6 +1108,63 @@ class Edit {
       }
     }
     track.clips = [...kept, ...directed];
+  }
+
+  /**
+   * Set, replace or remove one key of an angle's `reframe` (see the
+   * `multicam.reframe` method), or clear them all. A key in the same frame of
+   * the group clock as the one given is the one replaced or removed.
+   */
+  multicamReframe(args: OperationArgs<"multicam.reframe">): void {
+    const { group, angle } = this.angle(args.group, args.angle);
+    const { at, time, x, y, remove, clear } = args;
+    if (clear === true) {
+      if ([at, time, x, y, remove].some((value) => value !== undefined)) {
+        throw this.invalid("`clear` removes every key and takes no other field.", { field: "clear" });
+      }
+      delete angle.reframe;
+      return;
+    }
+    if ((at === undefined) === (time === undefined)) {
+      throw this.invalid("give the key time as `at` (group seconds) or `time` (timeline seconds), one of them.", { field: at === undefined ? "at" : "time" });
+    }
+    const second = Math.round((at ?? this.groupSecondAt(group, time!)) * 1000) / 1000;
+    const keys = [...(angle.reframe ?? [])];
+    const half = 0.5 / this.context.fps;
+    const found = keys.findIndex((key) => Math.abs(key.at - second) < half);
+    if (remove === true) {
+      if (x !== undefined || y !== undefined) throw this.invalid("`remove` takes no `x` or `y`.", { field: "remove" });
+      if (found < 0) {
+        throw this.invalid(`angle ${angle.id} (group ${group.id}) has no reframe key at group second ${second}.`, {
+          field: at === undefined ? "time" : "at",
+          hint: keys.length > 0 ? `Keys at group seconds: ${keys.map((key) => key.at).join(", ")}.` : "It has none.",
+        });
+      }
+      keys.splice(found, 1);
+    } else {
+      if (x === undefined && y === undefined) {
+        throw this.invalid("nothing to set.", { hint: "Pass `x` and/or `y`, `remove: true` or `clear: true`." });
+      }
+      const now = reframePointAt({ crop: angle.crop, reframe: keys }, second);
+      const key: ReframeKey = { at: found >= 0 ? keys[found]!.at : second, x: round4(x ?? now.x), y: round4(y ?? now.y) };
+      if (found >= 0) keys[found] = key;
+      else keys.splice(keys.filter((other) => other.at < second).length, 0, key);
+    }
+    if (keys.length === 0) delete angle.reframe;
+    else angle.reframe = keys;
+  }
+
+  /** Group second `group`'s program track plays at timeline second `time`; InvalidOperation in a gap. */
+  groupSecondAt(group: MulticamGroup, time: number): number {
+    const track = this.draft.tracks.find((candidate): candidate is ProgramTrack => candidate.kind === "program" && candidate.group === group.id);
+    const shot = track?.clips.find((candidate) => candidate.start <= time && time < candidate.start + (candidate.out - candidate.in));
+    if (!shot) {
+      throw this.invalid(`no shot of group ${group.id} plays at timeline second ${time}.`, {
+        field: "time",
+        hint: "Pick a time inside a shot of its program track, or give the group second as `at`.",
+      });
+    }
+    return shot.in + (time - shot.start);
   }
 
   /** Offset, name and sound of one mic; fields not given keep their value, defaults are not stored. */

@@ -405,6 +405,19 @@ describe("compileProgram with a multicam program track", () => {
     expect(angleLayer(programAt(program, 15, 0) as AngleSpan, HD)?.tile).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
   });
 
+  it("cuts a reframed angle where its keys say at the frame shown, in a 9:16 frame as export does", () => {
+    const keyed = { ...group, angles: group.angles.map((a) => (a.id === "ana" ? { ...a, reframe: [{ at: 4, x: 0.25, y: 0.5 }, { at: 6, x: 0.75, y: 0.5 }] } : a)) };
+    // Timeline 0..4 plays group 4..8, so the cut moves during the first two seconds.
+    const program = compileProgram({ ...view([programTrack([shot("s1", 0, 4, 8, "solo", ["ana"])])]), groups: [keyed] }, angles);
+    const span = programAt(program, 0, 0) as AngleSpan;
+    const tall = { width: 1080, height: 1920 };
+    expect(angleLayer(span, tall, 0)?.crop).toEqual({ left: 176, top: 0, width: 608, height: 1080 });
+    expect(angleLayer(span, tall, 1)?.crop.left).toBe(656);
+    expect(angleLayer(span, tall, 3)?.crop.left).toBe(1136);
+    // The project's own 16:9 frame does not cut a 16:9 picture: keys change nothing there.
+    expect(angleLayer(span, HD, 1)?.crop).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+  });
+
   it("plays every angle's sound under every shot, sample-exact, one span per unbroken run", () => {
     const program = compileProgram(talk([programTrack(SHOTS)]), angles);
     expect(program.audio).toEqual([

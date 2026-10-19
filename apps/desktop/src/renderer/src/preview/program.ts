@@ -10,6 +10,7 @@ import {
   movedProgramGroups,
   placementOf,
   programGroup,
+  shotGroupTime,
   shotLayers,
   shotSound,
 } from "@frameshell/schema/composite";
@@ -274,14 +275,17 @@ export interface PlaceholdersAt {
   notes: { span: PlaceholderSpan; layer: number }[];
 }
 
-/** Where the placeholders at program frame `frame` show: a shot's angle never covers the frame, only its tile. */
-export function placeholdersAt(program: Program, frame: number): PlaceholdersAt {
+/**
+ * Where the placeholders at program frame `frame` show in an `output`-sized
+ * frame (default the project's): a shot's angle never covers the frame, only its tile.
+ */
+export function placeholdersAt(program: Program, frame: number, output: Size = program.resolution): PlaceholdersAt {
   const found: PlaceholdersAt = { base: null, tiles: [], notes: [] };
   program.layers.forEach((_, layer) => {
     const span = programAt(program, frame, layer);
     if (span?.kind !== "placeholder") return;
     if (span.angle) {
-      const shown = angleLayer({ angle: span.angle.id, layout: span.angle.layout }, program.resolution);
+      const shown = angleLayer({ angle: span.angle.id, layout: span.angle.layout }, output);
       if (shown) found.tiles.push({ span, layer, tile: shown.tile });
     } else if (layer === 0) found.base = span;
     else found.notes.push({ span, layer });
@@ -408,13 +412,14 @@ export type AngleSpan = Extract<VideoSpan, { kind: "angle" }>;
 
 /**
  * Where the angle of `span` shows in an `output`-sized frame, and which of
- * its source pixels fill it (`shotLayers`, as export lays shots out); null
- * when its shot does not show that angle.
+ * its source pixels fill it at timeline second `seconds` (`shotLayers`, as
+ * export lays shots out: a reframed angle's cut moves over time; default the
+ * shot's start); null when its shot does not show that angle.
  */
-export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Size): AngleLayer | null {
+export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Size, seconds = span.layout.shot.start): AngleLayer | null {
   const { shot, group, sizes } = span.layout;
   const size = (asset: string) => sizes[asset] ?? output;
-  const layer = shotLayers(shot, group, output, size).find((candidate) => candidate.angle === span.angle);
+  const layer = shotLayers(shot, group, output, size, shotGroupTime(shot, seconds)).find((candidate) => candidate.angle === span.angle);
   return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset), backdrop: layer.backdrop } : null;
 }
 

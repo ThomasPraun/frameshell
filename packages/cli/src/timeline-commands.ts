@@ -54,6 +54,13 @@ mutations print the new revision):
   multicam mic <group> <mic> [--name n] [--offset s] [--gain dB] [--muted | --unmuted]
                                Fix a separate mic: rename it, set the group second at which its file's time 0 plays
                                (absolute, >= 0) or its sound under every shot
+  multicam reframe <group> <angle> (--time s | --at s) [--x f] [--y f] [--remove]
+  multicam reframe <group> <angle> --clear
+                               Keep a face in frame when a tile cuts the angle's picture (solo and two-up shots of a
+                               9:16 export of 16:9 cameras): a key at timeline second --time (or group second --at)
+                               centering the cut on --x/--y (fractions of the picture, 0 left/top, 1 right/bottom;
+                               omitted: the point there now). The point moves in a straight line between keys and
+                               holds outside them. --remove deletes the key in that frame, --clear every key
   shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b,…] [--corner top-left|top-right|bottom-left|bottom-right]
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
@@ -150,6 +157,9 @@ export const TIMELINE_OPTIONS = {
   corner: { type: "string" },
   screen: { type: "boolean" },
   "no-screen": { type: "boolean" },
+  time: { type: "string" },
+  remove: { type: "boolean" },
+  clear: { type: "boolean" },
   template: { type: "string" },
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
@@ -188,6 +198,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam offset": [],
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen"],
   "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
+  "multicam reframe": ["time", "at", "x", "y", "remove", "clear"],
   "shot set": ["layout", "angles", "corner"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
@@ -216,6 +227,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam offset": [3, 3],
   "multicam angle": [2, 2],
   "multicam mic": [2, 2],
+  "multicam reframe": [2, 2],
   "shot set": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
@@ -445,6 +457,32 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         offset: offset === undefined ? undefined : seconds(offset, "--offset"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+      });
+      break;
+    }
+    case "multicam reframe": {
+      method = "multicam.reframe";
+      const at = str("at");
+      const time = str("time");
+      if (values["clear"] === true) {
+        const other = ["time", "at", "x", "y", "remove"].find((flag) => values[flag] !== undefined);
+        if (other) throw new UsageError(`--clear removes every key: pass it without --${other}.`);
+      } else if ((at === undefined) === (time === undefined)) {
+        throw new UsageError("Pass the key time: --time <timeline seconds> or --at <group seconds>, one of them (or --clear).");
+      } else if (values["remove"] === true && (values["x"] !== undefined || values["y"] !== undefined)) {
+        throw new UsageError("--remove deletes the key: pass it without --x or --y.");
+      } else if (values["remove"] !== true && values["x"] === undefined && values["y"] === undefined) {
+        throw new UsageError("Pass --x and/or --y (fractions of the picture, 0 to 1), --remove or --clear.");
+      }
+      Object.assign(params, {
+        group: args[0],
+        angle: args[1],
+        at: at === undefined ? undefined : seconds(at, "--at"),
+        time: time === undefined ? undefined : seconds(time, "--time"),
+        x: num("x"),
+        y: num("y"),
+        remove: values["remove"] === true ? true : undefined,
+        clear: values["clear"] === true ? true : undefined,
       });
       break;
     }

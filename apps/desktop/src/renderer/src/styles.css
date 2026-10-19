@@ -2669,10 +2669,26 @@ button.track-head:focus-visible {
   color: #f0c068;
 }
 
-.region-toggle {
+/* Frame tools left of the transport buttons: the pick tool and the 9:16 view. */
+.preview-transport-tools {
   grid-column: 1;
   grid-row: 1;
   justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.preview-vertical {
+  width: auto;
+  padding: 0 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-vertical.on {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .region-toggle.on {

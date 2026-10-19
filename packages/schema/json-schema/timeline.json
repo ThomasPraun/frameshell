@@ -568,6 +568,39 @@
                   "additionalProperties": false,
                   "description": "Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it."
                 },
+                "reframe": {
+                  "description": "Where the picture is cut when a tile's aspect differs from it (a solo of a 16:9 camera in a 9:16 export): keys sorted by `at`, the point moving in a straight line between keys and held before the first and after the last; the cut never leaves the cropped picture. Absent: centered. Screens (`screen` shots, a `pip` screen) are never cut.",
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Group-clock second of the key."
+                      },
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Point to center on across the picture: fraction of the source width, 0 left edge, 1 right edge."
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Point to center on down the picture: fraction of the source height, 0 top edge, 1 bottom edge."
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
                 "audio": {
                   "description": "Gain and mute of the sound of this angle's own file, which plays under every shot. Absent with `mic` set: the mic carries the level.",
                   "type": "object",
