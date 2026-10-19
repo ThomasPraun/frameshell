@@ -44,6 +44,7 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "multicam.angle": "Change",
   "multicam.offset": "Sync",
   "multicam.reframe": "Reframe",
+  "multicam.paint": "Paint",
 };
 
 /** What the ops of an edit call change, for its label; mixed calls name clips. */
@@ -367,9 +368,10 @@ export class TimelineEditor {
 /**
  * Default history label of an edit call: `Move clip`, `Split 3 clips`,
  * `Edit 3 clips` when ops differ, `Ripple trim clip` for a rippled trim,
- * `Change shot`, `Sync angle`.
+ * `Change shot`, `Sync angle`, `Paint turns`.
  */
 export function editLabel(edits: readonly TimelineEdit[]): string {
+  if (edits.every((edit) => edit.op === "multicam.paint")) return "Paint turns";
   const verbs = edits.map((edit) => (edit.op === "clip.trim" && edit.args.ripple === true ? "Ripple trim" : BATCH_VERBS[edit.op]));
   const verb = verbs.every((candidate) => candidate === verbs[0]) ? verbs[0]! : "Edit";
   const noun = editNoun(edits);

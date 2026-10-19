@@ -1,3 +1,4 @@
+import type { PaintedTurn } from "@frameshell/schema";
 import { ENERGY_HOP_S, type EnergyProfile } from "../media/energy.js";
 
 /**
@@ -170,4 +171,42 @@ export function wordTurns(words: readonly SpokenWord[], speaker: string, offset:
   return runs
     .filter((run) => run.end - run.start >= MIN_TURN_S - 1e-9)
     .map((run) => ({ start: Math.round((offset + run.start) * 1000) / 1000, end: Math.round((offset + run.end) * 1000) / 1000 }));
+}
+
+/**
+ * `turns` with what a person painted on top (ADR 0016 decision 3): inside each painted stretch the
+ * angle speaks or is silent, whatever was measured, and outside it its turns stay. Turns left
+ * touching a spoken stretch join it; a spoken stretch is a turn however short. Sorted by start,
+ * then angle id.
+ */
+export function applyPainted(turns: readonly Turn[], painted: readonly PaintedTurn[]): Turn[] {
+  if (painted.length === 0) return [...turns];
+  const marked = new Set(painted.map((stretch) => stretch.angle));
+  const out: Turn[] = turns.filter((turn) => !marked.has(turn.angle));
+  for (const angle of marked) {
+    const stretches = painted.filter((stretch) => stretch.angle === angle).sort((a, b) => a.start - b.start);
+    // `kept`: the piece holds painted speech, so MIN_TURN_S does not apply to it.
+    const pieces: (Turn & { kept: boolean })[] = [];
+    for (const turn of turns.filter((candidate) => candidate.angle === angle)) {
+      let from = turn.start;
+      for (const stretch of stretches) {
+        if (stretch.end <= from || stretch.start >= turn.end) continue;
+        if (stretch.start > from) pieces.push({ angle, start: from, end: stretch.start, kept: false });
+        from = Math.max(from, stretch.end);
+      }
+      if (from < turn.end) pieces.push({ angle, start: from, end: turn.end, kept: false });
+    }
+    for (const stretch of stretches) if (stretch.speaking) pieces.push({ angle, start: stretch.start, end: stretch.end, kept: true });
+    pieces.sort((a, b) => a.start - b.start);
+    const joined: (Turn & { kept: boolean })[] = [];
+    for (const piece of pieces) {
+      const last = joined.at(-1);
+      if (last && piece.start <= last.end) {
+        last.end = Math.max(last.end, piece.end);
+        last.kept ||= piece.kept;
+      } else joined.push({ ...piece });
+    }
+    for (const { kept, ...turn } of joined) if (kept || turn.end - turn.start >= MIN_TURN_S - 1e-9) out.push(turn);
+  }
+  return out.sort((a, b) => a.start - b.start || (a.angle < b.angle ? -1 : a.angle > b.angle ? 1 : 0));
 }

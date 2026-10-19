@@ -246,6 +246,17 @@ export const MicSchema = z.strictObject({
   audio: ClipAudioSchema.optional().describe("Gain and mute of this mic's sound, which plays under every shot, once even when several angles use it."),
 });
 
+/**
+ * A stretch of the group clock where a person said who speaks (ADR 0016 decision 3: a manual correction always
+ * overrides the measured turns): the angle speaks there, or does not, whatever the sound says.
+ */
+export const PaintedTurnSchema = z.strictObject({
+  angle: Id.describe("Angle id of the group."),
+  start: Seconds.describe("Group-clock seconds where the stretch starts."),
+  end: Seconds.describe("Group-clock seconds where it ends; greater than `start`."),
+  speaking: z.boolean().describe("True: the angle speaks in the stretch. False: it does not, even where its sound is loud."),
+});
+
 /** The angles of one conversation on one shared clock (ADR 0016), shown by one program track. */
 export const MulticamGroupSchema = z
   .strictObject({
@@ -253,6 +264,13 @@ export const MulticamGroupSchema = z
     name: z.string().optional(),
     angles: z.array(AngleSchema).min(1),
     mics: z.array(MicSchema).optional().describe("Separate sound files of the group; angles pick theirs with `mic`. Absent: every angle has its own file's sound."),
+    painted: z
+      .array(PaintedTurnSchema)
+      .optional()
+      .describe(
+        "Who speaks, as a person painted it (`multicam.paint`): each stretch replaces the measured turns of its angle on the group clock, " +
+          "for `multicam.turns` and `direct`. Stretches of one angle never overlap. Absent: every turn is measured.",
+      ),
   })
   .superRefine((group, ctx) => {
     const seen = new Set<string>();
@@ -265,6 +283,17 @@ export const MulticamGroupSchema = z
       if (RESERVED_MIC_IDS.includes(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is reserved`, path: ["mics", m, "id"] });
       else if (seen.has(mic.id) || mics.has(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is already an angle or mic id`, path: ["mics", m, "id"] });
       mics.add(mic.id);
+    });
+    const byAngle = new Map<string, { start: number; end: number }[]>();
+    group.painted?.forEach((turn, p) => {
+      if (!seen.has(turn.angle)) ctx.addIssue({ code: "custom", message: `painted turn names angle "${turn.angle}", which the group does not have`, path: ["painted", p, "angle"] });
+      if (turn.end <= turn.start) ctx.addIssue({ code: "custom", message: "a painted turn must end after it starts", path: ["painted", p, "end"] });
+      const others = byAngle.get(turn.angle) ?? [];
+      if (others.some((other) => turn.start < other.end && other.start < turn.end)) {
+        ctx.addIssue({ code: "custom", message: `painted turns of angle "${turn.angle}" overlap`, path: ["painted", p, "start"] });
+      }
+      others.push(turn);
+      byAngle.set(turn.angle, others);
     });
     group.angles.forEach((angle, a) => {
       angle.reframe?.forEach((key, k) => {
@@ -448,6 +477,8 @@ export type Mic = z.infer<typeof MicSchema>;
 export type Angle = z.infer<typeof AngleSchema>;
 /** Crop of an {@link Angle}'s picture. */
 export type AngleCrop = z.infer<typeof AngleCropSchema>;
+/** A stretch of the group clock a person marked as spoken or silent for one angle; see {@link MulticamGroup}. */
+export type PaintedTurn = z.infer<typeof PaintedTurnSchema>;
 /** One key of an {@link Angle}'s `reframe`. */
 export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 /** Clip overlay placement. */

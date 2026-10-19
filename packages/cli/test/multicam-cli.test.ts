@@ -139,6 +139,26 @@ describe("frameshell multicam", () => {
     angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
     expect(angle).not.toHaveProperty("reframe");
   }, 120_000);
+
+  it("paints who speaks on the group clock and takes the range back to measured", () => {
+    const group = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].id as string;
+    const first = frameshell(["multicam", "paint", group, "ana", "--from", "1", "--to", "3", "--speaking", "--alone"]);
+    expect(first.stderr).toBe("");
+    expect(first.stdout).toContain("multicam.paint: updated");
+    const painted = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].painted;
+    expect(painted).toEqual([
+      { angle: "ana", start: 1, end: 3, speaking: true },
+      { angle: "ben", start: 1, end: 3, speaking: false },
+    ]);
+    const turns = JSON.parse(frameshell(["multicam", "turns", group, "--json"]).stdout) as { turns: { angle: string; start: number; end: number }[] };
+    expect(turns.turns.filter((turn) => turn.angle === "ana").some((turn) => turn.start <= 1 && turn.end >= 3)).toBe(true);
+    expect(turns.turns.filter((turn) => turn.angle === "ben").some((turn) => turn.start < 3 && turn.end > 1)).toBe(false);
+    const missing = frameshell(["multicam", "paint", group, "nobody", "--from", "1", "--to", "2", "--silent"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("has no angle");
+    expect(frameshell(["multicam", "paint", group, "--from", "0", "--to", "99", "--measured"]).code).toBe(0);
+    expect(JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0]).not.toHaveProperty("painted");
+  }, 120_000);
 });
 
 describe("frameshell direct", () => {
@@ -248,5 +268,16 @@ describe("parsing multicam commands", () => {
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1" })).toThrow(/--x and\/or --y/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", remove: true, x: "0.2" })).toThrow(/without --x/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true, at: "1" })).toThrow(/without --at/);
+    expect(parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4.5", speaking: true, alone: true })).toMatchObject({
+      method: "multicam.paint",
+      params: { group: "g_1", angle: "ana", start: 2, end: 4.5, speaking: true, alone: true },
+    });
+    expect(parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4", silent: true })).toMatchObject({ params: { speaking: false } });
+    expect(parseTimelineCommand(["multicam", "paint", "g_1"], { from: "2", to: "4", measured: true })).toMatchObject({ params: { group: "g_1", speaking: null } });
+    expect(() => parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4" })).toThrow(/one of --speaking/);
+    expect(() => parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4", speaking: true, silent: true })).toThrow(/one of --speaking/);
+    expect(() => parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4", silent: true, alone: true })).toThrow(/--alone goes with/);
+    expect(() => parseTimelineCommand(["multicam", "paint", "g_1"], { from: "2", to: "4", silent: true })).toThrow(/Name the angle/);
+    expect(() => parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { to: "4", silent: true })).toThrow(/--from/);
   });
 });

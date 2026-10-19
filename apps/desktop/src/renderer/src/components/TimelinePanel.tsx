@@ -12,11 +12,13 @@ import {
   useState,
 } from "react";
 import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
+import { turnsKey } from "../angles/model.js";
+import { useGroupsTurns } from "../angles/useTurns.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
-import { listenEverywhere } from "../windows.js";
+import { listenEverywhere, windowOf } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
@@ -52,10 +54,13 @@ import {
   zoomLimits,
 } from "../timeline/layout.js";
 import { MediaCache } from "../timeline/media.js";
-import { DEFAULT_THEME, type DragGhost, type TimelineTheme, clipBadges, paintTimeline } from "../timeline/paint.js";
+import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
+import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { useTranscripts } from "../transcript/useTranscripts.js";
 import { uiLink } from "../ui-link.js";
+import { contextMenu } from "./ContextMenu.js";
 import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
@@ -88,6 +93,8 @@ interface ViewState {
 /** Pointer gesture in progress on the lanes. */
 type Gesture =
   | { kind: "scrub"; pointer: number }
+  /** Drag over an angle's turn lane: paints who speaks over the time swept (#247). */
+  | { kind: "paint"; pointer: number; row: TrackRow; angle: string; time: number; clientX: number; moving: boolean }
   /** Drag over empty lane space: selects the time range swept. */
   | { kind: "range"; pointer: number; time: number; clientX: number; moving: boolean }
   | {
@@ -146,9 +153,33 @@ export function TimelinePanel({
 }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
-  const layout = useMemo(() => (view ? layoutTimeline(view, scenes) : null), [view, scenes]);
-  const empty = layout !== null && layout.clipCount === 0;
   const [status, setStatus] = useState<Status | null>(null);
+  // Program tracks whose turn lanes are open, and the turns they draw (measured again when anything they hear changes).
+  const [lanesOpen, setLanesOpen] = useState<ReadonlySet<string>>(new Set());
+  const { sources, hashes } = useTranscripts();
+  const wanted = useMemo(() => {
+    const groups = new Map<string, string>();
+    for (const track of view?.tracks ?? []) {
+      if (track.kind !== "program" || !lanesOpen.has(track.id) || !track.group) continue;
+      const group = view?.groups?.find((candidate) => candidate.id === track.group);
+      if (group) groups.set(group.id, turnsKey(group.angles, sources, hashes, group.mics, group.painted));
+    }
+    return groups;
+  }, [view, lanesOpen, sources, hashes]);
+  const measured = useGroupsTurns(wanted, true);
+  const turnLanes = useMemo(() => ({ open: lanesOpen, turns: new Map([...measured].map(([group, found]) => [group, found.turns])) }), [lanesOpen, measured]);
+  const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes) : null), [view, scenes, turnLanes]);
+  const empty = layout !== null && layout.clipCount === 0;
+  const toggleLanes = useCallback(
+    (track: string) =>
+      setLanesOpen((open) => {
+        const next = new Set(open);
+        if (!next.delete(track)) next.add(track);
+        return next;
+      }),
+    [],
+  );
+  const turnsError = [...measured.values()].find((found) => found.error !== null)?.error ?? null;
   /** Edits, undo and redo run one after another, in the order they were made. */
   const queue = useRef<Promise<void>>(Promise.resolve());
   const fpsRef = useRef(30);
@@ -227,8 +258,8 @@ export function TimelinePanel({
       >
         <span className="panel-title">{t.workspace.timeline}</span>
         <span className="panel-meta">{TIMELINE}</span>
-        <span className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
-          {status?.text ?? ""}
+        <span className={`timeline-status${status?.tone === "error" || (!status && turnsError) ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
+          {status?.text ?? (turnsError ? t.timeline.turnsFailed(turnsError) : "")}
         </span>
         {history !== null && <DiffLegend target={history} marks={marks} />}
         {onShowTranscript && (
@@ -260,6 +291,8 @@ export function TimelinePanel({
           diff={marks}
           onStatus={setStatus}
           run={run}
+          lanesOpen={lanesOpen}
+          onToggleLanes={toggleLanes}
           overlay={
             error && !view ? (
               <p className="timeline-error">{error}</p>
@@ -284,6 +317,8 @@ function TimelineCanvas({
   overlay,
   onStatus,
   run,
+  lanesOpen,
+  onToggleLanes,
 }: {
   layout: TimelineLayout | null;
   fps: number;
@@ -294,6 +329,9 @@ function TimelineCanvas({
   onStatus: (status: Status | null) => void;
   /** The panel's call queue, shared with undo and redo. */
   run: RunCall;
+  /** Program tracks whose turn lanes are open (already in `layout`). */
+  lanesOpen: ReadonlySet<string>;
+  onToggleLanes: (track: string) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -313,6 +351,8 @@ function TimelineCanvas({
   const gesture = useRef<Gesture | null>(null);
   /** Ghost drawn from a drag until the daemon's new revision shows the clip there. */
   const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
+  /** Stroke being painted on a turn lane; the lanes keep showing it until the daemon's new revision does. */
+  const stroke = useRef<{ stroke: TurnStroke; until: number | null } | null>(null);
   /** Edge drags ripple trim (R; Shift held at the press inverts it for that drag). */
   const [rippling, setRippling] = useState(false);
   /**
@@ -366,6 +406,7 @@ function TimelineCanvas({
       selectedTrack: track,
       selectedScene: chosenScene,
       ...(drag ? { drag } : {}),
+      stroke: stroke.current?.stroke ?? null,
     });
     performance.measure(PAINT_MEASURE, { start: started });
     // User Timing buffers are unbounded: keep only recent paints.
@@ -430,6 +471,8 @@ function TimelineCanvas({
     // A revision at or past the one a drag produced shows the clip where its ghost was.
     const pending = ghost.current;
     if (pending?.until != null && revision !== null && revision >= pending.until) ghost.current = null;
+    const painting = stroke.current;
+    if (painting?.until != null && revision !== null && revision >= painting.until) stroke.current = null;
     settleNudges();
     settle();
     if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
@@ -581,7 +624,9 @@ function TimelineCanvas({
         return;
       }
       // One call per command: main applies its edits as one transaction, one undo step.
-      run(() => window.frameshell.timeline.edit(TIMELINE, edits, options), done, edits.length);
+      // A stroke over several shots is several ops but one painted turn: the status counts it once.
+      const strokes = edits.every((edit) => edit.op === "multicam.paint");
+      run(() => window.frameshell.timeline.edit(TIMELINE, edits, options), done, strokes ? 1 : edits.length);
     },
     [run],
   );
@@ -650,6 +695,11 @@ function TimelineCanvas({
       schedule();
       return true;
     }
+    if (current?.kind === "paint") {
+      stroke.current = null;
+      schedule();
+      return current.moving;
+    }
     return false;
   };
 
@@ -703,6 +753,31 @@ function TimelineCanvas({
 
   const timeAt = (x: number) => (x + state.current.scrollLeft) / state.current.pxPerSecond;
 
+  /** On the frame grid, as a stroke on a turn lane names frames the agent can address. */
+  const onGrid = (time: number) => Math.max(0, Math.round(time * latest.current.fps) / latest.current.fps);
+
+  /** What a stroke does by the keys held: Alt marks the angle silent, Shift keeps the others, else it takes the floor. */
+  const paintMode = (event: { altKey: boolean; shiftKey: boolean }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
+
+  /** Right-click on a turn lane: take what was painted there back to the measured turns. */
+  const openLaneMenu = (event: MouseEvent, hit: NonNullable<ReturnType<typeof laneAt>>) => {
+    event.preventDefault();
+    const { row, lane, time } = hit;
+    const group = row.group ?? "";
+    const shots = shotSpans(row.clips);
+    const here = unpaintEdits(group, lane.angle.id, shots, lane.painted, time);
+    contextMenu.open(
+      event.clientX,
+      event.clientY,
+      [
+        { label: t.timeline.backToMeasured, disabled: here.length === 0, run: () => send(here) },
+        { label: t.timeline.clearAnglePainted(lane.angle.name), disabled: lane.painted.length === 0, run: () => send([clearEdit(group, lane.angle.id)]) },
+        { label: t.timeline.clearAllPainted, disabled: row.lanes.every((other) => other.painted.length === 0), run: () => send([clearEdit(group, null)]) },
+      ],
+      windowOf(event.target),
+    );
+  };
+
   /**
    * Press on the lanes: the ruler scrubs the playhead; a clip is selected
    * (Shift/Cmd/Ctrl toggles) and may be dragged; empty lane clears, and a
@@ -727,6 +802,20 @@ function TimelineCanvas({
     // Over the band but between spans: nothing under it is visible, so nothing is hit.
     if (at.y < layout.head) {
       selection.clear();
+      return;
+    }
+    const onLane = laneAt(layout, state.current, at.x, at.y);
+    if (onLane) {
+      gesture.current = {
+        kind: "paint",
+        pointer: event.pointerId,
+        row: onLane.row,
+        angle: onLane.lane.angle.id,
+        time: onGrid(onLane.time),
+        clientX: event.clientX,
+        moving: false,
+      };
+      box.setPointerCapture(event.pointerId);
       return;
     }
     const grab = grabAt(layout, state.current, at.x, at.y);
@@ -803,6 +892,13 @@ function TimelineCanvas({
       seek(timeAt(x), false);
       return;
     }
+    if (current?.kind === "paint") {
+      if (!current.moving && Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX) return;
+      current.moving = true;
+      stroke.current = { stroke: { row: current.row.id, angle: current.angle, from: current.time, to: onGrid(timeAt(x)), mode: paintMode(event) }, until: null };
+      schedule();
+      return;
+    }
     if (current?.kind === "range") {
       if (!current.moving && Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX) return;
       current.moving = true;
@@ -840,7 +936,7 @@ function TimelineCanvas({
       return;
     }
     const grab = grabAt(layout, state.current, x, y);
-    scroller.current!.style.cursor = grab ? (grab.part === "body" ? "grab" : "ew-resize") : "";
+    scroller.current!.style.cursor = grab ? (grab.part === "body" ? "grab" : "ew-resize") : laneAt(layout, state.current, x, y) ? "crosshair" : "";
     setHover((was) => (grab ? { row: grab.row, clip: grab.clip, x, y } : was ? null : was));
   };
 
@@ -849,6 +945,32 @@ function TimelineCanvas({
     if (!current || current.pointer !== event.pointerId) return;
     gesture.current = null;
     setDragging(null);
+    if (current.kind === "paint") {
+      const drawn = stroke.current;
+      if (!current.moving || !drawn) {
+        stroke.current = null;
+        schedule();
+        return;
+      }
+      const row = latest.current.layout?.rows.find((candidate) => candidate.id === current.row.id) ?? current.row;
+      const { from, to } = drawn.stroke;
+      const edits = paintEdits(row.group ?? "", current.angle, shotSpans(row.clips), from, to, paintMode(event));
+      if (edits.length === 0) {
+        stroke.current = null;
+        schedule();
+        onStatus({ tone: "info", text: t.timeline.noShotToPaint });
+        return;
+      }
+      drawn.stroke.mode = paintMode(event);
+      send(edits, (result) => {
+        if (stroke.current !== drawn) return;
+        // Keep the stroke until the feed shows the result; drop it at once when refused or already shown.
+        if (result && (latest.current.revision ?? -1) < result.revision) drawn.until = result.revision;
+        else stroke.current = null;
+        schedule();
+      });
+      return;
+    }
     if (current.kind !== "clip") return;
     if (!current.moving) {
       // A click (no drag) on a clip of a multi-selection selects just it; Shift on an edge toggles it.
@@ -886,6 +1008,11 @@ function TimelineCanvas({
     const rect = box.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    const onLane = layout ? laneAt(layout, state.current, x, y) : null;
+    if (onLane) {
+      openLaneMenu(event, onLane);
+      return;
+    }
     const grab = layout && y >= layout.head ? grabAt(layout, state.current, x, y) : null;
     const scene = layout && !grab ? sceneAt(layout, state.current, x, y) : null;
     if (scene) pickScene(scene);
@@ -957,18 +1084,61 @@ function TimelineCanvas({
         <div className="timeline-heads-rows">
           <div ref={heads}>
             {layout?.rows.map((row) =>
-              row.kind === "subtitles" || row.kind === "program" ? (
+              row.kind === "program" ? (
+                <div key={row.id} className="program-head" style={{ height: row.height + row.lanesHeight }} data-lanes={row.lanes.length > 0 ? "open" : "closed"}>
+                  <button
+                    className={`track-head track-program${selectedTrack === row.id ? " is-selected" : ""}`}
+                    style={{ height: row.height }}
+                    title={t.timeline.programHeadTitle(row.id)}
+                    aria-pressed={selectedTrack === row.id}
+                    data-track={row.id}
+                    onClick={() => selection.selectTrack(row.id, "timeline")}
+                  >
+                    <span className="track-id">{row.label}</span>
+                    <span className="track-label">{row.name ?? ""}</span>
+                  </button>
+                  {row.angles.length > 0 && (
+                    <button
+                      className={`icon-button turn-lanes-toggle${lanesOpen.has(row.id) ? " on" : ""}`}
+                      aria-pressed={lanesOpen.has(row.id)}
+                      aria-label={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.showTurnLanes}
+                      title={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(row.id, isMac)}
+                      data-testid="turn-lanes-toggle"
+                      data-track={row.id}
+                      onClick={() => onToggleLanes(row.id)}
+                    >
+                      <svg viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M2 4.5h4M8 4.5h6M2 8h7M11 8h3M2 11.5h2M6 11.5h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                      </svg>
+                    </button>
+                  )}
+                  {row.lanes.map((lane) => (
+                    <div
+                      key={lane.angle.id}
+                      className="turn-lane-head"
+                      style={{ height: lane.height, "--angle-color": `var(--angle-${lane.angle.color + 1})` } as React.CSSProperties}
+                      title={t.timeline.turnLaneTitle(lane.angle.name)}
+                      aria-label={t.timeline.turnLaneLabel(lane.angle.name)}
+                      data-testid="turn-lane-head"
+                      data-angle={lane.angle.id}
+                      data-turns={lane.marks.turns.length}
+                    >
+                      <span className="turn-lane-name">{lane.angle.name}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : row.kind === "subtitles" ? (
                 <button
                   key={row.id}
-                  className={`track-head track-${row.kind}${selectedTrack === row.id ? " is-selected" : ""}`}
+                  className={`track-head track-subtitles${selectedTrack === row.id ? " is-selected" : ""}`}
                   style={{ height: row.height }}
-                  title={row.kind === "program" ? t.timeline.programHeadTitle(row.id) : t.timeline.subtitleHeadTitle(row.id)}
+                  title={t.timeline.subtitleHeadTitle(row.id)}
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
                 >
                   <span className="track-id">{row.label}</span>
-                  <span className="track-label">{row.kind === "program" ? (row.name ?? "") : (row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?"))}</span>
+                  <span className="track-label">{row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}</span>
                 </button>
               ) : (
                 <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>
@@ -1077,6 +1247,7 @@ const OP_LABELS: Record<string, string> = {
   revert: t.timeline.ops.revert,
   "track.add": t.timeline.ops.trackAdd,
   "track.set": t.timeline.ops.trackSet,
+  "multicam.paint": t.timeline.ops.paint,
 };
 
 /**

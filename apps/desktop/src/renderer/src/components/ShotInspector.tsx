@@ -2,9 +2,12 @@ import type { TimelineView } from "@frameshell/protocol";
 import { DEFAULT_SHOT_CORNER, SHOT_ANGLE_COUNTS, SHOT_CORNERS, SHOT_LAYOUTS, type ShotCorner, type ShotLayout, reframePointAt } from "@frameshell/schema";
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
+import { speakerChoices } from "../angles/model.js";
 import { t } from "../i18n.js";
 import { useTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
+import type { TranscriptSource } from "../transcript/model.js";
+import { useTranscripts } from "../transcript/useTranscripts.js";
 import { ANGLE_COLOR_COUNT, type ClipBox, type ShotBox, type TrackRow, layoutName, layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { sendClipEdit } from "./clip-edits.js";
@@ -213,6 +216,47 @@ function ShotReframe({ clip, shot, group }: { clip: ClipBox; shot: ShotBox; grou
   );
 }
 
+/**
+ * Which speaker of the transcript of an angle's sound is this angle's person (`multicam.angle` `speaker`, #247):
+ * its turns then come from that speaker's words. Automatic clears it.
+ */
+function AngleSpeaker({
+  angle,
+  group,
+  sources,
+  onPick,
+}: {
+  angle: Angle;
+  group: Group;
+  sources: readonly TranscriptSource[];
+  onPick: (speaker: string | null) => void;
+}) {
+  const choices = speakerChoices(angle, group.mics, sources);
+  const stored = angle.speaker ?? "";
+  const known = choices.speakers.some((speaker) => speaker.id === stored);
+  const reason =
+    choices.off === "screen" ? t.inspector.angleSpeakerScreen : choices.off === "no-sound" ? t.inspector.angleSpeakerNoSound : choices.off === "none" ? t.inspector.angleSpeakerNone(angle.asset) : t.inspector.angleSpeakerTitle;
+  return (
+    <select
+      className="clip-field-select angle-speaker"
+      aria-label={t.inspector.angleSpeakerLabel(angle.name)}
+      title={reason}
+      disabled={choices.off !== null}
+      value={stored}
+      data-testid="angle-speaker"
+      onChange={(event) => onPick(event.target.value === "" ? null : event.target.value)}
+    >
+      <option value="">{`${t.inspector.angleSpeaker}: ${t.inspector.speakerAuto}`}</option>
+      {stored !== "" && !known && <option value={stored}>{`${t.inspector.angleSpeaker}: ${t.inspector.speakerMissing(stored)}`}</option>}
+      {choices.speakers.map((speaker) => (
+        <option key={speaker.id} value={speaker.id}>
+          {`${t.inspector.angleSpeaker}: ${speaker.name}`}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** Settings of a selected program track: the angles of the group it shows. */
 export function GroupInspector({ track }: { track: string }) {
   const { view } = useTimelineView(SELECTION_TIMELINE);
@@ -243,6 +287,7 @@ function angleColors(group: Group): Map<string, number> {
  */
 function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<string, number> }) {
   const { error, send } = useSender(group.id);
+  const { sources } = useTranscripts();
   const set = (angle: Angle, change: Omit<Extract<TimelineEdit, { op: "multicam.angle" }>["args"], "group" | "angle">) =>
     send({ op: "multicam.angle", args: { group: group.id, angle: angle.id, ...change } });
   return (
@@ -284,6 +329,7 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
             >
               {t.inspector.screen}
             </button>
+            <AngleSpeaker angle={angle} group={group} sources={sources} onPick={(speaker) => set(angle, { speaker })} />
           </div>
         );
       })}

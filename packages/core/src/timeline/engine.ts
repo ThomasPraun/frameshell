@@ -29,6 +29,7 @@ import {
   type Timeline,
   type Track,
   isShotClip,
+  paintStretches,
   parseTimeline,
   programGroup,
   reframePointAt,
@@ -219,6 +220,8 @@ class Edit {
         return this.multicamMic(request.args);
       case "multicam.reframe":
         return this.multicamReframe(request.args);
+      case "multicam.paint":
+        return this.multicamPaint(request.args);
       case "shot.set":
         return this.shotSet(request.args);
       case "multicam.direct":
@@ -1154,6 +1157,43 @@ class Edit {
     }
     if (keys.length === 0) delete angle.reframe;
     else angle.reframe = keys;
+  }
+
+  /**
+   * Mark a range of the group clock as spoken or silent for an angle, or back to measured
+   * (see the `multicam.paint` method); `alone` silences the other angles that can speak.
+   */
+  multicamPaint(args: OperationArgs<"multicam.paint">): void {
+    const { group } = this.group(args.group);
+    const { angle: id, speaking, alone } = args;
+    const start = Math.round(args.start * 1000) / 1000;
+    const end = Math.round(args.end * 1000) / 1000;
+    if (end <= start) {
+      throw this.invalid(`the range ${start}-${end} is empty: \`end\` must be after \`start\`.`, { field: "end" });
+    }
+    if (alone === true && speaking !== true) throw this.invalid("`alone` goes with `speaking: true`.", { field: "alone" });
+    if (id === undefined) {
+      if (speaking !== null) {
+        throw this.invalid("name the angle to mark as speaking or silent.", { field: "angle", hint: `Angles: ${group.angles.map((angle) => angle.id).join(", ")}.` });
+      }
+    } else {
+      const { angle } = this.angle(args.group, id);
+      if (speaking === true && angle.screen === true) {
+        throw this.invalid(`angle ${angle.id} is a screen, and screens are never speakers.`, { field: "angle", hint: "Mark a person's angle instead." });
+      }
+    }
+    const order = group.angles.map((angle) => angle.id);
+    let painted = group.painted ?? [];
+    const targets = id === undefined ? order : [id];
+    for (const angle of targets) painted = paintStretches(painted, { angle, start, end, speaking }, order);
+    if (alone === true) {
+      for (const other of group.angles) {
+        if (other.id === id || other.screen === true || other.mic === null) continue;
+        painted = paintStretches(painted, { angle: other.id, start, end, speaking: false }, order);
+      }
+    }
+    if (painted.length === 0) delete group.painted;
+    else group.painted = painted;
   }
 
   /** Group second `group`'s program track plays at timeline second `time`; InvalidOperation in a gap. */

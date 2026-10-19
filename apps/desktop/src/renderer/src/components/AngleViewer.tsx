@@ -1,6 +1,7 @@
 import type { AssetInfo } from "@frameshell/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type AngleTile, type SpeakingTurn, programRows, sameTurns, turnsKey, viewerModel, viewerRow } from "../angles/model.js";
+import { type AngleTile, programRows, turnsKey, viewerModel, viewerRow } from "../angles/model.js";
+import { useTurns } from "../angles/useTurns.js";
 import { t } from "../i18n.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useTransport } from "../preview/transport.js";
@@ -29,7 +30,7 @@ export function AngleViewer({ mediaUrl }: { mediaUrl: string }) {
   const groupId = view ? (viewerRow(rows, view.fps, time)?.group ?? null) : null;
   const group = view?.groups?.find((candidate) => candidate.id === groupId);
   const { sources, hashes } = useTranscripts();
-  const key = useMemo(() => (group ? turnsKey(group.angles, sources, hashes, group.mics) : null), [group, sources, hashes]);
+  const key = useMemo(() => (group ? turnsKey(group.angles, sources, hashes, group.mics, group.painted) : null), [group, sources, hashes]);
   const { turns, error: turnsError } = useTurns(groupId, key);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -134,25 +135,4 @@ function AngleTileView({
       </span>
     </button>
   );
-}
-
-/**
- * Speaking turns of `group` (`multicam.turns`), re-measured when `key` (the group's angles and mics: files, offsets, gains)
- * changes. Empty while measuring or when it fails; `error` then says why. Shots do not change turns, so editing
- * the program never re-measures.
- */
-function useTurns(group: string | null, key: string | null): { turns: readonly SpeakingTurn[]; error: string | null } {
-  const [state, setState] = useState<{ key: string; turns: readonly SpeakingTurn[]; error: string | null } | null>(null);
-  useEffect(() => {
-    if (!group || key === null) return;
-    let disposed = false;
-    window.frameshell.multicam.turns(SELECTION_TIMELINE, group).then(
-      (result) => !disposed && setState((current) => (current && current.key === key && sameTurns(current.turns, result.turns) ? current : { key, turns: result.turns, error: null })),
-      (error: Error) => !disposed && setState({ key, turns: [], error: error.message }),
-    );
-    return () => {
-      disposed = true;
-    };
-  }, [group, key]);
-  return state && state.key === key ? { turns: state.turns, error: state.error } : { turns: [], error: null };
 }

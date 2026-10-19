@@ -141,3 +141,34 @@ describe("multicam.direct", () => {
     });
   }, MEDIA_TIMEOUT);
 });
+
+describe("painted turns", () => {
+  const spans = (turns: { angle: string; start: number; end: number }[], angle: string) =>
+    turns.filter((turn) => turn.angle === angle).map((turn) => [Math.round(turn.start * 10) / 10, Math.round(turn.end * 10) / 10]);
+
+  it("override the measured ones for multicam.turns and multicam.direct, and null gives them back", async () => {
+    const measured = await agent.request("multicam.turns", { cwd: project, group });
+    const ben = spans(measured.turns, "ben");
+    expect(ben).toHaveLength(1);
+
+    // Ben's turn is 6-10.5 s: hand 7-9 s to Ana, who is silent there by sound.
+    await app.request("multicam.paint", { cwd: project, group, angle: "ana", start: 7, end: 9, speaking: true, alone: true });
+    const painted = await agent.request("multicam.turns", { cwd: project, group });
+    expect(spans(painted.turns, "ana")).toContainEqual([7, 9]);
+    expect(spans(painted.turns, "ben")).toEqual([
+      [ben[0]![0], 7],
+      [9, ben[0]![1]],
+    ]);
+
+    const directed = await agent.request("multicam.direct", { cwd: project, group, replaceHuman: true });
+    const track = await program();
+    const at = (second: number) => track.clips.find((shot) => shot.in <= second && second < shot.out)!;
+    expect(at(8).angles).toEqual(["ana"]);
+    expect(directed.operation.args["turns"]).toBe(painted.turns.length);
+
+    await app.request("multicam.paint", { cwd: project, group, start: 0, end: 20, speaking: null });
+    const back = await agent.request("multicam.turns", { cwd: project, group });
+    expect(spans(back.turns, "ben")).toEqual(ben);
+    expect(spans(back.turns, "ana")).not.toContainEqual([7, 9]);
+  }, MEDIA_TIMEOUT);
+});

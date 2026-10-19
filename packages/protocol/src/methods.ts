@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 46;
+export const PROTOCOL_VERSION = 47;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1314,6 +1314,22 @@ export const methods = {
     params: operationArgs["multicam.reframe"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "multicam.paint": {
+    mutating: true,
+    description:
+      "Correct who speaks in a multicam group by hand (ADR 0016 decision 3: a manual correction always overrides the measured " +
+      "turns). Marks a range of the group clock as spoken (`speaking: true`) or silent (`speaking: false`) for one angle, or takes " +
+      "it back to the measured turns (`speaking: null`; with `angle` left out, for every angle). The marks live in the group " +
+      "(`painted`) and replace the angle's measured turns inside their range, for `multicam.turns` and `multicam.direct`, so " +
+      "re-directing keeps them; undo reverts them like any operation. `alone: true` with `speaking: true` also marks every other " +
+      "angle that can speak as silent in the range: the person takes the floor. A mark overlapping an earlier one of the " +
+      "angle replaces it where they overlap; touching marks of the same kind merge. Screen angles are never speakers, so they " +
+      "cannot be marked as speaking. Example: `{ group: \"g_1a2b3c\", angle: \"ana\", start: 12, end: 15.5, speaking: true, alone: true }`. " +
+      "Fails with InvalidOperation when the group or angle does not exist, `end` is not after `start`, `angle` is missing with " +
+      "`speaking` set, `alone` is used without `speaking: true`, or a screen angle is marked as speaking.",
+    params: operationArgs["multicam.paint"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
   "shot.set": {
     mutating: true,
     description:
@@ -1343,7 +1359,8 @@ export const methods = {
       "speak together: two cameras of one person), and angles with a `speaker`, take their turns from the " +
       "words of that speaker in that sound's transcript (`transcribe.speakers` first; corrections in `edits` count); an angle " +
       "of a shared sound with no `speaker` takes the first speaker no other angle names, in order, and a warning says so " +
-      "(set it with `multicam.angle`). `speakers` lists the angles measured that way. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
+      "(set it with `multicam.angle`). `speakers` lists the angles measured that way. Stretches a person painted " +
+      "(`multicam.paint`, `painted` in the group) replace the measured turns of their angle inside their range. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
       "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,

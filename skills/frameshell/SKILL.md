@@ -53,7 +53,7 @@ When you guide the human through the app, name only these places; do not invent 
 |---|---|
 | Editing footage by its words: import, transcribe, silences, retakes, subtitles, export, verify | [transcript-editing.md](reference/transcript-editing.md) |
 | A video made from an audio recording (podcast, talk, voice note): simple, medium or explainer, the scene plan, building clips per scene | [video-from-audio.md](reference/video-from-audio.md) |
-| A conversation with one file per person, or cameras with separate mics (podcast, interview, panel): multicam group, sync check, mics, template, `direct`, reviewing low-confidence shots, keeping the human's shots, reframing for 9:16; one file or mic for several people (speakers on transcript words) | [multicam.md](reference/multicam.md) |
+| A conversation with one file per person, or cameras with separate mics (podcast, interview, panel): multicam group, sync check, mics, template, `direct`, reviewing low-confidence shots, keeping the human's shots, reframing for 9:16, correcting who speaks by hand; one file or mic for several people (speakers on transcript words) | [multicam.md](reference/multicam.md) |
 | Any CLI command: what it does, key flags, output | [cli.md](reference/cli.md); `frameshell --help` has every flag |
 | MCP tools, CLI or MCP, frame capture, what the user sees in the app (`ui_state`, `ui_*`) | [mcp.md](reference/mcp.md) |
 | The prompt holds a `[frameshell] …` line | [selection.md](reference/selection.md) |

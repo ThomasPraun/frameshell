@@ -64,6 +64,12 @@ mutations print the new revision):
                                centering the cut on --x/--y (fractions of the picture, 0 left/top, 1 right/bottom;
                                omitted: the point there now). The point moves in a straight line between keys and
                                holds outside them. --remove deletes the key in that frame, --clear every key
+  multicam paint <group> [<angle>] --from s --to s (--speaking [--alone] | --silent | --measured)
+                               Correct who speaks by hand, on the group clock: --speaking marks the angle as
+                               speaking from --from to --to (--alone: everyone else that can speak is silent
+                               there), --silent as not speaking, whatever its sound says; --measured takes the range
+                               back to the measured turns (no <angle>: every angle). Painted turns replace the
+                               measured ones for multicam turns and direct, and revert undoes them
   shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b,…] [--corner top-left|top-right|bottom-left|bottom-right]
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
@@ -166,6 +172,10 @@ export const TIMELINE_OPTIONS = {
   time: { type: "string" },
   remove: { type: "boolean" },
   clear: { type: "boolean" },
+  speaking: { type: "boolean" },
+  silent: { type: "boolean" },
+  measured: { type: "boolean" },
+  alone: { type: "boolean" },
   template: { type: "string" },
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
@@ -205,6 +215,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen", "speaker", "clear-speaker"],
   "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
   "multicam reframe": ["time", "at", "x", "y", "remove", "clear"],
+  "multicam paint": ["from", "to", "speaking", "silent", "measured", "alone"],
   "shot set": ["layout", "angles", "corner"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
@@ -234,6 +245,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam angle": [2, 2],
   "multicam mic": [2, 2],
   "multicam reframe": [2, 2],
+  "multicam paint": [1, 2],
   "shot set": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
@@ -491,6 +503,23 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         y: num("y"),
         remove: values["remove"] === true ? true : undefined,
         clear: values["clear"] === true ? true : undefined,
+      });
+      break;
+    }
+    case "multicam paint": {
+      method = "multicam.paint";
+      const kinds = ["speaking", "silent", "measured"].filter((flag) => values[flag] === true);
+      if (kinds.length !== 1) throw new UsageError("Pass one of --speaking, --silent or --measured.");
+      if (values["alone"] === true && values["speaking"] !== true) throw new UsageError("--alone goes with --speaking.");
+      if (args.length === 1 && values["measured"] !== true) throw new UsageError("Name the angle: multicam paint <group> <angle> …");
+      if (values["from"] === undefined || values["to"] === undefined) throw new UsageError("Pass --from <group seconds> and --to <group seconds>.");
+      Object.assign(params, {
+        group: args[0],
+        angle: args[1],
+        start: num("from"),
+        end: num("to"),
+        speaking: values["speaking"] === true ? true : values["silent"] === true ? false : null,
+        alone: values["alone"] === true ? true : undefined,
       });
       break;
     }

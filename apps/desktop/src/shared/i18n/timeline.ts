@@ -40,6 +40,7 @@ const en = {
     revert: "Undo",
     trackAdd: "New track",
     trackSet: "Track change",
+    paint: "Painted turns",
   },
   noSelectedUnderPlayhead: "No selected clip under the playhead",
   noClipUnderPlayhead: "No clip under the playhead",
@@ -95,6 +96,19 @@ const en = {
   doubtful: (percent: number) => `${percent}% sure`,
   followedTrack: "the followed track",
   wordsShowHere: (track: string) => `Words show here once the clips of ${track} are transcribed`,
+  showTurnLanes: "Show who speaks, one lane per angle",
+  hideTurnLanes: "Hide the turn lanes",
+  turnLanesTitle: (id: string, mac: boolean) =>
+    `${id}: who speaks, one lane per angle. Drag on a lane to say that person speaks there and the others do not; ` +
+    `Shift keeps the others, ${mac ? "Option" : "Alt"} marks them silent; right-click goes back to the measured turns.`,
+  turnLaneLabel: (name: string) => `Turns of ${name}`,
+  turnLaneTitle: (name: string) => `${name}: speaking turns. Framed: said by hand. Hatched: marked silent by hand.`,
+  turnsFailed: (reason: string) => `Turn lanes unavailable: ${reason}`,
+  noShotToPaint: "No shot plays there: nothing to paint",
+  backToMeasured: "Back to measured here",
+  clearAnglePainted: (name: string) => `Clear everything painted for ${name}`,
+  clearAllPainted: "Clear every painted turn",
+  nothingPainted: "Nothing was painted there",
 };
 
 const es: typeof en = {
@@ -136,6 +150,7 @@ const es: typeof en = {
     revert: "Deshacer",
     trackAdd: "Nueva pista",
     trackSet: "Cambio de pista",
+    paint: "Turnos pintados",
   },
   noSelectedUnderPlayhead: "Ningún clip seleccionado bajo el cursor de reproducción",
   noClipUnderPlayhead: "Ningún clip bajo el cursor de reproducción",
@@ -187,6 +202,19 @@ const es: typeof en = {
   doubtful: (percent) => `${percent}% de certeza`,
   followedTrack: "la pista seguida",
   wordsShowHere: (track) => `Aquí aparecerán las palabras cuando se transcriban los clips de ${track}`,
+  showTurnLanes: "Mostrar quién habla, una pista por ángulo",
+  hideTurnLanes: "Ocultar las pistas de turnos",
+  turnLanesTitle: (id, mac) =>
+    `${id}: quién habla, una pista por ángulo. Arrastra sobre una pista para indicar que esa persona habla ahí y las demás no; ` +
+    `Mayús conserva a las demás, ${mac ? "Opción" : "Alt"} la marca en silencio; clic derecho vuelve a los turnos medidos.`,
+  turnLaneLabel: (name) => `Turnos de ${name}`,
+  turnLaneTitle: (name) => `${name}: turnos de habla. Con marco: indicados a mano. Rayados: marcados en silencio a mano.`,
+  turnsFailed: (reason) => `Pistas de turnos no disponibles: ${reason}`,
+  noShotToPaint: "No hay ningún plano ahí: no hay nada que pintar",
+  backToMeasured: "Volver a lo medido aquí",
+  clearAnglePainted: (name) => `Borrar todo lo pintado para ${name}`,
+  clearAllPainted: "Borrar todos los turnos pintados",
+  nothingPainted: "No había nada pintado ahí",
 };
 
 export const timeline = { en, es };

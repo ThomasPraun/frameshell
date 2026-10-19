@@ -110,6 +110,33 @@ function shotAnglesAt(row: TrackRow, time: number, fps: number): string[] {
   return clip?.shot?.angles.map((angle: ShotAngle) => angle.id) ?? [];
 }
 
+/** What the angle panel offers for an angle's `speaker` (#247). */
+export interface SpeakerChoices {
+  /** Project-relative file the angle is heard through (its mic's, else its own); null when it has no sound. */
+  asset: string | null;
+  /** Speakers of that file's transcript, in the transcript's order; empty when it has none. */
+  speakers: { id: string; name: string }[];
+  /** Why the picker is off: a screen is never a speaker, an angle without sound has no turns, or no speakers were found yet. */
+  off: "screen" | "no-sound" | "none" | null;
+}
+
+/**
+ * The speakers an angle can be set to: those of the transcript of the sound it is heard through (its `mic`'s file,
+ * else its own), the way `multicam.turns` looks them up. The picker stays on when the angle already names a speaker,
+ * so it can be cleared.
+ */
+export function speakerChoices(
+  angle: { asset: string; mic?: string | null | undefined; screen?: boolean | undefined; speaker?: string | undefined },
+  mics: readonly { id: string; asset: string }[] | undefined,
+  sources: readonly TranscriptSource[],
+): SpeakerChoices {
+  if (angle.screen === true) return { asset: null, speakers: [], off: "screen" };
+  if (angle.mic === null) return { asset: null, speakers: [], off: "no-sound" };
+  const asset = typeof angle.mic === "string" ? (mics?.find((mic) => mic.id === angle.mic)?.asset ?? angle.asset) : angle.asset;
+  const speakers = sources.find((source) => source.transcript.asset === asset)?.transcript.speakers ?? [];
+  return { asset, speakers: speakers.map(({ id, name }) => ({ id, name })), off: speakers.length === 0 && angle.speaker === undefined ? "none" : null };
+}
+
 /** Whether two sets of turns are the same, so a refetch that found nothing new does not redraw. */
 export function sameTurns(a: readonly SpeakingTurn[], b: readonly SpeakingTurn[]): boolean {
   return a.length === b.length && a.every((turn, i) => turn.angle === b[i]!.angle && turn.start === b[i]!.start && turn.end === b[i]!.end);
@@ -117,18 +144,19 @@ export function sameTurns(a: readonly SpeakingTurn[], b: readonly SpeakingTurn[]
 
 /**
  * When `multicam.turns` must be asked again: the angles or mics changed, or a transcript of a sound they are heard
- * through (an angle's file, a mic's file) did (a diarization run, a speaker correction) or went stale. Angles sharing a
- * file or mic take their turns from its transcript.
+ * through (an angle's file, a mic's file) did (a diarization run, a speaker correction) or went stale, or a person painted
+ * turns. Angles sharing a file or mic take their turns from its transcript.
  */
 export function turnsKey(
   angles: readonly { asset: string }[],
   sources: readonly TranscriptSource[],
   hashes: ReadonlyMap<string, string | null>,
   mics: readonly { asset: string }[] = [],
+  painted: readonly unknown[] = [],
 ): string {
   const assets = new Set([...angles, ...mics].map((sound) => sound.asset));
   const transcripts = sources
     .filter((source) => assets.has(source.transcript.asset))
     .map((source) => [source.path, source.transcript, hashes.get(source.transcript.asset) ?? null]);
-  return JSON.stringify([angles, mics, transcripts]);
+  return JSON.stringify([angles, mics, transcripts, painted]);
 }

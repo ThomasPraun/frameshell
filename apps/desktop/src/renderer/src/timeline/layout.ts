@@ -2,6 +2,7 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
 import { t } from "../i18n.js";
+import { type GroupTurn, type LaneMarks, type PaintedMark, TURN_LANE_HEIGHT, laneMarks, shotSpans } from "./turn-lanes.js";
 
 /** Height of the time ruler above the lanes, px. */
 export const RULER_HEIGHT = 22;
@@ -88,6 +89,26 @@ export interface ShotBox {
   doubtful: boolean;
 }
 
+/** One angle's turn lane under a program track (#247). */
+export interface TurnLane {
+  angle: ShotAngle;
+  /** Top edge in content px. */
+  top: number;
+  height: number;
+  /** What the lane draws, on the timeline clock. */
+  marks: LaneMarks;
+  /** The group's painted stretches of this angle, on the group clock. */
+  painted: PaintedMark[];
+}
+
+/** Which program tracks show their turn lanes, and the turns they draw; see {@link layoutTimeline}. */
+export interface TurnLaneInput {
+  /** Ids of program tracks whose lanes are open. */
+  open: ReadonlySet<string>;
+  /** Speaking turns by group id, as `multicam.turns` reports them; a group with none yet draws empty lanes. */
+  turns: ReadonlyMap<string, readonly GroupTurn[]>;
+}
+
 /** One lane, in display order. */
 export interface TrackRow {
   id: string;
@@ -103,7 +124,12 @@ export interface TrackRow {
   angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
   top: number;
+  /** Height of the clips' band, px. Open turn lanes ({@link TrackRow.lanes}) come under it. */
   height: number;
+  /** Program tracks with their turn lanes open: one lane per angle, in group order; empty otherwise. */
+  lanes: TurnLane[];
+  /** Height of {@link TrackRow.lanes}, px; 0 when there are none. The next row starts after it. */
+  lanesHeight: number;
   /** Sorted by start, never overlapping. */
   clips: ClipBox[];
 }
@@ -142,9 +168,9 @@ export interface TimelineLayout {
  * Lay out a timeline the way editors read it: the top picture layer first
  * (the file lists the bottom layer first; program tracks stack among video
  * tracks), then audio, then subtitles. `scenes` add the band under the ruler
- * and push the lanes down.
+ * and push the lanes down; `lanes` open a program track's turn lanes under its shots.
  */
-export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] = []): TimelineLayout {
+export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] = [], lanes?: TurnLaneInput): TimelineLayout {
   const problems = new Map(view.problems.map((problem) => [problem.clip, problem.message]));
   const labels = new Map<string, string>();
   const counts: Record<TrackKind, number> = { video: 0, program: 0, audio: 0, subtitles: 0 };
@@ -168,6 +194,23 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
     });
     clipCount += clips.length;
     const height = LANE_HEIGHT[track.kind];
+    const angles = (group?.angles ?? []).map((angle, index): ShotAngle => ({ id: angle.id, name: angle.name, color: index % ANGLE_COLOR_COUNT }));
+    const open = track.kind === "program" && angles.length > 0 && lanes?.open.has(track.id) === true;
+    const spans = open ? shotSpans(clips) : [];
+    const painted: PaintedMark[] = open ? (group?.painted ?? []) : [];
+    const turns = open ? (lanes?.turns.get(track.group ?? "") ?? []) : [];
+    const laneRows = open
+      ? angles.map(
+          (angle, index): TurnLane => ({
+            angle,
+            top: top + height + index * TURN_LANE_HEIGHT,
+            height: TURN_LANE_HEIGHT,
+            marks: laneMarks(spans, angle.id, turns, painted),
+            painted: painted.filter((mark) => mark.angle === angle.id),
+          }),
+        )
+      : [];
+    const lanesHeight = laneRows.length * TURN_LANE_HEIGHT;
     const row: TrackRow = {
       id: track.id,
       kind: track.kind,
@@ -175,12 +218,14 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
       name: track.name,
       followsLabel: track.follows ? (labels.get(track.follows) ?? track.follows) : null,
       group: track.kind === "program" ? (track.group ?? null) : null,
-      angles: (group?.angles ?? []).map((angle, index): ShotAngle => ({ id: angle.id, name: angle.name, color: index % ANGLE_COLOR_COUNT })),
+      angles,
       top,
       height,
+      lanes: laneRows,
+      lanesHeight,
       clips,
     };
-    top += height;
+    top += height + lanesHeight;
     return row;
   });
   return { scenes: [...scenes], head, rows, duration, height: top, clipCount };

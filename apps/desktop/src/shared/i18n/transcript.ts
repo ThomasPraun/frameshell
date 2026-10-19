@@ -38,6 +38,15 @@ const en = {
   speakerNotSet: (message: string) => `Speaker not changed: ${message}`,
   speakerTitle: (name: string) => `${name} speaks. Right-click words to say someone else does.`,
   unknownSpeaker: "Unknown speaker",
+  saidByPlaceholder: "Said by…",
+  saidByLabel: "Set who says the selected words",
+  saidByTitle: (count: number) => `Set who says the ${count === 1 ? "selected word" : `${count} selected words`}`,
+  newSpeaker: "New speaker…",
+  renameSpeaker: "Rename speaker…",
+  speakerRenamed: (from: string, to: string) => `${from} is now called ${to}.`,
+  speakerNotRenamed: (message: string) => `Speaker not renamed: ${message}`,
+  speakerNameLabel: (name: string) => `Name of ${name}`,
+  speakerTitleRename: (name: string) => `${name} speaks. Double-click to rename; right-click words to say someone else does.`,
 };
 
 const es: typeof en = {
@@ -77,6 +86,15 @@ const es: typeof en = {
   speakerNotSet: (message) => `No se cambió quién habla: ${message}`,
   speakerTitle: (name) => `Habla ${name}. Haz clic derecho en palabras para indicar que habla otra persona.`,
   unknownSpeaker: "Hablante desconocido",
+  saidByPlaceholder: "Lo dice…",
+  saidByLabel: "Indicar quién dice las palabras seleccionadas",
+  saidByTitle: (count) => `Indicar quién dice ${count === 1 ? "la palabra seleccionada" : `las ${count} palabras seleccionadas`}`,
+  newSpeaker: "Nuevo hablante…",
+  renameSpeaker: "Renombrar hablante…",
+  speakerRenamed: (from, to) => `${from} ahora se llama ${to}.`,
+  speakerNotRenamed: (message) => `No se renombró al hablante: ${message}`,
+  speakerNameLabel: (name) => `Nombre de ${name}`,
+  speakerTitleRename: (name) => `Habla ${name}. Doble clic para renombrar; haz clic derecho en palabras para indicar que habla otra persona.`,
 };
 
 export const transcript = { en, es };

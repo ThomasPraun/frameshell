@@ -1,7 +1,22 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { type Transcript, parseTranscript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, restorePlan, rippleScope, struckRun, withWordSpeaker, withWordText, wordAt } from "../src/renderer/src/transcript/model.js";
+import {
+  buildTranscriptModel,
+  isKept,
+  paragraphs,
+  placeWord,
+  restoreEdit,
+  restorePlan,
+  rippleScope,
+  selectedWordIds,
+  struckRun,
+  withNewSpeaker,
+  withSpeakerName,
+  withWordSpeaker,
+  withWordText,
+  wordAt,
+} from "../src/renderer/src/transcript/model.js";
 
 // Seam under test: the transcript view's pure model. Timeline view and transcript files in; struck words,
 // timeline placements, the word under the playhead and the restore operation out.
@@ -337,6 +352,65 @@ describe("withWordSpeaker", () => {
   it("refuses a speaker the transcript does not list, and an unknown word", () => {
     expect(() => withWordSpeaker(file, ["w_000001"], "s9")).toThrow(/no speaker s9/);
     expect(() => withWordSpeaker(file, ["w_000099"], "s1")).toThrow(/no word w_000099/);
+  });
+});
+
+describe("withSpeakerName, withNewSpeaker and selectedWordIds", () => {
+  const spoken: Transcript = {
+    ...transcript,
+    words: transcript.words.map((word, i) => ({ ...word, speaker: i < 4 ? "s1" : "s2" })),
+    speakers: [
+      { id: "s1", name: "Speaker 1" },
+      { id: "s2", name: "Speaker 2" },
+    ],
+    nextSpeakerId: 3,
+  };
+  const file = `${JSON.stringify(spoken)}\n`;
+
+  it("renames a speaker, trimming the name and keeping the rest of the file", () => {
+    const next = JSON.parse(withSpeakerName(file, "s2", "  Ben  "));
+    expect(next.speakers).toEqual([
+      { id: "s1", name: "Speaker 1" },
+      { id: "s2", name: "Ben" },
+    ]);
+    expect({ ...next, speakers: spoken.speakers }).toEqual(JSON.parse(file));
+    expect(parseTranscript(next).ok).toBe(true);
+  });
+
+  it("refuses an unknown speaker, an empty name and a file that is no transcript", () => {
+    expect(() => withSpeakerName(file, "s9", "Ben")).toThrow(/no speaker s9/);
+    expect(() => withSpeakerName(file, "s1", "  ")).toThrow(/needs a name/);
+    expect(() => withSpeakerName("[]", "s1", "Ben")).toThrow(/not a transcript/);
+  });
+
+  it("adds the next free speaker and moves the mark past it, so an id is never reused", () => {
+    const made = withNewSpeaker(file);
+    expect(made.speaker).toEqual({ id: "s3", name: "Speaker 3" });
+    const next = JSON.parse(made.content);
+    expect(next.speakers.at(-1)).toEqual(made.speaker);
+    expect(next.nextSpeakerId).toBe(4);
+    expect(parseTranscript(next).ok).toBe(true);
+    expect(withNewSpeaker(made.content).speaker.id).toBe("s4");
+  });
+
+  it("starts at s1 without speakers, and goes above the mark when edits or words name a higher speaker", () => {
+    expect(withNewSpeaker(`${JSON.stringify(transcript)}\n`).speaker.id).toBe("s1");
+    const lagging = { ...spoken, nextSpeakerId: 1, edits: { w_000001: { speaker: "s2" } } };
+    expect(withNewSpeaker(JSON.stringify(lagging)).speaker.id).toBe("s3");
+  });
+
+  it("makes words said by a new speaker in two steps of one write", () => {
+    const made = withNewSpeaker(file);
+    const said = JSON.parse(withWordSpeaker(made.content, ["w_000001", "w_000002"], made.speaker.id));
+    expect(said.edits).toMatchObject({ w_000001: { speaker: "s3" }, w_000002: { speaker: "s3" } });
+    expect(parseTranscript(said).ok).toBe(true);
+  });
+
+  it("picks the selected words of one transcript, in selection order", () => {
+    const word = (transcript: string, id: string) => ({ transcript, asset: "a", word: id, text: id, start: 0, end: 1 });
+    const selected = [word(PATH, "w_000003"), word("transcripts/other.words.json", "w_000001"), word(PATH, "w_000001")];
+    expect(selectedWordIds(selected, PATH)).toEqual(["w_000003", "w_000001"]);
+    expect(selectedWordIds([], PATH)).toEqual([]);
   });
 });
 

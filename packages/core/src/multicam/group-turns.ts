@@ -1,7 +1,7 @@
 import { type MediaProbe, RpcError } from "@frameshell/protocol";
 import { type Angle, type MulticamGroup, type Transcript, wordSpeaker } from "@frameshell/schema";
 import { ENERGY_HOP_S, type EnergyProfile } from "../media/energy.js";
-import { type Turn, type TurnInput, speakingTurns, wordTurns } from "./turns.js";
+import { type Turn, type TurnInput, applyPainted, speakingTurns, wordTurns } from "./turns.js";
 
 /** A transcript file of an asset, for turns from speakers. */
 export interface TurnsTranscript {
@@ -65,7 +65,9 @@ interface Sound {
  * the others from the cached energy envelope ({@link speakingTurns}), so
  * angles sharing an undiarized mic (two cameras of one person) speak together. Screen
  * angles are never speakers: with a non-screen angle in the group they are
- * not heard at all (and a silent screen never warns). An angle with
+ * not heard at all (and a silent screen never warns). What a person painted
+ * (`group.painted`) then replaces the turns of its angle inside its range
+ * ({@link applyPainted}). An angle with
  * `mic: null` has no turns and no warning. An angle that cannot be measured
  * gets no turns and a warning; it does not fail the call.
  * Daemon errors (missing asset, ffmpeg unavailable) are thrown, never turned into warnings.
@@ -156,7 +158,7 @@ export async function groupTurns(source: TurnsSource, root: string, group: Multi
   const screens = new Set(group.angles.filter((angle) => angle.screen === true).map((angle) => angle.id));
   const heard = people ? inputs.map((input) => (screens.has(input.id) ? { ...input, profile: null } : input)) : inputs;
   const names = new Map(group.angles.map((angle) => [angle.id, angle.name]));
-  const turns = [...speakingTurns(heard, duration), ...fromSpeakers.turns]
+  const turns = applyPainted([...speakingTurns(heard, duration), ...fromSpeakers.turns], group.painted ?? [])
     .map((turn) => ({ ...turn, end: Math.min(turn.end, Math.round(duration * 1000) / 1000), name: names.get(turn.angle)! }))
     .filter((turn) => turn.end > turn.start)
     .sort((a, b) => a.start - b.start || (a.angle < b.angle ? -1 : a.angle > b.angle ? 1 : 0));

@@ -41,3 +41,7 @@ _Avoid_: auto-switcher, virtual producer
 **Speaker**:
 One person speaking in a transcript (`speakers`: id and name), found by speaker diarization; each word names its speaker.
 _Avoid_: voice, cluster, participant
+
+**Painted turn**:
+A stretch of the group clock a person marked as spoken or silent for one angle (`painted` in the group, `multicam paint`); it replaces the angle's measured speaking turns inside its range.
+_Avoid_: manual turn, override
