@@ -151,6 +151,8 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       if (!found) extra.set(id, (found = { id, kind, clips: [] }));
       return found as ClipTrack;
     };
+    // Per host track, not per nested clip: each nested clip has its own renamed group, so its own program track.
+    let programIndex = 0;
     for (const clip of track.clips) {
       const inner = isNestedClip(clip) && !stack.includes(clip.source) ? nested(clip.source) : null;
       if (!isNestedClip(clip) || !inner) {
@@ -161,7 +163,6 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       const from = clip.in ?? 0;
       const to = clip.duration !== undefined ? from + clip.duration : durationOf(flat.tracks);
       let videoIndex = 0;
-      let programIndex = 0;
       let audioIndex = 0;
       let ownTaken = false;
       const children = flat.tracks.flatMap((child): Track[] => {

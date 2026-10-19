@@ -114,7 +114,8 @@ export interface Program {
   /** Length in frames: end of the last span. */
   frames: number;
   /**
-   * One per video track, bottom first (the first video track is the base).
+   * One per video or program track, bottom first (layer 0 is the bottom
+   * picture track).
    * Each sorted, never overlapping; frames outside every span of every
    * layer are black.
    */

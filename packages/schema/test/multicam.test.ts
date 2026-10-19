@@ -240,6 +240,30 @@ describe("flattening nested multicam timelines", () => {
     expect(parseTimeline(flat).ok).toBe(true);
   });
 
+  it("gives each nested clip on one video host track its own program track and group", () => {
+    const main: Timeline = {
+      ...createTimeline("main"),
+      tracks: [
+        {
+          id: "v",
+          kind: "video",
+          clips: [
+            { id: "n1", type: "timeline", source: "timelines/podcast.json", start: 0, duration: 3 },
+            { id: "n2", type: "timeline", source: "timelines/podcast.json", start: 10, duration: 3 },
+          ],
+        },
+      ],
+    };
+    const flat = flattenTimeline(main, resolve);
+    const programs = flat.tracks.filter((track): track is ProgramTrack => track.kind === "program");
+    expect(programs.map((track) => [track.id, track.group, track.clips.map((clip) => [clip.id, clip.start])])).toEqual([
+      ["v/p1", "n1/g_talk", [["n1/c_a", 0]]],
+      ["v/p2", "n2/g_talk", [["n2/c_a", 10]]],
+    ]);
+    expect(flat.groups?.map((g) => g.id)).toEqual(["n1/g_talk", "n2/g_talk"]);
+    expect(parseTimeline(flat).ok).toBe(true);
+  });
+
   it("turns a nested program track on an audio host track into its angles' sound", () => {
     const main: Timeline = {
       ...createTimeline("main"),
