@@ -1,6 +1,6 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { cropViewBox, groupTimeAt, programRows, sameTurns, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
+import { cropViewBox, groupTimeAt, programRows, sameTurns, speakerChoices, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
 
 // Seam under test: what the multicam viewer shows at a playhead time (#243): group clock, shot angles, speakers.
 
@@ -169,5 +169,40 @@ describe("turnsKey", () => {
     expect(turnsKey(cameras, [transcript("s1")], hashes, moved)).not.toBe(before);
     // Without the mic, room.mp4 is no angle's sound: its transcript does not count.
     expect(turnsKey(cameras, [transcript("s1", { w1: { speaker: "s2" } })], hashes)).toBe(turnsKey(cameras, [transcript("s1")], hashes));
+  });
+
+  it("changes when a person paints turns, so the lanes measure again", () => {
+    const before = turnsKey(angles, [], hashes, [], []);
+    expect(turnsKey(angles, [], hashes)).toBe(before);
+    const painted = [{ angle: "ana", start: 1, end: 2, speaking: true }];
+    expect(turnsKey(angles, [], hashes, [], painted)).not.toBe(before);
+    expect(turnsKey(angles, [], hashes, [], [{ ...painted[0]!, speaking: false }])).not.toBe(turnsKey(angles, [], hashes, [], painted));
+  });
+});
+
+describe("speakerChoices", () => {
+  const room = (speakers: { id: string; name: string }[] | undefined) =>
+    [{ path: "transcripts/room.words.json", transcript: { asset: "assets/room.mp4", speakers } }] as never;
+  const people = [
+    { id: "s1", name: "Ana" },
+    { id: "s2", name: "Ben" },
+  ];
+
+  it("lists the speakers of the transcript of the angle's own file", () => {
+    expect(speakerChoices({ asset: "assets/room.mp4" }, undefined, room(people))).toEqual({ asset: "assets/room.mp4", speakers: people, off: null });
+  });
+
+  it("looks in the mic's file when the angle is heard through a mic", () => {
+    const mics = [{ id: "lav", asset: "assets/room.mp4" }];
+    expect(speakerChoices({ asset: "assets/cam.mp4", mic: "lav" }, mics, room(people))).toMatchObject({ asset: "assets/room.mp4", speakers: people, off: null });
+    expect(speakerChoices({ asset: "assets/cam.mp4", mic: "lav" }, [], room(people))).toMatchObject({ asset: "assets/cam.mp4", speakers: [], off: "none" });
+  });
+
+  it("is off for screens, angles without sound and files without speakers, unless a speaker is set to clear", () => {
+    expect(speakerChoices({ asset: "assets/room.mp4", screen: true }, undefined, room(people)).off).toBe("screen");
+    expect(speakerChoices({ asset: "assets/room.mp4", mic: null }, undefined, room(people)).off).toBe("no-sound");
+    expect(speakerChoices({ asset: "assets/room.mp4" }, undefined, room(undefined)).off).toBe("none");
+    expect(speakerChoices({ asset: "assets/room.mp4" }, undefined, []).off).toBe("none");
+    expect(speakerChoices({ asset: "assets/room.mp4", speaker: "s3" }, undefined, room(undefined)).off).toBeNull();
   });
 });

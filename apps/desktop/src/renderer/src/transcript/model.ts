@@ -451,6 +451,59 @@ export function withWordSpeaker(content: string, ids: readonly string[], speaker
   return `${JSON.stringify({ ...data, edits }, null, 2)}\n`;
 }
 
+/** Parsed transcript file `content` as the loose object the file editors below change. */
+function transcriptObject(content: string): { words?: unknown; edits?: unknown; speakers?: unknown; nextSpeakerId?: unknown } {
+  const data: unknown = JSON.parse(content);
+  if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("this is not a transcript file");
+  return data as { words?: unknown; edits?: unknown; speakers?: unknown; nextSpeakerId?: unknown };
+}
+
+/** Number of the id `s12` names; 0 for anything else. */
+const speakerNumber = (id: unknown): number => (typeof id === "string" && /^s\d+$/.test(id) ? Number(id.slice(1)) : 0);
+
+/**
+ * Transcript file `content` with speaker `id` renamed to `name` (trimmed), in its `speakers`: names survive
+ * diarization re-runs, which keep a speaker's id. Throws when `content` is no transcript object, lists no speaker `id`,
+ * or `name` is empty.
+ */
+export function withSpeakerName(content: string, id: string, name: string): string {
+  const data = transcriptObject(content);
+  const speakers = Array.isArray(data.speakers) ? (data.speakers as { id?: unknown; name?: unknown }[]) : [];
+  const found = speakers.find((candidate) => candidate.id === id);
+  if (!found) throw new Error(`no speaker ${id} in this transcript`);
+  if (name.trim() === "") throw new Error("a speaker needs a name");
+  found.name = name.trim();
+  return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+/**
+ * Transcript file `content` with one more speaker: the next free id (above `nextSpeakerId` and every listed, word and
+ * edit speaker, the way the daemon hands them out, so no id is ever reused), named `Speaker <n>`, and `nextSpeakerId` moved
+ * past it. The speaker is listed even with no words yet: give it some with {@link withWordSpeaker} in the same write.
+ * Throws when `content` is no transcript object.
+ */
+export function withNewSpeaker(content: string): { content: string; speaker: { id: string; name: string } } {
+  const data = transcriptObject(content);
+  const words = Array.isArray(data.words) ? (data.words as { speaker?: unknown }[]) : [];
+  const speakers = Array.isArray(data.speakers) ? (data.speakers as { id?: unknown; name?: unknown }[]) : [];
+  const edits = typeof data.edits === "object" && data.edits !== null ? Object.values(data.edits as Record<string, { speaker?: unknown }>) : [];
+  const used = [...speakers.map((speaker) => speaker.id), ...words.map((word) => word.speaker), ...edits.map((edit) => edit.speaker)].map(speakerNumber);
+  const mark = typeof data.nextSpeakerId === "number" ? data.nextSpeakerId : 1;
+  const number = Math.max(mark, ...used.map((n) => n + 1));
+  const speaker = { id: `s${number}`, name: `Speaker ${number}` };
+  data.speakers = [...speakers, speaker];
+  data.nextSpeakerId = number + 1;
+  return { content: `${JSON.stringify(data, null, 2)}\n`, speaker };
+}
+
+/**
+ * Ids of the selected words (the shared selection store's) that belong to transcript `path`, in selection order;
+ * what a speaker change on a selection made anywhere (timeline range, subtitle cue, transcript drag) applies to.
+ */
+export function selectedWordIds(selected: readonly SelectedWord[], path: string): string[] {
+  return selected.filter((word) => word.transcript === path).map((word) => word.word);
+}
+
 /** Source silence that starts a new paragraph, seconds. */
 const PARAGRAPH_GAP_S = 1.2;
 /** Shorter silence that starts one after a sentence end. */

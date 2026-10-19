@@ -697,6 +697,41 @@
               ],
               "additionalProperties": false
             }
+          },
+          "painted": {
+            "description": "Who speaks, as a person painted it (`multicam.paint`): each stretch replaces the measured turns of its angle on the group clock, for `multicam.turns` and `direct`. Stretches of one angle never overlap. Absent: every turn is measured.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "angle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Angle id of the group."
+                },
+                "start": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Group-clock seconds where the stretch starts."
+                },
+                "end": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Group-clock seconds where it ends; greater than `start`."
+                },
+                "speaking": {
+                  "type": "boolean",
+                  "description": "True: the angle speaks in the stretch. False: it does not, even where its sound is loud."
+                }
+              },
+              "required": [
+                "angle",
+                "start",
+                "end",
+                "speaking"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

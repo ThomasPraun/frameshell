@@ -346,6 +346,24 @@ export const operationArgs = {
     remove: z.boolean().optional().describe("True removes the key at `at` or `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key: the picture is cut centered again. Takes no other field."),
   }),
+  "multicam.paint": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    angle: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Angle id of that group. Left out only with `speaking: null`, which then clears the painted turns of every angle in the range."),
+    start: z.number().nonnegative().describe("Group-clock second where the range starts, 3 decimals."),
+    end: z.number().positive().describe("Group-clock second where the range ends, after `start`, 3 decimals."),
+    speaking: z
+      .boolean()
+      .nullable()
+      .describe("true: the angle speaks in the range. false: it does not, even where its sound is loud. null: back to the measured turns."),
+    alone: z
+      .boolean()
+      .optional()
+      .describe("With `speaking: true`: every other angle that can speak is marked silent in the range too, so the person takes the floor. Default false."),
+  }),
   "shot.set": z.strictObject({
     clip: ClipRef.describe("Shot id: a clip of a program track, from `timeline.show`."),
     shot: z

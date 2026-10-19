@@ -639,6 +639,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "multicam.angle": (params, caller) => operate("multicam.angle", params, caller),
     "multicam.mic": (params, caller) => operate("multicam.mic", params, caller),
     "multicam.reframe": (params, caller) => operate("multicam.reframe", params, caller),
+    "multicam.paint": (params, caller) => operate("multicam.paint", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);

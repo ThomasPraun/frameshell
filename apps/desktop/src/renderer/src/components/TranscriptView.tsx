@@ -14,7 +14,10 @@ import {
   isKept,
   paragraphs,
   restorePlan,
+  selectedWordIds,
   struckRun,
+  withNewSpeaker,
+  withSpeakerName,
   withWordSpeaker,
   withWordText,
   wordAt,
@@ -71,8 +74,11 @@ interface Marked {
  * - Double-click, F2 on one selected word, or the context menu edit a word's
  *   text: saved as a transcript `edits` entry, which subtitles show.
  * - Once speakers were found (`transcribe --speakers`), each paragraph names
- *   its speaker, and the context menu says who says the word or marked words:
- *   a speaker correction in `edits`, which wins over diarization.
+ *   its speaker, and the toolbar picker and the context menu say who says the
+ *   selected words (marked here, or selected anywhere in the shared selection,
+ *   e.g. a timeline range or a subtitle cue; also a new speaker): a speaker
+ *   correction in `edits`, which wins over diarization. Double-clicking a
+ *   speaker's name, or its context menu, renames it in the file's `speakers`.
  * - Right-click opens "Ask agent" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
  */
@@ -86,6 +92,8 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   const [restoring, setRestoring] = useState<ReadonlySet<string>>(new Set());
   const [marked, setMarked] = useState<Marked | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  /** Paragraph (first word's key) whose speaker name is being edited. */
+  const [renaming, setRenaming] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   const lastUserScroll = useRef(0);
@@ -199,22 +207,57 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     }
   };
 
-  /** Save that `speaker` says words `ids` of transcript `path`, as speaker corrections. */
-  const saveSpeaker = async (path: string, ids: readonly string[], speaker: { id: string; name: string }) => {
+  /**
+   * Save that `speaker` says words `ids` of transcript `path`, as speaker corrections; null: a new speaker, listed
+   * in the same write.
+   */
+  const saveSpeaker = async (path: string, ids: readonly string[], speaker: { id: string; name: string } | null) => {
     try {
-      const content = await window.frameshell.files.read(path);
-      await window.frameshell.files.write(path, withWordSpeaker(content, ids, speaker.id));
-      setStatus({ tone: "info", text: t.transcript.speakerSet(speaker.name, ids.length) });
+      let content = await window.frameshell.files.read(path);
+      let chosen = speaker;
+      if (!chosen) {
+        const made = withNewSpeaker(content);
+        content = made.content;
+        chosen = made.speaker;
+      }
+      await window.frameshell.files.write(path, withWordSpeaker(content, ids, chosen.id));
+      setStatus({ tone: "info", text: t.transcript.speakerSet(chosen.name, ids.length) });
     } catch (failure) {
       setStatus({ tone: "error", text: t.transcript.speakerNotSet((failure as Error).message) });
     }
   };
 
+  /** Save `name` as speaker `id`'s name in transcript `path` (null: cancelled). */
+  const saveSpeakerName = async (path: string, speaker: { id: string; name: string }, name: string | null) => {
+    setRenaming(null);
+    if (name === null || name.trim() === "" || name.trim() === speaker.name) return;
+    try {
+      const content = await window.frameshell.files.read(path);
+      await window.frameshell.files.write(path, withSpeakerName(content, speaker.id, name));
+      setStatus({ tone: "info", text: t.transcript.speakerRenamed(speaker.name, name.trim()) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.transcript.speakerNotRenamed((failure as Error).message) });
+    }
+  };
+
+  /**
+   * Words of `asset` a speaker change applies to: the drag range marked here (struck words too) and the words of the
+   * shared selection (set from the timeline, a subtitle cue or this view), each once.
+   */
+  const speakerTargets = (asset: AssetTranscript): string[] => {
+    const ids = new Set(selectedWordIds(selectedWords, asset.path));
+    if (marked?.path === asset.path) for (const word of asset.words.slice(marked.from, marked.to + 1)) ids.add(word.id);
+    return asset.words.filter((word) => ids.has(word.id)).map((word) => word.id);
+  };
+  // The assets the selection touches: the toolbar picker needs exactly one.
+  const pickerAssets = model?.assets.filter((asset) => speakerTargets(asset).length > 0) ?? [];
+
   const onPointerDown = (event: PointerEvent, asset: AssetTranscript, index: number) => {
     if (event.button !== 0 || editing) return;
     event.preventDefault();
     const struck = asset.words[index]!.placements.length === 0;
-    const extend = event.shiftKey && press.current?.asset === asset;
+    // By path: the model is rebuilt on every selection, so the asset object of the first click is gone.
+    const extend = event.shiftKey && press.current?.asset.path === asset.path;
     const anchor = extend ? press.current!.anchor : index;
     press.current = { asset, anchor, pointer: event.pointerId };
     // A plain press on a struck word is a click that restores it; it selects only once dragged.
@@ -241,13 +284,22 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       if (run.length > 1) items.push({ label: t.transcript.restorePassage(run.length), run: () => void restore(run) });
     }
     items.push({ label: t.transcript.editText, shortcut: "F2", run: () => setEditing(word.key) });
-    const targets = inMarked ? asset.words.slice(marked.from, marked.to + 1) : [word];
+    const chosen = inMarked || selected.has(word.key) ? speakerTargets(asset) : [word.id];
+    const ids = chosen.length > 0 ? chosen : [word.id];
+    const targets = asset.words.filter((candidate) => ids.includes(candidate.id));
     for (const speaker of asset.speakers) {
       if (targets.every((target) => target.speaker === speaker.id)) continue;
-      const ids = targets.map((target) => target.id);
       items.push({ label: t.transcript.setSpeaker(speaker.name, ids.length), run: () => void saveSpeaker(asset.path, ids, speaker) });
     }
+    items.push({ label: t.transcript.newSpeaker, run: () => void saveSpeaker(asset.path, ids, null) });
     openAskMenu(event, items);
+  };
+
+  /** Right-click on a speaker's name: rename it. */
+  const onSpeakerMenu = (event: MouseEvent, paragraph: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openAskMenu(event, [{ label: t.transcript.renameSpeaker, run: () => setRenaming(paragraph) }]);
   };
 
   const fps = view?.fps ?? 30;
@@ -274,6 +326,10 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             marked={marked?.path === asset.path ? marked : null}
             restoring={restoring}
             editing={editing}
+            renaming={renaming}
+            onRename={setRenaming}
+            onSpeakerMenu={onSpeakerMenu}
+            onSaveSpeakerName={(speaker, name) => void saveSpeakerName(asset.path, speaker, name)}
             onOpenFile={onOpenFile}
             onPointerDown={onPointerDown}
             onPointerEnter={onPointerEnter}
@@ -313,6 +369,13 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
           <span className="hint">
             {t.transcript.hint}
           </span>
+        )}
+        {pickerAssets.length === 1 && (
+          <SpeakerPicker
+            asset={pickerAssets[0]!}
+            count={speakerTargets(pickerAssets[0]!).length}
+            onPick={(speaker) => void saveSpeaker(pickerAssets[0]!.path, speakerTargets(pickerAssets[0]!), speaker)}
+          />
         )}
         <span
           className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : status?.tone === "warning" ? " timeline-status-warning" : ""}`}
@@ -358,6 +421,10 @@ function AssetSection({
   marked,
   restoring,
   editing,
+  renaming,
+  onRename,
+  onSpeakerMenu,
+  onSaveSpeakerName,
   onOpenFile,
   onPointerDown,
   onPointerEnter,
@@ -373,6 +440,11 @@ function AssetSection({
   marked: Marked | null;
   restoring: ReadonlySet<string>;
   editing: string | null;
+  /** Paragraph whose speaker name is being edited. */
+  renaming: string | null;
+  onRename: (paragraph: string) => void;
+  onSpeakerMenu: (event: MouseEvent, paragraph: string) => void;
+  onSaveSpeakerName: (speaker: { id: string; name: string }, name: string | null) => void;
   onOpenFile: (path: string) => void;
   onPointerDown: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
   onPointerEnter: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
@@ -407,11 +479,26 @@ function AssetSection({
               {first ? formatTimecode(first.from, fps) : t.transcript.cut}
             </span>
             <span className="transcript-words">
-              {asset.speakers.length > 0 && (
-                <span className="transcript-speaker" data-speaker={speaker ?? ""} title={t.transcript.speakerTitle(name)}>
-                  {name}
-                </span>
-              )}
+              {asset.speakers.length > 0 &&
+                (renaming === words[0]!.key && speaker ? (
+                  <span className="transcript-speaker" data-speaker={speaker}>
+                    <WordEditor
+                      text={name}
+                      label={t.transcript.speakerNameLabel(name)}
+                      onDone={(text) => onSaveSpeakerName({ id: speaker, name }, text)}
+                    />
+                  </span>
+                ) : (
+                  <span
+                    className="transcript-speaker"
+                    data-speaker={speaker ?? ""}
+                    title={speaker ? t.transcript.speakerTitleRename(name) : t.transcript.speakerTitle(name)}
+                    onDoubleClick={speaker ? () => onRename(words[0]!.key) : undefined}
+                    onContextMenu={speaker ? (event) => onSpeakerMenu(event, words[0]!.key) : undefined}
+                  >
+                    {name}
+                  </span>
+                ))}
               {words.map((word) => {
                 const i = index.get(word.key)!;
                 const struck = word.placements.length === 0;
@@ -473,7 +560,7 @@ function AssetSection({
 }
 
 /** Inline text field for one word: Enter or leaving it saves, Escape cancels. Reports once. */
-function WordEditor({ text, onDone }: { text: string; onDone: (text: string | null) => void }) {
+function WordEditor({ text, label, onDone }: { text: string; label?: string; onDone: (text: string | null) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const done = useRef(false);
   const finish = (value: string | null) => {
@@ -489,7 +576,7 @@ function WordEditor({ text, onDone }: { text: string; onDone: (text: string | nu
     <input
       ref={input}
       className="tw-edit"
-      aria-label={t.transcript.wordLabel(text)}
+      aria-label={label ?? t.transcript.wordLabel(text)}
       defaultValue={text}
       size={Math.max(text.length + 2, 6)}
       onPointerDown={(event) => event.stopPropagation()}
@@ -504,6 +591,38 @@ function WordEditor({ text, onDone }: { text: string; onDone: (text: string | nu
     />
   );
 }
+
+/**
+ * Who says the selected words: a speaker of the transcript, or a new one. Offered while the selection (marked here
+ * or made anywhere) sits in one transcript; a pick saves at once and the box goes back to its prompt.
+ */
+function SpeakerPicker({ asset, count, onPick }: { asset: AssetTranscript; count: number; onPick: (speaker: { id: string; name: string } | null) => void }) {
+  return (
+    <select
+      className="clip-field-select transcript-speaker-picker"
+      aria-label={t.transcript.saidByLabel}
+      title={t.transcript.saidByTitle(count)}
+      data-testid="speaker-picker"
+      value=""
+      onChange={(event) => {
+        const value = event.target.value;
+        if (value === "") return;
+        onPick(value === NEW_SPEAKER ? null : asset.speakers.find((speaker) => speaker.id === value)!);
+      }}
+    >
+      <option value="">{t.transcript.saidByPlaceholder}</option>
+      {asset.speakers.map((speaker) => (
+        <option key={speaker.id} value={speaker.id}>
+          {speaker.name}
+        </option>
+      ))}
+      <option value={NEW_SPEAKER}>{t.transcript.newSpeaker}</option>
+    </select>
+  );
+}
+
+/** Option value of "New speaker…": not a speaker id (`s1`). */
+const NEW_SPEAKER = "new";
 
 /** Text of word `key` as the view shows it. */
 function textOf(model: TranscriptModel, key: string): string {

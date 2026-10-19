@@ -588,4 +588,10 @@ describe("editLabel", () => {
       ]),
     ).toBe("Edit 2 clips");
   });
+
+  it("labels painted turns, one stroke over several shots included", () => {
+    const stroke = (start: number) => ({ op: "multicam.paint" as const, args: { group: "g_1", angle: "ana", start, end: start + 1, speaking: true } });
+    expect(editLabel([stroke(1)])).toBe("Paint turns");
+    expect(editLabel([stroke(1), stroke(5)])).toBe("Paint turns");
+  });
 });

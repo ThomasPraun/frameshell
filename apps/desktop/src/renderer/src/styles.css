@@ -2010,6 +2010,12 @@ code {
   font-size: 11.5px;
 }
 
+/* "Said by…": sets the speaker of the selected words. */
+.transcript-toolbar .transcript-speaker-picker {
+  flex: none;
+  margin-left: auto;
+}
+
 /* Correcting a word's text in place. */
 .tw-edit {
   padding: 0 3px;
@@ -2161,6 +2167,49 @@ button.track-head:focus-visible {
 
 .track-head.is-selected {
   background: var(--accent-soft);
+}
+
+/* A program track's head: the track button, the toggle of its turn lanes (#247) and one label per open lane. */
+.program-head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.program-head > button.track-head {
+  flex: none;
+}
+
+.turn-lanes-toggle {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 20px;
+  height: 18px;
+}
+
+.turn-lanes-toggle.on {
+  color: var(--accent);
+}
+
+.turn-lane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 10px 0 14px;
+  border-top: 1px solid var(--line-soft);
+  box-shadow: inset 3px 0 0 var(--angle-color);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.turn-lane-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .track-video {

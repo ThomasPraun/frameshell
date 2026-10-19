@@ -34,6 +34,7 @@ export {
   RESERVED_MIC_IDS,
   AngleCropSchema,
   ReframeKeySchema,
+  PaintedTurnSchema,
   TransformSchema,
   ClipAudioSchema,
   type Timeline,
@@ -55,6 +56,7 @@ export {
   type Mic,
   type AngleCrop,
   type ReframeKey,
+  type PaintedTurn,
   type Transform,
   type ClipAudio,
   isShotClip,
@@ -79,6 +81,7 @@ export {
   parseDirectorFile,
   resolveDirectorRules,
 } from "./director.js";
+export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   PLUGIN_MANIFEST_FILE,

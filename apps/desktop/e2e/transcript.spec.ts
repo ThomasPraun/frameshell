@@ -317,6 +317,42 @@ test("found speakers name each paragraph, and the context menu says who says a w
   expect(JSON.parse(readFileSync(path, "utf8")).words[5].speaker).toBe("s2");
 });
 
+test("a whole selection gets its speaker from the toolbar picker, a speaker is renamed in place, and a new one is made (#247)", async () => {
+  const path = join(box.projectDir, TRANSCRIPT);
+  const saved = () => JSON.parse(readFileSync(path, "utf8"));
+  const picker = page.getByTestId("speaker-picker");
+  // Words one to three, kept on the timeline: a click and a Shift+click mark the range in the shared selection.
+  await word(0).click();
+  await word(2).click({ modifiers: ["Shift"] });
+  await expect(picker).toBeVisible();
+  await picker.selectOption({ label: "Ben" });
+  await expect(status()).toContainText("3 words now said by Ben.");
+  await expect.poll(() => saved().edits).toMatchObject({ [id(0)]: { speaker: "s2" }, [id(1)]: { speaker: "s2" }, [id(2)]: { speaker: "s2" } });
+  // The diarized speakers stay in the words; the corrections win in the view.
+  expect(saved().words.slice(0, 3).map((w: { speaker: string }) => w.speaker)).toEqual(["s1", "s1", "s1"]);
+  await expect(page.locator('.transcript-para:has(.tw[data-word="' + id(0) + '"]) .transcript-speaker')).toHaveText("Ben");
+
+  // Renaming goes by the label: names live in `speakers`, ids stay.
+  await page.locator('.transcript-speaker[data-speaker="s2"]').first().dblclick();
+  const field = page.getByRole("textbox", { name: "Name of Ben" });
+  await field.fill("Benito");
+  await field.press("Enter");
+  await expect(status()).toContainText("Ben is now called Benito.");
+  await expect.poll(() => saved().speakers).toEqual([
+    { id: "s1", name: "Ana" },
+    { id: "s2", name: "Benito" },
+  ]);
+  await expect(page.locator('.transcript-speaker[data-speaker="s2"]').first()).toHaveText("Benito");
+
+  // A new speaker takes the next free id, and says the selected word.
+  await word(8).click();
+  await picker.selectOption({ label: "New speaker…" });
+  await expect(status()).toContainText("1 word now said by Speaker 3.");
+  await expect.poll(() => saved().speakers.at(-1)).toEqual({ id: "s3", name: "Speaker 3" });
+  expect(saved().nextSpeakerId).toBe(4);
+  expect(saved().edits[id(8)]).toEqual({ speaker: "s3" });
+});
+
 test("the transcript opens from the keyboard shortcut and from the timeline header", async () => {
   const tab = page.getByRole("tab", { name: "Transcript" });
   await page.getByRole("button", { name: "Close Transcript" }).click();

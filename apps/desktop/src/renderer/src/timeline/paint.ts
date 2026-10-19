@@ -12,6 +12,7 @@ import {
   rulerTicks,
   visibleClips,
 } from "./layout.js";
+import type { PaintMode, Span } from "./turn-lanes.js";
 
 /**
  * The slice of `CanvasRenderingContext2D` the painter uses; `Img` is what
@@ -145,6 +146,20 @@ export interface PaintInput<Img> {
   selectedTrack?: string | null;
   /** Selected script scene (shared selection store): its span in the scene band is framed in the accent color. */
   selectedScene?: { script: string; slug: string } | null;
+  /** A stroke being painted on a turn lane: tinted there until it is released. */
+  stroke?: TurnStroke | null;
+}
+
+/** A stroke on a turn lane in progress, as the panel previews it. */
+export interface TurnStroke {
+  /** Program track id and angle id of the lane. */
+  row: string;
+  angle: string;
+  /** Timeline seconds, either order. */
+  from: number;
+  to: number;
+  /** What release does; "silent" and "measured" are drawn in other colors than speech. */
+  mode: PaintMode;
 }
 
 /** Where a dragged clip would land, as the panel previews it (see `edit.ts` `dragPreview`). */
@@ -164,6 +179,12 @@ export interface DragGhost {
 
 /** Clip body inset from its lane, px. */
 const CLIP_INSET_Y = 3;
+/** Turn bar inset from its lane, px. */
+const TURN_INSET_Y = 3;
+/** Opacity of a turn bar. */
+const TURN_ALPHA = 0.7;
+/** Opacity of the stroke being painted. */
+const STROKE_ALPHA = 0.4;
 /** Labels need this much clip width, px. */
 const MIN_LABEL_WIDTH = 28;
 /** Tint of a selected range over the lanes: the selection must not hide the clips under it. */
@@ -202,13 +223,14 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   ctx.clip();
   layout.rows.forEach((row, index) => {
     const top = row.top - scrollTop;
-    if (top + row.height < layout.head || top > height) return;
+    const extent = row.height + row.lanesHeight;
+    if (top + extent < layout.head || top > height) return;
     if (index % 2 === 1) {
       ctx.fillStyle = colors.laneAlt;
-      ctx.fillRect(0, top, width, row.height);
+      ctx.fillRect(0, top, width, extent);
     }
     ctx.fillStyle = theme.lineSoft;
-    ctx.fillRect(0, top + row.height - 1, width, 1);
+    ctx.fillRect(0, top + extent - 1, width, 1);
     if (row.kind === "subtitles") {
       clipsDrawn += paintSubtitleLane(ctx, input, row, top, t0, t1);
       return;
@@ -220,6 +242,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       if (dragged) ctx.globalAlpha = 1;
       clipsDrawn++;
     }
+    if (row.lanes.length > 0) paintTurnLanes(ctx, input, row, scrollTop, t0, t1, colors);
   });
   if (input.diff) paintDiff(ctx, input, input.diff);
   if (input.drag) paintDrag(ctx, input, input.drag);
@@ -277,6 +300,63 @@ function withAlpha(color: string, alpha: number): string {
   if (!hex) return color;
   const channel = (at: number) => parseInt(hex.slice(at, at + 2), 16);
   return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, ${alpha})`;
+}
+
+/**
+ * The turn lanes of a program row: each angle's turns in its colour, what a person painted marked on them (spoken
+ * stretches framed and topped in the text colour, silenced ones hatched), and a stroke in progress.
+ */
+function paintTurnLanes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, scrollTop: number, t0: number, t1: number, colors: Palette): void {
+  const { pxPerSecond, scrollLeft, width } = input.viewport;
+  const { theme } = input;
+  const x = (time: number) => time * pxPerSecond - scrollLeft;
+  const visible = (spans: readonly Span[]) => spans.filter((span) => span.end > t0 && span.start < t1);
+  for (const lane of row.lanes) {
+    const top = lane.top - scrollTop;
+    const y = top + TURN_INSET_Y;
+    const h = lane.height - 2 * TURN_INSET_Y;
+    const color = colors.angles[lane.angle.color % colors.angles.length]!;
+    ctx.fillStyle = theme.lineSoft;
+    ctx.fillRect(0, top, width, 1);
+    for (const span of visible(lane.marks.turns)) {
+      const left = Math.max(x(span.start), -2);
+      const right = Math.min(Math.max(x(span.end), left + 1), width + 2);
+      ctx.fillStyle = color.full;
+      ctx.globalAlpha = TURN_ALPHA;
+      ctx.fillRect(left, y, right - left, h);
+      ctx.globalAlpha = 1;
+    }
+    for (const span of visible(lane.marks.silenced)) {
+      const left = Math.max(x(span.start), -2);
+      const right = Math.min(Math.max(x(span.end), left + 1), width + 2);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, y, right - left, h);
+      ctx.clip();
+      paintHatch(ctx, left, right, y, h, theme.danger);
+      ctx.restore();
+      ctx.strokeStyle = theme.danger;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, right - left - 1), h - 1);
+    }
+    for (const span of visible(lane.marks.spoken)) {
+      const left = Math.max(x(span.start), -2);
+      const right = Math.min(Math.max(x(span.end), left + 1), width + 2);
+      ctx.strokeStyle = theme.text;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, right - left - 1), h - 1);
+      ctx.fillStyle = theme.text;
+      ctx.fillRect(left, y, right - left, 2);
+    }
+    const stroke = input.stroke;
+    if (stroke && stroke.row === row.id && stroke.angle === lane.angle.id) {
+      const [from, to] = stroke.from <= stroke.to ? [stroke.from, stroke.to] : [stroke.to, stroke.from];
+      ctx.fillStyle = stroke.mode === "silent" ? theme.danger : stroke.mode === "measured" ? theme.textMuted : theme.accent;
+      ctx.globalAlpha = STROKE_ALPHA;
+      ctx.fillRect(x(from), top + 1, Math.max(1, x(to) - x(from)), lane.height - 1);
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 /** Returns true when derived media (thumbnails, waveform) was drawn. */
