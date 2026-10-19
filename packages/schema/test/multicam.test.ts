@@ -6,6 +6,7 @@ import {
   type Timeline,
   createTimeline,
   flattenTimeline,
+  movedProgramGroups,
   parseTimeline,
   programSound,
   shotLayers,
@@ -281,5 +282,36 @@ describe("flattening nested multicam timelines", () => {
 
   it("leaves root program tracks and their groups as they are", () => {
     expect(flattenTimeline(podcast, () => null)).toEqual(podcast);
+  });
+});
+
+describe("program tracks under a moved nested clip", () => {
+  const podcast: Timeline = { ...createTimeline("podcast"), tracks: [program([shot("c_a", 0, 0, 3, "solo", ["ana"])])], groups: [group] };
+  const wrapper: Timeline = {
+    ...createTimeline("wrapper"),
+    tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_in", type: "timeline", source: "timelines/podcast.json", start: 0 }] }],
+  };
+  const files: Record<string, Timeline> = { "timelines/podcast.json": podcast, "timelines/wrapper.json": wrapper };
+  const resolve = (source: string) => files[source] ?? null;
+  const main = (tracks: Timeline["tracks"]): Timeline => ({ ...createTimeline("main"), tracks });
+
+  it("names the flattened group of a program track whose nested clip has a transform, at any depth", () => {
+    const moved = main([
+      { id: "v1", kind: "video", clips: [{ id: "n1", type: "timeline", source: "timelines/podcast.json", start: 0, transform: { scale: 0.5 } }] },
+      { id: "v2", kind: "video", clips: [{ id: "n2", type: "timeline", source: "timelines/wrapper.json", start: 0, transform: { opacity: 0.5 } }] },
+      { id: "v3", kind: "video", clips: [{ id: "n3", type: "timeline", source: "timelines/podcast.json", start: 0 }] },
+    ]);
+    expect([...movedProgramGroups(moved, resolve)]).toEqual(["n1/g_talk", "n2/c_in/g_talk"]);
+    // The same ids as flattening gives the groups.
+    expect(flattenTimeline(moved, resolve).groups?.map((g) => g.id)).toEqual(["n1/g_talk", "n2/c_in/g_talk", "n3/g_talk"]);
+  });
+
+  it("ignores identity transforms, audio host tracks and root program tracks", () => {
+    const still = main([
+      { id: "v1", kind: "video", clips: [{ id: "n1", type: "timeline", source: "timelines/podcast.json", start: 0, transform: { x: 0, scale: 1 } }] },
+      { id: "a1", kind: "audio", clips: [{ id: "n2", type: "timeline", source: "timelines/podcast.json", start: 0, transform: { scale: 0.5 } }] },
+    ]);
+    expect(movedProgramGroups(still, resolve).size).toBe(0);
+    expect(movedProgramGroups(podcast, resolve).size).toBe(0);
   });
 });

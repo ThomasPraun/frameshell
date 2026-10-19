@@ -99,6 +99,7 @@ export {
   layerRect,
   composePlacement,
   flattenTimeline,
+  movedProgramGroups,
   type ShotLayer,
   shotTiles,
   croppedRect,

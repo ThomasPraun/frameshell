@@ -1,9 +1,9 @@
 // Preview engine (ADR 0001, SPEC §3.4): decodes proxies and cached clip renders with WebCodecs and composites every
 // video layer into an OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one
 // AudioWorklet mixer. Runs in a Worker: main-thread (React) stalls must not freeze the picture.
-import { type Placement, type Size, layerRect } from "@frameshell/schema/composite";
+import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
-import { type DecodeStep, type SpanTiming, decodeSteps } from "./decode-plan.js";
+import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
   type Anchor,
   type ClockSample,
@@ -15,7 +15,7 @@ import {
   heardTime,
   programSample,
 } from "./engine-protocol.js";
-import { type Program, type VideoSpan, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
+import { type AngleSpan, type Program, type VideoSpan, angleLayer, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
 import { type EncodedPicture, type VideoSource, isReadWhole, openVideoSource } from "./video-source.js";
 
@@ -92,9 +92,12 @@ interface LayerHost {
   queueTick(): void;
 }
 
-/** File and timing a span decodes from: a media span's proxy, or a generated span's ready render (one render frame per program frame). */
+/**
+ * File and timing a span decodes from: a media or shot angle span's proxy, or a generated span's ready render (one
+ * render frame per program frame).
+ */
 function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | null {
-  if (span.kind === "media") return { path: span.proxy, timing: span };
+  if (span.kind === "media" || span.kind === "angle") return { path: span.proxy, timing: span };
   if (span.kind === "generated" && span.render?.state === "ready") {
     return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: 1 } };
   }
@@ -176,6 +179,11 @@ class LayerDecoder {
     this.restart(from, true);
   }
 
+  /** Decoders of this layer not closed. */
+  get decoders(): number {
+    return [this.#decoder, this.#alphaDecoder].filter((decoder) => decoder !== null && decoder.state !== "closed").length;
+  }
+
   /** Close frames that end at or before `want`. */
   dropBefore(want: number): void {
     while (this.#ready.length > 0 && this.#ready[0]!.to <= want) closeReady(this.#ready.shift()!);
@@ -246,12 +254,9 @@ class LayerDecoder {
     }
   }
 
-  /** The ranged reads of the layer's spans from `from` on; unreadable files are skipped (and reported). */
+  /** The ranged reads of the layer's spans from `from` on, continuous ones joined; unreadable files are skipped (and reported). */
   async *#reads(spans: readonly VideoSpan[], from: number, gen: number): AsyncGenerator<{ path: string; source: VideoSource; block: ReadBlock }> {
-    for (const span of spans) {
-      const decodable = span.end > from ? decodableOf(span) : null;
-      if (!decodable) continue;
-      const { path, timing } = decodable;
+    for (const { path, timing } of joinRuns(spans.flatMap((span) => (span.end > from ? (decodableOf(span) ?? []) : [])))) {
       let source: VideoSource;
       try {
         source = await this.host.source(path);
@@ -420,6 +425,8 @@ interface Part {
   alpha: AlphaPlane | null;
   size: Size;
   placement: Placement;
+  /** A shot's angle: drawn cut into its tile instead of placed. */
+  angle: AngleSpan | null;
 }
 
 class Engine implements LayerHost {
@@ -458,7 +465,7 @@ class Engine implements LayerHost {
   #audioFadeFloor = 0;
   readonly #audioJobs = new Set<AudioJob>();
 
-  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0 };
+  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0 };
 
   constructor(canvas: OffscreenCanvas, mediaUrl: string) {
     this.#canvas = canvas;
@@ -466,7 +473,10 @@ class Engine implements LayerHost {
     this.#mediaUrl = mediaUrl;
     this.#context.fillStyle = "#000";
     this.#context.fillRect(0, 0, canvas.width, canvas.height);
-    setInterval(() => scope.postMessage({ type: "stats", stats: { ...this.stats } }), STATS_MS);
+    setInterval(() => {
+      this.stats.decoders = this.#layers.reduce((sum, layer) => sum + layer.decoders, 0);
+      scope.postMessage({ type: "stats", stats: { ...this.stats } });
+    }, STATS_MS);
   }
 
   get program(): Program | null {
@@ -646,7 +656,7 @@ class Engine implements LayerHost {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement, angle: null });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -656,8 +666,13 @@ class Engine implements LayerHost {
       const ready = pipeline.frameAt(want);
       if (ready) {
         const { frame } = ready;
-        const size = span.size ?? { width: frame.displayWidth, height: frame.displayHeight };
-        parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size, placement: span.placement });
+        const decoded = { width: frame.displayWidth, height: frame.displayHeight };
+        if (span.kind === "angle") {
+          // Shots fill opaque tiles: an angle's alpha plane is not used.
+          parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span });
+        } else {
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement: span.placement, angle: null });
+        }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
         complete = false;
@@ -671,7 +686,7 @@ class Engine implements LayerHost {
       this.#drawBlack();
       return;
     }
-    this.#shownAlpha = parts.map((part) => ({
+    this.#shownAlpha = parts.flatMap((part) => (part.angle ? [] : [part])).map((part) => ({
       layer: part.layer,
       size: part.size,
       placement: part.placement,
@@ -696,7 +711,11 @@ class Engine implements LayerHost {
     this.#announce(-1);
   }
 
-  /** Black, then every part bottom first at its `layerRect` (export places layers the same way). */
+  /**
+   * Black, then every part bottom first at its `layerRect`, or a shot's angle
+   * cut into its tile (`shotLayers` at the canvas size); export places layers
+   * the same way.
+   */
   #composite(parts: readonly Part[]): void {
     const context = this.#context;
     const output = { width: this.#canvas.width, height: this.#canvas.height };
@@ -705,6 +724,17 @@ class Engine implements LayerHost {
     context.fillStyle = "#000";
     context.fillRect(0, 0, output.width, output.height);
     for (const part of parts) {
+      if (part.angle) {
+        const layer = angleLayer(part.angle, output);
+        if (!layer) continue;
+        // The crop is in probed source pixels; the proxy frame is smaller.
+        const fx = part.size.width / layer.source.width;
+        const fy = part.size.height / layer.source.height;
+        const { crop, tile } = layer;
+        context.globalAlpha = 1;
+        context.drawImage(part.image, crop.left * fx, crop.top * fy, crop.width * fx, crop.height * fy, tile.left, tile.top, tile.width, tile.height);
+        continue;
+      }
       const rect = layerRect(part.size, output, project, part.placement);
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {

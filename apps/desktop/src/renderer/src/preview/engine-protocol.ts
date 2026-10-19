@@ -42,6 +42,8 @@ export interface EngineStats {
   restarts: number;
   /** Audio chunks sent to the mixer. */
   audioChunks: number;
+  /** `VideoDecoder`s open now: one per layer that decoded something, plus one per alpha stream (a multicam shot: one per angle slot). */
+  decoders: number;
 }
 
 /** Page to engine worker. */

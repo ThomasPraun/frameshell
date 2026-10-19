@@ -221,6 +221,35 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
   return { tracks: out, groups };
 }
 
+/**
+ * Ids (as {@link flattenTimeline} renames them) of the groups whose program
+ * tracks come from a nested clip on a video track that has a transform, at
+ * any depth. Flattening makes their shots fill the frame, not the nested
+ * clip's place in it, so a caller that draws them must refuse them instead.
+ */
+export function movedProgramGroups(timeline: Timeline, nested: NestedTimelines): Set<string> {
+  const found = new Set<string>();
+  const walk = (tracks: readonly Track[], prefix: string, moved: boolean, stack: readonly string[]) => {
+    for (const track of tracks) {
+      if (track.kind === "program") {
+        if (moved) found.add(`${prefix}${track.group}`);
+        continue;
+      }
+      // On an audio track a nested program track is sound only: nothing to place.
+      if (track.kind !== "video") continue;
+      for (const clip of track.clips) {
+        if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
+        const inner = nested(clip.source);
+        if (!inner) continue;
+        const own = !isIdentityPlacement(placementOf(clip.transform));
+        walk(inner.tracks, `${prefix}${clip.id}/`, moved || own, [...stack, clip.source]);
+      }
+    }
+  };
+  walk(timeline.tracks, "", false, [`timelines/${timeline.id}.json`]);
+  return found;
+}
+
 /** `shot` (nested seconds) cut to `[from, to)` and moved to the nested clip's timeline position; null when nothing of it plays. */
 function windowShot(shot: ShotClip, from: number, to: number, host: Extract<Clip, { type: "timeline" }>): ShotClip | null {
   const a = Math.max(shot.start, from);

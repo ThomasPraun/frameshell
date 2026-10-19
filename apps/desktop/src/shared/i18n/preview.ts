@@ -4,7 +4,7 @@ const en = {
   nestedTimeline: "Nested timeline cannot be read",
   ingest: "Building the preview proxy",
   noPreview: "No preview for this clip",
-  multicam: "Multicam shots do not play in the preview yet",
+  multicam: "Multicam shots inside a moved, scaled or faded nested timeline cannot be shown",
   noAudio: "No audio output: playing without sound",
   /** Notice when the preview's audio output cannot be set up; `{reason}` is the system's message. */
   audioUnavailable: (reason: string) => `Preview audio unavailable: ${reason}`,
@@ -50,7 +50,7 @@ const es: typeof en = {
   nestedTimeline: "No se puede leer la línea de tiempo anidada",
   ingest: "Creando el proxy de la vista previa",
   noPreview: "Este clip no tiene vista previa",
-  multicam: "Las tomas multicámara aún no se reproducen en la vista previa",
+  multicam: "Las tomas multicámara dentro de una línea de tiempo anidada movida, escalada o atenuada no se pueden mostrar",
   noAudio: "Sin salida de audio: se reproduce sin sonido",
   audioUnavailable: (reason) => `Audio de la vista previa no disponible: ${reason}`,
   playhead: "Cursor de reproducción",

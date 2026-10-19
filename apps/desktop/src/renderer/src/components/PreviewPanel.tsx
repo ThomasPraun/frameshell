@@ -4,7 +4,7 @@ import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
-import { type PlaceholderReason, type Program, programAt } from "../preview/program.js";
+import { type PlaceholderReason, type PlaceholderSpan, type Program, placeholdersAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useResolution } from "../preview/useProgram.js";
@@ -274,27 +274,42 @@ function SubtitleOverlay({ size, frame }: { size: Size; frame: number }) {
   return <canvas ref={canvas} className="preview-subtitles" aria-hidden="true" data-testid="preview-subtitles" />;
 }
 
-/** The base layer's placeholder fills the frame; upper layers' are listed small, over the picture. */
+/**
+ * The base layer's placeholder fills the frame; a shot's angle with no picture yet fills its tile; upper layers'
+ * are listed small, over the picture.
+ */
 function Placeholder({ program, frame }: { program: Program; frame: number }) {
-  const base = programAt(program, frame);
-  const upper = program.layers.flatMap((_, layer) => {
-    const span = layer > 0 ? programAt(program, frame, layer) : null;
-    return span?.kind === "placeholder" ? [{ span, layer }] : [];
-  });
+  const { base, tiles, notes } = placeholdersAt(program, frame);
+  const { width, height } = program.resolution;
+  const slate = (span: PlaceholderSpan) => (
+    <>
+      <p>{PLACEHOLDER_TEXT[span.reason]}</p>
+      <p className="preview-placeholder-detail">{rich(t.preview.clipOf, { type: <code>{span.type}</code>, clip: <code>{span.clip}</code> })}</p>
+    </>
+  );
   return (
     <>
-      {base?.kind === "placeholder" && (
+      {base && (
         <div className="preview-placeholder" data-testid="preview-placeholder" data-reason={base.reason}>
-          <p>{PLACEHOLDER_TEXT[base.reason]}</p>
-          <p className="preview-placeholder-detail">
-            {rich(t.preview.clipOf, { type: <code>{base.type}</code>, clip: <code>{base.clip}</code> })}
-          </p>
+          {slate(base)}
         </div>
       )}
-      {upper.length > 0 && (
+      {tiles.map(({ span, layer, tile }) => (
+        <div
+          key={`${layer}:${span.clip}`}
+          className="preview-placeholder preview-placeholder-tile"
+          data-testid="preview-angle-placeholder"
+          data-reason={span.reason}
+          data-angle={span.angle?.id}
+          style={{ left: percent(tile.left / width), top: percent(tile.top / height), width: percent(tile.width / width), height: percent(tile.height / height) }}
+        >
+          {slate(span)}
+        </div>
+      ))}
+      {notes.length > 0 && (
         <ul className="preview-layer-notes" aria-label={t.preview.hiddenLayers}>
-          {upper.map(({ span, layer }) => (
-            <li key={span.clip} data-testid="preview-layer-placeholder" data-reason={span.reason}>
+          {notes.map(({ span, layer }) => (
+            <li key={`${layer}:${span.clip}`} data-testid="preview-layer-placeholder" data-reason={span.reason}>
               {t.preview.layerNote(layer + 1, PLACEHOLDER_TEXT[span.reason], span.type, span.clip)}
             </li>
           ))}
@@ -303,6 +318,9 @@ function Placeholder({ program, frame }: { program: Program; frame: number }) {
     </>
   );
 }
+
+/** A fraction of the frame as a CSS length. */
+const percent = (value: number) => `${value * 100}%`;
 
 /** Clip id the timeline holds for a picture: a nested timeline's clips (`n1/c2`) belong to their nested clip. */
 const timelineClip = (id: string) => id.split("/")[0]!;
@@ -392,7 +410,6 @@ function Handles({
 
   const editable = target !== null && selected !== null && !selected.includes("/");
   const shown = editable ? (ghost?.clip === selected ? placedBox(program.resolution, target.size, ghost.placement) : target.box) : null;
-  const percent = (value: number) => `${value * 100}%`;
   return (
     <div className="preview-hit" onPointerDown={onSelect} data-testid="preview-hit">
       {shown && (

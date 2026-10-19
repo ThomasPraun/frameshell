@@ -3,7 +3,7 @@ import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { type PickResult, elementBox, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
 import { PickPages } from "../preview/pick-pages.js";
 import type { Program } from "../preview/program.js";
-import { type FrameBox, layerBox, layersIn } from "../preview/transform-edit.js";
+import { type FrameBox, layersIn, pictureBox } from "../preview/transform-edit.js";
 import { transport } from "../preview/transport.js";
 import { type SelectedPoint, type SelectedRegion, selection, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
@@ -273,7 +273,7 @@ function outlineOf(hover: Hover, program: Program): { box: FrameBox; label: stri
   if (element && result.page) {
     return { box: elementBox(result.page, program.resolution, element), label: `${elementLabel(element)} · ${result.target}`, clip: result.target, element };
   }
-  const picture = layerBox(program, hover.frame, result.target);
+  const picture = pictureBox(program, hover.frame, result.target, hover.point);
   if (!picture) return null;
   const note = result.unavailable ? ` · ${t.preview.noLivePage}` : "";
   return { box: picture.box, label: `${result.target}${note}`, clip: result.target, element: null };
