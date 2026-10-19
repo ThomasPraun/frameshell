@@ -2979,3 +2979,87 @@ button.track-head:focus-visible {
 .agent-guide-list .button {
   padding: 3px 10px;
 }
+
+/* Multicam viewer (#243): every angle at the playhead; the shot's angles outlined, the speaking ones marked. */
+.angle-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+}
+
+.angle-hint,
+.angle-notice {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.angle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.angle-tile {
+  position: relative;
+  display: block;
+  padding: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.angle-tile:hover {
+  border-color: var(--text-muted);
+}
+
+.angle-tile.is-in-shot {
+  border-color: var(--angle-color);
+}
+
+.angle-tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.angle-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.angle-label {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+}
+
+.angle-number {
+  color: var(--angle-color);
+  font-weight: 600;
+}
+
+.angle-speaking {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+}

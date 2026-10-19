@@ -108,6 +108,9 @@ const api: FrameshellApi = {
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
     live: (timeline, clip) => invokeOutcome(Channel.clipsLive, timeline, clip),
   },
+  multicam: {
+    turns: (timeline, group) => invokeOutcome(Channel.multicamTurns, timeline, group),
+  },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),
   },

@@ -1,0 +1,120 @@
+import type { TimelineView } from "@frameshell/protocol";
+import { describe, expect, it } from "vitest";
+import { groupTimeAt, programRows, sameTurns, speakingAt, viewerModel } from "../src/renderer/src/angles/model.js";
+
+// Seam under test: what the multicam viewer shows at a playhead time (#243): group clock, shot angles, speakers.
+
+const GROUP = {
+  id: "g_talk",
+  angles: [
+    { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5 },
+    { id: "cleo", name: "Cleo", asset: "assets/cleo.mp4", offset: 0 },
+  ],
+};
+
+const shot = (id: string, start: number, end: number, layout: string, angles: string[], source = start) => ({
+  id,
+  type: "shot",
+  start,
+  end,
+  in: source,
+  out: source + (end - start),
+  shot: layout,
+  angles,
+});
+
+function view(shots: ReturnType<typeof shot>[]): TimelineView {
+  return {
+    timeline: "main",
+    path: "timelines/main.json",
+    revision: 1,
+    fps: 30,
+    duration: 20,
+    problems: [],
+    groups: [GROUP],
+    tracks: [{ id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips: shots }],
+  };
+}
+
+const model = (shots: ReturnType<typeof shot>[], time: number, turns: Parameters<typeof viewerModel>[4] = []) => {
+  const timeline = view(shots);
+  return viewerModel(programRows(timeline), timeline.groups, timeline.fps, time, turns);
+};
+
+describe("viewerModel", () => {
+  const shots = [shot("c_1", 0, 4, "solo", ["ana"]), shot("c_2", 4, 8, "two-up", ["ana", "cleo"], 10)];
+
+  it("has a tile per angle in group order, numbered for the keys", () => {
+    const tiles = model(shots, 1)!.tiles;
+    expect(tiles.map((tile) => [tile.number, tile.id, tile.name])).toEqual([
+      [1, "ana", "Ana"],
+      [2, "ben", "Ben"],
+      [3, "cleo", "Cleo"],
+    ]);
+    expect(tiles.map((tile) => tile.color)).toEqual([0, 1, 2]);
+  });
+
+  it("outlines the angles of the shot under the playhead", () => {
+    expect(model(shots, 1)!.tiles.map((tile) => tile.inShot)).toEqual([true, false, false]);
+    expect(model(shots, 5)!.tiles.map((tile) => tile.inShot)).toEqual([true, false, true]);
+  });
+
+  it("puts each angle at group time less its offset, never before its file starts", () => {
+    const at = model(shots, 5)!;
+    expect(at.groupTime).toBeCloseTo(11);
+    expect(at.tiles.map((tile) => tile.sourceTime)).toEqual([11, 9.5, 11]);
+    expect(model(shots, 1)!.tiles[1]!.sourceTime).toBe(0);
+  });
+
+  it("marks every angle whose turn covers the playhead, overlapping speakers included", () => {
+    const turns = [
+      { angle: "ana", name: "Ana", start: 0, end: 3 },
+      { angle: "cleo", name: "Cleo", start: 2, end: 6 },
+    ];
+    expect(model(shots, 2.5, turns)!.tiles.map((tile) => tile.speaking)).toEqual([true, false, true]);
+    expect(model(shots, 3.5, turns)!.tiles.map((tile) => tile.speaking)).toEqual([false, false, true]);
+  });
+
+  it("reads speakers on the group clock, not the timeline's", () => {
+    const turns = [{ angle: "ben", name: "Ben", start: 10.5, end: 12 }];
+    expect(model(shots, 5, turns)!.tiles[1]!.speaking).toBe(true);
+    expect(model(shots, 1, turns)!.tiles[1]!.speaking).toBe(false);
+  });
+
+  it("shows no angle as in the shot in a gap, and keeps the clock going from the shot before", () => {
+    const gap = model([shot("c_1", 0, 4, "solo", ["ana"], 2)], 6)!;
+    expect(gap.hasShot).toBe(false);
+    expect(gap.tiles.some((tile) => tile.inShot)).toBe(false);
+    expect(gap.groupTime).toBeCloseTo(8);
+  });
+
+  it("is null without a program track or without its group", () => {
+    const plain: TimelineView = { ...view([]), tracks: [] };
+    expect(viewerModel(programRows(plain), plain.groups, 30, 0)).toBeNull();
+    const orphan: TimelineView = { ...view(shots), groups: [] };
+    expect(viewerModel(programRows(orphan), orphan.groups, 30, 0)).toBeNull();
+  });
+});
+
+describe("groupTimeAt", () => {
+  it("is exact on the frame grid, shot start included", () => {
+    const row = programRows(view([shot("c_1", 2, 6, "solo", ["ana"], 12)]))[0]!;
+    expect(groupTimeAt(row, 2, 30)).toEqual({ groupTime: 12, shot: true });
+    expect(groupTimeAt(row, 6, 30).shot).toBe(false);
+  });
+});
+
+describe("speakingAt and sameTurns", () => {
+  const turns = [{ angle: "ana", name: "Ana", start: 1, end: 2 }];
+  it("covers start, not end", () => {
+    expect(speakingAt(turns, "ana", 1)).toBe(true);
+    expect(speakingAt(turns, "ana", 2)).toBe(false);
+    expect(speakingAt(turns, "ben", 1.5)).toBe(false);
+  });
+  it("compares turns by angle and span", () => {
+    expect(sameTurns(turns, [{ ...turns[0]! }])).toBe(true);
+    expect(sameTurns(turns, [{ ...turns[0]!, end: 3 }])).toBe(false);
+    expect(sameTurns(turns, [])).toBe(false);
+  });
+});
