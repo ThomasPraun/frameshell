@@ -89,37 +89,72 @@ export function correlateProfiles(reference: EnergyProfile, other: EnergyProfile
   return { lag: (best + shift) * ENERGY_HOP_S, confidence };
 }
 
-/** Result of {@link planOffsets} for one file. */
+/** Result of {@link planSync} for one file. */
 export interface PlannedOffset {
   /** Group-clock second at which the file's time 0 plays; 3 decimals, never negative, earliest file 0. */
   offset: number;
-  /** Null for the reference. */
+  /** Null for the reference. Else the match with `against`; for an unsynced file the best one it had. */
   confidence: number | null;
-  /** False when the confidence is too low to trust the lag: the file then starts with the reference. */
+  /** False when no match reaches {@link SYNC_LOW_CONFIDENCE}: the file then starts with the reference. */
   synced: boolean;
+  /** Index of the file this one was placed by; null for the reference and for unsynced files. */
+  against: number | null;
 }
 
 /**
- * Offsets of every file from their estimates against the first one
- * (`estimates[i]` is for file i + 1). A file whose confidence is below
- * {@link SYNC_LOW_CONFIDENCE} starts together with the first file, then
- * everything shifts so the earliest start is 0.
+ * Offsets of every file against all the others (ADR 0016). `files[i]` is the
+ * data of file i, null when it has no sound. The reference is the first file
+ * with sound. The pair with the highest confidence between a placed and an
+ * unplaced file decides next, until none reaches {@link SYNC_LOW_CONFIDENCE}: a
+ * file too faint to match the reference still lands through any file that
+ * hears the same room. Whatever is left (no sound, no trustworthy match)
+ * starts together with the reference. Then everything shifts so the earliest
+ * start is 0. `estimate(reference, other)` is {@link correlateProfiles} by default.
  */
-export function planOffsets(estimates: readonly SyncEstimate[]): PlannedOffset[] {
-  const starts = [0];
-  const trusted = [true];
-  for (const estimate of estimates) {
-    const ok = estimate.confidence >= SYNC_LOW_CONFIDENCE;
-    trusted.push(ok);
-    // Heard at t + lag there means that file's time 0 is lag seconds before the reference's.
-    starts.push(ok ? -estimate.lag : 0);
+export function planSync<T>(files: readonly (T | null)[], estimate: (reference: T, other: T) => SyncEstimate): PlannedOffset[] {
+  const reference = files.findIndex((file) => file !== null);
+  const starts: number[] = files.map(() => 0);
+  const placed = new Map<number, { confidence: number | null; against: number | null }>();
+  if (reference >= 0) placed.set(reference, { confidence: null, against: null });
+  const cache = new Map<string, SyncEstimate>();
+  const between = (from: number, to: number): SyncEstimate => {
+    const key = `${from}:${to}`;
+    let found = cache.get(key);
+    if (!found) cache.set(key, (found = estimate(files[from]!, files[to]!)));
+    return found;
+  };
+  const best = (index: number): { confidence: number; against: number } | null => {
+    let top: { confidence: number; against: number } | null = null;
+    for (const from of placed.keys()) {
+      const { confidence } = between(from, index);
+      if (top === null || confidence > top.confidence) top = { confidence, against: from };
+    }
+    return top;
+  };
+  for (;;) {
+    let next: { index: number; confidence: number; against: number } | null = null;
+    for (const [index, file] of files.entries()) {
+      if (file === null || placed.has(index)) continue;
+      const top = best(index);
+      if (top && top.confidence >= SYNC_LOW_CONFIDENCE && (next === null || top.confidence > next.confidence)) next = { index, ...top };
+    }
+    if (!next) break;
+    // Heard at t + lag there means that file's time 0 is lag seconds before the other's.
+    starts[next.index] = starts[next.against]! - between(next.against, next.index).lag;
+    placed.set(next.index, { confidence: next.confidence, against: next.against });
   }
   const earliest = Math.min(...starts);
-  return starts.map((start, i) => ({
-    offset: Math.max(0, Math.round((start - earliest) * 1000) / 1000),
-    confidence: i === 0 ? null : estimates[i - 1]!.confidence,
-    synced: trusted[i]!,
-  }));
+  return starts.map((start, i) => {
+    const synced = placed.has(i);
+    const link = placed.get(i);
+    const attempt = !synced && files[i] !== null ? best(i) : null;
+    return {
+      offset: Math.max(0, Math.round((start - earliest) * 1000) / 1000),
+      confidence: synced ? link!.confidence : (attempt?.confidence ?? 0),
+      synced,
+      against: link?.against ?? null,
+    };
+  });
 }
 
 /**

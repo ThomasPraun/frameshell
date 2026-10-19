@@ -170,3 +170,59 @@ describe("multicam.angle", () => {
     expect(nothing.message).toContain("nothing to set");
   });
 });
+
+describe("separate mics", () => {
+  const micSet = (args: Record<string, unknown>) => ({ op: "multicam.mic", args: { group: "g_talk", ...args } }) as OperationRequest;
+
+  /** The podcast with Ana on a recorder file and Ben's own sound removed (a wide camera). */
+  function miked(): Timeline {
+    const timeline = podcast();
+    const group = timeline.groups![0]!;
+    group.mics = [{ id: "ana-lav", name: "Ana lav", asset: "assets/mic.wav", offset: 1.5, audio: { gain: -3 } }];
+    group.angles[0]!.mic = "ana-lav";
+    return timeline;
+  }
+
+  it("points an angle at a mic, at no sound, or back at its own file, dropping the angle's level when it leaves its file", async () => {
+    const missing = await rejection(applyOperation(podcast(), angleSet({ angle: "ben", mic: "ana-lav" }), context()));
+    expect(missing).toMatchObject({ message: expect.stringContaining('has no mic "ana-lav"') });
+
+    const added = await applyOperation(miked(), angleSet({ angle: "ben", mic: "ana-lav" }), context());
+    const ben = added.timeline.groups![0]!.angles[1]!;
+    expect(ben.mic).toBe("ana-lav");
+    expect(ben).not.toHaveProperty("audio");
+
+    const none = await applyOperation(added.timeline, angleSet({ angle: "ben", mic: "none" }), context());
+    expect(none.timeline.groups![0]!.angles[1]!.mic).toBeNull();
+    const own = await applyOperation(none.timeline, angleSet({ angle: "ben", mic: "camera" }), context());
+    expect(own.timeline.groups![0]!.angles[1]).not.toHaveProperty("mic");
+    expect(applyPatch(added.timeline, added.inverse.args).groups).toEqual(miked().groups);
+  });
+
+  it("refuses gain and mute on an angle that takes its sound from a mic, pointing at the mic", async () => {
+    const error = await rejection(applyOperation(miked(), angleSet({ angle: "ana", gain: -1 }), context()));
+    expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("takes its sound from mic ana-lav") });
+    expect(error.data).toMatchObject({ hint: "Use multicam.mic on ana-lav." });
+    const wide = await rejection(applyOperation(miked(), angleSet({ angle: "ana", mic: "none", muted: true }), context()));
+    expect(wide.message).toContain("takes its sound from no one");
+  });
+
+  it("fixes a mic's offset, name and level, storing no defaults, and journals the inverse", async () => {
+    const applied = await applyOperation(miked(), micSet({ mic: "ana-lav", offset: 0.84321, name: "Lav", gain: 0, muted: true }), context());
+    expect(applied.timeline.groups![0]!.mics).toEqual([{ id: "ana-lav", name: "Lav", asset: "assets/mic.wav", offset: 0.843, audio: { muted: true } }]);
+    expect(applied.changes.updated).toEqual(["g_talk"]);
+    expect(applyPatch(applied.timeline, applied.inverse.args).groups).toEqual(miked().groups);
+  });
+
+  it("explains an unknown mic, an angle id given as a mic, and an empty change", async () => {
+    const unknown = await rejection(applyOperation(miked(), micSet({ mic: "zoe", offset: 1 }), context()));
+    expect(unknown.message).toContain('has no mic "zoe"');
+    expect(unknown.data).toMatchObject({ hint: "Mics: ana-lav." });
+    const nothing = await rejection(applyOperation(miked(), micSet({ mic: "ana-lav" }), context()));
+    expect(nothing.message).toContain("nothing to set");
+    const noMics = await rejection(applyOperation(podcast(), micSet({ mic: "x", offset: 1 }), context()));
+    expect(noMics.data).toMatchObject({ hint: expect.stringContaining("The group has no mics") });
+    const offset = await rejection(applyOperation(miked(), { op: "multicam.offset", args: { group: "g_talk", angle: "ana-lav", offset: 1 } } as OperationRequest, context()));
+    expect(offset.data).toMatchObject({ hint: "ana-lav is a mic: use multicam.mic." });
+  });
+});

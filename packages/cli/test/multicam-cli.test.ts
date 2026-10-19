@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeBurstClip } from "../../core/test/media-fixtures.js";
+import { makeBurstAudio, makeBurstClip } from "../../core/test/media-fixtures.js";
 import { testBinariesDir } from "../../core/test/media-tools.js";
 import { UsageError, parseTimelineCommand } from "../src/timeline-commands.js";
 
@@ -39,7 +39,8 @@ beforeAll(async () => {
   const footage = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-footage-")));
   await makeBurstClip(join(footage, "ana.mp4"), { shiftS: 0 });
   await makeBurstClip(join(footage, "ben.mp4"), { shiftS: 1.5, durationS: 9 });
-  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4")]).code).toBe(0);
+  await makeBurstAudio(join(footage, "rec.wav"), { shiftS: 3, durationS: 8 });
+  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4"), join(footage, "rec.wav")]).code).toBe(0);
   daemonPid = JSON.parse(frameshell(["status", "--json"]).stdout).daemon.pid;
 }, 120_000);
 
@@ -137,6 +138,36 @@ describe("frameshell direct", () => {
   }, 120_000);
 });
 
+describe("frameshell multicam with separate mics", () => {
+  it("creates a group with a separate mic file, maps cameras to it, and fixes the mic by hand", () => {
+    const created = frameshell([
+      ...["multicam", "create", "assets/ana.mp4", "assets/ben.mp4"],
+      ...["--name", "Ana", "--name", "Ben", "--mic-file", "assets/rec.wav", "--mic-name", "Recorder", "--sound", "1", "--sound", "none"],
+    ]);
+    expect(created.stderr).toBe("");
+    expect(created.code).toBe(0);
+    expect(created.stdout).toMatch(/ {2}mic recorder {2}Recorder {2}assets\/rec.wav {2}offset \d+(\.\d+)? s {2}confidence \d+% with (ana|ben)/);
+    const json = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    const group = json.groups.at(-1) as { id: string; angles: { id: string; mic?: string | null }[]; mics: { id: string; offset: number }[] };
+    expect(group.angles.map((angle) => [angle.id, angle.mic])).toEqual([["ana", "recorder"], ["ben", null]]);
+    // The recorder started 3 s after Ana's file: it plays 3 s into the group clock.
+    expect(group.mics[0]!.offset).toBeCloseTo(3, 1);
+
+    const fixed = frameshell(["multicam", "mic", group.id, "recorder", "--offset", "0.25", "--gain=-2", "--name", "Lav"]);
+    expect(fixed.stderr).toBe("");
+    expect(fixed.code).toBe(0);
+    const again = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups.at(-1);
+    expect(again.mics[0]).toMatchObject({ name: "Lav", offset: 0.25, audio: { gain: -2 } });
+
+    const back = frameshell(["multicam", "angle", group.id, "ben", "--mic", "camera"]);
+    expect(back.code).toBe(0);
+    expect(JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups.at(-1).angles[1]).not.toHaveProperty("mic");
+    const bad = frameshell(["multicam", "angle", group.id, "ana", "--gain", "3"]);
+    expect(bad.code).not.toBe(0);
+    expect(bad.stderr).toContain("takes its sound from mic recorder");
+  }, 120_000);
+});
+
 describe("parsing multicam commands", () => {
   it("maps arguments to the methods and refuses a wrong name count, a bad number or conflicting flags", () => {
     expect(parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A", "B"] })).toMatchObject({
@@ -149,6 +180,17 @@ describe("parsing multicam commands", () => {
       method: "multicam.offset",
       params: { group: "g_1", angle: "ben", offset: 1.5 },
     });
+    expect(
+      parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { "mic-file": ["m.wav"], "mic-name": ["M"], sound: ["none", "1"], "group-name": "Talk" }),
+    ).toMatchObject({ method: "multicam.create", params: { assets: ["a.mp4", "b.mp4"], mics: ["m.wav"], micNames: ["M"], soundOf: ["none", "1"], name: "Talk" } });
+    expect(() => parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { "mic-name": ["M"] })).toThrow(/one per --mic-file/);
+    expect(parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { offset: "0.5", gain: "-3", muted: true })).toMatchObject({
+      method: "multicam.mic",
+      params: { group: "g_1", mic: "lav", offset: 0.5, gain: -3, muted: true },
+    });
+    expect(() => parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { offset: "later" })).toThrow(/--offset: expected a number/);
+    expect(() => parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { muted: true, unmuted: true })).toThrow(/not both/);
+    expect(parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { mic: "none" })).toMatchObject({ params: { mic: "none" } });
     expect(parseTimelineCommand(["multicam", "turns", "g_1"], {})).toMatchObject({ method: "multicam.turns", params: { group: "g_1" } });
     expect(() => parseTimelineCommand(["multicam", "turns"], {})).toThrow(UsageError);
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "soon"], {})).toThrow(/expected a number/);

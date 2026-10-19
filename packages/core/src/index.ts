@@ -143,7 +143,7 @@ export {
   type RenderProbe,
   type RenderedClip,
 } from "./clips/renderer.js";
-export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, syncReport } from "./multicam/measure.js";
+export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type TurnsSource, groupTurns } from "./multicam/group-turns.js";
 export {
   type GroupMotion,
@@ -164,5 +164,5 @@ export {
   SYNC_WINDOW_S,
   type SyncEstimate,
   correlateProfiles,
-  planOffsets,
+  planSync,
 } from "./multicam/sync.js";

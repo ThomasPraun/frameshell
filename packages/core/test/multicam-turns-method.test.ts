@@ -43,7 +43,9 @@ beforeAll(async () => {
   await makeVoiceClip(join(footage, "ben.mp4"), { own: BEN, bleed: others(BEN), shiftS: 1.5, durationS: 12.5 });
   await makeVoiceClip(join(footage, "zoe.mp4"), { own: ZOE, bleed: others(ZOE) });
   await makeClip(join(footage, "mute.mp4"), { durationS: 8, silent: true });
-  const names = ["ana", "ben", "zoe", "mute"];
+  // Silent cameras: the picture of people whose sound is recorded on separate mics.
+  for (const name of ["cam1", "cam2", "cam3", "cam4", "cam5"]) await makeClip(join(footage, `${name}.mp4`), { durationS: 8, silent: true });
+  const names = ["ana", "ben", "zoe", "mute", "cam1", "cam2", "cam3", "cam4", "cam5"];
   const { imported } = await conn.request("asset.import", { cwd: project, files: names.map((name) => join(footage, `${name}.mp4`)) });
   for (const entry of imported) files[entry.asset.split("/").pop()!.replace(".mp4", "")] = entry.asset;
 }, MEDIA_TIMEOUT);
@@ -96,5 +98,36 @@ describe("multicam.turns", () => {
       message: expect.stringContaining(created.group),
       data: expect.objectContaining({ groups: expect.arrayContaining([created.group]) }),
     });
+  }, MEDIA_TIMEOUT);
+
+  it("takes turns from each angle's mic: a separate file with its own offset, shared by two angles, none for a wide camera", async () => {
+    const created = await conn.request("multicam.create", {
+      cwd: project,
+      assets: [files["cam1"]!, files["cam2"]!, files["cam3"]!, files["cam4"]!, files["cam5"]!],
+      names: ["Ana", "Ben", "Ana 2", "Wide", "Zoe"],
+      mics: [files["ana"]!, files["ben"]!, files["zoe"]!],
+      micNames: ["Ana mic", "Ben mic", "Zoe mic"],
+      soundOf: ["1", "2", "1", "none", "3"],
+    });
+    // The mics are voice clips with video; their sync is not under test here, so Ben's mic is set to 1.5 s by hand.
+    for (const [mic, offset] of [["ana-mic", 0], ["ben-mic", 1.5], ["zoe-mic", 0]] as const) {
+      await conn.request("multicam.mic", { cwd: project, group: created.group, mic, offset });
+    }
+    const result = await conn.request("multicam.turns", { cwd: project, group: created.group });
+    expect(result.warnings).toEqual([]);
+    const spans = (angle: string) => result.turns.filter((turn) => turn.angle === angle).map((turn) => [turn.start, turn.end]);
+    const near = (actual: number[][], expected: number[][]) => {
+      expect(actual).toHaveLength(expected.length);
+      actual.forEach(([start, end], i) => {
+        expect(Math.abs(start! - expected[i]![0]!)).toBeLessThan(TOLERANCE);
+        expect(Math.abs(end! - expected[i]![1]!)).toBeLessThan(TOLERANCE);
+      });
+    };
+    near(spans("ana"), [[1.0, 4.0], [9.5, 10.5]]);
+    near(spans("ben"), [[4.5, 7.5], [9.8, 11.0]]);
+    near(spans("zoe"), [[7.8, 8.8]]);
+    // Ana's second camera hears the same mic: the same turns. The wide camera has none.
+    near(spans("ana-2"), [[1.0, 4.0], [9.5, 10.5]]);
+    expect(spans("wide")).toEqual([]);
   }, MEDIA_TIMEOUT);
 });

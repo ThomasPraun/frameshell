@@ -27,4 +27,32 @@ describe("groupTurns with a screen angle", () => {
     const { turns } = await groupTurns(source, "/p", { id: "g", angles } as MulticamGroup);
     expect(turns.filter((turn) => turn.angle === "ana").length).toBe(1);
   });
+
+  it("keeps a person heard through a mic when the screen shares that mic", async () => {
+    const group = {
+      id: "g",
+      angles: [
+        { id: "ana", name: "Ana", asset: "silent.mp4", offset: 0, mic: "lav" },
+        { id: "call", name: "Call", asset: "call.mp4", offset: 0, screen: true, mic: "lav" },
+      ],
+      mics: [{ id: "lav", name: "Lav", asset: "ana.mp4", offset: 0 }],
+    } as MulticamGroup;
+    const { turns, warnings } = await groupTurns(source, "/p", group);
+    expect(turns.map((turn) => turn.angle)).toEqual(["ana"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns about a silent person but not about a silent screen", async () => {
+    const quiet = { ...source, probe: async (_root: string, asset: string) => ({ audio: asset === "ana.mp4" ? {} : undefined }) as unknown as MediaProbe };
+    const group = {
+      id: "g",
+      angles: [
+        { id: "ana", name: "Ana", asset: "ana.mp4", offset: 0 },
+        { id: "ben", name: "Ben", asset: "ben.mp4", offset: 0 },
+        { id: "deck", name: "Deck", asset: "deck.mp4", offset: 0, screen: true },
+      ],
+    } as MulticamGroup;
+    const { warnings } = await groupTurns(quiet, "/p", group);
+    expect(warnings).toEqual(["Ben (ben.mp4) has no sound, so it has no turns."]);
+  });
 });

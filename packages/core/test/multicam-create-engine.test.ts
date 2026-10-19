@@ -10,6 +10,8 @@ const SOURCES: Record<string, SourceInfo> = {
   "assets/ben.mp4": { duration: 18, video: true, audio: true },
   "assets/Ben Two.mov": { duration: 18, video: true, audio: true },
   "assets/mic.wav": { duration: 20, video: false, audio: true },
+  "assets/Lav Ben.wav": { duration: 25, video: false, audio: true },
+  "assets/mute.mp4": { duration: 10, video: true, audio: false },
   "assets/still.png": { duration: null, video: true, audio: false },
 };
 
@@ -152,5 +154,73 @@ describe("multicam.offset", () => {
     expect(group.message).toContain("Groups: g_0001");
     const angle = await rejection(applyOperation(before, { op: "multicam.offset", args: { group: "g_0001", angle: "zoe", offset: 1 } }, context()));
     expect(angle.message).toContain("Angles: ana, ben");
+  });
+});
+
+describe("multicam.create with separate mics", () => {
+  const mics = [
+    { asset: "assets/mic.wav", name: "Ana lav", offset: 3 },
+    { asset: "assets/Lav Ben.wav", offset: 0.5 },
+  ];
+  const withMics = (angles: { asset: string; name?: string; offset: number; mic?: number | null }[], micFiles = mics) =>
+    ({ op: "multicam.create", args: { angles, mics: micFiles } }) as OperationRequest;
+
+  it("adds the mics with their own offsets, maps angles to them, and ends the group with the cameras", async () => {
+    const before = BASE();
+    const applied = await applyOperation(
+      before,
+      withMics([
+        { asset: "assets/ana.mp4", name: "Wide", offset: 0, mic: null },
+        { asset: "assets/ben.mp4", name: "Ana", offset: 1, mic: 0 },
+        { asset: "assets/Ben Two.mov", name: "Ben", offset: 0, mic: 1 },
+        { asset: "assets/mute.mp4", name: "Ben close", offset: 0, mic: 1 },
+      ]),
+      context(),
+    );
+    const group = applied.timeline.groups![0]!;
+    expect(group.angles.map((angle) => [angle.id, angle.mic])).toEqual([
+      ["wide", null],
+      ["ana", "ana-lav"],
+      ["ben", "lav-ben"],
+      ["ben-close", "lav-ben"],
+    ]);
+    expect(group.mics).toEqual([
+      { id: "ana-lav", name: "Ana lav", asset: "assets/mic.wav", offset: 3 },
+      { id: "lav-ben", name: "Lav Ben", asset: "assets/Lav Ben.wav", offset: 0.5 },
+    ]);
+    // The longest camera ends at 20 s; the mic, which runs to 25.5 s, does not stretch the shot.
+    expect(applied.timeline.tracks.at(-1)).toMatchObject({ clips: [{ out: 20, angles: ["wide", "ana", "ben", "ben-close"] }] });
+    const restored = applyPatch(applied.timeline, applied.inverse.args);
+    expect(restored.groups).toBeUndefined();
+  });
+
+  it("leaves `mic` off angles without one (their own sound) and refuses a mic index that does not exist", async () => {
+    const plain = await applyOperation(BASE(), withMics([{ asset: "assets/ana.mp4", offset: 0 }, { asset: "assets/ben.mp4", offset: 0 }]), context());
+    expect(plain.timeline.groups![0]!.angles.map((angle) => "mic" in angle)).toEqual([false, false]);
+    const bad = await rejection(
+      applyOperation(BASE(), withMics([{ asset: "assets/ana.mp4", offset: 0, mic: 2 }, { asset: "assets/ben.mp4", offset: 0 }]), context()),
+    );
+    expect(bad).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("takes mic 2, but there are 2 mic(s)") });
+  });
+
+  it("refuses a mic without sound, a file that is both camera and mic, and reserved names get another id", async () => {
+    const silent = await rejection(
+      applyOperation(
+        BASE(),
+        withMics([{ asset: "assets/ana.mp4", offset: 0 }, { asset: "assets/ben.mp4", offset: 0 }], [{ asset: "assets/mute.mp4", offset: 0 }]),
+        context(),
+      ),
+    );
+    expect(silent.message).toContain("has no sound");
+    const twice = await rejection(
+      applyOperation(BASE(), withMics([{ asset: "assets/ana.mp4", offset: 0 }, { asset: "assets/ben.mp4", offset: 0 }], [{ asset: "assets/ana.mp4", offset: 0 }]), context()),
+    );
+    expect(twice.message).toContain("listed twice");
+    const named = await applyOperation(
+      BASE(),
+      withMics([{ asset: "assets/ana.mp4", offset: 0 }, { asset: "assets/ben.mp4", offset: 0 }], [{ asset: "assets/mic.wav", name: "None", offset: 0 }]),
+      context(),
+    );
+    expect(named.timeline.groups![0]!.mics![0]!.id).toBe("none-2");
   });
 });

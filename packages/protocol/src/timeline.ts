@@ -240,16 +240,41 @@ export const operationArgs = {
           asset: z.string().min(1).describe("Project-relative media file with a picture, e.g. `assets/ana.mp4`."),
           name: z.string().min(1).optional().describe("Person or camera, e.g. `Ana`. Default: the file name without extension."),
           offset: Seconds("Group-clock second at which the asset's time 0 plays."),
+          mic: z
+            .number()
+            .int()
+            .nonnegative()
+            .nullable()
+            .optional()
+            .describe("Index into `mics` of the mic that carries this angle's sound; null for no sound. Default: the angle's own file."),
         }),
       )
       .min(2)
-      .describe("The synced files, first = the reference clock. The `multicam.create` method measures the offsets and passes them here."),
+      .describe("The synced cameras, each with a picture. The `multicam.create` method measures the offsets and passes them here."),
+    mics: z
+      .array(
+        z.strictObject({
+          asset: z.string().min(1).describe("Project-relative file with sound, e.g. `assets/ana.wav`."),
+          name: z.string().min(1).optional().describe("Person or recorder. Default: the file name without extension."),
+          offset: Seconds("Group-clock second at which the asset's time 0 plays."),
+        }),
+      )
+      .optional()
+      .describe("Separate sound files, synced like the cameras; angles pick one with `mic`."),
     name: z.string().min(1).optional().describe("Group and program track name. Default: the track is named `Multicam`."),
   }),
   "multicam.offset": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     angle: z.string().min(1).describe("Angle id of that group."),
     offset: Seconds("New group-clock second at which the angle's asset time 0 plays (absolute, not a nudge)."),
+  }),
+  "multicam.mic": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    mic: z.string().min(1).describe("Mic id of that group (`mics`); it never changes, angles keep naming it."),
+    name: z.string().min(1).optional().describe("New display name."),
+    offset: Seconds("New group-clock second at which the mic's file time 0 plays (absolute, not a nudge).").optional(),
+    gain: z.number().optional().describe("Gain of the mic's sound in dB, under every shot. 0 = unchanged level."),
+    muted: z.boolean().optional().describe("Mute the mic's sound under every shot."),
   }),
   "multicam.angle": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
@@ -265,8 +290,13 @@ export const operationArgs = {
       .nullable()
       .optional()
       .describe("Sides to change, fractions of the picture cut off (0 to below 1); omitted sides keep their value, null removes the crop."),
-    gain: z.number().optional().describe("Gain of the angle's sound in dB, under every shot. 0 = unchanged level."),
-    muted: z.boolean().optional().describe("Mute the angle's sound under every shot."),
+    gain: z.number().optional().describe("Gain of the angle's own file sound in dB, under every shot. 0 = unchanged level. Not for angles with a mic: use `multicam.mic`."),
+    muted: z.boolean().optional().describe("Mute the angle's own file sound under every shot. Not for angles with a mic: use `multicam.mic`."),
+    mic: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Where the angle is heard: a mic id of the group, `camera` (its own file's sound) or `none` (no sound, e.g. a wide camera)."),
     screen: z
       .boolean()
       .optional()
@@ -440,12 +470,16 @@ export const OperationResultSchema = z.object({
 /** See {@link OperationResultSchema}. */
 export type OperationResult = z.output<typeof OperationResultSchema>;
 
-/** Below this a measured sync is not trusted: the angle starts with the first file and a warning is given. */
+/**
+ * Below this a measured sync is not trusted: the file starts with the reference (the first file with sound)
+ * and a warning is given.
+ */
 export const SYNC_LOW_CONFIDENCE = 0.5;
 
-/** How one angle was synced to the first (`multicam.create`). */
+/** How one file was synced (`multicam.create`). */
 export const AngleSyncSchema = z.object({
-  angle: z.string().describe("Angle id in the new group."),
+  kind: z.enum(["camera", "mic"]).describe("`camera`: an angle; `mic`: a separate sound file."),
+  angle: z.string().describe("Angle id (`camera`) or mic id (`mic`) in the new group."),
   name: z.string(),
   asset: z.string(),
   offset: z.number().describe("Group-clock second at which the asset's time 0 plays, as stored."),
@@ -454,12 +488,13 @@ export const AngleSyncSchema = z.object({
     .min(0)
     .max(1)
     .nullable()
-    .describe("0 (no shared sound found) to 1 (unmistakable) for the audio match with the first file; null for the first file itself."),
+    .describe("0 (no shared sound found) to 1 (unmistakable) for the audio match with `against`; null for the reference file itself."),
+  against: z.string().nullable().describe("Id of the already placed file this one was matched with (the best match of all); null for the reference or when nothing matched."),
   synced: z
     .boolean()
     .describe(
-      "False when the confidence is below 0.5: no trustworthy match, so the offset was not measured (the file starts with the first one) " +
-        "and a warning says so. Fix it with `multicam.offset`.",
+      "False when the confidence is below 0.5 against every other file: no trustworthy match, so the offset was not measured (the file starts with the reference) " +
+        "and a warning says so. Fix it with `multicam.offset` (camera) or `multicam.mic` (mic).",
     ),
 });
 
@@ -468,7 +503,7 @@ export const MulticamCreateResultSchema = OperationResultSchema.extend({
   group: z.string().describe("Id of the new group."),
   track: z.string().describe("Id of the new program track."),
   clip: z.string().describe("Id of the initial `grid` shot, which covers the whole group."),
-  sync: z.array(AngleSyncSchema).describe("One entry per file, in the order given."),
+  sync: z.array(AngleSyncSchema).describe("One entry per file: the cameras in the order given, then the mics."),
 });
 
 /** See {@link MulticamCreateResultSchema}. */

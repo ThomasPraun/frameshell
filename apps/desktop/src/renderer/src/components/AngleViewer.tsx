@@ -27,7 +27,7 @@ export function AngleViewer({ mediaUrl }: { mediaUrl: string }) {
   const rows = useMemo(() => (view ? programRows(view) : []), [view]);
   const groupId = view ? (viewerRow(rows, view.fps, time)?.group ?? null) : null;
   const group = view?.groups?.find((candidate) => candidate.id === groupId);
-  const { turns, error: turnsError } = useTurns(groupId, group ? JSON.stringify(group.angles) : null);
+  const { turns, error: turnsError } = useTurns(groupId, group ? JSON.stringify([group.angles, group.mics]) : null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const model = useMemo(
@@ -134,7 +134,7 @@ function AngleTileView({
 }
 
 /**
- * Speaking turns of `group` (`multicam.turns`), re-measured when `key` (the group's angles: files, offsets, gains)
+ * Speaking turns of `group` (`multicam.turns`), re-measured when `key` (the group's angles and mics: files, offsets, gains)
  * changes. Empty while measuring or when it fails; `error` then says why. Shots do not change turns, so editing
  * the program never re-measures.
  */

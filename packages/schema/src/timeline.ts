@@ -180,6 +180,9 @@ export const AngleCropSchema = z
   })
   .describe("Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it.");
 
+/** Ids a mic cannot take: `multicam.angle` reads them as "the camera's own sound" and "no sound". */
+export const RESERVED_MIC_IDS: readonly string[] = ["camera", "none"];
+
 /** One synced source of a multicam group (ADR 0016): usually one person's picture and mic. */
 export const AngleSchema = z.strictObject({
   id: Id.describe("Unique within the group; shots name angles by it."),
@@ -187,11 +190,32 @@ export const AngleSchema = z.strictObject({
   asset: z.string().min(1).describe("Project-relative media file, e.g. `assets/ana.mp4`."),
   offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
   crop: AngleCropSchema.optional(),
-  audio: ClipAudioSchema.optional().describe("Gain and mute of this angle's sound, which plays under every shot."),
+  audio: ClipAudioSchema.optional().describe(
+    "Gain and mute of the sound of this angle's own file, which plays under every shot. Absent with `mic` set: the mic carries the level.",
+  ),
+  mic: Id.nullable()
+    .optional()
+    .describe(
+      "Where this angle's person is heard. Absent: the sound of its own file. An id of the group's `mics`: that mic " +
+        "(one mic may serve several angles and plays once); the file's own sound is then not played. null: no sound " +
+        "(a wide camera); its own file's sound is not played either.",
+    ),
   screen: z
     .boolean()
     .optional()
     .describe("True: a screen share, not a person. The director shows it (`screen`, `pip`) while it moves and never as a speaker. Default false."),
+});
+
+/**
+ * A sound file synced to the group apart from any picture (ADR 0016): a lavalier
+ * or recorder with its own start time.
+ */
+export const MicSchema = z.strictObject({
+  id: Id.describe("Unique among the group's angles and mics; angles name it in `mic`. Not `camera` or `none`."),
+  name: z.string().min(1).describe("Person or recorder, e.g. `Ana lav`."),
+  asset: z.string().min(1).describe("Project-relative file with sound, e.g. `assets/ana.wav`. Only its sound is used."),
+  offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
+  audio: ClipAudioSchema.optional().describe("Gain and mute of this mic's sound, which plays under every shot, once even when several angles use it."),
 });
 
 /** The angles of one conversation on one shared clock (ADR 0016), shown by one program track. */
@@ -200,12 +224,28 @@ export const MulticamGroupSchema = z
     id: Id.describe("Stable, core-generated (`g_…`); a program track names it in `group`."),
     name: z.string().optional(),
     angles: z.array(AngleSchema).min(1),
+    mics: z.array(MicSchema).optional().describe("Separate sound files of the group; angles pick theirs with `mic`. Absent: every angle has its own file's sound."),
   })
   .superRefine((group, ctx) => {
     const seen = new Set<string>();
     group.angles.forEach((angle, a) => {
       if (seen.has(angle.id)) ctx.addIssue({ code: "custom", message: `duplicate angle id "${angle.id}"`, path: ["angles", a, "id"] });
       seen.add(angle.id);
+    });
+    const mics = new Set<string>();
+    group.mics?.forEach((mic, m) => {
+      if (RESERVED_MIC_IDS.includes(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is reserved`, path: ["mics", m, "id"] });
+      else if (seen.has(mic.id) || mics.has(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is already an angle or mic id`, path: ["mics", m, "id"] });
+      mics.add(mic.id);
+    });
+    group.angles.forEach((angle, a) => {
+      if (typeof angle.mic === "string" && !mics.has(angle.mic)) {
+        const known = group.mics?.map((mic) => mic.id).join(", ");
+        ctx.addIssue({ code: "custom", message: `angle "${angle.id}" names mic "${angle.mic}", which the group does not have${known ? ` (mics: ${known})` : ""}`, path: ["angles", a, "mic"] });
+      }
+      if (angle.mic !== undefined && angle.audio) {
+        ctx.addIssue({ code: "custom", message: `angle "${angle.id}" takes its sound from ${angle.mic === null ? "no one" : `mic "${angle.mic}"`}: set gain and mute on the mic, not the angle`, path: ["angles", a, "audio"] });
+      }
     });
   });
 
@@ -368,6 +408,8 @@ export type TimelineClip = z.infer<typeof TimelineClipSchema>;
 export type AdapterClip = z.infer<typeof AdapterClipSchema>;
 /** Multicam group (ADR 0016). */
 export type MulticamGroup = z.infer<typeof MulticamGroupSchema>;
+/** Separate sound file of a {@link MulticamGroup}. */
+export type Mic = z.infer<typeof MicSchema>;
 /** One angle of a {@link MulticamGroup}. */
 export type Angle = z.infer<typeof AngleSchema>;
 /** Crop of an {@link Angle}'s picture. */

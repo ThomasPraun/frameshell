@@ -160,6 +160,50 @@ describe("multicam plan", () => {
   });
 });
 
+describe("multicam plan with separate mics", () => {
+  // Ana is heard on a recorder that started 2 s into the group and played -3 dB; Ben on the room mic shared with Eva; the wide camera has no sound.
+  const miked: MulticamGroup = {
+    id: "g_talk",
+    angles: [
+      { id: "wide", name: "Wide", asset: "assets/ana.mp4", offset: 0, mic: null },
+      { id: "ana", name: "Ana", asset: "assets/ben.mp4", offset: 0, mic: "lav" },
+      { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0, mic: "room" },
+      { id: "ben", name: "Ben", asset: "assets/ana.mp4", offset: 0, mic: "room" },
+    ],
+    mics: [
+      { id: "lav", name: "Lav", asset: "assets/lav.wav", offset: 2, audio: { gain: -3 } },
+      { id: "room", name: "Room", asset: "assets/room.wav", offset: 0 },
+    ],
+  };
+  const audioOnly = (name: string): [string, ExportSource] => [`assets/${name}.wav`, { path: `/project/assets/${name}.wav`, video: null, audio: true }];
+  const withMics = new Map<string, ExportSource>([...sources, audioOnly("lav"), audioOnly("room")]);
+  const track = { id: "t_p", kind: "program" as const, group: "g_talk", clips: [shot("c_1", 0, "grid", ["wide", "ana", "eva"], 0, 4)] };
+  const plan = compileRender({
+    timeline: { ...timeline, tracks: [track], groups: [miked] },
+    fps: 30,
+    preset: youtube1080,
+    loudness: -17,
+    sources: withMics,
+    resolution,
+    segmentSeconds: 2,
+  });
+
+  it("mixes the mics once each, with their gain and offset, and none of the angles' own files", () => {
+    expect(new Set(plan.audio.inputs)).toEqual(new Set(["/project/assets/lav.wav", "/project/assets/room.wav"]));
+    expect(plan.audio.tracks).toHaveLength(2);
+    const [lav, room] = plan.audio.tracks;
+    // The recorder starts at group second 2.
+    expect(lav![0]).toEqual({ kind: "silence", samples: 96_000 });
+    expect(lav!.find((item) => item.kind === "clip")).toMatchObject({ clip: "c_1/lav", from: 0, gainDb: -3 });
+    expect(room!.filter((item) => item.kind === "clip")).toHaveLength(1);
+  });
+
+  it("still draws every angle's picture", () => {
+    expect(plan.warnings).toEqual([]);
+    for (const input of ["ana", "ben", "eva"]) expect(JSON.stringify(plan.segments)).toContain(`assets/${input}.mp4`);
+  });
+});
+
 describe("multicam under a nested timeline", () => {
   const talk: Timeline = { ...timeline, id: "talk" };
   const hosted = (transform?: { scale: number }): Timeline => ({

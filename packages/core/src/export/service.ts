@@ -10,7 +10,7 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type ExportPreset, type Size, type Timeline, type Transcript, programGroup } from "@frameshell/schema";
+import { type ExportPreset, type MulticamGroup, type Size, type Timeline, type Transcript, programGroup } from "@frameshell/schema";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
@@ -338,7 +338,7 @@ export class ExportService {
     for (const track of timeline.tracks) {
       if (track.kind === "subtitles") continue;
       const assets =
-        track.kind === "program" ? (programGroup(timeline, track)?.angles.map((angle) => angle.asset) ?? []) : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : []));
+        track.kind === "program" ? groupAssets(programGroup(timeline, track)) : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : []));
       for (const asset of assets) {
         if (sources.has(asset)) continue;
         const probe = await this.#options.probe(root, asset);
@@ -353,6 +353,11 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** Files of a multicam group: the cameras and the separate mics. */
+function groupAssets(group: MulticamGroup | null): string[] {
+  return group ? [...group.angles.map((angle) => angle.asset), ...(group.mics ?? []).map((mic) => mic.asset)] : [];
 }
 
 /** Ids of the generated (adapter) clips on video tracks: each needs a cached render to export. */
