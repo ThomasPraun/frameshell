@@ -385,7 +385,7 @@ export class TimelineService {
       author: call.author,
       changes: applied.changes,
     });
-    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings };
+    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings: [...warnings, ...applied.warnings] };
   }
 
   /**
