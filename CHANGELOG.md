@@ -7,9 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Turn lanes: an angle marked as a screen share no longer reports speaking stretches painted before it became a screen, and the English tooltip says Alt marks that person silent.
+## [0.11.0] - 2026-10-19
 
 ### Added
 
@@ -40,12 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The CLI refuses a flag given twice (exit 2) where it takes one value; before, the last one won. `multicam create` and `multicam gallery` take `--name` (and `--mic-file`, `--mic-name`, `--sound`) once per file.
+- `multicam`, `shot` and `direct` are built-in commands and `shot` is a core clip type, so a plugin can no longer use those names for its command or clip type.
 - Desktop: the welcome button is now **New from video or audio…**.
 - Agent skill: new reference page for videos made from audio (the three levels, edit the audio first, scene plan with word ranges, human review, clips with `scriptRef`; ADR 0015).
 - `cut` now warns, in its result `warnings` and in the CLI output, for every generated clip (`hyperframes`, `remotion`…) it trims or splits, naming the clip id, type and `scriptRef` (ADR 0015). The cut still applies; the skill says to edit the audio before building visuals.
 
 ### Fixed
 
+- Turn lanes: an angle marked as a screen share no longer reports speaking stretches painted before it became a screen, and the English tooltip says Alt marks that person silent.
 - Export places a multicam program's sound at exact samples, like the preview (ADR 0016): each angle's or mic's file starts at `round(seconds * 48 kHz)` of its offset instead of a frame-rounded start, so mics of one room no longer drift up to half a frame apart (`soundSamples` in `composite.ts`, shared by both). A sound that runs on across a shot change is one mix item, without the edge fade at the shot change, as in the preview. Where hand-edited shots overlap, the later shot's sound wins from its start in export and preview alike. Sound of a program track nested inside an audio track still lands on frames (follow-up).
 
 ## [0.8.1] - 2026-10-17
@@ -258,7 +259,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.11.0
 [0.8.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.1
 [0.8.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.0
 [0.6.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.6.0
