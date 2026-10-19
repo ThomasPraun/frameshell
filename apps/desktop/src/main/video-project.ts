@@ -1,9 +1,10 @@
-// Planning a project created from video files (ADR 0013): folder beside the first video, name clash rules, clone test.
+// Planning a project created from video or audio files (ADR 0013, 0015): folder beside the first video, name clash rules, clone test.
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { copyFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { VideoProjectPlan } from "../shared/api.js";
+import { isAudioFile } from "./media-files.js";
 
 /** Above this total, and when no clone is possible, the user picks copy or use in place: a copy then costs real disk space. */
 export const ASK_COPY_BYTES = 2 * 1024 ** 3;
@@ -35,7 +36,7 @@ export async function planVideoProject(
   place: { parent?: string; name?: string } = {},
 ): Promise<VideoProjectPlan> {
   const [first] = files;
-  if (!first) throw new Error("Choose at least one video.");
+  if (!first) throw new Error("Choose at least one video or audio file.");
   let totalBytes = 0;
   const sizes: number[] = [];
   for (const file of files) {
@@ -44,17 +45,18 @@ export async function planVideoProject(
     sizes.push(info.size);
     totalBytes += info.size;
   }
+  const audioOnly = files.every(isAudioFile);
   const parent = place.parent ?? dirname(first);
   const name = projectName(place.name ?? stem(first));
   for (let n = 1; ; n++) {
     const dir = join(parent, n === 1 ? name : `${name} (${n})`);
     const existing = await stat(dir).catch(() => null);
     if (existing && (await holdsVideo(dir, first, sizes[0] ?? 0))) {
-      return { files, parent, name, dir, existing: true, totalBytes, clones: true, askMode: false };
+      return { files, parent, name, dir, existing: true, totalBytes, clones: true, askMode: false, audioOnly };
     }
     if (existing) continue;
     const clones = await canClone(first, parent);
-    return { files, parent, name, dir, existing: false, totalBytes, clones, askMode: !clones && totalBytes > ASK_COPY_BYTES };
+    return { files, parent, name, dir, existing: false, totalBytes, clones, askMode: !clones && totalBytes > ASK_COPY_BYTES, audioOnly };
   }
 }
 

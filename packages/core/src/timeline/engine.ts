@@ -8,6 +8,7 @@ import {
   type operationArgs,
 } from "@frameshell/protocol";
 import {
+  CORE_CLIP_TYPES,
   type Clip,
   type ClipTrack,
   type MediaClip,
@@ -116,6 +117,8 @@ export interface AppliedOperation {
   changes: OperationResult["changes"];
   /** Edges placed by {@link EditContext.resolveEditPoint}, in arg order. */
   snaps: SnapReport[];
+  /** Applied anyway, worth fixing (e.g. `cut` inside a generated clip); merged into the result's `warnings`. */
+  warnings: string[];
 }
 
 /**
@@ -147,6 +150,7 @@ class Edit {
   readonly grid: FrameGrid;
   readonly #spans = new Map<string, Promise<number>>();
   readonly snaps: SnapReport[] = [];
+  readonly warnings: string[] = [];
   #pending: Pick<SnapReport, "clean" | "window"> | null = null;
 
   constructor(
@@ -633,6 +637,7 @@ class Edit {
         } else if (S >= F && E <= T) {
           // Entirely inside the range: removed.
         } else if (S < F && E > T) {
+          this.warnInsideGenerated(clip);
           const right = structuredClone(clip);
           right.id = this.newId("c");
           this.trimTail(clip, from);
@@ -640,9 +645,11 @@ class Edit {
           right.start = from;
           for (const part of [clip, right]) if (!this.isEmpty(part)) kept.push(part);
         } else if (S < F) {
+          this.warnInsideGenerated(clip);
           this.trimTail(clip, from);
           if (!this.isEmpty(clip)) kept.push(clip);
         } else {
+          this.warnInsideGenerated(clip);
           this.trimHead(clip, to);
           clip.start = from;
           if (!this.isEmpty(clip)) kept.push(clip);
@@ -650,6 +657,19 @@ class Edit {
       }
       track.clips = kept;
     }
+  }
+
+  /**
+   * ADR 0015 decision 5: a cut that trims or splits an adapter clip slices its composition
+   * mid-way. Clips removed whole and cuts on a clip's edge are not warned.
+   */
+  warnInsideGenerated(clip: Clip): void {
+    if (CORE_CLIP_TYPES.some((type) => type === clip.type)) return;
+    const ref = clip.scriptRef ? `, scriptRef ${clip.scriptRef}` : "";
+    this.warnings.push(
+      `cut falls inside ${clip.type} clip ${clip.id}${ref}: its composition is trimmed or split. ` +
+        "Edit the audio before building visuals; re-place the clip against its script scene afterwards.",
+    );
   }
 
   patch(args: TimelinePatch): void {
@@ -681,7 +701,7 @@ class Edit {
     const inverse = diffTimelines(this.draft, this.before);
     const changes = await this.changes(forward);
     const timeline = { ...this.draft, revision: this.before.revision + 1 };
-    return { timeline, inverse: { op: "timeline.patch", args: inverse }, changes, snaps: this.snaps };
+    return { timeline, inverse: { op: "timeline.patch", args: inverse }, changes, snaps: this.snaps, warnings: this.warnings };
   }
 
   /**

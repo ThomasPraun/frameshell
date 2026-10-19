@@ -35,6 +35,14 @@ describe("projectName", () => {
 });
 
 describe("planVideoProject", () => {
+  it("marks a plan of audio files alone, and one with any video not", async () => {
+    const dir = folder();
+    const song = video(dir, "podcast.mp3");
+    expect(await planVideoProject([song])).toMatchObject({ dir: join(dir, "podcast"), audioOnly: true });
+    expect(await planVideoProject([song, video(dir)])).toMatchObject({ audioOnly: false });
+    expect(await planVideoProject([video(dir)])).toMatchObject({ audioOnly: false });
+  });
+
   it("puts the project beside the first video, named after it", async () => {
     const dir = folder();
     const first = video(dir);

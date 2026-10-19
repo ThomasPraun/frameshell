@@ -76,3 +76,9 @@ export async function makeSource(
 export async function ffmpegRun(ffmpeg: string, args: string[]): Promise<void> {
   await run(ffmpeg, args, { maxBuffer: 64 << 20, windowsHide: true });
 }
+
+/** A synthetic 44.1 kHz sine of one second: audio with no picture. */
+export async function makeAudio(out: string): Promise<void> {
+  const ffmpeg = await testFfmpeg();
+  await ffmpegRun(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=44100:duration=1", out]);
+}

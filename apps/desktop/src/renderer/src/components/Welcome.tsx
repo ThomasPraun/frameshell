@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
+import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
 import { useFileDrop } from "../file-drop.js";
 import { rich, t } from "../i18n.js";
 
-/** First screen of a window with no project: start from a video, open a folder, reopen a recent one, or create a project. */
+/** First screen of a window with no project: start from a video or audio file, open a folder, reopen a recent one, or create a project. */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
   const [notProject, setNotProject] = useState<string | null>(null);
@@ -89,8 +89,8 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
             onPlan={setPlan}
             onError={setError}
             onCancel={() => setPlan(null)}
-            onCreate={(mode, name, transcribe) =>
-              void run(() => window.frameshell.project.fromVideos({ ...plan, name }, mode, { transcribe }))
+            onCreate={(mode, name, transcribe, orientation) =>
+              void run(() => window.frameshell.project.fromVideos({ ...plan, name }, mode, { transcribe, orientation }))
             }
           />
         ) : (
@@ -138,7 +138,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   );
 }
 
-/** Confirmation of a project made from videos (ADR 0013): name, place, and copy or use in place when it matters. */
+/** Confirmation of a project made from videos or audio (ADR 0013, 0015): name, place, and copy or use in place when it matters. */
 function NewFromVideo({
   plan,
   busy,
@@ -153,11 +153,12 @@ function NewFromVideo({
   onError: (message: string | null) => void;
   onCancel: () => void;
   /** `name` as typed: it may not be replanned yet. */
-  onCreate: (mode: "copy" | "link", name: string, transcribe: boolean) => void;
+  onCreate: (mode: "copy" | "link", name: string, transcribe: boolean, orientation: AudioOrientation) => void;
 }) {
   const [name, setName] = useState(plan.name);
   const [mode, setMode] = useState<"copy" | "link">("copy");
   const [transcribe, setTranscribe] = useState(true);
+  const [orientation, setOrientation] = useState<AudioOrientation>("landscape");
   // Replans only for the latest edit: a slow answer for an older name must not overwrite a newer one.
   const latest = useRef(0);
 
@@ -187,7 +188,7 @@ function NewFromVideo({
       aria-label={t.welcome.form}
       onSubmit={(event) => {
         event.preventDefault();
-        onCreate(mode, name, transcribe);
+        onCreate(mode, name, transcribe, orientation);
       }}
     >
       <p className="welcome-new-source">{videos}</p>
@@ -213,6 +214,20 @@ function NewFromVideo({
           </button>
         </div>
       </div>
+
+      {plan.audioOnly && !plan.existing && (
+        <fieldset className="welcome-mode">
+          <legend>{t.welcome.frameLegend}</legend>
+          <label>
+            <input type="radio" name="frame" checked={orientation === "landscape"} onChange={() => setOrientation("landscape")} />
+            {t.welcome.frameLandscape}
+          </label>
+          <label>
+            <input type="radio" name="frame" checked={orientation === "portrait"} onChange={() => setOrientation("portrait")} />
+            {t.welcome.framePortrait}
+          </label>
+        </fieldset>
+      )}
 
       {plan.existing ? (
         <p className="welcome-hint">{t.welcome.exists}</p>

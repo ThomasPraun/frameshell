@@ -331,6 +331,27 @@ describe("cut (ripple)", () => {
     expect(changes).toMatchObject({ added: ["c_0005"], removed: ["c_0002"], range: { from: 0, to: 20 } });
   });
 
+  it("warns for a cut inside an adapter clip, not on its edge, outside it, or when it is removed whole", async () => {
+    let t = base();
+    t = (await apply(t, "clip.add", { track: "t_v", type: "hyperframes", duration: 4, start: 2, props: { title: "A" }, scriptRef: "scripts/a.md#intro" })).timeline; // c_0001 2–6
+    const inside = await apply(t, "cut", { from: 3, to: 4, snap: false });
+    expect(inside.warnings).toHaveLength(1);
+    expect(inside.warnings[0]).toMatch(/hyperframes clip c_0001, scriptRef scripts\/a\.md#intro/);
+    expect((await apply(t, "cut", { from: 1, to: 3, snap: false })).warnings).toHaveLength(1); // head
+    expect((await apply(t, "cut", { from: 5, to: 8, snap: false })).warnings).toHaveLength(1); // tail
+    expect((await apply(t, "cut", { from: 1, to: 2, snap: false })).warnings).toEqual([]); // ends on its start
+    expect((await apply(t, "cut", { from: 6, to: 7, snap: false })).warnings).toEqual([]); // starts on its end
+    expect((await apply(t, "cut", { from: 7, to: 8, snap: false })).warnings).toEqual([]);
+    expect((await apply(t, "cut", { from: 1, to: 7, snap: false })).warnings).toEqual([]); // removed whole
+    expect((await apply(t, "cut", { from: 3, to: 4, snap: false, tracks: ["t_a"] })).warnings).toEqual([]);
+  });
+
+  it("does not warn for a cut inside a media clip", async () => {
+    let t = base();
+    t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0, in: 0, out: 4 })).timeline;
+    expect((await apply(t, "cut", { from: 1, to: 2, snap: false })).warnings).toEqual([]);
+  });
+
   it("cuts only the named tracks and rejects an empty range", async () => {
     let t = base();
     t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;

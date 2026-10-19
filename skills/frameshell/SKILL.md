@@ -21,7 +21,7 @@ Frameshell is an IDE for video. You edit the project from the terminal; the huma
 
 1. **Orient.** `frameshell status` shows the project, running jobs, open transactions and refused direct edits. No project: `frameshell init`. When it warns that the project is in a synced folder (Dropbox, iCloud Drive…), tell the person before working. Then `frameshell timeline show --json`.
 2. **Open a transaction** named in the user's words: `frameshell tx begin "remove silences"`. One transaction per step the human might want to undo whole.
-3. **Edit.** Every mutation prints its `revision`, `op` id and `tx` id; `cut` and `clip trim` also print where each edge **snapped**.
+3. **Edit.** Every mutation prints its `revision`, `op` id and `tx` id; `cut` and `clip trim` also print where each edge **snapped**. `cut` also warns when it slices a generated clip: edit the audio before building visuals.
 4. **Check the result** the way the change is visible: `timeline show` for structure, `frame --at <s>` (MCP `frame_capture`) for anything on screen, `transcribe --verify` after an export that cut speech.
 5. **Commit:** `frameshell tx commit`. Tell the user what changed and the `tx` id.
 
