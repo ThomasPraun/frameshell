@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Protocol v36: `project.init` takes `resolution`, the frame size for a project whose `like` file has no picture.
 - Desktop: a project made from audio gets a picture once its transcript exists: a plain background image with the project title in `assets/` over the audio, and a subtitle track following the audio (default preset), in one undoable step (ADR 0015). A project that already has clips on a video track is left alone; swap the image with **Replace image…** in the clip inspector (one undoable step), or the subtitle preset as usual.
 - Desktop: **Replace image…** in the clip inspector shows a chosen image file in a media clip on a video track, keeping its track, start and length, as one undoable `ui` step.
+- Scripts: a scene can name the transcript words it covers with `<!-- words: talk.words.json w_000010..w_000042 -->` (transcript file optional while one transcript holds the ids) right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids, ambiguous bare ranges and reversed ranges are warnings. Protocol v37.
 
 ### Changed
 

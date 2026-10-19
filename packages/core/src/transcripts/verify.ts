@@ -248,7 +248,7 @@ function mediaClips(timeline: Timeline): MediaClip[] {
 }
 
 /** A media clip as it plays: overlaps trimmed the way the export compiler trims them (the later clip wins). */
-interface Visible {
+export interface Visible {
   clip: MediaClip;
   speed: number;
   /** Timeline seconds [start, end). */
@@ -325,7 +325,7 @@ function keptWords(
   return { words, unchecked, warnings };
 }
 
-function visibleClips(clips: readonly MediaClip[]): Visible[] {
+export function visibleClips(clips: readonly MediaClip[]): Visible[] {
   const placed = clips
     .map((clip) => {
       const speed = clip.speed ?? 1;

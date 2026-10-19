@@ -720,6 +720,10 @@ function formatOutline(outline: ScriptOutlineResult): string {
     const clips = scene.clips.length > 0 ? `clips: ${scene.clips.map(({ timeline, clip }) => `${timeline}/${clip}`).join(", ")}` : "no clips";
     const words = `${scene.words} word${scene.words === 1 ? "" : "s"}`;
     lines.push(`  ${`#${scene.slug}`.padEnd(slugW)}  ${scene.title.padEnd(titleW)}  line ${String(scene.line).padEnd(lineW)}  ${words}  ${clips}`);
+    if (scene.wordRange) {
+      const placed = scene.span.map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
+      lines.push(`    spoken ${scene.wordRange.transcript ? `${scene.wordRange.transcript} ` : ""}${scene.wordRange.from}..${scene.wordRange.to}  ${placed.length > 0 ? placed.join(", ") : "not on a timeline"}`);
+    }
   }
   if (outline.unresolved.length > 0) {
     lines.push("Unresolved refs:", ...outline.unresolved.map(({ timeline, clip, scriptRef }) => `  ${timeline}/${clip} -> ${scriptRef}`));

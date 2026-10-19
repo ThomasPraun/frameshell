@@ -11,7 +11,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. Also says which `frameshell` PATH runs and whether it is this CLI (a note, never an exit 1). |
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
 | `frameshell gc [--dry-run]` | Free disk: delete regenerable files under `.frameshell/` nothing uses (proxies, sidecars, waveforms, thumbnails, transcription audio of deleted or replaced assets; clip renders no clip keys; Ask agent captures in `.frameshell/context/` older than 7 days). `--dry-run` lists them first. Never touches `assets/`; deleted outputs rebuild on demand. |
-| `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips. |
+| `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips, and for scenes with a `<!-- words: ... -->` comment the timeline span of their words. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
 ## Timeline
