@@ -183,7 +183,8 @@ test("Replace image swaps the selected picture for a chosen file in one ui step,
   expect(before.asset).toBe(LOGO);
 
   await inspector().getByRole("button", { name: "Replace image…" }).click();
-  await expect.poll(() => logo().asset).toBe("assets/cover.png");
+  // The remove and the add are two writes: a read between them sees no clip yet.
+  await expect.poll(() => (logo() as { asset?: string } | undefined)?.asset).toBe("assets/cover.png");
   const after = logo();
   expect(after).toMatchObject({ start: before.start, out: before.out });
   expect(journaled().slice(-2)).toEqual([
