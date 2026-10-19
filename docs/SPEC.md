@@ -22,12 +22,13 @@ Frameshell does **not** ship its own LLM. Its value is what agent CLIs lack: a d
 
 | Case | Description | Example |
 |---|---|---|
-| **A: Scripted / motion video** | Explainers, tutorials, product demos, shorts. Built from a script, assets, voice-over, subtitles and code-based motion graphics (HyperFrames, Remotion). | "Turn `scripts/launch.md` into a 60 s 9:16 promo." |
+| **A: Scripted / motion video** | Explainers, tutorials, product demos, shorts. Built from a script, assets, voice-over, subtitles and code-based motion graphics (HyperFrames, Remotion). The spine may also be an audio recording and its transcript, from subtitles on a background to a full explainer (ADR 0015). | "Turn `scripts/launch.md` into a 60 s 9:16 promo." / "Make an explainer video for `podcast.mp3`." |
 | **B: Transcript-driven footage editing** | Long recordings (talks, YouTube videos) cut by the agent from a word-level transcript: silences, repeated takes, intro, subtitles, loudness. | "Edit this video, add the intro, remove silences, prepare it for YouTube." |
+| **C: Conversations with several people** | Podcasts, interviews, panels and recorded calls with one picture per person. A rule-based director cuts to whoever speaks, two-shots and wides; the agent reviews doubtful shots; the human corrects with number keys (ADR 0016). | "Build the multicam, interview style, and remove the silences." |
 
 Case B follows the workflow published by Facundo Corengia ("El prompt para no editar más"): the agent edits and the human's only job is to watch it once and correct. Frameshell makes that review step visual and reversible.
 
-Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grading, advanced keyframing, multicam).
+Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grading, advanced keyframing); switching shots live during a call; AI avatars.
 
 ---
 
@@ -35,7 +36,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 
 | # | Topic | Decision | Rationale | Rejected |
 |---|---|---|---|---|
-| 1 | Use case | A (scripted/motion) + B (transcript-driven editing) on one model | The agent does the heavy lifting and the human reviews; both cases share "clips on tracks" | Classic manual NLE |
+| 1 | Use case | A (scripted/motion) + B (transcript-driven editing) + C (conversations, ADR 0016) on one model | The agent does the heavy lifting and the human reviews; both cases share "clips on tracks" | Classic manual NLE |
 | 2 | App format | **Desktop app: Electron + React + TypeScript** | Real terminal (node-pty + xterm.js, same as VS Code); bundled Chromium + Node, both required by HTML/React video engines; proven IDE pattern | Tauri (per-OS webview codec issues, Node sidecar anyway, Rust), Flutter desktop (Remotion player would need a webview, weak terminal), VS Code extension (webviews lack H.264, panel-bound UI), plain local web app |
 | 3 | Source of truth | **Declarative timeline JSON**; clips reference media or compositions of any engine through **adapters** | Human and agent edit the same structured data; moving a clip = changing a number; not tied to one engine | Remotion TSX as truth (timeline edits would require rewriting arbitrary code), OTIO native (verbose, poor fit for code compositions; export only) |
 | 4 | Preview | **Hybrid**: `media` clips play directly from proxies; generated clips play from a per-clip render cache; live preview of the active clip later | Preview matches export; a new engine works with `render()` only | All-live multi-engine sync (hard, preview/export drift), render-only (too slow to feel live) |
@@ -56,6 +57,8 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
 | 20 | MCP scope | **Project + observe + navigate**: every core operation as a typed tool, frame capture as images, what is at a point of a frame (clip stack and composition element, ADR 0011), UI state (playhead, selection, open tab) and navigation (seek, play, select, open file, show transaction diff) | Model can see what it built and resolve "this" from the user's selection; UI actions are already core operations | Project-only (model edits blind), full UI automation (clicks/drags: fragile, adds no capability) |
 | 21 | Ask agent from selection | **"Ask agent" action** (Cmd/Ctrl+L, context menu) writes a compact text reference of the current selection into the active agent terminal's prompt, unsent. Selectable: clips, words/subtitles, time ranges, assets, script scenes, a **rectangular region of the preview frame**, and **picked points**: the clip stack and the composition element under a pixel (ADR 0011) | Removes "which one?" round trips; plain text works with any agent CLI; ids let the agent fetch detail via CLI/MCP | Agent-pull only via `ui_state` (user must still explain), chat panel (decision 9) |
+| 22 | Video from audio | **Part of case A**: new project from an audio file; a built-in subtitles-on-background video with no agent; for richer videos the agent writes a scene plan tied to transcript words before generating clips; audio is edited before visuals (ADR 0015) | Same tools as case A; the simple level is deterministic and must work without an agent | A separate use case, agent-made simple level, clips anchored to words, AI avatars |
+| 23 | Multicam | **Multicam group + program track** of shot clips; a deterministic director (`frameshell direct`, `director.json`) proposes shots with a confidence, the agent reviews doubtful ones, the human corrects with number keys and a multicam viewer (ADR 0016) | One shot change is one clip edit; reproducible over hours of conversation; review stays cheap | One track per person with split clips, agent picks every shot, live switching |
 
 ### Cross-cutting rules
 
@@ -548,6 +551,9 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 |---|---|
 | **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
 | **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
+| **v0.9** | Video from audio (ADR 0015): new project from an audio file, built-in subtitles-on-background video, scene plan tied to transcript words |
+| **v0.10** | Multicam (ADR 0016): one file per person, audio sync, multicam group and program track, `solo`/`two-up`/`grid` shots, `frameshell direct` with `director.json`, number-key switching and multicam viewer |
+| **v0.11** | Multicam sources and shots: speaker diarization and `speaker` on words, gallery-view call recordings, camera sets with separate mics, `screen` and picture-in-picture shots, 9:16 reframing |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
 
