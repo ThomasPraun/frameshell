@@ -66,3 +66,32 @@ export function* decodeSteps(span: SpanTiming, from: number, table: SyncTable): 
     frame = until;
   }
 }
+
+/** One file and the program frames it plays. */
+export interface DecodeRun {
+  path: string;
+  timing: SpanTiming;
+}
+
+/**
+ * `runs` in order, each joined to the one before when it plays on from where
+ * that one stops: same file and speed, next program frame, next source
+ * frame. Decoding then goes on across the join instead of restarting at a
+ * keyframe, as at a multicam shot change that keeps showing an angle.
+ */
+export function joinRuns(runs: Iterable<DecodeRun>): DecodeRun[] {
+  const joined: DecodeRun[] = [];
+  for (const run of runs) {
+    const last = joined.at(-1);
+    const b = run.timing;
+    if (last && last.path === run.path) {
+      const a = last.timing;
+      if (a.end === b.start && a.speed === b.speed && a.in + (a.end - a.start) * a.speed === b.in) {
+        last.timing = { ...a, end: b.end };
+        continue;
+      }
+    }
+    joined.push({ path: run.path, timing: { start: b.start, end: b.end, in: b.in, speed: b.speed } });
+  }
+  return joined;
+}

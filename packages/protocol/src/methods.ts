@@ -693,10 +693,10 @@ export const methods = {
       "`atempo` for clip speed, then two-pass loudness normalization to the target (preset `loudness`, else " +
       "`export.loudness` in `frameshell.json`, else -17 LUFS integrated). Follow the job with `job.list` until it is " +
       "`done` (the file exists at `output`) or `failed` (`error` says why), or subscribe to `job.progress`. Renders from the original assets, not " +
-      "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black) and " +
-      "the sound of every video and audio track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
+      "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black), multicam " +
+      "program tracks (every shot's angles in their tiles) and the sound of every video, audio and program track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
       "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
-      "clips, multicam program tracks), TimelineNotFound, AssetNotFound.",
+      "clips, a multicam group missing, a program track nested under a transformed clip), TimelineNotFound, AssetNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

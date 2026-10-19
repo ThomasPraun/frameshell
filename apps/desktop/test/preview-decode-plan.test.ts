@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { type DecodeStep, decodeSteps, syncTable } from "../src/renderer/src/preview/decode-plan.js";
+import { type DecodeStep, decodeSteps, joinRuns, syncTable } from "../src/renderer/src/preview/decode-plan.js";
+
+describe("joinRuns", () => {
+  const run = (path: string, start: number, end: number, inFrame: number, speed = 1) => ({ path, timing: { start, end, in: inFrame, speed } });
+
+  it("joins spans of one file that play on frame after frame (a shot change keeping an angle)", () => {
+    expect(joinRuns([run("a", 0, 30, 100), run("a", 30, 60, 130), run("a", 60, 90, 160)])).toEqual([run("a", 0, 90, 100)]);
+    expect(joinRuns([run("a", 0, 30, 0, 2), run("a", 30, 40, 60, 2)])).toEqual([run("a", 0, 40, 0, 2)]);
+  });
+
+  it("keeps apart other files, source jumps, gaps and speed changes", () => {
+    const apart = [run("a", 0, 30, 0), run("b", 30, 60, 30), run("b", 60, 90, 0), run("b", 91, 95, 31), run("b", 95, 99, 35, 2)];
+    expect(joinRuns(apart)).toEqual(apart);
+  });
+});
 
 // Seam under test: the decode plan of one media span (ADR 0001: decode from the keyframe before the in-point, discard pre-roll).
 

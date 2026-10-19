@@ -1109,6 +1109,12 @@ code {
   color: var(--text-muted);
 }
 
+/* A shot's angle with no picture yet: the slate fills only its tile, the other angles stay visible. */
+.preview-placeholder-tile {
+  inset: auto;
+  padding: 8px;
+}
+
 .preview-placeholder p {
   margin: 0;
 }

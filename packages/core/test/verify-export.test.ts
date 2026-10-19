@@ -397,6 +397,73 @@ describe("verifyExport", () => {
     expect(report.uncertain).toEqual([expect.objectContaining({ word: "w_000019", reason: "garbled", clipped: true, heardAs: "casa" })]);
   });
 
+  it("passes over a multicam export: the words of every angle are heard under every shot", async () => {
+    const dir = project();
+    const words = (asset: string, spoken: [string, number, number][]) => ({
+      schemaVersion: 1,
+      asset,
+      assetHash: `sha256:${"b".repeat(64)}`,
+      provider: "fake",
+      model: "fake-large",
+      language: "es",
+      words: spoken.map(([text, start, end], i) => ({ id: `w_${String(i + 1).padStart(6, "0")}`, text, start, end, confidence: 0.95 })),
+      edits: {},
+      nextWordId: spoken.length + 1,
+    });
+    writeFileSync(join(dir, "assets", "ana.mp4"), "ana");
+    writeFileSync(join(dir, "assets", "ben.mp4"), "ben");
+    writeFileSync(join(dir, "transcripts", "ana.words.json"), JSON.stringify(words("assets/ana.mp4", [["Buenas", 0.2, 0.6], ["tardes", 0.7, 1.1], ["amigos", 2.0, 2.5]])));
+    // Ben's recording starts at group second 1: his "Hola" at his 0.5 s is heard at 1.5.
+    writeFileSync(join(dir, "transcripts", "ben.words.json"), JSON.stringify(words("assets/ben.mp4", [["Hola", 0.5, 0.9], ["qué", 1.2, 1.4], ["tal", 1.5, 1.8]])));
+    const parsed = parseTimeline({
+      schemaVersion: 1,
+      id: "main",
+      revision: 3,
+      tracks: [
+        {
+          id: "t_p",
+          kind: "program",
+          group: "g_talk",
+          clips: [
+            { id: "c_s1", type: "shot", start: 0, in: 0, out: 1.5, shot: "solo", angles: ["ana"] },
+            { id: "c_s2", type: "shot", start: 1.5, in: 1.5, out: 3, shot: "two-up", angles: ["ana", "ben"] },
+          ],
+        },
+      ],
+      groups: [
+        {
+          id: "g_talk",
+          angles: [
+            { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+            { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1 },
+          ],
+        },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const spoken: [string, number, number][] = [
+      ["Buenas", 0.2, 0.6],
+      ["tardes", 0.7, 1.1],
+      ["Hola", 1.5, 1.9],
+      ["qué", 2.2, 2.4],
+      ["amigos", 2.0, 2.5],
+      ["tal", 2.5, 2.8],
+    ];
+    const heardWords: TranscriptWord[] = spoken.sort((a, b) => a[1] - b[1]).map(([text, start, end]) => ({ text, start, end, confidence: 0.9 }));
+    const report = await verifyExport({
+      projectDir: dir,
+      exportFile: join(dir, "exports", "main.mp4"),
+      timelineId: "main",
+      timeline: parsed.value,
+      providerId: "fake",
+      provider: fakeProvider(heardWords).provider,
+      tools: noTools,
+      extractAudio: fakeExtract(3).extract,
+    });
+    expect(report.lost).toEqual([]);
+    expect(report).toMatchObject({ expected: 6, heard: 6, unchecked: [] });
+  });
+
   it("fails with AssetNotFound for a missing export", async () => {
     const dir = project();
     await expect(run(dir, [], { exportFile: join(dir, "exports", "nope.mp4") }).result).rejects.toMatchObject({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Program } from "../src/renderer/src/preview/program.js";
-import { dragPlacement, layerAt, layerBox, layersAt, layersIn, placementEdit } from "../src/renderer/src/preview/transform-edit.js";
+import { dragPlacement, layerAt, layerBox, layersAt, layersIn, pictureBox, placementEdit } from "../src/renderer/src/preview/transform-edit.js";
 
 // Seam under test: the preview's on-canvas transform handles, as pure geometry (the component only forwards pointer events).
 
@@ -94,6 +94,45 @@ describe("layersIn", () => {
   it("names the clips whose box meets a rectangle, topmost first", () => {
     expect(layersIn(stacked, 30, { x0: 0, y0: 0.6, x1: 0.3, y1: 1 }).map((hit) => hit.clip)).toEqual(["c_0200/c_title", "c_cam"]);
     expect(layersIn(stacked, 30, { x0: 0.7, y0: 0.05, x1: 0.9, y1: 0.3 }).map((hit) => hit.clip)).toEqual(["c_logo", "c_0200/c_title", "c_cam"]);
+  });
+});
+
+describe("multicam shots", () => {
+  const angles = [
+    { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0 },
+  ];
+  const layout = {
+    shot: { id: "c_s1", type: "shot" as const, start: 0, in: 0, out: 3, shot: "two-up" as const, angles: ["ana", "ben"] },
+    group: { id: "g_talk", angles },
+    sizes: { "assets/ana.mp4": HD, "assets/ben.mp4": HD },
+  };
+  const angle = (id: string) => ({ kind: "angle" as const, clip: "c_s1", start: 0, end: 90, proxy: `${id}.mp4`, in: 0, speed: 1, angle: id, layout });
+  const twoUp: Program = { ...program, layers: [program.layers[0]!, [angle("ana")], [angle("ben")]] };
+
+  it("hits the tile of the angle under the point, as footage of the shot", () => {
+    expect(layersAt(twoUp, 30, { x: 0.75, y: 0.5 })).toEqual([
+      { clip: "c_s1", layer: 2, kind: "media", type: "shot", paints: true },
+      { clip: "c_cam", layer: 0, kind: "media", type: "media", paints: true },
+    ]);
+  });
+
+  it("names a shot once for a region over several of its tiles, at its topmost angle there", () => {
+    expect(layersIn(twoUp, 30, { x0: 0.4, y0: 0.4, x1: 0.6, y1: 0.6 }).map(({ clip, layer }) => [clip, layer])).toEqual([
+      ["c_s1", 2],
+      ["c_cam", 0],
+    ]);
+  });
+
+  it("gives a shot no handles: shots fill their tiles, they have no placement", () => {
+    expect(layerBox(twoUp, 30, "c_s1")).toBeNull();
+  });
+
+  it("outlines the tile of the shot's angle under the pointer", () => {
+    expect(pictureBox(twoUp, 30, "c_s1", { x: 0.25, y: 0.5 })).toMatchObject({ layer: 1, box: { left: 0, top: 0, width: 0.5, height: 1 } });
+    expect(pictureBox(twoUp, 30, "c_s1", { x: 0.75, y: 0.5 })).toMatchObject({ layer: 2, box: { left: 0.5, top: 0, width: 0.5, height: 1 } });
+    expect(pictureBox(twoUp, 30, "c_cam", { x: 0.5, y: 0.5 })).toEqual(layerBox(twoUp, 30, "c_cam"));
+    expect(pictureBox(twoUp, 120, "c_s1", { x: 0.5, y: 0.5 })).toBeNull();
   });
 });
 
