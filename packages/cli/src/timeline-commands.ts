@@ -34,7 +34,7 @@ mutations print the new revision):
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
-  --ripple (clip add, clip trim) moves later clips on every video and audio track by the length added or
+  --ripple (clip add, clip trim) moves later clips on every video, audio and program track by the length added or
   removed, the inverse of cut: restore removed material without overlapping the next clip.
   --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
   Subtitle tracks (--follows a video or audio track) show the transcript words of that track's clips: cuts

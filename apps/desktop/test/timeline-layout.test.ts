@@ -223,3 +223,22 @@ describe("clipAt", () => {
     expect(clipAt(layout, { ...viewport, scrollLeft: 20 }, 25, y)?.clip.id).toBe("c_2");
   });
 });
+
+describe("layoutTimeline with a program track", () => {
+  it("stacks program tracks among video tracks as P rows, labelling shots by layout and angles", () => {
+    const shot = { id: "c_s", type: "shot", start: 0, end: 4, in: 0, out: 4, shot: "two-up", angles: ["ana", "ben"] };
+    const layout = layoutTimeline(
+      view([
+        { id: "t_v1", kind: "video", name: null, follows: null, clips: [] },
+        { id: "t_p", kind: "program", name: "Podcast", follows: null, group: "g_talk", clips: [shot] },
+        { id: "t_a1", kind: "audio", name: null, follows: null, clips: [] },
+      ]),
+    );
+    expect(layout.rows.map((row) => [row.id, row.label, row.kind, row.height])).toEqual([
+      ["t_p", "P1", "program", LANE_HEIGHT.program],
+      ["t_v1", "V1", "video", LANE_HEIGHT.video],
+      ["t_a1", "A1", "audio", LANE_HEIGHT.audio],
+    ]);
+    expect(layout.rows[0]!.clips[0]).toMatchObject({ id: "c_s", kind: "shot", name: "two-up · ana, ben", asset: null, start: 0, end: 4 });
+  });
+});

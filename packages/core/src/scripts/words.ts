@@ -1,6 +1,14 @@
 import { readFile, readdir } from "node:fs/promises";
 import { basename, join, sep } from "node:path";
-import { type MediaClip, type ScriptWordRange, type Timeline, type Transcript, parseTimeline, parseTranscript } from "@frameshell/schema";
+import {
+  type MediaClip,
+  type ScriptWordRange,
+  type Timeline,
+  type Transcript,
+  parseTimeline,
+  parseTranscript,
+  withProgramSound,
+} from "@frameshell/schema";
 import { visibleClips } from "../transcripts/verify.js";
 
 /** A scene's words placed on one timeline: first to last placed word, in timeline seconds. */
@@ -121,7 +129,8 @@ function spanOn(id: string, timeline: Timeline, transcript: Transcript, wanted: 
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   const placedIds = new Set<string>();
-  for (const track of timeline.tracks) {
+  // A program track places the words its angles' sound plays.
+  for (const track of withProgramSound(timeline).tracks) {
     if (track.kind === "subtitles") continue;
     // Overlaps trim against every media clip of the track, as in the export and `keptWords`.
     const visible = visibleClips(track.clips.filter((clip): clip is MediaClip => clip.type === "media"));

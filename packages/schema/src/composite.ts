@@ -1,6 +1,19 @@
 // How video layers composite (SPEC §3.4, §3.5, §5.3). Pure and shared: the export compiler and the preview place
 // layers with these same functions, so a preview frame matches the exported one.
-import type { Clip, ClipAudio, ClipTrack, Timeline, Track, Transform } from "./timeline.js";
+import type {
+  AngleCrop,
+  Clip,
+  ClipAudio,
+  ClipTrack,
+  MediaClip,
+  MulticamGroup,
+  ProgramTrack,
+  ShotClip,
+  ShotLayout,
+  Timeline,
+  Track,
+  Transform,
+} from "./timeline.js";
 
 /** A clip {@link Transform} with every default filled in. */
 export interface Placement {
@@ -93,28 +106,50 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * composes with each video clip's ({@link composePlacement}), its gain adds,
  * its mute wins. Subtitle tracks of nested timelines are dropped.
  *
+ * A nested program track on a video track T becomes program track `T/p1`,
+ * `T/p2`, … above T, showing a copy of its group renamed `<nested clip>/<group>`
+ * (appended to `groups`); shots fill the frame, so the nested clip's
+ * transform does not apply to them. On an audio track it becomes its angles'
+ * sound ({@link programSound}).
+ *
  * A clip whose timeline `nested` cannot give, or that would nest a timeline
  * inside itself, stays as it is for the caller to report. The root is
  * assumed to be `timelines/<id>.json`.
  */
 export function flattenTimeline(timeline: Timeline, nested: NestedTimelines): Timeline {
-  return { ...timeline, tracks: flattenTracks(timeline.tracks, nested, [`timelines/${timeline.id}.json`]) };
+  const own = timeline.groups ?? [];
+  const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`]);
+  // Every group of the root stays, shown or not; nested ones only when shown.
+  const groups = [...own, ...flat.groups.filter((group) => !own.includes(group))];
+  return { ...timeline, tracks: flat.tracks, ...(groups.length > 0 ? { groups } : {}) };
 }
 
-function flattenTracks(tracks: readonly Track[], nested: NestedTimelines, stack: readonly string[]): Track[] {
+/** Flattened tracks, and the groups their program tracks show. */
+interface Flat {
+  tracks: Track[];
+  groups: MulticamGroup[];
+}
+
+/** `tracks`, whose program tracks show groups of `ownGroups`, flattened. */
+function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGroup[], nested: NestedTimelines, stack: readonly string[]): Flat {
   const out: Track[] = [];
+  const groups: MulticamGroup[] = [];
   for (const track of tracks) {
-    if (track.kind === "subtitles" || !track.clips.some(isNestedClip)) {
+    if (track.kind === "program") {
+      const group = ownGroups.find((candidate) => candidate.id === track.group);
+      if (group && !groups.includes(group)) groups.push(group);
+    }
+    if (track.kind === "subtitles" || track.kind === "program" || !track.clips.some(isNestedClip)) {
       out.push(track);
       continue;
     }
     const own: Clip[] = [];
-    /** Extra tracks by id, in first-seen order: layers `T/2`… and sound `T/a1`…. */
-    const extra = new Map<string, ClipTrack>();
+    /** Extra tracks by id, in first-seen order: layers `T/2`…, program tracks `T/p1`… and sound `T/a1`…. */
+    const extra = new Map<string, ClipTrack | ProgramTrack>();
     const extraTrack = (id: string, kind: ClipTrack["kind"]) => {
       let found = extra.get(id);
       if (!found) extra.set(id, (found = { id, kind, clips: [] }));
-      return found;
+      return found as ClipTrack;
     };
     for (const clip of track.clips) {
       const inner = isNestedClip(clip) && !stack.includes(clip.source) ? nested(clip.source) : null;
@@ -122,14 +157,35 @@ function flattenTracks(tracks: readonly Track[], nested: NestedTimelines, stack:
         own.push(clip);
         continue;
       }
-      const flat = flattenTracks(inner.tracks, nested, [...stack, clip.source]);
+      const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source]);
       const from = clip.in ?? 0;
-      const to = clip.duration !== undefined ? from + clip.duration : durationOf(flat);
+      const to = clip.duration !== undefined ? from + clip.duration : durationOf(flat.tracks);
       let videoIndex = 0;
+      let programIndex = 0;
       let audioIndex = 0;
       let ownTaken = false;
-      for (const child of flat) {
+      const children = flat.tracks.flatMap((child): Track[] => {
+        if (child.kind !== "program" || track.kind !== "audio") return [child];
+        const group = flat.groups.find((candidate) => candidate.id === child.group);
+        return group ? programSound(child, group) : [];
+      });
+      for (const child of children) {
         if (child.kind === "subtitles") continue;
+        if (child.kind === "program") {
+          const group = flat.groups.find((candidate) => candidate.id === child.group);
+          if (!group) continue;
+          // A copy per nested clip, so the clip's gain and mute can go onto its angles.
+          const angles = group.angles.map((angle) => {
+            const audio = composeAudio(clip.audio, angle.audio);
+            return audio ? { ...angle, audio } : angle;
+          });
+          const renamed: MulticamGroup = { ...group, id: `${clip.id}/${group.id}`, angles };
+          groups.push(renamed);
+          const id = `${track.id}/p${++programIndex}`;
+          const shots = child.clips.flatMap((shot) => windowShot(shot, from, to, clip) ?? []);
+          extra.set(id, { id, kind: "program", ...(child.name ? { name: child.name } : {}), group: renamed.id, clips: shots });
+          continue;
+        }
         let target: Clip[];
         if (track.kind === "video" && child.kind === "video") {
           videoIndex++;
@@ -148,11 +204,22 @@ function flattenTracks(tracks: readonly Track[], nested: NestedTimelines, stack:
         }
       }
     }
-    const byStart = (a: Clip, b: Clip) => a.start - b.start;
+    const byStart = (a: { start: number }, b: { start: number }) => a.start - b.start;
     out.push({ ...track, clips: own.sort(byStart) });
-    for (const added of extra.values()) out.push({ ...added, clips: added.clips.sort(byStart) });
+    for (const added of extra.values()) {
+      (added.clips as { start: number }[]).sort(byStart);
+      out.push(added);
+    }
   }
-  return out;
+  return { tracks: out, groups };
+}
+
+/** `shot` (nested seconds) cut to `[from, to)` and moved to the nested clip's timeline position; null when nothing of it plays. */
+function windowShot(shot: ShotClip, from: number, to: number, host: Extract<Clip, { type: "timeline" }>): ShotClip | null {
+  const a = Math.max(shot.start, from);
+  const b = Math.min(shot.start + (shot.out - shot.in), to);
+  if (b <= a) return null;
+  return { ...shot, id: `${host.id}/${shot.id}`, start: host.start + (a - from), in: shot.in + (a - shot.start), out: shot.in + (b - shot.start) };
 }
 
 /** Adapter types never match `timeline` (ADAPTER_CLIP_TYPE_PATTERN), so `type` alone narrows. */
@@ -171,7 +238,8 @@ function durationOf(tracks: readonly Track[]): number {
   let end = 0;
   for (const track of tracks) {
     if (track.kind === "subtitles") continue;
-    for (const clip of track.clips) end = Math.max(end, clipEnd(clip) ?? clip.start);
+    if (track.kind === "program") for (const shot of track.clips) end = Math.max(end, shot.start + (shot.out - shot.in));
+    else for (const clip of track.clips) end = Math.max(end, clipEnd(clip) ?? clip.start);
   }
   return end;
 }
@@ -213,4 +281,162 @@ function composeAudio(outer: ClipAudio | undefined, inner: ClipAudio | undefined
   const gain = (outer.gain ?? 0) + (inner?.gain ?? 0);
   const muted = outer.muted === true || inner?.muted === true;
   return { ...inner, ...(gain !== 0 || inner?.gain !== undefined ? { gain } : {}), ...(muted ? { muted } : {}) };
+}
+
+// Multicam shots (ADR 0016). A shot shows its angles in tiles that cover the frame without gaps; each angle's
+// picture (after its own crop) fills its tile and is cut to the tile's aspect, centered. Sound never depends
+// on the shot: every angle of the group plays under every shot.
+
+/** One angle's picture in a shot: which source pixels land in which output rectangle. */
+export interface ShotLayer {
+  /** Angle id. */
+  angle: string;
+  /** Project-relative asset of the angle. */
+  asset: string;
+  /** Output rectangle, integer pixels inside the frame. */
+  tile: LayerRect;
+  /** Source rectangle scaled into `tile`, integer pixels inside the source frame. */
+  crop: LayerRect;
+}
+
+/**
+ * Tiles of a `layout` shot with `count` angles in an `output` frame, in
+ * angle order. `solo` covers the frame; `two-up` splits it side by side, or
+ * stacked when the frame is taller than wide; `grid` picks the columns whose
+ * tiles come closest to `aspect` (width / height of the pictures; default
+ * 16:9), the last row centered when not full. Edges round to whole pixels,
+ * so tiles meet without gaps.
+ */
+export function shotTiles(layout: ShotLayout, count: number, output: Size, aspect = 16 / 9): LayerRect[] {
+  if (count < 1) return [];
+  const { width, height } = output;
+  if (layout === "solo") return [{ left: 0, top: 0, width, height }];
+  let cols: number;
+  if (layout === "two-up") cols = width >= height ? 2 : 1;
+  else cols = gridColumns(count, output, aspect);
+  const shown = layout === "two-up" ? 2 : count;
+  const rows = Math.ceil(shown / cols);
+  const tiles: LayerRect[] = [];
+  for (let index = 0; index < shown; index++) {
+    const row = Math.floor(index / cols);
+    const inRow = Math.min(cols, shown - row * cols);
+    const offset = ((cols - inRow) * width) / cols / 2;
+    const column = index - row * cols;
+    const left = Math.round(offset + (column * width) / cols);
+    const right = Math.round(offset + ((column + 1) * width) / cols);
+    const top = Math.round((row * height) / rows);
+    const bottom = Math.round(((row + 1) * height) / rows);
+    tiles.push({ left, top, width: right - left, height: bottom - top });
+  }
+  return tiles;
+}
+
+/** Columns of a `count`-tile grid: tile aspect nearest `aspect`; ties to fewer empty cells, then fewer columns. */
+function gridColumns(count: number, output: Size, aspect: number): number {
+  let best = { cols: 1, score: Number.POSITIVE_INFINITY, empty: Number.POSITIVE_INFINITY };
+  for (let cols = 1; cols <= count; cols++) {
+    const rows = Math.ceil(count / cols);
+    const score = Math.abs(Math.log(output.width / cols / (output.height / rows) / aspect));
+    const empty = cols * rows - count;
+    if (score < best.score - 1e-9 || (Math.abs(score - best.score) <= 1e-9 && empty < best.empty)) best = { cols, score, empty };
+  }
+  return best.cols;
+}
+
+/** Source pixels left by an angle's `crop`, before any layout. */
+export function croppedRect(source: Size, crop: AngleCrop | undefined): LayerRect {
+  const left = Math.round((crop?.left ?? 0) * source.width);
+  const top = Math.round((crop?.top ?? 0) * source.height);
+  const right = Math.round((crop?.right ?? 0) * source.width);
+  const bottom = Math.round((crop?.bottom ?? 0) * source.height);
+  return { left, top, width: Math.max(1, source.width - left - right), height: Math.max(1, source.height - top - bottom) };
+}
+
+/** Centered part of `area` (source pixels) with the aspect of `tile`, so it fills the tile without bars. */
+export function coverCrop(area: LayerRect, tile: Size): LayerRect {
+  const scale = Math.max(tile.width / area.width, tile.height / area.height);
+  const width = Math.max(1, Math.min(area.width, Math.round(tile.width / scale)));
+  const height = Math.max(1, Math.min(area.height, Math.round(tile.height / scale)));
+  return {
+    left: area.left + Math.floor((area.width - width) / 2),
+    top: area.top + Math.floor((area.height - height) / 2),
+    width,
+    height,
+  };
+}
+
+/**
+ * Layers of `shot` in an `output` frame: one per angle it shows, in its
+ * order, each angle's cropped picture filling its tile ({@link shotTiles},
+ * {@link coverCrop}). `sourceSize` gives each asset's picture size. Angles
+ * missing from `group` are skipped (the timeline schema refuses them).
+ */
+export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, sourceSize: (asset: string) => Size): ShotLayer[] {
+  const angles = shot.angles.flatMap((id) => group.angles.find((angle) => angle.id === id) ?? []);
+  const areas = angles.map((angle) => croppedRect(sourceSize(angle.asset), angle.crop));
+  const aspect = areas.length > 0 ? areas.reduce((sum, area) => sum + area.width / area.height, 0) / areas.length : 16 / 9;
+  const tiles = shotTiles(shot.shot, angles.length, output, aspect);
+  return angles.map((angle, index) => {
+    const tile = tiles[index]!;
+    return { angle: angle.id, asset: angle.asset, tile, crop: coverCrop(areas[index]!, tile) };
+  });
+}
+
+/**
+ * Every angle's sound under `shot`, as media clips (`<shot>/<angle>`) in
+ * group order: source time = group time - the angle's offset, with its gain
+ * and mute. The part before an asset's time 0 is left out (the clip starts
+ * later); the end is not bounded by the asset's length, which only a probe
+ * knows. Angles with nothing under the shot are left out.
+ */
+export function shotSound(shot: ShotClip, group: MulticamGroup): MediaClip[] {
+  const clips: MediaClip[] = [];
+  for (const angle of group.angles) {
+    const from = shot.in - angle.offset;
+    const to = shot.out - angle.offset;
+    if (to <= 0) continue;
+    const skipped = Math.max(0, -from);
+    clips.push({
+      id: `${shot.id}/${angle.id}`,
+      type: "media",
+      asset: angle.asset,
+      start: shot.start + skipped,
+      in: from + skipped,
+      out: to,
+      ...(angle.audio ? { audio: angle.audio } : {}),
+    });
+  }
+  return clips;
+}
+
+/**
+ * Sound of a program track showing `group`: one audio track per angle
+ * (`<track>/<angle>`, group order) holding that angle's {@link shotSound}
+ * under each shot, so a mixer that plays audio tracks plays the program.
+ */
+export function programSound(track: ProgramTrack, group: MulticamGroup): ClipTrack[] {
+  return group.angles.map((angle) => {
+    const alone = { ...group, angles: [angle] };
+    return { id: `${track.id}/${angle.id}`, kind: "audio", name: angle.name, clips: track.clips.flatMap((shot) => shotSound(shot, alone)) };
+  });
+}
+
+/** The group `track` shows; null when the timeline has none by that id. */
+export function programGroup(timeline: Pick<Timeline, "groups">, track: ProgramTrack): MulticamGroup | null {
+  return timeline.groups?.find((group) => group.id === track.group) ?? null;
+}
+
+/**
+ * `timeline` with each program track replaced, in its place, by its
+ * {@link programSound} tracks, for code that only listens (word checks,
+ * audio pauses). A program track whose group is missing goes silent.
+ */
+export function withProgramSound(timeline: Timeline): Timeline {
+  if (!timeline.tracks.some((track) => track.kind === "program")) return timeline;
+  const tracks = timeline.tracks.flatMap((track): Track[] => {
+    if (track.kind !== "program") return [track];
+    const group = programGroup(timeline, track);
+    return group ? programSound(track, group) : [];
+  });
+  return { ...timeline, tracks };
 }

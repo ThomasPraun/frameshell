@@ -284,7 +284,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "pattern": "^(?!(?:media|timeline)$)[a-z][a-z0-9-]*$",
+                          "pattern": "^(?!(?:media|timeline|shot)$)[a-z][a-z0-9-]*$",
                           "description": "Clip type registered by an adapter plugin, e.g. `hyperframes`."
                         },
                         "source": {
@@ -336,6 +336,112 @@
             "properties": {
               "id": {
                 "type": "string",
+                "minLength": 1,
+                "description": "Stable, core-generated (`t_…`)."
+              },
+              "kind": {
+                "type": "string",
+                "const": "program"
+              },
+              "name": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the multicam group in the timeline's `groups`; one program track per group."
+              },
+              "clips": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Stable, core-generated (`c_…`); reference clips by it."
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "shot"
+                    },
+                    "start": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Timeline seconds of the first frame."
+                    },
+                    "in": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Group-clock seconds of the first frame."
+                    },
+                    "out": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "description": "Group-clock seconds just after the last frame; greater than `in`."
+                    },
+                    "shot": {
+                      "type": "string",
+                      "enum": [
+                        "solo",
+                        "two-up",
+                        "grid"
+                      ],
+                      "description": "Layout: `solo` (one angle), `two-up` (two), `grid` (two or more)."
+                    },
+                    "angles": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats."
+                    },
+                    "confidence": {
+                      "description": "Set by the director: 0 (a guess) to 1 (sure). Absent on shots a person chose.",
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "reason": {
+                      "description": "Set by the director: why it chose this shot, in a few words.",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "scriptRef": {
+                      "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "start",
+                    "in",
+                    "out",
+                    "shot",
+                    "angles"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Shots, sorted by `start`, never overlapping."
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "group",
+              "clips"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
                 "minLength": 1
               },
               "kind": {
@@ -378,6 +484,110 @@
         ]
       },
       "description": "Stacking order: the first video track is the bottom layer."
+    },
+    "groups": {
+      "description": "Multicam groups (ADR 0016), each shown by one program track.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable, core-generated (`g_…`); a program track names it in `group`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "angles": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Unique within the group; shots name angles by it."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Person or camera, e.g. `Ana`."
+                },
+                "asset": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Project-relative media file, e.g. `assets/ana.mp4`."
+                },
+                "offset": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."
+                },
+                "crop": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "description": "Default 0.",
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    },
+                    "top": {
+                      "description": "Default 0.",
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    },
+                    "right": {
+                      "description": "Default 0.",
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    },
+                    "bottom": {
+                      "description": "Default 0.",
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it."
+                },
+                "audio": {
+                  "description": "Gain and mute of this angle's sound, which plays under every shot.",
+                  "type": "object",
+                  "properties": {
+                    "gain": {
+                      "description": "Gain in dB; 0 = unchanged, negative = quieter. Default 0.",
+                      "type": "number"
+                    },
+                    "muted": {
+                      "description": "Default false.",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "asset",
+                "offset"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "angles"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

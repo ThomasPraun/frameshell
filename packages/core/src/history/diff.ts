@@ -1,13 +1,13 @@
 import { isDeepStrictEqual } from "node:util";
 import { type ClipDiff, ErrorCode, type JournalEntry, RpcError } from "@frameshell/protocol";
-import type { Clip, Timeline } from "@frameshell/schema";
+import type { AnyClip, Timeline } from "@frameshell/schema";
 import { applyPatch } from "../timeline/patch.js";
 import { historyNotFound, journalGap } from "./revert.js";
 
 /** A clip and the track holding it. */
 export interface PlacedClip {
   track: string;
-  clip: Clip;
+  clip: AnyClip;
 }
 
 /** One clip the target changed; see {@link planDiff}. */
@@ -90,7 +90,7 @@ function touchedClips(entry: JournalEntry, before: Timeline, after: Timeline): s
 function locate(timeline: Timeline, id: string): PlacedClip | null {
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
-    const clip = track.clips.find((candidate) => candidate.id === id);
+    const clip = (track.clips as AnyClip[]).find((candidate) => candidate.id === id);
     if (clip) return { track: track.id, clip };
   }
   return null;

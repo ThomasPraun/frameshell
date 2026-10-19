@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 37;
+export const PROTOCOL_VERSION = 38;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -695,7 +695,7 @@ export const methods = {
       "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black) and " +
       "the sound of every video and audio track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
       "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
-      "clips), TimelineNotFound, AssetNotFound.",
+      "clips, multicam program tracks), TimelineNotFound, AssetNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -1238,9 +1238,9 @@ export const methods = {
     mutating: true,
     description:
       "Remove the timeline range [from, to) and close the gap (ripple): clips inside are removed, clips crossing an edge " +
-      "are trimmed or split, later clips move left by `to - from`. Applies to every video and audio track unless " +
+      "are trimmed or split, later clips move left by `to - from`. Applies to every video, audio and program track unless " +
       "`tracks` is given (cutting only some tracks shifts them against the rest). Example: `{ from: 12.4, to: 13.1 }` " +
-      "removes a 0.7 s silence. Where media clips with audio lie under an edge, it snaps into the nearest audio pause " +
+      "removes a 0.7 s silence. Where media clips with audio (or a program track's angles) lie under an edge, it snaps into the nearest audio pause " +
       "within ±`snapWindow` (default: project `editing.snapWindow`, else 0.5 s) so no word is clipped; `snaps` reports requested vs applied and " +
       "`clean: false` when no pause was in reach (speech may be clipped there). `snap: false` cuts exactly. " +
       "A cut that trims or splits an adapter clip (e.g. `hyperframes`) adds a `warnings` entry naming its id, type and `scriptRef`: edit audio before building visuals.",
@@ -1857,6 +1857,8 @@ export const ErrorCode = {
   ClipRenderFailed: -32038,
   /** data: `{ clip, type, timeline, details }`: the clip cannot be shown live (no adapter, adapter without `livePreview`, or it failed). */
   LiveUnavailable: -32039,
+  /** data: `{ op, feature, hint }`: valid request this version cannot carry out yet, e.g. `clip.add` on a program track. */
+  Unsupported: -32040,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

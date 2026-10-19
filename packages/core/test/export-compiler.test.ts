@@ -249,6 +249,24 @@ describe("export compiler", () => {
     );
   });
 
+  it("refuses a multicam program track as not supported yet, for renders and frames", () => {
+    const multicam: Timeline = {
+      ...timeline,
+      tracks: [
+        ...timeline.tracks,
+        { id: "t_p", kind: "program", group: "g_talk", clips: [{ id: "c_s", type: "shot", start: 0, in: 0, out: 2, shot: "solo", angles: ["ana"] }] },
+      ],
+      groups: [{ id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/talk.mp4", offset: 0 }] }],
+    };
+    const refusal = expect.objectContaining({
+      code: ErrorCode.ExportUnsupported,
+      message: expect.stringMatching(/Track t_p is a multicam program track \(group g_talk\); exporting multicam shots is not supported yet/),
+      data: { timeline: "main", track: "t_p" },
+    });
+    expect(() => compileRender({ timeline: multicam, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(refusal);
+    expect(() => compileFrame({ timeline: multicam, fps: 30, at: 1, width: 640, height: 360, output: "frame.png", sources, resolution })).toThrow(refusal);
+  });
+
   describe("generated clips (SPEC §3.5 step 2, ADR 0002)", () => {
     const layered: Timeline = {
       schemaVersion: 1,

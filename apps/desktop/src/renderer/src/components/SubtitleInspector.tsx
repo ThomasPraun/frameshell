@@ -38,7 +38,7 @@ export function SubtitleInspector({ track }: { track: string }) {
     setError(null);
     sendClipEdit({ op: "track.set", args }).catch((failure: unknown) => setError((failure as Error).message));
   };
-  const sources = layout.rows.filter((candidate) => candidate.kind !== "subtitles");
+  const sources = layout.rows.filter((candidate) => candidate.kind === "video" || candidate.kind === "audio");
 
   return (
     <div className="clip-inspector subtitle-inspector" role="group" aria-label={t.inspector.settingsOfSubtitleTrack(row.label)} data-track={track}>

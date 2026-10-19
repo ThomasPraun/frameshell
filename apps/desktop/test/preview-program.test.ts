@@ -332,3 +332,27 @@ describe("program differences (live timeline changes)", () => {
     expect(firstAudioDifference(before, after, 0)).toBe(240_000);
   });
 });
+
+describe("compileProgram with a multicam program track", () => {
+  const shot = (id: string, start: number, from: number, to: number) => ({ id, type: "shot", start, in: from, out: to, end: start + to - from, shot: "solo", angles: ["ana"] });
+  const group = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/a.mp4", offset: 0 }] };
+
+  it("shows a placeholder per shot as a layer in stacking order, and plays no sound for it yet", () => {
+    const program = compileProgram(
+      {
+        ...view([
+          { id: "v1", kind: "video", name: null, follows: null, clips: [clip("c1", 0, 10, 12)] },
+          { id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips: [shot("c_s1", 1, 0, 2), shot("c_s2", 3, 5, 6)] },
+        ]),
+        groups: [group],
+      },
+      assets(asset("assets/a.mp4")),
+    );
+    expect(program.layers[1]).toEqual([
+      { kind: "placeholder", clip: "c_s1", start: 30, end: 90, reason: "multicam", type: "shot" },
+      { kind: "placeholder", clip: "c_s2", start: 90, end: 120, reason: "multicam", type: "shot" },
+    ]);
+    expect(program.frames).toBe(120);
+    expect(program.audio.map((span) => span.clip)).toEqual(["c1"]);
+  });
+});

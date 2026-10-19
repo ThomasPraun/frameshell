@@ -33,7 +33,7 @@ export const HistoryOperationSchema = z.object({
   at: z.string(),
   revisionBefore: z.int(),
   revision: z.int(),
-  touched: z.array(z.string()).describe("Ids of the tracks and clips this operation changed."),
+  touched: z.array(z.string()).describe("Ids of the multicam groups, tracks and clips this operation changed."),
 });
 
 /** Consecutive-in-time operations of one transaction, oldest first. */

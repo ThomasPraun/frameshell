@@ -14,7 +14,7 @@ import { timelineHash } from "./hash.js";
 
 /**
  * Pure history logic over a journal (SPEC §6.2): what `revert` restores and
- * when it must refuse, and the grouped `history` view. Entity keys are
+ * when it must refuse, and the grouped `history` view. Entity keys are `group:<id>`,
  * `track:<id>`, `clip:<id>` and `order` (track stacking order).
  */
 
@@ -64,7 +64,7 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
       const blamed = segment.filter((other) => relates(other, key, state, current));
       for (const other of blamed.length > 0 ? blamed : segment.slice(0, 1)) {
         const conflict = conflicts.get(other.id) ?? { entry: other, ids: new Set<string>() };
-        conflict.ids.add(key.replace(/^(clip|track):/, ""));
+        conflict.ids.add(key.replace(/^(clip|track|group):/, ""));
         conflicts.set(other.id, conflict);
       }
     }
@@ -82,9 +82,13 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
   return restored;
 }
 
-/** Ids of the tracks and clips a patch changes (clips named once, tracks first). */
+/** Ids of the multicam groups, tracks and clips a patch changes (each named once; groups, then tracks, then clips). */
 export function touchedIds(patch: TimelinePatch): string[] {
-  const ids = [...(patch.tracks ?? []).map((entry) => entry.id), ...(patch.clips ?? []).map((entry) => entry.id)];
+  const ids = [
+    ...(patch.groups ?? []).map((entry) => entry.id),
+    ...(patch.tracks ?? []).map((entry) => entry.id),
+    ...(patch.clips ?? []).map((entry) => entry.id),
+  ];
   return [...new Set(ids)];
 }
 
@@ -161,6 +165,7 @@ export function journalGap(current: Timeline, tail: JournalEntry[]): string | nu
 
 function patchKeys(patch: TimelinePatch): string[] {
   return [
+    ...(patch.groups ?? []).map((entry) => `group:${entry.id}`),
     ...(patch.tracks ?? []).map((entry) => `track:${entry.id}`),
     ...(patch.clips ?? []).map((entry) => `clip:${entry.id}`),
     ...(patch.order ? ["order"] : []),
@@ -190,6 +195,7 @@ function value(timeline: Timeline, key: string): unknown {
   if (key === "order") return timeline.tracks.map((track) => track.id);
   const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   if (kind === "track") return timeline.tracks.find((track) => track.id === id) ?? null;
+  if (kind === "group") return timeline.groups?.find((group) => group.id === id) ?? null;
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     const clip = track.clips.find((candidate) => candidate.id === id);
@@ -208,6 +214,7 @@ function relates(entry: JournalEntry, key: string, ...states: Timeline[]): boole
   if (patchKeys(patch).includes(key)) return true;
   if (key === "order") return (patch.tracks ?? []).length > 0;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
+  if (key.startsWith("group:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);
   return holders.some((track) => (patch.tracks ?? []).some((entry) => entry.id === track));
 }

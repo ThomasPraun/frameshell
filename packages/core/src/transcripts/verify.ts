@@ -10,7 +10,7 @@ import {
   type TranscribeVerifyResult,
   type UncertainWord,
 } from "@frameshell/protocol";
-import type { MediaClip, Timeline, Transcript } from "@frameshell/schema";
+import { type MediaClip, type Timeline, type Transcript, withProgramSound } from "@frameshell/schema";
 import { type WordHearing, alignWords, comparableText } from "./align.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
 import { type TranscriberTools, resolveTranscript } from "./transcriber.js";
@@ -107,7 +107,9 @@ type SourceTranscript = { rel: string; transcript: Transcript } | { unchecked: "
  */
 export async function verifyExport(options: VerifyExportOptions): Promise<TranscribeVerifyResult> {
   const started = performance.now();
-  const { projectDir, exportFile, timeline, providerId, tools } = options;
+  const { projectDir, exportFile, providerId, tools } = options;
+  // Words are heard, not seen: a program track counts as its angles' sound.
+  const timeline = withProgramSound(options.timeline);
   const progress = options.progress ?? (() => {});
   const extractAudio = options.extractAudio ?? extractAudioWithFfmpeg;
   if (!(await isFile(exportFile))) {
@@ -471,11 +473,11 @@ function repeatCollapses(kept: readonly KeptWord[], hearing: readonly WordHearin
   return found;
 }
 
-/** Timeline seconds up to the end of its last clip; nested timelines without `duration` are not counted. */
+/** Timeline seconds up to the end of its last clip; nested timelines without `duration` are not counted. Program tracks come as sound. */
 function timelineDuration(timeline: Timeline): number {
   let end = 0;
   for (const track of timeline.tracks) {
-    if (track.kind === "subtitles") continue;
+    if (track.kind === "subtitles" || track.kind === "program") continue;
     for (const clip of track.clips) {
       if ("asset" in clip) end = Math.max(end, clip.start + (clip.out - clip.in) / (clip.speed ?? 1));
       else if (clip.duration !== undefined) end = Math.max(end, clip.start + clip.duration);

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
-  ClipSchema,
+  AnyClipSchema,
   MAX_SNAP_WINDOW_S,
+  MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
@@ -48,7 +49,7 @@ const rippleArg = (what: string) =>
     .boolean()
     .optional()
     .describe(
-      `${what} Applies to every video and audio track (or only \`rippleTracks\`), like \`cut\`, so tracks stay in sync; clips crossing the ` +
+      `${what} Applies to every video, audio and program track (or only \`rippleTracks\`), like \`cut\`, so tracks stay in sync; clips crossing the ` +
         "insertion point stay where they are. Default false: nothing else moves, and a clip that would overlap its " +
         "neighbour is refused.",
     );
@@ -59,8 +60,8 @@ const rippleTracksArg = z
   .min(1)
   .optional()
   .describe(
-    "With `ripple: true`: the only video and audio tracks whose later clips move; the clip's own track always moves. " +
-      "Default: every video and audio track. Leave out a track whose later clips would leave a gap (black, silence) " +
+    "With `ripple: true`: the only video, audio and program tracks whose later clips move; the clip's own track always moves. " +
+      "Default: every video, audio and program track. Leave out a track whose later clips would leave a gap (black, silence) " +
       "behind them, e.g. footage or music under a restored voice line; that track keeps its timing.",
   );
 
@@ -225,7 +226,7 @@ export const operationArgs = {
       .array(TrackRef)
       .min(1)
       .optional()
-      .describe("Tracks to cut. Default: every video and audio track, which keeps them in sync."),
+      .describe("Tracks to cut. Default: every video, audio and program track, which keeps them in sync."),
     ...snapArgs,
   }),
 } as const;
@@ -236,10 +237,14 @@ export type OperationName = keyof typeof operationArgs;
 /**
  * Change that restores or replaces parts of a timeline. Every operation's
  * inverse is a patch, so one `apply` undoes any operation.
- * Applied in order: `tracks` (replace, insert or delete whole tracks), then
- * `clips` (upsert or delete one clip in a track), then `order`.
+ * Applied in order: `groups` (replace, insert or delete whole multicam
+ * groups), `tracks` (replace, insert or delete whole tracks), then `clips`
+ * (upsert or delete one clip in a track), then `order`.
  */
 export const TimelinePatchSchema = z.strictObject({
+  groups: z
+    .array(z.strictObject({ id: z.string().min(1), group: MulticamGroupSchema.nullable().describe("Full group; null deletes it.") }))
+    .optional(),
   tracks: z
     .array(z.strictObject({ id: z.string().min(1), track: TrackSchema.nullable().describe("Full track; null deletes it.") }))
     .optional(),
@@ -248,7 +253,7 @@ export const TimelinePatchSchema = z.strictObject({
       z.strictObject({
         track: z.string().min(1),
         id: z.string().min(1),
-        clip: ClipSchema.nullable().describe("Full clip; null deletes it."),
+        clip: AnyClipSchema.nullable().describe("Full clip; null deletes it."),
       }),
     )
     .optional(),
@@ -327,9 +332,9 @@ export const OperationResultSchema = z.object({
   operation: OperationRecordSchema,
   changes: z
     .object({
-      added: z.array(z.string()).describe("Ids of tracks and clips created."),
-      updated: z.array(z.string()).describe("Ids of tracks and clips changed."),
-      removed: z.array(z.string()).describe("Ids of tracks and clips deleted."),
+      added: z.array(z.string()).describe("Ids of multicam groups, tracks and clips created."),
+      updated: z.array(z.string()).describe("Ids of multicam groups, tracks and clips changed."),
+      removed: z.array(z.string()).describe("Ids of multicam groups, tracks and clips deleted."),
       range: z
         .object({
           from: z.number(),
@@ -380,14 +385,23 @@ const StoredStyleSchema = z
   .optional()
   .describe("Subtitle tracks: `style` as stored (unset fields use the preset's; no preset = `big-keyword`); absent for clip tracks and when unset.");
 
+/** Track kinds as `timeline.show` and `track.list` report them. */
+const TrackKindSchema = z
+  .enum(["video", "audio", "program", "subtitles"])
+  .describe("`program`: the shots of a multicam group (ADR 0016), its angles' sound under every shot.");
+
+/** Group id of a program track in track views. */
+const ProgramGroupSchema = z.string().optional().describe("Program tracks: id of the multicam group in `groups`; absent for other tracks.");
+
 /** Compact track summary of `track.list`. */
 export const TrackSummarySchema = z.object({
   id: z.string(),
-  kind: z.enum(["video", "audio", "subtitles"]),
+  kind: TrackKindSchema,
   name: z.string().nullable(),
   follows: z.string().nullable().describe("Subtitle tracks: followed track id; null otherwise."),
+  group: ProgramGroupSchema,
   style: StoredStyleSchema,
-  clips: z.int().describe("Number of clips; 0 for subtitle tracks."),
+  clips: z.int().describe("Number of clips (shots on a program track); 0 for subtitle tracks."),
   end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
 
@@ -401,13 +415,18 @@ export const TimelineViewSchema = z.object({
   tracks: z.array(
     z.object({
       id: z.string(),
-      kind: z.enum(["video", "audio", "subtitles"]),
+      kind: TrackKindSchema,
       name: z.string().nullable(),
       follows: z.string().nullable(),
+      group: ProgramGroupSchema,
       style: StoredStyleSchema,
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),
+  groups: z
+    .array(MulticamGroupSchema)
+    .optional()
+    .describe("Multicam groups as stored (angles with asset, offset, crop, audio); absent when the timeline has none."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),
 });
 

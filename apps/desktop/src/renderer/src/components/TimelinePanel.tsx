@@ -906,7 +906,7 @@ function TimelineCanvas({
               className="icon-button"
               aria-label={t.timeline.addSubtitleTrack}
               title={t.timeline.addSubtitleTitle}
-              disabled={!layout?.rows.some((row) => row.kind !== "subtitles")}
+              disabled={!layout?.rows.some((row) => row.kind === "video" || row.kind === "audio")}
               onClick={addSubtitles}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1047,7 +1047,8 @@ const OP_LABELS: Record<string, string> = {
  * track; null when there is no clip track.
  */
 function subtitleSource(layout: TimelineLayout | null, selectedClips: readonly string[], subtitles: SubtitlesState): string | null {
-  const rows = layout?.rows.filter((row) => row.kind !== "subtitles") ?? [];
+  // Subtitles follow video or audio tracks only.
+  const rows = layout?.rows.filter((row) => row.kind === "video" || row.kind === "audio") ?? [];
   const picked = rows.find((row) => row.clips.some((clip) => selectedClips.includes(clip.id)));
   const transcribed = rows.find((row) => row.clips.some((clip) => clip.asset !== null && subtitles.transcriptOf(clip.asset) !== null));
   // Rows list the top video layer first: the base track is the last video row.

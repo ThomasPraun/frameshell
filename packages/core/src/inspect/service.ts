@@ -14,7 +14,7 @@ import {
   RpcError,
   markGenerated,
 } from "@frameshell/protocol";
-import { type Clip, type Size, type Timeline, layerRect, placementOf } from "@frameshell/schema";
+import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementOf, programGroup, shotLayers } from "@frameshell/schema";
 import { Chrome } from "./chrome.js";
 
 /** Alpha × opacity below this does not count as painting, as in the app (`PAINT_MIN`). */
@@ -42,7 +42,7 @@ export interface InspectOptions {
 export type InspectResult = MethodResult<"inspect.point">;
 
 interface Hit {
-  clip: Clip;
+  clip: AnyClip;
   type: string;
   paints: boolean;
   generated: boolean;
@@ -131,6 +131,18 @@ export class InspectService {
   async #hits(root: string, timeline: Timeline, fps: number, frame: number, resolution: Size, pixel: { x: number; y: number }): Promise<Hit[]> {
     const hits: Hit[] = [];
     for (const track of timeline.tracks) {
+      if (track.kind === "program") {
+        const shot = track.clips.find((candidate) => Math.round(candidate.start * fps) <= frame && frame < endFrame(candidate, fps));
+        const group = programGroup(timeline, track);
+        if (!shot || !group) continue;
+        const sizes = new Map<string, Size>();
+        for (const angle of group.angles) sizes.set(angle.asset, (await this.#options.pictureSize(root, angle.asset)) ?? resolution);
+        const layer = shotLayers(shot, group, resolution, (asset) => sizes.get(asset) ?? resolution).find(
+          ({ tile }) => pixel.x >= tile.left && pixel.x < tile.left + tile.width && pixel.y >= tile.top && pixel.y < tile.top + tile.height,
+        );
+        if (layer) hits.unshift({ clip: shot, type: "shot", paints: true, generated: false, rect: layer.tile });
+        continue;
+      }
       if (track.kind !== "video") continue;
       const clip = track.clips.find((candidate) => Math.round(candidate.start * fps) <= frame && frame < endFrame(candidate, fps));
       if (!clip || clip.type === "timeline") continue;
@@ -165,9 +177,10 @@ export class InspectService {
 }
 
 /** Last frame + 1 of a clip on the frame grid; its start for an unresolved nested clip. */
-function endFrame(clip: Clip, fps: number): number {
+function endFrame(clip: AnyClip, fps: number): number {
   const start = Math.round(clip.start * fps);
   if ("asset" in clip) return Math.max(start + 1, Math.round((clip.start + (clip.out - clip.in) / (clip.speed ?? 1)) * fps));
+  if (isShotClip(clip)) return Math.max(start + 1, Math.round((clip.start + (clip.out - clip.in)) * fps));
   return clip.duration !== undefined ? Math.max(start + 1, Math.round((clip.start + clip.duration) * fps)) : start;
 }
 

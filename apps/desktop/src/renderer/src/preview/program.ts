@@ -1,6 +1,6 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import type { Clip, Timeline, Track } from "@frameshell/schema";
+import type { Clip, ProgramTrack, Timeline, Track } from "@frameshell/schema";
 import { type Placement, type Size, flattenTimeline, placementOf } from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -17,7 +17,9 @@ export type PlaceholderReason =
   /** Proxy not built yet: ingest pending or running. */
   | "ingest"
   /** Ingest failed, or the asset is not in `asset.list` (missing file). */
-  | "unavailable";
+  | "unavailable"
+  /** Shot of a multicam program track: the preview does not play shots yet. */
+  | "multicam";
 
 /** One stretch of a video layer, program frames `[start, end)`. */
 export type VideoSpan =
@@ -99,7 +101,8 @@ export interface AudioSpan {
 /**
  * The preview's program: every video track as a layer, composited bottom
  * first with each clip's placement, and the sound of every unmuted media
- * clip on every track, mixed. Nested timelines are flattened first. Timing
+ * clip on every track, mixed. A program track is a layer of placeholders,
+ * one per shot, and silent: multicam does not play yet. Nested timelines are flattened first. Timing
  * and placement follow export exactly: clip edges on the project frame
  * grid, sample boundaries rounded from frames, layers placed by `layerRect`.
  */
@@ -144,6 +147,12 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
+    if (track.kind === "program") {
+      const layer = shotPlaceholders(track, frame);
+      for (const span of layer) frames = Math.max(frames, span.end);
+      layers.push(layer);
+      continue;
+    }
     const placed: { clip: Clip; start: number; end: number }[] = [];
     for (const clip of track.clips) {
       const end = endOf(clip);
@@ -288,9 +297,22 @@ function asTimeline(view: TimelineView, root: boolean): Timeline {
       const { end: _end, ...stored } = clip;
       return stored as unknown as Clip;
     });
+    if (track.kind === "program") return { id: track.id, kind: "program", group: track.group ?? "", clips: clips as unknown as ProgramTrack["clips"] };
     return { id: track.id, kind: track.kind, clips };
   });
-  return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks };
+  return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks, ...(view.groups ? { groups: view.groups } : {}) };
+}
+
+/** One placeholder per shot, program frames, sorted; an overlapping later shot wins from its start. */
+function shotPlaceholders(track: ProgramTrack, frame: (seconds: number) => number): VideoSpan[] {
+  const spans = track.clips
+    .map((shot): VideoSpan => {
+      const start = frame(shot.start);
+      return { kind: "placeholder", clip: shot.id, start, end: Math.max(start + 1, frame(shot.start + shot.out - shot.in)), reason: "multicam", type: shot.type };
+    })
+    .sort((a, b) => a.start - b.start);
+  for (let i = 1; i < spans.length; i++) spans[i - 1]!.end = Math.min(spans[i - 1]!.end, spans[i]!.start);
+  return spans.filter((span) => span.end > span.start);
 }
 
 /** Timeline seconds just after the clip's last frame; null when unknown (unreadable nested timeline). */
