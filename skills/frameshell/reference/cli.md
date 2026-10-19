@@ -23,13 +23,13 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell track add <video\|audio\|subtitles> [--name n] [--index n]` | New track, on top unless `--index`. Subtitle tracks need `--follows <track>`; `--preset big-keyword\|plain`, `--position top\|center\|bottom`. |
 | `frameshell track set <track> …` | Rename (`--name`, `--clear-name`); subtitle `--follows`, `--preset`, `--position`. |
 | `frameshell track remove <track> [--force]` | `--force` when it holds clips. |
-| `frameshell clip add <track> [asset] …` | Place media (`--start`, `--in`, `--out` or `--duration`, `--speed`), or an adapter clip (`--type hyperframes --source <html> --duration s --props '<json>'`). Overlay placement `--x --y --scale --opacity`. `--ripple` inserts, moving later clips right on every video and audio track; `--ripple-track <track>` (repeatable) limits that to the clip's track plus the named ones. `--snap` snaps media `in`/`out` into pauses. |
+| `frameshell clip add <track> [asset] …` | Place media (`--start`, `--in`, `--out` or `--duration`, `--speed`), or an adapter clip (`--type hyperframes --source <html> --duration s --props '<json>'`). Overlay placement `--x --y --scale --opacity`. `--ripple` inserts, moving later clips right on every video, audio and program track; `--ripple-track <track>` (repeatable) limits that to the clip's track plus the named ones. `--snap` snaps media `in`/`out` into pauses. |
 | `frameshell clip move <clip> [--start s] [--track t]` | Same length, new place; refused on overlap. |
 | `frameshell clip trim <clip> [--in s \| --start s] [--out s \| --end s]` | `--in`/`--out` in source seconds, `--start`/`--end` in timeline seconds. Snaps like `cut`. `--ripple` moves later clips by the length change: the inverse of `cut`. `--ripple-track <track>` (repeatable) as for `clip add`. |
 | `frameshell clip split <clip> --at s` | Left part keeps the id; the right part's id is in `changes.added`. |
 | `frameshell clip remove <clip>` | Leaves a gap; to close it use `cut`. |
 | `frameshell clip set <clip> …` | `--speed`, `--gain` (dB, negatives as `--gain=-6`), `--muted`/`--unmuted`, `--x --y --scale --opacity`, `--props '<json>'` (replaces), `--script-ref <script#scene>`/`--clear-script-ref`. |
-| `frameshell cut [track…] --from s --to s` | Remove a timeline range on every video and audio track (or the listed ones) and close the gap. Edges snap into audio pauses; `--snap-window s` widens the reach, `--no-snap` cuts exactly. |
+| `frameshell cut [track…] --from s --to s` | Remove a timeline range on every video, audio and program track (or the listed ones) and close the gap. Edges snap into audio pauses; `--snap-window s` widens the reach, `--no-snap` cuts exactly. |
 
 Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` line per snapped edge and any `warning:`. In `--json`: `revision`, `operation.id`, `operation.tx`, `changes.added/updated/removed`, `snaps`, `warnings`.
 

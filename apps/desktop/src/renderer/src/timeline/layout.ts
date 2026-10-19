@@ -9,7 +9,7 @@ export const RULER_HEIGHT = 22;
 export const SCENE_BAND_HEIGHT = 18;
 
 /** Lane height per track kind, px. */
-export const LANE_HEIGHT = { video: 44, audio: 44, subtitles: 28 } as const;
+export const LANE_HEIGHT = { video: 44, program: 44, audio: 44, subtitles: 28 } as const;
 
 /** Stand-in length of a clip whose end is unknown (nested timeline missing), when no clip follows it. */
 const UNKNOWN_LENGTH_S = 2;
@@ -26,16 +26,16 @@ const FRAME_PX_MAX = 24;
 /** Track kind as the daemon reports it. */
 export type TrackKind = TimelineView["tracks"][number]["kind"];
 
-/** How a clip gets its pictures: from a file, another timeline, or an adapter plugin (rendered). */
-export type ClipKind = "media" | "timeline" | "generated";
+/** How a clip gets its pictures: from a file, another timeline, an adapter plugin (rendered), or a multicam group's angles. */
+export type ClipKind = "media" | "timeline" | "generated" | "shot";
 
 /** One clip placed on the timeline, times in timeline seconds. */
 export interface ClipBox {
   id: string;
-  /** Clip `type` as stored, e.g. `media`, `timeline`, `hyperframes`. */
+  /** Clip `type` as stored, e.g. `media`, `timeline`, `hyperframes`, `shot`. */
   type: string;
   kind: ClipKind;
-  /** What it plays, for its label: file name, nested timeline id or composition name. */
+  /** What it plays, for its label: file name, nested timeline id, composition name, or a shot's layout and angle ids. */
   name: string;
   start: number;
   /** Derived end; a stand-in when {@link ClipBox.problem} is set. */
@@ -60,7 +60,7 @@ export interface ClipBox {
 export interface TrackRow {
   id: string;
   kind: TrackKind;
-  /** Short label, numbered per kind from the bottom layer: `V1`, `A2`, `S1`. */
+  /** Short label, numbered per kind from the bottom layer: `V1`, `P1`, `A2`, `S1`. */
   label: string;
   name: string | null;
   /** Subtitle tracks: label of the followed track; null otherwise. */
@@ -103,19 +103,21 @@ export interface TimelineLayout {
 }
 
 /**
- * Lay out a timeline the way editors read it: the top video layer first
- * (the file lists the bottom layer first), then audio, then subtitles.
- * `scenes` add the band under the ruler and push the lanes down.
+ * Lay out a timeline the way editors read it: the top picture layer first
+ * (the file lists the bottom layer first; program tracks stack among video
+ * tracks), then audio, then subtitles. `scenes` add the band under the ruler
+ * and push the lanes down.
  */
 export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] = []): TimelineLayout {
   const problems = new Map(view.problems.map((problem) => [problem.clip, problem.message]));
   const labels = new Map<string, string>();
-  const counts: Record<TrackKind, number> = { video: 0, audio: 0, subtitles: 0 };
-  const prefix: Record<TrackKind, string> = { video: "V", audio: "A", subtitles: "S" };
+  const counts: Record<TrackKind, number> = { video: 0, program: 0, audio: 0, subtitles: 0 };
+  const prefix: Record<TrackKind, string> = { video: "V", program: "P", audio: "A", subtitles: "S" };
   for (const track of view.tracks) labels.set(track.id, `${prefix[track.kind]}${++counts[track.kind]}`);
 
   const byKind = (kind: TrackKind) => view.tracks.filter((track) => track.kind === kind);
-  const ordered = [...byKind("video").reverse(), ...byKind("audio"), ...byKind("subtitles")];
+  const pictures = view.tracks.filter((track) => track.kind === "video" || track.kind === "program");
+  const ordered = [...pictures.reverse(), ...byKind("audio"), ...byKind("subtitles")];
 
   const head = RULER_HEIGHT + (scenes.length > 0 ? SCENE_BAND_HEIGHT : 0);
   let top = head;
@@ -151,11 +153,13 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
   const fields = clip as Record<string, unknown>;
   const text = (key: string) => (typeof fields[key] === "string" ? (fields[key] as string) : null);
   const num = (key: string, fallback: number) => (typeof fields[key] === "number" ? (fields[key] as number) : fallback);
-  const kind: ClipKind = clip.type === "media" ? "media" : clip.type === "timeline" ? "timeline" : "generated";
+  const kind: ClipKind = clip.type === "media" ? "media" : clip.type === "timeline" ? "timeline" : clip.type === "shot" ? "shot" : "generated";
   const asset = kind === "media" ? text("asset") : null;
   const source = text("source");
   let name: string;
+  const angles = Array.isArray(fields["angles"]) ? (fields["angles"] as unknown[]).filter((angle) => typeof angle === "string") : [];
   if (asset) name = baseName(asset);
+  else if (kind === "shot") name = [text("shot") ?? "shot", angles.join(", ")].filter(Boolean).join(" · ");
   else if (kind === "timeline" && source) name = baseName(source).replace(/\.json$/, "");
   else if (source) name = /^index\.[a-z]+$/i.test(baseName(source)) ? baseName(parentDir(source)) : baseName(source);
   else name = clip.type;

@@ -82,7 +82,7 @@ function base(): Timeline {
 
 function clipsOf(timeline: Timeline, track: string): Clip[] {
   const found = timeline.tracks.find((t) => t.id === track);
-  if (!found || found.kind === "subtitles") throw new Error(`no clip track ${track}`);
+  if (!found || found.kind === "subtitles" || found.kind === "program") throw new Error(`no video or audio track ${track}`);
   return found.clips;
 }
 

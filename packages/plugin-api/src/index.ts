@@ -79,7 +79,7 @@ export type CommandResult = string | void | { output?: string; data?: unknown };
  * the project format. Preview plays the cached file; export overlays it.
  */
 export interface ClipAdapter {
-  /** Clip `type` in timeline files: lowercase, not `media` or `timeline`. */
+  /** Clip `type` in timeline files: lowercase, not `media`, `timeline` or `shot` (`CORE_CLIP_TYPES`, `ADAPTER_CLIP_TYPE_PATTERN` in `@frameshell/schema`). */
   readonly type: string;
   /**
    * Schema of the clip's `props`, checked on `clip.add` and `clip.set`.

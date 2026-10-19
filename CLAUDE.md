@@ -30,6 +30,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Timeline panel (canvas layout, paint, live updates, scene band from `script.outline` spans) | `apps/desktop/src/renderer/src/timeline/` (`scenes.ts` = band data); ADR 0015 |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
+| Multicam model (groups, angles, program track, shots: invariants, shot layout + sound) | `packages/schema/src/timeline.ts`, `composite.ts` (`shotLayers`, `shotSound`); engine `checkShots`; SPEC §5.3; ADR 0016 |
 | Clip inspector, preview layer handles | `renderer/src/components/ClipInspector.tsx`, `renderer/src/preview/transform-edit.ts` |
 | Preview player (program, engine worker, audio worklet, playhead store, clip render decode) | `apps/desktop/src/renderer/src/preview/` (`video-source.ts` = proxy or render); ADR 0001, 0002; media URLs `apps/desktop/src/main/media-protocol.ts` |
 | Live preview of generated clips (`frameshell-live://` scheme, seek bridge, iframe, topmost-layer rule) | `apps/desktop/src/main/live-protocol.ts`, `renderer/src/preview/live.ts`, `components/LivePreview.tsx`; daemon `clip.live`; ADR 0010 |

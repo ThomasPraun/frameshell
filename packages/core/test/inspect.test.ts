@@ -69,6 +69,34 @@ describe("inspect.point", () => {
     expect((await service().point("/p", { timeline: "main", at: 2, x: 0.1, y: 0.1 })).target).toBe("c_cam");
   });
 
+  it("hits the shot whose tile holds the point on a program track above the footage", async () => {
+    const multicam = {
+      ...timeline,
+      tracks: [
+        timeline.tracks[0]!,
+        { id: "t_p", kind: "program", group: "g_talk", clips: [{ id: "c_s", type: "shot", start: 1, in: 0, out: 2, shot: "two-up", angles: ["ana", "ben"] }] },
+      ],
+      groups: [
+        {
+          id: "g_talk",
+          angles: [
+            { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+            { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0 },
+          ],
+        },
+      ],
+    } as Timeline;
+    const inspect = service({ timeline: async () => ({ timeline: multicam, fps: 30 }) });
+    const point = await inspect.point("/p", { timeline: "main", at: 2, x: 0.75, y: 0.5 });
+    expect(point.layers).toEqual([
+      { clip: "c_s", type: "shot", paints: true },
+      { clip: "c_cam", type: "media", paints: true },
+    ]);
+    expect(point.target).toBe("c_s");
+    // Before the shot starts: the footage.
+    expect((await inspect.point("/p", { timeline: "main", at: 0.5, x: 0.75, y: 0.5 })).target).toBe("c_cam");
+  });
+
   it("takes project pixels too, and refuses a time or a point outside the timeline and frame", async () => {
     const point = await service().point("/p", { timeline: "main", at: 0.5, x: 480, y: 270, unit: "pixel" });
     expect(point).toMatchObject({ x: 0.25, y: 0.25, pixel: { x: 480, y: 270 }, target: "c_cam" });

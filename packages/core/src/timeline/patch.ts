@@ -1,13 +1,21 @@
 import { isDeepStrictEqual } from "node:util";
 import type { TimelinePatch } from "@frameshell/protocol";
-import type { Clip, ClipTrack, Timeline, Track } from "@frameshell/schema";
+import type { AnyClip, AnyClipTrack, MulticamGroup, Timeline, Track } from "@frameshell/schema";
 
 /**
  * Patch turning `from` into `to`, at clip granularity: whole tracks only when
- * a track appears, disappears or its own fields change. Diffing makes every
- * operation's inverse correct by construction (`diff(after, before)`).
+ * a track appears, disappears or its own fields change; whole multicam groups.
+ * Diffing makes every operation's inverse correct by construction
+ * (`diff(after, before)`).
  */
 export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
+  const groups: NonNullable<TimelinePatch["groups"]> = [];
+  const groupsAfter = new Map((to.groups ?? []).map((group) => [group.id, group]));
+  for (const group of from.groups ?? []) if (!groupsAfter.has(group.id)) groups.push({ id: group.id, group: null });
+  for (const group of to.groups ?? []) {
+    const before = from.groups?.find((candidate) => candidate.id === group.id);
+    if (!before || !isDeepStrictEqual(before, group)) groups.push({ id: group.id, group });
+  }
   const tracks: NonNullable<TimelinePatch["tracks"]> = [];
   const deletions: NonNullable<TimelinePatch["clips"]> = [];
   const upserts: NonNullable<TimelinePatch["clips"]> = [];
@@ -28,6 +36,7 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
     }
   }
   const patch: TimelinePatch = {};
+  if (groups.length > 0) patch.groups = groups;
   if (tracks.length > 0) patch.tracks = tracks;
   // Deletions first: a clip moving between tracks is never in two places after the patch.
   if (deletions.length + upserts.length > 0) patch.clips = [...deletions, ...upserts];
@@ -36,13 +45,35 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
   return structuredClone(patch);
 }
 
+/** True when `patch` changes nothing. */
+export function isEmptyPatch(patch: TimelinePatch): boolean {
+  return !patch.groups && !patch.tracks && !patch.clips && !patch.order;
+}
+
 /**
  * Apply `patch` to a copy of `timeline` (revision untouched). Clips stay
- * sorted by start. Throws when the patch names a missing or subtitle track,
- * or `order` is not a permutation of the resulting tracks.
+ * sorted by start; `groups` disappears when the last group goes. Throws
+ * when the patch names a missing or subtitle track, or `order` is not a
+ * permutation of the resulting tracks. Whether a clip suits its track kind
+ * is left to the timeline schema.
  */
 export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
   const next = structuredClone(timeline);
+  if (patch.groups) {
+    const groups: MulticamGroup[] = next.groups ?? [];
+    for (const { id, group } of patch.groups) {
+      const index = groups.findIndex((candidate) => candidate.id === id);
+      if (group === null) {
+        if (index !== -1) groups.splice(index, 1);
+      } else if (index === -1) {
+        groups.push(structuredClone(group));
+      } else {
+        groups[index] = structuredClone(group);
+      }
+    }
+    if (groups.length > 0) next.groups = groups;
+    else delete next.groups;
+  }
   for (const { id, track } of patch.tracks ?? []) {
     const index = next.tracks.findIndex((candidate) => candidate.id === id);
     if (track === null) {
@@ -53,17 +84,18 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
       next.tracks[index] = structuredClone(track);
     }
   }
-  const touched = new Set<ClipTrack>();
+  const touched = new Set<AnyClipTrack>();
   for (const { track: trackId, id, clip } of patch.clips ?? []) {
     const track = next.tracks.find((candidate) => candidate.id === trackId);
     if (!track || track.kind === "subtitles") throw new Error(`patch names clip track "${trackId}", which does not exist`);
-    const index = track.clips.findIndex((candidate) => candidate.id === id);
+    const clips: AnyClip[] = track.clips;
+    const index = clips.findIndex((candidate) => candidate.id === id);
     if (clip === null) {
-      if (index !== -1) track.clips.splice(index, 1);
+      if (index !== -1) clips.splice(index, 1);
     } else if (index === -1) {
-      track.clips.push(structuredClone(clip));
+      clips.push(structuredClone(clip));
     } else {
-      track.clips[index] = structuredClone(clip);
+      clips[index] = structuredClone(clip);
     }
     touched.add(track);
   }
@@ -79,7 +111,7 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
 }
 
 /** Canonical clip order: by start, then id. */
-export function sortClips(track: { clips: Clip[] }): void {
+export function sortClips(track: { clips: AnyClip[] }): void {
   track.clips.sort((a, b) => a.start - b.start || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 

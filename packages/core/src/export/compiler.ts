@@ -441,6 +441,14 @@ function layoutTimeline(
   let frames = 0;
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
+    if (track.kind === "program") {
+      throw unsupported(
+        timeline.id,
+        `Track ${track.id} is a multicam program track (group ${track.group}); exporting multicam shots is not supported yet. ` +
+          `Remove the track to export the rest: \`frameshell track remove ${track.id} --force\`.`,
+        { track: track.id },
+      );
+    }
     const placed: Placed[] = [];
     for (const listed of track.clips) {
       const clip = track.kind === "video" ? asFootage(listed, generated) : listed;

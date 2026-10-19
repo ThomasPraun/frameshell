@@ -1,5 +1,5 @@
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import type { Clip, Timeline } from "@frameshell/schema";
+import { type AnyClip, type Timeline, isShotClip } from "@frameshell/schema";
 import type { FrameGrid } from "./grid.js";
 
 /**
@@ -51,7 +51,7 @@ function nestedProblem(reason: NestedTimelineError["reason"], chain: readonly st
  */
 export function nestedClipError(
   error: NestedTimelineError,
-  where: { timeline: string; track: string; clip: Clip; op?: string },
+  where: { timeline: string; track: string; clip: AnyClip; op?: string },
 ): RpcError {
   const { timeline, track, clip, op } = where;
   const source = error.chain[0]!;
@@ -77,14 +77,15 @@ export function nestedClipError(
 
 /**
  * Timeline time just after the last frame of `clip`, on the grid. Media:
- * `(out - in) / speed`; nested timelines without `duration` play to the end
- * of the nested file; adapter clips carry `duration`. Throws what `nested`
- * throws.
+ * `(out - in) / speed`; shots: `out - in`; nested timelines without
+ * `duration` play to the end of the nested file; adapter clips carry
+ * `duration`. Throws what `nested` throws.
  */
-export async function clipEnd(clip: Clip, grid: FrameGrid, nested: NestedDuration): Promise<number> {
+export async function clipEnd(clip: AnyClip, grid: FrameGrid, nested: NestedDuration): Promise<number> {
   let duration: number;
   // Only media clips have `asset`; adapter `type` is any string, so it cannot narrow.
   if ("asset" in clip) duration = (clip.out - clip.in) / (clip.speed ?? 1);
+  else if (isShotClip(clip)) duration = clip.out - clip.in;
   else if (clip.duration !== undefined) duration = clip.duration;
   else duration = (await nested(clip.source!)) - (clip.in ?? 0);
   return grid.snap(clip.start + duration);

@@ -8,15 +8,22 @@ import {
   type operationArgs,
 } from "@frameshell/protocol";
 import {
+  type AnyClip,
+  type AnyClipTrack,
   CORE_CLIP_TYPES,
   type Clip,
   type ClipTrack,
   type MediaClip,
+  type ProgramTrack,
+  type ShotClip,
   type TimelineClip,
   type Timeline,
   type Track,
+  isShotClip,
   parseTimeline,
+  programGroup,
   scriptRefPathProblem,
+  shotSound,
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
@@ -52,9 +59,9 @@ export interface EditPoint {
   edge: "start" | "end";
   /** Search half-width, seconds: op `snapWindow`, else {@link EditContext.snapWindow}, else {@link DEFAULT_SNAP_WINDOW_S}. */
   window: number;
-  /** Clip being trimmed; absent for `cut`, which spans tracks. */
+  /** Clip being trimmed; absent for `cut`, which spans tracks. Shots are never snapped (their sound is not theirs). */
   clip?: Clip;
-  /** `cut` only: clips of the tracks being cut, as before the operation. */
+  /** `cut` only: clips of the tracks being cut, as before the operation; a program track's shots as their angles' sound (`shotSound`). */
   clips?: Clip[];
   /** Earliest allowed result, same clock (op `snapBounds`). The engine clamps a result outside. */
   min?: number;
@@ -197,7 +204,7 @@ class Edit {
       if (follows === undefined) {
         throw this.invalid("a subtitle track needs `follows`: the video or audio track whose words it shows.", {
           field: "follows",
-          hint: `Clip tracks here: ${this.clipTracks().map((t) => t.id).join(", ") || "none, add one first"}.`,
+          hint: `Clip tracks here: ${this.mediaTracks().map((t) => t.id).join(", ") || "none, add one first"}.`,
         });
       }
       this.checkFollows(follows);
@@ -238,8 +245,11 @@ class Edit {
 
   /** `follows` must name an existing video or audio track. */
   checkFollows(follows: string): void {
-    if (this.track(follows).kind === "subtitles") {
-      throw this.invalid(`\`follows\` must name a video or audio track; ${follows} is a subtitle track.`, { field: "follows" });
+    const { kind } = this.track(follows);
+    if (kind === "subtitles" || kind === "program") {
+      throw this.invalid(`\`follows\` must name a video or audio track; ${follows} is a ${kind === "program" ? "program" : "subtitle"} track.`, {
+        field: "follows",
+      });
     }
   }
 
@@ -267,9 +277,22 @@ class Edit {
   // Clips
 
   async clipAdd(args: OperationArgs<"clip.add">): Promise<void> {
-    const track = this.clipTrack(args.track);
+    const target = this.clipTrack(args.track);
+    if (target.kind === "program") {
+      throw this.unsupported(`track ${target.id} is a program track; adding shots with \`clip.add\` is not supported yet.`, {
+        feature: "shot.add",
+        hint: "Change its shots with `clip.split`, `clip.trim`, `clip.move` or `clip.remove`, or edit the timeline file.",
+      });
+    }
+    const track = target;
     const rippled = this.rippleScope(args, track);
     const { type } = args;
+    if (type === "shot") {
+      throw this.invalid("shot clips belong on a program track, which holds the shots of a multicam group.", {
+        field: "type",
+        hint: "Use `media` for a file on a video or audio track.",
+      });
+    }
     if (track.kind === "audio" && args.transform) throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
     if (args.scriptRef !== undefined) this.checkScriptRefShape(args.scriptRef);
     const extras = {
@@ -361,7 +384,7 @@ class Edit {
       // Room first, so the new clip is never compared with a clip it pushes away.
       const length = this.grid.snap((await this.span(clip)).end - clip.start);
       const from = this.grid.frame(clip.start);
-      for (const other of rippled.flatMap((t) => t.clips)) {
+      for (const other of rippled.flatMap(clipsOf)) {
         if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
       }
     }
@@ -401,11 +424,17 @@ class Edit {
           hint: `Pick a ${track.kind} track: ${this.clipTracks().filter((t) => t.kind === track.kind).map((t) => t.id).join(", ")}.`,
         });
       }
+      if (target !== track && target.kind === "program") {
+        throw this.invalid(`${clip.id} is a shot of group ${(track as ProgramTrack).group}; ${target.id} shows group ${target.group}.`, {
+          field: "track",
+          hint: "Shots stay on their program track; move it along the track with `start`.",
+        });
+      }
     }
     if (args.start !== undefined) clip.start = this.grid.snap(args.start);
     if (target !== track) {
-      track.clips.splice(track.clips.indexOf(clip), 1);
-      target.clips.push(clip);
+      track.clips.splice(clipsOf(track).indexOf(clip), 1);
+      clipsOf(target).push(clip);
     }
   }
 
@@ -422,7 +451,7 @@ class Edit {
    * plus `own` (the edited clip's track). `rippleTracks` without `ripple` is
    * refused rather than ignored.
    */
-  rippleScope(args: { ripple?: boolean | undefined; rippleTracks?: string[] | undefined }, own: ClipTrack): ClipTrack[] {
+  rippleScope(args: { ripple?: boolean | undefined; rippleTracks?: string[] | undefined }, own: AnyClipTrack): AnyClipTrack[] {
     if (args.rippleTracks === undefined) return this.clipTracks();
     if (args.ripple !== true) throw this.invalid("`rippleTracks` needs `ripple: true`.", { field: "rippleTracks" });
     const named = new Set<Track>(args.rippleTracks.map((id) => this.clipTrack(id)));
@@ -437,13 +466,13 @@ class Edit {
    * starting inside the old clip by the head change only (they stay with its
    * old first frame). Clips crossing either point stay.
    */
-  async rippleTrim(clip: Clip, before: { start: number; end: number }, rippled: readonly ClipTrack[]): Promise<void> {
+  async rippleTrim(clip: AnyClip, before: { start: number; end: number }, rippled: readonly AnyClipTrack[]): Promise<void> {
     const g = this.grid;
     const head = g.snap(before.start - clip.start);
     clip.start = before.start;
     const total = g.snap((await this.span(clip)).end - before.end);
     const [first, last] = [g.frame(before.start), g.frame(before.end)];
-    for (const other of rippled.flatMap((track) => track.clips)) {
+    for (const other of rippled.flatMap(clipsOf)) {
       if (other === clip) continue;
       const at = g.frame(other.start);
       if (at >= last) other.start = g.snap(other.start + total);
@@ -452,13 +481,14 @@ class Edit {
   }
 
   /** Move the edges `args` names; with `ripple` the left edge may pass timeline 0, {@link Edit.rippleTrim} puts it back. */
-  async trimEdges(clip: Clip, args: OperationArgs<"clip.trim">): Promise<void> {
+  async trimEdges(clip: AnyClip, args: OperationArgs<"clip.trim">): Promise<void> {
     const ripple = args.ripple === true;
     if (args.in !== undefined && args.start !== undefined) throw this.invalid("pass `in` or `start`, not both.", { field: "start" });
     if (args.out !== undefined && args.end !== undefined) throw this.invalid("pass `out` or `end`, not both.", { field: "end" });
     const head = args.in !== undefined || args.start !== undefined;
     const tail = args.out !== undefined || args.end !== undefined;
     if (!head && !tail) throw this.invalid("nothing to trim.", { hint: "Pass `in`/`start` (head) and/or `out`/`end` (tail)." });
+    if (isShotClip(clip)) return this.trimShot(clip, args, head);
     const snap = { enabled: args.snap !== false, window: args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
     const bounds = this.snapBounds(args.snapBounds, { in: args.in, out: args.out });
     // Bounds are source seconds: only `in` and `out` edges take them.
@@ -527,8 +557,37 @@ class Edit {
     clip.duration = duration;
   }
 
+  /**
+   * {@link Edit.trimEdges} for a shot: `in`/`out` are group-clock seconds at
+   * speed 1, `out` at most the group's end. Never snapped: a shot change
+   * moves pictures, the sound under it is every angle's.
+   */
+  async trimShot(clip: ShotClip, args: OperationArgs<"clip.trim">, head: boolean): Promise<void> {
+    const g = this.grid;
+    if (args.snapBounds !== undefined) throw this.invalid("shots are not snapped; they take no `snapBounds`.", { field: "snapBounds" });
+    const span = await this.span(clip);
+    let { start, in: clipIn, out } = clip;
+    if (args.in !== undefined) {
+      clipIn = g.snap(args.in);
+      start = g.snap(clip.start + (clipIn - clip.in));
+    } else if (args.start !== undefined) {
+      start = g.snap(args.start);
+      clipIn = g.snap(clip.in + (start - clip.start));
+    }
+    if (args.out !== undefined) out = g.snap(args.out);
+    else if (args.end !== undefined) out = g.snap(clip.in + (g.snap(args.end) - clip.start));
+    if (clipIn < 0 || (start < 0 && args.ripple !== true)) throw this.headLimit(clip, 1, args.in !== undefined, span.end, out);
+    if (out <= clipIn) {
+      throw this.invalid(`the shot would be empty (in ${clipIn}, out ${out}).`, {
+        field: head ? (args.in !== undefined ? "in" : "start") : args.out !== undefined ? "out" : "end",
+        hint: "Keep at least one frame, or remove the shot with `clip.remove`.",
+      });
+    }
+    Object.assign(clip, { start, in: clipIn, out });
+  }
+
   /** Head trim past source or timeline time 0: error with the valid range of the field used. */
-  headLimit(clip: Clip, speed: number, bySource: boolean, end: number, out: number): RpcError {
+  headLimit(clip: AnyClip, speed: number, bySource: boolean, end: number, out: number): RpcError {
     const g = this.grid;
     const oldIn = clip.in ?? 0;
     const minIn = Math.max(0, oldIn - clip.start * speed);
@@ -556,7 +615,7 @@ class Edit {
     this.trimTail(clip, at);
     this.trimHead(right, at);
     if (!this.isEmpty(clip) && !this.isEmpty(right)) {
-      track.clips.push(right);
+      clipsOf(track).push(right);
       return;
     }
     throw this.invalid(`splitting ${clip.id} at ${at} leaves an empty part at this speed.`, { field: "at", hint: "Split a frame later or earlier." });
@@ -564,7 +623,7 @@ class Edit {
 
   clipRemove(args: OperationArgs<"clip.remove">): void {
     const { track, clip } = this.clip(args.clip);
-    track.clips.splice(track.clips.indexOf(clip), 1);
+    track.clips.splice(clipsOf(track).indexOf(clip), 1);
   }
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
@@ -574,6 +633,18 @@ class Edit {
       throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, transform, props, scriptRef." });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
+    if (isShotClip(clip)) {
+      const given = (["speed", "gain", "muted", "transform", "props"] as const).filter((field) => args[field] !== undefined);
+      if (given.length > 0) {
+        throw this.invalid(`shots take no ${given.map((f) => `\`${f}\``).join(", ")}; only \`scriptRef\` is set per shot.`, {
+          field: given[0]!,
+          hint: "A shot plays every angle's sound at the angle's own gain, set on the angle in the timeline's `groups`.",
+        });
+      }
+      if (scriptRef === null) delete clip.scriptRef;
+      else if (scriptRef !== undefined) clip.scriptRef = scriptRef;
+      return;
+    }
     if (speed !== undefined) {
       if (!isMedia(clip)) throw this.invalid(`only media clips take \`speed\`; ${clip.id} is ${clip.type}.`, { field: "speed" });
       if (speed === 1) delete clip.speed;
@@ -608,7 +679,11 @@ class Edit {
       });
     }
     const snap = { enabled: args.snap !== false, window: args.snapWindow ?? this.context.snapWindow ?? DEFAULT_SNAP_WINDOW_S };
-    const clips = tracks.flatMap((track) => structuredClone(track.clips));
+    const clips = tracks.flatMap((track): Clip[] => {
+      if (track.kind !== "program") return structuredClone(track.clips);
+      const group = programGroup(this.draft, track);
+      return group ? track.clips.flatMap((shot) => shotSound(shot, group)) : [];
+    });
     const resolve = (time: number, edge: EditPoint["edge"]) =>
       this.resolve(snap.enabled, { time, clock: "timeline", edge, window: snap.window, clips });
     const from = this.report("from", null, args.from, g.snap(await resolve(args.from, "end")));
@@ -622,8 +697,8 @@ class Edit {
     const [F, T] = [g.frame(from), g.frame(to)];
     const shift = to - from;
     for (const track of tracks) {
-      const kept: Clip[] = [];
-      for (const clip of track.clips) {
+      const kept: AnyClip[] = [];
+      for (const clip of clipsOf(track)) {
         const S = g.frame(clip.start);
         if (S >= T) {
           // After the range: only moves, so its end is not needed (it may be unknown).
@@ -655,7 +730,7 @@ class Edit {
           if (!this.isEmpty(clip)) kept.push(clip);
         }
       }
-      track.clips = kept;
+      clipsOf(track).splice(0, track.clips.length, ...kept);
     }
   }
 
@@ -663,7 +738,7 @@ class Edit {
    * ADR 0015 decision 5: a cut that trims or splits an adapter clip slices its composition
    * mid-way. Clips removed whole and cuts on a clip's edge are not warned.
    */
-  warnInsideGenerated(clip: Clip): void {
+  warnInsideGenerated(clip: AnyClip): void {
     if (CORE_CLIP_TYPES.some((type) => type === clip.type)) return;
     const ref = clip.scriptRef ? `, scriptRef ${clip.scriptRef}` : "";
     this.warnings.push(
@@ -680,6 +755,8 @@ class Edit {
       throw this.invalid((error as Error).message);
     }
     this.draft.tracks = next.tracks;
+    if (next.groups) this.draft.groups = next.groups;
+    else delete this.draft.groups;
   }
 
   // Finishing
@@ -688,15 +765,20 @@ class Edit {
   async finish(): Promise<AppliedOperation> {
     for (const track of this.draft.tracks) if (track.kind !== "subtitles") sortClips(track);
     const forward = diffTimelines(this.before, this.draft);
+    const changedGroups = new Set((forward.groups ?? []).map((entry) => entry.id));
     const changedTracks = new Set([
       ...(forward.tracks ?? []).filter((entry) => entry.track).map((entry) => entry.id),
       ...(forward.clips ?? []).map((entry) => entry.track),
     ]);
-    for (const track of this.draft.tracks) {
-      if (track.kind !== "subtitles" && changedTracks.has(track.id)) await this.checkTrack(track);
-    }
+    const checked = this.draft.tracks.filter(
+      (track): track is AnyClipTrack =>
+        track.kind !== "subtitles" && (changedTracks.has(track.id) || (track.kind === "program" && changedGroups.has(track.group))),
+    );
+    for (const track of checked) await this.checkTrack(track);
     const parsed = parseTimeline(this.draft);
     if (!parsed.ok) throw this.invalid(`the result would not be a valid timeline:\n${parsed.error}`);
+    // After the schema: shots name angles of their group.
+    for (const track of checked) if (track.kind === "program") await this.checkShots(track);
 
     const inverse = diffTimelines(this.draft, this.before);
     const changes = await this.changes(forward);
@@ -710,10 +792,10 @@ class Edit {
    * only when this operation provably kept it valid: content unchanged, and
    * the next clip no closer than before (see {@link Edit.lengthBound}).
    */
-  async checkTrack(track: ClipTrack): Promise<void> {
+  async checkTrack(track: AnyClipTrack): Promise<void> {
     const g = this.grid;
-    let previous: { clip: Clip; end: number; known: boolean } | null = null;
-    for (const clip of track.clips) {
+    let previous: { clip: AnyClip; end: number; known: boolean } | null = null;
+    for (const clip of clipsOf(track)) {
       const known = await this.end(clip);
       let end: number;
       if (known !== null) {
@@ -744,13 +826,47 @@ class Edit {
     }
   }
 
+  /**
+   * Shots of a program track against its group's media: every shown angle
+   * has a picture, and no shot plays past the group's end (the latest angle
+   * end, `offset` + asset length). Angle assets must be readable media.
+   */
+  async checkShots(track: ProgramTrack): Promise<void> {
+    const group = programGroup(this.draft, track);
+    if (!group) return;
+    const g = this.grid;
+    let end = 0;
+    const pictures = new Map<string, boolean>();
+    for (const angle of group.angles) {
+      const info = await this.context.source(angle.asset);
+      pictures.set(angle.id, info.video);
+      end = Math.max(end, info.duration === null ? Number.POSITIVE_INFINITY : angle.offset + info.duration);
+    }
+    const last = g.floor(end);
+    for (const shot of track.clips) {
+      const blind = shot.angles.find((id) => pictures.get(id) === false);
+      if (blind !== undefined) {
+        const angle = group.angles.find((candidate) => candidate.id === blind)!;
+        throw this.invalid(`shot ${shot.id} shows angle ${blind}, but ${angle.asset} has no video stream.`, {
+          hint: `Show angles with a picture (group ${group.id}: ${group.angles.filter((a) => pictures.get(a.id)).map((a) => a.id).join(", ") || "none"}).`,
+        });
+      }
+      if (shot.out > last + 1e-9) {
+        throw this.invalid(`shot ${shot.id} plays group ${group.id} to ${shot.out} s, past its end (${last} s).`, {
+          field: "out",
+          valid: { min: g.seconds(g.frame(shot.in) + 1), max: last },
+        });
+      }
+    }
+  }
+
   async changes(forward: TimelinePatch): Promise<OperationResult["changes"]> {
     const before = indexIds(this.before);
     const after = indexIds(this.draft);
     const added: string[] = [];
     const updated: string[] = [];
     const removed: string[] = [];
-    const touched: Clip[] = [];
+    const touched: AnyClip[] = [];
     const seen = new Set<string>();
     const sort = (id: string, existedBefore: boolean, existsAfter: boolean) => {
       // A clip moving between tracks appears twice in the patch (delete + upsert).
@@ -760,6 +876,13 @@ class Edit {
       else if (!existsAfter) removed.push(id);
       else updated.push(id);
     };
+    for (const { id } of forward.groups ?? []) {
+      sort(id, before.groups.has(id), after.groups.has(id));
+      // A group's angles are the sound and pictures of its shots.
+      for (const timeline of [this.before, this.draft]) {
+        for (const track of timeline.tracks) if (track.kind === "program" && track.group === id) touched.push(...track.clips);
+      }
+    }
     for (const { id } of forward.tracks ?? []) {
       sort(id, before.tracks.has(id), after.tracks.has(id));
       for (const side of [before.tracks.get(id), after.tracks.get(id)]) {
@@ -789,7 +912,7 @@ class Edit {
    * naming the clip, its track and the fix when its nested timeline is
    * missing, invalid or cyclic.
    */
-  async span(clip: Clip): Promise<{ end: number }> {
+  async span(clip: AnyClip): Promise<{ end: number }> {
     try {
       return { end: await clipEnd(clip, this.grid, this.#nested) };
     } catch (error) {
@@ -798,7 +921,7 @@ class Edit {
   }
 
   /** Like {@link Edit.span}, but null when the nested timeline is unavailable. */
-  async end(clip: Clip): Promise<number | null> {
+  async end(clip: AnyClip): Promise<number | null> {
     try {
       return await clipEnd(clip, this.grid, this.#nested);
     } catch (error) {
@@ -842,7 +965,7 @@ class Edit {
   }
 
   /** Wrap a nested timeline failure of an existing clip in an actionable error; rethrow anything else. */
-  nestedError(clip: Clip, error: unknown): unknown {
+  nestedError(clip: AnyClip, error: unknown): unknown {
     if (!(error instanceof NestedTimelineError)) return error;
     const track = [this.draft, this.before]
       .flatMap((timeline) => timeline.tracks)
@@ -856,7 +979,7 @@ class Edit {
    * (Infinity when last). Valid only while its content is unchanged, so
    * null when the clip is new or anything but `start` changed.
    */
-  lengthBound(clip: Clip): number | null {
+  lengthBound(clip: AnyClip): number | null {
     for (const track of this.before.tracks) {
       if (track.kind === "subtitles") continue;
       const index = track.clips.findIndex((c) => c.id === clip.id);
@@ -934,26 +1057,26 @@ class Edit {
   }
 
   /** Record the last resolved edge as a snap of `field`; returns `applied`. */
-  report(field: SnapReport["field"], clip: Clip | null, requested: number, applied: number): number {
+  report(field: SnapReport["field"], clip: AnyClip | null, requested: number, applied: number): number {
     if (this.#pending) this.snaps.push({ field, clip: clip?.id ?? null, requested, applied, ...this.#pending });
     this.#pending = null;
     return applied;
   }
 
   /** Keep `clip` up to timeline time `at` (a grid time inside it). */
-  trimTail(clip: Clip, at: number): void {
-    if (isMedia(clip)) {
-      clip.out = this.grid.floor(clip.in + (at - clip.start) * (clip.speed ?? 1));
+  trimTail(clip: AnyClip, at: number): void {
+    if (isMedia(clip) || isShotClip(clip)) {
+      clip.out = this.grid.floor(clip.in + (at - clip.start) * speedOf(clip));
     } else {
       clip.duration = this.grid.snap(at - clip.start);
     }
   }
 
   /** Drop `clip` before timeline time `at` (a grid time inside it); start moves to `at`. */
-  trimHead(clip: Clip, at: number): void {
+  trimHead(clip: AnyClip, at: number): void {
     const delta = at - clip.start;
-    if (isMedia(clip)) {
-      clip.in = this.grid.ceil(clip.in + delta * (clip.speed ?? 1));
+    if (isMedia(clip) || isShotClip(clip)) {
+      clip.in = this.grid.ceil(clip.in + delta * speedOf(clip));
     } else {
       clip.in = this.grid.snap((clip.in ?? 0) + delta);
       if (clip.duration !== undefined) clip.duration = this.grid.snap(clip.duration - delta);
@@ -961,8 +1084,8 @@ class Edit {
     clip.start = this.grid.snap(at);
   }
 
-  isEmpty(clip: Clip): boolean {
-    if (isMedia(clip)) return clip.out <= clip.in;
+  isEmpty(clip: AnyClip): boolean {
+    if (isMedia(clip) || isShotClip(clip)) return clip.out <= clip.in;
     return clip.duration !== undefined && this.grid.frame(clip.duration) < 1;
   }
 
@@ -1004,7 +1127,7 @@ class Edit {
     }
   }
 
-  async trackEnd(track: ClipTrack): Promise<number> {
+  async trackEnd(track: AnyClipTrack): Promise<number> {
     let end = 0;
     for (const clip of track.clips) end = Math.max(end, (await this.span(clip)).end);
     return end;
@@ -1041,7 +1164,7 @@ class Edit {
     );
   }
 
-  clipTrack(id: string): ClipTrack {
+  clipTrack(id: string): AnyClipTrack {
     const track = this.track(id);
     if (track.kind !== "subtitles") return track;
     throw this.invalid(`${id} is a subtitle track; its words come from ${track.follows}, it holds no clips.`, {
@@ -1050,13 +1173,19 @@ class Edit {
     });
   }
 
-  clipTracks(): ClipTrack[] {
-    return this.draft.tracks.filter((track): track is ClipTrack => track.kind !== "subtitles");
+  /** Video, audio and program tracks, in stacking order. */
+  clipTracks(): AnyClipTrack[] {
+    return this.draft.tracks.filter((track): track is AnyClipTrack => track.kind !== "subtitles");
   }
 
-  clip(id: string): { track: ClipTrack; clip: Clip } {
+  /** Video and audio tracks, in stacking order. */
+  mediaTracks(): ClipTrack[] {
+    return this.draft.tracks.filter((track): track is ClipTrack => track.kind === "video" || track.kind === "audio");
+  }
+
+  clip(id: string): { track: AnyClipTrack; clip: AnyClip } {
     for (const track of this.clipTracks()) {
-      const clip = track.clips.find((candidate) => candidate.id === id);
+      const clip = clipsOf(track).find((candidate) => candidate.id === id);
       if (clip) return { track, clip };
     }
     throw new RpcError(
@@ -1071,7 +1200,7 @@ class Edit {
     const taken = [indexIds(this.draft), indexIds(this.before)];
     for (let attempt = 0; attempt < 100; attempt++) {
       const id = this.context.newId(prefix);
-      if (taken.every(({ tracks, clips }) => !tracks.has(id) && !clips.has(id))) return id;
+      if (taken.every(({ tracks, clips, groups }) => !tracks.has(id) && !clips.has(id) && !groups.has(id))) return id;
     }
     throw new Error(`could not generate a free ${prefix}_ id`);
   }
@@ -1085,6 +1214,11 @@ class Edit {
         hint: "Use a project-relative script path, plus `#scene` for one scene, e.g. `scripts/script.md#intro` (see `frameshell script outline`).",
       });
     }
+  }
+
+  /** `Unsupported`: a valid request this version cannot carry out yet. */
+  unsupported(reason: string, data: { feature: string; hint: string }): RpcError {
+    return new RpcError(ErrorCode.Unsupported, `${this.op}: ${reason} ${data.hint}`, { op: this.op, ...data });
   }
 
   invalid(reason: string, extra: { field?: string; valid?: { min: number; max: number }; hint?: string } = {}): RpcError {
@@ -1101,21 +1235,33 @@ class Edit {
 }
 
 /** Adapter `type` is any string, so `clip.type === "media"` alone does not narrow. */
-function isMedia(clip: Clip): clip is MediaClip {
+function isMedia(clip: AnyClip): clip is MediaClip {
   return clip.type === "media";
 }
 
-function isNested(clip: Clip): clip is TimelineClip {
+function isNested(clip: AnyClip): clip is TimelineClip {
   return clip.type === "timeline";
 }
 
+/** Source seconds per timeline second; shots run at 1. */
+function speedOf(clip: MediaClip | ShotClip): number {
+  return isShotClip(clip) ? 1 : (clip.speed ?? 1);
+}
 
-function indexIds(timeline: Timeline): { tracks: Map<string, Track>; clips: Map<string, Clip> } {
+/**
+ * `track.clips` typed as any clip, for code that moves clips without caring
+ * about their kind; {@link Edit.finish} validates kinds against tracks.
+ */
+function clipsOf(track: AnyClipTrack): AnyClip[] {
+  return track.clips;
+}
+
+function indexIds(timeline: Timeline): { tracks: Map<string, Track>; clips: Map<string, AnyClip>; groups: Set<string> } {
   const tracks = new Map<string, Track>();
-  const clips = new Map<string, Clip>();
+  const clips = new Map<string, AnyClip>();
   for (const track of timeline.tracks) {
     tracks.set(track.id, track);
     if (track.kind !== "subtitles") for (const clip of track.clips) clips.set(clip.id, clip);
   }
-  return { tracks, clips };
+  return { tracks, clips, groups: new Set((timeline.groups ?? []).map((group) => group.id)) };
 }

@@ -38,7 +38,7 @@ import {
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
-import { diffTimelines } from "./patch.js";
+import { diffTimelines, isEmptyPatch } from "./patch.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -428,6 +428,7 @@ export class TimelineService {
         kind: track.kind,
         name: track.name ?? null,
         follows: track.kind === "subtitles" ? track.follows : null,
+        ...(track.kind === "program" ? { group: track.group } : {}),
         ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
         clips,
       });
@@ -439,6 +440,7 @@ export class TimelineService {
       fps,
       duration,
       tracks,
+      ...(timeline.groups ? { groups: timeline.groups } : {}),
       problems,
     };
   }
@@ -457,6 +459,7 @@ export class TimelineService {
         kind: track.kind,
         name: track.name,
         follows: track.follows,
+        ...(track.group !== undefined ? { group: track.group } : {}),
         ...(track.style ? { style: track.style } : {}),
         clips: track.clips.length,
         end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
@@ -627,7 +630,7 @@ export class TimelineService {
     fps: number,
     saver: Saver,
   ): Promise<{ timeline: Timeline; result: OperationResult | null }> {
-    if (!patch.tracks && !patch.clips && !patch.order) {
+    if (isEmptyPatch(patch)) {
       const text = `${JSON.stringify(base, null, 2)}\n`;
       await writeTextAtomic(timelinePath(root, id), text);
       this.#known.set(await this.#key(root, id), { text, timeline: base });
@@ -678,8 +681,8 @@ export class TimelineService {
       );
     }
     const patch = diffTimelines(base, incoming);
-    if (!patch.tracks && !patch.clips && !patch.order) {
-      // Same tracks and clips (formatting, key order): nothing to journal.
+    if (isEmptyPatch(patch)) {
+      // Same groups, tracks and clips (formatting, key order): nothing to journal.
       await writeTextAtomic(path, text);
       this.#known.set(await this.#key(root, id), { text, timeline: base });
       return { timeline: structuredClone(base), result: null };
