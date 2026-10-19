@@ -124,7 +124,18 @@ function AngleTileView({
       onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => onCut(tile, event.shiftKey)}
     >
-      {src ? <video ref={video} src={src} muted playsInline preload="auto" disablePictureInPicture /> : <span className="angle-empty">{noPicture(asset) ? t.angles.unavailable : t.angles.preparing}</span>}
+      {src ? (
+        <video
+          ref={video}
+          src={src}
+          muted
+          playsInline
+          preload="auto"
+          disablePictureInPicture
+          // Chromium's `object-view-box` shows only the crop, still letterboxed by `object-fit: contain`; React's CSS types lack it.
+          style={tile.viewBox ? ({ objectViewBox: tile.viewBox } as React.CSSProperties) : undefined}
+        />
+      ) : <span className="angle-empty">{noPicture(asset) ? t.angles.unavailable : t.angles.preparing}</span>}
       <span className="angle-label">
         <span className="angle-number">{tile.number}</span>
         <span className="angle-name">{tile.name}</span>

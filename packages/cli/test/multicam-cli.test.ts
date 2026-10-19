@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeBurstAudio, makeBurstClip } from "../../core/test/media-fixtures.js";
+import { GALLERY_FOUR, GALLERY_THREE, makeBurstAudio, makeBurstClip, makeGallery } from "../../core/test/media-fixtures.js";
 import { testBinariesDir } from "../../core/test/media-tools.js";
 import { UsageError, parseTimelineCommand } from "../src/timeline-commands.js";
 
@@ -40,7 +40,8 @@ beforeAll(async () => {
   await makeBurstClip(join(footage, "ana.mp4"), { shiftS: 0 });
   await makeBurstClip(join(footage, "ben.mp4"), { shiftS: 1.5, durationS: 9 });
   await makeBurstAudio(join(footage, "rec.wav"), { shiftS: 3, durationS: 8 });
-  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4"), join(footage, "rec.wav")]).code).toBe(0);
+  await makeGallery(join(footage, "call.mp4"), [GALLERY_FOUR, GALLERY_THREE, GALLERY_THREE], 3);
+  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4"), join(footage, "rec.wav"), join(footage, "call.mp4")]).code).toBe(0);
   daemonPid = JSON.parse(frameshell(["status", "--json"]).stdout).daemon.pid;
 }, 120_000);
 
@@ -191,6 +192,21 @@ describe("frameshell multicam with separate mics", () => {
   }, 120_000);
 });
 
+describe("frameshell multicam gallery", () => {
+  it("cuts a gallery recording into tiles, prints their crops and the layout change", () => {
+    const made = frameshell(["multicam", "gallery", "assets/call.mp4", "--name", "Ana", "--name", "Ben", "--name", "Zoe"]);
+    expect(made.stderr).toBe("");
+    expect(made.code).toBe(0);
+    expect(made.stdout).toMatch(/Multicam group g_[0-9a-f]{6} · program track t_[0-9a-f]{6} · shot c_[0-9a-f]{6} \(grid, whole length\) · 3 tiles from 9 frames/);
+    expect(made.stdout).toMatch(/ {2}zoe {2}Zoe {2}crop left 0\.2\d* top 0\.51\d* right 0\.2\d* bottom 0\.0\d* {2}confidence \d+%/);
+    expect(made.stdout).toContain("0–3 s  4 tiles\n  3–9 s  3 tiles  (used)");
+    expect(made.stdout).toContain("warning: the call layout changes at 3 s: 4 tiles before, 3 tiles after.");
+    const wrong = frameshell(["multicam", "gallery", "assets/call.mp4", "--name", "Ana"]);
+    expect(wrong.code).not.toBe(0);
+    expect(wrong.stderr).toContain("1 name(s) for 3 tiles");
+  }, 120_000);
+});
+
 describe("parsing multicam commands", () => {
   it("maps arguments to the methods and refuses a wrong name count, a bad number or conflicting flags", () => {
     expect(parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A", "B"] })).toMatchObject({
@@ -199,6 +215,12 @@ describe("parsing multicam commands", () => {
     });
     expect(() => parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A"] })).toThrow(UsageError);
     expect(() => parseTimelineCommand(["multicam", "create", "a.mp4"], {})).toThrow(/takes 2\+ argument/);
+    expect(parseTimelineCommand(["multicam", "gallery", "call.mp4"], { name: ["A", "B"], "group-name": "Standup", at: "62.5" })).toMatchObject({
+      method: "multicam.gallery",
+      params: { asset: "call.mp4", names: ["A", "B"], name: "Standup", at: 62.5 },
+    });
+    expect(() => parseTimelineCommand(["multicam", "gallery", "a.mp4", "b.mp4"], {})).toThrow(/takes 1 argument/);
+    expect(() => parseTimelineCommand(["multicam", "gallery", "a.mp4"], { at: "soon" })).toThrow(/--at: expected a number/);
     expect(parseTimelineCommand(["multicam", "offset", "g_1", "ben", "1.5"], {})).toMatchObject({
       method: "multicam.offset",
       params: { group: "g_1", angle: "ben", offset: 1.5 },

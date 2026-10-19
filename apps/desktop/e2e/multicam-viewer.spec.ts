@@ -58,7 +58,9 @@ test.beforeAll(async () => {
   mkdirSync(box.configDir, { recursive: true });
   writeFileSync(join(box.configDir, "config.json"), JSON.stringify({ binaries: { ffmpeg } }));
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
-  timeline.groups = [{ id: "g_talk", angles: COLOURS.map((colour) => ({ id: colour, name: colour, asset: asset(colour), offset: 0 })) }];
+  // Lime is cut like a tile of a gallery recording: the viewer shows only its crop.
+  const crop = (colour: string) => (colour === "lime" ? { crop: { left: 0.5 } } : {});
+  timeline.groups = [{ id: "g_talk", angles: COLOURS.map((colour) => ({ id: colour, name: colour, asset: asset(colour), offset: 0, ...crop(colour) })) }];
   timeline.tracks = [
     {
       id: "t_program",
@@ -92,6 +94,7 @@ test("the viewer shows every angle, outlines the shot's, and a click cuts to an 
   const viewer = page.getByTestId("angle-viewer");
   await expect(viewer.getByTestId("angle-tile")).toHaveCount(3);
   await expect(viewer).toHaveAttribute("data-decoders", "3");
+  await expect(viewer.locator('[data-angle="lime"] video')).toHaveCSS("object-view-box", "inset(0% 0% 0% 50%)");
   await expect(viewer.locator('[data-angle="red"]')).toHaveAttribute("data-in-shot", "true");
   await expect(viewer.locator('[data-angle="blue"]')).toHaveAttribute("data-in-shot", "false");
 

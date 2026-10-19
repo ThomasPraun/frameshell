@@ -211,6 +211,8 @@ class Edit {
         return this.cut(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
+      case "multicam.gallery":
+        return this.multicamGallery(request.args);
       case "multicam.offset":
         return this.multicamOffset(request.args);
       case "multicam.angle":
@@ -847,6 +849,66 @@ class Edit {
     this.draft.tracks.push(track);
   }
 
+  /**
+   * One multicam group from the tiles of one gallery recording (see the
+   * `multicam.gallery` method): one angle per tile, each a crop of `args.asset`
+   * at offset 0, and its program track with one `grid` shot over the file. The
+   * file's sound plays once, through one mic every angle takes; a silent file
+   * gives silent angles and no mic.
+   */
+  async multicamGallery(args: OperationArgs<"multicam.gallery">): Promise<void> {
+    const info = await this.context.source(args.asset);
+    if (!info.video || info.duration === null) {
+      throw this.invalid(`${args.asset} has no moving picture; a gallery recording needs a video file.`, { field: "asset" });
+    }
+    const angles: Angle[] = [];
+    args.tiles.forEach((tile, index) => {
+      const name = tile.name ?? `Tile ${index + 1}`;
+      const crop: AngleCrop = {};
+      for (const side of ["left", "top", "right", "bottom"] as const) {
+        const value = tile.crop[side];
+        if (value !== undefined && value !== 0) crop[side] = Math.round(value * 10000) / 10000;
+      }
+      this.checkCrop(crop, `tile ${index + 1}`, "tiles");
+      angles.push({ id: this.angleId(name, angles), name, asset: args.asset, offset: 0, ...(Object.keys(crop).length > 0 ? { crop } : {}) });
+    });
+    const mics: Mic[] = [];
+    if (info.audio) {
+      const taken: { id: string }[] = [...angles, ...RESERVED_MIC_IDS.map((id) => ({ id }))];
+      mics.push({ id: this.angleId("Call", taken), name: "Call", asset: args.asset, offset: 0 });
+    }
+    for (const angle of angles) angle.mic = mics[0]?.id ?? null;
+    const last = this.grid.floor(info.duration);
+    if (this.grid.frame(last) < 1) throw this.invalid(`${args.asset} is shorter than one frame (${info.duration} s).`, { field: "asset" });
+    const id = this.newId("g");
+    const group: MulticamGroup = { id, ...(args.name ? { name: args.name } : {}), angles, ...(mics.length > 0 ? { mics } : {}) };
+    const track: ProgramTrack = {
+      id: this.newId("t"),
+      kind: "program",
+      name: args.name ?? "Multicam",
+      group: id,
+      clips: [{ id: this.newId("c"), type: "shot", start: 0, in: 0, out: last, shot: "grid", angles: angles.map((angle) => angle.id) }],
+    };
+    this.draft.groups = [...(this.draft.groups ?? []), group];
+    this.draft.tracks.push(track);
+  }
+
+  /** InvalidOperation when `crop` of `what` leaves no picture: left + right or top + bottom reach 1. */
+  checkCrop(crop: AngleCrop, what: string, field: string): void {
+    for (const [a, b] of [
+      ["left", "right"],
+      ["top", "bottom"],
+    ] as const) {
+      const sum = (crop[a] ?? 0) + (crop[b] ?? 0);
+      if (sum >= 1) {
+        throw this.invalid(`the crop of ${what} would cut its whole picture: ${a} + ${b} = ${Number(sum.toFixed(4))}.`, {
+          field,
+          hint: `Keep ${a} + ${b} below 1 (fractions of the picture).`,
+        });
+      }
+    }
+  }
+
   /** Set one angle's offset; shots left past the group's new end are refused by {@link Edit.checkShots}. */
   multicamOffset(args: OperationArgs<"multicam.offset">): void {
     const { angle } = this.angle(args.group, args.angle);
@@ -897,18 +959,7 @@ class Edit {
         if (value === 0) delete merged[side];
         else merged[side] = Math.round(value * 10000) / 10000;
       }
-      for (const [a, b] of [
-        ["left", "right"],
-        ["top", "bottom"],
-      ] as const) {
-        const sum = (merged[a] ?? 0) + (merged[b] ?? 0);
-        if (sum >= 1) {
-          throw this.invalid(`the crop of angle ${angle.id} (group ${group.id}) would cut its whole picture: ${a} + ${b} = ${Number(sum.toFixed(4))}.`, {
-            field: "crop",
-            hint: `Keep ${a} + ${b} below 1 (fractions of the picture).`,
-          });
-        }
-      }
+      this.checkCrop(merged, `angle ${angle.id} (group ${group.id})`, "crop");
       if (Object.keys(merged).length === 0) delete angle.crop;
       else angle.crop = merged;
     }
