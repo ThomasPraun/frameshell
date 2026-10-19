@@ -41,8 +41,8 @@ export interface MeasuredAngles {
 /**
  * Resolve the files and measure every file's offset against the first
  * (ADR 0016). Throws InvalidOperation naming the file and the fix when a
- * file is outside the project, has no picture or no sound, or cannot be
- * decoded, and AssetNotFound when it does not exist.
+ * file is outside the project, has no picture, cannot be decoded, or is the
+ * first file and has no sound (later silent files stay unsynced), and AssetNotFound when it does not exist.
  */
 export async function measureAngles(source: MeasureSource, request: MeasureRequest): Promise<MeasuredAngles> {
   const { root, cwd, names } = request;
@@ -62,7 +62,8 @@ export async function measureAngles(source: MeasureSource, request: MeasureReque
       field: "assets",
     });
   }
-  for (const asset of assets) {
+  const silent = new Set<string>();
+  for (const [i, asset] of assets.entries()) {
     const probe = await source.probe(root, asset).catch((error: unknown) => {
       if (error instanceof RpcError) throw error;
       throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${asset} is not a media file ffprobe can read.`, {
@@ -71,18 +72,29 @@ export async function measureAngles(source: MeasureSource, request: MeasureReque
         field: "assets",
       });
     });
-    if (!probe.video || probe.video.still || !probe.audio) {
-      const lacks = !probe.audio ? "sound" : "a moving picture";
+    if (!probe.video || probe.video.still) {
       throw new RpcError(
         ErrorCode.InvalidOperation,
-        `${op}: ${asset} has no ${lacks}; each angle needs a video file with sound to be synced by its audio.`,
-        { op, reason: "no streams", field: "assets", hint: "Sync a file without sound by hand with `multicam.offset` after adding the others." },
+        `${op}: ${asset} has no moving picture; each angle needs a video file.`,
+        { op, reason: "no streams", field: "assets" },
       );
     }
+    if (probe.audio) continue;
+    if (i === 0) {
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `${op}: ${asset} has no sound, and the first file sets the clock the others are synced to.`,
+        { op, reason: "no streams", field: "assets", hint: "Put a file with sound first." },
+      );
+    }
+    silent.add(asset);
   }
   const reference = await profileOf(source, root, assets[0]!);
   const estimates = [];
-  for (const asset of assets.slice(1)) estimates.push(correlateProfiles(reference, await profileOf(source, root, asset)));
+  for (const asset of assets.slice(1)) {
+    // A silent file has nothing to match: unsynced, it starts with the first file and gets the usual warning.
+    estimates.push(silent.has(asset) ? { lag: 0, confidence: 0 } : correlateProfiles(reference, await profileOf(source, root, asset)));
+  }
   return { assets, plan: planOffsets(estimates) };
 }
 

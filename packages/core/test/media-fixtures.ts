@@ -22,13 +22,14 @@ export async function makeVfrRecording(path: string, durationS = 2.5): Promise<v
 }
 
 /** Short CFR clip of a given size, test pattern plus tone. */
-export async function makeClip(path: string, { width = 320, height = 240, fps = 30, durationS = 1 } = {}): Promise<void> {
+export async function makeClip(path: string, { width = 320, height = 240, fps = 30, durationS = 1, silent = false } = {}): Promise<void> {
   const { ffmpeg } = await mediaTools();
   await run(ffmpeg, [
     ...["-hide_banner", "-loglevel", "error", "-y"],
     ...["-f", "lavfi", "-i", `testsrc2=s=${width}x${height}:r=${fps}:d=${durationS}`],
-    ...["-f", "lavfi", "-i", `sine=f=440:r=48000:d=${durationS}`],
-    ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+    ...(silent ? [] : ["-f", "lavfi", "-i", `sine=f=440:r=48000:d=${durationS}`]),
+    ...["-c:v", "libx264", "-pix_fmt", "yuv420p"],
+    ...(silent ? ["-an", path] : ["-c:a", "aac", "-shortest", path]),
   ]);
 }
 

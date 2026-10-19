@@ -24,7 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { parseTimeline } from "@frameshell/schema";
+import { type Timeline, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -295,14 +295,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
   };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
-  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string; [arg: string]: unknown }, caller: Caller) => {
+  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string; [arg: string]: unknown }, caller: Caller, onApplied?: (after: Timeline) => void) => {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
     const key = authorOf(caller);
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, timeline });
-    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx });
+    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(onApplied ? { onApplied } : {}) });
     await transactions.applied(key, tx);
     return result;
   };
@@ -523,11 +523,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ...(names ? { name: names[i]! } : {}),
         offset: measured.plan[i]!.offset,
       }));
-      const result = await operate("multicam.create", { cwd, timeline, angles, ...(name ? { name } : {}) }, caller);
-      const created = (await timelines.load(dir, timeline)).timeline;
-      const group = created.groups?.find((candidate) => result.changes.added.includes(candidate.id));
-      const track = created.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
-      if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the new group is missing from the timeline");
+      // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
+      let written: Timeline | undefined;
+      const result = await operate("multicam.create", { cwd, timeline, angles, ...(name ? { name } : {}) }, caller, (after) => {
+        written = after;
+      });
+      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
+      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
+      if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the operation wrote no new group");
       const { sync, warnings } = syncReport(group, measured.plan);
       return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
     },

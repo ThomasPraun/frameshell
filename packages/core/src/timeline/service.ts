@@ -114,6 +114,8 @@ export interface CallContext {
 /** Operation to run: the engine request plus who asked. */
 export interface TimelineCall extends CallContext {
   request: OperationRequest;
+  /** Called with the timeline this operation wrote, before the next operation can run on it. */
+  onApplied?: (timeline: Timeline) => void;
 }
 
 /** Revert to run: a tx id (`tx_…`) or op id (`op_…`) from the timeline's journal. */
@@ -186,7 +188,10 @@ export class TimelineService {
       const { timeline, fps, snapWindow } = await this.#current(root, id);
       const request = normalizeArgs(call);
       const context = this.#context(root, id, fps, request.op, snapWindow);
-      return this.#record(call, timeline, await applyOperation(timeline, request, context), request.op, request.args, warnings);
+      const applied = await applyOperation(timeline, request, context);
+      const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);
+      call.onApplied?.(applied.timeline);
+      return result;
     });
   }
 
@@ -838,6 +843,12 @@ function normalizeArgs(call: TimelineCall): OperationRequest {
   return { op: request.op, args };
 }
 
+/**
+ * Resolve a caller's path (absolute, else relative to `cwd`, then to `root`) to a
+ * project-relative `/` path, preferring an existing file. Throws InvalidOperation
+ * "outside project" (naming `field` and `op`) when it leaves the project or
+ * points under `.frameshell/`.
+ */
 export function projectPath(root: string, cwd: string, path: string, field: string, op = "clip.add"): string {
   const candidates = isAbsolute(path) ? [path] : [resolve(cwd, path), resolve(root, path)];
   const inside = candidates

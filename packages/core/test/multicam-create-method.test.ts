@@ -37,7 +37,8 @@ beforeAll(async () => {
       [9.5, 0.3, 450],
     ],
   });
-  const names = ["ana", "ben", "zoe", "hum", "other"];
+  await makeClip(join(footage, "mute.mp4"), { durationS: 8, silent: true });
+  const names = ["ana", "ben", "zoe", "hum", "other", "mute"];
   const { imported } = await conn.request("asset.import", { cwd: project, files: names.map((name) => join(footage, `${name}.mp4`)) });
   for (const entry of imported) files[entry.asset.split("/").pop()!.replace(".mp4", "")] = entry.asset;
 }, MEDIA_TIMEOUT);
@@ -93,6 +94,20 @@ describe("multicam.create", () => {
     for (const angle of result.sync.slice(1)) expect(angle.confidence).toBeLessThan(0.5);
     expect(result.warnings).toHaveLength(2);
     expect(result.warnings[0]).toContain(`frameshell multicam offset ${result.group} hum <seconds>`);
+  }, MEDIA_TIMEOUT);
+
+  it("keeps a file without sound as an unsynced angle with a warning, but refuses it as the first file", async () => {
+    const result = await conn.request("multicam.create", { cwd: project, assets: [files["ana"]!, files["mute"]!], names: ["Ana", "Mute"] });
+    expect(result.sync.map((angle) => [angle.name, angle.offset, angle.synced, angle.confidence])).toEqual([
+      ["Ana", 0, true, null],
+      ["Mute", 0, false, 0],
+    ]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain(`frameshell multicam offset ${result.group} mute <seconds>`);
+    await expect(conn.request("multicam.create", { cwd: project, assets: [files["mute"]!, files["ana"]!] })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("first file sets the clock"),
+    });
   }, MEDIA_TIMEOUT);
 
   it("fixes an angle by hand with multicam.offset, journaled and reverted", async () => {
