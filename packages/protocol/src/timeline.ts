@@ -410,6 +410,29 @@ export const MulticamCreateResultSchema = OperationResultSchema.extend({
 /** See {@link MulticamCreateResultSchema}. */
 export type MulticamCreateResult = z.output<typeof MulticamCreateResultSchema>;
 
+/** One stretch of speech of one angle's person, on the group clock. */
+export const SpeakingTurnSchema = z.object({
+  angle: z.string().describe("Angle id in the group."),
+  name: z.string().describe("Angle name, e.g. the person."),
+  start: z.number().describe("Group-clock seconds where the person starts speaking."),
+  end: z.number().describe("Group-clock seconds where the turn ends; greater than `start`."),
+});
+
+/** Result of `multicam.turns`. */
+export const MulticamTurnsResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int(),
+  group: z.string(),
+  duration: z.number().describe("Group-clock seconds where the last angle's file ends."),
+  turns: z
+    .array(SpeakingTurnSchema)
+    .describe("Every angle's turns sorted by `start`. Turns of different angles may overlap: both people spoke at once."),
+  warnings: z.array(z.string()).describe("Angles that could not be measured (no sound, unreadable); they have no turns."),
+});
+
+/** See {@link MulticamTurnsResultSchema}. */
+export type MulticamTurnsResult = z.output<typeof MulticamTurnsResultSchema>;
+
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z
   .looseObject({
