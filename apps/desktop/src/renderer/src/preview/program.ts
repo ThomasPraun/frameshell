@@ -122,6 +122,8 @@ export interface AngleLayer {
   tile: LayerRect;
   crop: LayerRect;
   source: Size;
+  /** True: black fills the frame behind the tile (`ShotLayer.backdrop`). */
+  backdrop: boolean;
 }
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
@@ -413,7 +415,7 @@ export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Si
   const { shot, group, sizes } = span.layout;
   const size = (asset: string) => sizes[asset] ?? output;
   const layer = shotLayers(shot, group, output, size).find((candidate) => candidate.angle === span.angle);
-  return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset) } : null;
+  return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset), backdrop: layer.backdrop } : null;
 }
 
 /** A shot as the preview plays it: program frames `[start, end)`. */
@@ -464,6 +466,11 @@ function angleSlots(shots: readonly PlacedShot[], group: MulticamGroup, assets: 
       const free = next.indexOf(null);
       if (free >= 0) next[free] = id;
       else next.push(id);
+    }
+    // Slots paint bottom first: a pip inset (second angle) must sit above its screen (first angle).
+    if (placed.shot.shot === "pip") {
+      const [screen, inset] = [next.indexOf(shown[0] ?? ""), next.indexOf(shown[1] ?? "")];
+      if (screen > inset && inset >= 0) [next[screen], next[inset]] = [next[inset]!, next[screen]!];
     }
     held = next;
     while (slots.length < next.length) slots.push([]);

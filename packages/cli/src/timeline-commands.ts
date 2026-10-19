@@ -46,17 +46,20 @@ mutations print the new revision):
                                Fix one angle's sync by hand: the group second at which its file's time 0 plays
                                (absolute, >= 0; a smaller number plays the angle earlier)
   multicam angle <group> <angle> [--name n] [--crop-left f] [--crop-top f] [--crop-right f] [--crop-bottom f]
-                 [--clear-crop] [--gain dB] [--muted | --unmuted] [--mic <mic id> | camera | none]
+                 [--clear-crop] [--gain dB] [--muted | --unmuted] [--mic <mic id> | camera | none] [--screen | --no-screen]
                                Rename an angle, crop its picture (fractions cut off each side, 0 to below 1), set
-                               its sound under every shot or pick where it is heard: a mic of the group, camera (its
-                               own file) or none. With a mic, gain and mute belong to the mic
+                               its sound under every shot, pick where it is heard (a mic of the group, camera: its
+                               own file, or none; with a mic, gain and mute belong to the mic) or mark it a screen
+                               share (--screen: shown by screen and pip shots while it moves, never as a speaker)
   multicam mic <group> <mic> [--name n] [--offset s] [--gain dB] [--muted | --unmuted]
                                Fix a separate mic: rename it, set the group second at which its file's time 0 plays
                                (absolute, >= 0) or its sound under every shot
-  shot set <shot> [--layout solo|two-up|grid] [--angles a,b,…]
+  shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b,…] [--corner top-left|top-right|bottom-left|bottom-right]
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
-                               count when it does not fit (1 solo, 2 two-up, more grid)
+                               count when it does not fit (1 solo, 2 two-up, more grid). screen shows one angle whole,
+                               with bars; pip takes the screen first, then the speaker as an inset in --corner (default
+                               bottom-right)
   multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap). Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings}
@@ -144,6 +147,9 @@ export const TIMELINE_OPTIONS = {
   "clear-crop": { type: "boolean" },
   layout: { type: "string" },
   angles: { type: "string" },
+  corner: { type: "string" },
+  screen: { type: "boolean" },
+  "no-screen": { type: "boolean" },
   template: { type: "string" },
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
@@ -180,9 +186,9 @@ const ALLOWED: Record<string, string[]> = {
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam offset": [],
-  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic"],
+  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen"],
   "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
-  "shot set": ["layout", "angles"],
+  "shot set": ["layout", "angles", "corner"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
@@ -415,6 +421,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       const sides = { left: num("crop-left"), top: num("crop-top"), right: num("crop-right"), bottom: num("crop-bottom") };
       const cropped = Object.values(sides).some((value) => value !== undefined);
       if (cropped && values["clear-crop"] === true) throw new UsageError("Pass --crop-<side> or --clear-crop, not both.");
+      if (values["screen"] === true && values["no-screen"] === true) throw new UsageError("Pass --screen or --no-screen, not both.");
       Object.assign(params, {
         group: args[0],
         angle: args[1],
@@ -423,6 +430,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         mic: str("mic"),
+        screen: values["screen"] === true ? true : values["no-screen"] === true ? false : undefined,
       });
       break;
     }
@@ -447,7 +455,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         .map((angle) => angle.trim())
         .filter((angle) => angle !== "");
       if (angles !== undefined && angles.length === 0) throw new UsageError("--angles: give angle ids separated by commas, e.g. --angles ana,ben.");
-      Object.assign(params, { clip: args[0], shot: str("layout"), angles });
+      Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
     case "multicam turns":

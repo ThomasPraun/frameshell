@@ -398,6 +398,7 @@ describe("compileProgram with a multicam program track", () => {
     expect(angleLayer(ana, { width: 960, height: 540 })).toEqual({
       tile: { left: 480, top: 0, width: 480, height: 540 },
       crop: { left: 480, top: 0, width: 960, height: 1080 },
+      backdrop: false,
       source: HD,
     });
     expect(angleLayer(ben, { width: 960, height: 540 })?.tile).toEqual({ left: 0, top: 0, width: 480, height: 540 });
@@ -470,6 +471,21 @@ describe("compileProgram with a multicam program track", () => {
     const after = compileProgram(talk([base, programTrack(regrid)]), angles);
     expect(firstVideoDifference(before, after, 0, 1)).toBe(Infinity);
     expect(firstVideoDifference(before, after, 0, 2)).toBe(Infinity);
+  });
+
+  it("paints a pip inset above its screen: slots paint bottom first, so the screen takes the lower slot even when the inset was shown before", () => {
+    const pips = [shot("s1", 0, 0, 1, "solo", ["ana"]), shot("s2", 1, 1, 2, "pip", ["eva", "ana"])];
+    const program = compileProgram(talk([programTrack(pips)]), angles);
+    expect(program.layers.map(brief)).toEqual([
+      // Eva (the screen) swaps into slot 0 under Ana, who was there alone.
+      ["s1:ana@0-30<0", "s2:eva@30-60<23"],
+      ["s2:ana@30-60<30"],
+    ]);
+    const screen = programAt(program, 45, 0) as AngleSpan;
+    const inset = programAt(program, 45, 1) as AngleSpan;
+    // The screen fills the frame (bars where shapes differ) and the inset sits in the bottom-right corner over it.
+    expect(angleLayer(screen, HD)!.tile).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+    expect(angleLayer(inset, HD)!.tile).toEqual({ left: 1402, top: 772, width: 480, height: 270 });
   });
 
   it("refuses shots of a nested clip with a transform (they would fill the frame), and still plays their sound", () => {

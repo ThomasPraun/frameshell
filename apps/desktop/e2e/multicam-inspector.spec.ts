@@ -186,3 +186,30 @@ test("an angle heard through a mic (or none) cannot take gain or mute here", asy
   await expect(mute).toBeDisabled();
   await expect(mute).toHaveAttribute("title", "This angle is heard through a mic (or none): its level is set on the mic");
 });
+
+test("a screen angle and a pip shot: the toggle, the layout and the corner are saved through the daemon", async () => {
+  const lime = page.getByRole("group", { name: "Angles of program track P1" }).locator('[data-angle="lime"]');
+  await lime.getByRole("button", { name: "Screen" }).click();
+  await expect.poll(() => saved().angles[1]!["screen"]).toBe(true);
+
+  const scroller = page.locator(".timeline-scroller");
+  const rect = await laidOutBox(scroller);
+  const pxPerSecond = (await scroller.evaluate((element) => element.scrollWidth)) / FIT_SPAN_S;
+  await page.mouse.click(rect.x + 1 * pxPerSecond, rect.y + PROGRAM_LANE_MIDDLE);
+  await expect(lanes()).toHaveAttribute("data-selected", "c_shot");
+  // Only a pip shot offers a corner.
+  await expect(inspector().getByRole("radiogroup", { name: "Inset" })).toHaveCount(0);
+
+  await inspector().getByRole("radiogroup", { name: "Layout" }).getByRole("radio", { name: "Screen + inset" }).click();
+  // The screen angle leads, the person fills the inset.
+  await expect(shotItem()).toContainText("Screen + inset · lime, Ana");
+  expect(saved().shot).toMatchObject({ shot: "pip", angles: ["lime", "red"] });
+  expect(saved().shot).not.toHaveProperty("corner");
+
+  await inspector().getByRole("radiogroup", { name: "Inset" }).getByRole("radio", { name: "Top left" }).click();
+  await expect.poll(() => saved().shot["corner"]).toBe("top-left");
+
+  await inspector().getByRole("radiogroup", { name: "Layout" }).getByRole("radio", { name: "Solo" }).click();
+  await expect.poll(() => saved().shot["shot"]).toBe("solo");
+  expect(saved().shot).not.toHaveProperty("corner");
+});

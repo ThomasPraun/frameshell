@@ -385,9 +385,11 @@
                       "enum": [
                         "solo",
                         "two-up",
-                        "grid"
+                        "grid",
+                        "screen",
+                        "pip"
                       ],
-                      "description": "Layout: `solo` (one angle), `two-up` (two), `grid` (two or more)."
+                      "description": "Layout: `solo` (one angle), `two-up` (two), `grid` (two or more), `screen` (one angle whole), `pip` (screen angle + inset)."
                     },
                     "angles": {
                       "minItems": 1,
@@ -396,7 +398,17 @@
                         "type": "string",
                         "minLength": 1
                       },
-                      "description": "Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats."
+                      "description": "Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats. `pip`: the screen first, then the inset."
+                    },
+                    "corner": {
+                      "description": "`pip` only: corner of the inset. Default `bottom-right`.",
+                      "type": "string",
+                      "enum": [
+                        "top-left",
+                        "top-right",
+                        "bottom-left",
+                        "bottom-right"
+                      ]
                     },
                     "confidence": {
                       "description": "Set by the director: 0 (a guess) to 1 (sure). Absent on shots a person chose.",
@@ -582,6 +594,10 @@
                       "type": "null"
                     }
                   ]
+                },
+                "screen": {
+                  "description": "True: a screen share, not a person. The director shows it (`screen`, `pip`) while it moves and never as a speaker. Default false.",
+                  "type": "boolean"
                 }
               },
               "required": [

@@ -10,14 +10,25 @@ export const CORE_CLIP_TYPES = ["media", "timeline", "shot"] as const;
 /** Adapter clip type name: lowercase, not a core type. */
 export const ADAPTER_CLIP_TYPE_PATTERN = /^(?!(?:media|timeline|shot)$)[a-z][a-z0-9-]*$/;
 
-/** Shot layouts (ADR 0016): `solo` takes one angle, `two-up` two, `grid` two or more. */
-export const SHOT_LAYOUTS = ["solo", "two-up", "grid"] as const;
+/**
+ * Shot layouts (ADR 0016): `solo` takes one angle, `two-up` two, `grid` two or more;
+ * `screen` one angle whole (never cropped), `pip` a screen angle with a second angle as an inset.
+ */
+export const SHOT_LAYOUTS = ["solo", "two-up", "grid", "screen", "pip"] as const;
+
+/** Corners of a `pip` shot's inset. */
+export const SHOT_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+
+/** Corner of a `pip` inset when the shot has no `corner`. */
+export const DEFAULT_SHOT_CORNER: (typeof SHOT_CORNERS)[number] = "bottom-right";
 
 /** Angles a shot of each layout takes: `[min, max]`. */
 export const SHOT_ANGLE_COUNTS: Readonly<Record<(typeof SHOT_LAYOUTS)[number], readonly [number, number]>> = {
   solo: [1, 1],
   "two-up": [2, 2],
   grid: [2, Number.POSITIVE_INFINITY],
+  screen: [1, 1],
+  pip: [2, 2],
 };
 
 /** A director's shot below this `confidence` is a doubtful one: the timeline marks it for review. */
@@ -120,11 +131,16 @@ export const ShotClipSchema = z
     start: ClipStartSchema,
     in: Seconds.describe("Group-clock seconds of the first frame."),
     out: z.number().positive().describe("Group-clock seconds just after the last frame; greater than `in`."),
-    shot: z.enum(SHOT_LAYOUTS).describe("Layout: `solo` (one angle), `two-up` (two), `grid` (two or more)."),
+    shot: z
+      .enum(SHOT_LAYOUTS)
+      .describe("Layout: `solo` (one angle), `two-up` (two), `grid` (two or more), `screen` (one angle whole), `pip` (screen angle + inset)."),
     angles: z
       .array(Id)
       .min(1)
-      .describe("Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats."),
+      .describe(
+        "Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats. `pip`: the screen first, then the inset.",
+      ),
+    corner: z.enum(SHOT_CORNERS).optional().describe("`pip` only: corner of the inset. Default `bottom-right`."),
     confidence: z
       .number()
       .min(0)
@@ -141,6 +157,7 @@ export const ShotClipSchema = z
       const count = min === max ? `exactly ${min}` : `at least ${min}`;
       ctx.addIssue({ code: "custom", message: `a ${shot.shot} shot takes ${count} angle(s), got ${shot.angles.length}`, path: ["angles"] });
     }
+    if (shot.corner !== undefined && shot.shot !== "pip") ctx.addIssue({ code: "custom", message: "only a pip shot has a corner", path: ["corner"] });
     shot.angles.forEach((angle, a) => {
       if (shot.angles.indexOf(angle) !== a) ctx.addIssue({ code: "custom", message: `angle "${angle}" is listed twice`, path: ["angles", a] });
     });
@@ -183,6 +200,10 @@ export const AngleSchema = z.strictObject({
         "(one mic may serve several angles and plays once); the file's own sound is then not played. null: no sound " +
         "(a wide camera); its own file's sound is not played either.",
     ),
+  screen: z
+    .boolean()
+    .optional()
+    .describe("True: a screen share, not a person. The director shows it (`screen`, `pip`) while it moves and never as a speaker. Default false."),
 });
 
 /**
@@ -376,6 +397,9 @@ export type ShotClip = z.infer<typeof ShotClipSchema>;
 export type AnyClip = Clip | ShotClip;
 /** Shot layout. */
 export type ShotLayout = (typeof SHOT_LAYOUTS)[number];
+
+/** See {@link SHOT_CORNERS}. */
+export type ShotCorner = (typeof SHOT_CORNERS)[number];
 /** `type: "media"` clip. */
 export type MediaClip = z.infer<typeof MediaClipSchema>;
 /** `type: "timeline"` clip. */

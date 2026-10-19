@@ -5,6 +5,7 @@ import {
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
+  SHOT_CORNERS,
   SHOT_LAYOUTS,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
@@ -296,10 +297,18 @@ export const operationArgs = {
       .min(1)
       .optional()
       .describe("Where the angle is heard: a mic id of the group, `camera` (its own file's sound) or `none` (no sound, e.g. a wide camera)."),
+    screen: z
+      .boolean()
+      .optional()
+      .describe("True marks the angle as a screen share (shown by `screen` and `pip` shots, never a speaker); false clears it."),
   }),
   "shot.set": z.strictObject({
     clip: ClipRef.describe("Shot id: a clip of a program track, from `timeline.show`."),
-    shot: z.enum(SHOT_LAYOUTS).optional().describe("New layout: `solo` (one angle), `two-up` (two), `grid` (two or more). Default: unchanged."),
+    shot: z
+      .enum(SHOT_LAYOUTS)
+      .optional()
+      .describe("New layout: `solo` (one angle), `two-up` (two), `grid` (two or more), `screen` (one angle whole), `pip` (screen + inset). Default: unchanged."),
+    corner: z.enum(SHOT_CORNERS).optional().describe("Corner of a `pip` inset. Default: unchanged, else `bottom-right`."),
     angles: z
       .array(z.string().min(1))
       .min(1)
@@ -319,6 +328,16 @@ export const operationArgs = {
         }),
       )
       .describe("Speaking turns of the group's angles. The `multicam.direct` method measures them and passes them here."),
+    motion: z
+      .array(
+        z.strictObject({
+          angle: z.string().min(1),
+          start: z.number().nonnegative().describe("Group-clock seconds."),
+          end: z.number().nonnegative().describe("Group-clock seconds; greater than `start`."),
+        }),
+      )
+      .optional()
+      .describe("Stretches in which a screen angle changes. The `multicam.direct` method measures them and passes them here."),
     rules: DirectorRulesSchema.describe("Resolved rules: a template with `director.json` on top."),
     keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
   }),

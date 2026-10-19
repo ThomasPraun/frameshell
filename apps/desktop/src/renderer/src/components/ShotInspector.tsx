@@ -1,5 +1,5 @@
 import type { TimelineView } from "@frameshell/protocol";
-import { SHOT_ANGLE_COUNTS, SHOT_LAYOUTS, type ShotLayout } from "@frameshell/schema";
+import { DEFAULT_SHOT_CORNER, SHOT_ANGLE_COUNTS, SHOT_CORNERS, SHOT_LAYOUTS, type ShotCorner, type ShotLayout } from "@frameshell/schema";
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
 import { t } from "../i18n.js";
@@ -16,6 +16,8 @@ const LAYOUT_TITLES: Record<ShotLayout, string> = {
   solo: t.inspector.layoutSoloTitle,
   "two-up": t.inspector.layoutTwoUpTitle,
   grid: t.inspector.layoutGridTitle,
+  screen: t.inspector.layoutScreenTitle,
+  pip: t.inspector.layoutPipTitle,
 };
 
 /** Edits from one inspector, with the daemon's refusal shown in it; `send` resolves false on a refusal. */
@@ -75,6 +77,14 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
         value={shot.layout}
         onPick={(id) => send({ op: "shot.set", args: { clip: clip.id, shot: id as ShotLayout } })}
       />
+      {shot.layout === "pip" && (
+        <Choice
+          label={t.inspector.corner}
+          options={SHOT_CORNERS.map((id) => ({ id, label: t.inspector.corners[id], title: t.inspector.cornerTitle(t.inspector.corners[id]) }))}
+          value={(shot.corner as ShotCorner | null) ?? DEFAULT_SHOT_CORNER}
+          onPick={(id) => send({ op: "shot.set", args: { clip: clip.id, corner: id as ShotCorner } })}
+        />
+      )}
       <div className="clip-inspector-group" role="group" aria-label={t.inspector.shownAngles}>
         {shot.angles.map((angle, index) => (
           <span key={`${index}:${angle.id}`} className="angle-slot">
@@ -174,7 +184,7 @@ function angleColors(group: Group): Map<string, number> {
 
 /**
  * One row per angle of a multicam group: name, sync offset, crop per side,
- * gain and mute. Each change is one `multicam.angle` (`multicam.offset` for
+ * gain, mute and screen flag. Each change is one `multicam.angle` (`multicam.offset` for
  * the sync) by `ui`, undoable like any edit; preview and export follow.
  */
 function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<string, number> }) {
@@ -188,6 +198,7 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
         const muted = angle.audio?.muted === true;
         // With a mic (or none) the level belongs to the mic, edited by the agent or CLI: `multicam.mic`.
         const heard = angle.mic === undefined;
+        const screen = angle.screen === true;
         return (
           <div key={angle.id} className="clip-inspector-group angle-row" role="group" aria-label={t.inspector.angleRow(angle.name)} data-angle={angle.id}>
             <Swatch color={colors.get(angle.id) ?? 0} />
@@ -210,6 +221,14 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
               onClick={() => set(angle, { muted: !muted })}
             >
               {t.inspector.mute}
+            </button>
+            <button
+              className={`clip-inspector-button clip-inspector-screen${screen ? " on" : ""}`}
+              aria-pressed={screen}
+              title={screen ? t.inspector.unscreenAngleTitle : t.inspector.screenAngleTitle}
+              onClick={() => set(angle, { screen: !screen })}
+            >
+              {t.inspector.screen}
             </button>
           </div>
         );

@@ -48,6 +48,11 @@ const en = {
   layoutSoloTitle: "One angle fills the frame",
   layoutTwoUpTitle: "Two angles side by side",
   layoutGridTitle: "Two or more angles in a grid",
+  layoutScreenTitle: "One angle whole, with bars where its shape differs, never cropped",
+  layoutPipTitle: "The screen with a second angle as an inset; first angle = the screen",
+  corner: "Inset",
+  cornerTitle: (corner: string) => `Show the inset in the ${corner} corner`,
+  corners: { "top-left": "Top left", "top-right": "Top right", "bottom-left": "Bottom left", "bottom-right": "Bottom right" },
   shownAngles: "Angles shown",
   angleSlot: (n: number) => `Angle ${n}`,
   angleSlotTitle: "Angle shown in this place; picking one shown elsewhere swaps the two",
@@ -77,6 +82,9 @@ const en = {
   muteAngleTitle: "Mute this angle under every shot",
   unmuteAngleTitle: "Unmute this angle",
   soundFromMicTitle: "This angle is heard through a mic (or none): its level is set on the mic",
+  screen: "Screen",
+  screenAngleTitle: "Mark this angle as a screen share: the director shows it while it moves, never as a speaker",
+  unscreenAngleTitle: "This angle is a screen share; click to treat it as a person again",
 };
 
 const es: typeof en = {
@@ -127,6 +135,11 @@ const es: typeof en = {
   layoutSoloTitle: "Un ángulo llena el cuadro",
   layoutTwoUpTitle: "Dos ángulos lado a lado",
   layoutGridTitle: "Dos o más ángulos en cuadrícula",
+  layoutScreenTitle: "Un ángulo completo, con franjas donde su forma difiere, sin recortar",
+  layoutPipTitle: "La pantalla con un segundo ángulo en un recuadro; el primer ángulo es la pantalla",
+  corner: "Recuadro",
+  cornerTitle: (corner) => `Mostrar el recuadro en la esquina ${corner}`,
+  corners: { "top-left": "superior izquierda", "top-right": "superior derecha", "bottom-left": "inferior izquierda", "bottom-right": "inferior derecha" },
   shownAngles: "Ángulos visibles",
   angleSlot: (n) => `Ángulo ${n}`,
   angleSlotTitle: "Ángulo que se ve en este lugar; si eliges uno que se ve en otro lugar, se intercambian",
@@ -156,6 +169,9 @@ const es: typeof en = {
   muteAngleTitle: "Silenciar este ángulo bajo todos los planos",
   unmuteAngleTitle: "Quitar el silencio de este ángulo",
   soundFromMicTitle: "Este ángulo se oye por un micrófono (o por ninguno): su nivel se ajusta en el micrófono",
+  screen: "Pantalla",
+  screenAngleTitle: "Marcar este ángulo como pantalla compartida: el director lo muestra mientras se mueve y nunca como hablante",
+  unscreenAngleTitle: "Este ángulo es una pantalla compartida; haz clic para tratarlo otra vez como una persona",
 };
 
 export const inspector = { en, es };
