@@ -244,6 +244,16 @@ describe("multicam sound at exact samples", () => {
       [143_520, 191_520, 48_000],
     ]);
   });
+
+  it("lets the later of two overlapping shots win the sound from its own start, at its own source position", () => {
+    const { audio } = plan([shot("c_1", 0, "solo", ["ana"], 0, 2), shot("c_2", 1, "solo", ["ana"], 5, 6)]);
+    const clips = audio.tracks[0]!.filter((item) => item.kind === "clip");
+    // Ana's file starts 0.01 s in: shot 1 plays until the group second 1 (47 520 samples), shot 2 reads from source second 5 - 0.01.
+    expect(clips.map((item) => item.kind === "clip" && [item.clip, item.from, item.samples])).toEqual([
+      ["c_1/ana", 0, 47_520],
+      ["c_2/ana", 239_520, 48_000],
+    ]);
+  });
 });
 
 describe("multicam under a nested timeline", () => {

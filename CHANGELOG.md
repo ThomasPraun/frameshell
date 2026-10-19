@@ -35,13 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent skill: new reference page for videos made from audio (the three levels, edit the audio first, scene plan with word ranges, human review, clips with `scriptRef`; ADR 0015).
 - `cut` now warns, in its result `warnings` and in the CLI output, for every generated clip (`hyperframes`, `remotion`…) it trims or splits, naming the clip id, type and `scriptRef` (ADR 0015). The cut still applies; the skill says to edit the audio before building visuals.
 
+### Fixed
+
+- Export places a multicam program's sound at exact samples, like the preview (ADR 0016): each angle's or mic's file starts at `round(seconds * 48 kHz)` of its offset instead of a frame-rounded start, so mics of one room no longer drift up to half a frame apart (`soundSamples` in `composite.ts`, shared by both). A sound that runs on across a shot change is one mix item, without the edge fade at the shot change, as in the preview. Where hand-edited shots overlap, the later shot's sound wins from its start in export and preview alike. Sound of a program track nested inside an audio track still lands on frames (follow-up).
+
 ## [0.8.1] - 2026-10-17
 
 Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the project open in the app. Installing it is enough: an existing connection keeps working, restart Claude Desktop once. No protocol change; the official plugins are unchanged.
 
 ### Fixed
 
-- Export places a multicam program's sound at exact samples, like the preview (ADR 0016): each angle's or mic's file starts at `round(seconds * 48 kHz)` of its offset instead of a frame-rounded start, so mics of one room no longer drift up to half a frame apart (`soundSamples` in `composite.ts`, shared by both). A sound that runs on across a shot change is one mix item, without the edge fade at the shot change, as in the preview.
 - Desktop: Claude Desktop, connected with **Connect Claude Desktop**, now reaches the app's daemon on macOS and Linux, so its tools act on the project open in the app. MCP clients start servers without `TMPDIR`, which the default daemon socket path depends on, so `frameshell mcp` started a second daemon that showed no window. The app's `frameshell` command now uses the app's socket when its caller sets no `FRAMESHELL_SOCKET`.
 
 ## [0.8.0] - 2026-10-16

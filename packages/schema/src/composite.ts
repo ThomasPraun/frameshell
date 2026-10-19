@@ -553,14 +553,21 @@ export function soundSamples(clip: MediaClip, rate: number, sourceRate = rate): 
  * Sound of a program track showing `group`: one audio track per sound
  * (`<track>/<sound id>`, {@link groupSounds} order) holding its
  * {@link shotSound} under each shot, so a mixer that plays audio tracks
- * plays the program.
+ * plays the program. Where hand-edited shots overlap, the later shot wins
+ * from its start, as in the picture: the earlier shot's sound ends there.
  */
 export function programSound(track: ProgramTrack, group: MulticamGroup): ClipTrack[] {
+  const shots = [...track.clips].sort((a, b) => a.start - b.start);
+  const heard = shots.map((shot, i) => {
+    const next = shots[i + 1];
+    if (!next || shot.start + shot.out - shot.in <= next.start) return shot;
+    return { ...shot, out: shot.in + Math.max(0, next.start - shot.start) };
+  });
   return groupSounds(group).map((sound) => ({
     id: `${track.id}/${sound.id}`,
     kind: "audio",
     name: sound.name,
-    clips: track.clips.flatMap((shot) => soundClip(shot, sound) ?? []),
+    clips: heard.flatMap((shot) => soundClip(shot, sound) ?? []),
   }));
 }
 
