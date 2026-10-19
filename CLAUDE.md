@@ -39,6 +39,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Detached panels (panel windows, allowlist, placement in `configDir`, project window registry, global keys, maximize) | `apps/desktop/src/main/panel-windows.ts`, `renderer/src/panel-window.ts`, `renderer/src/windows.ts`, `components/Workspace.tsx`; ADR 0012 |
 | Terminals across windows (pty outlives view, output ring + `terminal:attach` replay, Ask agent target) | `apps/desktop/src/main/output-ring.ts`, `main/terminals.ts`, `renderer/src/components/TerminalPanel.tsx`, `renderer/src/ask/ask-target.ts`; ADR 0012 |
 | Cut to angle (keys 1-9, Shift adds; one transaction per playback; viewer click calls `cutToAngle`) | `apps/desktop/src/renderer/src/timeline/angle-cut.ts`, `angle-keys.ts`; listener in `components/Workspace.tsx`; main `timeline-editor.ts` (`burstGap`, `settle`); ADR 0016 |
+| Multicam viewer (Angles sidebar view, detachable; proxy `<video>` per angle, turns mark, click = `cutToAngle`) | `renderer/src/components/AngleViewer.tsx`, `renderer/src/angles/model.ts`; ADR 0016 |
 | Timeline editing (gestures, keys, undo/redo) | `renderer/src/timeline/edit.ts`; main `src/main/timeline-editor.ts` |
 | Agent-labelled terminals (detection, `session.tag`, `agent:<label>:<session>` author, `FRAMESHELL_AGENT`) | `apps/desktop/src/main/agent-detect.ts`, `main/terminals.ts`; `packages/protocol/src/agents.ts`; SPEC §6.2 |
 | History panel (list, diff marks, revert from UI) | `renderer/src/history/`, `components/HistoryPanel.tsx`; core `history/diff.ts` |
