@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Agent skill: new reference page for videos made from audio (the three levels, edit the audio first, scene plan with word ranges, human review, clips with `scriptRef`; ADR 0015).
 - `cut` now warns, in its result `warnings` and in the CLI output, for every generated clip (`hyperframes`, `remotion`…) it trims or splits, naming the clip id, type and `scriptRef` (ADR 0015). The cut still applies; the skill says to edit the audio before building visuals.
 
 ## [0.8.1] - 2026-10-17

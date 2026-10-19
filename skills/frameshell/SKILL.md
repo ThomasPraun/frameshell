@@ -1,6 +1,6 @@
 ---
 name: frameshell
-description: Edit video in a Frameshell project (`frameshell.json`) with the `frameshell` CLI or its MCP tools. Cut footage by transcript (silences, retakes), place clips, overlays and subtitles, export and verify. Also covers resuming after the human's timeline edits and resolving pasted `[frameshell]` selection lines. Use whenever the directory holds `frameshell.json` or the user mentions Frameshell.
+description: Edit video in a Frameshell project (`frameshell.json`) with the `frameshell` CLI or its MCP tools. Cut footage by transcript (silences, retakes), make a video from an audio recording, place clips, overlays and subtitles, export and verify. Also covers resuming after the human's timeline edits and resolving pasted `[frameshell]` selection lines. Use whenever the directory holds `frameshell.json` or the user mentions Frameshell.
 ---
 
 # Frameshell
@@ -52,6 +52,7 @@ When you guide the human through the app, name only these places; do not invent 
 | When | Read |
 |---|---|
 | Editing footage by its words: import, transcribe, silences, retakes, subtitles, export, verify | [transcript-editing.md](reference/transcript-editing.md) |
+| A video made from an audio recording (podcast, talk, voice note): simple, medium or explainer, the scene plan, building clips per scene | [video-from-audio.md](reference/video-from-audio.md) |
 | Any CLI command: what it does, key flags, output | [cli.md](reference/cli.md); `frameshell --help` has every flag |
 | MCP tools, CLI or MCP, frame capture, what the user sees in the app (`ui_state`, `ui_*`) | [mcp.md](reference/mcp.md) |
 | The prompt holds a `[frameshell] …` line | [selection.md](reference/selection.md) |
