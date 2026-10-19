@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemon } from "@frameshell/core";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
-import type { TimelineEdit } from "../src/shared/api.js";
+import { EDIT_BURST_GAP_MAX_MS, type TimelineEdit } from "../src/shared/api.js";
 import { TimelineEditor, editLabel } from "../src/main/timeline-editor.js";
 
 // Seam under test: main's timeline editor (what the renderer's edits and undo/redo keys reach),
@@ -335,6 +335,28 @@ describe("TimelineEditor gesture bursts (#119)", () => {
     await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
     const second = await editor.apply(dir, "main", nudge(20.067), burst);
     expect(second.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("burstGap keeps the burst open longer than the default gap, until settle closes it", async () => {
+    const { dir, app } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 20 });
+    const long = { ...burst, burstGap: 60_000 };
+    const first = await editor.apply(dir, "main", nudge(20.033), long);
+    await sleep(200);
+    const second = await editor.apply(dir, "main", nudge(20.067), long);
+    expect(second.operation.tx).toBe(first.operation.tx);
+    await editor.settle();
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+    const third = await editor.apply(dir, "main", nudge(20.1), long);
+    expect(third.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("refuses a burstGap that is not a whole number of ms within the limit", async () => {
+    const { dir, app } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params));
+    for (const burstGap of [0, 1.5, -1, EDIT_BURST_GAP_MAX_MS + 1, "9" as unknown as number]) {
+      await expect(editor.apply(dir, "main", nudge(20.033), { ...burst, burstGap })).rejects.toThrow(/burstGap/);
+    }
   });
 
   it("another burst key, an undo, a History revert or a file save each close the open burst first", async () => {

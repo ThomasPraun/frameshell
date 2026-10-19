@@ -864,6 +864,12 @@ function registerIpc(): void {
       return true;
     }),
   );
+  ipcMain.handle(Channel.timelineSettle, (event) =>
+    outcome(async () => {
+      await requireProject(stateOf(event.sender));
+      return editor.settle();
+    }),
+  );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),
   );

@@ -5,6 +5,8 @@ const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
   dropToImport: "Drop to import into assets/",
+  angleNoShot: "No shot at the playhead to cut.",
+  angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
   askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.",
   askAgent: "Ask agent",
   frameNotCaptured: (reason: string) => `Frame not captured: ${reason}`,
@@ -60,6 +62,8 @@ const es: typeof en = {
   imported: (names) => `Se importó ${names} a assets/.`,
   notMedia: (names) => `No es audio, video ni imagen: ${names}.`,
   dropToImport: "Suelta para importar a assets/",
+  angleNoShot: "No hay un plano bajo el cabezal para cortar.",
+  angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,
   askNothing:
     "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para preguntarle al agente.",
   askAgent: "Preguntar al agente",

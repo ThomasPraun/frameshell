@@ -157,7 +157,16 @@ export interface EditOptions {
    * first call's label names the burst, so the key should name the clips too.
    */
   burst?: string;
+  /**
+   * With `burst`: ms the burst's transaction stays open after its latest edit, instead of the default few
+   * hundred. For presses spread over a playback (cut to angle), closed early by `timeline.settle`. Positive
+   * integer, at most {@link EDIT_BURST_GAP_MAX_MS}.
+   */
+  burstGap?: number;
 }
+
+/** Longest {@link EditOptions.burstGap} main accepts, ms. */
+export const EDIT_BURST_GAP_MAX_MS = 120_000;
 
 /** Longest {@link EditOptions} label or burst key main accepts. */
 export const EDIT_OPTION_MAX_LENGTH = 200;
@@ -305,6 +314,8 @@ export interface FrameshellApi {
      * what it shows, keeping its track, start and length, as one undoable step. False when cancelled.
      */
     replaceImage(timeline: string, clip: string): Promise<boolean>;
+    /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
+    settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
     undo(timeline: string): Promise<OperationResult | null>;
     /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */
@@ -499,6 +510,7 @@ export const Channel = {
   timelineRejected: "timeline:rejected",
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
+  timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
   timelineHistoryCommand: "timeline:history-command",

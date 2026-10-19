@@ -97,6 +97,8 @@ export interface TrackRow {
   followsLabel: string | null;
   /** Program tracks: id of the multicam group they show; null otherwise. */
   group: string | null;
+  /** Program tracks: the group's angles in group order (what the number keys pick); empty otherwise. */
+  angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
   top: number;
   height: number;
@@ -171,6 +173,7 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
       name: track.name,
       followsLabel: track.follows ? (labels.get(track.follows) ?? track.follows) : null,
       group: track.kind === "program" ? (track.group ?? null) : null,
+      angles: (group?.angles ?? []).map((angle, index): ShotAngle => ({ id: angle.id, name: angle.name, color: index % ANGLE_COLOR_COUNT })),
       top,
       height,
       clips,
