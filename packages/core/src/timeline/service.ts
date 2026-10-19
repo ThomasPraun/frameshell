@@ -49,7 +49,7 @@ export interface TimelineServiceOptions {
   /** Clip adapters loaded for the project; see `PluginHost.clipTypes`. */
   clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>>;
   /** Id generator. Default: prefix + 6 random hex digits (`c_1a2b3c`). */
-  newId?: (prefix: "c" | "t") => string;
+  newId?: (prefix: "c" | "t" | "g") => string;
   /** Cut/trim edge adjustment per project and fps (#12 energy snapping). Default: none, edges stay. */
   resolveEditPoint?: (root: string, fps: number) => EditPointResolver | undefined;
   /**
@@ -470,7 +470,7 @@ export class TimelineService {
 
   #context(root: string, id: string, fps: number, op: string, snapWindow?: number): EditContext {
     const grid = new FrameGrid(fps);
-    const newId = this.#options.newId ?? ((prefix: "c" | "t") => `${prefix}_${randomBytes(3).toString("hex")}`);
+    const newId = this.#options.newId ?? ((prefix: "c" | "t" | "g") => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
     return {
       fps,
@@ -838,7 +838,7 @@ function normalizeArgs(call: TimelineCall): OperationRequest {
   return { op: request.op, args };
 }
 
-function projectPath(root: string, cwd: string, path: string, field: string): string {
+export function projectPath(root: string, cwd: string, path: string, field: string, op = "clip.add"): string {
   const candidates = isAbsolute(path) ? [path] : [resolve(cwd, path), resolve(root, path)];
   const inside = candidates
     .map((candidate) => relative(root, candidate))
@@ -846,7 +846,7 @@ function projectPath(root: string, cwd: string, path: string, field: string): st
   const chosen = inside.find((rel) => isFile(join(root, rel))) ?? inside[0];
   if (chosen === undefined || chosen.split(sep)[0]?.toLowerCase() === ".frameshell") {
     throw new RpcError(ErrorCode.InvalidOperation, `${field} ${path} is outside the project ${root}. Import it first: \`frameshell import <file>\`.`, {
-      op: "clip.add",
+      op,
       reason: "outside project",
       field,
     });

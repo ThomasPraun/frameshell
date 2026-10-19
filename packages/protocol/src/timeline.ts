@@ -229,6 +229,24 @@ export const operationArgs = {
       .describe("Tracks to cut. Default: every video, audio and program track, which keeps them in sync."),
     ...snapArgs,
   }),
+  "multicam.create": z.strictObject({
+    angles: z
+      .array(
+        z.strictObject({
+          asset: z.string().min(1).describe("Project-relative media file with a picture, e.g. `assets/ana.mp4`."),
+          name: z.string().min(1).optional().describe("Person or camera, e.g. `Ana`. Default: the file name without extension."),
+          offset: Seconds("Group-clock second at which the asset's time 0 plays."),
+        }),
+      )
+      .min(2)
+      .describe("The synced files, first = the reference clock. The `multicam.create` method measures the offsets and passes them here."),
+    name: z.string().min(1).optional().describe("Group and program track name. Default: the track is named `Multicam`."),
+  }),
+  "multicam.offset": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    angle: z.string().min(1).describe("Angle id of that group."),
+    offset: Seconds("New group-clock second at which the angle's asset time 0 plays (absolute, not a nudge)."),
+  }),
 } as const;
 
 /** Name of a public timeline operation. */
@@ -357,6 +375,40 @@ export const OperationResultSchema = z.object({
 
 /** See {@link OperationResultSchema}. */
 export type OperationResult = z.output<typeof OperationResultSchema>;
+
+/** Below this a measured sync is not trusted: the angle starts with the first file and a warning is given. */
+export const SYNC_LOW_CONFIDENCE = 0.5;
+
+/** How one angle was synced to the first (`multicam.create`). */
+export const AngleSyncSchema = z.object({
+  angle: z.string().describe("Angle id in the new group."),
+  name: z.string(),
+  asset: z.string(),
+  offset: z.number().describe("Group-clock second at which the asset's time 0 plays, as stored."),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .describe("0 (no shared sound found) to 1 (unmistakable) for the audio match with the first file; null for the first file itself."),
+  synced: z
+    .boolean()
+    .describe(
+      "False when the confidence is below 0.5: no trustworthy match, so the offset was not measured (the file starts with the first one) " +
+        "and a warning says so. Fix it with `multicam.offset`.",
+    ),
+});
+
+/** Result of `multicam.create`: the operation plus the new ids and every angle's sync. */
+export const MulticamCreateResultSchema = OperationResultSchema.extend({
+  group: z.string().describe("Id of the new group."),
+  track: z.string().describe("Id of the new program track."),
+  clip: z.string().describe("Id of the initial `grid` shot, which covers the whole group."),
+  sync: z.array(AngleSyncSchema).describe("One entry per file, in the order given."),
+});
+
+/** See {@link MulticamCreateResultSchema}. */
+export type MulticamCreateResult = z.output<typeof MulticamCreateResultSchema>;
 
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z

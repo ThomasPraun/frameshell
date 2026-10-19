@@ -143,3 +143,11 @@ export {
   type RenderProbe,
   type RenderedClip,
 } from "./clips/renderer.js";
+export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, syncReport } from "./multicam/measure.js";
+export {
+  type PlannedOffset,
+  SYNC_WINDOW_S,
+  type SyncEstimate,
+  correlateProfiles,
+  planOffsets,
+} from "./multicam/sync.js";

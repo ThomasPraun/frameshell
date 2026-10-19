@@ -38,6 +38,8 @@ const VERBS: Record<string, string> = {
   "track.add": t.history.verbs.addTrack,
   "track.remove": t.history.verbs.removeTrack,
   "track.set": t.history.verbs.changeTrack,
+  "multicam.create": t.history.verbs.multicamCreate,
+  "multicam.offset": t.history.verbs.multicamOffset,
   "timeline.patch": t.history.verbs.directEdit,
 };
 

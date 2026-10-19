@@ -202,7 +202,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           "dry-run": { type: "boolean", default: false },
-          name: { type: "string" },
+          name: { type: "string", multiple: true },
           "no-skill": { type: "boolean", default: false },
           provider: { type: "string" },
           model: { type: "string" },
@@ -219,7 +219,15 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       io.stderr(`${(error as Error).message}\n\n${USAGE}`);
       return 2;
     }
-    const { values, positionals } = parsed;
+    const { positionals } = parsed;
+    // Only `multicam create` takes `--name` several times (one per angle); elsewhere it is one string.
+    const perAngle = positionals[0] === "multicam" && positionals[1] === "create";
+    const names = parsed.values.name;
+    if (!perAngle && names !== undefined && names.length > 1) {
+      io.stderr(`--name was given ${names.length} times; \`frameshell ${positionals.slice(0, 2).join(" ")}\` takes one.\n\n${USAGE}`);
+      return 2;
+    }
+    const values = { ...parsed.values, name: perAngle ? names : names?.[0] };
     if (values.version) {
       io.stdout(`${CLI_VERSION}\n`);
       return 0;
@@ -232,7 +240,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     let builtin: Invocation | null;
     try {
       checkBuiltinFlags(positionals, values);
-      builtin = TIMELINE_COMMANDS.has(positionals[0]!) ? parseTimelineCommand(positionals, values) : parseBuiltin(positionals, values);
+      builtin = TIMELINE_COMMANDS.has(positionals[0]!) ? parseTimelineCommand(positionals, values) : parseBuiltin(positionals, values as Parameters<typeof parseBuiltin>[1]);
     } catch (error) {
       if (!(error instanceof UsageError)) throw error;
       io.stderr(`${error.message}\n\n${USAGE}`);

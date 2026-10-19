@@ -7,13 +7,16 @@ import {
   type TimelinePatch,
   type operationArgs,
 } from "@frameshell/protocol";
+import { basename } from "node:path/posix";
 import {
+  type Angle,
   type AnyClip,
   type AnyClipTrack,
   CORE_CLIP_TYPES,
   type Clip,
   type ClipTrack,
   type MediaClip,
+  type MulticamGroup,
   type ProgramTrack,
   type ShotClip,
   type TimelineClip,
@@ -99,8 +102,8 @@ export interface EditContext {
   nestedDuration(source: string): Promise<number>;
   /** Adapter clip types loaded for the project; empty when plugins are untrusted. */
   clipTypes(): Promise<ReadonlyMap<string, ClipTypeInfo>>;
-  /** Fresh id with prefix `c` (clip) or `t` (track); the engine retries on collision. */
-  newId(prefix: "c" | "t"): string;
+  /** Fresh id with prefix `c` (clip), `t` (track) or `g` (multicam group); the engine retries on collision. */
+  newId(prefix: "c" | "t" | "g"): string;
   /** Edge adjustment seam for `cut` and `clip.trim` (#12). Absent: edges stay. */
   resolveEditPoint?: EditPointResolver;
   /** Project default snap half-width, seconds (`editing.snapWindow`); an op's `snapWindow` overrides it. */
@@ -191,6 +194,10 @@ class Edit {
         return this.clipSet(request.args);
       case "cut":
         return this.cut(request.args);
+      case "multicam.create":
+        return this.multicamCreate(request.args);
+      case "multicam.offset":
+        return this.multicamOffset(request.args);
       case "timeline.patch":
         return this.patch(request.args);
     }
@@ -747,6 +754,76 @@ class Edit {
     );
   }
 
+  // Multicam
+
+  /**
+   * One multicam group from `args.angles` (offsets already measured), its
+   * program track on top, and one `grid` shot over the group's whole length.
+   */
+  async multicamCreate(args: OperationArgs<"multicam.create">): Promise<void> {
+    const seen = new Set<string>();
+    const angles: Angle[] = [];
+    let end = 0;
+    for (const given of args.angles) {
+      if (seen.has(given.asset)) {
+        throw this.invalid(`${given.asset} is listed twice.`, { field: "angles", hint: "Give each person's file once." });
+      }
+      seen.add(given.asset);
+      const info = await this.context.source(given.asset);
+      if (!info.video || info.duration === null) {
+        throw this.invalid(`${given.asset} has no moving picture; a multicam angle needs a video file.`, {
+          field: "angles",
+          hint: "Audio-only files and still images cannot be angles.",
+        });
+      }
+      const name = given.name ?? basename(given.asset).replace(/\.[^.]*$/, "");
+      const offset = Math.round(given.offset * 1000) / 1000;
+      angles.push({ id: this.angleId(name, angles), name, asset: given.asset, offset });
+      end = Math.max(end, offset + info.duration);
+    }
+    const last = this.grid.floor(end);
+    if (this.grid.frame(last) < 1) throw this.invalid(`the files add up to less than one frame (${end} s).`, { field: "angles" });
+    const id = this.newId("g");
+    const group: MulticamGroup = { id, ...(args.name ? { name: args.name } : {}), angles };
+    const track: ProgramTrack = {
+      id: this.newId("t"),
+      kind: "program",
+      name: args.name ?? "Multicam",
+      group: id,
+      clips: [{ id: this.newId("c"), type: "shot", start: 0, in: 0, out: last, shot: "grid", angles: angles.map((angle) => angle.id) }],
+    };
+    this.draft.groups = [...(this.draft.groups ?? []), group];
+    this.draft.tracks.push(track);
+  }
+
+  /** Set one angle's offset; shots left past the group's new end are refused by {@link Edit.checkShots}. */
+  multicamOffset(args: OperationArgs<"multicam.offset">): void {
+    const group = this.draft.groups?.find((candidate) => candidate.id === args.group);
+    if (!group) {
+      const ids = (this.draft.groups ?? []).map((candidate) => candidate.id);
+      throw this.invalid(`no multicam group "${args.group}" in timeline ${this.draft.id}.`, {
+        field: "group",
+        hint: ids.length > 0 ? `Groups: ${ids.join(", ")}.` : "There are none; make one with `frameshell multicam create`.",
+      });
+    }
+    const angle = group.angles.find((candidate) => candidate.id === args.angle);
+    if (!angle) {
+      throw this.invalid(`group ${group.id} has no angle "${args.angle}".`, {
+        field: "angle",
+        hint: `Angles: ${group.angles.map((candidate) => candidate.id).join(", ")}.`,
+      });
+    }
+    angle.offset = Math.round(args.offset * 1000) / 1000;
+  }
+
+  /** Angle id from a name: lowercase letters, digits, `-` and `_`; a number is appended on a clash. */
+  angleId(name: string, taken: readonly Angle[]): string {
+    const base = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "angle";
+    let id = base;
+    for (let n = 2; taken.some((angle) => angle.id === id); n++) id = `${base}-${n}`;
+    return id;
+  }
+
   patch(args: TimelinePatch): void {
     let next: Timeline;
     try {
@@ -1195,7 +1272,7 @@ class Edit {
     );
   }
 
-  newId(prefix: "c" | "t"): string {
+  newId(prefix: "c" | "t" | "g"): string {
     // Ids removed by this same operation stay taken: one id never names two things in one change.
     const taken = [indexIds(this.draft), indexIds(this.before)];
     for (let attempt = 0; attempt < 100; attempt++) {

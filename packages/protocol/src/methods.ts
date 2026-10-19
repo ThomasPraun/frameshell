@@ -4,6 +4,7 @@ import { AgentLabelSchema } from "./agents.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
+  MulticamCreateResultSchema,
   OpIdSchema,
   OperationResultSchema,
   RejectionRecordSchema,
@@ -29,7 +30,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 38;
+export const PROTOCOL_VERSION = 39;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1186,6 +1187,40 @@ export const methods = {
       "Fails with InvalidOperation (overlap, out beyond the source duration, wrong " +
       "track kind, unknown clip type; data says the valid range), AssetNotFound, TrackNotFound.",
     params: operationArgs["clip.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "multicam.create": {
+    mutating: true,
+    description:
+      "Make a multicam group from one file per person (ADR 0016). Measures each file's offset against the FIRST by audio " +
+      "cross-correlation (the sound they share: a clap, the room, bleed from the other mic), shifts all so the earliest starts at 0, " +
+      "then adds the group, a program track and one `grid` shot over the whole length. Example: " +
+      "`{ assets: [\"assets/ana.mp4\", \"assets/ben.mp4\"], names: [\"Ana\", \"Ben\"] }`. `sync` reports each file's offset and " +
+      "`confidence` (0 to 1). Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the first file), " +
+      "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset`. Only the first ten minutes of " +
+      "each file are matched. Needs two or more files, each with a picture and sound. " +
+      "Fails with InvalidOperation (file missing or unreadable, no picture or sound, outside the project).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      assets: z
+        .array(z.string().min(1))
+        .min(2)
+        .describe("Media files inside the project, absolute or relative to `cwd`; the first one sets the clock."),
+      names: z.array(z.string().min(1)).optional().describe("Angle names in the same order, e.g. the people. Default: file names."),
+      name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
+    }),
+    result: MulticamCreateResultSchema,
+  },
+  "multicam.offset": {
+    mutating: true,
+    description:
+      "Fix one angle's sync by hand: set `offset`, the group-clock second at which its file's time 0 plays (absolute, not a nudge: " +
+      "a smaller offset makes the angle play earlier against the others). Offsets cannot be negative: to start an angle before " +
+      "the others, raise the others' offsets. Example: `{ group: \"g_1a2b3c\", angle: \"ben\", offset: 1.42 }`. " +
+      "Fails with InvalidOperation when the group or angle does not exist, or when a shot would then play past the group's end " +
+      "(trim those shots first).",
+    params: operationArgs["multicam.offset"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "clip.move": {
