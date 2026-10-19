@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The CLI refuses a flag given twice (exit 2) where it takes one value; before, the last one won. `multicam create` and `multicam gallery` take `--name` (and `--mic-file`, `--mic-name`, `--sound`) once per file.
+- `multicam`, `shot` and `direct` are built-in commands and `shot` is a core clip type, so a plugin can no longer use those names for its command or clip type.
 - Desktop: the welcome button is now **New from video or audio…**.
 - Agent skill: new reference page for videos made from audio (the three levels, edit the audio first, scene plan with word ranges, human review, clips with `scriptRef`; ADR 0015).
 - `cut` now warns, in its result `warnings` and in the CLI output, for every generated clip (`hyperframes`, `remotion`…) it trims or splits, naming the clip id, type and `scriptRef` (ADR 0015). The cut still applies; the skill says to edit the audio before building visuals.
