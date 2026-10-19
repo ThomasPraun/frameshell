@@ -28,7 +28,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Agent guide above terminals (agent catalog, install commands, Start by path, suggestions), Connect Claude Desktop (config edit keeps other bytes) | `apps/desktop/src/main/agent-catalog.ts`, `main/claude-desktop.ts`, `renderer/src/components/AgentGuide.tsx` |
 | New project from video (folder beside video, name clash, clone test), audio project background + subtitles (`main/audio-background.ts`), drops, Open with (single instance, `open-file`, Windows registry) | `apps/desktop/src/main/video-project.ts`, `main/media-files.ts`, `main/open-paths.ts`, `build/installer.nsh`, `renderer/src/components/Welcome.tsx`, `renderer/src/file-drop.ts`; ADR 0013 |
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
-| Timeline panel (canvas layout, paint, live updates) | `apps/desktop/src/renderer/src/timeline/` |
+| Timeline panel (canvas layout, paint, live updates, scene band from `script.outline` spans) | `apps/desktop/src/renderer/src/timeline/` (`scenes.ts` = band data); ADR 0015 |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
 | Clip inspector, preview layer handles | `renderer/src/components/ClipInspector.tsx`, `renderer/src/preview/transform-edit.ts` |
 | Preview player (program, engine worker, audio worklet, playhead store, clip render decode) | `apps/desktop/src/renderer/src/preview/` (`video-source.ts` = proxy or render); ADR 0001, 0002; media URLs `apps/desktop/src/main/media-protocol.ts` |

@@ -325,3 +325,35 @@ describe("paintTimeline", () => {
 
 /** Height of the ruler bar marking a selected range, px. */
 const RANGE_BAR = 3;
+
+describe("scene band", () => {
+  const scenes = [
+    { script: "scripts/plan.md", slug: "intro", title: "Intro scene", start: 0, end: 5, clips: ["c_0"] },
+    { script: "scripts/plan.md", slug: "demo", title: "Demo scene", start: 5, end: 12, clips: [] },
+  ];
+  const input = (layout: ReturnType<typeof layoutTimeline>) => ({ layout, viewport: viewport(60), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
+
+  it("labels each scene's span with its heading, and only when the layout has scenes", () => {
+    const withScenes = recorder();
+    paintTimeline(withScenes, input(layoutTimeline(longTimeline(2), scenes)));
+    expect(withScenes.texts).toEqual(expect.arrayContaining(["Intro scene", "Demo scene"]));
+    const without = recorder();
+    paintTimeline(without, input(layoutTimeline(longTimeline(2))));
+    expect(without.texts).not.toContain("Intro scene");
+  });
+
+  it("draws unfilled scenes dashed and filled ones solid", () => {
+    const dashes: number[][] = [];
+    const ctx = Object.assign(recorder(), { setLineDash: (segments: number[]) => void dashes.push(segments) });
+    paintTimeline(ctx, input(layoutTimeline(longTimeline(2), scenes)));
+    // One dashed outline (then its reset) for the hollow scene; clips set none.
+    expect(dashes.filter((segments) => segments.length > 0)).toHaveLength(1);
+  });
+
+  it("frames the selected scene in the accent color", () => {
+    const strokes: { color: unknown; width: number }[] = [];
+    const ctx = Object.assign(recorder(), { strokeRect: () => void strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth }) });
+    paintTimeline(ctx, { ...input(layoutTimeline(longTimeline(2), scenes)), selectedScene: { script: "scripts/plan.md", slug: "demo" } });
+    expect(strokes.filter((stroke) => stroke.color === DEFAULT_THEME.accent && stroke.width === 2)).toHaveLength(1);
+  });
+});

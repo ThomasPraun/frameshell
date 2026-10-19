@@ -107,6 +107,9 @@ const api: FrameshellApi = {
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
     live: (timeline, clip) => invokeOutcome(Channel.clipsLive, timeline, clip),
   },
+  scripts: {
+    outline: (file) => invokeOutcome(Channel.scriptsOutline, file),
+  },
   updates: {
     status: () => ipcRenderer.invoke(Channel.updatesStatus),
     onStatus: (listener) => subscribe(Channel.updatesChanged, listener),

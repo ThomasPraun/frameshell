@@ -5,6 +5,9 @@ import { t } from "../i18n.js";
 /** Height of the time ruler above the lanes, px. */
 export const RULER_HEIGHT = 22;
 
+/** Height of the scene band under the ruler, px; the band exists only while a script scene has words on the timeline. */
+export const SCENE_BAND_HEIGHT = 18;
+
 /** Lane height per track kind, px. */
 export const LANE_HEIGHT = { video: 44, audio: 44, subtitles: 28 } as const;
 
@@ -69,8 +72,28 @@ export interface TrackRow {
   clips: ClipBox[];
 }
 
+/** A script scene's words placed on the timeline, as the scene band shows it (ADR 0015). */
+export interface SceneBox {
+  /** Project-relative script, e.g. `scripts/plan.md`. */
+  script: string;
+  /** Heading slug: the `#anchor` of a `scriptRef`. */
+  slug: string;
+  /** Heading text. */
+  title: string;
+  /** Timeline seconds of its first placed word. */
+  start: number;
+  /** Timeline seconds where its last placed word ends. */
+  end: number;
+  /** Ids of this timeline's clips whose `scriptRef` is the scene; the span is hollow while empty. */
+  clips: string[];
+}
+
 /** Everything the panel draws, derived from one `timeline.show` result. */
 export interface TimelineLayout {
+  /** Scene spans in start order; empty draws no band. */
+  scenes: SceneBox[];
+  /** Height of the fixed top area, px: the ruler plus the scene band when there are scenes. Lanes start here. */
+  head: number;
   rows: TrackRow[];
   /** Latest clip end, seconds; stand-in ends included. */
   duration: number;
@@ -82,8 +105,9 @@ export interface TimelineLayout {
 /**
  * Lay out a timeline the way editors read it: the top video layer first
  * (the file lists the bottom layer first), then audio, then subtitles.
+ * `scenes` add the band under the ruler and push the lanes down.
  */
-export function layoutTimeline(view: TimelineView): TimelineLayout {
+export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] = []): TimelineLayout {
   const problems = new Map(view.problems.map((problem) => [problem.clip, problem.message]));
   const labels = new Map<string, string>();
   const counts: Record<TrackKind, number> = { video: 0, audio: 0, subtitles: 0 };
@@ -93,7 +117,8 @@ export function layoutTimeline(view: TimelineView): TimelineLayout {
   const byKind = (kind: TrackKind) => view.tracks.filter((track) => track.kind === kind);
   const ordered = [...byKind("video").reverse(), ...byKind("audio"), ...byKind("subtitles")];
 
-  let top = RULER_HEIGHT;
+  const head = RULER_HEIGHT + (scenes.length > 0 ? SCENE_BAND_HEIGHT : 0);
+  let top = head;
   let duration = view.duration ?? 0;
   let clipCount = 0;
   const rows = ordered.map((track): TrackRow => {
@@ -117,7 +142,7 @@ export function layoutTimeline(view: TimelineView): TimelineLayout {
     top += height;
     return row;
   });
-  return { rows, duration, height: top, clipCount };
+  return { scenes: [...scenes], head, rows, duration, height: top, clipCount };
 }
 
 type ClipView = TimelineView["tracks"][number]["clips"][number];
@@ -311,11 +336,22 @@ export interface LaneViewport {
 }
 
 /**
+ * Scene span under a point of the canvas (`x` from the lanes' left edge, `y`
+ * from the top); null outside the band. The band is fixed: vertical scroll
+ * does not move it. Where spans overlap, the one drawn last (latest start) wins.
+ */
+export function sceneAt(layout: TimelineLayout, viewport: LaneViewport, x: number, y: number): SceneBox | null {
+  if (y < RULER_HEIGHT || y >= layout.head) return null;
+  const time = (x + viewport.scrollLeft) / viewport.pxPerSecond;
+  return layout.scenes.findLast((scene) => time >= scene.start && time < scene.end) ?? null;
+}
+
+/**
  * Clip under a point of the canvas (`x` from the lanes' left edge, `y` from
- * the top, ruler included); null over the ruler, gaps and empty lanes.
+ * the top, ruler included); null over the ruler and scene band, gaps and empty lanes.
  */
 export function clipAt(layout: TimelineLayout, viewport: LaneViewport, x: number, y: number): { row: TrackRow; clip: ClipBox } | null {
-  if (y < RULER_HEIGHT) return null;
+  if (y < layout.head) return null;
   const contentY = y + viewport.scrollTop;
   const row = layout.rows.find((candidate) => contentY >= candidate.top && contentY < candidate.top + candidate.height);
   if (!row) return null;

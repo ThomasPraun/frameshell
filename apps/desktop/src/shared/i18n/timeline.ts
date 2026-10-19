@@ -77,6 +77,12 @@ const en = {
   snappedEdge: "Snapped to a clip edge",
   clipListLabel: "Timeline clips",
   selected: "selected",
+  /** Label of the scene band's head, under the zoom buttons. */
+  scenes: "Scenes",
+  scenesTitle: "Script scenes placed on their words. Click one to select its time range; dashed ones have no clip yet.",
+  /** Screen-reader line of a scene span; `clips` is how many are linked to it, none meaning it is still empty. */
+  sceneItem: (title: string, from: string, to: string, clips: number, selected: boolean) =>
+    `Scene ${title}, ${from} to ${to}, ${clips === 0 ? "no clips yet" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", selected" : ""}`,
   /** Canvas label of a clip whose end cannot be derived. */
   lengthUnknownShort: "length unknown",
   lengthUnknown: "Length unknown",
@@ -163,6 +169,10 @@ const es: typeof en = {
   snappedEdge: "Ajustado al borde de un clip",
   clipListLabel: "Clips de la línea de tiempo",
   selected: "seleccionado",
+  scenes: "Escenas",
+  scenesTitle: "Escenas del guion colocadas sobre sus palabras. Haz clic en una para seleccionar su rango de tiempo; las de línea discontinua aún no tienen clip.",
+  sceneItem: (title, from, to, clips, selected) =>
+    `Escena ${title}, de ${from} a ${to}, ${clips === 0 ? "sin clips todavía" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", seleccionada" : ""}`,
   lengthUnknownShort: "duración desconocida",
   lengthUnknown: "Duración desconocida",
   muted: "silenciado",

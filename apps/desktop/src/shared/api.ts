@@ -8,6 +8,7 @@ import type {
   MethodParams,
   OperationResult,
   RevertConflict,
+  ScriptOutlineResult,
   TimelineRejection,
   TimelineView,
   UiCommand,
@@ -382,6 +383,13 @@ export interface FrameshellApi {
      */
     live(timeline: string, clip: string): Promise<LiveClipPage>;
   };
+  scripts: {
+    /**
+     * `script.outline` of a script of the window's project (project-relative path): its scenes with the
+     * timeline span of their transcript words (ADR 0015). Rejects with the daemon's message.
+     */
+    outline(file: string): Promise<ScriptOutlineResult>;
+  };
   updates: {
     /** The update to show in the banner; null when none, or dismissed this session. */
     status(): Promise<UpdateStatus | null>;
@@ -495,6 +503,7 @@ export const Channel = {
   clipsRenders: "clips:renders",
   clipsJob: "clips:job",
   clipsLive: "clips:live",
+  scriptsOutline: "scripts:outline",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",

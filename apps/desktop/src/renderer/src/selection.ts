@@ -349,11 +349,18 @@ export const selection = {
   /**
    * Select script scene `scene` with `clips`, the ones realizing it (maybe
    * none). `reveal` asks panels to bring the first clip into view, a new
-   * request every call: a heading clicked again scrolls again.
+   * request every call: a heading clicked again scrolls again. `range` is the
+   * timeline span of the scene's words (its band on the timeline); the
+   * selection is then the timeline's own, `origin` defaults to `script`.
    */
-  selectScene(scene: SelectedScene, clips: readonly string[], options: { reveal?: boolean } = {}): void {
+  selectScene(
+    scene: SelectedScene,
+    clips: readonly string[],
+    options: { reveal?: boolean; range?: TimeRange; origin?: SelectionOrigin } = {},
+  ): void {
     const reveal = options.reveal === true && clips.length > 0 ? { clip: clips[0]! } : null;
-    replace({ ...EMPTY, clips: [...clips], origin: "script", reveal, scene: { ...scene } });
+    const range = options.range && options.range.to > options.range.from ? { from: options.range.from, to: options.range.to } : null;
+    replace({ ...EMPTY, clips: [...clips], range, origin: options.origin ?? "script", reveal, scene: { ...scene } });
   },
   /** Replace the selection with a rectangle drawn on the preview. */
   selectRegion(region: SelectedRegion, origin: SelectionOrigin): void {
@@ -408,6 +415,19 @@ export const selection = {
     // Clips selected with the words (`ui_select`) stay when every word is cut.
     if ((placed.length === 0 || !range) && current.clips.length === 0) replace(EMPTY);
     else replace({ ...current, words: placed.map((entry) => entry.word), range });
+  },
+  /**
+   * Follow a scene picked on the timeline's band when a new revision changes
+   * it: `next` is its span and linked clips now, null when no span is placed
+   * (the range goes, the clips stay; both come back with the span). No-op
+   * for any other selection, including a scene picked from its heading.
+   */
+  retainScene(next: { range: TimeRange; clips: readonly string[] } | null): void {
+    if (current.scene === null || current.origin !== "timeline") return;
+    const range = next && next.range.to > next.range.from ? next.range : null;
+    const clips = next ? next.clips : current.clips;
+    if (sameRange(range, current.range) && clips.length === current.clips.length && clips.every((id, i) => id === current.clips[i])) return;
+    replace({ ...current, range: range && { from: range.from, to: range.to }, clips: [...clips] });
   },
   /**
    * Drop the selected track, and words picked on it, once a new revision of
