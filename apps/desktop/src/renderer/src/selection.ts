@@ -349,11 +349,18 @@ export const selection = {
   /**
    * Select script scene `scene` with `clips`, the ones realizing it (maybe
    * none). `reveal` asks panels to bring the first clip into view, a new
-   * request every call: a heading clicked again scrolls again.
+   * request every call: a heading clicked again scrolls again. `range` is the
+   * timeline span of the scene's words (its band on the timeline); the
+   * selection is then the timeline's own, `origin` defaults to `script`.
    */
-  selectScene(scene: SelectedScene, clips: readonly string[], options: { reveal?: boolean } = {}): void {
+  selectScene(
+    scene: SelectedScene,
+    clips: readonly string[],
+    options: { reveal?: boolean; range?: TimeRange; origin?: SelectionOrigin } = {},
+  ): void {
     const reveal = options.reveal === true && clips.length > 0 ? { clip: clips[0]! } : null;
-    replace({ ...EMPTY, clips: [...clips], origin: "script", reveal, scene: { ...scene } });
+    const range = options.range && options.range.to > options.range.from ? { from: options.range.from, to: options.range.to } : null;
+    replace({ ...EMPTY, clips: [...clips], range, origin: options.origin ?? "script", reveal, scene: { ...scene } });
   },
   /** Replace the selection with a rectangle drawn on the preview. */
   selectRegion(region: SelectedRegion, origin: SelectionOrigin): void {
@@ -408,6 +415,15 @@ export const selection = {
     // Clips selected with the words (`ui_select`) stay when every word is cut.
     if ((placed.length === 0 || !range) && current.clips.length === 0) replace(EMPTY);
     else replace({ ...current, words: placed.map((entry) => entry.word), range });
+  },
+  /**
+   * Follow the span of a scene selected with a range (from the timeline's
+   * scene band) when a new revision moves it: `range` is where its words are
+   * now, null when none are placed any more. No-op for any other selection.
+   */
+  retainSceneRange(range: TimeRange | null): void {
+    if (current.scene === null || current.range === null || sameRange(range, current.range)) return;
+    replace({ ...current, range });
   },
   /**
    * Drop the selected track, and words picked on it, once a new revision of

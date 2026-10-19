@@ -106,6 +106,10 @@ describe("reference lines", () => {
       '[frameshell] scene scripts/script.md#intro "Intro" · clips c_0001, c_0012',
     ]);
     expect(referenceLines({ ...blank, scene, origin: "script" }, view)).toEqual(['[frameshell] scene scripts/script.md#intro "Intro"']);
+    // Picked on the timeline's scene band: the span of its words comes first.
+    expect(referenceLines({ ...blank, scene, clips: ["c_0001"], range: { from: 2, to: 12.5 }, origin: "timeline" }, view)).toEqual([
+      '[frameshell] scene scripts/script.md#intro "Intro" · 00:00:02.00–00:00:12.50 · clips c_0001',
+    ]);
     const region = { x0: 0.62, y0: 0.08, x1: 0.94, y1: 0.2249, at: 65.2, clips: [], elements: [] };
     expect(referenceLines({ ...blank, region, origin: "preview" }, view, { frame: ".frameshell/context/f_1956.png" })).toEqual([
       "[frameshell] region (0.62,0.08)–(0.94,0.22) @ 00:01:05.20 · frame .frameshell/context/f_1956.png",

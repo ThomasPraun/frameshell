@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   LANE_HEIGHT,
   RULER_HEIGHT,
+  SCENE_BAND_HEIGHT,
   clampScroll,
   clipAt,
   contentWidth,
@@ -11,6 +12,7 @@ import {
   formatTimecode,
   layoutTimeline,
   rulerTicks,
+  sceneAt,
   visibleClips,
   zoomAround,
   zoomLimits,
@@ -221,5 +223,43 @@ describe("clipAt", () => {
     expect(clipAt(layout, viewport, 35, y)).toBeNull();
     expect(clipAt(layout, viewport, 45, RULER_HEIGHT / 2)).toBeNull();
     expect(clipAt(layout, { ...viewport, scrollLeft: 20 }, 25, y)?.clip.id).toBe("c_2");
+  });
+});
+
+describe("scene band", () => {
+  const tracks = [{ id: "t_v", kind: "video" as const, name: null, follows: null, clips: [media("c_a", 0, 10)] }];
+  const scenes = [
+    { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [] },
+    { script: "scripts/plan.md", slug: "demo", title: "Demo", start: 4, end: 9, clips: ["c_a"] },
+  ];
+  const viewport = { pxPerSecond: 10, scrollLeft: 0, scrollTop: 0 };
+
+  it("adds no band without scenes, so lanes keep their place", () => {
+    const layout = layoutTimeline(view(tracks));
+    expect(layout.head).toBe(RULER_HEIGHT);
+    expect(layout.rows[0]!.top).toBe(RULER_HEIGHT);
+    expect(layout.scenes).toEqual([]);
+  });
+
+  it("pushes the lanes below a band under the ruler", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    expect(layout.head).toBe(RULER_HEIGHT + SCENE_BAND_HEIGHT);
+    expect(layout.rows[0]!.top).toBe(layout.head);
+    expect(layout.height).toBe(layout.head + LANE_HEIGHT.video);
+  });
+
+  it("finds the span under a point of the band only, wherever the lanes are scrolled", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    const inBand = RULER_HEIGHT + 4;
+    expect(sceneAt(layout, viewport, 25, inBand)?.slug).toBe("intro");
+    expect(sceneAt(layout, { ...viewport, scrollTop: 30 }, 45, inBand)?.slug).toBe("demo");
+    // A span starts at its first pixel and ends where the next scene's begins.
+    expect(sceneAt(layout, viewport, 10, inBand)?.slug).toBe("intro");
+    expect(sceneAt(layout, viewport, 40, inBand)?.slug).toBe("demo");
+    expect(sceneAt(layout, viewport, 5, inBand)).toBeNull();
+    expect(sceneAt(layout, viewport, 95, inBand)).toBeNull();
+    expect(sceneAt(layout, viewport, 25, RULER_HEIGHT - 1)).toBeNull();
+    expect(sceneAt(layout, viewport, 25, layout.head)).toBeNull();
+    expect(sceneAt(layout, { ...viewport, scrollLeft: 30 }, 5, inBand)?.slug).toBe("intro");
   });
 });

@@ -2030,6 +2030,20 @@ code {
   padding: 0 4px;
 }
 
+/* Head of the scene band the canvas draws under the ruler; its height is set from the layout. */
+.scene-spacer {
+  flex: none;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .timeline-zoom {
   display: flex;
   gap: 2px;
