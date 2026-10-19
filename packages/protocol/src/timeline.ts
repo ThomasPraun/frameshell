@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AnyClipSchema,
+  DirectorRulesSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
@@ -275,6 +276,22 @@ export const operationArgs = {
       .optional()
       .describe("Angle ids of the track's group to show, in layout order (left to right, then top to bottom). Default: unchanged."),
   }),
+  "multicam.direct": z.strictObject({
+    group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
+    from: Seconds("Timeline time where directing starts. Default 0.").optional(),
+    to: Seconds("Timeline time where it ends; greater than `from`. Default: the program track's end.").optional(),
+    turns: z
+      .array(
+        z.strictObject({
+          angle: z.string().min(1),
+          start: z.number().nonnegative().describe("Group-clock seconds."),
+          end: z.number().nonnegative().describe("Group-clock seconds; greater than `start`."),
+        }),
+      )
+      .describe("Speaking turns of the group's angles. The `multicam.direct` method measures them and passes them here."),
+    rules: DirectorRulesSchema.describe("Resolved rules: a template with `director.json` on top."),
+    keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
+  }),
 } as const;
 
 /** Name of a public timeline operation. */
@@ -460,6 +477,33 @@ export const MulticamTurnsResultSchema = z.object({
 
 /** See {@link MulticamTurnsResultSchema}. */
 export type MulticamTurnsResult = z.output<typeof MulticamTurnsResultSchema>;
+
+/** A shot the director wrote, placed on the timeline. */
+export const DirectedShotSchema = z.object({
+  clip: z.string().describe("Shot id."),
+  start: z.number().describe("Timeline seconds."),
+  end: z.number().describe("Timeline seconds."),
+  shot: z.enum(SHOT_LAYOUTS),
+  angles: z.array(z.string()),
+  confidence: z.number().describe("0 (a guess) to 1 (sure)."),
+  reason: z.string(),
+});
+
+/** Result of `multicam.direct`: the operation plus what the director did. */
+export const MulticamDirectResultSchema = OperationResultSchema.extend({
+  group: z.string(),
+  track: z.string().describe("Program track the shots were written to."),
+  template: z.string().describe("Template the rules started from."),
+  rulesFile: z.string().nullable().describe("Project-relative rules file read on top of the template; null when none was."),
+  shots: z.int().describe("Shots written."),
+  kept: z.array(z.string()).describe("Ids of the shots a person chose in the range, left as they were."),
+  low: z
+    .array(DirectedShotSchema)
+    .describe("Written shots with `confidence` below 0.5, by `start`: the ones to review (watch them, then `shot.set` where the rules guessed wrong)."),
+});
+
+/** See {@link MulticamDirectResultSchema}. */
+export type MulticamDirectResult = z.output<typeof MulticamDirectResultSchema>;
 
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z

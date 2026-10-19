@@ -24,7 +24,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type Timeline, parseTimeline } from "@frameshell/schema";
+import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -36,6 +36,8 @@ import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
 import { groupTurns } from "./multicam/group-turns.js";
+import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
+import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
@@ -47,6 +49,7 @@ import { IdempotencyCache } from "./idempotency.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService } from "./timeline/service.js";
+import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
@@ -296,17 +299,34 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
   };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
-  const operate = async (op: OperationRequest["op"], params: { cwd: string; timeline: string; [arg: string]: unknown }, caller: Caller, onApplied?: (after: Timeline) => void) => {
+  const operate = async (
+    op: OperationRequest["op"],
+    params: { cwd: string; timeline: string; [arg: string]: unknown },
+    caller: Caller,
+    onApplied?: (after: Timeline) => void,
+    prepare?: (current: Timeline, request: OperationRequest) => Promise<OperationRequest>,
+  ) => {
     const { cwd, timeline, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
     const key = authorOf(caller);
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, timeline });
-    const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(onApplied ? { onApplied } : {}) });
+    const result = await timelines.apply({
+      root: dir,
+      cwd,
+      timeline,
+      request,
+      author: journalAuthorOf(caller),
+      tx,
+      ...(onApplied ? { onApplied } : {}),
+      ...(prepare ? { prepare: (current: Timeline) => prepare(current, request) } : {}),
+    });
     await transactions.applied(key, tx);
     return result;
   };
+  /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
+  const turnsSource = { probe: (d: string, a: string) => media.probe(d, a), profile: (d: string, a: string) => energy.profile(d, a) };
   /** Revert `target` on one timeline for `caller`; its own transaction unless an explicit one is open. */
   const revert = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller) => {
     const key = authorOf(caller);
@@ -541,22 +561,65 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await timelines.load(dir, timeline);
-      const found = loaded.groups?.find((candidate) => candidate.id === group);
-      if (!found) {
-        const ids = loaded.groups?.map((candidate) => candidate.id).join(", ");
-        throw new RpcError(
-          ErrorCode.InvalidOperation,
-          `multicam.turns: no group "${group}" in this timeline${ids ? ` (groups: ${ids})` : " (it has no multicam groups; make one with `multicam create`)"}.`,
-          {
-            op: "multicam.turns",
-            reason: "unknown group",
-            field: "group",
-            groups: loaded.groups?.map((candidate) => candidate.id) ?? [],
-          },
-        );
-      }
-      const result = await groupTurns({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, dir, found);
+      const found = groupOf(loaded, group, "multicam.turns");
+      const result = await groupTurns(turnsSource, dir, found);
       return { timeline, revision: loaded.revision, group, ...result };
+    },
+    "multicam.direct": async ({ cwd, timeline, group, template, rules, from, to, replaceHuman }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await timelines.load(dir, timeline);
+      const found = groupOf(loaded, group, "multicam.direct");
+      const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
+      const measured = await groupTurns(turnsSource, dir, found);
+      const turns = measured.turns.map(({ angle, start, end }) => ({ angle, start, end }));
+      let written: Timeline | undefined;
+      let keep: string[] = [];
+      const args = { cwd, timeline, group, from, to, turns, rules: loadedRules.rules, keep };
+      // Human shots come from the timeline and journal the operation applies to: measuring turns
+      // can take long, and a shot a person sets meanwhile must still be kept.
+      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+        const program = current.tracks.find((track): track is ProgramTrack => track.kind === "program" && track.group === group);
+        keep = replaceHuman === true || !program ? [] : humanShots(await readJournal(dir, timeline), program);
+        return { ...request, args: { ...request.args, keep } } as OperationRequest;
+      };
+      const result = await operate(
+        "multicam.direct",
+        args,
+        caller,
+        (after) => {
+          written = after;
+        },
+        prepare,
+      );
+      const track = written?.tracks.find((candidate): candidate is ProgramTrack => candidate.kind === "program" && candidate.group === group);
+      if (!track) throw new Error("multicam.direct: the operation left no program track");
+      const grid = new FrameGrid(fps);
+      const first = grid.frame(grid.snap(from ?? 0));
+      // A shot cut by both ends of the range leaves its tail as a new id after `to`: not a directed shot.
+      const end = to === undefined ? Number.POSITIVE_INFINITY : grid.snap(to);
+      const last = to === undefined ? Number.POSITIVE_INFINITY : grid.frame(end);
+      const added = new Set(track.clips.filter((shot) => result.changes.added.includes(shot.id) && shot.start < end - 1e-6).map((shot) => shot.id));
+      const keptIds = new Set(keep);
+      const inRange = (shot: ShotClip) => grid.frame(shot.start + shot.out - shot.in) > first && grid.frame(shot.start) < last;
+      const unknown = unknownWeights(loadedRules.rules, found);
+      const warnings = [
+        ...result.warnings,
+        ...measured.warnings,
+        ...(unknown.length > 0 ? [`weights name ${unknown.join(", ")}, not angles of group ${group} (angles: ${found.angles.map((angle) => angle.id).join(", ")}).`] : []),
+      ];
+      return {
+        ...result,
+        // The journal keeps every turn; the reply only counts them, so an agent's context is not spent on them.
+        operation: { ...result.operation, args: { ...result.operation.args, turns: turns.length } },
+        group,
+        track: track.id,
+        template: loadedRules.template,
+        rulesFile: loadedRules.rulesFile,
+        shots: added.size,
+        kept: track.clips.filter((shot) => keptIds.has(shot.id) && inRange(shot)).map((shot) => shot.id),
+        low: lowShots(track, added),
+        warnings,
+      };
     },
     "tx.begin": async ({ label, autoCommitAfter }, caller) => {
       const author = authorOf(caller);
@@ -729,6 +792,18 @@ function transactionKey(author: string): string {
   const match = /^agent:[^:]+(?::(.+))?$/.exec(author);
   if (!match) return author;
   return match[1] ? `cli:${match[1]}` : "cli";
+}
+
+/** Group `group` of `timeline`; InvalidOperation for `op` listing the groups there are. */
+function groupOf(timeline: Timeline, group: string, op: string): MulticamGroup {
+  const found = timeline.groups?.find((candidate) => candidate.id === group);
+  if (found) return found;
+  const ids = timeline.groups?.map((candidate) => candidate.id).join(", ");
+  throw new RpcError(
+    ErrorCode.InvalidOperation,
+    `${op}: no group "${group}" in this timeline${ids ? ` (groups: ${ids})` : " (it has no multicam groups; make one with `multicam create`)"}.`,
+    { op, reason: "unknown group", field: "group", groups: timeline.groups?.map((candidate) => candidate.id) ?? [] },
+  );
 }
 
 /** `file` (absolute, or relative to the project root) as a project-relative `/`-separated path; OutsideProject beyond `root`. */

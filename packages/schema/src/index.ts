@@ -53,6 +53,23 @@ export {
   parseTimeline,
   createTimeline,
 } from "./timeline.js";
+export {
+  DIRECTOR_SCHEMA_URL,
+  DIRECTOR_FILE,
+  DIRECTOR_TEMPLATE_IDS,
+  DEFAULT_DIRECTOR_TEMPLATE,
+  DIRECTOR_TEMPLATES,
+  DirectorRulesSchema,
+  DirectorFileSchema,
+  DirectorTwoShotSchema,
+  DirectorWideSchema,
+  DirectorCutawaySchema,
+  type DirectorTemplateId,
+  type DirectorRules,
+  type DirectorFile,
+  parseDirectorFile,
+  resolveDirectorRules,
+} from "./director.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   PLUGIN_MANIFEST_FILE,

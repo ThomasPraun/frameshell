@@ -116,6 +116,11 @@ export interface TimelineCall extends CallContext {
   request: OperationRequest;
   /** Called with the timeline this operation wrote, before the next operation can run on it. */
   onApplied?: (timeline: Timeline) => void;
+  /**
+   * Called in the operation's turn with the timeline it applies to, before the engine runs:
+   * returns the request to apply instead of `request`, for args that must match that timeline.
+   */
+  prepare?: (timeline: Timeline) => Promise<OperationRequest>;
 }
 
 /** Revert to run: a tx id (`tx_…`) or op id (`op_…`) from the timeline's journal. */
@@ -186,7 +191,7 @@ export class TimelineService {
     const warnings = problem ? [problem] : [];
     return this.#turn(root, id, async () => {
       const { timeline, fps, snapWindow } = await this.#current(root, id);
-      const request = normalizeArgs(call);
+      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call);
       const context = this.#context(root, id, fps, request.op, snapWindow);
       const applied = await applyOperation(timeline, request, context);
       const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);

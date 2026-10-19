@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "template": {
+      "description": "Rule set to start from: `interview`, `podcast-calm` or `panel-dynamic`. Default `interview`.",
+      "type": "string",
+      "enum": [
+        "interview",
+        "podcast-calm",
+        "panel-dynamic"
+      ]
+    },
+    "minShot": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Shortest shot: a shorter one (a quick interjection) merges into the shot before it, so the voice plays over that picture. Seconds."
+    },
+    "maxShot": {
+      "anyOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Longest solo, seconds: a solo held longer gets a cutaway (see `cutaway`) every this many seconds. Null switches the rule off."
+    },
+    "cutLead": {
+      "type": "number",
+      "minimum": 0,
+      "description": "J-cut: the new speaker's voice leads the picture by this long, so a cut to a speaker lands this far into their turn. 0 cuts on the first word. Seconds."
+    },
+    "twoShot": {
+      "type": "object",
+      "properties": {
+        "exchange": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "description": "Quick exchange: three or more turns in a row alternating between the same two people, each shorter than this, become one two-up. Null switches the rule off. Seconds."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overlap": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "description": "Two people talking at once for at least this long get a two-up; shorter overlaps keep the shot that was on. Null switches the rule off. Seconds."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "wide": {
+      "type": "object",
+      "properties": {
+        "silence": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "description": "Nobody speaking for at least this long goes wide; shorter pauses keep the shot that was on. Null switches the rule off. Seconds."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "laughter": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "description": "Laughter or cross-talk: `together` or more people talking at once for at least this long goes wide (shorter: two-up rules apply). Null switches the rule off. Seconds."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "together": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 9007199254740991,
+          "description": "People talking at once that count as laughter; capped at the group's angles with a picture, so everyone in a group of two."
+        }
+      },
+      "additionalProperties": false
+    },
+    "cutaway": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "enum": [
+            "listener",
+            "wide"
+          ],
+          "description": "`listener`: a solo of the listener with the highest weight (a reaction shot); `wide`: a grid of every angle."
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Seconds the cutaway lasts before the picture returns to the speaker."
+        }
+      },
+      "additionalProperties": false
+    },
+    "weights": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      },
+      "description": "Weight per angle id, default 1: who the picture favours when the rules must pick (the two-up pair among more people talking at once, the listener of a cutaway). 0: never shown alone or in a two-up (wide shots still show them); their turns keep the shot that was on."
+    }
+  },
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/director.json"
+}

@@ -145,6 +145,8 @@ export {
 } from "./clips/renderer.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type TurnsSource, groupTurns } from "./multicam/group-turns.js";
+export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
+export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 export { BLEED_DB, MERGE_GAP_S, MIN_TURN_S, TURN_FRAME_S, type Turn, type TurnInput, speakingTurns } from "./multicam/turns.js";
 export {
   type PlannedOffset,

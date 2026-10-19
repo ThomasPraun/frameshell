@@ -117,6 +117,26 @@ describe("frameshell multicam", () => {
   }, 120_000);
 });
 
+describe("frameshell direct", () => {
+  it("writes shots from the turns and reports them, then refuses an unknown template", () => {
+    const json = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    const group = json.groups[0].id as string;
+    const directed = frameshell(["direct", group, "--template", "panel-dynamic"]);
+    expect(directed.stderr).toBe("");
+    expect(directed.code).toBe(0);
+    expect(directed.stdout).toMatch(new RegExp(`^Directed group ${group} on t_[0-9a-f]{6} \\(panel-dynamic\\): \\d+ shots?`));
+    expect(directed.stdout).toContain("multicam.direct: added");
+    const after = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    expect(after.tracks.at(-1).clips.every((shot: { confidence?: number; reason?: string }) => shot.confidence !== undefined && shot.reason)).toBe(true);
+    const report = JSON.parse(frameshell(["direct", group, "--from", "1", "--to", "4", "--json"]).stdout) as { low: unknown[]; template: string };
+    expect(report.template).toBe("interview");
+    expect(Array.isArray(report.low)).toBe(true);
+    const wrong = frameshell(["direct", group, "--template", "news"]);
+    expect(wrong.code).not.toBe(0);
+    expect(wrong.stderr).toContain("template");
+  }, 120_000);
+});
+
 describe("parsing multicam commands", () => {
   it("maps arguments to the methods and refuses a wrong name count, a bad number or conflicting flags", () => {
     expect(parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A", "B"] })).toMatchObject({
@@ -145,5 +165,12 @@ describe("parsing multicam commands", () => {
     expect(parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { "clear-crop": true })).toMatchObject({ params: { crop: null } });
     expect(() => parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { "clear-crop": true, "crop-left": "0.1" })).toThrow(/not both/);
     expect(() => parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { muted: true, unmuted: true })).toThrow(/not both/);
+    expect(parseTimelineCommand(["direct", "g_1"], { template: "podcast-calm", rules: "r.json", from: "2", to: "9", "replace-human": true })).toMatchObject({
+      method: "multicam.direct",
+      params: { group: "g_1", template: "podcast-calm", rules: "r.json", from: 2, to: 9, replaceHuman: true },
+    });
+    expect(parseTimelineCommand(["direct", "g_1"], {})!.params).toEqual({ group: "g_1" });
+    expect(() => parseTimelineCommand(["direct"], {})).toThrow(/takes 1 argument/);
+    expect(() => parseTimelineCommand(["direct", "g_1"], { layout: "solo" })).toThrow(/does not take --layout/);
   });
 });

@@ -2,6 +2,7 @@ import type {
   DaemonConnection,
   HistoryResult,
   MulticamCreateResult,
+  MulticamDirectResult,
   MulticamTurnsResult,
   MethodName,
   MethodResult,
@@ -50,6 +51,11 @@ mutations print the new revision):
   multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap). Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings}
+  direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from s] [--to s] [--replace-human]
+                               Shots from who speaks, by rules (director.json at the project root on top of the
+                               template, or --rules): written on the program track in one operation, each with a
+                               confidence and reason. Same input, same shots. Keeps shots a person chose in the app
+                               unless --replace-human. Lists the doubtful ones (--json: low)
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
@@ -76,7 +82,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "cut", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "tx", "history", "revert"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -124,6 +130,9 @@ export const TIMELINE_OPTIONS = {
   "clear-crop": { type: "boolean" },
   layout: { type: "string" },
   angles: { type: "string" },
+  template: { type: "string" },
+  rules: { type: "string" },
+  "replace-human": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -160,6 +169,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted"],
   "shot set": ["layout", "angles"],
   "multicam turns": [],
+  "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
   "tx begin": [],
   "tx commit": [],
@@ -186,6 +196,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam angle": [2, 2],
   "shot set": [1, 1],
   "multicam turns": [1, 1],
+  "direct ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
@@ -210,8 +221,8 @@ export function timelineCommandFlags(): Map<string, string[]> {
  */
 export function parseTimelineCommand(positionals: string[], values: Values): TimelineInvocation | null {
   const [group, ...rest] = positionals;
-  // `history` and `revert` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
-  const flat = group === "cut" || group === "history" || group === "revert";
+  // `history`, `revert` and `direct` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
+  const flat = group === "cut" || group === "history" || group === "revert" || group === "direct";
   const command = group === "cut" ? "cut" : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
   const args = flat ? rest : rest.slice(1);
   const allowed = ALLOWED[command];
@@ -407,6 +418,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "multicam.turns";
       params["group"] = args[0];
       break;
+    case "direct ":
+      method = "multicam.direct";
+      Object.assign(params, {
+        group: args[0],
+        template: str("template"),
+        rules: str("rules"),
+        from: num("from"),
+        to: num("to"),
+        replaceHuman: values["replace-human"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -454,6 +476,7 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
   }
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
+  if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   return formatOperation(result as OperationResult);
 }
 
@@ -462,6 +485,17 @@ function formatMulticamTurns(result: MulticamTurnsResult): string {
   for (const turn of result.turns) lines.push(`  ${turn.start}–${turn.end} s  ${turn.angle}  ${turn.name}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
+}
+
+function formatMulticamDirect(result: MulticamDirectResult): string {
+  const rules = result.rulesFile ? `${result.template} + ${result.rulesFile}` : result.template;
+  const kept = result.kept.length > 0 ? ` · kept ${result.kept.length} shot${result.kept.length === 1 ? "" : "s"} a person chose` : "";
+  const lines = [`Directed group ${result.group} on ${result.track} (${rules}): ${result.shots} shot${result.shots === 1 ? "" : "s"}${kept}`];
+  if (result.low.length > 0) lines.push(`Low confidence (${result.low.length}), worth a look:`);
+  for (const shot of result.low) {
+    lines.push(`  ${shot.clip}  ${shot.start}–${shot.end} s  ${shot.shot} ${shot.angles.join(",")}  ${Math.round(shot.confidence * 100)}%  ${shot.reason}`);
+  }
+  return `${lines.join("\n")}\n${formatOperation(result)}`;
 }
 
 function formatMulticamCreate(result: MulticamCreateResult): string {
