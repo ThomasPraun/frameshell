@@ -43,6 +43,8 @@ export async function resolveNested(root: string, timeline: Timeline, read: Nest
 export interface TransformedProgram {
   /** Id of the nested clip, in the timeline that holds it. */
   clip: string;
+  /** Id of the timeline that holds the clip. */
+  timeline: string;
   /** Timeline file the clip nests. */
   source: string;
 }
@@ -61,7 +63,7 @@ export function transformedProgram(timeline: Timeline, nested: (source: string) 
       const inner = nested(clip.source);
       if (!inner) continue;
       if (!isIdentityPlacement(placementOf(clip.transform)) && showsProgram(inner, nested, [...stack, clip.source])) {
-        return { clip: clip.id, source: clip.source };
+        return { clip: clip.id, timeline: timeline.id, source: clip.source };
       }
       const deeper = transformedProgram(inner, nested, [...stack, clip.source]);
       if (deeper) return deeper;

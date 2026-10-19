@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { createProjectConfig, type ExportPreset, type MulticamGroup, type ShotClip, type Timeline, shotLayers } from "@frameshell/schema";
+import { createProjectConfig, type ExportPreset, type MulticamGroup, type ShotClip, type Timeline, flattenTimeline, shotLayers } from "@frameshell/schema";
 import { BUILTIN_PRESETS, type ExportSource, ExportService, compileFrame, compileRender, executeRender, loudnessAnalysis, mixStep } from "../src/index.js";
 import type { JobQueue } from "../src/jobs/queue.js";
 import { tempDir } from "./helpers.js";
@@ -35,12 +35,12 @@ const shot = (id: string, start: number, layout: ShotClip["shot"], angles: strin
   angles,
 });
 
-/** Ana from group second 0, Ben from 0.5 (his recording started late), Eva at -6 dB. */
+/** Ana from group second 0, Ben from 0.5 (his recording started late) without the left quarter of his picture, Eva at -6 dB. */
 const group: MulticamGroup = {
   id: "g_talk",
   angles: [
     { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
-    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.5 },
+    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.5, crop: { left: 0.25 } },
     { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0, audio: { gain: -6 } },
   ],
 };
@@ -109,6 +109,13 @@ describe("multicam plan", () => {
     }
   });
 
+  it("applies an angle's crop: Ben's solo shot reads only the picture right of his cropped left edge", () => {
+    // Shot c_s5 (Ben solo, 4-5 s) is in the third segment; 1920x1080 minus the left quarter is 1440x1080, cover-cropped to 16:9.
+    const [layer] = shotLayers(shots[4]!, group, { width: 1920, height: 1080 }, (asset) => sources.get(asset)!.video!);
+    expect(layer!.crop).toEqual({ left: 480, top: 135, width: 1440, height: 810 });
+    expect(plan.files["seg-0003.filter"]!).toContain("crop=1440:810:480:135,scale=1920:1080");
+  });
+
   it("captures a single frame of a shot", () => {
     const frame = compileFrame({ timeline, fps: 30, at: 2.5, width: 640, height: 360, output: "frame.png", sources, resolution });
     expect(frame).toMatchObject({ frame: 75, at: 2.5, clip: null });
@@ -121,6 +128,25 @@ describe("multicam plan", () => {
     const filter = compileRender({ timeline: over, fps: 30, preset: youtube1080, loudness: -17, sources, resolution }).files["seg-0001.filter"]!;
     expect(filter).toContain("[base]");
     expect(filter.indexOf("overlay=x=0:y=0")).toBeLessThan(filter.indexOf("overlay=x=480:y=270"));
+  });
+
+  it("keeps nested stacking order: a video track listed after the program track draws over the shot tiles", () => {
+    const logo = { id: "c_logo", type: "media" as const, asset: "assets/ana.mp4", start: 0, in: 0, out: 1, transform: { scale: 0.25 } };
+    const inner: Timeline = { ...timeline, id: "inner", tracks: [timeline.tracks[0]!, { id: "v_logo", kind: "video", clips: [logo] }] };
+    const outer: Timeline = {
+      schemaVersion: 1,
+      id: "outer",
+      revision: 1,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_t", type: "timeline", source: "timelines/inner.json", start: 0, duration: 5 }] }],
+    };
+    const flat = flattenTimeline(outer, (at) => (at === "timelines/inner.json" ? inner : null));
+    expect(flat.tracks.map((t) => `${t.id}:${t.kind}`)).toEqual(["v1:video", "v1/p1:program", "v1/2:video"]);
+    const filter = compileRender({ timeline: flat, fps: 30, preset: youtube1080, loudness: -17, sources, resolution }).files["seg-0001.filter"]!;
+    // The scaled logo is drawn after the full-frame shot.
+    const shotAt = filter.indexOf("overlay=x=0:y=0");
+    expect(shotAt).toBeGreaterThan(-1);
+    expect(filter.lastIndexOf("overlay=")).toBeGreaterThan(shotAt);
+    expect(filter.slice(shotAt)).toContain("overlay=x=720:y=405");
   });
 
   it("warns when an angle has no picture and refuses a program track whose group is missing", () => {
@@ -142,11 +168,12 @@ describe("multicam under a nested timeline", () => {
     revision: 1,
     tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_talk", type: "timeline", source: "timelines/talk.json", start: 0, duration: 5, ...(transform ? { transform } : {}) }] }],
   });
-  const service = (host: Timeline) => {
+  const service = (host: Timeline, nested: (at: string) => Timeline | null = (at) => (at === "timelines/talk.json" ? talk : null), hostSource?: string) => {
+    if (hostSource) host = { ...host, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_mid", type: "timeline", source: hostSource, start: 0, duration: 5 }] }] };
     const root = tempDir();
     writeFileSync(join(root, "frameshell.json"), JSON.stringify(createProjectConfig("Test")));
     const exporter = new ExportService({
-      jobs: {} as JobQueue,
+      jobs: { enqueue: () => "job_1" } as unknown as JobQueue,
       ffmpeg: async () => "ffmpeg",
       probe: async () => ({
         duration: 8,
@@ -155,8 +182,9 @@ describe("multicam under a nested timeline", () => {
         audio: { codec: "aac", channels: 1, sampleRate: 48_000 },
       }),
       loadTimeline: async () => ({ timeline: host, fps: 30 }),
-      readNested: async (_root, at) => (at === "timelines/talk.json" ? talk : null),
+      readNested: async (_root, at) => nested(at),
       pluginPresets: async () => [],
+      segmentSeconds: 2,
     });
     return { root, exporter };
   };
@@ -171,10 +199,25 @@ describe("multicam under a nested timeline", () => {
     await expect(exporter.frame(root, { timeline: "main", at: 1, out: join(root, "f.png") })).rejects.toMatchObject({ code: ErrorCode.ExportUnsupported });
   });
 
+  it("names the timeline that holds a transformed clip two levels deep", async () => {
+    const mid: Timeline = {
+      schemaVersion: 1,
+      id: "mid",
+      revision: 1,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_deep", type: "timeline", source: "timelines/talk.json", start: 0, duration: 5, transform: { scale: 0.5 } }] }],
+    };
+    const { root, exporter } = service(hosted(), (at) => (at === "timelines/mid.json" ? mid : at === "timelines/talk.json" ? talk : null), "timelines/mid.json");
+    await expect(exporter.render(root, { timeline: "main" })).rejects.toMatchObject({
+      code: ErrorCode.ExportUnsupported,
+      message: expect.stringContaining("frameshell clip set c_deep --timeline mid --x 0"),
+      data: { timeline: "mid", clip: "c_deep" },
+    });
+  });
+
   it("plans a host clip without a transform: the nested program track shows over the host's slot", async () => {
     const { root, exporter } = service(hosted());
-    // The error that follows comes from the stub queue, after compiling the plan: validation passed.
-    await expect(exporter.render(root, { timeline: "main" })).rejects.not.toMatchObject({ code: ErrorCode.ExportUnsupported });
+    const result = await exporter.render(root, { timeline: "main" });
+    expect(result).toMatchObject({ job: "job_1", duration: 5, warnings: [], segments: 3 });
   });
 });
 

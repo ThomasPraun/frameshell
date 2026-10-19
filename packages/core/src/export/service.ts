@@ -305,11 +305,12 @@ export class ExportService {
     });
     const hit = transformedProgram(timeline, (source) => seen.get(source) ?? null, [`timelines/${timeline.id}.json`]);
     if (hit) {
+      const where = hit.timeline === timeline.id ? "" : ` --timeline ${hit.timeline}`;
       throw new RpcError(
         ErrorCode.ExportUnsupported,
         `Clip ${hit.clip} nests ${hit.source}, which shows multicam shots, and has a transform (x, y, scale or opacity). ` +
-          `Shots fill the frame and cannot be placed under a transform. Clear it: \`frameshell clip set ${hit.clip} --x 0 --y 0 --scale 1 --opacity 1\`.`,
-        { timeline: id, clip: hit.clip },
+          `Shots fill the frame and cannot be placed under a transform. Clear it: \`frameshell clip set ${hit.clip}${where} --x 0 --y 0 --scale 1 --opacity 1\`.`,
+        { timeline: hit.timeline, clip: hit.clip },
       );
     }
     return { timeline: flat, fps };
