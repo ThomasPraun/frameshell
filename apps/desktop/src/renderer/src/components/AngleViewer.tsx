@@ -1,6 +1,6 @@
 import type { AssetInfo } from "@frameshell/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type AngleTile, type SpeakingTurn, programRows, sameTurns, viewerModel } from "../angles/model.js";
+import { type AngleTile, type SpeakingTurn, programRows, sameTurns, viewerModel, viewerRow } from "../angles/model.js";
 import { t } from "../i18n.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useTransport } from "../preview/transport.js";
@@ -25,10 +25,7 @@ export function AngleViewer({ mediaUrl }: { mediaUrl: string }) {
   const { time, playing } = useTransport();
   const assets = useAssets(view?.revision ?? null);
   const rows = useMemo(() => (view ? programRows(view) : []), [view]);
-  const groupId = useMemo(() => {
-    const row = rows[0];
-    return row?.group ?? null;
-  }, [rows]);
+  const groupId = view ? (viewerRow(rows, view.fps, time)?.group ?? null) : null;
   const group = view?.groups?.find((candidate) => candidate.id === groupId);
   const { turns, error: turnsError } = useTurns(groupId, group ? JSON.stringify(group.angles) : null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -55,7 +52,7 @@ export function AngleViewer({ mediaUrl }: { mediaUrl: string }) {
       <p className="angle-hint">{t.angles.hint}</p>
       <div className="angle-grid" role="group" aria-label={t.angles.grid}>
         {model.tiles.map((tile) => (
-          <AngleTileView key={tile.id} tile={tile} proxy={proxyOf(assets, tile)} mediaUrl={mediaUrl} playing={playing} onCut={cut} />
+          <AngleTileView key={tile.id} tile={tile} asset={assets?.get(tile.asset)} mediaUrl={mediaUrl} playing={playing} onCut={cut} />
         ))}
       </div>
       {(notice ?? (turnsError ? t.angles.turnsFailed(turnsError) : null)) && (
@@ -72,20 +69,26 @@ function proxyOf(assets: ReadonlyMap<string, AssetInfo> | null, tile: AngleTile)
   return assets?.get(tile.asset)?.proxy ?? null;
 }
 
+/** Ingest failed, or finished with no picture (audio-only): the tile will never get a video. */
+function noPicture(asset: AssetInfo | undefined): boolean {
+  return asset?.state === "failed" || (asset?.state === "ready" && !asset.proxy);
+}
+
 function AngleTileView({
   tile,
-  proxy,
+  asset,
   mediaUrl,
   playing,
   onCut,
 }: {
   tile: AngleTile;
-  proxy: string | null;
+  asset: AssetInfo | undefined;
   mediaUrl: string;
   playing: boolean;
   onCut: (tile: AngleTile, additive: boolean) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const proxy = asset?.proxy ?? null;
   const src = proxy ? mediaUrl + proxy.split("/").map(encodeURIComponent).join("/") : null;
 
   // Keep the angle's picture on the playhead: seek while paused, play along and fix drift while playing.
@@ -112,10 +115,13 @@ function AngleTileView({
       data-in-shot={tile.inShot}
       data-speaking={tile.speaking}
       aria-label={t.angles.tile(tile.number, tile.name)}
+      title={tile.inShot ? t.angles.inShot : undefined}
       aria-pressed={tile.inShot}
+      // A mouse press must not focus the tile: Space/Enter would then re-activate it (cut) instead of playing.
+      onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => onCut(tile, event.shiftKey)}
     >
-      {src ? <video ref={video} src={src} muted playsInline preload="auto" disablePictureInPicture /> : <span className="angle-empty">{t.angles.preparing}</span>}
+      {src ? <video ref={video} src={src} muted playsInline preload="auto" disablePictureInPicture /> : <span className="angle-empty">{noPicture(asset) ? t.angles.unavailable : t.angles.preparing}</span>}
       <span className="angle-label">
         <span className="angle-number">{tile.number}</span>
         <span className="angle-name">{tile.name}</span>

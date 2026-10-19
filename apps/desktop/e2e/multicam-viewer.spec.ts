@@ -95,6 +95,8 @@ test("the viewer shows every angle, outlines the shot's, and a click cuts to an 
   await expect(viewer.locator('[data-angle="red"]')).toHaveAttribute("data-in-shot", "true");
   await expect(viewer.locator('[data-angle="blue"]')).toHaveAttribute("data-in-shot", "false");
 
+  // The tab button holds the focus after its click and Space skips buttons: park the focus on the page first.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await viewer.locator('[data-angle="blue"]').click();
   await expect.poll(() => shots().length).toBe(2);
   expect(shots()).toEqual([
@@ -107,6 +109,20 @@ test("the viewer shows every angle, outlines the shot's, and a click cuts to an 
   await viewer.locator('[data-angle="lime"]').click({ modifiers: ["Shift"] });
   await expect.poll(() => shots()[1]![3]).toBe("blue+lime");
   expect(shots()[1]![2]).toBe("two-up");
+
+  // A click leaves the focus where it was: Space then plays instead of re-activating the tile and cutting again.
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("preview-frame")).not.toHaveAttribute("data-playing", "true");
+  expect(shots()[1]![3]).toBe("blue+lime");
+  expect(shots()).toHaveLength(2);
+
+  // Back to the frame the next test cuts at.
+  await page.mouse.click(rect.x + 120, rect.y + 10);
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
+  expect(Math.round((await playhead()) * FPS) / FPS).toBe(at);
 });
 
 test("the viewer works in its own window", async () => {

@@ -10,6 +10,7 @@ export type SpeakingTurn = MulticamTurnsResult["turns"][number];
 export interface AngleTile {
   /** Angle id in the group. */
   id: string;
+  /** Angle name as the group shows it. */
   name: string;
   /** 1-based place in the group: the number key, and what a click cuts to. */
   number: number;
@@ -33,6 +34,7 @@ export interface ViewerModel {
   groupTime: number;
   /** Whether a shot of the program track is under the playhead; false in a gap, where no angle counts as shown. */
   hasShot: boolean;
+  /** One tile per group angle, in group order. */
   tiles: AngleTile[];
 }
 
@@ -63,6 +65,11 @@ export function programRows(view: TimelineView): TrackRow[] {
   return layoutTimeline(view).rows.filter((row) => row.kind === "program" && row.group !== null && row.angles.length > 0);
 }
 
+/** The row of `rows` the viewer shows at `time`: the topmost with a shot there, else the topmost. */
+export function viewerRow(rows: readonly TrackRow[], fps: number, time: number): TrackRow | undefined {
+  return rows.find((candidate) => groupTimeAt(candidate, time, fps).shot) ?? rows[0];
+}
+
 /**
  * The tiles at `time` (timeline seconds) for the topmost of `rows` ({@link programRows}) that has a shot there, else
  * the topmost; null when there is none. `turns` are the group's speaking turns (empty until measured).
@@ -74,7 +81,7 @@ export function viewerModel(
   time: number,
   turns: readonly SpeakingTurn[] = [],
 ): ViewerModel | null {
-  const row = rows.find((candidate) => groupTimeAt(candidate, time, fps).shot) ?? rows[0];
+  const row = viewerRow(rows, fps, time);
   const group = row ? groups?.find((candidate) => candidate.id === row.group) : undefined;
   if (!row || !group) return null;
   const { groupTime, shot } = groupTimeAt(row, time, fps);
