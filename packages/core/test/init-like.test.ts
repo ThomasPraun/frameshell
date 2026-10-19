@@ -39,6 +39,26 @@ describe("project.init like (#197)", () => {
   );
 
   it(
+    "takes only the sample rate from an audio file, plus the size given",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      const source = join(tempDir(), "podcast.mp3");
+      await run(ffmpeg, [...["-v", "error", "-y", "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "0.5"], source]);
+      const dir = join(tempDir(), "podcast");
+      await conn.request("project.init", { dir, like: source, resolution: { width: 1080, height: 1920 } });
+      const config = JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8"));
+      expect(config).toMatchObject({ resolution: { width: 1080, height: 1920 }, fps: 30, sampleRate: 44100 });
+      const landscape = join(tempDir(), "podcast-wide");
+      await conn.request("project.init", { dir: landscape, like: source });
+      expect(JSON.parse(readFileSync(join(landscape, "frameshell.json"), "utf8"))).toMatchObject({
+        resolution: { width: 1920, height: 1080 },
+        sampleRate: 44100,
+      });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "refuses a file that is not media and creates nothing",
     async () => {
       const notes = join(tempDir(), "notes.mp4");

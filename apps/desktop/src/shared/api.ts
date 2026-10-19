@@ -59,7 +59,7 @@ export interface ProjectSetup {
 }
 
 /**
- * Project to create from video files (ADR 0013), as main planned it. The
+ * Project to create from video or audio files (ADR 0013, 0015), as main planned it. The
  * renderer shows it for confirmation and passes `files`, `parent` and `name`
  * back; main plans again before creating.
  */
@@ -80,7 +80,12 @@ export interface VideoProjectPlan {
   clones: boolean;
   /** No clone and over 2 GB: the user picks copy or use in place before creating. */
   askMode: boolean;
+  /** Every file is audio (ADR 0015): no picture, so the user picks the frame orientation before creating. */
+  audioOnly: boolean;
 }
+
+/** Frame of a project made from audio alone: 16:9 (1920x1080) or 9:16 (1080x1920). */
+export type AudioOrientation = "landscape" | "portrait";
 
 /** A live terminal. `session` is its `FRAMESHELL_SESSION`. */
 export interface TerminalInfo {
@@ -183,7 +188,7 @@ export interface FrameshellApi {
     recent(): Promise<string[]>;
     /** Stop warning that this window's project is in a synced folder (#187); kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
-    /** Choose videos with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
+    /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
     chooseVideos(): Promise<VideoProjectPlan | null>;
     /**
      * Plan the project for the videos among `files` (e.g. dropped), optionally
@@ -191,7 +196,7 @@ export interface FrameshellApi {
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
-    /** Videos the OS asked to open in this window (Open with, #184), once: null when none or already taken. */
+    /** Videos or audio the OS asked to open in this window (Open with, #184), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
     /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
     onVideosOffered(listener: () => void): () => void;
@@ -205,7 +210,7 @@ export interface FrameshellApi {
     fromVideos(
       plan: Pick<VideoProjectPlan, "files" | "parent" | "name">,
       mode: "copy" | "link",
-      options?: { transcribe?: boolean },
+      options?: { transcribe?: boolean; orientation?: AudioOrientation },
     ): Promise<OpenOutcome>;
     /**
      * Setup still running, or just ended, for this window's project (#188);

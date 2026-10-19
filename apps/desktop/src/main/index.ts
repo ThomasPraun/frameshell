@@ -26,6 +26,7 @@ import {
   type TimelineChange,
   type TimelineEdit,
   type ProjectSetup,
+  type AudioOrientation,
   type VideoProjectPlan,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
@@ -65,7 +66,7 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
-import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "./media-files.js";
+import { MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
 import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
@@ -482,7 +483,7 @@ async function pickVideos(window: BrowserWindow): Promise<string[]> {
     title: text.app.dialogs.chooseVideos,
     properties: ["openFile", "multiSelections"],
     filters: [
-      { name: text.app.dialogs.videos, extensions: [...VIDEO_EXTENSIONS] },
+      { name: text.app.dialogs.videos, extensions: [...START_EXTENSIONS] },
       { name: text.app.dialogs.allFiles, extensions: ["*"] },
     ],
   });
@@ -495,6 +496,7 @@ async function createFromVideos(
   request: Pick<VideoProjectPlan, "files" | "parent" | "name">,
   mode: "copy" | "link",
   transcribe: boolean,
+  orientation: AudioOrientation = "landscape",
 ): Promise<OpenOutcome> {
   try {
     // Planned again: the folder may have appeared since the renderer showed the plan.
@@ -502,10 +504,12 @@ async function createFromVideos(
     let assets: string[] = [];
     if (!plan.existing) {
       // The project takes the first video's size, frame rate and sample rate (#197); the defaults when ffprobe
-      // cannot read it, so an odd file never blocks the project.
+      // cannot read it, so an odd file never blocks the project. Audio alone has no picture: the chosen frame (ADR 0015).
+      const like = plan.files.find((file) => !isAudioFile(file)) ?? plan.files[0];
+      const resolution = plan.audioOnly ? AUDIO_FRAMES[orientation] : undefined;
       await daemon
-        .request("project.init", { dir: plan.dir, name: plan.name, like: plan.files[0] })
-        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name }));
+        .request("project.init", { dir: plan.dir, name: plan.name, like, ...(resolution && { resolution }) })
+        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name, ...(resolution && { resolution }) }));
       const { imported } = await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
       assets = imported.map((item) => item.asset);
       await placeOnTimeline(plan.dir, assets);
@@ -518,19 +522,30 @@ async function createFromVideos(
   }
 }
 
+/** Frame size of a project made from audio alone (ADR 0015). */
+const AUDIO_FRAMES = {
+  landscape: { width: 1920, height: 1080 },
+  portrait: { width: 1080, height: 1920 },
+} as const;
+
 /**
- * Put `assets` one after another on a new video track of the main timeline,
- * as one `ui` transaction, so a single undo takes them off (#197). A video
- * that cannot be placed (unreadable) is skipped; the rest still go in.
+ * Put the videos among `assets` one after another on a new video track of the
+ * main timeline, and the audio files on a new audio track (A1, ADR 0015), as
+ * one `ui` transaction, so a single undo takes them off (#197). A file that
+ * cannot be placed (unreadable) is skipped; the rest still go in.
  */
 async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
   await editor.alone(async () => {
-    await daemon.request("tx.begin", { label: "Place the videos", autoCommitAfter: 30 });
+    await daemon.request("tx.begin", { label: "Place the media", autoCommitAfter: 30 });
     try {
-      const track = await daemon.request("track.add", { cwd: dir, timeline: "main", kind: "video", name: "Video" });
-      const id = track.changes.added[0];
-      if (id) {
-        for (const asset of assets) await daemon.request("clip.add", { cwd: dir, timeline: "main", track: id, asset }).catch(() => undefined);
+      for (const kind of ["video", "audio"] as const) {
+        const group = assets.filter((asset) => isAudioFile(asset) === (kind === "audio"));
+        if (group.length === 0) continue;
+        const name = kind === "video" ? "Video" : "Audio";
+        const track = await daemon.request("track.add", { cwd: dir, timeline: "main", kind, name });
+        const id = track.changes.added[0];
+        if (!id) continue;
+        for (const asset of group) await daemon.request("clip.add", { cwd: dir, timeline: "main", track: id, asset }).catch(() => undefined);
       }
     } finally {
       await daemon.request("tx.commit", {}).catch(() => undefined);
@@ -620,7 +635,7 @@ async function openPaths(paths: string[]): Promise<void> {
     if (info?.isDirectory()) showProject(path);
     else if (info?.isFile()) files.push(path);
   }
-  const { accepted } = await partitionFiles(files, VIDEO_EXTENSIONS);
+  const { accepted } = await partitionFiles(files, START_EXTENSIONS);
   if (accepted.length === 0) return;
   const plan = await planVideoProject(accepted).catch(() => null);
   if (!plan) return;
@@ -727,7 +742,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.projectPlanVideos, (_event, files: string[], place?: { parent?: string; name?: string }) =>
     outcome(async () => {
-      const { accepted, refused } = await partitionFiles(files, VIDEO_EXTENSIONS);
+      const { accepted, refused } = await partitionFiles(files, START_EXTENSIONS);
       return { plan: accepted.length > 0 ? await planVideoProject(accepted, place) : null, refused };
     }),
   );
@@ -740,8 +755,14 @@ function registerIpc(): void {
   });
   ipcMain.handle(
     Channel.projectFromVideos,
-    (event, plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link", options?: { transcribe?: boolean }) =>
-      createFromVideos(stateOf(event.sender), plan, mode === "link" ? "link" : "copy", options?.transcribe === true),
+    (event, plan: Pick<VideoProjectPlan, "files" | "parent" | "name">, mode: "copy" | "link", options?: { transcribe?: boolean; orientation?: AudioOrientation }) =>
+      createFromVideos(
+        stateOf(event.sender),
+        plan,
+        mode === "link" ? "link" : "copy",
+        options?.transcribe === true,
+        options?.orientation === "portrait" ? "portrait" : "landscape",
+      ),
   );
   ipcMain.handle(Channel.projectSetup, async (event) => {
     const { project } = await requireProject(stateOf(event.sender));

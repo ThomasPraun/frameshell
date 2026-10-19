@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, partitionFiles } from "../src/main/media-files.js";
+import { MEDIA_EXTENSIONS, START_EXTENSIONS, VIDEO_EXTENSIONS, isAudioFile, partitionFiles } from "../src/main/media-files.js";
 import { importNotice } from "../src/renderer/src/file-drop.js";
 
 describe("partitionFiles", () => {
@@ -21,6 +21,22 @@ describe("partitionFiles", () => {
       refused: [files[1], files[3], folder, missing],
     });
     expect((await partitionFiles(files, MEDIA_EXTENSIONS)).refused).toEqual([files[1]]);
+  });
+
+  it("starts a project from video and audio, not from images", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "frameshell-media-files-"));
+    const files = ["talk.mp4", "podcast.MP3", "voice.m4a", "logo.png"].map((name) => {
+      writeFileSync(join(dir, name), "x");
+      return join(dir, name);
+    });
+    expect(await partitionFiles(files, START_EXTENSIONS)).toEqual({ accepted: files.slice(0, 3), refused: [files[3]] });
+  });
+});
+
+describe("isAudioFile", () => {
+  it("tells audio from video by extension, ignoring case", () => {
+    expect(["a.wav", "b.MP3", "c.opus", "d.flac"].every(isAudioFile)).toBe(true);
+    expect(["a.mp4", "b.mov", "c.png", "noext"].some(isAudioFile)).toBe(false);
   });
 });
 

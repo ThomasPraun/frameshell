@@ -40,10 +40,14 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Open with Frameshell for videos (#184). Alternate rank: listed in Finder's Open with, never the default player.
+  # Open with Frameshell for videos and audio (#184, ADR 0015). Alternate rank: listed in Finder's Open with, never the default player.
   fileAssociations:
     - ext: [mp4, mov, m4v, mkv, webm]
       name: Video
+      role: Viewer
+      rank: Alternate
+    - ext: [wav, mp3, m4a, aac, flac, ogg, opus]
+      name: Audio
       role: Viewer
       rank: Alternate
 dmg:
@@ -65,7 +69,19 @@ linux:
   vendor: Frameshell
   # Listed in the .desktop file's MimeType: offered in Open with, the default player stays the user's (#184). Not
   # fileAssociations: on Linux those also install a mime package that redefines these types with a document icon.
-  mimeTypes: [video/mp4, video/quicktime, video/x-m4v, video/x-matroska, video/webm]
+  mimeTypes:
+    - video/mp4
+    - video/quicktime
+    - video/x-m4v
+    - video/x-matroska
+    - video/webm
+    - audio/wav
+    - audio/mpeg
+    - audio/mp4
+    - audio/aac
+    - audio/flac
+    - audio/ogg
+    - audio/opus
 deb:
   # Same as electron-builder's defaults, except /usr/bin/frameshell: a script running the bundled CLI, not a link to
   # the app binary (#143).

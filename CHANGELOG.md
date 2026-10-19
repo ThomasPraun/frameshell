@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: a new project can start from an audio file (`wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`, `opus`), from **New from video…**, a drop on the welcome screen or Open with (ADR 0015). The confirmation offers a 16:9 (default) or 9:16 frame; the audio goes on its own audio track in one undoable step, and is transcribed. Frameshell is also offered in Open with for audio, never as its default player.
+- Protocol v36: `project.init` takes `resolution`, the frame size for a project whose `like` file has no picture.
+
 ## [0.8.1] - 2026-10-17
 
 Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the project open in the app. Installing it is enough: an existing connection keeps working, restart Claude Desktop once. No protocol change; the official plugins are unchanged.
