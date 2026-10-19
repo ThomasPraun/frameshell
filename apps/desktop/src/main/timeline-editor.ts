@@ -121,8 +121,8 @@ export class TimelineEditor {
    * agent changed the same clips meanwhile), what applied stays as one
    * step. In a burst, earlier calls stay and the refusal ends the burst, but
    * what this call applied is reverted first, so a refused call changes nothing.
-   * An edit whose `clip` is {@link CREATED_CLIP} acts on the clip the previous
-   * edit of the call created. Rejects ops outside
+   * An edit whose `clip` is {@link CREATED_CLIP} right after a `clip.split`
+   * acts on the clip that split created; anywhere else it is a plain clip id. Rejects ops outside
    * {@link TIMELINE_EDIT_OPS} and malformed options before sending
    * anything: the renderer is not trusted to pick any method.
    */
@@ -272,11 +272,12 @@ export class TimelineEditor {
 
   /** Send `edits` in order, pushing each result onto `applied` so a caller can undo them when a later one is refused. */
   async #sendAll(cwd: string, timeline: string, edits: readonly TimelineEdit[], applied: OperationResult[]): Promise<void> {
-    for (const edit of edits) {
+    for (const [index, edit] of edits.entries()) {
       let sent: TimelineEdit = edit;
-      if ((edit.args as { clip?: unknown }).clip === CREATED_CLIP) {
+      // Only right after a split: elsewhere `$created` is a valid clip id a timeline file may use.
+      if (index > 0 && edits[index - 1]!.op === "clip.split" && (edit.args as { clip?: unknown }).clip === CREATED_CLIP) {
         const created = applied.at(-1)?.changes.added[0];
-        if (!created) throw new Error("The edit before it did not create a clip for it to act on.");
+        if (!created) throw new Error("The split before it did not report a new clip for it to act on.");
         sent = { ...edit, args: { ...edit.args, clip: created } } as TimelineEdit;
       }
       applied.push(await this.#send(cwd, timeline, sent));

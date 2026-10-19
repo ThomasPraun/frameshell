@@ -145,8 +145,8 @@ export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
 export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
 
 /**
- * Stands for a `clip` arg in a multi-edit call: the clip the previous edit of the call created (the new part of
- * a `clip.split`), whose id the caller cannot know before the call runs.
+ * Stands for a `clip` arg in a multi-edit call, on the edit right after a `clip.split`: the new part of that
+ * split, whose id the caller cannot know before the call runs. Anywhere else it is an ordinary clip id.
  */
 export const CREATED_CLIP = "$created";
 

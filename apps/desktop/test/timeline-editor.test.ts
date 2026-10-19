@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startDaemon } from "@frameshell/core";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
-import { EDIT_BURST_GAP_MAX_MS, type TimelineEdit } from "../src/shared/api.js";
+import { CREATED_CLIP, EDIT_BURST_GAP_MAX_MS, type TimelineEdit } from "../src/shared/api.js";
 import { TimelineEditor, editLabel } from "../src/main/timeline-editor.js";
 
 // Seam under test: main's timeline editor (what the renderer's edits and undo/redo keys reach),
@@ -409,6 +409,77 @@ describe("TimelineEditor gesture bursts (#119)", () => {
     await expect(editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: -1 } }], burst)).rejects.toThrow();
     const next = await editor.apply(dir, "main", nudge(20.067), burst);
     expect(next.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("reverts a refused multi-edit call of a running burst, newest first, and the take still undoes as one step", async () => {
+    const { dir, app, clip } = await setup();
+    const editor = new TimelineEditor((method, params) => app.request(method, params), { burstGapMs: 5_000 });
+    await editor.apply(dir, "main", nudge(20.033), burst);
+    const call: TimelineEdit[] = [
+      { op: "clip.move", args: { clip: "c_c", start: 30 } },
+      { op: "clip.move", args: { clip: "c_c", start: 31 } },
+      { op: "clip.move", args: { clip: "c_a", start: 5 } }, // Overlaps c_b.
+    ];
+    await expect(editor.apply(dir, "main", call, burst)).rejects.toThrow(/overlap/);
+    expect(await clip("c_c")).toMatchObject({ start: 20.033 });
+    expect(await clip("c_a")).toMatchObject({ start: 0 });
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
+    await editor.undo(dir, "main");
+    expect(await clip("c_c")).toMatchObject({ start: 20 });
+  });
+
+  it("leaves the applied ops and ends the burst when reverting them conflicts with an agent's edit", async () => {
+    const { dir, app, cli, clip } = await setup();
+    const editor = new TimelineEditor(
+      async (method, params) => {
+        // The agent moves c_c again between the call's first edit and its refusal.
+        if (method === "clip.move" && (params as { clip: string }).clip === "c_a") {
+          await cli.request("clip.move", { cwd: dir, timeline: "main", clip: "c_c", start: 35 });
+        }
+        return app.request(method, params);
+      },
+      { burstGapMs: 5_000 },
+    );
+    const first = await editor.apply(dir, "main", nudge(20.033), burst);
+    const call: TimelineEdit[] = [
+      { op: "clip.move", args: { clip: "c_c", start: 30 } },
+      { op: "clip.move", args: { clip: "c_a", start: 5 } }, // Overlaps c_b.
+    ];
+    await expect(editor.apply(dir, "main", call, burst)).rejects.toThrow(/overlap/);
+    expect(await clip("c_c")).toMatchObject({ start: 35 });
+    const next = await editor.apply(dir, "main", [{ op: "clip.move", args: { clip: "c_c", start: 40 } }], burst);
+    expect(next.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("resolves $created only on the edit right after a split; a plain clip with that id is edited as itself", async () => {
+    const result = (added: string[]) => ({ operation: { id: "op", tx: "tx" }, changes: { added } });
+    const sentClips: unknown[] = [];
+    const request = vi.fn(async (method: string, params: unknown) => {
+      if (method === "clip.move" || method === "clip.split") sentClips.push((params as { clip: string }).clip);
+      return method === "clip.split" ? result(["c_new"]) : result([]);
+    });
+    const editor = new TimelineEditor(request as never);
+    const edit = (op: "clip.move" | "clip.split", clip: string): TimelineEdit =>
+      (op === "clip.move" ? { op, args: { clip, start: 1 } } : { op, args: { clip, at: 1 } }) as TimelineEdit;
+    await editor.apply("/p", "main", [edit("clip.move", CREATED_CLIP)]);
+    await editor.apply("/p", "main", [edit("clip.move", "c_a"), edit("clip.move", CREATED_CLIP)]);
+    await editor.apply("/p", "main", [edit("clip.split", "c_a"), edit("clip.move", CREATED_CLIP)]);
+    expect(sentClips).toEqual([CREATED_CLIP, "c_a", CREATED_CLIP, "c_a", "c_new"]);
+  });
+
+  it("rejects $created after a split that reported no new clip, sending nothing further", async () => {
+    const calls: string[] = [];
+    const request = vi.fn(async (method: string) => {
+      calls.push(method);
+      return { operation: { id: "op", tx: "tx" }, changes: { added: [] } };
+    });
+    const editor = new TimelineEditor(request as never);
+    const edits = [
+      { op: "clip.split", args: { clip: "c_a", at: 1 } },
+      { op: "clip.move", args: { clip: CREATED_CLIP, start: 1 } },
+    ] as TimelineEdit[];
+    await expect(editor.apply("/p", "main", edits)).rejects.toThrow(/did not report a new clip/);
+    expect(calls).not.toContain("clip.move");
   });
 });
 
