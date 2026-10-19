@@ -20,7 +20,7 @@ writeFileSync(notes, "%PDF");
 test("a video opened from the OS is offered as a new project on the welcome screen", async () => {
   const { app, page } = await launch(box, { paths: [take, notes] });
   try {
-    const form = page.getByRole("form", { name: "New project from video" });
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByText("take.mp4")).toBeVisible();
     await expect(form.getByLabel("Project name")).toHaveValue("take");
     // Transcription would download the plugin and a 574 MB model: covered with a dead registry in new-from-video.
@@ -38,7 +38,7 @@ test("audio opened from the OS is offered as a new project with the frame choice
   await makeAudio(episode);
   const { app, page } = await launch(box, { paths: [episode] });
   try {
-    const form = page.getByRole("form", { name: "New project from video" });
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByText("episode.mp3")).toBeVisible();
     await expect(form.getByText("This audio has no picture")).toBeVisible();
     await form.getByLabel("Transcribe what is said").uncheck();
@@ -85,7 +85,7 @@ test("a second launch hands its video to the running app", async () => {
       // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs, as in the harness.
       execFile(packaged ?? "", [...(process.platform === "linux" ? ["--no-sandbox"] : []), second], { env, timeout: 30_000 }, (error) => (error ? reject(error) : resolve())),
     );
-    const form = page.getByRole("form", { name: "New project from video" });
+    const form = page.getByRole("form", { name: "New project from video or audio" });
     await expect(form.getByLabel("Project name")).toHaveValue("second");
     expect(app.windows()).toHaveLength(1);
   } finally {

@@ -66,9 +66,11 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
-import { MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
+import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
+import { replaceClipImage } from "./replace-image.js";
+import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
 import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
 import { UpdatePreferences, updateMode } from "./update-check.js";
 import { Updater } from "./updater.js";
@@ -478,6 +480,15 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   return result.canceled ? undefined : result.filePaths[0];
 }
 
+async function pickImage(window: BrowserWindow): Promise<string | undefined> {
+  const result = await dialog.showOpenDialog(window, {
+    title: text.app.dialogs.chooseImage,
+    properties: ["openFile"],
+    filters: [{ name: text.app.dialogs.images, extensions: [...IMAGE_EXTENSIONS] }],
+  });
+  return result.canceled ? undefined : result.filePaths[0];
+}
+
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: text.app.dialogs.chooseVideos,
@@ -515,7 +526,10 @@ async function createFromVideos(
       await placeOnTimeline(plan.dir, assets);
     }
     const opened = await openFromWindow(state, plan.dir);
-    if (transcribe && assets.length > 0) void setUpTranscription(plan.dir, assets);
+    if (transcribe && assets.length > 0) {
+      const background = plan.audioOnly ? { title: plan.name, size: AUDIO_FRAMES[orientation] } : undefined;
+      void setUpTranscription(plan.dir, assets, background);
+    }
     return opened;
   } catch (error) {
     return { status: "error", message: (error as Error).message };
@@ -570,8 +584,10 @@ function reportSetup(dir: string, setup: ProjectSetup): void {
  * transcribe `assets`, in the background, reporting each step (#188). The
  * user created the project, so the plugin is trusted as `plugin.install`
  * trusts it. Fails softly: the project stays usable and the agent can retry.
+ * With `background` (a project made from audio), the transcript is followed by
+ * the built-in background and subtitles (ADR 0015).
  */
-async function setUpTranscription(dir: string, assets: string[]): Promise<void> {
+async function setUpTranscription(dir: string, assets: string[], background?: { title: string; size: FrameSize }): Promise<void> {
   const name = (asset: string) => asset.split("/").pop() ?? asset;
   const running = (message: string, fraction: number | null = null) =>
     reportSetup(dir, { message, detail: null, fraction, state: "running" });
@@ -592,6 +608,15 @@ async function setUpTranscription(dir: string, assets: string[]): Promise<void> 
         { cwd: dir, asset },
         { onProgress: (update) => running(`${name(asset)}: ${update.message}`, update.fraction ?? null) },
       );
+    }
+    if (background) {
+      failure = said.backgroundFailed;
+      running(said.addingBackground);
+      await addAudioBackground(dir, background.title, background.size, {
+        request: (method, params, options) => daemon.request(method, params, options),
+        alone: (work) => editor.alone(work),
+        render: renderBackgroundTo,
+      });
     }
     reportSetup(dir, { message: said.transcribed(assets.map(name).join(", ")), detail: null, fraction: null, state: "done" });
   } catch (error) {
@@ -825,6 +850,19 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[], options?: EditOptions) =>
     outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits, options ?? {})),
+  );
+  ipcMain.handle(Channel.timelineReplaceImage, (event, timeline: string, clip: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const file = await pickImage(state.window);
+      if (!file) return false;
+      await replaceClipImage(project.dir, String(timeline), String(clip), file, {
+        request: (method, params) => daemon.request(method, params),
+        apply: (edits, label) => editor.apply(project.dir, String(timeline), edits, { label }),
+      });
+      return true;
+    }),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),

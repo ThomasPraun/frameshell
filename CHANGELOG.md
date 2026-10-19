@@ -11,11 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Desktop: a new project can start from an audio file (`wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`, `opus`), from **New from video…**, a drop on the welcome screen or Open with (ADR 0015). The confirmation offers a 16:9 (default) or 9:16 frame; the audio goes on its own audio track in one undoable step, and is transcribed. Frameshell is also offered in Open with for audio, never as its default player.
 - Protocol v36: `project.init` takes `resolution`, the frame size for a project whose `like` file has no picture.
+- Desktop: a project made from audio gets a picture once its transcript exists: a plain background image with the project title in `assets/` over the audio, and a subtitle track following the audio (default preset), in one undoable step (ADR 0015). A project that already has clips on a video track is left alone; swap the image with **Replace image…** in the clip inspector (one undoable step), or the subtitle preset as usual.
+- Desktop: **Replace image…** in the clip inspector shows a chosen image file in a media clip on a video track, keeping its track, start and length, as one undoable `ui` step.
 - Scripts: a scene can name the transcript words it covers with `<!-- words: talk.words.json w_000010..w_000042 -->` (transcript file optional while one transcript holds the ids) right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids, ambiguous bare ranges and reversed ranges are warnings. Protocol v37.
 - Desktop: the timeline shows a band under the ruler with one span per script scene that names transcript words (ADR 0015), labelled with its heading; scenes with no clip linked by `scriptRef` are drawn hollow. It follows the script, the transcript and the timeline live. A click on a span selects its time range, and Ask agent on it writes `[frameshell] scene <script>#<slug> "<title>" · <time range> · clips …`.
 
 ### Changed
 
+- Desktop: the welcome button is now **New from video or audio…**.
 - Agent skill: new reference page for videos made from audio (the three levels, edit the audio first, scene plan with word ranges, human review, clips with `scriptRef`; ADR 0015).
 - `cut` now warns, in its result `warnings` and in the CLI output, for every generated clip (`hyperframes`, `remotion`…) it trims or splits, naming the clip id, type and `scriptRef` (ADR 0015). The cut still applies; the skill says to edit the audio before building visuals.
 

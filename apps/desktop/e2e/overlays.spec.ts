@@ -167,6 +167,32 @@ test("dragging the selected layer's handles moves it by the pointer's travel, in
   await expect.poll(async () => (await laidOutBox(handles)).x - before.x).toBeGreaterThan(30);
 });
 
+test("Replace image swaps the selected picture for a chosen file in one ui step, keeping its place and length", async () => {
+  const staging = join(box.dataDir, "staging");
+  mkdirSync(staging, { recursive: true });
+  const chosen = join(staging, "cover.png");
+  await ffmpegRun(await testFfmpeg(), ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=100x100", "-frames:v", "1", chosen]);
+  await app.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, chosen);
+  const logo = (): { id: string; asset: string; start: number; out: number } => {
+    const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+    return timeline.tracks[2].clips[0];
+  };
+  const before = logo();
+  expect(before.asset).toBe(LOGO);
+
+  await inspector().getByRole("button", { name: "Replace image…" }).click();
+  // The remove and the add are two writes: a read between them sees no clip yet.
+  await expect.poll(() => (logo() as { asset?: string } | undefined)?.asset).toBe("assets/cover.png");
+  const after = logo();
+  expect(after).toMatchObject({ start: before.start, out: before.out });
+  expect(journaled().slice(-2)).toEqual([
+    { op: "clip.remove", author: "ui" },
+    { op: "clip.add", author: "ui" },
+  ]);
+});
+
 test("an audio clip shows its gain; the inspector changes it and mutes it", async () => {
   await expect(page.locator('li[data-clip="c_tone"]')).toContainText("-12 dB");
   // The audio lane is the fourth (V3, V2, V1, A1): scroll the lanes to the bottom and click it.
