@@ -2,6 +2,7 @@ import type {
   DaemonConnection,
   HistoryResult,
   MulticamCreateResult,
+  MulticamTurnsResult,
   MethodName,
   MethodResult,
   OperationResult,
@@ -46,6 +47,9 @@ mutations print the new revision):
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
                                count when it does not fit (1 solo, 2 two-up, more grid)
+  multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
+                               mic (a voice heard in another person's mic does not count; people talking at once
+                               overlap). Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings}
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
@@ -155,6 +159,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam offset": [],
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted"],
   "shot set": ["layout", "angles"],
+  "multicam turns": [],
   cut: ["from", "to", "no-snap", "snap-window"],
   "tx begin": [],
   "tx commit": [],
@@ -180,6 +185,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam offset": [3, 3],
   "multicam angle": [2, 2],
   "shot set": [1, 1],
+  "multicam turns": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
@@ -397,6 +403,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], shot: str("layout"), angles });
       break;
     }
+    case "multicam turns":
+      method = "multicam.turns";
+      params["group"] = args[0];
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -443,7 +453,15 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
     return `Aborted ${tx} "${label}"${reverted.length === 0 ? " (nothing to undo)" : ", changes undone:"}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
+  if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   return formatOperation(result as OperationResult);
+}
+
+function formatMulticamTurns(result: MulticamTurnsResult): string {
+  const lines = [`Group ${result.group} · ${result.turns.length} turn${result.turns.length === 1 ? "" : "s"} over ${result.duration} s`];
+  for (const turn of result.turns) lines.push(`  ${turn.start}–${turn.end} s  ${turn.angle}  ${turn.name}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatMulticamCreate(result: MulticamCreateResult): string {

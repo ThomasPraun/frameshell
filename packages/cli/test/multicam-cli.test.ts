@@ -76,6 +76,17 @@ describe("frameshell multicam", () => {
     const wrong = frameshell(["multicam", "offset", group.id, "zoe", "0.25"]);
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("Angles: ana, ben");
+
+    const turns = frameshell(["multicam", "turns", group.id, "--json"]);
+    expect(turns.code).toBe(0);
+    const parsed = JSON.parse(turns.stdout) as { group: string; turns: { angle: string; start: number; end: number }[] };
+    expect(parsed.group).toBe(group.id);
+    expect(new Set(parsed.turns.map((turn) => turn.angle))).toEqual(new Set(["ana", "ben"]));
+    const text = frameshell(["multicam", "turns", group.id]);
+    expect(text.stdout).toMatch(/^Group g_[0-9a-f]{6} · \d+ turns? over [\d.]+ s\n {2}[\d.]+–[\d.]+ s {2}(ana|ben) {2}(Ana|Ben)/);
+    const unknown = frameshell(["multicam", "turns", "g_nope"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain(`groups: ${group.id}`);
   }, 120_000);
 
   it("changes a shot and an angle, each one undoable step", () => {
@@ -118,6 +129,8 @@ describe("parsing multicam commands", () => {
       method: "multicam.offset",
       params: { group: "g_1", angle: "ben", offset: 1.5 },
     });
+    expect(parseTimelineCommand(["multicam", "turns", "g_1"], {})).toMatchObject({ method: "multicam.turns", params: { group: "g_1" } });
+    expect(() => parseTimelineCommand(["multicam", "turns"], {})).toThrow(UsageError);
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "soon"], {})).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "1"], { "group-name": "x" })).toThrow(/does not take --group-name/);
     expect(parseTimelineCommand(["shot", "set", "c_1"], { layout: "two-up", angles: "ana, ben" })).toMatchObject({
