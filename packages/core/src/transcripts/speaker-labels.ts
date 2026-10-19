@@ -60,19 +60,22 @@ export interface LabelledSpeakers {
   words: TranscriptFileWord[];
   /** Speakers of the words in order of first appearance, then earlier ones that only edits still name. */
   speakers: TranscriptSpeaker[];
+  /** High-water mark to persist as the transcript's `nextSpeakerId`. */
+  nextSpeakerId: number;
 }
 
 /**
  * Turn per-word cluster `labels` into transcript speakers. A cluster takes
  * the id of the earlier speaker it shares the most words with (by word id,
  * one cluster per speaker, largest overlaps first), keeping its name; other
- * clusters get new ids above every id used before. Speakers named only by
- * kept `edits` stay listed so the edits stay valid.
+ * clusters get new ids from {@link nextSpeakerIdOf}, so an id a run dropped
+ * is never reused. Speakers named only by kept `edits` stay listed so the
+ * edits stay valid.
  */
 export function labelSpeakers(
   words: readonly TranscriptFileWord[],
   labels: readonly (string | undefined)[],
-  previous: Pick<Transcript, "words" | "edits" | "speakers"> | null,
+  previous: Pick<Transcript, "words" | "edits" | "speakers" | "nextSpeakerId"> | null,
 ): LabelledSpeakers {
   const before = new Map((previous?.words ?? []).map((word) => [word.id, word.speaker]));
   const shared = new Map<string, Map<string, number>>();
@@ -95,10 +98,7 @@ export function labelSpeakers(
     taken.add(id);
   }
   const oldSpeakers = previous?.speakers ?? [];
-  let next = [...oldSpeakers.map((speaker) => speaker.id), ...Object.values(previous?.edits ?? {}).flatMap((edit) => (edit.speaker ? [edit.speaker] : []))].reduce(
-    (max, id) => Math.max(max, Number(id.slice(1)) + 1),
-    1,
-  );
+  let next = nextSpeakerIdOf(previous);
   const labelled = words.map((word, i): TranscriptFileWord => {
     const { speaker: _old, ...rest } = word;
     const label = labels[i];
@@ -110,7 +110,17 @@ export function labelSpeakers(
     }
     return { ...rest, speaker: id };
   });
-  return { words: labelled, speakers: speakerList(labelled, previous?.edits ?? {}, oldSpeakers) };
+  return { words: labelled, speakers: speakerList(labelled, previous?.edits ?? {}, oldSpeakers), nextSpeakerId: next };
+}
+
+/**
+ * Number of the next free speaker id of `previous`: its `nextSpeakerId`,
+ * raised above every listed and edit speaker (a hand-written file may lack
+ * the mark or lag behind it).
+ */
+export function nextSpeakerIdOf(previous: Pick<Transcript, "edits" | "speakers" | "nextSpeakerId"> | null): number {
+  const ids = [...(previous?.speakers ?? []).map((speaker) => speaker.id), ...Object.values(previous?.edits ?? {}).flatMap((edit) => (edit.speaker ? [edit.speaker] : []))];
+  return ids.reduce((max, id) => Math.max(max, Number(id.slice(1)) + 1), previous?.nextSpeakerId ?? 1);
 }
 
 /**

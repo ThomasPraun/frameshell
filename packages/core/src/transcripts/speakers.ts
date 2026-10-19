@@ -177,13 +177,14 @@ export async function diarizeAsset(options: DiarizeAssetOptions): Promise<Transc
     throw refused(`${transcriptRel} was replaced while the speakers were being found. Run it again.`, "transcript changed");
   }
   const labels = wordLabels(previous.words, segments);
-  const { words, speakers } = labelSpeakers(previous.words, labels, previous);
+  const { words, speakers, nextSpeakerId } = labelSpeakers(previous.words, labels, previous);
   const transcript: Transcript = {
     ...previous,
     $schema: previous.$schema ?? TRANSCRIPT_SCHEMA_URL,
     schemaVersion: SCHEMA_VERSION,
     words,
     speakers,
+    nextSpeakerId,
   };
   const checked = parseTranscript(transcript);
   if (!checked.ok) failed(new Error(`the speakers gave a transcript the format rejects:\n${checked.error}`));

@@ -72,12 +72,24 @@ export const TranscriptSchema = z
     nextWordId: z.number().int().positive().optional(),
     /** Who speaks, in order of first appearance. Absent: speakers were never diarized. */
     speakers: z.array(SpeakerSchema).optional(),
+    /**
+     * Number of the next speaker id to hand out (`4` → `s4`), like
+     * `nextWordId`: an id a later run dropped is never given to another
+     * voice. Absent: ids above every listed and edit speaker are free.
+     */
+    nextSpeakerId: z.number().int().positive().optional(),
   })
   .superRefine((transcript, ctx) => {
     const speakers = new Set<string>();
     transcript.speakers?.forEach((speaker, index) => {
       if (speakers.has(speaker.id)) ctx.addIssue({ code: "custom", message: `duplicate speaker id ${speaker.id}`, path: ["speakers", index, "id"] });
       speakers.add(speaker.id);
+    });
+    const nextSpeaker = transcript.nextSpeakerId;
+    transcript.speakers?.forEach((speaker, index) => {
+      if (nextSpeaker !== undefined && Number(speaker.id.slice(1)) >= nextSpeaker) {
+        ctx.addIssue({ code: "custom", message: `speaker id ${speaker.id} is not below nextSpeakerId ${nextSpeaker}`, path: ["speakers", index, "id"] });
+      }
     });
     const unlisted = (id: string) => `speaker ${id} is not in \`speakers\`${speakers.size > 0 ? ` (${[...speakers].join(", ")})` : ""}`;
     transcript.words.forEach((word, index) => {

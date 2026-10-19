@@ -45,6 +45,15 @@ describe("transcript (transcripts/*.words.json)", () => {
     if (!result.ok) expect(result.error).toMatch(/w_000001/);
   });
 
+  it("accepts nextSpeakerId above every speaker id, and rejects one that is not", () => {
+    const speakers = [{ id: "s1", name: "Ana" }, { id: "s3", name: "Ben" }];
+    expect(parseTranscript({ ...specExample, speakers, nextSpeakerId: 4 }).ok).toBe(true);
+    const atMark = parseTranscript({ ...specExample, speakers, nextSpeakerId: 3 });
+    expect(atMark.ok).toBe(false);
+    if (!atMark.ok) expect(atMark.error).toMatch(/s3.*nextSpeakerId 3/);
+    expect(parseTranscript({ ...specExample, nextSpeakerId: 0 }).ok).toBe(false);
+  });
+
   it("accepts nextWordId above every word and edit id, and rejects one that is not", () => {
     expect(parseTranscript({ ...specExample, nextWordId: 3 }).ok).toBe(true);
     const wordAtMark = parseTranscript({ ...specExample, nextWordId: 2 });

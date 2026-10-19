@@ -86,6 +86,21 @@ describe("labelSpeakers", () => {
       { id: "s2", name: "Ben" },
     ]);
   });
+
+  it("never gives a dropped speaker's id to a voice found by a later run", () => {
+    const words = [word(1, 0, 1), word(2, 1, 2), word(3, 2, 3)];
+    const first = labelSpeakers(words, ["a", "b", "c"], null);
+    expect(first.nextSpeakerId).toBe(4);
+    const run1 = { words: first.words, edits: {}, speakers: [...first.speakers.slice(0, 2), { id: "s3", name: "Carla" }], nextSpeakerId: first.nextSpeakerId };
+    const second = labelSpeakers(run1.words, ["a", "b", "b"], run1);
+    expect(second.speakers.map((speaker) => speaker.id)).toEqual(["s1", "s2"]);
+    expect(second.nextSpeakerId).toBe(4);
+    const run2 = { words: second.words, edits: {}, speakers: second.speakers, nextSpeakerId: second.nextSpeakerId };
+    const third = labelSpeakers(run2.words, ["a", "b", "c"], run2);
+    expect(third.words.map((w) => w.speaker)).toEqual(["s1", "s2", "s4"]);
+    expect(third.speakers.at(-1)).toEqual({ id: "s4", name: "Speaker 4" });
+    expect(third.nextSpeakerId).toBe(5);
+  });
 });
 
 describe("carrySpeakers", () => {

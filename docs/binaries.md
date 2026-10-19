@@ -195,7 +195,7 @@ Pin: **sherpa-onnx v1.13.8** (2026-09-10), upstream [k2-fsa/sherpa-onnx](https:/
 | win32-x64 | `sherpa-onnx-v1.13.8-win-x64-shared-MT-Release.tar.bz2` | 24.8 MB | `6dffdc715a4465b989446a6105265d2cb345e7101591a17d35534b6758f6e8df` | `onnxruntime.dll`, `onnxruntime_providers_shared.dll` |
 | win32-arm64 | `sherpa-onnx-v1.13.8-win-arm64-shared-MT-Release.tar.bz2` | 23.3 MB | `455ea18dc44aea188b4f7976037dea3d77e3f8d7afe0760f34244a7a0db53c4c` | `onnxruntime.dll`, `onnxruntime_providers_shared.dll` |
 
-- **Licence:** Apache-2.0 (sherpa-onnx); ONNX Runtime, linked in, is MIT. Frameshell never redistributes them: the user's machine downloads from the builder's GitHub release. No mirror, like headless Chrome.
+- **Licence:** Apache-2.0 (sherpa-onnx); ONNX Runtime, linked in, is MIT. Frameshell never redistributes them: the user's machine downloads from the builder's GitHub release. No Frameshell mirror, like whisper.cpp's upstream assets and models and headless Chrome; only ffmpeg is mirrored.
 - **Why these assets:** `shared` builds are 20-28 MB against 180-540 MB for `static` ones, and need only the one runtime library beside the tool. On Windows the `MT` builds link the C runtime statically, so no Visual C++ redistributable is needed. On Linux the tool and its runtime need glibc 2.16 (x64) or 2.17 (arm64) and `libstdc++` (read from the binaries). CPU only: diarization of an hour takes minutes, not worth a GPU candidate.
 - **Extraction:** the system `tar` reads `.tar.bz2`; on Linux GNU tar needs `bzip2`.
 

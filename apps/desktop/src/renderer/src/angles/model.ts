@@ -1,6 +1,7 @@
 // What the multicam viewer shows at the playhead (#243, ADR 0016 decision 5): the group's angles, which ones the
 // current shot uses, who speaks, and where each angle's file is. Pure: the panel draws it.
 import type { MulticamTurnsResult, TimelineView } from "@frameshell/protocol";
+import type { TranscriptSource } from "../transcript/model.js";
 import { ANGLE_COLOR_COUNT, type ShotAngle, type TrackRow, layoutTimeline } from "../timeline/layout.js";
 
 /** One speaking turn, as `multicam.turns` reports it. */
@@ -112,4 +113,20 @@ function shotAnglesAt(row: TrackRow, time: number, fps: number): string[] {
 /** Whether two sets of turns are the same, so a refetch that found nothing new does not redraw. */
 export function sameTurns(a: readonly SpeakingTurn[], b: readonly SpeakingTurn[]): boolean {
   return a.length === b.length && a.every((turn, i) => turn.angle === b[i]!.angle && turn.start === b[i]!.start && turn.end === b[i]!.end);
+}
+
+/**
+ * When `multicam.turns` must be asked again: the angles changed, or a transcript of an angle's asset did (a
+ * diarization run, a speaker correction) or went stale. Angles sharing a file take their turns from it.
+ */
+export function turnsKey(
+  angles: readonly { asset: string }[],
+  sources: readonly TranscriptSource[],
+  hashes: ReadonlyMap<string, string | null>,
+): string {
+  const assets = new Set(angles.map((angle) => angle.asset));
+  const transcripts = sources
+    .filter((source) => assets.has(source.transcript.asset))
+    .map((source) => [source.path, source.transcript, hashes.get(source.transcript.asset) ?? null]);
+  return JSON.stringify([angles, transcripts]);
 }

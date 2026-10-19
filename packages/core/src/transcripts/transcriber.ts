@@ -11,7 +11,7 @@ import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
-import { carrySpeakers } from "./speaker-labels.js";
+import { carrySpeakers, nextSpeakerIdOf } from "./speaker-labels.js";
 import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
 
 /** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
@@ -174,7 +174,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     words: assigned.words,
     edits: assigned.edits,
     nextWordId: assigned.nextWordId,
-    ...(speakers ? { speakers } : {}),
+    ...(speakers ? { speakers, nextSpeakerId: nextSpeakerIdOf(previous) } : {}),
   };
   const checked = parseTranscript(transcript);
   if (!checked.ok) failed(new Error(`provider returned words the transcript format rejects:\n${checked.error}`));
