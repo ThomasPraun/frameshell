@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 36;
+export const PROTOCOL_VERSION = 37;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -349,6 +349,14 @@ const EventsParams = z.strictObject({
 const ClipLocationSchema = z.object({
   timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
   clip: z.string().describe("Clip id."),
+});
+
+/** Where a script scene's words sit on one timeline, as `script.outline` resolves them. */
+const SceneSpanSchema = z.object({
+  timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
+  start: z.number().describe("Timeline seconds where the first placed word of the range starts."),
+  end: z.number().describe("Timeline seconds where the last placed word of the range ends."),
+  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
 });
 
 const ExportPresetResultSchema = z.looseObject({
@@ -1076,7 +1084,10 @@ export const methods = {
       "with `clip.set`) and the clips of every timeline already linked to it. Scenes with empty `clips` still need " +
       "footage or a composition. Top-level `clips` are linked to the whole script (`scriptRef` is the path without " +
       "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
-      "or removed heading). Never fails on content: bad frontmatter or duplicate headings become `warnings`. Fails with " +
+      "or removed heading). A scene that names transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` under its heading (word ids repeat across transcripts: name the file; a bare range matching several transcripts is not placed) " +
+      "has `wordRange`, and `span`: the timeline seconds those words occupy, per timeline, so you can place or re-place its clips; " +
+      "unknown ids, an ambiguous range or a reversed range become `warnings`. " +
+      "Never fails on content: bad frontmatter, duplicate headings or bad word ranges become `warnings`. Fails with " +
       "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -1096,13 +1107,19 @@ export const methods = {
           ScriptSceneSchema.extend({
             ref: z.string().describe("`scriptRef` value for this scene: `<path>#<slug>`."),
             clips: z.array(ClipLocationSchema).describe("Clips whose `scriptRef` is `ref`, any timeline; empty when none."),
+            span: z
+              .array(SceneSpanSchema)
+              .describe(
+                "Where the scene's `wordRange` sits on each timeline that places any of those words (first to last placed word, " +
+                  "through clips cut inside the range); empty when `wordRange` is null, unresolved, or no timeline places its words.",
+              ),
           }),
         )
         .describe("In file order."),
       unresolved: z
         .array(ClipLocationSchema.extend({ scriptRef: z.string() }))
         .describe("Clips referencing this file at an anchor with no scene; fix with `clip.set` `scriptRef`."),
-      warnings: z.array(z.string()).describe("Frontmatter problems, duplicate headings, unreadable timelines skipped."),
+      warnings: z.array(z.string()).describe("Frontmatter problems, duplicate headings, bad word ranges, unreadable timelines or transcripts skipped."),
     }),
   },
   "timeline.show": {

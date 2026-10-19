@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { WordIdSchema } from "./transcript.js";
 
 /**
  * Scripts (`scripts/*.md`, SPEC §5.5, decision 14): plain Markdown with
@@ -7,8 +8,21 @@ import { z } from "zod";
  * slug is the anchor clips use in `scriptRef` (`scripts/script.md#intro`);
  * a `scriptRef` without `#anchor` refers to the whole script.
  * Optional YAML frontmatter carries `title`, `target_duration`, `aspect`.
+ * A scene may name the transcript words it covers with an HTML comment right
+ * under its heading, `<!-- words: talk.words.json w_000010..w_000042 -->`
+ * (ADR 0015); the transcript file may be left out when one transcript holds the ids.
  * Parsing never fails: problems become `warnings`.
  */
+
+/** Transcript words a scene covers: first and last word id, inclusive, in transcript order. */
+export const ScriptWordRangeSchema = z.object({
+  transcript: z
+    .string()
+    .nullable()
+    .describe("Transcript file the ids belong to (`talk.words.json`, under `transcripts/`); null when the comment does not name one. Word ids repeat across transcripts."),
+  from: WordIdSchema.describe("First word id."),
+  to: WordIdSchema.describe("Last word id; equal to `from` for a single word."),
+});
 
 /** One scene: a level-2 heading and the lines up to the next one. */
 export const ScriptSceneSchema = z.object({
@@ -21,7 +35,10 @@ export const ScriptSceneSchema = z.object({
     ),
   line: z.int().describe("1-based file line of the heading (frontmatter lines count)."),
   endLine: z.int().describe("1-based last line of the scene: the line before the next scene heading, or the last line."),
-  words: z.int().describe("Words in the scene body (heading excluded); rough voice-over length at ~2.5 words/s."),
+  words: z.int().describe("Words in the scene body (heading and `words` comment excluded); rough voice-over length at ~2.5 words/s."),
+  wordRange: ScriptWordRangeSchema.nullable().describe(
+    "Transcript words the scene covers, from a `<!-- words: talk.words.json w_000010..w_000042 -->` comment under the heading; null when absent or malformed.",
+  ),
 });
 
 /** Frontmatter conventions; each null when absent or invalid. */
@@ -34,6 +51,8 @@ export const ScriptMetaSchema = z.object({
   aspect: z.string().nullable().describe("Frontmatter `aspect`, e.g. `9:16`."),
 });
 
+/** See {@link ScriptWordRangeSchema}. */
+export type ScriptWordRange = z.output<typeof ScriptWordRangeSchema>;
 /** See {@link ScriptSceneSchema}. */
 export type ScriptScene = z.output<typeof ScriptSceneSchema>;
 /** See {@link ScriptMetaSchema}. */
@@ -79,10 +98,13 @@ export function parseScript(text: string): ScriptOutline {
   }
 
   const slugger = new Slugger();
-  const scenes = headings.map((heading, i) => {
+  const scenes: ScriptScene[] = headings.map((heading, i) => {
     const endLine = (headings[i + 1]?.line ?? lines.length + 1) - 1;
-    const body = lines.slice(heading.line, endLine).join("\n");
-    return { title: heading.title, slug: slugger.slug(heading.base), line: heading.line, endLine, words: countWords(body) };
+    const bodyLines = lines.slice(heading.line, endLine);
+    const slug = slugger.slug(heading.base);
+    const { wordRange, commentIndex } = readWordsComment(bodyLines, slug, warnings);
+    if (commentIndex !== -1) bodyLines.splice(commentIndex, 1);
+    return { title: heading.title, slug, line: heading.line, endLine, words: countWords(bodyLines.join("\n")), wordRange };
   });
 
   const byBase = new Map<string, { title: string; slugs: string[] }>();
@@ -163,6 +185,27 @@ class Slugger {
     }
     this.#occurrences.set(result, 0);
     return result;
+  }
+}
+
+/**
+ * The `<!-- words: a..b -->` comment on the first non-blank line under a
+ * heading. Malformed ones warn and give no range; `commentIndex` is its line
+ * in `body`, or -1.
+ */
+function readWordsComment(body: string[], slug: string, warnings: string[]): { wordRange: ScriptWordRange | null; commentIndex: number } {
+  const commentIndex = body.findIndex((line) => line.trim() !== "");
+  const none = { wordRange: null, commentIndex: -1 };
+  if (commentIndex === -1) return none;
+  const comment = /^\s*<!--\s*words\s*:(.*?)-->\s*$/i.exec(body[commentIndex]!);
+  if (!comment) return /^\s*<!--\s*words\b/i.test(body[commentIndex]!) ? malformed() : none;
+  const range = /^\s*(?:([^\s<>]+)\s+)?(w_\d{6,})(?:\s*\.\.\s*(w_\d{6,}))?\s*$/.exec(comment[1]!);
+  if (!range || (range[1] !== undefined && /^w_\d/.test(range[1]))) return malformed();
+  return { wordRange: { transcript: range[1] ?? null, from: range[2]!, to: range[3] ?? range[2]! }, commentIndex };
+
+  function malformed() {
+    warnings.push(`Scene "${slug}": malformed words comment; write \`<!-- words: w_000010..w_000042 -->\` on one line. Ignored.`);
+    return { wordRange: null, commentIndex };
   }
 }
 
