@@ -321,6 +321,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 onCollapse={() => toggle("sidebar")}
                 onOpenFile={browseFile}
                 activeFile={active}
+                mediaUrl={project.mediaUrl}
                 detached={detachedViews}
                 onDetach={setPanelDetached}
               />
@@ -419,7 +420,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       />
       {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
-          <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} />
+          <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} mediaUrl={project.mediaUrl} />
         </PanelWindow>
       ))}
       <ContextMenuHost />
