@@ -180,6 +180,38 @@ Pin: **Chrome for Testing 154.0.8037.57**, the build ADR 0002 measured, from Goo
 - Verified when pinning (2026-09-30): each archive's MD5 matched the `x-goog-hash` Google's bucket publishes, each was listed (16 files on macOS, 287 on Linux, 288 on Windows, all under the one top directory), the darwin-arm64 executable printed `Google Chrome for Testing 154.0.8037.57` from a manager install, and the Linux zip extracted by `extractZip` matched `unzip` byte for byte. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs and runs the pin; `FRAMESHELL_TEST_REAL_HYPERFRAMES=1` renders a composition with it.
 - Re-pin: pick a Chrome for Testing version (`https://googlechromelabs.github.io/chrome-for-testing/known-good-versions.json`), download each `chrome-headless-shell-<target>.zip`, record size and SHA-256 (check the MD5 against the bucket's `x-goog-hash` header), then run the two opt-in tests above.
 
+## Speaker diarization (sherpa-onnx) and its models
+
+Used by `transcribe.speakers` (ADR 0016 decision 3: who speaks when people share a mic). On demand: the first `frameshell transcribe --speakers` installs it; `doctor` lists it but never reports it missing. The tool prints no version, so `doctor` shows `sherpa-onnx` where other tools show a version.
+
+Pin: **sherpa-onnx v1.13.8** (2026-09-10), upstream [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) release assets, `shared` CPU variants. Each `.tar.bz2` holds one top directory; the manager installs `bin/sherpa-onnx-offline-speaker-diarization` and the ONNX Runtime library it loads from its own directory (rpath `@loader_path` on macOS, `$ORIGIN` on Linux; the exe's directory on Windows).
+
+| Platform | Asset | Size | SHA-256 | Runtime next to it |
+|---|---|---|---|---|
+| darwin-arm64 | `sherpa-onnx-v1.13.8-osx-arm64-shared.tar.bz2` | 20.3 MB | `b10e5c7e2c30ea03de9c442655d14860d9edc475c6251d58a8f5f06e913a1d56` | `libonnxruntime.dylib` |
+| darwin-x64 | `sherpa-onnx-v1.13.8-osx-x64-shared.tar.bz2` | 22.8 MB | `54aad64acee9d2d596535a6080d6f22602a720af5460e1d50461b1e1b06bee40` | `libonnxruntime.dylib` |
+| linux-x64 | `sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2` | 28.2 MB | `c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4` | `libonnxruntime.so` |
+| linux-arm64 | `sherpa-onnx-v1.13.8-linux-aarch64-shared-cpu.tar.bz2` | 28.1 MB | `4e3734f82bc1379fd91f219f5869c7e9d03b7a4f7561907d8abca4849c51a789` | `libonnxruntime.so` |
+| win32-x64 | `sherpa-onnx-v1.13.8-win-x64-shared-MT-Release.tar.bz2` | 24.8 MB | `6dffdc715a4465b989446a6105265d2cb345e7101591a17d35534b6758f6e8df` | `onnxruntime.dll`, `onnxruntime_providers_shared.dll` |
+| win32-arm64 | `sherpa-onnx-v1.13.8-win-arm64-shared-MT-Release.tar.bz2` | 23.3 MB | `455ea18dc44aea188b4f7976037dea3d77e3f8d7afe0760f34244a7a0db53c4c` | `onnxruntime.dll`, `onnxruntime_providers_shared.dll` |
+
+- **Licence:** Apache-2.0 (sherpa-onnx); ONNX Runtime, linked in, is MIT. Frameshell never redistributes them: the user's machine downloads from the builder's GitHub release. No mirror, like headless Chrome.
+- **Why these assets:** `shared` builds are 20-28 MB against 180-540 MB for `static` ones, and need only the one runtime library beside the tool. On Windows the `MT` builds link the C runtime statically, so no Visual C++ redistributable is needed. On Linux the tool and its runtime need glibc 2.16 (x64) or 2.17 (arm64) and `libstdc++` (read from the binaries). CPU only: diarization of an hour takes minutes, not worth a GPU candidate.
+- **Extraction:** the system `tar` reads `.tar.bz2`; on Linux GNU tar needs `bzip2`.
+
+Models, from the Hugging Face repositories where sherpa-onnx's author publishes the ONNX exports, pinned by revision:
+
+| Id | Model | Revision | Size | SHA-256 | Licence |
+|---|---|---|---|---|---|
+| `pyannote-segmentation-3-0` | [pyannote segmentation 3.0](https://huggingface.co/pyannote/segmentation-3.0) as `model.onnx` (`csukuangfj/sherpa-onnx-pyannote-segmentation-3-0`) | `9403a6902bb5` | 6.0 MB | `220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079` | MIT |
+| `3dspeaker-campplus-en-voxceleb` | [3D-Speaker CAM++, VoxCeleb](https://modelscope.cn/models/iic/speech_campplus_sv_en_voxceleb_16k) (`csukuangfj/speaker-embedding-models`) | `0743f301363d` | 29.6 MB | `357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b` | Apache-2.0 |
+
+The embedding model also lists sherpa-onnx's `speaker-recongition-models` release asset (same bytes) as a second URL. CAM++ trained on VoxCeleb was chosen over the Chinese-only 3D-Speaker models because VoxCeleb's speakers talk many languages; the licence of each model was read from its model card (Hugging Face `license: mit`; ModelScope `Apache License 2.0`).
+
+Verified when pinning (2026-10-19): each archive was downloaded and its SHA-256 matched GitHub's published digest; each archive was listed and the members above found; the libraries each executable loads were read from it (only ONNX Runtime besides the system's); both model files hashed the same from Hugging Face (matching its LFS oid) and, for the embedding model, from the release asset (matching sherpa-onnx's `checksum.txt`). The darwin-arm64 pin was installed by the manager and diarized sherpa-onnx's `0-four-speakers-zh.wav` sample (57 s) in 2.3 s on an Apple M3 with 4 threads. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the pin and both models and runs them on every platform of the Real binaries workflow.
+
+Re-pin: pick a release (`gh release view v<version> -R k2-fsa/sherpa-onnx --json assets` gives sizes and digests), download each asset and check its digest, list it (`tar -tjf`) and update the member paths, read each executable's library list again (`otool -L`, `readelf -d`, the PE imports), then run the opt-in test above.
+
 ## Re-pinning ffmpeg
 
 1. Pick a release build: for Martin Riedl, the "Release Build" section; for BtbN, the last autobuild of a month and the `n<major>.<minor>` `gpl` (not `gpl-shared`) assets.

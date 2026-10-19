@@ -55,6 +55,10 @@
           },
           "speechInside": {
             "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "pattern": "^s\\d+$"
           }
         },
         "required": [
@@ -78,11 +82,12 @@
         "properties": {
           "text": {
             "type": "string"
+          },
+          "speaker": {
+            "type": "string",
+            "pattern": "^s\\d+$"
           }
         },
-        "required": [
-          "text"
-        ],
         "additionalProperties": false
       }
     },
@@ -90,6 +95,27 @@
       "type": "integer",
       "exclusiveMinimum": 0,
       "maximum": 9007199254740991
+    },
+    "speakers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^s\\d+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

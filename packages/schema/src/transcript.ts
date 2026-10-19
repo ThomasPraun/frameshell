@@ -7,6 +7,9 @@ export const TRANSCRIPT_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VE
 /** Stable word id, e.g. `w_000001`. Opaque: never reorder or reuse. */
 export const WordIdSchema = z.string().regex(/^w_\d{6,}$/, "must look like `w_000001`");
 
+/** Speaker id in a transcript, e.g. `s1`. Opaque and stable across re-runs of `transcribe.speakers`. */
+export const SpeakerIdSchema = z.string().regex(/^s\d+$/, "must look like `s1`");
+
 /** Number part of a {@link WordIdSchema} id (`w_000042` → 42). */
 export function wordIdNumber(id: string): number {
   return Number(id.slice(2));
@@ -28,16 +31,24 @@ const WordSchema = z
      * Never cut inside it. Written by `transcribe` only when true.
      */
     speechInside: z.boolean().optional(),
+    /** Who says it (ADR 0016): a `speakers` id, set by speaker diarization. A human correction goes in `edits`. */
+    speaker: SpeakerIdSchema.optional(),
   })
   .refine((word) => word.end >= word.start, { message: "end must be >= start", path: ["end"] });
 
-/** Human correction of one word. Only `text` for now. */
-const WordEditSchema = z.strictObject({ text: z.string() });
+/** Human correction of one word: its text, who says it, or both. Wins over the transcribed values. */
+const WordEditSchema = z
+  .strictObject({ text: z.string().optional(), speaker: SpeakerIdSchema.optional() })
+  .refine((edit) => edit.text !== undefined || edit.speaker !== undefined, { message: "an edit sets `text`, `speaker` or both" });
+
+/** One person speaking in a transcript. `name` is free text a human may change; `id` stays. */
+const SpeakerSchema = z.strictObject({ id: SpeakerIdSchema, name: z.string().min(1) });
 
 /**
  * Zod model of a word-level transcript (SPEC §5.4). Times are source-asset
  * seconds measured on the CFR proxy. `edits` holds human corrections keyed by
- * word id; re-transcribing keeps those whose id survives.
+ * word id; re-transcribing keeps those whose id survives. `speakers` lists who
+ * speaks (speaker diarization); every word or edit `speaker` names one of them.
  */
 export const TranscriptSchema = z
   .strictObject({
@@ -59,8 +70,22 @@ export const TranscriptSchema = z
      * (hand-written file): ids above every word and edit id are free.
      */
     nextWordId: z.number().int().positive().optional(),
+    /** Who speaks, in order of first appearance. Absent: speakers were never diarized. */
+    speakers: z.array(SpeakerSchema).optional(),
   })
   .superRefine((transcript, ctx) => {
+    const speakers = new Set<string>();
+    transcript.speakers?.forEach((speaker, index) => {
+      if (speakers.has(speaker.id)) ctx.addIssue({ code: "custom", message: `duplicate speaker id ${speaker.id}`, path: ["speakers", index, "id"] });
+      speakers.add(speaker.id);
+    });
+    const unlisted = (id: string) => `speaker ${id} is not in \`speakers\`${speakers.size > 0 ? ` (${[...speakers].join(", ")})` : ""}`;
+    transcript.words.forEach((word, index) => {
+      if (word.speaker !== undefined && !speakers.has(word.speaker)) ctx.addIssue({ code: "custom", message: unlisted(word.speaker), path: ["words", index, "speaker"] });
+    });
+    for (const [id, edit] of Object.entries(transcript.edits)) {
+      if (edit.speaker !== undefined && !speakers.has(edit.speaker)) ctx.addIssue({ code: "custom", message: unlisted(edit.speaker), path: ["edits", id, "speaker"] });
+    }
     const seen = new Set<string>();
     const next = transcript.nextWordId;
     transcript.words.forEach((word, index) => {
@@ -81,6 +106,14 @@ export type Transcript = z.infer<typeof TranscriptSchema>;
 
 /** One word of a {@link Transcript}. */
 export type TranscriptFileWord = Transcript["words"][number];
+
+/** One speaker of a {@link Transcript}. */
+export type TranscriptSpeaker = NonNullable<Transcript["speakers"]>[number];
+
+/** Who says `word`: the human correction in `edits`, else the diarized speaker; undefined when unknown. */
+export function wordSpeaker(transcript: Pick<Transcript, "edits">, word: Pick<TranscriptFileWord, "id" | "speaker">): string | undefined {
+  return transcript.edits[word.id]?.speaker ?? word.speaker;
+}
 
 /** Validate unknown input as a transcript. Never throws. */
 export function parseTranscript(input: unknown): ParseResult<Transcript> {

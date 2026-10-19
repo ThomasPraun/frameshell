@@ -583,8 +583,100 @@ export const CHROME_HEADLESS_SHELL_PACKAGE: BinaryPackage = {
   },
 };
 
+const SHERPA_ONNX = "https://github.com/k2-fsa/sherpa-onnx";
+const SHERPA_ONNX_VERSION = "1.13.8";
+/** Executable of {@link SHERPA_ONNX_PACKAGE}: speaker diarization of a 16 kHz mono WAV. */
+export const DIARIZATION_TOOL = "sherpa-onnx-offline-speaker-diarization";
+
+/**
+ * One upstream `shared` release asset: the executable plus the ONNX Runtime
+ * library it loads from its own directory (`@loader_path` / `$ORIGIN` rpath on
+ * macOS and Linux, the exe's directory on Windows).
+ */
+function sherpaOnnx(target: string, sha256: string, size: number, runtime: readonly string[]): PinnedBuild {
+  const dir = `sherpa-onnx-v${SHERPA_ONNX_VERSION}-${target}`;
+  const windows = target.startsWith("win-");
+  return {
+    version: SHERPA_ONNX_VERSION,
+    origin: SHERPA_ONNX,
+    license: "Apache-2.0",
+    archives: [
+      {
+        urls: [`${SHERPA_ONNX}/releases/download/v${SHERPA_ONNX_VERSION}/${dir}.tar.bz2`],
+        sha256,
+        size,
+        files: { [DIARIZATION_TOOL]: `${dir}/bin/${DIARIZATION_TOOL}${windows ? ".exe" : ""}` },
+        support: Object.fromEntries(runtime.map((name) => [name, `${dir}/${windows ? "bin" : "lib"}/${name}`])),
+      },
+    ],
+  };
+}
+
+const WIN_ONNX_RUNTIME = ["onnxruntime.dll", "onnxruntime_providers_shared.dll"];
+
+/**
+ * sherpa-onnx's offline speaker diarization (ADR 0016 decision 3: who speaks
+ * when the audio is mixed). Upstream CPU release assets, downloaded from
+ * GitHub on first use and never mirrored. The Windows builds link the C
+ * runtime statically (`MT`), so they need no Visual C++ redistributable.
+ */
+export const SHERPA_ONNX_PACKAGE: BinaryPackage = {
+  name: "sherpa-onnx",
+  tools: [DIARIZATION_TOOL],
+  onDemand: true,
+  // Prints no version; `--help` exits 0 and names the program.
+  versionProbe: { args: ["--help"], pattern: /(sherpa-onnx)/ },
+  builds: {
+    "darwin-arm64": sherpaOnnx("osx-arm64-shared", "b10e5c7e2c30ea03de9c442655d14860d9edc475c6251d58a8f5f06e913a1d56", 20_314_448, ["libonnxruntime.dylib"]),
+    "darwin-x64": sherpaOnnx("osx-x64-shared", "54aad64acee9d2d596535a6080d6f22602a720af5460e1d50461b1e1b06bee40", 22_846_038, ["libonnxruntime.dylib"]),
+    "linux-x64": sherpaOnnx("linux-x64-shared", "c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4", 28_156_791, ["libonnxruntime.so"]),
+    "linux-arm64": sherpaOnnx("linux-aarch64-shared-cpu", "4e3734f82bc1379fd91f219f5869c7e9d03b7a4f7561907d8abca4849c51a789", 28_091_778, ["libonnxruntime.so"]),
+    "win32-x64": sherpaOnnx("win-x64-shared-MT-Release", "6dffdc715a4465b989446a6105265d2cb345e7101591a17d35534b6758f6e8df", 24_805_859, WIN_ONNX_RUNTIME),
+    "win32-arm64": sherpaOnnx("win-arm64-shared-MT-Release", "455ea18dc44aea188b4f7976037dea3d77e3f8d7afe0760f34244a7a0db53c4c", 23_341_583, WIN_ONNX_RUNTIME),
+  },
+};
+
+/** Model id of the speech segmentation model diarization runs first. */
+export const SEGMENTATION_MODEL = "pyannote-segmentation-3-0";
+/** Model id of the speaker embedding model diarization clusters voices with. */
+export const SPEAKER_EMBEDDING_MODEL = "3dspeaker-campplus-en-voxceleb";
+
+const SEGMENTATION_REVISION = "9403a6902bb58e3d5ae8c7e77c3422de279db2e0";
+const EMBEDDING_REVISION = "0743f301363dec56491a490f6d6cbc9d67f9a3bf";
+
+/**
+ * Models of {@link SHERPA_ONNX_PACKAGE}, as sherpa-onnx's author exports them
+ * to ONNX: pyannote segmentation 3.0 (MIT) and 3D-Speaker's CAM++ trained on
+ * VoxCeleb (Apache-2.0), whose speakers talk many languages.
+ */
+export const DIARIZATION_MODELS: readonly ManagedModel[] = [
+  {
+    id: SEGMENTATION_MODEL,
+    version: SEGMENTATION_REVISION.slice(0, 12),
+    origin: "https://huggingface.co/pyannote/segmentation-3.0",
+    license: "MIT",
+    urls: [`https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/${SEGMENTATION_REVISION}/model.onnx`],
+    sha256: "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079",
+    size: 5_992_913,
+    file: "model.onnx",
+  },
+  {
+    id: SPEAKER_EMBEDDING_MODEL,
+    version: EMBEDDING_REVISION.slice(0, 12),
+    origin: "https://modelscope.cn/models/iic/speech_campplus_sv_en_voxceleb_16k",
+    license: "Apache-2.0",
+    urls: [
+      `https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/${EMBEDDING_REVISION}/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx`,
+      `${SHERPA_ONNX}/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx`,
+    ],
+    sha256: "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
+    size: 29_596_978,
+    file: "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+  },
+];
+
 /** Every package the daemon manages. */
-export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE, CHROME_HEADLESS_SHELL_PACKAGE];
+export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE, CHROME_HEADLESS_SHELL_PACKAGE, SHERPA_ONNX_PACKAGE];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = WHISPER_MODELS;
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS];

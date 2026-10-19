@@ -1913,6 +1913,13 @@ code {
   color: var(--text);
 }
 
+.transcript-speaker {
+  margin-right: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .tw {
   border-radius: 2px;
   padding: 1px 0;

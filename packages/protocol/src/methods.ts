@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 43;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1041,6 +1041,41 @@ export const methods = {
       seconds: z.number().describe("Wall time of the whole call."),
     }),
   },
+  "transcribe.speakers": {
+    description:
+      "Find who says each word of an asset's transcript (ADR 0016, speaker diarization; local, CPU): writes `speaker` (`s1`, `s2`, ...) " +
+      "on the words of `transcripts/<asset>.words.json` and `speakers: [{ id, name }]` (default names `Speaker 1`, ...). For a recording " +
+      "where several people share one mic or one mixed track; with one mic per person `multicam.turns` already knows who speaks. " +
+      "Run `transcribe` first. Re-running keeps each voice's id and name where it matches the last run, and human corrections in " +
+      "`edits` (`{ \"w_000042\": { \"speaker\": \"s2\" } }`) always win; rename a speaker by editing its `name` in the file. " +
+      "Pass `speakers` when you know how many people talk: it is more reliable than letting the voices decide. The first run " +
+      "downloads sherpa-onnx and two models (about 60 MB). Example: `{ asset: \"assets/podcast.mp4\", speakers: 2 }`. Fails with " +
+      "InvalidOperation (no transcript, or a stale one: re-run `transcribe`), AssetNotFound, OutsideProject, InvalidProjectFile, " +
+      "TranscriptionFailed, or the Binary* errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Asset file, absolute or relative to `cwd`; its transcript must exist and be current."),
+      speakers: z.int().min(1).max(32).optional().describe("Number of people speaking, when known. Default: found from the voices."),
+    }),
+    result: z.object({
+      transcript: z.string().describe("Updated transcript file, project-relative."),
+      asset: z.string().describe("Project-relative asset path."),
+      speakers: z
+        .array(
+          z.object({
+            id: z.string().describe("Speaker id on the words, e.g. `s1`."),
+            name: z.string(),
+            words: z.int().describe("Words this speaker says, corrections included."),
+            seconds: z.number().describe("Sum of those words' spans, source seconds."),
+          }),
+        )
+        .describe("In order of first appearance."),
+      segments: z.int().describe("Speech segments diarization found."),
+      unassigned: z.int().describe("Words no speech segment covers: they have no speaker."),
+      corrections: z.int().describe("Human speaker corrections in `edits`, kept and applied."),
+      seconds: z.number().describe("Wall time of the whole call."),
+    }),
+  },
   "file.write": {
     mutating: true,
     description:
@@ -1229,7 +1264,9 @@ export const methods = {
     mutating: true,
     description:
       "Change one angle of a multicam group: `name`, `crop` (fractions of its picture cut off each side, merged side by side; " +
-      "null removes it) and its sound under every shot (`gain` dB, `muted`). The angle id stays, so shots keep showing it. " +
+      "null removes it), its sound under every shot (`gain` dB, `muted`) and `speaker`: the transcript speaker (`s1`, from " +
+      "`transcribe.speakers` on the angle's file) whose words are this person's turns when people share a mic (null clears it). " +
+      "The angle id stays, so shots keep showing it. " +
       "Example: `{ group: \"g_1a2b3c\", angle: \"ben\", crop: { left: 0.1, right: 0.1 }, gain: -3 }`. Sync is `multicam.offset`. " +
       "Fails with InvalidOperation when the group or angle does not exist, nothing is given, or the crop would leave no picture " +
       "(left + right, top + bottom must stay below 1).",
@@ -1257,7 +1294,10 @@ export const methods = {
       "A voice heard in another person's mic (bleed, more than 12 dB below the loudest mic at that time) does not count as " +
       "that person's turn; people talking at once keep overlapping turns. Pauses under 0.5 s stay inside a turn, sounds under " +
       "0.3 s are not turns. Read-only. Each angle's `audio.gain` (dB) is added to its mic level before mics are compared. An angle without sound has no turns and a " +
-      "warning. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
+      "warning. Shared mic: angles whose file another angle also uses, and angles with a `speaker`, take their turns from the " +
+      "words of that speaker in the file's transcript (`transcribe.speakers` first; corrections in `edits` count); an angle " +
+      "of a shared file with no `speaker` takes the first speaker no other angle names, in order, and a warning says so " +
+      "(set it with `multicam.angle`). `speakers` lists the angles measured that way. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
       "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -1717,6 +1757,10 @@ export type TranscribeResult = MethodResult<"transcribe">;
 export type TranscribeVerifyParams = MethodParams<"transcribe.verify">;
 /** Result of `transcribe.verify`. */
 export type TranscribeVerifyResult = MethodResult<"transcribe.verify">;
+/** `transcribe.speakers` params. */
+export type TranscribeSpeakersParams = MethodParams<"transcribe.speakers">;
+/** Result of `transcribe.speakers`. */
+export type TranscribeSpeakersResult = MethodResult<"transcribe.speakers">;
 /** One word of `transcribe.verify` `lost`. */
 export type LostWord = z.output<typeof LostWordSchema>;
 /** One word of `transcribe.verify` `uncertain`. */

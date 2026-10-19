@@ -15,6 +15,7 @@ import {
   paragraphs,
   restorePlan,
   struckRun,
+  withWordSpeaker,
   withWordText,
   wordAt,
 } from "../transcript/model.js";
@@ -69,6 +70,9 @@ interface Marked {
  *   and the playhead jumps to, also while playing.
  * - Double-click, F2 on one selected word, or the context menu edit a word's
  *   text: saved as a transcript `edits` entry, which subtitles show.
+ * - Once speakers were found (`transcribe --speakers`), each paragraph names
+ *   its speaker, and the context menu says who says the word or marked words:
+ *   a speaker correction in `edits`, which wins over diarization.
  * - Right-click opens "Ask agent" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
  */
@@ -195,6 +199,17 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     }
   };
 
+  /** Save that `speaker` says words `ids` of transcript `path`, as speaker corrections. */
+  const saveSpeaker = async (path: string, ids: readonly string[], speaker: { id: string; name: string }) => {
+    try {
+      const content = await window.frameshell.files.read(path);
+      await window.frameshell.files.write(path, withWordSpeaker(content, ids, speaker.id));
+      setStatus({ tone: "info", text: t.transcript.speakerSet(speaker.name, ids.length) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.transcript.speakerNotSet((failure as Error).message) });
+    }
+  };
+
   const onPointerDown = (event: PointerEvent, asset: AssetTranscript, index: number) => {
     if (event.button !== 0 || editing) return;
     event.preventDefault();
@@ -226,6 +241,12 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       if (run.length > 1) items.push({ label: t.transcript.restorePassage(run.length), run: () => void restore(run) });
     }
     items.push({ label: t.transcript.editText, shortcut: "F2", run: () => setEditing(word.key) });
+    const targets = inMarked ? asset.words.slice(marked.from, marked.to + 1) : [word];
+    for (const speaker of asset.speakers) {
+      if (targets.every((target) => target.speaker === speaker.id)) continue;
+      const ids = targets.map((target) => target.id);
+      items.push({ label: t.transcript.setSpeaker(speaker.name, ids.length), run: () => void saveSpeaker(asset.path, ids, speaker) });
+    }
     openAskMenu(event, items);
   };
 
@@ -378,12 +399,19 @@ function AssetSection({
       )}
       {paragraphs(asset.words).map((words) => {
         const first = words.find((word) => word.placements.length > 0)?.placements[0];
+        const speaker = words[0]!.speaker;
+        const name = asset.speakers.find((candidate) => candidate.id === speaker)?.name ?? t.transcript.unknownSpeaker;
         return (
           <p key={words[0]!.key} className="transcript-para">
             <span className="transcript-time" aria-hidden="true">
               {first ? formatTimecode(first.from, fps) : t.transcript.cut}
             </span>
             <span className="transcript-words">
+              {asset.speakers.length > 0 && (
+                <span className="transcript-speaker" data-speaker={speaker ?? ""} title={t.transcript.speakerTitle(name)}>
+                  {name}
+                </span>
+              )}
               {words.map((word) => {
                 const i = index.get(word.key)!;
                 const struck = word.placements.length === 0;

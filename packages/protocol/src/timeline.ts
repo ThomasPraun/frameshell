@@ -266,6 +266,15 @@ export const operationArgs = {
       .describe("Sides to change, fractions of the picture cut off (0 to below 1); omitted sides keep their value, null removes the crop."),
     gain: z.number().optional().describe("Gain of the angle's sound in dB, under every shot. 0 = unchanged level."),
     muted: z.boolean().optional().describe("Mute the angle's sound under every shot."),
+    speaker: z
+      .string()
+      .regex(/^s\d+$/, "must look like `s1`")
+      .nullable()
+      .optional()
+      .describe(
+        "Speaker id (`s1`, from `transcribe.speakers`) in the transcript of the angle's file whose words are this person's turns, " +
+          "for a mic people share; null clears it (turns from the mic's energy again, unless the file is shared).",
+      ),
   }),
   "shot.set": z.strictObject({
     clip: ClipRef.describe("Shot id: a clip of a program track, from `timeline.show`."),
@@ -472,7 +481,18 @@ export const MulticamTurnsResultSchema = z.object({
   turns: z
     .array(SpeakingTurnSchema)
     .describe("Every angle's turns sorted by `start`. Turns of different angles may overlap: both people spoke at once."),
-  warnings: z.array(z.string()).describe("Angles that could not be measured (no sound, unreadable); they have no turns."),
+  warnings: z
+    .array(z.string())
+    .describe("Angles that could not be measured (no sound, unreadable, no transcript speakers) and guessed speakers of a shared mic."),
+  speakers: z
+    .array(
+      z.object({
+        angle: z.string(),
+        speaker: z.string().describe("Transcript speaker id whose words are the angle's turns."),
+        transcript: z.string().describe("Transcript file, project-relative."),
+      }),
+    )
+    .describe("Angles whose turns come from transcript speakers instead of their own mic. Empty when every angle has its own mic."),
 });
 
 /** See {@link MulticamTurnsResultSchema}. */

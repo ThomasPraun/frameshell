@@ -332,14 +332,16 @@ Rules:
     { "id": "w_000001", "text": "Hola", "start": 0.520, "end": 0.810, "confidence": 0.97 },
     { "id": "w_000002", "text": "a",    "start": 0.810, "end": 0.880, "confidence": 0.95 }
   ],
-  "edits": { "w_000002": { "text": "a todos" } }
+  "edits": { "w_000002": { "text": "a todos" } },
+  "speakers": [{ "id": "s1", "name": "Ana" }]
 }
 ```
 
 - Times are source-asset seconds (same clock as the asset's `in`/`out`), measured on the CFR proxy.
 - `start` is the DTW onset; `end` is derived from audio energy (last speech frame before the next onset), because DTW gives no word end (ADR 0003).
 - `assetHash` invalidates the transcript if the asset changes.
-- `edits` holds human corrections; re-transcribing keeps them where word IDs still match.
+- `edits` holds human corrections (`text`, `speaker`, or both); re-transcribing keeps them where word IDs still match.
+- `speakers` and each word's optional `speaker` (ADR 0016): who says it, from local speaker diarization (`frameshell transcribe --speakers`), run on demand after transcription. A speaker id stays with its person across runs (the voice sharing most words with the last run keeps its id and `name`); a speaker correction in `edits` always wins. Re-transcribing gives each new word the speaker of the old words it overlaps. Every `speaker` names an entry of `speakers`.
 
 ### 5.5 Script (`scripts/*.md`)
 
@@ -510,6 +512,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - Sources: pinned URLs + SHA-256 (sources and licences in `docs/binaries.md`). A mirror on Frameshell GitHub Releases is redistribution of GPL binaries: it ships only together with the matching source code (or a written offer), published in the same release.
 - ffmpeg: GPL build (x264/x265, libvpx encoder and decoder) downloaded by the user at first run; not redistributed inside the installer. `doctor` checks libvpx.
 - Headless Chrome for HTML engines (HyperFrames): managed like other binaries and passed via `PRODUCER_HEADLESS_SHELL_PATH`.
+- Speaker diarization (ADR 0016): sherpa-onnx's offline diarization (Apache-2.0), upstream prebuilt CPU builds per platform, with a pyannote segmentation model (MIT) and a 3D-Speaker embedding model (Apache-2.0), about 60 MB together, downloaded from the builders on first use; not mirrored.
 - whisper.cpp: pinned version, prebuilt per platform. macOS (Metal) and Linux builds are compiled reproducibly by Frameshell CI and published once on a Frameshell GitHub Release (MIT licence; bytes must match the pin); Windows uses upstream prebuilt assets. v0.1 ships CPU builds on Linux and Windows; GPU builds (CUDA/Vulkan) come from a user override (`binaries.whisper-cli`). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
 

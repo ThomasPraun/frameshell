@@ -41,16 +41,18 @@ mutations print the new revision):
                                Fix one angle's sync by hand: the group second at which its file's time 0 plays
                                (absolute, >= 0; a smaller number plays the angle earlier)
   multicam angle <group> <angle> [--name n] [--crop-left f] [--crop-top f] [--crop-right f] [--crop-bottom f]
-                 [--clear-crop] [--gain dB] [--muted | --unmuted]
-                               Rename an angle, crop its picture (fractions cut off each side, 0 to below 1) or set
-                               its sound under every shot
+                 [--clear-crop] [--gain dB] [--muted | --unmuted] [--speaker s1 | --clear-speaker]
+                               Rename an angle, crop its picture (fractions cut off each side, 0 to below 1), set
+                               its sound under every shot, or name the transcript speaker whose words are its turns
+                               (a mic people share; transcribe --speakers first)
   shot set <shot> [--layout solo|two-up|grid] [--angles a,b,…]
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
                                count when it does not fit (1 solo, 2 two-up, more grid)
   multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
                                mic (a voice heard in another person's mic does not count; people talking at once
-                               overlap). Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings}
+                               overlap), or from transcript speakers for angles sharing a file or naming a speaker.
+                               Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings, speakers}
   direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from s] [--to s] [--replace-human]
                                Shots from who speaks, by rules (director.json at the project root on top of the
                                template, or --rules): written on the program track in one operation, each with a
@@ -128,6 +130,8 @@ export const TIMELINE_OPTIONS = {
   "crop-right": { type: "string" },
   "crop-bottom": { type: "string" },
   "clear-crop": { type: "boolean" },
+  speaker: { type: "string" },
+  "clear-speaker": { type: "boolean" },
   layout: { type: "string" },
   angles: { type: "string" },
   template: { type: "string" },
@@ -166,7 +170,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
   "multicam create": ["name", "group-name"],
   "multicam offset": [],
-  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted"],
+  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "speaker", "clear-speaker"],
   "shot set": ["layout", "angles"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
@@ -394,6 +398,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       const sides = { left: num("crop-left"), top: num("crop-top"), right: num("crop-right"), bottom: num("crop-bottom") };
       const cropped = Object.values(sides).some((value) => value !== undefined);
       if (cropped && values["clear-crop"] === true) throw new UsageError("Pass --crop-<side> or --clear-crop, not both.");
+      if (str("speaker") !== undefined && values["clear-speaker"] === true) throw new UsageError("Pass --speaker or --clear-speaker, not both.");
       Object.assign(params, {
         group: args[0],
         angle: args[1],
@@ -401,6 +406,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         crop: values["clear-crop"] === true ? null : cropped ? sides : undefined,
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+        speaker: values["clear-speaker"] === true ? null : str("speaker"),
       });
       break;
     }
@@ -483,6 +489,7 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
 function formatMulticamTurns(result: MulticamTurnsResult): string {
   const lines = [`Group ${result.group} · ${result.turns.length} turn${result.turns.length === 1 ? "" : "s"} over ${result.duration} s`];
   for (const turn of result.turns) lines.push(`  ${turn.start}–${turn.end} s  ${turn.angle}  ${turn.name}`);
+  for (const { angle, speaker, transcript } of result.speakers) lines.push(`  ${angle}: turns from speaker ${speaker} of ${transcript}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
 }

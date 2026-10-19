@@ -171,6 +171,14 @@ export const AngleSchema = z.strictObject({
   offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
   crop: AngleCropSchema.optional(),
   audio: ClipAudioSchema.optional().describe("Gain and mute of this angle's sound, which plays under every shot."),
+  speaker: z
+    .string()
+    .regex(/^s\d+$/, "must look like `s1`")
+    .optional()
+    .describe(
+      "Speaker id (`s1`) in the transcript of `asset` whose words are this person's speaking turns, instead of the mic's energy: " +
+        "for a mic several people share. Angles with the same `asset` take their turns from speakers anyway.",
+    ),
 });
 
 /** The angles of one conversation on one shared clock (ADR 0016), shown by one program track. */

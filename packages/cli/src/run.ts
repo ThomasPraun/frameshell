@@ -16,6 +16,7 @@ import {
   type ScriptOutlineResult,
   type StatusResult,
   type TranscribeResult,
+  type TranscribeSpeakersResult,
   type TranscribeVerifyResult,
   resolveSocketPath,
 } from "@frameshell/protocol";
@@ -70,6 +71,10 @@ Commands:
   transcribe --verify <export> [--timeline id] [--provider p] [--model m] [--language l]
                                Re-transcribe an export and list the source words lost at cuts,
                                with timeline position and clip; exit 1 if any was lost
+  transcribe --speakers <asset> [--people n]
+                               Find who says each word of the asset's transcript (speaker diarization,
+                               local): speaker ids on its words, names in its speakers list. --people:
+                               how many talk, when known. First run downloads the engine (about 60 MB)
   render [--preset p] [--out file] [--timeline id]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
@@ -101,7 +106,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify", "point", "px"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify", "speakers", "people", "point", "px"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -113,7 +118,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
-  transcribe: ["verify", "timeline", "provider", "model", "language"],
+  transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
   render: ["preset", "out", "timeline"],
   frame: ["at", "out", "timeline", "preset"],
   inspect: ["at", "point", "px", "timeline"],
@@ -155,6 +160,7 @@ type Invocation =
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
+  | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string }
@@ -208,6 +214,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           model: { type: "string" },
           language: { type: "string" },
           verify: { type: "string" },
+          speakers: { type: "string" },
+          people: { type: "string" },
           preset: { type: "string" },
           point: { type: "string" },
           px: { type: "string" },
@@ -305,6 +313,8 @@ function parseBuiltin(
     model?: string | undefined;
     language?: string | undefined;
     verify?: string | undefined;
+    speakers?: string | undefined;
+    people?: string | undefined;
     preset?: string | undefined;
     timeline?: string | undefined;
     out?: string | undefined;
@@ -352,6 +362,18 @@ function parseBuiltin(
   }
   if (command === "transcribe") {
     const { provider, model, language } = options;
+    if (options.speakers !== undefined) {
+      if (rest.length > 0) throw new UsageError("`frameshell transcribe --speakers <asset>` takes the asset as the flag's value, nothing else.");
+      if (options.verify !== undefined || provider || model || language || options.timeline) {
+        throw new UsageError("`frameshell transcribe --speakers <asset>` takes only --people.");
+      }
+      const people = options.people === undefined ? undefined : Number(options.people);
+      if (people !== undefined && (!Number.isInteger(people) || people < 1 || people > 32)) {
+        throw new UsageError(`--people takes how many people talk, a whole number from 1 to 32, got "${options.people}".`);
+      }
+      return { kind: "transcribe.speakers", asset: options.speakers, ...(people !== undefined ? { speakers: people } : {}) };
+    }
+    if (options.people !== undefined) throw new UsageError("--people goes with `frameshell transcribe --speakers <asset>`.");
     if (options.verify !== undefined) {
       if (rest.length > 0) throw new UsageError("`frameshell transcribe --verify <export>` takes no asset: it checks the export against every clip.");
       return {
@@ -470,6 +492,14 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });
       return flags.json ? json(result) : formatOutline(result);
+    }
+    case "transcribe.speakers": {
+      const result = await conn.request(
+        "transcribe.speakers",
+        { cwd, asset: inv.asset, ...(inv.speakers !== undefined ? { speakers: inv.speakers } : {}) },
+        flags.json ? {} : { onProgress: progressPrinter(io) },
+      );
+      return flags.json ? json(result) : formatSpeakers(result);
     }
     case "transcribe.verify": {
       await settleTrust(conn, flags, io);
@@ -703,6 +733,14 @@ function formatTranscribe(result: TranscribeResult): string {
   if (result.speechInside.length > 0) {
     lines.push(`  warning: ${result.speechInside.join(", ")} hide${result.speechInside.length === 1 ? "s" : ""} untranscribed speech; never cut inside`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatSpeakers(result: TranscribeSpeakersResult): string {
+  const lines = [`Speakers of ${result.asset} -> ${result.transcript}`, `  ${result.speakers.length} speaker${result.speakers.length === 1 ? "" : "s"} · ${result.segments} segments · ${result.seconds.toFixed(1)} s`];
+  for (const speaker of result.speakers) lines.push(`  ${speaker.id}  ${speaker.name}  ${speaker.words} words, ${speaker.seconds.toFixed(1)} s`);
+  if (result.corrections > 0) lines.push(`  kept ${result.corrections} human speaker correction${result.corrections === 1 ? "" : "s"}`);
+  if (result.unassigned > 0) lines.push(`  ${result.unassigned} word${result.unassigned === 1 ? "" : "s"} outside any speech segment: no speaker`);
   return `${lines.join("\n")}\n`;
 }
 

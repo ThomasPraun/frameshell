@@ -293,6 +293,30 @@ test("double-clicking a word corrects its text as a transcript edit", async () =
   await expect(status()).toContainText("Corrected “five” to “fyve”");
 });
 
+test("found speakers name each paragraph, and the context menu says who says a word, as a transcript edit", async () => {
+  const path = join(box.projectDir, TRANSCRIPT);
+  const before = JSON.parse(readFileSync(path, "utf8"));
+  // As `transcribe --speakers` writes it: Ana says one to five, Ben the rest.
+  const spoken = {
+    ...before,
+    words: before.words.map((w: object, k: number) => ({ ...w, speaker: k < 5 ? "s1" : "s2" })),
+    speakers: [
+      { id: "s1", name: "Ana" },
+      { id: "s2", name: "Ben" },
+    ],
+  };
+  writeFileSync(path, JSON.stringify(spoken));
+  await expect(page.locator('.transcript-speaker[data-speaker="s2"]').first()).toHaveText("Ben");
+  await expect(page.locator('.transcript-speaker[data-speaker="s1"]').first()).toHaveText("Ana");
+
+  await word(5).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Said by Ana" }).click();
+  await expect(status()).toContainText("1 word now said by Ana.");
+  await expect.poll(() => JSON.parse(readFileSync(path, "utf8")).edits).toEqual({ [id(4)]: { text: "fyve" }, [id(5)]: { speaker: "s1" } });
+  // The word's diarized speaker stays; the correction wins in the view.
+  expect(JSON.parse(readFileSync(path, "utf8")).words[5].speaker).toBe("s2");
+});
+
 test("the transcript opens from the keyboard shortcut and from the timeline header", async () => {
   const tab = page.getByRole("tab", { name: "Transcript" });
   await page.getByRole("button", { name: "Close Transcript" }).click();

@@ -31,4 +31,12 @@ A podcast, interview, panel or recorded call with one file per person (video wit
 - **Do not add or delete shots by hand.** The program track is filled by `direct`; changing one is `shot set`, and `clip split`/`trim`/`move`/`remove` work on shots but a gap leaves the picture empty. Adding shots to a program track is not supported yet.
 - **Late cuts are fine, late sync is not.** `cut` and `clip trim --ripple` keep the angles in sync (the program track ripples with every other track). `multicam offset` is refused when a shot would play past the group's new end: trim it first. After changing an offset, run `multicam turns` and `direct` again.
 - **Gain levels the mics.** When one voice sounds in another person's mic, `multicam angle <group> <angle> --gain <dB>` evens the levels and `multicam turns` counts it; mute a mic that carries only noise with `--muted`. Check the turns again after.
-- **Not covered yet.** Mixed audio (one mic for everyone, no speaker names on transcript words), a gallery-view call cut into tiles, `screen` and picture-in-picture shots. With one shared mic `multicam turns` cannot tell who speaks: say so and offer to cut by hand with `shot set` rather than directing blind.
+- **Not covered yet.** A gallery-view call cut into tiles, `screen` and picture-in-picture shots.
+
+## One mic for several people
+
+When people share a mic (one recording of the room, a mixed track, or each camera hearing everyone), mic energy cannot tell who speaks. The words can:
+
+1. `frameshell transcribe assets/<file> --language <code>`, then `frameshell transcribe --speakers assets/<file> --people <n> --json`. Ask how many people talk when you do not know. Read a few words of each speaker (`transcripts/<file>.words.json`, `speaker` on each word) and rename them to the people in its `speakers` list (`name`; keep the `id`).
+2. Tell each angle whose voice it is: `frameshell multicam angle <group> <angle> --speaker s2`. Angles that show the same file take their turns from its speakers anyway; without `--speaker` they take the free speakers in order and `multicam turns` warns about the guess, so set them.
+3. `frameshell multicam turns <group> --json`: `speakers` lists the angles measured from words; then direct as usual. A word said by the wrong person is corrected in the transcript's `edits` (`{ "w_000042": { "speaker": "s1" } }`) or by the person in the app's transcript view; re-run `multicam turns` and `direct` after.

@@ -520,7 +520,8 @@ const execFileAsync = promisify(execFile);
 
 /**
  * System tar: bsdtar on macOS and Windows reads zip and tar; GNU tar on Linux
- * reads tar.xz via `xz` but no zip, so Linux zips go through {@link extractZip}.
+ * reads tar.xz via `xz` and tar.bz2 via `bzip2` but no zip, so Linux zips go
+ * through {@link extractZip}.
  */
 async function extract(archive: string, dest: string, members: string[], binary: string, url: string): Promise<void> {
   if (process.platform === "linux" && (await isZip(archive))) {
@@ -537,7 +538,7 @@ async function extract(archive: string, dest: string, members: string[], binary:
     await execFileAsync(tar, ["-xf", archive, "-C", dest, ...members], { windowsHide: true, maxBuffer: 1 << 20 });
   } catch (error) {
     const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
-    const hint = process.platform === "linux" ? " (tar.xz needs `xz`: install xz-utils)" : "";
+    const hint = process.platform === "linux" ? " (tar.xz needs `xz`, tar.bz2 needs `bzip2`: install xz-utils or bzip2)" : "";
     throw installFailed(binary, url, `could not extract ${members.join(", ")}${hint}: ${stderr || (error as Error).message}`);
   }
 }

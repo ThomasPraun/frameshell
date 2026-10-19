@@ -570,6 +570,11 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "speaker": {
+                  "description": "Speaker id (`s1`) in the transcript of `asset` whose words are this person's speaking turns, instead of the mic's energy: for a mic several people share. Angles with the same `asset` take their turns from speakers anyway.",
+                  "type": "string",
+                  "pattern": "^s\\d+$"
                 }
               },
               "required": [

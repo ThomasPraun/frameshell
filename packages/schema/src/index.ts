@@ -88,7 +88,10 @@ export {
   TranscriptSchema,
   type Transcript,
   type TranscriptFileWord,
+  type TranscriptSpeaker,
+  SpeakerIdSchema,
   WordIdSchema,
+  wordSpeaker,
   wordIdNumber,
   parseTranscript,
 } from "./transcript.js";

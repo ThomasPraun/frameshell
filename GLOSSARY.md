@@ -29,3 +29,7 @@ _Avoid_: cut, layout, scene
 **Director**:
 The deterministic rule engine (`frameshell direct`, `director.json`) that turns speaking turns into shots.
 _Avoid_: auto-switcher, virtual producer
+
+**Speaker**:
+One person speaking in a transcript (`speakers`: id and name), found by speaker diarization; each word names its speaker.
+_Avoid_: voice, cluster, participant

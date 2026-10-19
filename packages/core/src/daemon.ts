@@ -35,7 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
-import { groupTurns } from "./multicam/group-turns.js";
+import { type TurnsSource, groupTurns } from "./multicam/group-turns.js";
 import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
@@ -53,7 +53,8 @@ import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
-import { transcribeAsset } from "./transcripts/transcriber.js";
+import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
+import { resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { writeContext } from "./context.js";
@@ -85,6 +86,8 @@ export interface DaemonOptions {
   jobConcurrency?: number;
   /** Audio extraction for `transcribe` and for energy snapping of assets without sidecar. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
   extractAudio?: AudioExtractor;
+  /** Speaker diarization for `transcribe.speakers`. Defaults to sherpa-onnx from {@link DaemonOptions.binaries}. */
+  diarize?: Diarizer;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -326,7 +329,23 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return result;
   };
   /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
-  const turnsSource = { probe: (d: string, a: string) => media.probe(d, a), profile: (d: string, a: string) => energy.profile(d, a) };
+  const turnsSource: TurnsSource = {
+    probe: (d, a) => media.probe(d, a),
+    profile: (d, a) => energy.profile(d, a),
+    async transcript(d, a) {
+      let found: Awaited<ReturnType<typeof resolveTranscript>>;
+      try {
+        found = await resolveTranscript(d, a);
+      } catch (error) {
+        // Both names belong to other assets: this one has no transcript.
+        if (error instanceof RpcError && error.code === ErrorCode.TranscriptNameTaken) return null;
+        throw error;
+      }
+      if (!found.previous) return null;
+      const { hash } = await media.derivedAudio(d, a);
+      return { path: found.rel, transcript: found.previous, stale: hash !== found.previous.assetHash };
+    },
+  };
   /** Revert `target` on one timeline for `caller`; its own transaction unless an explicit one is open. */
   const revert = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller) => {
     const key = authorOf(caller);
@@ -456,6 +475,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         },
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
+        progress: request.progress,
+      }));
+    },
+    "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
+      await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
+      const { dir, config } = (await readEnclosingProject(cwd))!;
+      const overrides = { dir, binaries: config.binaries };
+      return transcribing(dir, () => diarizeAsset({
+        projectDir: dir,
+        asset: resolve(cwd, asset),
+        speakers,
+        tools: {
+          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
+          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
+        },
+        media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
+        extractAudio: options.extractAudio,
+        diarize: options.diarize,
         progress: request.progress,
       }));
     },
