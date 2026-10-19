@@ -32,7 +32,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
 | Multicam model (groups, angles, program track, shots: invariants, shot layout + sound) | `packages/schema/src/timeline.ts`, `composite.ts` (`shotLayers`, `shotSound`); engine `checkShots`; SPEC §5.3; ADR 0016 |
 | Clip inspector, preview layer handles | `renderer/src/components/ClipInspector.tsx`, `renderer/src/preview/transform-edit.ts` |
-| Preview player (program, engine worker, audio worklet, playhead store, clip render decode) | `apps/desktop/src/renderer/src/preview/` (`video-source.ts` = proxy or render); ADR 0001, 0002; media URLs `apps/desktop/src/main/media-protocol.ts` |
+| Preview player (program, engine worker, audio worklet, playhead store, clip render decode, multicam shots: one layer + decoder per angle slot) | `apps/desktop/src/renderer/src/preview/` (`video-source.ts` = proxy or render); ADR 0001, 0002; media URLs `apps/desktop/src/main/media-protocol.ts` |
 | Live preview of generated clips (`frameshell-live://` scheme, seek bridge, iframe, topmost-layer rule) | `apps/desktop/src/main/live-protocol.ts`, `renderer/src/preview/live.ts`, `components/LivePreview.tsx`; daemon `clip.live`; ADR 0010 |
 | Preview ADR 0001 thresholds (real app, opt-in, ~20 min) | `FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`; results `docs/research/preview-playback-measurements.md` |
 | Desktop selection (shared store, extend, never duplicate); playhead = `preview/transport.ts` | `apps/desktop/src/renderer/src/selection.ts` |

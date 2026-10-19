@@ -1,8 +1,9 @@
 // Geometry of the preview's on-canvas transform handles. Pure: the panel forwards pointer positions, this says where
-// a layer is and what placement a drag makes; boxes come from `layerRect`, as the engine and export place layers.
-import { type Placement, type Size, layerRect } from "@frameshell/schema/composite";
+// a layer is and what placement a drag makes; boxes come from `layerRect` (shots: `shotLayers`), as the engine and
+// export place layers.
+import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import type { TimelineEdit } from "../../../shared/api.js";
-import { type Program, programAt } from "./program.js";
+import { type Program, type VideoSpan, angleLayer, programAt } from "./program.js";
 
 /** A point or box in fractions of the frame: 0 = left/top edge, 1 = right/bottom edge. */
 export interface FrameBox {
@@ -23,20 +24,43 @@ export interface LayerBox {
 }
 
 /**
- * Box of `clip` at program frame `frame`; null when it shows no picture then
- * (gap, placeholder, other clip, media of unknown size). A generated clip
+ * Box of `clip` at program frame `frame`, the one its handles move; null when
+ * it shows no movable picture then (gap, placeholder, other clip, media of
+ * unknown size, a multicam shot: shots fill their tiles). A generated clip
  * whose render is not ready yet takes the project format, the size its
  * render will have, so it can be hit and moved while it renders.
  */
 export function layerBox(program: Program, frame: number, clip: string): LayerBox | null {
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
-    if (!span || span.clip !== clip || span.kind === "placeholder") continue;
-    const size = span.size ?? (span.kind === "generated" ? program.resolution : null);
-    if (!size) continue;
-    return { layer, size, placement: span.placement, box: frameBox(program.resolution, size, span.placement) };
+    if (!span || span.clip !== clip || span.kind === "angle") continue;
+    const found = spanBox(program, span, layer);
+    if (found) return found;
   }
   return null;
+}
+
+/** Where `span` (on `layer`) shows; null for a placeholder or media of unknown size. A shot's angle shows in its tile. */
+function spanBox(program: Program, span: VideoSpan, layer: number): LayerBox | null {
+  if (span.kind === "placeholder") return null;
+  const { resolution } = program;
+  if (span.kind === "angle") {
+    const shown = angleLayer(span, resolution);
+    if (!shown) return null;
+    const { tile } = shown;
+    const box = { left: tile.left / resolution.width, top: tile.top / resolution.height, width: tile.width / resolution.width, height: tile.height / resolution.height };
+    return { layer, size: shown.source, placement: IDENTITY_PLACEMENT, box };
+  }
+  const size = span.size ?? (span.kind === "generated" ? resolution : null);
+  if (!size) return null;
+  return { layer, size, placement: span.placement, box: frameBox(resolution, size, span.placement) };
+}
+
+/** Hit kind and clip type of a picture span: a shot's angle is footage of a `shot` clip. */
+function hitKind(span: Exclude<VideoSpan, { kind: "placeholder" }>): Pick<LayerHit, "kind" | "type"> {
+  if (span.kind === "generated") return { kind: "generated", type: span.type };
+  if (span.kind === "angle") return { kind: "media", type: "shot" };
+  return { kind: span.kind, type: "media" };
 }
 
 /** Box of a `size` picture placed with `placement`, in fractions of a `resolution` frame. */
@@ -57,7 +81,7 @@ export interface LayerHit {
   /** Layer index, 0 = base. */
   layer: number;
   kind: "media" | "still" | "generated";
-  /** Clip type: `media` for footage and stills, the adapter type (e.g. `hyperframes`) for generated clips. */
+  /** Clip type: `media` for footage and stills, `shot` for a multicam shot's angle, the adapter type (e.g. `hyperframes`) for generated clips. */
   type: string;
   /**
    * The layer's picture covers the point: inside its box, not fully
@@ -89,12 +113,12 @@ export function layersAt(
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder") continue;
-    const found = layerBox(program, frame, span.clip);
+    const found = spanBox(program, span, layer);
     if (!found) continue;
     const { left, top, width, height } = found.box;
     if (point.x < left || point.x >= left + width || point.y < top || point.y >= top + height) continue;
     const strength = found.placement.opacity * (alphaOf(layer) ?? 1);
-    hits.push({ clip: span.clip, layer, kind: span.kind, type: span.kind === "generated" ? span.type : "media", paints: strength >= PAINT_MIN });
+    hits.push({ clip: span.clip, layer, ...hitKind(span), paints: strength >= PAINT_MIN });
   }
   return hits;
 }
@@ -119,11 +143,11 @@ export function layersIn(program: Program, frame: number, rect: { x0: number; y0
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder") continue;
-    const found = layerBox(program, frame, span.clip);
+    const found = spanBox(program, span, layer);
     if (!found || found.placement.opacity < PAINT_MIN) continue;
     const { left, top, width, height } = found.box;
     if (rect.x1 <= left || rect.x0 >= left + width || rect.y1 <= top || rect.y0 >= top + height) continue;
-    hits.push({ clip: span.clip, layer, kind: span.kind, type: span.kind === "generated" ? span.type : "media", paints: true });
+    hits.push({ clip: span.clip, layer, ...hitKind(span), paints: true });
   }
   return hits;
 }

@@ -1,7 +1,15 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { EDGE_FADE_SAMPLES } from "../src/renderer/src/preview/mixer.js";
-import { compileProgram, firstAudioDifference, firstVideoDifference, programAt } from "../src/renderer/src/preview/program.js";
+import {
+  type AngleSpan,
+  type VideoSpan,
+  angleLayer,
+  compileProgram,
+  firstAudioDifference,
+  firstVideoDifference,
+  programAt,
+} from "../src/renderer/src/preview/program.js";
 
 // Seam under test: what the preview plays, compiled from `timeline.show` plus `asset.list` (same rules as export).
 
@@ -334,25 +342,125 @@ describe("program differences (live timeline changes)", () => {
 });
 
 describe("compileProgram with a multicam program track", () => {
-  const shot = (id: string, start: number, from: number, to: number) => ({ id, type: "shot", start, in: from, out: to, end: start + to - from, shot: "solo", angles: ["ana"] });
-  const group = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/a.mp4", offset: 0 }] };
+  const shot = (id: string, start: number, from: number, to: number, layout: string, angles: string[]) => ({
+    id,
+    type: "shot",
+    start,
+    in: from,
+    out: to,
+    end: start + to - from,
+    shot: layout,
+    angles,
+  });
+  const group = {
+    id: "g_talk",
+    angles: [
+      { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+      { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5, audio: { gain: -6 } },
+      { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0.25 },
+    ],
+  };
+  const programTrack = (clips: unknown[]): Track => ({ id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips } as Track);
+  const talk = (tracks: Track[]) => ({ ...view(tracks), groups: [group] });
+  const angles = assets(asset("assets/ana.mp4"), asset("assets/ben.mp4"), asset("assets/eva.mp4"));
+  const proxy = (name: string) => `.frameshell/proxies/assets${name}mp4.mp4`;
+  const sidecar = (name: string) => `.frameshell/proxies/assets${name}mp4.pcm`;
+  // Group clock = timeline time: solo Ana, two-up Ben | Ana, grid of three, solo Eva.
+  const SHOTS = [
+    shot("s1", 0, 0, 1, "solo", ["ana"]),
+    shot("s2", 1, 1, 2, "two-up", ["ben", "ana"]),
+    shot("s3", 2, 2, 3, "grid", ["ana", "ben", "eva"]),
+    shot("s4", 3, 3, 4, "solo", ["eva"]),
+  ];
+  const brief = (spans: VideoSpan[]) =>
+    spans.map((s) => (s.kind === "angle" ? `${s.clip}:${s.angle}@${s.start}-${s.end}<${s.in}` : s.kind === "placeholder" ? `${s.clip}:${s.reason}@${s.start}-${s.end}` : s.kind));
 
-  it("shows a placeholder per shot as a layer in stacking order, and plays no sound for it yet", () => {
-    const program = compileProgram(
-      {
-        ...view([
-          { id: "v1", kind: "video", name: null, follows: null, clips: [clip("c1", 0, 10, 12)] },
-          { id: "t_p", kind: "program", name: null, follows: null, group: "g_talk", clips: [shot("c_s1", 1, 0, 2), shot("c_s2", 3, 5, 6)] },
-        ]),
-        groups: [group],
-      },
-      assets(asset("assets/a.mp4")),
-    );
-    expect(program.layers[1]).toEqual([
-      { kind: "placeholder", clip: "c_s1", start: 30, end: 90, reason: "multicam", type: "shot" },
-      { kind: "placeholder", clip: "c_s2", start: 90, end: 120, reason: "multicam", type: "shot" },
-    ]);
+  it("gives a program track one layer per angle slot; an angle keeps its slot across shots, offsets map group time to source", () => {
+    const program = compileProgram(talk([programTrack(SHOTS)]), angles);
     expect(program.frames).toBe(120);
-    expect(program.audio.map((span) => span.clip)).toEqual(["c1"]);
+    expect(program.layers.map(brief)).toEqual([
+      ["s1:ana@0-30<0", "s2:ana@30-60<30", "s3:ana@60-90<60"],
+      // Ben's file starts 1.5 s into the group: nothing of it before frame 45.
+      ["s2:ben@45-60<0", "s3:ben@60-90<15"],
+      // 1.75 s and 2.75 s of Eva's file: frames 52.5 and 82.5, rounded.
+      ["s3:eva@60-90<53", "s4:eva@90-120<83"],
+    ]);
+    const first = program.layers[0]![0]!;
+    expect(first).toMatchObject({ kind: "angle", proxy: proxy("ana"), speed: 1 });
+  });
+
+  it("lays each angle out in its shot's tile with shotLayers, at any frame size", () => {
+    const program = compileProgram(talk([programTrack(SHOTS)]), angles);
+    const ana = programAt(program, 45, 0) as AngleSpan;
+    const ben = programAt(program, 45, 1) as AngleSpan;
+    // Two-up Ben | Ana: Ana's slot is 0, her tile the right half. A 1920x1080 picture cut to a 480x540 tile.
+    expect(angleLayer(ana, { width: 960, height: 540 })).toEqual({
+      tile: { left: 480, top: 0, width: 480, height: 540 },
+      crop: { left: 480, top: 0, width: 960, height: 1080 },
+      source: HD,
+    });
+    expect(angleLayer(ben, { width: 960, height: 540 })?.tile).toEqual({ left: 0, top: 0, width: 480, height: 540 });
+    expect(angleLayer(programAt(program, 15, 0) as AngleSpan, HD)?.tile).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+  });
+
+  it("plays every angle's sound under every shot, sample-exact, one span per unbroken run", () => {
+    const program = compileProgram(talk([programTrack(SHOTS)]), angles);
+    expect(program.audio).toEqual([
+      { clip: "s1/ana", start: 0, end: 192_000, sidecar: sidecar("ana"), channels: 1, in: 0, speed: 1, gain: 1 },
+      // Eva's file starts at group 0.25 s; Ben's at 1.5 s, 6 dB down.
+      { clip: "s1/eva", start: 12_000, end: 192_000, sidecar: sidecar("eva"), channels: 1, in: 0, speed: 1, gain: 1 },
+      { clip: "s2/ben", start: 72_000, end: 192_000, sidecar: sidecar("ben"), channels: 1, in: 0, speed: 1, gain: 10 ** (-6 / 20) },
+    ]);
+  });
+
+  it("splits an angle's sound where the group clock jumps (a ripple cut), and leaves muted angles out", () => {
+    const muted = { ...group, angles: group.angles.map((a) => (a.id === "ben" ? { ...a, audio: { muted: true } } : a)) };
+    const program = compileProgram(
+      { ...view([programTrack([shot("s1", 0, 0, 1, "solo", ["ana"]), shot("s2", 1, 3, 4, "solo", ["ana"])])]), groups: [muted] },
+      angles,
+    );
+    expect(program.audio.filter((s) => s.sidecar === sidecar("ana")).map((s) => [s.start, s.end, s.in])).toEqual([
+      [0, 48_000, 0],
+      [48_000, 96_000, 144_000],
+    ]);
+    expect(program.audio.some((s) => s.sidecar === sidecar("ben"))).toBe(false);
+  });
+
+  it("shows a placeholder for an angle still ingesting, in its slot only", () => {
+    const ingesting = assets(asset("assets/ana.mp4"), asset("assets/ben.mp4", { state: "processing", proxy: null }), asset("assets/eva.mp4"));
+    const program = compileProgram(talk([programTrack([SHOTS[1]!])]), ingesting);
+    expect(program.layers.map(brief)).toEqual([["s2:ingest@30-60"], ["s2:ana@30-60<30"]]);
+  });
+
+  it("stacks above the video tracks under it and does not restart an angle's decode at a layout change", () => {
+    const base = { id: "v1", kind: "video", name: null, follows: null, clips: [clip("c1", 0, 0, 4, { asset: "assets/ana.mp4" })] } as Track;
+    const before = compileProgram(talk([base, programTrack(SHOTS)]), angles);
+    expect(before.layers).toHaveLength(4);
+    expect(before.layers[0]![0]!.kind).toBe("media");
+    // s2 becomes a grid of Ana and Ben: Ana's slot shows the same frames, Ben's too.
+    const regrid = SHOTS.map((s) => (s.id === "s2" ? { ...s, shot: "grid", angles: ["ana", "ben"] } : s));
+    const after = compileProgram(talk([base, programTrack(regrid)]), angles);
+    expect(firstVideoDifference(before, after, 0, 1)).toBe(Infinity);
+    expect(firstVideoDifference(before, after, 0, 2)).toBe(Infinity);
+  });
+
+  it("refuses shots of a nested clip with a transform (they would fill the frame), and still plays their sound", () => {
+    const podcast: TimelineView = { ...view([programTrack([SHOTS[0]!])]), timeline: "podcast", path: "timelines/podcast.json", groups: [group] };
+    const nest = (transform?: object) =>
+      view([
+        {
+          id: "v1",
+          kind: "video",
+          name: null,
+          follows: null,
+          clips: [{ id: "n1", type: "timeline", source: "timelines/podcast.json", start: 0, duration: 1, end: 1, ...(transform ? { transform } : {}) }],
+        },
+      ]);
+    const nested = new Map([["timelines/podcast.json", podcast]]);
+    const moved = compileProgram(nest({ scale: 0.5 }), angles, { nested });
+    expect(moved.layers.map(brief)).toEqual([[], ["n1/s1:multicam@0-30"]]);
+    expect(moved.audio.map((s) => s.clip)).toEqual(["n1/s1/ana", "n1/s1/eva"]);
+    const still = compileProgram(nest(), angles, { nested });
+    expect(still.layers.map(brief)).toEqual([[], ["n1/s1:ana@0-30<0"]]);
   });
 });

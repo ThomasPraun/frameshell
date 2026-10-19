@@ -97,6 +97,32 @@ describe("layersIn", () => {
   });
 });
 
+describe("multicam shots", () => {
+  const angles = [
+    { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
+    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0 },
+  ];
+  const layout = {
+    shot: { id: "c_s1", type: "shot" as const, start: 0, in: 0, out: 3, shot: "two-up" as const, angles: ["ana", "ben"] },
+    group: { id: "g_talk", angles },
+    sizes: { "assets/ana.mp4": HD, "assets/ben.mp4": HD },
+  };
+  const angle = (id: string) => ({ kind: "angle" as const, clip: "c_s1", start: 0, end: 90, proxy: `${id}.mp4`, in: 0, speed: 1, angle: id, layout });
+  const twoUp: Program = { ...program, layers: [program.layers[0]!, [angle("ana")], [angle("ben")]] };
+
+  it("hits the tile of the angle under the point, as footage of the shot", () => {
+    expect(layersAt(twoUp, 30, { x: 0.75, y: 0.5 })).toEqual([
+      { clip: "c_s1", layer: 2, kind: "media", type: "shot", paints: true },
+      { clip: "c_cam", layer: 0, kind: "media", type: "media", paints: true },
+    ]);
+    expect(layersIn(twoUp, 30, { x0: 0.4, y0: 0.4, x1: 0.6, y1: 0.6 }).map((hit) => hit.layer)).toEqual([2, 1, 0]);
+  });
+
+  it("gives a shot no handles: shots fill their tiles, they have no placement", () => {
+    expect(layerBox(twoUp, 30, "c_s1")).toBeNull();
+  });
+});
+
 describe("dragPlacement", () => {
   const start = { x: 600, y: -300, scale: 0.25, opacity: 1 };
   // The frame shows at 960x540 CSS px: one CSS px is two project px.

@@ -1,7 +1,18 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import type { Clip, ProgramTrack, Timeline, Track } from "@frameshell/schema";
-import { type Placement, type Size, flattenTimeline, placementOf } from "@frameshell/schema/composite";
+import type { Angle, Clip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track } from "@frameshell/schema";
+import {
+  type LayerRect,
+  type NestedTimelines,
+  type Placement,
+  type Size,
+  flattenTimeline,
+  movedProgramGroups,
+  placementOf,
+  programGroup,
+  shotLayers,
+  shotSound,
+} from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -18,7 +29,7 @@ export type PlaceholderReason =
   | "ingest"
   /** Ingest failed, or the asset is not in `asset.list` (missing file). */
   | "unavailable"
-  /** Shot of a multicam program track: the preview does not play shots yet. */
+  /** Shot of a program track inside a nested clip with a transform: shots fill the frame, so they would show in the wrong place. */
   | "multicam";
 
 /** One stretch of a video layer, program frames `[start, end)`. */
@@ -69,7 +80,40 @@ export type VideoSpan =
       size: Size | null;
       placement: Placement;
     }
+  | {
+      /** One angle of a multicam shot (ADR 0016): its proxy, cut into the shot's tile ({@link angleLayer}). */
+      kind: "angle";
+      /** Shot clip id. */
+      clip: string;
+      start: number;
+      end: number;
+      /** Project-relative CFR proxy of the angle's asset. */
+      proxy: string;
+      /** Source frame (project fps) shown at `start`. */
+      in: number;
+      /** Always 1: shots have no speed. */
+      speed: number;
+      /** Angle id. */
+      angle: string;
+      /** Shared by every angle span of one shot. */
+      layout: ShotFrame;
+    }
   | { kind: "placeholder"; clip: string; start: number; end: number; reason: PlaceholderReason; type: string };
+
+/** What {@link angleLayer} needs to lay a shot out at any frame size, as export does (`shotLayers`). */
+export interface ShotFrame {
+  shot: ShotClip;
+  group: MulticamGroup;
+  /** Source picture size by angle asset: probed, or the project resolution while unknown. */
+  sizes: Record<string, Size>;
+}
+
+/** An angle's picture in an `output`-sized frame: `crop` (source pixels, of `source`) drawn into `tile`. */
+export interface AngleLayer {
+  tile: LayerRect;
+  crop: LayerRect;
+  source: Size;
+}
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
 export type LayerRender =
@@ -101,10 +145,12 @@ export interface AudioSpan {
 /**
  * The preview's program: every video track as a layer, composited bottom
  * first with each clip's placement, and the sound of every unmuted media
- * clip on every track, mixed. A program track is a layer of placeholders,
- * one per shot, and silent: multicam does not play yet. Nested timelines are flattened first. Timing
- * and placement follow export exactly: clip edges on the project frame
- * grid, sample boundaries rounded from frames, layers placed by `layerRect`.
+ * clip on every track, mixed. A program track takes one layer per angle a
+ * shot shows at most (one decoder each), its shots laid out by `shotLayers`,
+ * and plays every angle's sound under every shot. Nested timelines are
+ * flattened first. Timing and placement follow export exactly: clip edges
+ * on the project frame grid, sample boundaries rounded from frames, layers
+ * placed by `layerRect`.
  */
 export interface Program {
   fps: number;
@@ -114,8 +160,8 @@ export interface Program {
   /** Length in frames: end of the last span. */
   frames: number;
   /**
-   * One per video or program track, bottom first (layer 0 is the bottom
-   * picture track).
+   * One per video track and per angle slot of a program track, bottom first
+   * (layer 0 is the bottom picture track).
    * Each sorted, never overlapping; frames outside every span of every
    * layer are black.
    */
@@ -144,14 +190,24 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const audio: AudioSpan[] = [];
   let frames = 0;
 
-  const flat = flattenView(view, options.nested);
+  const resolution = options.resolution ?? DEFAULT_RESOLUTION;
+  const resolve = nestedResolver(options.nested);
+  const root = asTimeline(view, true);
+  const flat = flattenTimeline(root, resolve);
+  const moved = movedProgramGroups(root, resolve);
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
     if (track.kind === "program") {
-      const layer = shotPlaceholders(track, frame);
-      for (const span of layer) frames = Math.max(frames, span.end);
-      layers.push(layer);
+      const shots = placeShots(track, frame);
+      for (const { end } of shots) frames = Math.max(frames, end);
+      const group = programGroup(flat, track);
+      if (!group || moved.has(group.id)) {
+        layers.push(shots.map(({ shot, start, end }) => ({ kind: "placeholder", clip: shot.id, start, end, reason: group ? "multicam" : "unavailable", type: shot.type })));
+      } else {
+        layers.push(...angleSlots(shots, group, assets, fps, resolution));
+      }
+      if (group) audio.push(...shotAudio(shots, group, assets, rate));
       continue;
     }
     const placed: { clip: Clip; start: number; end: number }[] = [];
@@ -191,7 +247,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     if (track.kind === "video") layers.push(layer);
   }
   audio.sort((a, b) => a.start - b.start);
-  return { fps, sampleRate: rate, resolution: options.resolution ?? DEFAULT_RESOLUTION, frames, layers, audio };
+  return { fps, sampleRate: rate, resolution, frames, layers, audio };
 }
 
 /** Span of `layer` (0 = base) at program frame `frame`; null in gaps, past the end and for a missing layer. */
@@ -259,7 +315,7 @@ function nextStart(spans: readonly VideoSpan[], frame: number, end: number): num
 
 function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (!x || !y) return x === y;
-  if (x.kind === "media" && y.kind === "media") {
+  if ((x.kind === "media" || x.kind === "angle") && x.kind === y.kind) {
     return x.proxy === y.proxy && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
@@ -277,10 +333,14 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
  * ones stay unresolved.
  */
 export function flattenView(view: TimelineView, nested?: ReadonlyMap<string, TimelineView>): Timeline {
-  return flattenTimeline(asTimeline(view, true), (source) => {
+  return flattenTimeline(asTimeline(view, true), nestedResolver(nested));
+}
+
+function nestedResolver(nested: ReadonlyMap<string, TimelineView> | undefined): NestedTimelines {
+  return (source) => {
     const found = nested?.get(source);
     return found ? asTimeline(found, false) : null;
-  });
+  };
 }
 
 /**
@@ -304,16 +364,144 @@ function asTimeline(view: TimelineView, root: boolean): Timeline {
   return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks, ...(view.groups ? { groups: view.groups } : {}) };
 }
 
-/** One placeholder per shot, program frames, sorted; an overlapping later shot wins from its start. */
-function shotPlaceholders(track: ProgramTrack, frame: (seconds: number) => number): VideoSpan[] {
-  const spans = track.clips
-    .map((shot): VideoSpan => {
+/** One angle of a multicam shot in the preview. */
+export type AngleSpan = Extract<VideoSpan, { kind: "angle" }>;
+
+/**
+ * Where the angle of `span` shows in an `output`-sized frame, and which of
+ * its source pixels fill it (`shotLayers`, as export lays shots out); null
+ * when its shot does not show that angle.
+ */
+export function angleLayer(span: AngleSpan, output: Size): AngleLayer | null {
+  const { shot, group, sizes } = span.layout;
+  const size = (asset: string) => sizes[asset] ?? output;
+  const layer = shotLayers(shot, group, output, size).find((candidate) => candidate.angle === span.angle);
+  return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset) } : null;
+}
+
+/** A shot as the preview plays it: program frames `[start, end)`. */
+interface PlacedShot {
+  /** `out` cut where an overlapping later shot starts. */
+  shot: ShotClip;
+  start: number;
+  end: number;
+}
+
+/** Shots of `track` in program frames, sorted; an overlapping later shot (a hand-edited file) wins from its start. */
+function placeShots(track: ProgramTrack, frame: (seconds: number) => number): PlacedShot[] {
+  const placed = track.clips
+    .map((shot): PlacedShot => {
       const start = frame(shot.start);
-      return { kind: "placeholder", clip: shot.id, start, end: Math.max(start + 1, frame(shot.start + shot.out - shot.in)), reason: "multicam", type: shot.type };
+      return { shot, start, end: Math.max(start + 1, frame(shot.start + shot.out - shot.in)) };
     })
     .sort((a, b) => a.start - b.start);
-  for (let i = 1; i < spans.length; i++) spans[i - 1]!.end = Math.min(spans[i - 1]!.end, spans[i]!.start);
-  return spans.filter((span) => span.end > span.start);
+  for (let i = 1; i < placed.length; i++) {
+    const previous = placed[i - 1]!;
+    const next = placed[i]!;
+    if (previous.end <= next.start) continue;
+    previous.end = next.start;
+    previous.shot = { ...previous.shot, out: Math.min(previous.shot.out, previous.shot.in + (next.shot.start - previous.shot.start)) };
+  }
+  return placed.filter((p) => p.end > p.start);
+}
+
+/**
+ * Picture layers of a program track: one per angle slot, as many as the most
+ * angles one shot shows (at least one). An angle keeps its slot from shot to
+ * shot while it is shown, so a layout change goes on decoding it with no
+ * restart; a newly shown angle takes a slot the previous shot left free.
+ */
+function angleSlots(shots: readonly PlacedShot[], group: MulticamGroup, assets: ReadonlyMap<string, AssetInfo>, fps: number, resolution: Size): VideoSpan[][] {
+  const sizes: Record<string, Size> = {};
+  for (const angle of group.angles) {
+    const video = assets.get(angle.asset)?.media?.video;
+    sizes[angle.asset] = video ? { width: video.width, height: video.height } : resolution;
+  }
+  const slots: VideoSpan[][] = [[]];
+  let held: (string | null)[] = [];
+  for (const placed of shots) {
+    const shown = placed.shot.angles.filter((id) => group.angles.some((angle) => angle.id === id));
+    const next = held.map((id) => (id !== null && shown.includes(id) ? id : null));
+    for (const id of shown) {
+      if (next.includes(id)) continue;
+      const free = next.indexOf(null);
+      if (free >= 0) next[free] = id;
+      else next.push(id);
+    }
+    held = next;
+    while (slots.length < next.length) slots.push([]);
+    const layout: ShotFrame = { shot: placed.shot, group, sizes };
+    next.forEach((id, slot) => {
+      const angle = id === null ? undefined : group.angles.find((candidate) => candidate.id === id);
+      const span = angle ? angleSpan(placed, angle, layout, assets.get(angle.asset), fps) : null;
+      if (span) slots[slot]!.push(span);
+    });
+  }
+  return slots;
+}
+
+/** The picture of `angle` under `placed`: its proxy, a placeholder while it has none, null for no picture. */
+function angleSpan(placed: PlacedShot, angle: Angle, layout: ShotFrame, info: AssetInfo | undefined, fps: number): VideoSpan | null {
+  const { shot, start, end } = placed;
+  const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: shot.id, start, end, reason, type: shot.type });
+  if (!info || info.media?.video?.still) return placeholder("unavailable");
+  if (!info.proxy) {
+    if (info.state === "pending" || info.state === "processing") return placeholder("ingest");
+    return info.state === "ready" && info.media && !info.media.video ? null : placeholder("unavailable");
+  }
+  // Source time = group time - offset. An asset that starts after the shot shows from its time 0 on.
+  let first = start;
+  let sourceIn = Math.round((shot.in - angle.offset) * fps);
+  if (sourceIn < 0) {
+    first = start - sourceIn;
+    sourceIn = 0;
+  }
+  if (first >= end) return null;
+  return { kind: "angle", clip: shot.id, start: first, end, proxy: info.proxy, in: sourceIn, speed: 1, angle: angle.id, layout };
+}
+
+/**
+ * Sound of a program track: every angle's `shotSound` under each shot, in
+ * exact samples rather than frames, so the mics of one room stay aligned with
+ * each other. An angle's sound that runs on unbroken across a shot change
+ * stays one span: the mixer fades span edges, and shots switch pictures only.
+ */
+function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: ReadonlyMap<string, AssetInfo>, rate: number): AudioSpan[] {
+  const spans: AudioSpan[] = [];
+  const last = new Map<string, AudioSpan>();
+  for (const { shot } of shots) {
+    for (const clip of shotSound(shot, group)) {
+      const sidecar = assets.get(clip.asset)?.sidecar;
+      if (clip.audio?.muted === true || !sidecar) continue;
+      const span: AudioSpan = {
+        clip: clip.id,
+        start: Math.round(clip.start * rate),
+        end: Math.round((clip.start + clip.out - clip.in) * rate),
+        sidecar: sidecar.path,
+        channels: sidecar.channels,
+        in: Math.round(clip.in * sidecar.sampleRate),
+        speed: 1,
+        gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
+      };
+      if (span.end <= span.start) continue;
+      // `shotSound` names its clips `<shot>/<angle>`.
+      const angle = clip.id.slice(shot.id.length + 1);
+      const previous = last.get(angle);
+      const continues =
+        previous !== undefined &&
+        previous.sidecar === span.sidecar &&
+        previous.gain === span.gain &&
+        Math.abs(span.start - previous.end) <= 1 &&
+        Math.abs(span.in - (previous.in + (span.start - previous.start))) <= 1;
+      if (continues) {
+        previous.end = span.end;
+        continue;
+      }
+      spans.push(span);
+      last.set(angle, span);
+    }
+  }
+  return spans;
 }
 
 /** Timeline seconds just after the clip's last frame; null when unknown (unreadable nested timeline). */

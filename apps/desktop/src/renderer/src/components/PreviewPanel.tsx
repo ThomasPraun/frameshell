@@ -294,7 +294,8 @@ function Placeholder({ program, frame }: { program: Program; frame: number }) {
       {upper.length > 0 && (
         <ul className="preview-layer-notes" aria-label={t.preview.hiddenLayers}>
           {upper.map(({ span, layer }) => (
-            <li key={span.clip} data-testid="preview-layer-placeholder" data-reason={span.reason}>
+            // A shot's angles each have a layer: one shot can have several notes.
+            <li key={`${layer}:${span.clip}`} data-testid="preview-layer-placeholder" data-reason={span.reason}>
               {t.preview.layerNote(layer + 1, PLACEHOLDER_TEXT[span.reason], span.type, span.clip)}
             </li>
           ))}
