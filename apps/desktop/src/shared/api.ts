@@ -165,8 +165,8 @@ export interface EditOptions {
   burstGap?: number;
 }
 
-/** Longest {@link EditOptions.burstGap} main accepts, ms. */
-export const EDIT_BURST_GAP_MAX_MS = 120_000;
+/** Longest {@link EditOptions.burstGap} main accepts, ms: the daemon's longest `autoCommitAfter` (3600 s) less main's 15 s margin. */
+export const EDIT_BURST_GAP_MAX_MS = 3_585_000;
 
 /** Longest {@link EditOptions} label or burst key main accepts. */
 export const EDIT_OPTION_MAX_LENGTH = 200;

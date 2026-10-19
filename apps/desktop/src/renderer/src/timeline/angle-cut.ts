@@ -1,13 +1,13 @@
 // Cutting to an angle by number key or click (#242, ADR 0016 decision 5): which shot is under the playhead, what
 // to split and set, and the serial queue that sends it. The multicam viewer calls `cutToAngle` too.
 import type { OperationResult, TimelineView } from "@frameshell/protocol";
-import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
+import { EDIT_BURST_GAP_MAX_MS, type EditOptions, type TimelineEdit } from "../../../shared/api.js";
 import { transport as appTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "./layout.js";
 
-/** How long the transaction of one playback stays open after a press, ms: presses may be far apart. */
-export const TAKE_GAP_MS = 60_000;
+/** How long the transaction of one playback stays open after a press, ms: the longest main allows, so a long single-speaker stretch does not split the take. */
+export const TAKE_GAP_MS = EDIT_BURST_GAP_MAX_MS;
 
 /** What a press does. */
 export interface AngleCutPlan {
@@ -67,14 +67,19 @@ export type AngleCutOutcome = { kind: "cut"; result: OperationResult; plan: Angl
 
 /** The app's side of a cut: reads the timeline, sends edits, and ends the transaction of a playback. */
 export interface AngleCutHost {
+  /** The timeline's current view. */
   show(timeline: string): Promise<TimelineView>;
+  /** Send `edits` as one call of the burst named in `options`. */
   edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;
+  /** Close the open take's transaction now. */
   settle(): Promise<void>;
 }
 
 /** The slice of the transport store a cut reads. */
 export interface AngleCutTransport {
+  /** Playhead time in seconds and whether it plays. */
   get(): { time: number; playing: boolean };
+  /** Call `listener` on every change; returns the unsubscribe function. */
   subscribe(listener: () => void): () => void;
 }
 

@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startDaemon } from "@frameshell/core";
 import { type DaemonConnection, type TimelineView, connectToDaemon } from "@frameshell/protocol";
 import { TimelineEditor } from "../src/main/timeline-editor.js";
 import { ffmpegRun, testFfmpeg, useTestBinaries } from "../e2e/media.js";
-import { createAngleCutter, planAngleCut } from "../src/renderer/src/timeline/angle-cut.js";
+import { TAKE_GAP_MS, createAngleCutter, planAngleCut } from "../src/renderer/src/timeline/angle-cut.js";
 import { angleKey } from "../src/renderer/src/timeline/angle-keys.js";
 import { type TrackRow, layoutTimeline } from "../src/renderer/src/timeline/layout.js";
 
@@ -87,17 +87,19 @@ describe("planAngleCut", () => {
 
 describe("angleKey", () => {
   const press = (code: string, extra: Record<string, unknown> = {}) =>
-    angleKey({ code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, target: null, ...extra });
+    angleKey({ code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, target: null, key: "", ...extra });
 
   it("takes digits 1-9 of the row and the keypad, Shift adding", () => {
     expect(press("Digit1")).toEqual({ number: 1, additive: false });
-    expect(press("Numpad9")).toEqual({ number: 9, additive: false });
+    expect(press("Numpad9", { key: "9" })).toEqual({ number: 9, additive: false });
     expect(press("Digit2", { shiftKey: true })).toEqual({ number: 2, additive: true });
   });
 
   it("leaves 0, other keys, shortcuts with a modifier, repeats and typing alone", () => {
     expect(press("Digit0")).toBeNull();
     expect(press("KeyA")).toBeNull();
+    expect(press("Numpad1", { key: "End" })).toBeNull();
+    expect(press("Numpad4", { key: "ArrowLeft" })).toBeNull();
     expect(press("Digit1", { metaKey: true })).toBeNull();
     expect(press("Digit1", { ctrlKey: true })).toBeNull();
     expect(press("Digit1", { altKey: true })).toBeNull();
@@ -222,6 +224,26 @@ describe("the angle cutter against a daemon", () => {
     ]);
     expect(await ui()).toEqual([["Cut to angles", ["clip.split", "shot.set", "clip.split", "shot.set"]]]);
 
+    await editor.undo(dir, "main");
+    expect(await shots()).toEqual([[0, 10, "solo", "ana"]]);
+  });
+
+  it("presses far apart in one playback are still one transaction", async () => {
+    const { editor, dir, cutter, set, shots, ui } = await setup();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      set({ time: 1, playing: true });
+      await cutter.cut(2);
+      // Past the default burst gap and any minute-scale idle timer: only the stop closes the take.
+      await vi.advanceTimersByTimeAsync(TAKE_GAP_MS - 1_000);
+      set({ time: 3.5 });
+      await cutter.cut(1);
+      set({ time: 3.5, playing: false });
+    } finally {
+      vi.useRealTimers();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await ui()).toEqual([["Cut to angles", ["clip.split", "shot.set", "clip.split", "shot.set"]]]);
     await editor.undo(dir, "main");
     expect(await shots()).toEqual([[0, 10, "solo", "ana"]]);
   });

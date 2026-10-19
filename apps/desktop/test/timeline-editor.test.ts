@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startDaemon } from "@frameshell/core";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import { EDIT_BURST_GAP_MAX_MS, type TimelineEdit } from "../src/shared/api.js";
@@ -349,6 +349,22 @@ describe("TimelineEditor gesture bursts (#119)", () => {
     await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: ErrorCode.TransactionState });
     const third = await editor.apply(dir, "main", nudge(20.1), long);
     expect(third.operation.tx).not.toBe(first.operation.tx);
+  });
+
+  it("a burst of the longest burstGap survives minutes of idle time", async () => {
+    const { dir, app } = await setup();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const editor = new TimelineEditor((method, params) => app.request(method, params));
+      const long = { ...burst, burstGap: EDIT_BURST_GAP_MAX_MS };
+      const first = await editor.apply(dir, "main", nudge(20.033), long);
+      await vi.advanceTimersByTimeAsync(300_000);
+      const second = await editor.apply(dir, "main", nudge(20.067), long);
+      expect(second.operation.tx).toBe(first.operation.tx);
+      await editor.settle();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses a burstGap that is not a whole number of ms within the limit", async () => {
