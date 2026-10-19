@@ -211,23 +211,26 @@ describe("selection store", () => {
       const scene = { script: "scripts/plan.md", slug: "intro", title: "Intro" };
       selection.selectScene(scene, ["c_a"], { range: { from: 2, to: 8 }, origin: "timeline" });
       expect(selection.get()).toEqual({ ...blank, clips: ["c_a"], range: { from: 2, to: 8 }, scene, origin: "timeline" });
-      selection.retainSceneRange({ from: 0, to: 6 });
+      selection.retainScene({ range: { from: 0, to: 6 }, clips: ["c_a"] });
       expect(selection.get().range).toEqual({ from: 0, to: 6 });
       const moved = selection.get();
-      selection.retainSceneRange({ from: 0, to: 6 });
+      selection.retainScene({ range: { from: 0, to: 6 }, clips: ["c_a"] });
       expect(selection.get()).toBe(moved);
-      selection.retainSceneRange(null);
+      selection.retainScene(null);
       expect(selection.get()).toMatchObject({ range: null, scene, clips: ["c_a"] });
+      // The span comes back, and a clip linked since the pick joins the selection.
+      selection.retainScene({ range: { from: 1, to: 5 }, clips: ["c_a", "c_b"] });
+      expect(selection.get()).toMatchObject({ range: { from: 1, to: 5 }, scene, clips: ["c_a", "c_b"], origin: "timeline" });
       // A scene picked from its heading has no range to follow.
       selection.selectScene(scene, ["c_a"]);
-      selection.retainSceneRange({ from: 1, to: 2 });
+      selection.retainScene({ range: { from: 1, to: 2 }, clips: ["c_a"] });
       expect(selection.get().range).toBeNull();
       // An empty span is no range.
       selection.selectScene(scene, [], { range: { from: 3, to: 3 }, origin: "timeline" });
       expect(selection.get().range).toBeNull();
       // Another kind of range selection is not a scene's.
       selection.selectRange({ from: 1, to: 2 }, "timeline");
-      selection.retainSceneRange({ from: 5, to: 6 });
+      selection.retainScene({ range: { from: 5, to: 6 }, clips: [] });
       expect(selection.get().range).toEqual({ from: 1, to: 2 });
     });
 

@@ -262,4 +262,14 @@ describe("scene band", () => {
     expect(sceneAt(layout, viewport, 25, layout.head)).toBeNull();
     expect(sceneAt(layout, { ...viewport, scrollLeft: 30 }, 5, inBand)?.slug).toBe("intro");
   });
+
+  it("hits no clip over the band, even where scrolled lanes would sit under it", () => {
+    const layout = layoutTimeline(view(tracks), scenes);
+    const inBand = RULER_HEIGHT + 4;
+    const scrolled = { ...viewport, scrollTop: 30 };
+    // x = 95 is past the last span; contentY lands inside the first lane.
+    expect(sceneAt(layout, scrolled, 95, inBand)).toBeNull();
+    expect(clipAt(layout, scrolled, 95, inBand)).toBeNull();
+    expect(clipAt(layout, scrolled, 95, layout.head)?.clip.id).toBe("c_a");
+  });
 });

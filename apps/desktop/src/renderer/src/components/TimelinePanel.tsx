@@ -203,7 +203,7 @@ export function TimelinePanel({
     const picked = selection.get().scene;
     if (!picked) return;
     const box = scenes.find((candidate) => candidate.script === picked.script && candidate.slug === picked.slug);
-    selection.retainSceneRange(box ? { from: box.start, to: box.end } : null);
+    selection.retainScene(box ? { range: { from: box.start, to: box.end }, clips: box.clips } : null);
   }, [scenes]);
 
   // The History panel's pick, marked on the lanes: what that transaction or operation did.
@@ -721,6 +721,11 @@ function TimelineCanvas({
     const scene = sceneAt(layout, state.current, at.x, at.y);
     if (scene) {
       pickScene(scene);
+      return;
+    }
+    // Over the band but between spans: nothing under it is visible, so nothing is hit.
+    if (at.y < layout.head) {
+      selection.clear();
       return;
     }
     const grab = grabAt(layout, state.current, at.x, at.y);

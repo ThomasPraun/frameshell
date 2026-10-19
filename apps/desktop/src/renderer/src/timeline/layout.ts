@@ -348,10 +348,10 @@ export function sceneAt(layout: TimelineLayout, viewport: LaneViewport, x: numbe
 
 /**
  * Clip under a point of the canvas (`x` from the lanes' left edge, `y` from
- * the top, ruler included); null over the ruler, gaps and empty lanes.
+ * the top, ruler included); null over the ruler and scene band, gaps and empty lanes.
  */
 export function clipAt(layout: TimelineLayout, viewport: LaneViewport, x: number, y: number): { row: TrackRow; clip: ClipBox } | null {
-  if (y < RULER_HEIGHT) return null;
+  if (y < layout.head) return null;
   const contentY = y + viewport.scrollTop;
   const row = layout.rows.find((candidate) => contentY >= candidate.top && contentY < candidate.top + candidate.height);
   if (!row) return null;

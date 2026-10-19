@@ -1,7 +1,7 @@
 // Timeline editing (SPEC §10): what a press grabs, where a drag lands, which daemon edits a gesture or key sends.
 // Pure and DOM-free, like layout.ts: the panel feeds pointer and keys in and sends the edits out.
 import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
-import { type ClipBox, type LaneViewport, type TimelineLayout, type TrackRow, RULER_HEIGHT, clipAt, visibleClips } from "./layout.js";
+import { type ClipBox, type LaneViewport, type TimelineLayout, type TrackRow, clipAt, visibleClips } from "./layout.js";
 
 /** Edge handles are this wide at most, px; a third of the clip on short clips, so the middle still moves it. */
 const EDGE_PX = 6;
@@ -201,7 +201,7 @@ function nearest(snap: DragInput["snap"], time: number): SnapPoint | null {
 
 /** Lane under content `y`, or null over the ruler and below the last lane. */
 function rowAt(layout: TimelineLayout, y: number): TrackRow | null {
-  if (y < RULER_HEIGHT) return null;
+  if (y < layout.head) return null;
   return layout.rows.find((row) => y >= row.top && y < row.top + row.height) ?? null;
 }
 

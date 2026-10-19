@@ -417,13 +417,17 @@ export const selection = {
     else replace({ ...current, words: placed.map((entry) => entry.word), range });
   },
   /**
-   * Follow the span of a scene selected with a range (from the timeline's
-   * scene band) when a new revision moves it: `range` is where its words are
-   * now, null when none are placed any more. No-op for any other selection.
+   * Follow a scene picked on the timeline's band when a new revision changes
+   * it: `next` is its span and linked clips now, null when no span is placed
+   * (the range goes, the clips stay; both come back with the span). No-op
+   * for any other selection, including a scene picked from its heading.
    */
-  retainSceneRange(range: TimeRange | null): void {
-    if (current.scene === null || current.range === null || sameRange(range, current.range)) return;
-    replace({ ...current, range });
+  retainScene(next: { range: TimeRange; clips: readonly string[] } | null): void {
+    if (current.scene === null || current.origin !== "timeline") return;
+    const range = next && next.range.to > next.range.from ? next.range : null;
+    const clips = next ? next.clips : current.clips;
+    if (sameRange(range, current.range) && clips.length === current.clips.length && clips.every((id, i) => id === current.clips[i])) return;
+    replace({ ...current, range: range && { from: range.from, to: range.to }, clips: [...clips] });
   },
   /**
    * Drop the selected track, and words picked on it, once a new revision of
