@@ -14,9 +14,11 @@ import {
   type AnyClip,
   type AnyClipTrack,
   CORE_CLIP_TYPES,
+  RESERVED_MIC_IDS,
   type Clip,
   type ClipTrack,
   type MediaClip,
+  type Mic,
   type MulticamGroup,
   type ProgramTrack,
   SHOT_ANGLE_COUNTS,
@@ -209,6 +211,8 @@ class Edit {
         return this.multicamOffset(request.args);
       case "multicam.angle":
         return this.multicamAngle(request.args);
+      case "multicam.mic":
+        return this.multicamMic(request.args);
       case "shot.set":
         return this.shotSet(request.args);
       case "multicam.direct":
@@ -772,12 +776,15 @@ class Edit {
   // Multicam
 
   /**
-   * One multicam group from `args.angles` (offsets already measured), its
-   * program track on top, and one `grid` shot over the group's whole length.
+   * One multicam group from `args.angles` and `args.mics` (offsets already
+   * measured), its program track on top, and one `grid` shot over the cameras'
+   * whole length. A mic runs on past the cameras without extending the group.
    */
   async multicamCreate(args: OperationArgs<"multicam.create">): Promise<void> {
     const seen = new Set<string>();
     const angles: Angle[] = [];
+    const mics: Mic[] = [];
+    const givenMics = args.mics ?? [];
     let end = 0;
     for (const given of args.angles) {
       if (seen.has(given.asset)) {
@@ -788,7 +795,13 @@ class Edit {
       if (!info.video || info.duration === null) {
         throw this.invalid(`${given.asset} has no moving picture; a multicam angle needs a video file.`, {
           field: "angles",
-          hint: "Audio-only files and still images cannot be angles.",
+          hint: "Audio-only files and still images cannot be angles; give them as mics.",
+        });
+      }
+      if (given.mic !== undefined && given.mic !== null && given.mic >= givenMics.length) {
+        throw this.invalid(`angle ${given.asset} takes mic ${given.mic}, but there are ${givenMics.length} mic(s).`, {
+          field: "angles",
+          hint: "`mic` is a 0-based index into `mics`.",
         });
       }
       const name = given.name ?? basename(given.asset).replace(/\.[^.]*$/, "");
@@ -796,10 +809,27 @@ class Edit {
       angles.push({ id: this.angleId(name, angles), name, asset: given.asset, offset });
       end = Math.max(end, offset + info.duration);
     }
+    const taken: { id: string }[] = [...angles, ...RESERVED_MIC_IDS.map((id) => ({ id }))];
+    for (const given of givenMics) {
+      if (seen.has(given.asset)) {
+        throw this.invalid(`${given.asset} is listed twice.`, { field: "mics", hint: "A file is one angle or one mic; a camera's own sound needs no mic." });
+      }
+      seen.add(given.asset);
+      const info = await this.context.source(given.asset);
+      if (!info.audio) throw this.invalid(`${given.asset} has no sound; a mic needs an audio stream.`, { field: "mics" });
+      const name = given.name ?? basename(given.asset).replace(/\.[^.]*$/, "");
+      const mic: Mic = { id: this.angleId(name, taken), name, asset: given.asset, offset: Math.round(given.offset * 1000) / 1000 };
+      mics.push(mic);
+      taken.push(mic);
+    }
+    args.angles.forEach((given, index) => {
+      if (given.mic === undefined) return;
+      angles[index]!.mic = given.mic === null ? null : mics[given.mic]!.id;
+    });
     const last = this.grid.floor(end);
     if (this.grid.frame(last) < 1) throw this.invalid(`the files add up to less than one frame (${end} s).`, { field: "angles" });
     const id = this.newId("g");
-    const group: MulticamGroup = { id, ...(args.name ? { name: args.name } : {}), angles };
+    const group: MulticamGroup = { id, ...(args.name ? { name: args.name } : {}), angles, ...(mics.length > 0 ? { mics } : {}) };
     const track: ProgramTrack = {
       id: this.newId("t"),
       kind: "program",
@@ -817,12 +847,35 @@ class Edit {
     angle.offset = Math.round(args.offset * 1000) / 1000;
   }
 
-  /** Name, crop and sound of one angle; fields not given keep their value, defaults are not stored. */
+  /** Name, crop, sound and mic of one angle; fields not given keep their value, defaults are not stored. */
   multicamAngle(args: OperationArgs<"multicam.angle">): void {
     const { group, angle } = this.angle(args.group, args.angle);
-    const { name, crop, gain, muted } = args;
-    if ([name, crop, gain, muted].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted. To fix sync use `multicam.offset`." });
+    const { name, crop, gain, muted, mic } = args;
+    if ([name, crop, gain, muted, mic].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted, mic. To fix sync use `multicam.offset`." });
+    }
+    if (mic !== undefined) {
+      if (mic === "camera") delete angle.mic;
+      else if (mic === "none") {
+        angle.mic = null;
+        delete angle.audio;
+      } else {
+        if (!group.mics?.some((candidate) => candidate.id === mic)) {
+          const ids = group.mics?.map((candidate) => candidate.id);
+          throw this.invalid(`group ${group.id} has no mic "${mic}".`, {
+            field: "mic",
+            hint: `${ids && ids.length > 0 ? `Mics: ${ids.join(", ")}` : "The group has no mics"}; or \`camera\` for the angle's own sound, \`none\` for no sound.`,
+          });
+        }
+        angle.mic = mic;
+        delete angle.audio;
+      }
+    }
+    if ((gain !== undefined || muted !== undefined) && angle.mic !== undefined) {
+      throw this.invalid(`angle ${angle.id} takes its sound from ${angle.mic === null ? "no one" : `mic ${angle.mic}`}, so it has no gain or mute of its own.`, {
+        field: gain !== undefined ? "gain" : "muted",
+        hint: angle.mic === null ? "Set `mic: \"camera\"` to hear its file again." : `Use multicam.mic on ${angle.mic}.`,
+      });
     }
     if (name !== undefined) angle.name = name;
     if (crop === null) delete angle.crop;
@@ -1034,8 +1087,34 @@ class Edit {
     track.clips = [...kept, ...directed];
   }
 
-  /** Group `groupId` and its angle `angleId` in the draft; InvalidOperation naming the ids there are. */
-  angle(groupId: string, angleId: string): { group: MulticamGroup; angle: Angle } {
+  /** Offset, name and sound of one mic; fields not given keep their value, defaults are not stored. */
+  multicamMic(args: OperationArgs<"multicam.mic">): void {
+    const { group } = this.group(args.group);
+    const mic = group.mics?.find((candidate) => candidate.id === args.mic);
+    if (!mic) {
+      const ids = group.mics?.map((candidate) => candidate.id);
+      throw this.invalid(`group ${group.id} has no mic "${args.mic}".`, {
+        field: "mic",
+        hint: ids && ids.length > 0 ? `Mics: ${ids.join(", ")}.` : "The group has no mics; make it again with `frameshell multicam create --mic-file`.",
+      });
+    }
+    const { name, offset, gain, muted } = args;
+    if ([name, offset, gain, muted].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, offset, gain, muted." });
+    }
+    if (name !== undefined) mic.name = name;
+    if (offset !== undefined) mic.offset = Math.round(offset * 1000) / 1000;
+    if (gain !== undefined || muted !== undefined) {
+      const audio = { ...mic.audio, ...(gain !== undefined ? { gain } : {}), ...(muted !== undefined ? { muted } : {}) };
+      if (audio.gain === 0) delete audio.gain;
+      if (audio.muted === false) delete audio.muted;
+      if (Object.keys(audio).length === 0) delete mic.audio;
+      else mic.audio = audio;
+    }
+  }
+
+  /** Group `groupId` in the draft; InvalidOperation naming the ids there are. */
+  group(groupId: string): { group: MulticamGroup } {
     const group = this.draft.groups?.find((candidate) => candidate.id === groupId);
     if (!group) {
       const ids = (this.draft.groups ?? []).map((candidate) => candidate.id);
@@ -1044,18 +1123,26 @@ class Edit {
         hint: ids.length > 0 ? `Groups: ${ids.join(", ")}.` : "There are none; make one with `frameshell multicam create`.",
       });
     }
+    return { group };
+  }
+
+  /** Group `groupId` and its angle `angleId` in the draft; InvalidOperation naming the ids there are. */
+  angle(groupId: string, angleId: string): { group: MulticamGroup; angle: Angle } {
+    const { group } = this.group(groupId);
     const angle = group.angles.find((candidate) => candidate.id === angleId);
     if (!angle) {
       throw this.invalid(`group ${group.id} has no angle "${angleId}".`, {
         field: "angle",
-        hint: `Angles: ${group.angles.map((candidate) => candidate.id).join(", ")}.`,
+        hint: group.mics?.some((mic) => mic.id === angleId)
+          ? `${angleId} is a mic: use multicam.mic.`
+          : `Angles: ${group.angles.map((candidate) => candidate.id).join(", ")}.`,
       });
     }
     return { group, angle };
   }
 
   /** Angle id from a name: lowercase letters, digits, `-` and `_`; a number is appended on a clash. */
-  angleId(name: string, taken: readonly Angle[]): string {
+  angleId(name: string, taken: readonly { id: string }[]): string {
     const base = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "angle";
     let id = base;
     for (let n = 2; taken.some((angle) => angle.id === id); n++) id = `${base}-${n}`;

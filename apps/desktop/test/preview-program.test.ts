@@ -427,6 +427,28 @@ describe("compileProgram with a multicam program track", () => {
     expect(program.audio.some((s) => s.sidecar === sidecar("ben"))).toBe(false);
   });
 
+  it("plays a mic's file once, with its own offset and gain, instead of the angles' own sound", () => {
+    const miked = {
+      ...group,
+      angles: [
+        { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+        { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5, mic: "lav" },
+        { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0.25, mic: null },
+      ],
+      mics: [{ id: "lav", name: "Lav", asset: "assets/lav.wav", offset: 2, audio: { gain: -6 } }],
+    };
+    const program = compileProgram(
+      { ...view([programTrack([shot("s1", 0, 0, 3, "solo", ["ana"]), shot("s2", 3, 3, 4, "solo", ["ben"])])]), groups: [miked] },
+      assets(asset("assets/ana.mp4"), asset("assets/ben.mp4"), asset("assets/eva.mp4"), asset("assets/lav.wav", { proxy: null })),
+    );
+    // One unbroken span from the mic's start at group second 2 to the end of the program (4 s), across the shot change.
+    expect(program.audio).toEqual([
+      { clip: "s1/lav", start: 96_000, end: 192_000, sidecar: ".frameshell/proxies/assetslavwav.pcm", channels: 1, in: 0, speed: 1, gain: 10 ** (-6 / 20) },
+    ]);
+    // The pictures still come from the angles' files.
+    expect(program.layers.map(brief)).toEqual([["s1:ana@0-90<0", "s2:ben@90-120<45"]]);
+  });
+
   it("shows a placeholder for an angle still ingesting, in its slot only", () => {
     const ingesting = assets(asset("assets/ana.mp4"), asset("assets/ben.mp4", { state: "processing", proxy: null }), asset("assets/eva.mp4"));
     const program = compileProgram(talk([programTrack([SHOTS[1]!])]), ingesting);

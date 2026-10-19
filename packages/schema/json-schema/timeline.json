@@ -557,7 +557,70 @@
                   "description": "Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it."
                 },
                 "audio": {
-                  "description": "Gain and mute of this angle's sound, which plays under every shot.",
+                  "description": "Gain and mute of the sound of this angle's own file, which plays under every shot. Absent with `mic` set: the mic carries the level.",
+                  "type": "object",
+                  "properties": {
+                    "gain": {
+                      "description": "Gain in dB; 0 = unchanged, negative = quieter. Default 0.",
+                      "type": "number"
+                    },
+                    "muted": {
+                      "description": "Default false.",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "mic": {
+                  "description": "Where this angle's person is heard. Absent: the sound of its own file. An id of the group's `mics`: that mic (one mic may serve several angles and plays once); the file's own sound is then not played. null: no sound (a wide camera); its own file's sound is not played either.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "asset",
+                "offset"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "mics": {
+            "description": "Separate sound files of the group; angles pick theirs with `mic`. Absent: every angle has its own file's sound.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Unique among the group's angles and mics; angles name it in `mic`. Not `camera` or `none`."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Person or recorder, e.g. `Ana lav`."
+                },
+                "asset": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Project-relative file with sound, e.g. `assets/ana.wav`. Only its sound is used."
+                },
+                "offset": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."
+                },
+                "audio": {
+                  "description": "Gain and mute of this mic's sound, which plays under every shot, once even when several angles use it.",
                   "type": "object",
                   "properties": {
                     "gain": {

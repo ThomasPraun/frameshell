@@ -315,3 +315,69 @@ describe("program tracks under a moved nested clip", () => {
     expect(movedProgramGroups(podcast, resolve).size).toBe(0);
   });
 });
+
+describe("separate mics", () => {
+  // Wide camera hears nothing (`mic: null`); Ana has her own recorder file; Ben and Eva share the room mic; Cleo keeps her file's sound.
+  const withMics: MulticamGroup = {
+    id: "g_talk",
+    angles: [
+      { id: "wide", name: "Wide", asset: "assets/wide.mp4", offset: 0, mic: null },
+      { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "ana-lav" },
+      { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.5, mic: "room" },
+      { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0.25, mic: "room" },
+      { id: "cleo", name: "Cleo", asset: "assets/cleo.mp4", offset: 1, audio: { gain: -2 } },
+    ],
+    mics: [
+      { id: "ana-lav", name: "Ana lav", asset: "assets/ana.wav", offset: 2, audio: { gain: 3 } },
+      { id: "room", name: "Room", asset: "assets/room.wav", offset: 0.1 },
+    ],
+  };
+
+  it("keeps groups without mics valid and plays an angle's own file only without `mic`", () => {
+    expect(errorOf(multicam([program([])], [withMics]))).toBeNull();
+    expect(shotSound(shot("c_1", 0, 0, 4, "solo", ["ana"]), group).map((clip) => clip.asset)).toEqual(["assets/ana.mp4", "assets/ben.mp4", "assets/eva.mp4"]);
+  });
+
+  it("plays each mic once, however many angles use it, and nothing for angles with a mic or no mic", () => {
+    const clips = shotSound(shot("c_1", 10, 1, 4, "solo", ["ana"]), withMics);
+    expect(clips).toEqual([
+      { id: "c_1/cleo", type: "media", asset: "assets/cleo.mp4", start: 10, in: 0, out: 3, audio: { gain: -2 } },
+      // Ana's recorder starts at group second 2: its time 0 plays 1 s into the shot.
+      { id: "c_1/ana-lav", type: "media", asset: "assets/ana.wav", start: 11, in: 0, out: 2, audio: { gain: 3 } },
+      { id: "c_1/room", type: "media", asset: "assets/room.wav", start: 10, in: 0.9, out: 3.9 },
+    ]);
+    const sound = programSound(program([shot("c_1", 0, 0, 4, "solo", ["ana"])]), withMics);
+    expect(sound.map((t) => [t.id, t.name])).toEqual([
+      ["t_p/cleo", "Cleo"],
+      ["t_p/ana-lav", "Ana lav"],
+      ["t_p/room", "Room"],
+    ]);
+  });
+
+  it("refuses unknown, reserved and clashing mic ids, and levels set on an angle that takes its sound from a mic", () => {
+    const bad = (change: Partial<MulticamGroup>) => errorOf(multicam([], [{ ...withMics, ...change }]));
+    expect(bad({ angles: [{ ...withMics.angles[1]!, mic: "gone" }] })).toBe(
+      'groups.0.angles.0.mic: angle "ana" names mic "gone", which the group does not have (mics: ana-lav, room)',
+    );
+    expect(bad({ mics: [{ ...withMics.mics![0]!, id: "camera" }] })).toMatch(/groups\.0\.mics\.0\.id: mic id "camera" is reserved/);
+    expect(bad({ mics: [{ ...withMics.mics![0]!, id: "wide" }] })).toMatch(/groups\.0\.mics\.0\.id: mic id "wide" is already an angle or mic id/);
+    expect(bad({ mics: [withMics.mics![0]!, withMics.mics![0]!] })).toMatch(/groups\.0\.mics\.1\.id: mic id "ana-lav" is already/);
+    expect(bad({ angles: [{ ...withMics.angles[1]!, audio: { gain: 1 } }] })).toMatch(
+      /groups\.0\.angles\.0\.audio: angle "ana" takes its sound from mic "ana-lav": set gain and mute on the mic/,
+    );
+    expect(bad({ angles: [{ ...withMics.angles[0]!, audio: { muted: true } }] })).toMatch(/takes its sound from no one/);
+  });
+
+  it("puts a nested clip's gain on the mics and the angles playing their own file, not on angles with a mic", () => {
+    const podcast: Timeline = { ...createTimeline("podcast"), tracks: [program([shot("c_a", 0, 0, 3, "solo", ["ana"])])], groups: [withMics] };
+    const main: Timeline = {
+      ...createTimeline("main"),
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_n", type: "timeline", source: "timelines/podcast.json", start: 0, audio: { gain: -6 } }] }],
+    };
+    const flat = flattenTimeline(main, (source) => (source === "timelines/podcast.json" ? podcast : null));
+    const copy = flat.groups![0]!;
+    expect(copy.angles.map((angle) => angle.audio ?? null)).toEqual([null, null, null, null, { gain: -8 }]);
+    expect(copy.mics!.map((mic) => mic.audio?.gain)).toEqual([-3, -6]);
+    expect(parseTimeline(flat).ok).toBe(true);
+  });
+});

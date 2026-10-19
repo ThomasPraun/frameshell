@@ -11,8 +11,12 @@ _Avoid_: storyboard, shot list
 ## Multicam (ADR 0016)
 
 **Angle**:
-One synced source of a multicam group (usually one person's picture and mic), with its offset, crop and gain.
+One synced picture of a multicam group (usually one person), with its offset and crop. Its sound is its own file's, a mic's, or none.
 _Avoid_: camera, feed, participant
+
+**Mic**:
+A separate sound file of a multicam group with its own offset and gain. Angles pick one; one mic may serve several angles and plays once.
+_Avoid_: audio track, recorder
 
 **Multicam group**:
 The set of angles of one conversation, on one shared clock.

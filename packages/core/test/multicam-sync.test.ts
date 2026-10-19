@@ -1,6 +1,6 @@
 import { SYNC_LOW_CONFIDENCE } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { correlateProfiles, energyEnvelope, energyProfile, planOffsets } from "../src/index.js";
+import { correlateProfiles, energyEnvelope, energyProfile, planSync } from "../src/index.js";
 
 // Pure sync maths on in-memory audio: a shared burst pattern heard at different offsets, and files that share nothing.
 
@@ -68,21 +68,63 @@ describe("correlateProfiles", () => {
   });
 });
 
-describe("planOffsets", () => {
-  it("starts the earliest file at 0 and measures the others from it", () => {
-    // File 2 started 2.5 s after the reference; file 3 started 1 s before it.
-    const plan = planOffsets([
-      { lag: -2.5, confidence: 0.9 },
-      { lag: 1, confidence: 0.7 },
-    ]);
+describe("planSync", () => {
+  /** Stub estimates by `reference>other`: files are plain labels here. */
+  const estimates =
+    (table: Record<string, { lag: number; confidence: number }>) =>
+    (reference: string, other: string) =>
+      table[`${reference}>${other}`] ?? { lag: 0, confidence: 0 };
+
+  it("starts the earliest file at 0 and measures the others from the reference", () => {
+    // B started 2.5 s after the reference; C started 1 s before it.
+    const plan = planSync(["a", "b", "c"], estimates({ "a>b": { lag: -2.5, confidence: 0.9 }, "a>c": { lag: 1, confidence: 0.7 } }));
     expect(plan.map((entry) => entry.offset)).toEqual([1, 3.5, 0]);
     expect(plan.map((entry) => entry.confidence)).toEqual([null, 0.9, 0.7]);
+    expect(plan.map((entry) => entry.against)).toEqual([null, 0, 0]);
     expect(plan.every((entry) => entry.synced)).toBe(true);
   });
 
-  it("leaves an untrusted file where the reference starts, whatever lag it measured", () => {
-    const plan = planOffsets([{ lag: -7.77, confidence: 0.2 }, { lag: -2, confidence: 0.9 }]);
+  it("leaves an untrusted file where the reference starts, whatever lag it measured, and reports its best confidence", () => {
+    const plan = planSync(["a", "b", "c"], estimates({ "a>b": { lag: -7.77, confidence: 0.2 }, "a>c": { lag: -2, confidence: 0.9 } }));
     expect(plan.map((entry) => entry.offset)).toEqual([0, 0, 2]);
     expect(plan.map((entry) => entry.synced)).toEqual([true, false, true]);
+    expect(plan[1]).toMatchObject({ confidence: 0.2, against: null });
+  });
+
+  it("places a file that only matches another placed file, through it", () => {
+    // B hears nothing of the reference A but matches C, which matches A: B lands via C, in either file order.
+    const table = {
+      "a>c": { lag: -2, confidence: 0.8 },
+      "c>b": { lag: -1.5, confidence: 0.7 },
+      "a>b": { lag: 9, confidence: 0.1 },
+    };
+    const plan = planSync(["a", "b", "c"], estimates(table));
+    expect(plan.map((entry) => entry.offset)).toEqual([0, 3.5, 2]);
+    expect(plan.map((entry) => [entry.synced, entry.against])).toEqual([
+      [true, null],
+      [true, 2],
+      [true, 0],
+    ]);
+  });
+
+  it("takes the best match of all placed files, not the first", () => {
+    const table = {
+      "a>b": { lag: -1, confidence: 0.6 },
+      "a>c": { lag: -3, confidence: 0.9 },
+      "c>b": { lag: 2, confidence: 0.95 },
+    };
+    const plan = planSync(["a", "b", "c"], estimates(table));
+    expect(plan[1]).toMatchObject({ against: 2, confidence: 0.95 });
+    expect(plan.map((entry) => entry.offset)).toEqual([0, 1, 3]);
+  });
+
+  it("uses the first file with sound as the reference and leaves silent files unsynced at its start", () => {
+    const plan = planSync([null, "m", null, "n"], estimates({ "m>n": { lag: -4, confidence: 0.9 } }));
+    expect(plan.map((entry) => [entry.offset, entry.synced, entry.confidence, entry.against])).toEqual([
+      [0, false, 0, null],
+      [0, true, null, null],
+      [0, false, 0, null],
+      [4, true, 0.9, 1],
+    ]);
   });
 });

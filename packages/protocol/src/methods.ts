@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 43;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1194,22 +1194,34 @@ export const methods = {
   "multicam.create": {
     mutating: true,
     description:
-      "Make a multicam group from one file per person (ADR 0016). Measures each file's offset against the FIRST by audio " +
-      "cross-correlation (the sound they share: a clap, the room, bleed from the other mic), shifts all so the earliest starts at 0, " +
-      "then adds the group, a program track and one `grid` shot over the whole length. Example: " +
-      "`{ assets: [\"assets/ana.mp4\", \"assets/ben.mp4\"], names: [\"Ana\", \"Ben\"] }`. `sync` reports each file's offset and " +
-      "`confidence` (0 to 1). Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the first file), " +
-      "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset`. Only the first ten minutes of " +
-      "each file are matched. Needs two or more files, each with a picture and sound. " +
-      "Fails with InvalidOperation (file missing or unreadable, no picture or sound, outside the project).",
+      "Make a multicam group from cameras (one file per camera or person) and, optionally, separate mic files (ADR 0016). Measures " +
+      "every file's offset by audio cross-correlation (the sound they share: a clap, the room, bleed from the other mic) against " +
+      "ALL the others, not only the first: each file is placed by its best match with a file already placed, so a camera whose " +
+      "sound is faint still lands through the mic that hears the same room. The earliest file starts at 0, then the group, a " +
+      "program track and one `grid` shot over the cameras' length are added. A camera's sound is its own file's unless a mic " +
+      "carries it: `soundOf` has one entry per camera, a 1-based index into `mics`, `none` (wide camera: no sound) or `camera` " +
+      "(its own file). Default: the camera n takes mic n while there are mics, the rest keep their own file; one mic may serve " +
+      "several cameras. Example: `{ assets: [\"assets/wide.mp4\", \"assets/ana.mp4\", \"assets/ben.mp4\"], mics: [\"assets/ana.wav\", " +
+      "\"assets/ben.wav\"], soundOf: [\"none\", \"1\", \"2\"] }`. `sync` reports each file's offset, `confidence` (0 to 1) and the file it " +
+      "was matched `against`. Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the reference), " +
+      "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset` (cameras) or " +
+      "`multicam.mic` (mics). Only the first ten minutes of each file are matched. Needs two or more cameras with a picture; " +
+      "the reference is the first file with sound; a file without sound is not synced. " +
+      "Fails with InvalidOperation (file missing or unreadable, no picture, no file with sound, outside the project, bad `soundOf`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       assets: z
         .array(z.string().min(1))
         .min(2)
-        .describe("Media files inside the project, absolute or relative to `cwd`; the first one sets the clock."),
+        .describe("Camera files with a picture, inside the project, absolute or relative to `cwd`; the first one sets the clock unless it has no sound."),
       names: z.array(z.string().min(1)).optional().describe("Angle names in the same order, e.g. the people. Default: file names."),
+      mics: z.array(z.string().min(1)).optional().describe("Separate sound files (audio or video files; only the sound is used), same rules as `assets`."),
+      micNames: z.array(z.string().min(1)).optional().describe("Mic names in the same order as `mics`. Default: file names."),
+      soundOf: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("One entry per camera, in order: a 1-based index into `mics`, `none` or `camera`. Default: see the description."),
       name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
     }),
     result: MulticamCreateResultSchema,
@@ -1225,13 +1237,25 @@ export const methods = {
     params: operationArgs["multicam.offset"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "multicam.mic": {
+    mutating: true,
+    description:
+      "Change one separate mic of a multicam group: `name`, `offset` (group-clock second at which its file's time 0 plays, absolute; " +
+      "fixes its sync) and its sound under every shot (`gain` dB, `muted`). The mic plays once, whichever angles use it. " +
+      "Example: `{ group: \"g_1a2b3c\", mic: \"ana-lav\", offset: 0.84, gain: -2 }`. Pick which mic an angle uses with `multicam.angle`. " +
+      "Fails with InvalidOperation when the group or mic does not exist or nothing is given.",
+    params: operationArgs["multicam.mic"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
   "multicam.angle": {
     mutating: true,
     description:
       "Change one angle of a multicam group: `name`, `crop` (fractions of its picture cut off each side, merged side by side; " +
-      "null removes it) and its sound under every shot (`gain` dB, `muted`). The angle id stays, so shots keep showing it. " +
+      "null removes it), its sound under every shot (`gain` dB, `muted`: the angle's own file; with a mic they belong to the mic, see " +
+      "`multicam.mic`) and where it is heard (`mic`: a mic id of the group, `camera` for its own file, `none` for no sound). " +
+      "The angle id stays, so shots keep showing it. " +
       "Example: `{ group: \"g_1a2b3c\", angle: \"ben\", crop: { left: 0.1, right: 0.1 }, gain: -3 }`. Sync is `multicam.offset`. " +
-      "Fails with InvalidOperation when the group or angle does not exist, nothing is given, or the crop would leave no picture " +
+      "Fails with InvalidOperation when the group, angle or mic does not exist, nothing is given, gain or muted is given for an angle that takes its sound from a mic or none, or the crop would leave no picture " +
       "(left + right, top + bottom must stay below 1).",
     params: operationArgs["multicam.angle"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

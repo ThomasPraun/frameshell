@@ -76,6 +76,7 @@ const en = {
   sideBottom: "bottom",
   muteAngleTitle: "Mute this angle under every shot",
   unmuteAngleTitle: "Unmute this angle",
+  soundFromMicTitle: "This angle is heard through a mic (or none): its level is set on the mic",
 };
 
 const es: typeof en = {
@@ -154,6 +155,7 @@ const es: typeof en = {
   sideBottom: "abajo",
   muteAngleTitle: "Silenciar este ángulo bajo todos los planos",
   unmuteAngleTitle: "Quitar el silencio de este ángulo",
+  soundFromMicTitle: "Este ángulo se oye por un micrófono (o por ninguno): su nivel se ajusta en el micrófono",
 };
 
 export const inspector = { en, es };

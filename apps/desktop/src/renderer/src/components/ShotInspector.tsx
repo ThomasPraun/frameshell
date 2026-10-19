@@ -186,6 +186,8 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
       {group.angles.map((angle) => {
         const crop = angle.crop ?? {};
         const muted = angle.audio?.muted === true;
+        // With a mic (or none) the level belongs to the mic, edited by the agent or CLI: `multicam.mic`.
+        const heard = angle.mic === undefined;
         return (
           <div key={angle.id} className="clip-inspector-group angle-row" role="group" aria-label={t.inspector.angleRow(angle.name)} data-angle={angle.id}>
             <Swatch color={colors.get(angle.id) ?? 0} />
@@ -199,11 +201,12 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
             <NumberField name="cropTop" stored={crop.top ?? 0} onCommit={(top) => set(angle, { crop: { top } })} />
             <NumberField name="cropRight" stored={crop.right ?? 0} onCommit={(right) => set(angle, { crop: { right } })} />
             <NumberField name="cropBottom" stored={crop.bottom ?? 0} onCommit={(bottom) => set(angle, { crop: { bottom } })} />
-            <NumberField name="gain" stored={angle.audio?.gain ?? 0} disabled={muted} onCommit={(gain) => set(angle, { gain })} />
+            <NumberField name="gain" stored={angle.audio?.gain ?? 0} disabled={muted || !heard} onCommit={(gain) => set(angle, { gain })} />
             <button
               className={`clip-inspector-button clip-inspector-mute${muted ? " on" : ""}`}
               aria-pressed={muted}
-              title={muted ? t.inspector.unmuteAngleTitle : t.inspector.muteAngleTitle}
+              title={!heard ? t.inspector.soundFromMicTitle : muted ? t.inspector.unmuteAngleTitle : t.inspector.muteAngleTitle}
+              disabled={!heard}
               onClick={() => set(angle, { muted: !muted })}
             >
               {t.inspector.mute}

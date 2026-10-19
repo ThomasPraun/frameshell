@@ -531,22 +531,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "multicam.create": async ({ cwd, timeline, assets, names, name }, caller) => {
+    "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name }, caller) => {
       const dir = await root(cwd);
       const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
         root: dir,
         cwd,
         assets,
         names,
+        mics,
+        micNames,
+        soundOf,
       });
       const angles = measured.assets.map((asset, i) => ({
         asset,
         ...(names ? { name: names[i]! } : {}),
         offset: measured.plan[i]!.offset,
+        ...(measured.soundOf[i] !== undefined ? { mic: measured.soundOf[i]! } : {}),
+      }));
+      const micFiles = measured.mics.map((asset, i) => ({
+        asset,
+        ...(micNames ? { name: micNames[i]! } : {}),
+        offset: measured.plan[measured.assets.length + i]!.offset,
       }));
       // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
       let written: Timeline | undefined;
-      const result = await operate("multicam.create", { cwd, timeline, angles, ...(name ? { name } : {}) }, caller, (after) => {
+      const result = await operate("multicam.create", { cwd, timeline, angles, ...(micFiles.length > 0 ? { mics: micFiles } : {}), ...(name ? { name } : {}) }, caller, (after) => {
         written = after;
       });
       const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
@@ -557,6 +566,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
     "multicam.angle": (params, caller) => operate("multicam.angle", params, caller),
+    "multicam.mic": (params, caller) => operate("multicam.mic", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);

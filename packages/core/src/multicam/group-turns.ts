@@ -13,7 +13,7 @@ export interface TurnsSource {
 
 /** Speaking turns of a group plus what could not be measured. */
 export interface GroupTurns {
-  /** Group-clock seconds where the last angle's file ends. */
+  /** Group-clock seconds where the last sound ends. */
   duration: number;
   /** Each carries the angle's display name. */
   turns: (Turn & { name: string })[];
@@ -23,24 +23,45 @@ export interface GroupTurns {
 
 /**
  * Turns of every angle of `group` (see {@link speakingTurns}), from the
- * cached energy envelopes of the angles' files. An angle whose file has no
- * sound or cannot be decoded gets no turns and a warning; it does not fail the call.
- * Daemon errors (missing asset, ffmpeg unavailable) are thrown, never turned into warnings.
+ * cached energy envelopes of the angles' sound: its own file, or its mic
+ * (offset and gain of the mic; angles sharing a mic hear the same voice, so
+ * they speak together). An angle with `mic: null` has no turns and no warning.
+ * An angle whose file has no sound or cannot be decoded gets no turns and a
+ * warning; it does not fail the call. Daemon errors (missing asset, ffmpeg
+ * unavailable) are thrown, never turned into warnings.
  */
 export async function groupTurns(source: TurnsSource, root: string, group: MulticamGroup): Promise<GroupTurns> {
   const warnings: string[] = [];
   const inputs: TurnInput[] = [];
-  for (const angle of group.angles) {
+  const profiles = new Map<string, EnergyProfile | null>();
+  const profileOf = async (asset: string, who: string): Promise<EnergyProfile | null> => {
+    if (profiles.has(asset)) return profiles.get(asset)!;
     let profile: EnergyProfile | null = null;
     try {
-      const probe = await source.probe(root, angle.asset);
-      if (probe.audio) profile = await source.profile(root, angle.asset);
-      else warnings.push(`${angle.name} (${angle.asset}) has no sound, so it has no turns.`);
+      const probe = await source.probe(root, asset);
+      if (probe.audio) profile = await source.profile(root, asset);
+      else warnings.push(`${who} (${asset}) has no sound, so it has no turns.`);
     } catch (error) {
       if (error instanceof RpcError) throw error;
-      warnings.push(`${angle.name} (${angle.asset}): could not read the sound (${(error as Error).message}), so it has no turns.`);
+      warnings.push(`${who} (${asset}): could not read the sound (${(error as Error).message}), so it has no turns.`);
     }
-    inputs.push({ id: angle.id, offset: angle.offset, gain: angle.audio?.gain ?? 0, profile });
+    profiles.set(asset, profile);
+    return profile;
+  };
+  for (const angle of group.angles) {
+    if (angle.mic === null) {
+      inputs.push({ id: angle.id, offset: angle.offset, profile: null });
+    } else if (angle.mic === undefined) {
+      inputs.push({ id: angle.id, offset: angle.offset, gain: angle.audio?.gain ?? 0, profile: await profileOf(angle.asset, angle.name) });
+    } else {
+      const mic = group.mics?.find((candidate) => candidate.id === angle.mic);
+      if (!mic) {
+        warnings.push(`${angle.name} names mic ${angle.mic}, which the group does not have, so it has no turns.`);
+        inputs.push({ id: angle.id, offset: angle.offset, profile: null });
+        continue;
+      }
+      inputs.push({ id: angle.id, offset: mic.offset, gain: mic.audio?.gain ?? 0, profile: await profileOf(mic.asset, `${angle.name}'s mic ${mic.name}`) });
+    }
   }
   const duration = Math.max(0, ...inputs.map((input) => (input.profile ? input.offset + input.profile.db.length * ENERGY_HOP_S : 0)));
   const names = new Map(group.angles.map((angle) => [angle.id, angle.name]));

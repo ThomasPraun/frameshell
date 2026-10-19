@@ -179,12 +179,15 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
         if (child.kind === "program") {
           const group = flat.groups.find((candidate) => candidate.id === child.group);
           if (!group) continue;
-          // A copy per nested clip, so the clip's gain and mute can go onto its angles.
-          const angles = group.angles.map((angle) => {
-            const audio = composeAudio(clip.audio, angle.audio);
-            return audio ? { ...angle, audio } : angle;
-          });
-          const renamed: MulticamGroup = { ...group, id: `${clip.id}/${group.id}`, angles };
+          // A copy per nested clip, so the clip's gain and mute can go onto each sound: the angles playing
+          // their own file and the mics (an angle with a mic carries no audio of its own).
+          const withClipAudio = <T extends { audio?: ClipAudio | undefined }>(sound: T): T => {
+            const audio = composeAudio(clip.audio, sound.audio);
+            return audio ? { ...sound, audio } : sound;
+          };
+          const angles = group.angles.map((angle) => (angle.mic === undefined ? withClipAudio(angle) : angle));
+          const mics = group.mics?.map(withClipAudio);
+          const renamed: MulticamGroup = { ...group, id: `${clip.id}/${group.id}`, angles, ...(mics ? { mics } : {}) };
           groups.push(renamed);
           if (videoIndex === 0) programFirst = true;
           const id = `${track.id}/p${++programIndex}`;
@@ -418,43 +421,69 @@ export function shotLayers(shot: ShotClip, group: MulticamGroup, output: Size, s
   });
 }
 
-/**
- * Every angle's sound under `shot`, as media clips (`<shot>/<angle>`) in
- * group order: source time = group time - the angle's offset, with its gain
- * and mute. The part before an asset's time 0 is left out (the clip starts
- * later); the end is not bounded by the asset's length, which only a probe
- * knows. Angles with nothing under the shot are left out.
- */
-export function shotSound(shot: ShotClip, group: MulticamGroup): MediaClip[] {
-  const clips: MediaClip[] = [];
-  for (const angle of group.angles) {
-    const from = shot.in - angle.offset;
-    const to = shot.out - angle.offset;
-    if (to <= 0) continue;
-    const skipped = Math.max(0, -from);
-    clips.push({
-      id: `${shot.id}/${angle.id}`,
-      type: "media",
-      asset: angle.asset,
-      start: shot.start + skipped,
-      in: from + skipped,
-      out: to,
-      ...(angle.audio ? { audio: angle.audio } : {}),
-    });
-  }
-  return clips;
+/** One sound of a multicam group: an angle's own file, or a mic. */
+export interface GroupSound {
+  /** Angle id (its own file's sound) or mic id; unique in the group. */
+  id: string;
+  name: string;
+  /** Project-relative file. */
+  asset: string;
+  /** Group-clock second at which the file's time 0 plays. */
+  offset: number;
+  audio?: ClipAudio;
 }
 
 /**
- * Sound of a program track showing `group`: one audio track per angle
- * (`<track>/<angle>`, group order) holding that angle's {@link shotSound}
- * under each shot, so a mixer that plays audio tracks plays the program.
+ * The sounds that play under every shot of `group`, in order: the own-file
+ * sound of each angle without a `mic`, then each mic once however many
+ * angles use it. Angles with `mic: null` or a mic add none of their own.
+ */
+export function groupSounds(group: MulticamGroup): GroupSound[] {
+  const own = group.angles.filter((angle) => angle.mic === undefined);
+  return [...own, ...(group.mics ?? [])].map(({ id, name, asset, offset, audio }) => ({ id, name, asset, offset, ...(audio ? { audio } : {}) }));
+}
+
+/** `sound` under `shot` as a media clip (`<shot>/<sound id>`); null when nothing of it plays there. */
+function soundClip(shot: ShotClip, sound: GroupSound): MediaClip | null {
+  const from = shot.in - sound.offset;
+  const to = shot.out - sound.offset;
+  if (to <= 0) return null;
+  const skipped = Math.max(0, -from);
+  return {
+    id: `${shot.id}/${sound.id}`,
+    type: "media",
+    asset: sound.asset,
+    start: shot.start + skipped,
+    in: from + skipped,
+    out: to,
+    ...(sound.audio ? { audio: sound.audio } : {}),
+  };
+}
+
+/**
+ * Every sound of the group ({@link groupSounds}) under `shot`, as media clips
+ * (`<shot>/<sound id>`): source time = group time - the sound's offset, with
+ * its gain and mute. The part before an asset's time 0 is left out (the clip
+ * starts later); the end is not bounded by the asset's length, which only a
+ * probe knows. Sounds with nothing under the shot are left out.
+ */
+export function shotSound(shot: ShotClip, group: MulticamGroup): MediaClip[] {
+  return groupSounds(group).flatMap((sound) => soundClip(shot, sound) ?? []);
+}
+
+/**
+ * Sound of a program track showing `group`: one audio track per sound
+ * (`<track>/<sound id>`, {@link groupSounds} order) holding its
+ * {@link shotSound} under each shot, so a mixer that plays audio tracks
+ * plays the program.
  */
 export function programSound(track: ProgramTrack, group: MulticamGroup): ClipTrack[] {
-  return group.angles.map((angle) => {
-    const alone = { ...group, angles: [angle] };
-    return { id: `${track.id}/${angle.id}`, kind: "audio", name: angle.name, clips: track.clips.flatMap((shot) => shotSound(shot, alone)) };
-  });
+  return groupSounds(group).map((sound) => ({
+    id: `${track.id}/${sound.id}`,
+    kind: "audio",
+    name: sound.name,
+    clips: track.clips.flatMap((shot) => soundClip(shot, sound) ?? []),
+  }));
 }
 
 /** The group `track` shows; null when the timeline has none by that id. */
