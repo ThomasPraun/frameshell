@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop: a new project can start from an audio file (`wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`, `opus`), from **New from video…**, a drop on the welcome screen or Open with (ADR 0015). The confirmation offers a 16:9 (default) or 9:16 frame; the audio goes on its own audio track in one undoable step, and is transcribed. Frameshell is also offered in Open with for audio, never as its default player.
 - Protocol v36: `project.init` takes `resolution`, the frame size for a project whose `like` file has no picture.
 - Scripts: a scene can name the transcript words it covers with `<!-- words: talk.words.json w_000010..w_000042 -->` (transcript file optional while one transcript holds the ids) right under its `##` heading (ADR 0015). `frameshell script outline --json` (and the `script.outline` MCP resource) then returns each scene's `wordRange` and `span`, the timeline seconds its words occupy per timeline, through clips cut inside the range; unknown ids, ambiguous bare ranges and reversed ranges are warnings. Protocol v37.
+- Desktop: the timeline shows a band under the ruler with one span per script scene that names transcript words (ADR 0015), labelled with its heading; scenes with no clip linked by `scriptRef` are drawn hollow. It follows the script, the transcript and the timeline live. A click on a span selects its time range, and Ask agent on it writes `[frameshell] scene <script>#<slug> "<title>" · <time range> · clips …`.
 
 ### Changed
 

@@ -322,7 +322,7 @@ Plain Markdown. Optional conventions:
 - YAML frontmatter: `title`, `target_duration`, `aspect`.
 - Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`). A `scriptRef` without `#anchor` refers to the whole script.
 - A scene may name the transcript words it covers with an HTML comment right under its heading, `<!-- words: talk.words.json w_000010..w_000042 -->` (ADR 0015). Optional; a single id names one word. Word ids repeat across transcripts, so the comment names the transcript file (under `transcripts/`); the bare form `<!-- words: w_000010..w_000042 -->` works only while exactly one transcript holds both ids, otherwise it warns and places nothing. The range runs in transcript order and stays inside one transcript.
-- `frameshell script outline <file> --json` returns parsed scenes; a scene with a words comment also gets its `span`: first to last placed word on each timeline. The UI highlights the scene of the selected clip and flags scenes with no clips.
+- `frameshell script outline <file> --json` returns parsed scenes; a scene with a words comment also gets its `span`: first to last placed word on each timeline. The UI highlights the scene of the selected clip and flags scenes with no clips; the timeline shows a band under the ruler with one span per scene that has a placed word range (hollow while no clip of that timeline has its `scriptRef`), and a click on a span selects its time range and clips.
 
 ### 5.6 Schema evolution
 
@@ -508,7 +508,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
   [frameshell] asset assets/logo.png
   [frameshell] file scripts/launch.md
   [frameshell] clip c_0012 · media assets/raw-01.mp4 · 00:00:12.40–00:00:31.00 · track t_1a2b3c
-  [frameshell] scene scripts/launch.md#intro "Intro" · clips c_0100, c_0101
+  [frameshell] scene scripts/launch.md#intro "Intro" · 00:00:00.20–00:00:12.50 · clips c_0100, c_0101
   [frameshell] transaction tx_0042
   [frameshell] operation op_0310
   [frameshell] range 00:01:00.00–00:01:12.50

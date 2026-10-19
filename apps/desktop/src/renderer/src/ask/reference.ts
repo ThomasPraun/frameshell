@@ -147,7 +147,7 @@ function pointLine(point: SelectedPoint, view: TimelineView | null, extras: Refe
  * The reference of `selection`, one line per selected item (SPEC §10):
  * words become subtitle lines (one per clip playing them), clips one line
  * each, a History pick its transaction or operation first, a script scene
- * one line naming its clips, a bare timeline range, explorer files (`asset`
+ * one line naming its time span (when picked on the timeline's scene band) and its clips, a bare timeline range, explorer files (`asset`
  * under `assets/`, else `file`), a preview region naming the clips under it
  * (topmost first) and its saved `frame` capture when there is one, or
  * `frame pending` while a render it needs is not ready (ADR 0011), and
@@ -168,7 +168,8 @@ export function referenceLines(selection: Selection, view: TimelineView | null, 
   if (selection.scene) {
     const { script, slug, title } = selection.scene;
     const clips = selection.clips.length > 0 ? [`clips ${selection.clips.join(", ")}`] : [];
-    return [[`${TAG} scene ${script}#${slug} ${quote(title)}`, ...clips].join(" · ")];
+    const when = selection.range ? [span(selection.range.from, selection.range.to)] : [];
+    return [[`${TAG} scene ${script}#${slug} ${quote(title)}`, ...when, ...clips].join(" · ")];
   }
   if (selection.files.length > 0) {
     return selection.files.map((path) => `${TAG} ${path.startsWith("assets/") ? "asset" : "file"} ${path}`);
