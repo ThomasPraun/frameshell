@@ -8,6 +8,7 @@ import type {
   MethodParams,
   OperationResult,
   RevertConflict,
+  MulticamTurnsResult,
   ScriptOutlineResult,
   TimelineRejection,
   TimelineView,
@@ -408,6 +409,13 @@ export interface FrameshellApi {
      */
     live(timeline: string, clip: string): Promise<LiveClipPage>;
   };
+  multicam: {
+    /**
+     * `multicam.turns` of a group of a timeline of the window's project: who speaks when, on the group clock
+     * (ADR 0016). Rejects with the daemon's message.
+     */
+    turns(timeline: string, group: string): Promise<MulticamTurnsResult>;
+  };
   scripts: {
     /**
      * `script.outline` of a script of the window's project (project-relative path): its scenes with the
@@ -530,6 +538,7 @@ export const Channel = {
   clipsJob: "clips:job",
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
+  multicamTurns: "multicam:turns",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",
