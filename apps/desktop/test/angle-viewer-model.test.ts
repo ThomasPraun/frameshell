@@ -1,6 +1,6 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { groupTimeAt, programRows, sameTurns, speakingAt, viewerModel } from "../src/renderer/src/angles/model.js";
+import { groupTimeAt, programRows, sameTurns, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
 
 // Seam under test: what the multicam viewer shows at a playhead time (#243): group clock, shot angles, speakers.
 
@@ -116,5 +116,52 @@ describe("speakingAt and sameTurns", () => {
     expect(sameTurns(turns, [{ ...turns[0]! }])).toBe(true);
     expect(sameTurns(turns, [{ ...turns[0]!, end: 3 }])).toBe(false);
     expect(sameTurns(turns, [])).toBe(false);
+  });
+});
+
+describe("turnsKey", () => {
+  const angles = [
+    { id: "ana", asset: "assets/room.mp4", offset: 0 },
+    { id: "ben", asset: "assets/room.mp4", offset: 0 },
+  ];
+  const transcript = (speaker: string, edits = {}) => ({
+    path: "transcripts/room.words.json",
+    transcript: {
+      version: 1,
+      asset: "assets/room.mp4",
+      assetHash: `sha256:${"a".repeat(64)}`,
+      words: [{ id: "w1", text: "hi", start: 0, end: 0.4, speaker }],
+      edits,
+      speakers: [{ id: "s1", name: "Speaker 1" }, { id: "s2", name: "Speaker 2" }],
+    },
+  }) as never;
+  const hashes = new Map([["assets/room.mp4", `sha256:${"a".repeat(64)}`]]);
+
+  it("changes when a speaker correction lands in a transcript of an angle's asset", () => {
+    const before = turnsKey(angles, [transcript("s1")], hashes);
+    expect(turnsKey(angles, [transcript("s1")], hashes)).toBe(before);
+    expect(turnsKey(angles, [transcript("s1", { w1: { speaker: "s2" } })], hashes)).not.toBe(before);
+    expect(turnsKey(angles, [transcript("s2")], hashes)).not.toBe(before);
+  });
+
+  it("changes when the asset hash moves, and ignores transcripts of other assets", () => {
+    const before = turnsKey(angles, [transcript("s1")], hashes);
+    expect(turnsKey(angles, [transcript("s1")], new Map([["assets/room.mp4", null]]))).not.toBe(before);
+    const other = { path: "transcripts/x.words.json", transcript: { asset: "assets/x.mp4" } } as never;
+    expect(turnsKey(angles, [transcript("s1"), other], hashes)).toBe(before);
+  });
+
+  it("follows the transcript of a mic the angles share, and changes when the mics do", () => {
+    const cameras = [
+      { id: "ana", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+      { id: "ben", asset: "assets/ben.mp4", offset: 0, mic: "lav" },
+    ];
+    const mics = [{ id: "lav", asset: "assets/room.mp4", offset: 0.5 }];
+    const before = turnsKey(cameras, [transcript("s1")], hashes, mics);
+    expect(turnsKey(cameras, [transcript("s1", { w1: { speaker: "s2" } })], hashes, mics)).not.toBe(before);
+    const moved = [{ ...mics[0]!, offset: 0.6 }];
+    expect(turnsKey(cameras, [transcript("s1")], hashes, moved)).not.toBe(before);
+    // Without the mic, room.mp4 is no angle's sound: its transcript does not count.
+    expect(turnsKey(cameras, [transcript("s1", { w1: { speaker: "s2" } })], hashes)).toBe(turnsKey(cameras, [transcript("s1")], hashes));
   });
 });

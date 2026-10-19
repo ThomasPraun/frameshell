@@ -278,7 +278,7 @@ describe("frameshell doctor", () => {
     FRAMESHELL_CONFIG_DIR: configDir,
   });
 
-  it("--json lists managed ffmpeg, ffprobe, whisper-cli and headless Chrome as not installed, without downloading, and exits 1", () => {
+  it("--json lists managed ffmpeg, ffprobe, whisper-cli, headless Chrome and the diarization tool as not installed, without downloading, and exits 1", () => {
     // A PATH without frameshell, whatever the machine has installed.
     const env = { ...isolated(), PATH: tempDir() };
     const result = frameshell(["doctor", "--json"], tempDir(), env);
@@ -291,10 +291,12 @@ describe("frameshell doctor", () => {
       ["ffprobe", "managed", false],
       ["whisper-cli", "managed", false],
       ["chrome-headless-shell", "managed", false],
+      ["sherpa-onnx-offline-speaker-diarization", "managed", false],
     ]);
     expect(report.problems.join("\n")).toMatch(/doctor --install|No managed ffmpeg build/);
-    // whisper.cpp installs on first transcription, headless Chrome on first HyperFrames render: never a problem here.
-    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome/);
+    // whisper.cpp installs on first transcription, headless Chrome on first HyperFrames render, sherpa-onnx on first
+    // speaker diarization: never a problem here.
+    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome|sherpa/);
     // Which frameshell PATH runs is advice, never a problem: an empty PATH adds a note and no problem.
     expect(report.command).toMatchObject({ path: null, self: { entry: realpathSync(cliBin), app: false } });
     expect(report.command.notes).toEqual([expect.stringContaining("File → Install 'frameshell' Command in PATH")]);

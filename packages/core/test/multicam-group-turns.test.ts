@@ -16,6 +16,7 @@ const profiles: Record<string, EnergyProfile> = {
 const source = {
   probe: async () => ({ audio: {} }) as unknown as MediaProbe,
   profile: async (_root: string, asset: string) => profiles[asset]!,
+  transcript: async () => null,
 };
 const angles = [
   { id: "ana", name: "Ana", asset: "ana.mp4", offset: 0 },

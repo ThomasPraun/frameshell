@@ -143,9 +143,10 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (tool.name === "frame_capture") return capture(await link.get(), args);
     if (tool.name === "frames_strip") return strip(await link.get(), args);
     const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
-    if (tool.method === "transcribe") {
+    if (tool.method === "transcribe" || tool.method === "transcribe.speakers") {
       const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
-      notify([transcriptUri(transcript)], true);
+      // Speakers rewrite an existing transcript: its resource changed, the list did not.
+      notify([transcriptUri(transcript)], tool.method === "transcribe");
     }
     return { content: [{ type: "text", text: compact(result) }] };
   };

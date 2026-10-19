@@ -33,6 +33,11 @@ const en = {
   keptTitle: (time: string) => `${time} · double-click to fix the text`,
   speechInside: " Holds more speech than this word; do not cut inside it.",
   wordLabel: (text: string) => `Text of “${text}”`,
+  setSpeaker: (name: string, count: number) => (count === 1 ? `Said by ${name}` : `${count} words said by ${name}`),
+  speakerSet: (name: string, count: number) => `${count === 1 ? "1 word" : `${count} words`} now said by ${name}.`,
+  speakerNotSet: (message: string) => `Speaker not changed: ${message}`,
+  speakerTitle: (name: string) => `${name} speaks. Right-click words to say someone else does.`,
+  unknownSpeaker: "Unknown speaker",
 };
 
 const es: typeof en = {
@@ -67,6 +72,11 @@ const es: typeof en = {
   keptTitle: (time) => `${time} · doble clic para corregir el texto`,
   speechInside: " Contiene más habla que esta palabra; no cortes dentro de ella.",
   wordLabel: (text) => `Texto de “${text}”`,
+  setSpeaker: (name, count) => (count === 1 ? `Lo dice ${name}` : `${count} palabras las dice ${name}`),
+  speakerSet: (name, count) => `${count === 1 ? "Ahora 1 palabra la dice" : `Ahora ${count} palabras las dice`} ${name}.`,
+  speakerNotSet: (message) => `No se cambió quién habla: ${message}`,
+  speakerTitle: (name) => `Habla ${name}. Haz clic derecho en palabras para indicar que habla otra persona.`,
+  unknownSpeaker: "Hablante desconocido",
 };
 
 export const transcript = { en, es };

@@ -78,7 +78,7 @@ Compact JSON, the same as the matching `--json` CLI output:
 | `frameshell://transcripts/{file}` | `transcripts/{file}` as written, e.g. `raw-01.words.json` |
 | `frameshell://scripts/{file}/outline` | `script.outline` (one resource per `scripts/**/*.md`); the stdio contract test reads it |
 
-Subscribed timeline and history resources get `notifications/resources/updated` on the daemon's `timeline.changed` event, from any client (CLI, app, file edit). A timeline not listed before, and a transcript written by this server's `transcribe`, send `notifications/resources/list_changed`. After a lost daemon connection the server reconnects on the next request, renews its event subscription and marks every subscribed resource updated.
+Subscribed timeline and history resources get `notifications/resources/updated` on the daemon's `timeline.changed` event, from any client (CLI, app, file edit). A timeline not listed before, and a transcript written by this server's `transcribe`, send `notifications/resources/list_changed`. A transcript this server's `transcribe_speakers` rewrote gets `notifications/resources/updated` when subscribed. After a lost daemon connection the server reconnects on the next request, renews its event subscription and marks every subscribed resource updated.
 
 ## Not yet
 

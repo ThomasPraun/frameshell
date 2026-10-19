@@ -175,6 +175,37 @@ describe("transcribeAsset", () => {
     expect(result).toMatchObject({ reusedIds: 2, keptEdits: 1, droppedEdits: ["w_000003"] });
   });
 
+  it("re-transcribing keeps the speakers: names, corrections, and each word's speaker from the old words it overlaps", async () => {
+    const dir = project();
+    await run(dir, fakeProvider(words(["Hola", 0.5, 0.8], ["mundo", 0.9, 1.3], ["cruel", 2, 2.4])).provider);
+    const first = readTranscript(dir);
+    const speakers = [
+      { id: "s1", name: "Ana" },
+      { id: "s2", name: "Ben" },
+    ];
+    const said = ["s1", "s1", "s2"];
+    writeFileSync(
+      join(dir, "transcripts", "raw-01.words.json"),
+      JSON.stringify({
+        ...first,
+        words: first.words.map((w: object, i: number) => ({ ...w, speaker: said[i] })),
+        edits: { w_000002: { speaker: "s2" } },
+        speakers,
+      }),
+    );
+
+    await run(dir, fakeProvider(words(["Hola", 0.5, 0.8], ["mundo", 0.9, 1.3], ["tan", 1.9, 2.1], ["cruel", 2.2, 2.5])).provider);
+    const second = readTranscript(dir);
+    expect(second.words.map((w: { text: string; speaker?: string }) => [w.text, w.speaker])).toEqual([
+      ["Hola", "s1"],
+      ["mundo", "s1"],
+      ["tan", "s2"],
+      ["cruel", "s2"],
+    ]);
+    expect(second.edits).toEqual({ w_000002: { speaker: "s2" } });
+    expect(second.speakers).toEqual(speakers);
+  });
+
   it("never hands out an id dropped by an earlier run, across any number of runs", async () => {
     const dir = project();
     await run(dir, fakeProvider(words(["hola", 0.5, 0.8], ["mundo", 0.9, 1.3])).provider);

@@ -301,6 +301,15 @@ export const operationArgs = {
       .boolean()
       .optional()
       .describe("True marks the angle as a screen share (shown by `screen` and `pip` shots, never a speaker); false clears it."),
+    speaker: z
+      .string()
+      .regex(/^s\d+$/, "must look like `s1`")
+      .nullable()
+      .optional()
+      .describe(
+        "Speaker id (`s1`, from `transcribe.speakers`) in the transcript of the angle's sound (its mic's file, else its own file) whose " +
+          "words are this person's turns, for a file or mic people share; null clears it (turns from energy again, unless the sound is shared).",
+      ),
   }),
   "multicam.reframe": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
@@ -546,7 +555,18 @@ export const MulticamTurnsResultSchema = z.object({
   turns: z
     .array(SpeakingTurnSchema)
     .describe("Every angle's turns sorted by `start`. Turns of different angles may overlap: both people spoke at once."),
-  warnings: z.array(z.string()).describe("Angles that could not be measured (no sound, unreadable); they have no turns."),
+  warnings: z
+    .array(z.string())
+    .describe("Angles that could not be measured (no sound, unreadable, no transcript speakers) and guessed speakers of a shared mic."),
+  speakers: z
+    .array(
+      z.object({
+        angle: z.string(),
+        speaker: z.string().describe("Transcript speaker id whose words are the angle's turns."),
+        transcript: z.string().describe("Transcript file, project-relative."),
+      }),
+    )
+    .describe("Angles whose turns come from transcript speakers instead of their own mic. Empty when every angle has its own mic."),
 });
 
 /** See {@link MulticamTurnsResultSchema}. */

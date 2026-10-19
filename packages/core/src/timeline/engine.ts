@@ -853,12 +853,12 @@ class Edit {
     angle.offset = Math.round(args.offset * 1000) / 1000;
   }
 
-  /** Name, crop, sound, mic and screen flag of one angle; fields not given keep their value, defaults are not stored. */
+  /** Name, crop, sound, mic, screen flag and transcript speaker of one angle; fields not given keep their value, defaults are not stored. */
   multicamAngle(args: OperationArgs<"multicam.angle">): void {
     const { group, angle } = this.angle(args.group, args.angle);
-    const { name, crop, gain, muted, mic, screen } = args;
-    if ([name, crop, gain, muted, mic, screen].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted, mic, screen. To fix sync use `multicam.offset`." });
+    const { name, crop, gain, muted, mic, screen, speaker } = args;
+    if ([name, crop, gain, muted, mic, screen, speaker].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted, mic, screen, speaker. To fix sync use `multicam.offset`." });
     }
     if (mic !== undefined) {
       if (mic === "camera") delete angle.mic;
@@ -884,6 +884,8 @@ class Edit {
       });
     }
     if (name !== undefined) angle.name = name;
+    if (speaker === null) delete angle.speaker;
+    else if (speaker !== undefined) angle.speaker = speaker;
     if (screen === true) angle.screen = true;
     else if (screen === false) delete angle.screen;
     if (crop === null) delete angle.crop;

@@ -161,6 +161,15 @@ describe("multicam.angle", () => {
     expect(reset.timeline.groups![0]!.angles[1]).not.toHaveProperty("audio");
   });
 
+  it("names the transcript speaker whose words are the angle's turns, clears it with null, and undoes it", async () => {
+    const before = podcast();
+    const set = await applyOperation(before, angleSet({ angle: "ana", speaker: "s2" }), context());
+    expect(set.timeline.groups![0]!.angles[0]).toMatchObject({ id: "ana", speaker: "s2" });
+    expect(applyPatch(set.timeline, set.inverse.args).groups).toEqual(before.groups);
+    const cleared = await applyOperation(set.timeline, angleSet({ angle: "ana", speaker: null }), context());
+    expect(cleared.timeline.groups![0]!.angles[0]).not.toHaveProperty("speaker");
+  });
+
   it("explains an unknown group or angle, and an empty change", async () => {
     const group = await rejection(applyOperation(podcast(), { op: "multicam.angle", args: { group: "g_no", angle: "ana", name: "A" } }, context()));
     expect(group.message).toContain("Groups: g_talk, g_mic");

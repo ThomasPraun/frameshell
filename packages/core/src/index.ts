@@ -28,6 +28,11 @@ export {
   frameshellWhisperUrl,
   WHISPER_MODELS,
   WHISPER_PACKAGE,
+  DIARIZATION_MODELS,
+  DIARIZATION_TOOL,
+  SEGMENTATION_MODEL,
+  SHERPA_ONNX_PACKAGE,
+  SPEAKER_EMBEDDING_MODEL,
   buildCandidates,
   type SourceArchive,
   currentPlatform,
@@ -73,6 +78,8 @@ export {
 } from "./transcripts/transcriber.js";
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
+export { type DiarizeAssetOptions, type DiarizeRequest, type Diarizer, diarizeAsset, parseDiarization, sherpaDiarizer } from "./transcripts/speakers.js";
+export { type LabelledSpeakers, type SpeakerSegment, carrySpeakers, defaultSpeakerName, labelSpeakers, nextSpeakerIdOf, wordLabels } from "./transcripts/speaker-labels.js";
 export { type AudioExtractor, type AudioInput, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 export {
   type AppliedOperation,
@@ -144,7 +151,7 @@ export {
   type RenderedClip,
 } from "./clips/renderer.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
-export { type GroupTurns, type TurnsSource, groupTurns } from "./multicam/group-turns.js";
+export { type GroupTurns, type SpeakerSource, type TurnsSource, type TurnsTranscript, groupTurns } from "./multicam/group-turns.js";
 export {
   type GroupMotion,
   MOTION_HZ,
@@ -158,7 +165,7 @@ export {
 } from "./multicam/motion.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
-export { BLEED_DB, MERGE_GAP_S, MIN_TURN_S, TURN_FRAME_S, type Turn, type TurnInput, speakingTurns } from "./multicam/turns.js";
+export { BLEED_DB, MERGE_GAP_S, MIN_TURN_S, type SpokenWord, TURN_FRAME_S, type Turn, type TurnInput, speakingTurns, wordTurns } from "./multicam/turns.js";
 export {
   type PlannedOffset,
   SYNC_WINDOW_S,

@@ -1,8 +1,14 @@
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BinaryManager,
   CHROME_HEADLESS_SHELL_PACKAGE,
+  DIARIZATION_MODELS,
+  DIARIZATION_TOOL,
+  SEGMENTATION_MODEL,
+  SHERPA_ONNX_PACKAGE,
+  SPEAKER_EMBEDDING_MODEL,
   FFMPEG_PACKAGE,
   WHISPER_FRAMESHELL_BUILDS,
   WHISPER_FRAMESHELL_TAG,
@@ -14,8 +20,10 @@ import {
   currentPlatform,
   execProcess,
   runDoctor,
+  sherpaDiarizer,
 } from "../src/index.js";
 import { tempDir } from "./helpers.js";
+import { toneWav } from "./whisper-fixture.js";
 
 describe("pinned ffmpeg manifest", () => {
   const platforms = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64"] as const;
@@ -174,6 +182,40 @@ describe("pinned headless Chrome manifest", () => {
   });
 });
 
+describe("pinned sherpa-onnx diarization manifest", () => {
+  const PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64", "win32-arm64"] as const;
+
+  it.each(PLATFORMS)("%s pins one upstream 1.13.8 CPU archive with the diarization tool and ONNX Runtime beside it", (platform) => {
+    const [build, ...others] = buildCandidates(SHERPA_ONNX_PACKAGE, platform);
+    expect(others).toEqual([]);
+    expect(build).toMatchObject({ version: "1.13.8", license: "Apache-2.0", origin: "https://github.com/k2-fsa/sherpa-onnx" });
+    const [archive, ...more] = build!.archives;
+    expect(more).toEqual([]);
+    expect(archive!.urls).toEqual([expect.stringMatching(/^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\/v1\.13\.8\/sherpa-onnx-v1\.13\.8-.+\.tar\.bz2$/)]);
+    expect(archive!.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(archive!.size).toBeGreaterThan(10_000_000);
+    expect(Object.keys(archive!.files)).toEqual([DIARIZATION_TOOL]);
+    const runtime = platform.startsWith("win32") ? "onnxruntime.dll" : platform.startsWith("darwin") ? "libonnxruntime.dylib" : "libonnxruntime.so";
+    expect(Object.keys(archive!.support!)).toContain(runtime);
+  });
+
+  it("is installed by the first diarization, never mirrored", () => {
+    expect(SHERPA_ONNX_PACKAGE).toMatchObject({ onDemand: true, tools: [DIARIZATION_TOOL] });
+    expect(SHERPA_ONNX_PACKAGE.mirror).toBeUndefined();
+  });
+
+  it("pins both models by revision and SHA-256 under permissive licences", () => {
+    expect(DIARIZATION_MODELS.map((model) => [model.id, model.license])).toEqual([
+      [SEGMENTATION_MODEL, "MIT"],
+      [SPEAKER_EMBEDDING_MODEL, "Apache-2.0"],
+    ]);
+    for (const model of DIARIZATION_MODELS) {
+      expect(model.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(model.urls[0]).toMatch(/^https:\/\/huggingface\.co\/csukuangfj\/[^/]+\/resolve\/[0-9a-f]{40}\//);
+    }
+  });
+});
+
 // Opt-in: downloads the real pinned build (~60-170 MB) for this platform, then runs it.
 // Run with FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test; CI runs it weekly (.github/workflows/real-binaries.yml).
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinned ffmpeg download", () => {
@@ -231,6 +273,22 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       const version = await execProcess(shell, ["--version"], { timeoutMs: 60_000 });
       expect(version.code, version.stderr).toBe(0);
       expect(version.stdout).toContain("Chrome for Testing 154.0.8037.57");
+    },
+    600_000,
+  );
+
+  it(
+    `installs the ${currentPlatform()} sherpa-onnx pin and its models, verified, and diarizes a WAV`,
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const binary = await binaries.ensure(DIARIZATION_TOOL);
+      const segmentation = await binaries.ensureModel(SEGMENTATION_MODEL);
+      const embedding = await binaries.ensureModel(SPEAKER_EMBEDDING_MODEL);
+      // Tones, not speech: the run must succeed; how many segments it finds does not matter.
+      const audio = join(tempDir(), "tones.wav");
+      writeFileSync(audio, toneWav(4, [[0.5, 1.5], [2.5, 3.5]]));
+      const segments = await sherpaDiarizer({ binary, segmentation, embedding, audio, onProgress: () => {} });
+      expect(Array.isArray(segments)).toBe(true);
     },
     600_000,
   );

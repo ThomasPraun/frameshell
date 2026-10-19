@@ -1,6 +1,6 @@
 // The transcript view's model (SPEC §10): which words the timeline plays, where, and how to bring a cut one back.
 import type { TimelineView } from "@frameshell/protocol";
-import type { Transcript } from "@frameshell/schema";
+import { type Transcript, type TranscriptSpeaker, wordSpeaker } from "@frameshell/schema";
 import type { TimelineEdit } from "../../../shared/api.js";
 import type { SelectedWord, TimeRange } from "../selection.js";
 
@@ -33,6 +33,8 @@ export interface TranscriptWord {
   placements: Placement[];
   /** The span hides speech the transcript lacks (transcript `speechInside`): never cut inside it. */
   speechInside: boolean;
+  /** Speaker id: the human correction when there is one; null when unknown. */
+  speaker: string | null;
 }
 
 /** The words of one asset on the timeline, in source order. */
@@ -40,6 +42,8 @@ export interface AssetTranscript {
   asset: string;
   path: string;
   words: TranscriptWord[];
+  /** Who speaks (transcript `speakers`); empty when speakers were never found. */
+  speakers: TranscriptSpeaker[];
 }
 
 /** Everything the transcript view shows for one timeline revision. */
@@ -138,9 +142,10 @@ export function buildTranscriptModel(view: TimelineView, sources: readonly Trans
         const placements = place(clips, word.start, word.end);
         for (const { from, to } of placements) timeline.push({ from, to, key });
         const text = transcript.edits[word.id]?.text ?? word.text;
-        return { key, id: word.id, text, start: word.start, end: word.end, placements, speechInside: word.speechInside === true };
+        const speaker = wordSpeaker(transcript, word) ?? null;
+        return { key, id: word.id, text, start: word.start, end: word.end, placements, speechInside: word.speechInside === true, speaker };
       });
-    assets.push({ asset, path, words });
+    assets.push({ asset, path, words, speakers: transcript.speakers ?? [] });
   }
   timeline.sort((a, b) => a.from - b.from);
   return { assets, missing, timeline };
@@ -402,9 +407,9 @@ export function struckRun(words: readonly TranscriptWord[], index: number): stri
  * Transcript file `content` with word `id` corrected to `text`, as a human
  * edit (SPEC §5.4 `edits`; subtitles and `transcribe --verify` read it).
  * Every other field and edit stays as it is. `text` is trimmed; empty, or
- * equal to what was transcribed, drops the edit so the word reads as
- * transcribed again. Throws when `content` is no transcript object or has no
- * word `id`.
+ * equal to what was transcribed, drops the text correction so the word reads
+ * as transcribed again (a speaker correction stays). Throws when `content` is
+ * no transcript object or has no word `id`.
  */
 export function withWordText(content: string, id: string, text: string): string {
   const data = JSON.parse(content) as { words?: unknown; edits?: unknown };
@@ -413,8 +418,36 @@ export function withWordText(content: string, id: string, text: string): string 
   if (!word) throw new Error(`no word ${id} in this transcript`);
   const edits = { ...(typeof data.edits === "object" && data.edits !== null ? (data.edits as Record<string, unknown>) : {}) };
   const corrected = text.trim();
-  if (corrected === "" || corrected === word.text) delete edits[id];
-  else edits[id] = { ...(edits[id] as object | undefined), text: corrected };
+  const { text: _old, ...rest } = (edits[id] ?? {}) as Record<string, unknown>;
+  // Clearing the text keeps the word's other corrections (its speaker).
+  if (corrected !== "" && corrected !== word.text) edits[id] = { ...rest, text: corrected };
+  else if (Object.keys(rest).length > 0) edits[id] = rest;
+  else delete edits[id];
+  return `${JSON.stringify({ ...data, edits }, null, 2)}\n`;
+}
+
+/**
+ * Transcript file `content` with words `ids` said by speaker `speaker`, as
+ * human edits (SPEC §5.4 `edits`; re-running speaker diarization keeps
+ * them). A word whose diarized speaker already is `speaker` loses its speaker
+ * correction instead. Every other field and edit stays. Throws when `content`
+ * is no transcript object, lists no speaker `speaker`, or lacks a word.
+ */
+export function withWordSpeaker(content: string, ids: readonly string[], speaker: string): string {
+  const data = JSON.parse(content) as { words?: unknown; edits?: unknown; speakers?: unknown };
+  const words = Array.isArray(data.words) ? (data.words as { id?: unknown; speaker?: unknown }[]) : [];
+  const speakers = Array.isArray(data.speakers) ? (data.speakers as { id?: unknown }[]) : [];
+  if (!speakers.some((candidate) => candidate.id === speaker)) throw new Error(`no speaker ${speaker} in this transcript`);
+  const edits = { ...(typeof data.edits === "object" && data.edits !== null ? (data.edits as Record<string, Record<string, unknown>>) : {}) };
+  for (const id of ids) {
+    const word = words.find((candidate) => candidate.id === id);
+    if (!word) throw new Error(`no word ${id} in this transcript`);
+    const { speaker: _old, ...rest } = edits[id] ?? {};
+    if (word.speaker === speaker) {
+      if (Object.keys(rest).length === 0) delete edits[id];
+      else edits[id] = rest;
+    } else edits[id] = { ...rest, speaker };
+  }
   return `${JSON.stringify({ ...data, edits }, null, 2)}\n`;
 }
 
@@ -424,17 +457,19 @@ const PARAGRAPH_GAP_S = 1.2;
 const SENTENCE_GAP_S = 0.6;
 
 /**
- * Split words (source order) into paragraphs at long source pauses, or at
- * a shorter pause after a sentence end: reading aid only, never saved.
+ * Split words (source order) into paragraphs at long source pauses, at a
+ * shorter pause after a sentence end, and where the speaker changes:
+ * reading aid only, never saved.
  */
-export function paragraphs<W extends { text: string; start: number; end: number }>(words: readonly W[]): W[][] {
+export function paragraphs<W extends { text: string; start: number; end: number; speaker?: string | null }>(words: readonly W[]): W[][] {
   const result: W[][] = [];
   let current: W[] = [];
   for (const word of words) {
     const last = current.at(-1);
     if (last) {
       const gap = word.start - last.end;
-      if (gap >= PARAGRAPH_GAP_S || (gap >= SENTENCE_GAP_S && /[.!?…]["»”']?$/.test(last.text))) {
+      const turn = (word.speaker ?? null) !== (last.speaker ?? null);
+      if (turn || gap >= PARAGRAPH_GAP_S || (gap >= SENTENCE_GAP_S && /[.!?…]["»”']?$/.test(last.text))) {
         result.push(current);
         current = [];
       }

@@ -1,7 +1,7 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { type Transcript, parseTranscript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, restorePlan, rippleScope, struckRun, withWordText, wordAt } from "../src/renderer/src/transcript/model.js";
+import { buildTranscriptModel, isKept, paragraphs, placeWord, restoreEdit, restorePlan, rippleScope, struckRun, withWordSpeaker, withWordText, wordAt } from "../src/renderer/src/transcript/model.js";
 
 // Seam under test: the transcript view's pure model. Timeline view and transcript files in; struck words,
 // timeline placements, the word under the playhead and the restore operation out.
@@ -301,6 +301,43 @@ describe("withWordText", () => {
   it("refuses an unknown word", () => {
     expect(() => withWordText(file, "w_000099", "x")).toThrow(/no word w_000099/);
   });
+
+  it("keeps a speaker correction when the text correction goes", () => {
+    const spoken = `${JSON.stringify({ ...transcript, edits: { w_000007: { text: "cortar,", speaker: "s1" } }, speakers: [{ id: "s1", name: "Ana" }] })}\n`;
+    expect(editsOf(withWordText(spoken, "w_000007", ""))).toEqual({ w_000007: { speaker: "s1" } });
+  });
+});
+
+describe("withWordSpeaker", () => {
+  const spoken: Transcript = {
+    ...transcript,
+    words: transcript.words.map((word, i) => ({ ...word, speaker: i < 4 ? "s1" : "s2" })),
+    speakers: [
+      { id: "s1", name: "Ana" },
+      { id: "s2", name: "Ben" },
+    ],
+  };
+  const file = `${JSON.stringify(spoken)}\n`;
+  const editsOf = (content: string) => JSON.parse(content).edits;
+
+  it("records who says the words as speaker corrections, keeping text corrections and the rest of the file", () => {
+    const next = withWordSpeaker(file, ["w_000006", "w_000007"], "s1");
+    expect(editsOf(next)).toEqual({ w_000006: { speaker: "s1" }, w_000007: { text: "cortar,", speaker: "s1" } });
+    expect(JSON.parse(next).words).toEqual(spoken.words);
+    expect(parseTranscript(JSON.parse(next)).ok).toBe(true);
+  });
+
+  it("drops the correction of a word given back to the speaker diarization found", () => {
+    // "Hola" (w_000001) was diarized as Ana, "cortar" (w_000007) as Ben.
+    const corrected = withWordSpeaker(file, ["w_000001", "w_000007"], "s2");
+    expect(editsOf(corrected)).toEqual({ w_000001: { speaker: "s2" }, w_000007: { text: "cortar," } });
+    expect(editsOf(withWordSpeaker(corrected, ["w_000001", "w_000007"], "s1"))).toEqual({ w_000007: { text: "cortar,", speaker: "s1" } });
+  });
+
+  it("refuses a speaker the transcript does not list, and an unknown word", () => {
+    expect(() => withWordSpeaker(file, ["w_000001"], "s9")).toThrow(/no speaker s9/);
+    expect(() => withWordSpeaker(file, ["w_000099"], "s1")).toThrow(/no word w_000099/);
+  });
 });
 
 describe("paragraphs", () => {
@@ -309,5 +346,29 @@ describe("paragraphs", () => {
     const words = [w("Hola.", 0, 0.5), w("Hoy", 1.2, 1.5), w("vamos", 1.6, 2), w("a", 2.7, 2.8), w("cortar", 4.1, 4.5)];
     expect(paragraphs(words).map((p) => p.map((x) => x.text).join(" "))).toEqual(["Hola.", "Hoy vamos a", "cortar"]);
     expect(paragraphs([])).toEqual([]);
+  });
+
+  it("breaks where the speaker changes, with no pause", () => {
+    const w = (text: string, start: number, speaker: string | null) => ({ text, start, end: start + 0.3, speaker });
+    const words = [w("Hola", 0, "s1"), w("Ben", 0.4, "s1"), w("hola", 0.8, "s2"), w("Ana", 1.2, "s2")];
+    expect(paragraphs(words).map((p) => p.map((x) => x.text).join(" "))).toEqual(["Hola Ben", "hola Ana"]);
+  });
+});
+
+describe("buildTranscriptModel speakers", () => {
+  it("gives each word its speaker, corrections first, and each asset its speaker list", () => {
+    const spoken: Transcript = {
+      ...transcript,
+      words: transcript.words.map((word) => ({ ...word, speaker: "s1" })),
+      edits: { ...transcript.edits, w_000008: { speaker: "s2" } },
+      speakers: [
+        { id: "s1", name: "Ana" },
+        { id: "s2", name: "Ben" },
+      ],
+    };
+    const [asset] = buildTranscriptModel(cutView, [{ path: PATH, transcript: spoken }]).assets;
+    expect(asset!.speakers).toEqual(spoken.speakers);
+    expect(asset!.words.map((word) => word.speaker)).toEqual(["s1", "s1", "s1", "s1", "s1", "s1", "s1", "s2"]);
+    expect(buildTranscriptModel(cutView, sources).assets[0]!.words[0]!.speaker).toBeNull();
   });
 });

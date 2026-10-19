@@ -11,6 +11,7 @@ import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
+import { carrySpeakers, nextSpeakerIdOf } from "./speaker-labels.js";
 import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
 
 /** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
@@ -90,7 +91,9 @@ export interface TranscribeAssetOptions {
  * hiding more speech is re-transcribed alone and split, or else flagged
  * `speechInside` ({@link recoverLongWords}). Word ids
  * survive re-transcription where the same word is found again, and so do
- * their human edits; new words get ids never used before in the file.
+ * their human edits; new words get ids never used before in the file. Once
+ * speakers were diarized, each word takes the speaker of the old words it
+ * overlaps ({@link carrySpeakers}).
  *
  * Throws `AssetNotFound`, `OutsideProject`, `TranscriptNameTaken`,
  * `InvalidProjectFile`, `TranscriptionFailed` (provider or extraction error),
@@ -106,20 +109,6 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   const { rel: transcriptRel, path: transcriptPath } = await resolveTranscript(projectDir, assetRel);
   const provider = typeof options.provider === "function" ? await options.provider() : options.provider;
 
-  progress({ message: `Hashing ${assetRel}` });
-  const onHash = (fraction: number) => progress({ message: `Hashing ${assetRel}`, fraction });
-  const derived = options.media ? await options.media.derivedAudio(assetRel, onHash) : null;
-  const hash = derived ? derived.hash.replace(/^sha256:/, "") : await sha256File(assetPath);
-  const sidecar = derived?.sidecar ?? null;
-  const audioSource = sidecar ? sidecar.path : assetRel;
-  const input: AudioInput = sidecar
-    ? {
-        path: join(projectDir, ...sidecar.path.split("/")),
-        raw: { format: sidecar.format, sampleRate: sidecar.sampleRate, channels: sidecar.channels },
-      }
-    : { path: assetPath };
-  const audio = join(projectDir, ...AUDIO_CACHE_DIR.split("/"), `${audioCacheKey(hash)}-${sidecar ? "sidecar" : "asset"}.wav`);
-
   const failed = (error: unknown): never => {
     if (error instanceof RpcError) throw error;
     const details = (error as Error)?.message ?? String(error);
@@ -129,18 +118,14 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
       details,
     });
   };
-
-  if (!(await isFile(audio))) {
-    progress({ message: `Extracting audio from ${audioSource}` });
-    const temp = `${audio}.${process.pid}.tmp.wav`;
-    try {
-      await mkdir(dirname(audio), { recursive: true });
-      await extractAudio(input, temp, () => tools.ensureBinary("ffmpeg", progress));
-      await renameRetrying(temp, audio);
-    } catch (error) {
-      await rm(temp, { force: true });
-      failed(error);
-    }
+  const hashed = await hashAsset({ ...options, assetPath, assetRel, progress });
+  const { hash } = hashed;
+  let audio: string;
+  let audioSource: string;
+  try {
+    ({ audio, audioSource } = await transcriptionAudio({ projectDir, assetPath, assetRel, hashed, tools, extractAudio, progress }));
+  } catch (error) {
+    return failed(error);
   }
 
   const transcribeOptions = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
@@ -177,6 +162,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     word.speechInside = true;
     speechInside.push(word.id);
   });
+  const speakers = carrySpeakers(assigned.words, assigned.edits, previous);
   const transcript: Transcript = {
     $schema: TRANSCRIPT_SCHEMA_URL,
     schemaVersion: SCHEMA_VERSION,
@@ -188,6 +174,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     words: assigned.words,
     edits: assigned.edits,
     nextWordId: assigned.nextWordId,
+    ...(speakers ? { speakers, nextSpeakerId: nextSpeakerIdOf(previous) } : {}),
   };
   const checked = parseTranscript(transcript);
   if (!checked.ok) failed(new Error(`provider returned words the transcript format rejects:\n${checked.error}`));
@@ -210,6 +197,71 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     speechInside,
     seconds: Math.round(performance.now() - started) / 1000,
   };
+}
+
+/** Content hash of an asset and its complete ingest's PCM sidecar, if any; see {@link hashAsset}. */
+export interface HashedAsset {
+  /** Bare lowercase hex SHA-256 of the asset bytes. */
+  hash: string;
+  sidecar: AssetInfo["sidecar"];
+}
+
+/** Hash of the asset at `assetPath`, from the derived media lookup when there is one (it caches hashes). */
+export async function hashAsset(options: {
+  assetPath: string;
+  assetRel: string;
+  media?: TranscriberMedia | undefined;
+  progress: (progress: Progress) => void;
+}): Promise<HashedAsset> {
+  const { assetRel, progress } = options;
+  progress({ message: `Hashing ${assetRel}` });
+  const onHash = (fraction: number) => progress({ message: `Hashing ${assetRel}`, fraction });
+  const derived = options.media ? await options.media.derivedAudio(assetRel, onHash) : null;
+  return {
+    hash: derived ? derived.hash.replace(/^sha256:/, "") : await sha256File(options.assetPath),
+    sidecar: derived?.sidecar ?? null,
+  };
+}
+
+/**
+ * The 16 kHz mono WAV of an asset under {@link AUDIO_CACHE_DIR}, extracted
+ * once per content hash: from the PCM sidecar of a complete ingest when there
+ * is one (same clock as the CFR proxy), else from the asset itself.
+ * `audioSource` is the project-relative file it came from. Extraction errors
+ * are thrown as they are.
+ */
+export async function transcriptionAudio(options: {
+  projectDir: string;
+  assetPath: string;
+  assetRel: string;
+  hashed: HashedAsset;
+  tools: Pick<TranscriberTools, "ensureBinary">;
+  extractAudio: AudioExtractor;
+  progress: (progress: Progress) => void;
+}): Promise<{ audio: string; audioSource: string }> {
+  const { projectDir, assetRel, hashed, tools, progress } = options;
+  const { sidecar } = hashed;
+  const audioSource = sidecar ? sidecar.path : assetRel;
+  const input: AudioInput = sidecar
+    ? {
+        path: join(projectDir, ...sidecar.path.split("/")),
+        raw: { format: sidecar.format, sampleRate: sidecar.sampleRate, channels: sidecar.channels },
+      }
+    : { path: options.assetPath };
+  const audio = join(projectDir, ...AUDIO_CACHE_DIR.split("/"), `${audioCacheKey(hashed.hash)}-${sidecar ? "sidecar" : "asset"}.wav`);
+  if (!(await isFile(audio))) {
+    progress({ message: `Extracting audio from ${audioSource}` });
+    const temp = `${audio}.${process.pid}.tmp.wav`;
+    try {
+      await mkdir(dirname(audio), { recursive: true });
+      await options.extractAudio(input, temp, () => tools.ensureBinary("ffmpeg", progress));
+      await renameRetrying(temp, audio);
+    } catch (error) {
+      await rm(temp, { force: true });
+      throw error;
+    }
+  }
+  return { audio, audioSource };
 }
 
 /**
@@ -265,8 +317,11 @@ function stripExtension(path: string): string {
   return ext ? path.slice(0, -ext.length) : path;
 }
 
-/** Real path and `/`-separated project-relative path of an existing asset file inside the project. */
-async function resolveAsset(projectDir: string, asset: string): Promise<{ real: string; rel: string }> {
+/**
+ * Real path and `/`-separated project-relative path of an existing asset file
+ * inside the project. Throws `AssetNotFound` or `OutsideProject`.
+ */
+export async function resolveAsset(projectDir: string, asset: string): Promise<{ real: string; rel: string }> {
   const target = resolve(asset);
   let real: string;
   try {
@@ -294,7 +349,7 @@ async function resolveAsset(projectDir: string, asset: string): Promise<{ real: 
  * Previous transcript for id and edit reuse. Throws `InvalidProjectFile` when
  * it exists but is broken: overwriting it would silently lose human edits.
  */
-async function readPrevious(path: string): Promise<Transcript | null> {
+export async function readPrevious(path: string): Promise<Transcript | null> {
   if (!(await exists(path))) return null;
   const invalid = (details: string) =>
     new RpcError(

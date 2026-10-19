@@ -1,11 +1,12 @@
 import type { AssetInfo } from "@frameshell/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type AngleTile, type SpeakingTurn, programRows, sameTurns, viewerModel, viewerRow } from "../angles/model.js";
+import { type AngleTile, type SpeakingTurn, programRows, sameTurns, turnsKey, viewerModel, viewerRow } from "../angles/model.js";
 import { t } from "../i18n.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { cutToAngle } from "../timeline/angle-cut.js";
+import { useTranscripts } from "../transcript/useTranscripts.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 
 /** While playing, an angle's video is put back on the playhead when it is this far off, s. */
@@ -27,7 +28,9 @@ export function AngleViewer({ mediaUrl }: { mediaUrl: string }) {
   const rows = useMemo(() => (view ? programRows(view) : []), [view]);
   const groupId = view ? (viewerRow(rows, view.fps, time)?.group ?? null) : null;
   const group = view?.groups?.find((candidate) => candidate.id === groupId);
-  const { turns, error: turnsError } = useTurns(groupId, group ? JSON.stringify([group.angles, group.mics]) : null);
+  const { sources, hashes } = useTranscripts();
+  const key = useMemo(() => (group ? turnsKey(group.angles, sources, hashes, group.mics) : null), [group, sources, hashes]);
+  const { turns, error: turnsError } = useTurns(groupId, key);
   const [notice, setNotice] = useState<string | null>(null);
 
   const model = useMemo(

@@ -223,6 +223,15 @@ export const AngleSchema = z.strictObject({
     .boolean()
     .optional()
     .describe("True: a screen share, not a person. The director shows it (`screen`, `pip`) while it moves and never as a speaker. Default false."),
+  speaker: z
+    .string()
+    .regex(/^s\d+$/, "must look like `s1`")
+    .optional()
+    .describe(
+      "Speaker id (`s1`) in the transcript of this angle's sound (its `mic`'s asset, else `asset`) whose words are this person's " +
+        "speaking turns, instead of the energy: for a mic several people share. Angles hearing the same file (or the same mic, once its transcript " +
+        "has speakers) take their turns from speakers anyway; screens never do.",
+    ),
 });
 
 /**

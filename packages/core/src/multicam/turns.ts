@@ -1,9 +1,10 @@
 import { ENERGY_HOP_S, type EnergyProfile } from "../media/energy.js";
 
 /**
- * Who speaks when (ADR 0016 decision 3, one mic per person): speaking turns
- * per angle from the angles' own energy envelopes (`media/energy-store.ts`).
- * Pure: callers bring profiles and offsets.
+ * Who speaks when (ADR 0016 decision 3): speaking turns per angle from the
+ * angles' own energy envelopes (`media/energy-store.ts`, one mic per person),
+ * or from transcript speakers when people share a mic ({@link wordTurns}).
+ * Pure: callers bring profiles, words and offsets.
  */
 
 /** Resolution of the turns: one decision per frame, taking the loudest hop in it. */
@@ -134,4 +135,39 @@ function dropShort(list: [number, number][]): [number, number][] {
 
 function seconds(frame: number): number {
   return Math.round(frame * TURN_FRAME_S * 1000) / 1000;
+}
+
+/** A transcript word with who says it (`edits` applied); source-asset seconds. */
+export interface SpokenWord {
+  start: number;
+  end: number;
+  speaker: string | undefined;
+}
+
+/**
+ * Speaking turns of transcript speaker `speaker` on the group clock (file
+ * time + `offset`), for a mic people share: runs of that speaker's words,
+ * joined across pauses up to {@link MERGE_GAP_S} unless another speaker's
+ * word comes between; turns under {@link MIN_TURN_S} dropped, as with energy.
+ * Words without a speaker break nothing.
+ */
+export function wordTurns(words: readonly SpokenWord[], speaker: string, offset: number): Omit<Turn, "angle">[] {
+  const sorted = words.filter((word) => word.speaker !== undefined).sort((a, b) => a.start - b.start);
+  const runs: { start: number; end: number }[] = [];
+  let open: { start: number; end: number } | null = null;
+  for (const word of sorted) {
+    if (word.speaker !== speaker) {
+      open = null;
+      continue;
+    }
+    const end = Math.max(word.end, word.start);
+    if (open && word.start - open.end <= MERGE_GAP_S + 1e-9) open.end = Math.max(open.end, end);
+    else {
+      open = { start: word.start, end };
+      runs.push(open);
+    }
+  }
+  return runs
+    .filter((run) => run.end - run.start >= MIN_TURN_S - 1e-9)
+    .map((run) => ({ start: Math.round((offset + run.start) * 1000) / 1000, end: Math.round((offset + run.end) * 1000) / 1000 }));
 }
