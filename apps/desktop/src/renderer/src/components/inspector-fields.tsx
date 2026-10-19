@@ -84,16 +84,32 @@ const FIELDS = {
 export type FieldName = keyof typeof FIELDS;
 
 /**
+ * Saves a field's entry. A promise that resolves false means the daemon refused
+ * it: the saved value is unchanged, so the field shows it again.
+ */
+export type FieldCommit<T> = (value: T) => void | Promise<boolean>;
+
+/** Calls `onCommit`; on a refusal shows the saved value of that moment (`latest`) again. */
+function commitOrRestore<T>(onCommit: FieldCommit<T>, value: T, latest: { current: string }, setText: (text: string) => void): void {
+  void onCommit(value)?.then((ok) => {
+    if (!ok) setText(latest.current);
+  });
+}
+
+/**
  * A numeric setting: type and press Enter (or leave the field), Escape
  * restores the saved value, arrows step it (Shift: ten steps). Dragging the
- * label left or right scrubs the value; release saves it.
+ * label left or right scrubs the value; release saves it. An entry the
+ * daemon refuses gives way to the saved value again.
  */
-export function NumberField({ name, stored, disabled, onCommit }: { name: FieldName; stored: number; disabled?: boolean; onCommit: (value: number) => void }) {
+export function NumberField({ name, stored, disabled, onCommit }: { name: FieldName; stored: number; disabled?: boolean; onCommit: FieldCommit<number> }) {
   const spec: FieldSpec = FIELDS[name];
   const shown = spec.show(stored);
   const [text, setText] = useState(String(shown));
   const [invalid, setInvalid] = useState(false);
   const scrub = useRef<{ pointer: number; x: number; from: number } | null>(null);
+  const latest = useRef(String(shown));
+  latest.current = String(shown);
 
   // A new saved value (this edit, the agent's, an undo) replaces what the field shows.
   useEffect(() => {
@@ -109,7 +125,7 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
     }
     setInvalid(false);
     setText(String(round(value, spec.decimals)));
-    if (next !== stored) onCommit(next);
+    if (next !== stored) commitOrRestore(onCommit, next, latest, setText);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -173,10 +189,15 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
   );
 }
 
-/** A text setting: Enter or leaving the field saves it, Escape restores the saved text; empty is refused. */
-export function TextField({ label, title, stored, onCommit }: { label: string; title: string; stored: string; onCommit: (value: string) => void }) {
+/**
+ * A text setting: Enter or leaving the field saves it, Escape restores the saved text; empty is refused.
+ * An entry the daemon refuses gives way to the saved text again.
+ */
+export function TextField({ label, title, stored, onCommit }: { label: string; title: string; stored: string; onCommit: FieldCommit<string> }) {
   const [text, setText] = useState(stored);
   const [invalid, setInvalid] = useState(false);
+  const latest = useRef(stored);
+  latest.current = stored;
   useEffect(() => {
     setText(stored);
     setInvalid(false);
@@ -188,7 +209,7 @@ export function TextField({ label, title, stored, onCommit }: { label: string; t
       return;
     }
     setInvalid(false);
-    if (value !== stored) onCommit(value);
+    if (value !== stored) commitOrRestore(onCommit, value, latest, setText);
   };
   return (
     <label className={`clip-field${invalid ? " is-invalid" : ""}`} title={title}>

@@ -18,13 +18,19 @@ const LAYOUT_TITLES: Record<ShotLayout, string> = {
   grid: t.inspector.layoutGridTitle,
 };
 
-/** Edits from one inspector, with the daemon's refusal shown in it. */
-function useSender(key: string): { error: string | null; send: (edit: TimelineEdit) => void } {
+/** Edits from one inspector, with the daemon's refusal shown in it; `send` resolves false on a refusal. */
+function useSender(key: string): { error: string | null; send: (edit: TimelineEdit) => Promise<boolean> } {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [key]);
   const send = (edit: TimelineEdit) => {
     setError(null);
-    sendClipEdit(edit).catch((failure: unknown) => setError((failure as Error).message));
+    return sendClipEdit(edit).then(
+      () => true,
+      (failure: unknown) => {
+        setError((failure as Error).message);
+        return false;
+      },
+    );
   };
   return { error, send };
 }

@@ -64,6 +64,7 @@ export interface ClipBox {
 
 /** One angle a shot shows. */
 export interface ShotAngle {
+  /** Angle id in the group, as the shot stores it. */
   id: string;
   /** Angle name from the group; the id when the group does not list it. */
   name: string;
@@ -79,6 +80,7 @@ export interface ShotBox {
   angles: ShotAngle[];
   /** Director's confidence, 0 to 1; null on a shot a person chose. */
   confidence: number | null;
+  /** Director's reason for the shot; null on a shot a person chose. */
   reason: string | null;
   /** Below `SHOT_LOW_CONFIDENCE`: worth a look. */
   doubtful: boolean;

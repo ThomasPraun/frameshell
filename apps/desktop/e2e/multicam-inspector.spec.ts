@@ -161,3 +161,17 @@ test("the group's angles: a rename shows on the shot, and the program track head
   await expect(group.getByRole("group", { name: "Angle Ana" })).toBeVisible();
   await expect(group.getByRole("group", { name: "Angle lime" })).toBeVisible();
 });
+
+test("a crop the daemon refuses shows the error, and the field the saved value again", async () => {
+  const lime = page.getByRole("group", { name: "Angles of program track P1" }).locator('[data-angle="lime"]');
+  await lime.getByRole("textbox", { name: "R (%)" }).fill("50");
+  await lime.getByRole("textbox", { name: "R (%)" }).press("Enter");
+  await expect.poll(() => saved().angles[1]!["crop"]).toEqual({ right: 0.5 });
+
+  // L + R reaches the whole width: refused.
+  await lime.getByRole("textbox", { name: "L (%)" }).fill("60");
+  await lime.getByRole("textbox", { name: "L (%)" }).press("Enter");
+  await expect(page.getByRole("group", { name: "Angles of program track P1" }).getByRole("status")).toBeVisible();
+  await expect(lime.getByRole("textbox", { name: "L (%)" })).toHaveValue("0");
+  expect(saved().angles[1]!["crop"]).toEqual({ right: 0.5 });
+});
