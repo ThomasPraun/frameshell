@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 43;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1229,7 +1229,8 @@ export const methods = {
     mutating: true,
     description:
       "Change one angle of a multicam group: `name`, `crop` (fractions of its picture cut off each side, merged side by side; " +
-      "null removes it) and its sound under every shot (`gain` dB, `muted`). The angle id stays, so shots keep showing it. " +
+      "null removes it), its sound under every shot (`gain` dB, `muted`) and `screen` (true: a screen share, which the " +
+      "director shows while it moves, never as a speaker). The angle id stays, so shots keep showing it. " +
       "Example: `{ group: \"g_1a2b3c\", angle: \"ben\", crop: { left: 0.1, right: 0.1 }, gain: -3 }`. Sync is `multicam.offset`. " +
       "Fails with InvalidOperation when the group or angle does not exist, nothing is given, or the crop would leave no picture " +
       "(left + right, top + bottom must stay below 1).",
@@ -1239,12 +1240,15 @@ export const methods = {
   "shot.set": {
     mutating: true,
     description:
-      "Change a shot of a program track (ADR 0016): its layout `shot` (`solo` 1 angle, `two-up` 2, `grid` 2 or more) and/or the " +
+      "Change a shot of a program track (ADR 0016): its layout `shot` (`solo` 1 angle, `two-up` 2, `grid` 2 or more, `screen` 1 " +
+      "angle whole with bars, never cropped, `pip` 2: the screen first, then a speaker as an inset in `corner`) and/or the " +
       "`angles` it shows, in layout order. Only `shot`: the angles are kept, cut to the layout's count, or filled with the group's " +
-      "next angles in group order. Only `angles`: the layout stays when it takes that many, else it follows the count (1 `solo`, " +
-      "2 `two-up`, more `grid`). Both: they must fit. The shot becomes one a person chose: `confidence` and `reason` are removed. " +
+      "next angles in group order (`screen` and `pip` put angles marked `screen` first). Only `angles`: the layout stays when it " +
+      "takes that many, else it follows the count (1 `solo`, 2 `two-up`, more `grid`). Both: they must fit. `corner` " +
+      "(`top-left`, `top-right`, `bottom-left`, `bottom-right`; default `bottom-right`) only fits a `pip` shot. " +
+      "The shot becomes one a person chose: `confidence` and `reason` are removed. " +
       "Timing does not change: split the shot first (`clip.split`) to change only part of it. Examples: " +
-      "`{ clip: \"c_0301\", shot: \"solo\", angles: [\"ana\"] }`, `{ clip: \"c_0301\", angles: [\"ana\", \"ben\"] }`. " +
+      "`{ clip: \"c_0301\", shot: \"solo\", angles: [\"ana\"] }`, `{ clip: \"c_0301\", shot: \"pip\", angles: [\"screen\", \"ana\"], corner: \"top-right\" }`. " +
       "Fails with InvalidOperation (not a shot, unknown or repeated angle, angle without a picture, wrong count for the layout).",
     params: operationArgs["shot.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -1273,7 +1277,9 @@ export const methods = {
       "track by rules, in one operation. Deterministic: the same turns and rules give the same shots. Rules: the `template` " +
       "(`interview` default, `podcast-calm`, `panel-dynamic`) with `director.json` in the project (or `rules`) on top: shortest " +
       "and longest solo, two-up on quick exchanges and on two people talking at once, wide (`grid`) on silence and laughter, cut " +
-      "lead (the voice leads the cut, J-cut), weight per angle. The program track keeps what plays where: each shot in range is " +
+      "lead (the voice leads the cut, J-cut), weight per angle. Angles marked `screen` (`multicam.angle`) are measured for motion " +
+      "(the picture changing): a stretch of motion becomes a `screen` shot while nobody speaks and a `pip` (screen with the " +
+      "speaker as an inset) while someone does; screens never speak. The program track keeps what plays where: each shot in range is " +
       "replaced by directed shots over the same group time, gaps stay gaps; an empty track is filled over the whole group. " +
       "Shots a person chose in the app (`shot.set` by author `ui`, and pieces cut out of them) are kept unless " +
       "`replaceHuman: true`; `kept` lists those in the range. Every shot gets " +

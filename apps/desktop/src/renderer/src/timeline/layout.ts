@@ -74,8 +74,10 @@ export interface ShotAngle {
 
 /** A shot clip's layout and angles, and the director's verdict on it. */
 export interface ShotBox {
-  /** `solo`, `two-up` or `grid` as stored. */
+  /** `solo`, `two-up`, `grid`, `screen` or `pip` as stored. */
   layout: string;
+  /** Inset corner of a `pip` shot as stored; null on any other shot, and on a `pip` shot that names none (bottom-right). */
+  corner: string | null;
   /** In layout order. */
   angles: ShotAngle[];
   /** Director's confidence, 0 to 1; null on a shot a person chose. */
@@ -201,6 +203,7 @@ function shotBox(fields: Record<string, unknown>, group: GroupView | undefined):
   const confidence = typeof fields["confidence"] === "number" ? (fields["confidence"] as number) : null;
   return {
     layout: typeof fields["shot"] === "string" ? (fields["shot"] as string) : "",
+    corner: typeof fields["corner"] === "string" ? (fields["corner"] as string) : null,
     angles,
     confidence,
     reason: typeof fields["reason"] === "string" ? (fields["reason"] as string) : null,

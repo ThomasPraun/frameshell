@@ -224,7 +224,7 @@ interface Placed {
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
    */
-  tile?: { crop: LayerRect; rect: LayerRect };
+  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean };
 }
 
 /** What export v1 renders of a timeline. */
@@ -614,7 +614,7 @@ function placeShots(shots: readonly ShotClip[], group: MulticamGroup, context: S
         in: Math.round((from + skipped) * fps),
         speed: 1,
         placement: placementOf(undefined),
-        tile: { crop: layer.crop, rect: layer.tile },
+        tile: { crop: layer.crop, rect: layer.tile, backdrop: layer.backdrop },
       });
     }
   });
@@ -747,11 +747,12 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
       pieceChain(placed, start, end, fps, inputs),
       ...(crop ? [`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`] : []),
       `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
+      ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
     lines.push(`${chain.join(",")}[o${n}]`);
-    const overlay = `[${below}][o${n}]overlay=x=${rect.left}:y=${rect.top}:eof_action=pass:format=auto`;
+    const overlay = `[${below}][o${n}]overlay=x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });

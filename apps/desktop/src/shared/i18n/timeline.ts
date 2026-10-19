@@ -90,7 +90,7 @@ const en = {
   muted: "muted",
   opacity: (percent: number) => `${percent}% opacity`,
   /** Shot layouts (ADR 0016), by stored value. */
-  layouts: { solo: "Solo", "two-up": "Two-up", grid: "Grid" },
+  layouts: { solo: "Solo", "two-up": "Two-up", grid: "Grid", screen: "Screen", pip: "Screen + inset" },
   /** Label badge of a director's shot below the review threshold. */
   doubtful: (percent: number) => `${percent}% sure`,
   followedTrack: "the followed track",
@@ -183,7 +183,7 @@ const es: typeof en = {
   lengthUnknown: "Duración desconocida",
   muted: "silenciado",
   opacity: (percent) => `${percent}% de opacidad`,
-  layouts: { solo: "Individual", "two-up": "A dos", grid: "Cuadrícula" },
+  layouts: { solo: "Individual", "two-up": "A dos", grid: "Cuadrícula", screen: "Pantalla", pip: "Pantalla + recuadro" },
   doubtful: (percent) => `${percent}% de certeza`,
   followedTrack: "la pista seguida",
   wordsShowHere: (track) => `Aquí aparecerán las palabras cuando se transcriban los clips de ${track}`,

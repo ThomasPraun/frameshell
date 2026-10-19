@@ -31,6 +31,7 @@ const RULES: DirectorRules = {
   twoShot: { exchange: null, overlap: null },
   wide: { silence: null, laughter: null, together: 3 },
   cutaway: { to: "listener", length: 2 },
+  screen: { motion: null, hold: 0, threshold: 0.3, pip: true, corner: "bottom-right" },
   weights: {},
 };
 

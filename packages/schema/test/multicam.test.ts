@@ -129,11 +129,11 @@ describe("shot layout (composite)", () => {
   it("solo: the angle covers the frame, cut to its aspect", () => {
     expect(shotTiles("solo", 1, landscape)).toEqual([{ left: 0, top: 0, width: 1920, height: 1080 }]);
     expect(shotLayers(shot("c", 0, 0, 1, "solo", ["ana"]), group, landscape, sizes)).toEqual([
-      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1920, height: 1080 }, crop: { left: 0, top: 0, width: 1920, height: 1080 } },
+      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1920, height: 1080 }, crop: { left: 0, top: 0, width: 1920, height: 1080 }, backdrop: false },
     ]);
     // 9:16: the centre 608x1080 of the 16:9 picture.
     expect(shotLayers(shot("c", 0, 0, 1, "solo", ["ana"]), group, portrait, sizes)).toEqual([
-      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1080, height: 1920 }, crop: { left: 656, top: 0, width: 608, height: 1080 } },
+      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 0, top: 0, width: 1080, height: 1920 }, crop: { left: 656, top: 0, width: 608, height: 1080 }, backdrop: false },
     ]);
   });
 
@@ -144,8 +144,8 @@ describe("shot layout (composite)", () => {
 
   it("two-up: side by side at 16:9, stacked at 9:16", () => {
     expect(shotLayers(shot("c", 0, 0, 1, "two-up", ["ben", "ana"]), group, landscape, sizes)).toEqual([
-      { angle: "ben", asset: "assets/ben.mp4", tile: { left: 0, top: 0, width: 960, height: 1080 }, crop: { left: 480, top: 0, width: 960, height: 1080 } },
-      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 960, top: 0, width: 960, height: 1080 }, crop: { left: 480, top: 0, width: 960, height: 1080 } },
+      { angle: "ben", asset: "assets/ben.mp4", tile: { left: 0, top: 0, width: 960, height: 1080 }, crop: { left: 480, top: 0, width: 960, height: 1080 }, backdrop: false },
+      { angle: "ana", asset: "assets/ana.mp4", tile: { left: 960, top: 0, width: 960, height: 1080 }, crop: { left: 480, top: 0, width: 960, height: 1080 }, backdrop: false },
     ]);
     expect(shotTiles("two-up", 2, portrait)).toEqual([
       { left: 0, top: 0, width: 1080, height: 960 },

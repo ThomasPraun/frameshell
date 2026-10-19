@@ -820,11 +820,13 @@ class Edit {
   /** Name, crop and sound of one angle; fields not given keep their value, defaults are not stored. */
   multicamAngle(args: OperationArgs<"multicam.angle">): void {
     const { group, angle } = this.angle(args.group, args.angle);
-    const { name, crop, gain, muted } = args;
-    if ([name, crop, gain, muted].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted. To fix sync use `multicam.offset`." });
+    const { name, crop, gain, muted, screen } = args;
+    if ([name, crop, gain, muted, screen].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of name, crop, gain, muted, screen. To fix sync use `multicam.offset`." });
     }
     if (name !== undefined) angle.name = name;
+    if (screen === true) angle.screen = true;
+    else if (screen === false) delete angle.screen;
     if (crop === null) delete angle.crop;
     else if (crop !== undefined) {
       const merged: AngleCrop = { ...angle.crop };
@@ -870,8 +872,8 @@ class Edit {
         hint: "Use `clip.set` for other clips.",
       });
     }
-    if (args.shot === undefined && args.angles === undefined) {
-      throw this.invalid("nothing to set.", { hint: "Pass `shot` (the layout), `angles`, or both." });
+    if (args.shot === undefined && args.angles === undefined && args.corner === undefined) {
+      throw this.invalid("nothing to set.", { hint: "Pass `shot` (the layout), `angles`, `corner`, or several." });
     }
     const group = programGroup(this.draft, track);
     if (!group) throw this.invalid(`program track ${track.id} names no group of this timeline.`, { field: "clip" });
@@ -897,10 +899,18 @@ class Edit {
         throw this.invalid(`a ${layout} shot takes ${takes(layout)}; got ${angles.length}.`, { field: "angles" });
       }
     } else {
-      layout = args.shot!;
+      layout = args.shot ?? clip.shot;
       const [min, max] = SHOT_ANGLE_COUNTS[layout];
       angles = clip.angles.slice(0, max);
-      for (const id of known) if (angles.length < min && !angles.includes(id)) angles.push(id);
+      let fill = known;
+      if (layout !== clip.shot && (layout === "screen" || layout === "pip")) {
+        // The screen leads, people fill the rest: `pip` shows the screen with a person in it.
+        const screens = group.angles.filter((angle) => angle.screen === true).map((angle) => angle.id);
+        const lead = angles.find((id) => screens.includes(id)) ?? screens[0];
+        if (lead !== undefined) angles = [lead, ...angles.filter((id) => id !== lead)].slice(0, max);
+        fill = [...known.filter((id) => !screens.includes(id)), ...screens];
+      }
+      for (const id of fill) if (angles.length < min && !angles.includes(id)) angles.push(id);
       if (angles.length < min) {
         throw this.invalid(`a ${layout} shot takes ${takes(layout)}; group ${group.id} has ${known.length}.`, {
           field: "shot",
@@ -908,8 +918,13 @@ class Edit {
         });
       }
     }
+    if (args.corner !== undefined && layout !== "pip") {
+      throw this.invalid(`a ${layout} shot has no corner; only a pip shot's inset does.`, { field: "corner", hint: "Set `shot: \"pip\"` with it." });
+    }
     clip.shot = layout;
     clip.angles = angles;
+    if (layout !== "pip") delete clip.corner;
+    else if (args.corner !== undefined) clip.corner = args.corner;
     delete clip.confidence;
     delete clip.reason;
   }
@@ -945,7 +960,7 @@ class Edit {
     let groupEnd = 0;
     for (const angle of group.angles) {
       const info = await this.context.source(angle.asset);
-      angles.push({ id: angle.id, picture: info.video });
+      angles.push({ id: angle.id, picture: info.video, ...(angle.screen ? { screen: true } : {}) });
       groupEnd = Math.max(groupEnd, info.duration === null ? Number.POSITIVE_INFINITY : angle.offset + info.duration);
     }
     if (!angles.some((angle) => angle.picture)) {
@@ -1012,6 +1027,7 @@ class Edit {
       const shots = directShots({
         angles,
         turns: args.turns,
+        ...(args.motion ? { motion: args.motion } : {}),
         rules: args.rules,
         from: span.in,
         to: span.out,
@@ -1026,6 +1042,7 @@ class Edit {
           out: shot.out,
           shot: shot.shot,
           angles: shot.angles,
+          ...(shot.corner ? { corner: shot.corner } : {}),
           confidence: shot.confidence,
           reason: shot.reason,
         });
