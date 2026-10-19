@@ -41,6 +41,7 @@ Fixes **Connect Claude Desktop** on macOS: Claude Desktop now works on the proje
 
 ### Fixed
 
+- Desktop: an angle switch (number key or viewer click) that the daemon refuses no longer leaves its split behind. The split and the `shot.set` are one edit call, and `timeline.edit` now undoes what a refused call applied even inside a gesture burst; a `clip` arg of `$created` stands for the clip the previous edit of the call created (#268).
 - Desktop: Claude Desktop, connected with **Connect Claude Desktop**, now reaches the app's daemon on macOS and Linux, so its tools act on the project open in the app. MCP clients start servers without `TMPDIR`, which the default daemon socket path depends on, so `frameshell mcp` started a second daemon that showed no window. The app's `frameshell` command now uses the app's socket when its caller sets no `FRAMESHELL_SOCKET`.
 
 ## [0.8.0] - 2026-10-16

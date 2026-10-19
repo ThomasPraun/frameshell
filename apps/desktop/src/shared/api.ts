@@ -145,6 +145,12 @@ export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
 export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
 
 /**
+ * Stands for a `clip` arg in a multi-edit call: the clip the previous edit of the call created (the new part of
+ * a `clip.split`), whose id the caller cannot know before the call runs.
+ */
+export const CREATED_CLIP = "$created";
+
+/**
  * How main groups and names the transaction of one `timeline.edit` call.
  * Both optional; main rejects values longer than {@link EDIT_OPTION_MAX_LENGTH}.
  */
@@ -306,7 +312,7 @@ export interface FrameshellApi {
      * Resolves with the last result. Rejects with the daemon's message
      * (overlap, bounds) at the first refused edit, and undoes the call's
      * earlier ones, so a group move is all or nothing (in a gesture burst,
-     * earlier presses stay). `options` labels the transaction or joins a
+     * earlier calls stay, but this call's edits are still undone). `options` labels the transaction or joins a
      * gesture burst's.
      */
     edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;

@@ -128,7 +128,9 @@ describe("the angle cutter against a daemon", () => {
     ],
   };
 
-  async function setup() {
+  /** `staleAngle`: the cutter reads a view with a fourth angle the daemon does not know, so its `shot.set` is refused. */
+  async function setup(options: { staleAngle?: boolean } = {}) {
+    let stale = options.staleAngle === true;
     const work = realpathSync(mkdtempSync(join(tmpdir(), "fs-angle-")));
     const socketPath = process.platform === "win32" ? `\\\\.\\pipe\\frameshell-angle-${randomUUID().slice(0, 8)}` : join(work, "d.sock");
     const configDir = join(work, "config");
@@ -156,7 +158,12 @@ describe("the angle cutter against a daemon", () => {
     await loader.request("file.write", { path: join(dir, "timelines", "main.json"), content: JSON.stringify(FIXTURE) });
     const editor = new TimelineEditor((method, params) => app.request(method, params));
     const host = {
-      show: (timeline: string) => app.request("timeline.show", { cwd: dir, timeline }),
+      show: async (timeline: string) => {
+        const view = await app.request("timeline.show", { cwd: dir, timeline });
+        if (!stale) return view;
+        const groups = (view.groups ?? []).map((group) => ({ ...group, angles: [...group.angles, { id: "zed", name: "ZED", asset: "assets/zed.mp4", offset: 0 }] }));
+        return { ...view, groups };
+      },
       edit: (timeline: string, edits: Parameters<TimelineEditor["apply"]>[2], options?: Parameters<TimelineEditor["apply"]>[3]) =>
         editor.apply(dir, timeline, edits, options),
       settle: () => editor.settle(),
@@ -182,7 +189,7 @@ describe("the angle cutter against a daemon", () => {
     };
     const ui = async () =>
       (await app.request("history", { cwd: dir, timeline: "main" })).transactions.filter((tx) => tx.author === "ui").map((tx) => [tx.label, tx.operations.map((op) => op.op)]);
-    return { dir, app, editor, cutter: createAngleCutter(host, transport), set, shots, ui };
+    return { dir, app, editor, cutter: createAngleCutter(host, transport), set, setStale: (value: boolean) => (stale = value), shots, ui };
   }
 
   it("a press while paused is one transaction of its own, one undo", async () => {
@@ -279,5 +286,32 @@ describe("the angle cutter against a daemon", () => {
     await cutter.cut(2);
     expect(await shots()).toEqual([[0, 10, "solo", "ben"]]);
     expect(await ui()).toEqual([["Cut to BEN", ["shot.set"]]]);
+  });
+
+  it("a refused switch leaves the timeline unchanged: the split is undone, nothing is left to undo", async () => {
+    const { cutter, set, shots, ui, app, editor, dir } = await setup({ staleAngle: true });
+    set({ time: 2 });
+    await expect(cutter.cut(4)).rejects.toThrow(/zed/);
+    expect(await shots()).toEqual([[0, 10, "solo", "ana"]]);
+    // The journal keeps the aborted transaction (split, then its revert); undo skips it.
+    expect(await ui()).toEqual([["Cut to ZED", ["clip.split", "revert"]]]);
+    await expect(app.request("tx.commit", {})).rejects.toMatchObject({ code: expect.anything() });
+    expect(await editor.undo(dir, "main")).toBeNull();
+  });
+
+  it("a refused press in a playback reverts its split, keeps the presses before it and still undoes as one take", async () => {
+    const { cutter, set, setStale, shots, editor, dir } = await setup();
+    set({ time: 1, playing: true });
+    await cutter.cut(2);
+    setStale(true);
+    set({ time: 3.5 });
+    await expect(cutter.cut(4)).rejects.toThrow(/zed/);
+    set({ playing: false });
+    expect(await shots()).toEqual([
+      [0, 1, "solo", "ana"],
+      [1, 10, "solo", "ben"],
+    ]);
+    await editor.undo(dir, "main");
+    expect(await shots()).toEqual([[0, 10, "solo", "ana"]]);
   });
 });

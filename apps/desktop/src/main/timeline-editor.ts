@@ -8,7 +8,7 @@ import {
   type RevertConflict,
   type RpcError,
 } from "@frameshell/protocol";
-import { EDIT_BURST_GAP_MAX_MS, EDIT_OPTION_MAX_LENGTH, type EditOptions, type RevertOutcome, TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
+import { CREATED_CLIP, EDIT_BURST_GAP_MAX_MS, EDIT_OPTION_MAX_LENGTH, type EditOptions, type RevertOutcome, TIMELINE_EDIT_OPS, type TimelineEdit } from "../shared/api.js";
 
 /** A typed daemon request, e.g. {@link DaemonLink.request} bound to the app's link. */
 export type DaemonRequest = <M extends MethodName>(method: M, params: MethodParams<M>) => Promise<MethodResult<M>>;
@@ -119,8 +119,10 @@ export class TimelineEditor {
    * or nothing: what applied before the refusal is undone (`tx.abort`), so
    * a group move never lands half done; when that undo itself conflicts (an
    * agent changed the same clips meanwhile), what applied stays as one
-   * step. In a burst, earlier presses stay and the refusal ends the burst.
-   * Rejects ops outside
+   * step. In a burst, earlier calls stay and the refusal ends the burst, but
+   * what this call applied is reverted first, so a refused call changes nothing.
+   * An edit whose `clip` is {@link CREATED_CLIP} acts on the clip the previous
+   * edit of the call created. Rejects ops outside
    * {@link TIMELINE_EDIT_OPS} and malformed options before sending
    * anything: the renderer is not trusted to pick any method.
    */
@@ -149,30 +151,26 @@ export class TimelineEditor {
       if (burst !== undefined && open?.key === burst && open.cwd === cwd && open.timeline === timeline) {
         clearTimeout(open.timer);
         open.gap = gap;
-        return this.#sendBurst(cwd, timeline, edits, open);
+        return this.#sendBurst(cwd, timeline, edits, open, false);
       }
       await this.#endBurst();
       await this.#commitOrphan();
       await this.#begin((label as string | undefined) ?? editLabel(edits), burstGap === undefined ? BATCH_AUTO_COMMIT_S : BATCH_AUTO_COMMIT_S + gap / 1000);
       if (burst === undefined) {
-        let applied = 0;
-        let last: OperationResult | undefined;
+        const applied: OperationResult[] = [];
         try {
-          for (const edit of edits) {
-            last = await this.#send(cwd, timeline, edit);
-            applied += 1;
-          }
+          await this.#sendAll(cwd, timeline, edits, applied);
         } catch (error) {
-          await (applied > 0 ? this.#abort() : this.#commit());
+          await (applied.length > 0 ? this.#abort() : this.#commit());
           throw error;
         }
         // A lost commit is retried before the next call.
         await this.#commit();
-        return last!;
+        return applied.at(-1)!;
       }
       const begun: Burst = { key: burst as string, gap, cwd, timeline, timer: undefined };
       this.#burst = begun;
-      return this.#sendBurst(cwd, timeline, edits, begun);
+      return this.#sendBurst(cwd, timeline, edits, begun, true);
     });
   }
 
@@ -235,13 +233,30 @@ export class TimelineEditor {
     return this.#serial(() => this.#endBurst());
   }
 
-  /** Send a burst's `edits` in order; a refusal ends the burst, success re-arms its gap timer. */
-  async #sendBurst(cwd: string, timeline: string, edits: readonly TimelineEdit[], burst: Burst): Promise<OperationResult> {
-    let last: OperationResult | undefined;
+  /**
+   * Send a burst's `edits` in order; success re-arms its gap timer. A refusal ends the burst after undoing this
+   * call's applied edits: a fresh burst aborts its transaction, a running one reverts them (newest first).
+   */
+  async #sendBurst(cwd: string, timeline: string, edits: readonly TimelineEdit[], burst: Burst, fresh: boolean): Promise<OperationResult> {
+    const applied: OperationResult[] = [];
     try {
-      for (const edit of edits) last = await this.#send(cwd, timeline, edit);
+      await this.#sendAll(cwd, timeline, edits, applied);
     } catch (error) {
-      await this.#endBurst();
+      if (applied.length > 0 && fresh) {
+        clearTimeout(burst.timer);
+        if (this.#burst === burst) this.#burst = null;
+        await this.#abort();
+      } else {
+        for (const result of applied.reverse()) {
+          try {
+            await this.request("revert", { cwd, timeline, target: result.operation.id });
+          } catch {
+            // Changed since by someone else: what applied stays.
+            break;
+          }
+        }
+        await this.#endBurst();
+      }
       throw error;
     }
     if (this.#burst === burst) {
@@ -252,7 +267,20 @@ export class TimelineEditor {
       }, burst.gap);
       burst.timer.unref?.();
     }
-    return last!;
+    return applied.at(-1)!;
+  }
+
+  /** Send `edits` in order, pushing each result onto `applied` so a caller can undo them when a later one is refused. */
+  async #sendAll(cwd: string, timeline: string, edits: readonly TimelineEdit[], applied: OperationResult[]): Promise<void> {
+    for (const edit of edits) {
+      let sent: TimelineEdit = edit;
+      if ((edit.args as { clip?: unknown }).clip === CREATED_CLIP) {
+        const created = applied.at(-1)?.changes.added[0];
+        if (!created) throw new Error("The edit before it did not create a clip for it to act on.");
+        sent = { ...edit, args: { ...edit.args, clip: created } } as TimelineEdit;
+      }
+      applied.push(await this.#send(cwd, timeline, sent));
+    }
   }
 
   #send(cwd: string, timeline: string, edit: TimelineEdit): Promise<OperationResult> {
