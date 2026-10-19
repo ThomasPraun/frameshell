@@ -109,7 +109,9 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * A nested program track on a video track T becomes program track `T/p1`,
  * `T/p2`, … above T, showing a copy of its group renamed `<nested clip>/<group>`
  * (appended to `groups`); shots fill the frame, so the nested clip's
- * transform does not apply to them. On an audio track it becomes its angles'
+ * transform does not apply to them. Stacking follows the nested track order:
+ * when the program track comes before the first video track, that track and
+ * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
  * sound ({@link programSound}).
  *
  * A clip whose timeline `nested` cannot give, or that would nest a timeline
@@ -165,6 +167,8 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       let videoIndex = 0;
       let audioIndex = 0;
       let ownTaken = false;
+      // A program track listed before the first video track keeps its place under the later ones.
+      let programFirst = false;
       const children = flat.tracks.flatMap((child): Track[] => {
         if (child.kind !== "program" || track.kind !== "audio") return [child];
         const group = flat.groups.find((candidate) => candidate.id === child.group);
@@ -182,6 +186,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
           });
           const renamed: MulticamGroup = { ...group, id: `${clip.id}/${group.id}`, angles };
           groups.push(renamed);
+          if (videoIndex === 0) programFirst = true;
           const id = `${track.id}/p${++programIndex}`;
           const shots = child.clips.flatMap((shot) => windowShot(shot, from, to, clip) ?? []);
           extra.set(id, { id, kind: "program", ...(child.name ? { name: child.name } : {}), group: renamed.id, clips: shots });
@@ -189,6 +194,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
         }
         let target: Clip[];
         if (track.kind === "video" && child.kind === "video") {
+          if (videoIndex === 0 && programFirst) videoIndex = 1;
           videoIndex++;
           target = videoIndex === 1 ? own : extraTrack(`${track.id}/${videoIndex}`, "video").clips;
         } else if (track.kind === "audio" && !ownTaken) {
