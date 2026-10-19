@@ -32,23 +32,44 @@ mutations print the new revision):
   clip remove <clip>
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
-  multicam create <asset> <asset>… [--name <angle>…] [--group-name n]
-                               One file per person (video with sound): measures each file's offset against the
-                               first by audio cross-correlation, adds a group, a program track and one grid shot
-                               over the whole length. Prints every file's confidence; below 0.5 the file is not
-                               shifted and a warning says so. --name once per file, in order (default: file name)
+  multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
+                  [--group-name n]
+                               One video file per camera or person: measures every file's offset against all the
+                               others by audio cross-correlation, adds a group, a program track and one grid shot
+                               over the cameras' length. Prints every file's confidence; below 0.5 the file is not
+                               shifted and a warning says so. --name once per file, in order (default: file name).
+                               Separate mic files: --mic-file once per mic (any start time; --mic-name names them).
+                               --sound once per camera, in order: a mic number (1 = first --mic-file), none (wide
+                               camera, no sound) or camera (its own file); default: camera n takes mic n. One mic
+                               may serve several cameras
   multicam offset <group> <angle> <seconds>
                                Fix one angle's sync by hand: the group second at which its file's time 0 plays
                                (absolute, >= 0; a smaller number plays the angle earlier)
   multicam angle <group> <angle> [--name n] [--crop-left f] [--crop-top f] [--crop-right f] [--crop-bottom f]
-                 [--clear-crop] [--gain dB] [--muted | --unmuted] [--speaker s1 | --clear-speaker]
+                 [--clear-crop] [--gain dB] [--muted | --unmuted] [--mic <mic id> | camera | none] [--screen | --no-screen]
+                 [--speaker s1 | --clear-speaker]
                                Rename an angle, crop its picture (fractions cut off each side, 0 to below 1), set
-                               its sound under every shot, or name the transcript speaker whose words are its turns
-                               (a mic people share; transcribe --speakers first)
-  shot set <shot> [--layout solo|two-up|grid] [--angles a,b,…]
+                               its sound under every shot, pick where it is heard (a mic of the group, camera: its
+                               own file, or none; with a mic, gain and mute belong to the mic) or mark it a screen
+                               share (--screen: shown by screen and pip shots while it moves, never as a speaker), or
+                               name the transcript speaker whose words are its turns (a file or mic people share;
+                               transcribe --speakers on that sound's file first)
+  multicam mic <group> <mic> [--name n] [--offset s] [--gain dB] [--muted | --unmuted]
+                               Fix a separate mic: rename it, set the group second at which its file's time 0 plays
+                               (absolute, >= 0) or its sound under every shot
+  multicam reframe <group> <angle> (--time s | --at s) [--x f] [--y f] [--remove]
+  multicam reframe <group> <angle> --clear
+                               Keep a face in frame when a tile cuts the angle's picture (solo and two-up shots of a
+                               9:16 export of 16:9 cameras): a key at timeline second --time (or group second --at)
+                               centering the cut on --x/--y (fractions of the picture, 0 left/top, 1 right/bottom;
+                               omitted: the point there now). The point moves in a straight line between keys and
+                               holds outside them. --remove deletes the key in that frame, --clear every key
+  shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b,…] [--corner top-left|top-right|bottom-left|bottom-right]
                                Change a shot's layout and the angles it shows, in layout order. Only --layout: the
                                angles are kept, cut or filled from the group; only --angles: the layout follows the
-                               count when it does not fit (1 solo, 2 two-up, more grid)
+                               count when it does not fit (1 solo, 2 two-up, more grid). screen shows one angle whole,
+                               with bars; pip takes the screen first, then the speaker as an inset in --corner (default
+                               bottom-right)
   multicam turns <group>       Who speaks when: every angle's speaking turns on the group clock, from that angle's own
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap), or from transcript speakers for angles sharing a file or naming a speaker.
@@ -90,6 +111,11 @@ export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam
 export const TIMELINE_OPTIONS = {
   timeline: { type: "string" },
   name: { type: "string", multiple: true },
+  "mic-file": { type: "string", multiple: true },
+  "mic-name": { type: "string", multiple: true },
+  sound: { type: "string", multiple: true },
+  mic: { type: "string" },
+  offset: { type: "string" },
   "group-name": { type: "string" },
   "clear-name": { type: "boolean" },
   follows: { type: "string" },
@@ -134,6 +160,12 @@ export const TIMELINE_OPTIONS = {
   "clear-speaker": { type: "boolean" },
   layout: { type: "string" },
   angles: { type: "string" },
+  corner: { type: "string" },
+  screen: { type: "boolean" },
+  "no-screen": { type: "boolean" },
+  time: { type: "string" },
+  remove: { type: "boolean" },
+  clear: { type: "boolean" },
   template: { type: "string" },
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
@@ -168,10 +200,12 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
-  "multicam create": ["name", "group-name"],
+  "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam offset": [],
-  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "speaker", "clear-speaker"],
-  "shot set": ["layout", "angles"],
+  "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen", "speaker", "clear-speaker"],
+  "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
+  "multicam reframe": ["time", "at", "x", "y", "remove", "clear"],
+  "shot set": ["layout", "angles", "corner"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
@@ -198,6 +232,8 @@ const ARITY: Record<string, [number, number]> = {
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam offset": [3, 3],
   "multicam angle": [2, 2],
+  "multicam mic": [2, 2],
+  "multicam reframe": [2, 2],
   "shot set": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
@@ -385,7 +421,12 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (names !== undefined && names.length !== args.length) {
         throw new UsageError(`--name: give one per file (${args.length}), in the same order as the files, got ${names.length}.`);
       }
-      Object.assign(params, { assets: args, names, name: str("group-name") });
+      const micNames = list("mic-name");
+      const micFiles = list("mic-file");
+      if (micNames !== undefined && micNames.length !== (micFiles?.length ?? 0)) {
+        throw new UsageError(`--mic-name: give one per --mic-file (${micFiles?.length ?? 0}), in the same order, got ${micNames.length}.`);
+      }
+      Object.assign(params, { assets: args, names, mics: micFiles, micNames, soundOf: list("sound"), name: str("group-name") });
       break;
     }
     case "multicam offset":
@@ -399,6 +440,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       const cropped = Object.values(sides).some((value) => value !== undefined);
       if (cropped && values["clear-crop"] === true) throw new UsageError("Pass --crop-<side> or --clear-crop, not both.");
       if (str("speaker") !== undefined && values["clear-speaker"] === true) throw new UsageError("Pass --speaker or --clear-speaker, not both.");
+      if (values["screen"] === true && values["no-screen"] === true) throw new UsageError("Pass --screen or --no-screen, not both.");
       Object.assign(params, {
         group: args[0],
         angle: args[1],
@@ -407,6 +449,48 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         speaker: values["clear-speaker"] === true ? null : str("speaker"),
+        mic: str("mic"),
+        screen: values["screen"] === true ? true : values["no-screen"] === true ? false : undefined,
+      });
+      break;
+    }
+    case "multicam mic": {
+      method = "multicam.mic";
+      if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
+      const offset = str("offset");
+      Object.assign(params, {
+        group: args[0],
+        mic: args[1],
+        name: str("name"),
+        offset: offset === undefined ? undefined : seconds(offset, "--offset"),
+        gain: num("gain"),
+        muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+      });
+      break;
+    }
+    case "multicam reframe": {
+      method = "multicam.reframe";
+      const at = str("at");
+      const time = str("time");
+      if (values["clear"] === true) {
+        const other = ["time", "at", "x", "y", "remove"].find((flag) => values[flag] !== undefined);
+        if (other) throw new UsageError(`--clear removes every key: pass it without --${other}.`);
+      } else if ((at === undefined) === (time === undefined)) {
+        throw new UsageError("Pass the key time: --time <timeline seconds> or --at <group seconds>, one of them (or --clear).");
+      } else if (values["remove"] === true && (values["x"] !== undefined || values["y"] !== undefined)) {
+        throw new UsageError("--remove deletes the key: pass it without --x or --y.");
+      } else if (values["remove"] !== true && values["x"] === undefined && values["y"] === undefined) {
+        throw new UsageError("Pass --x and/or --y (fractions of the picture, 0 to 1), --remove or --clear.");
+      }
+      Object.assign(params, {
+        group: args[0],
+        angle: args[1],
+        at: at === undefined ? undefined : seconds(at, "--at"),
+        time: time === undefined ? undefined : seconds(time, "--time"),
+        x: num("x"),
+        y: num("y"),
+        remove: values["remove"] === true ? true : undefined,
+        clear: values["clear"] === true ? true : undefined,
       });
       break;
     }
@@ -417,7 +501,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         .map((angle) => angle.trim())
         .filter((angle) => angle !== "");
       if (angles !== undefined && angles.length === 0) throw new UsageError("--angles: give angle ids separated by commas, e.g. --angles ana,ben.");
-      Object.assign(params, { clip: args[0], shot: str("layout"), angles });
+      Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
     case "multicam turns":
@@ -508,8 +592,9 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
 function formatMulticamCreate(result: MulticamCreateResult): string {
   const lines = [`Multicam group ${result.group} · program track ${result.track} · shot ${result.clip} (grid, whole length)`];
   for (const angle of result.sync) {
-    const match = angle.confidence === null ? "reference" : `confidence ${Math.round(angle.confidence * 100)}%${angle.synced ? "" : " (not synced)"}`;
-    lines.push(`  ${angle.angle}  ${angle.name}  ${angle.asset}  offset ${angle.offset} s  ${match}`);
+    const against = angle.against === null ? "" : ` with ${angle.against}`;
+    const match = angle.confidence === null ? "reference" : `confidence ${Math.round(angle.confidence * 100)}%${angle.synced ? against : " (not synced)"}`;
+    lines.push(`  ${angle.kind === "mic" ? "mic " : ""}${angle.angle}  ${angle.name}  ${angle.asset}  offset ${angle.offset} s  ${match}`);
   }
   return `${lines.join("\n")}\n${formatOperation(result)}`;
 }

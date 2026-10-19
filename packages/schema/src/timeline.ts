@@ -10,14 +10,25 @@ export const CORE_CLIP_TYPES = ["media", "timeline", "shot"] as const;
 /** Adapter clip type name: lowercase, not a core type. */
 export const ADAPTER_CLIP_TYPE_PATTERN = /^(?!(?:media|timeline|shot)$)[a-z][a-z0-9-]*$/;
 
-/** Shot layouts (ADR 0016): `solo` takes one angle, `two-up` two, `grid` two or more. */
-export const SHOT_LAYOUTS = ["solo", "two-up", "grid"] as const;
+/**
+ * Shot layouts (ADR 0016): `solo` takes one angle, `two-up` two, `grid` two or more;
+ * `screen` one angle whole (never cropped), `pip` a screen angle with a second angle as an inset.
+ */
+export const SHOT_LAYOUTS = ["solo", "two-up", "grid", "screen", "pip"] as const;
+
+/** Corners of a `pip` shot's inset. */
+export const SHOT_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+
+/** Corner of a `pip` inset when the shot has no `corner`. */
+export const DEFAULT_SHOT_CORNER: (typeof SHOT_CORNERS)[number] = "bottom-right";
 
 /** Angles a shot of each layout takes: `[min, max]`. */
 export const SHOT_ANGLE_COUNTS: Readonly<Record<(typeof SHOT_LAYOUTS)[number], readonly [number, number]>> = {
   solo: [1, 1],
   "two-up": [2, 2],
   grid: [2, Number.POSITIVE_INFINITY],
+  screen: [1, 1],
+  pip: [2, 2],
 };
 
 /** A director's shot below this `confidence` is a doubtful one: the timeline marks it for review. */
@@ -120,11 +131,16 @@ export const ShotClipSchema = z
     start: ClipStartSchema,
     in: Seconds.describe("Group-clock seconds of the first frame."),
     out: z.number().positive().describe("Group-clock seconds just after the last frame; greater than `in`."),
-    shot: z.enum(SHOT_LAYOUTS).describe("Layout: `solo` (one angle), `two-up` (two), `grid` (two or more)."),
+    shot: z
+      .enum(SHOT_LAYOUTS)
+      .describe("Layout: `solo` (one angle), `two-up` (two), `grid` (two or more), `screen` (one angle whole), `pip` (screen angle + inset)."),
     angles: z
       .array(Id)
       .min(1)
-      .describe("Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats."),
+      .describe(
+        "Angle ids of the track's group, in layout order (left to right, then top to bottom); no repeats. `pip`: the screen first, then the inset.",
+      ),
+    corner: z.enum(SHOT_CORNERS).optional().describe("`pip` only: corner of the inset. Default `bottom-right`."),
     confidence: z
       .number()
       .min(0)
@@ -141,6 +157,7 @@ export const ShotClipSchema = z
       const count = min === max ? `exactly ${min}` : `at least ${min}`;
       ctx.addIssue({ code: "custom", message: `a ${shot.shot} shot takes ${count} angle(s), got ${shot.angles.length}`, path: ["angles"] });
     }
+    if (shot.corner !== undefined && shot.shot !== "pip") ctx.addIssue({ code: "custom", message: "only a pip shot has a corner", path: ["corner"] });
     shot.angles.forEach((angle, a) => {
       if (shot.angles.indexOf(angle) !== a) ctx.addIssue({ code: "custom", message: `angle "${angle}" is listed twice`, path: ["angles", a] });
     });
@@ -163,6 +180,19 @@ export const AngleCropSchema = z
   })
   .describe("Fractions of the source picture (0 to below 1) cut off each side before a shot fills its tile with it.");
 
+/**
+ * One key of an angle's reframing: from group second `at`, tiles that cut the
+ * angle's picture to their aspect keep the part centered on (`x`, `y`).
+ */
+export const ReframeKeySchema = z.strictObject({
+  at: Seconds.describe("Group-clock second of the key."),
+  x: z.number().min(0).max(1).describe("Point to center on across the picture: fraction of the source width, 0 left edge, 1 right edge."),
+  y: z.number().min(0).max(1).describe("Point to center on down the picture: fraction of the source height, 0 top edge, 1 bottom edge."),
+});
+
+/** Ids a mic cannot take: `multicam.angle` reads them as "the camera's own sound" and "no sound". */
+export const RESERVED_MIC_IDS: readonly string[] = ["camera", "none"];
+
 /** One synced source of a multicam group (ADR 0016): usually one person's picture and mic. */
 export const AngleSchema = z.strictObject({
   id: Id.describe("Unique within the group; shots name angles by it."),
@@ -170,15 +200,50 @@ export const AngleSchema = z.strictObject({
   asset: z.string().min(1).describe("Project-relative media file, e.g. `assets/ana.mp4`."),
   offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
   crop: AngleCropSchema.optional(),
-  audio: ClipAudioSchema.optional().describe("Gain and mute of this angle's sound, which plays under every shot."),
+  reframe: z
+    .array(ReframeKeySchema)
+    .min(1)
+    .optional()
+    .describe(
+      "Where the picture is cut when a tile's aspect differs from it (a solo of a 16:9 camera in a 9:16 export): keys sorted by " +
+        "`at`, the point moving in a straight line between keys and held before the first and after the last; the cut never " +
+        "leaves the cropped picture. Absent: centered. Screens (`screen` shots, a `pip` screen) are never cut.",
+    ),
+  audio: ClipAudioSchema.optional().describe(
+    "Gain and mute of the sound of this angle's own file, which plays under every shot. Absent with `mic` set: the mic carries the level.",
+  ),
+  mic: Id.nullable()
+    .optional()
+    .describe(
+      "Where this angle's person is heard. Absent: the sound of its own file. An id of the group's `mics`: that mic " +
+        "(one mic may serve several angles and plays once); the file's own sound is then not played. null: no sound " +
+        "(a wide camera); its own file's sound is not played either.",
+    ),
+  screen: z
+    .boolean()
+    .optional()
+    .describe("True: a screen share, not a person. The director shows it (`screen`, `pip`) while it moves and never as a speaker. Default false."),
   speaker: z
     .string()
     .regex(/^s\d+$/, "must look like `s1`")
     .optional()
     .describe(
-      "Speaker id (`s1`) in the transcript of `asset` whose words are this person's speaking turns, instead of the mic's energy: " +
-        "for a mic several people share. Angles with the same `asset` take their turns from speakers anyway.",
+      "Speaker id (`s1`) in the transcript of this angle's sound (its `mic`'s asset, else `asset`) whose words are this person's " +
+        "speaking turns, instead of the energy: for a mic several people share. Angles hearing the same file (or the same mic, once its transcript " +
+        "has speakers) take their turns from speakers anyway; screens never do.",
     ),
+});
+
+/**
+ * A sound file synced to the group apart from any picture (ADR 0016): a lavalier
+ * or recorder with its own start time.
+ */
+export const MicSchema = z.strictObject({
+  id: Id.describe("Unique among the group's angles and mics; angles name it in `mic`. Not `camera` or `none`."),
+  name: z.string().min(1).describe("Person or recorder, e.g. `Ana lav`."),
+  asset: z.string().min(1).describe("Project-relative file with sound, e.g. `assets/ana.wav`. Only its sound is used."),
+  offset: Seconds.describe("Group-clock seconds at which the asset's time 0 plays: source time = group time - offset."),
+  audio: ClipAudioSchema.optional().describe("Gain and mute of this mic's sound, which plays under every shot, once even when several angles use it."),
 });
 
 /** The angles of one conversation on one shared clock (ADR 0016), shown by one program track. */
@@ -187,12 +252,34 @@ export const MulticamGroupSchema = z
     id: Id.describe("Stable, core-generated (`g_…`); a program track names it in `group`."),
     name: z.string().optional(),
     angles: z.array(AngleSchema).min(1),
+    mics: z.array(MicSchema).optional().describe("Separate sound files of the group; angles pick theirs with `mic`. Absent: every angle has its own file's sound."),
   })
   .superRefine((group, ctx) => {
     const seen = new Set<string>();
     group.angles.forEach((angle, a) => {
       if (seen.has(angle.id)) ctx.addIssue({ code: "custom", message: `duplicate angle id "${angle.id}"`, path: ["angles", a, "id"] });
       seen.add(angle.id);
+    });
+    const mics = new Set<string>();
+    group.mics?.forEach((mic, m) => {
+      if (RESERVED_MIC_IDS.includes(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is reserved`, path: ["mics", m, "id"] });
+      else if (seen.has(mic.id) || mics.has(mic.id)) ctx.addIssue({ code: "custom", message: `mic id "${mic.id}" is already an angle or mic id`, path: ["mics", m, "id"] });
+      mics.add(mic.id);
+    });
+    group.angles.forEach((angle, a) => {
+      angle.reframe?.forEach((key, k) => {
+        const previous = angle.reframe![k - 1];
+        if (previous && key.at <= previous.at) {
+          ctx.addIssue({ code: "custom", message: `reframe keys of angle "${angle.id}" must be sorted by \`at\`, each later than the one before`, path: ["angles", a, "reframe", k, "at"] });
+        }
+      });
+      if (typeof angle.mic === "string" && !mics.has(angle.mic)) {
+        const known = group.mics?.map((mic) => mic.id).join(", ");
+        ctx.addIssue({ code: "custom", message: `angle "${angle.id}" names mic "${angle.mic}", which the group does not have${known ? ` (mics: ${known})` : ""}`, path: ["angles", a, "mic"] });
+      }
+      if (angle.mic !== undefined && angle.audio) {
+        ctx.addIssue({ code: "custom", message: `angle "${angle.id}" takes its sound from ${angle.mic === null ? "no one" : `mic "${angle.mic}"`}: set gain and mute on the mic, not the angle`, path: ["angles", a, "audio"] });
+      }
     });
   });
 
@@ -344,6 +431,9 @@ export type ShotClip = z.infer<typeof ShotClipSchema>;
 export type AnyClip = Clip | ShotClip;
 /** Shot layout. */
 export type ShotLayout = (typeof SHOT_LAYOUTS)[number];
+
+/** See {@link SHOT_CORNERS}. */
+export type ShotCorner = (typeof SHOT_CORNERS)[number];
 /** `type: "media"` clip. */
 export type MediaClip = z.infer<typeof MediaClipSchema>;
 /** `type: "timeline"` clip. */
@@ -352,10 +442,14 @@ export type TimelineClip = z.infer<typeof TimelineClipSchema>;
 export type AdapterClip = z.infer<typeof AdapterClipSchema>;
 /** Multicam group (ADR 0016). */
 export type MulticamGroup = z.infer<typeof MulticamGroupSchema>;
+/** Separate sound file of a {@link MulticamGroup}. */
+export type Mic = z.infer<typeof MicSchema>;
 /** One angle of a {@link MulticamGroup}. */
 export type Angle = z.infer<typeof AngleSchema>;
 /** Crop of an {@link Angle}'s picture. */
 export type AngleCrop = z.infer<typeof AngleCropSchema>;
+/** One key of an {@link Angle}'s `reframe`. */
+export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 /** Clip overlay placement. */
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */

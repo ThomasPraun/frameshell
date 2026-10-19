@@ -9,7 +9,7 @@ import type { MulticamGroup } from "@frameshell/schema";
 import type { z } from "zod";
 import type { EnergyProfile } from "../media/energy.js";
 import { projectPath } from "../timeline/service.js";
-import { type PlannedOffset, correlateProfiles, planOffsets } from "./sync.js";
+import { type PlannedOffset, correlateProfiles, planSync } from "./sync.js";
 
 /** Where `multicam.create` finds the media facts it needs; the daemon wires these to its services. */
 export interface MeasureSource {
@@ -24,78 +24,130 @@ export interface MeasureRequest {
   root: string;
   /** Caller's directory: relative assets resolve against it first. */
   cwd: string;
-  /** As the caller named them; the first sets the clock. */
+  /** Cameras, as the caller named them. */
   assets: readonly string[];
   /** Same order as `assets`; absent = names are left to the engine (file names). */
   names?: readonly string[] | undefined;
+  /** Separate sound files, as the caller named them. */
+  mics?: readonly string[] | undefined;
+  /** Same order as `mics`; absent = file names. */
+  micNames?: readonly string[] | undefined;
+  /** One entry per camera: a 1-based mic index, `none` or `camera`; absent = {@link resolveSoundOf} defaults. */
+  soundOf?: readonly string[] | undefined;
 }
 
 /** Output of {@link measureAngles}. */
 export interface MeasuredAngles {
-  /** Project-relative, `/`-separated, in the order given. */
+  /** Cameras, project-relative, `/`-separated, in the order given. */
   assets: string[];
-  /** One per asset: its offset, confidence and whether the match is trusted. */
+  /** Mics, project-relative, in the order given. */
+  mics: string[];
+  /** Per camera: undefined = its own file's sound, null = no sound, a number = 0-based index into `mics`. */
+  soundOf: (number | null | undefined)[];
+  /** One per file, cameras then mics: its offset, confidence and whether the match is trusted. */
   plan: PlannedOffset[];
 }
 
 /**
- * Resolve the files and measure every file's offset against the first
- * (ADR 0016). Throws InvalidOperation naming the file and the fix when a
- * file is outside the project, has no picture, cannot be decoded, or is the
- * first file and has no sound (later silent files stay unsynced), and AssetNotFound when it does not exist.
+ * Which sound each camera carries: `given` has one entry per camera (a
+ * 1-based mic index, `none`, `camera`); without it camera n takes mic n while
+ * there are mics and the rest keep their own file. Throws InvalidOperation
+ * for a wrong count or an index without a mic.
+ */
+export function resolveSoundOf(given: readonly string[] | undefined, cameras: number, mics: number): (number | null | undefined)[] {
+  const op = "multicam.create";
+  if (given === undefined) return Array.from({ length: cameras }, (_, i) => (i < mics ? i : undefined));
+  if (given.length !== cameras) {
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${given.length} soundOf entries for ${cameras} camera(s); give one per camera, in the same order.`, {
+      op,
+      reason: "soundOf",
+      field: "soundOf",
+    });
+  }
+  return given.map((entry) => {
+    if (entry === "camera") return undefined;
+    if (entry === "none") return null;
+    const index = /^[1-9]\d*$/.test(entry) ? Number(entry) : 0;
+    if (index < 1 || index > mics) {
+      throw new RpcError(ErrorCode.InvalidOperation, `${op}: soundOf "${entry}" is not \`camera\`, \`none\` or the number of a mic (1 to ${mics}).`, {
+        op,
+        reason: "soundOf",
+        field: "soundOf",
+        hint: mics === 0 ? "No mics were given." : `Mics: 1 to ${mics}, in the order given.`,
+      });
+    }
+    return index - 1;
+  });
+}
+
+/**
+ * Resolve the files and measure every file's offset against all the others
+ * (ADR 0016, {@link planSync}). Throws InvalidOperation naming the file and
+ * the fix when a file is outside the project, a camera has no picture, a mic
+ * has no sound, a file cannot be decoded, listed twice, or no file has sound
+ * at all, and AssetNotFound when it does not exist.
  */
 export async function measureAngles(source: MeasureSource, request: MeasureRequest): Promise<MeasuredAngles> {
   const { root, cwd, names } = request;
   const op = "multicam.create";
-  if (names !== undefined && names.length !== request.assets.length) {
-    throw new RpcError(
-      ErrorCode.InvalidOperation,
-      `${op}: ${names.length} name(s) for ${request.assets.length} file(s); give one name per file, in the same order.`,
-      { op, reason: "names", field: "names" },
-    );
+  const mics = request.mics ?? [];
+  for (const [given, list, field] of [
+    [names, request.assets, "names"],
+    [request.micNames, mics, "micNames"],
+  ] as const) {
+    if (given !== undefined && given.length !== list.length) {
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `${op}: ${given.length} name(s) for ${list.length} file(s); give one name per file, in the same order.`,
+        { op, reason: "names", field },
+      );
+    }
   }
+  const soundOf = resolveSoundOf(request.soundOf, request.assets.length, mics.length);
   const assets = request.assets.map((asset) => projectPath(root, cwd, asset, "asset", op));
-  if (new Set(assets).size !== assets.length) {
-    throw new RpcError(ErrorCode.InvalidOperation, `${op}: a file is listed twice. Give each person's file once.`, {
+  const micAssets = mics.map((asset) => projectPath(root, cwd, asset, "asset", op));
+  const all = [...assets, ...micAssets];
+  if (new Set(all).size !== all.length) {
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: a file is listed twice. Give each file once, as a camera or as a mic.`, {
       op,
       reason: "duplicate",
       field: "assets",
     });
   }
-  const silent = new Set<string>();
-  for (const [i, asset] of assets.entries()) {
+  const profiles: (EnergyProfile | null)[] = [];
+  for (const [i, asset] of all.entries()) {
+    const camera = i < assets.length;
     const probe = await source.probe(root, asset).catch((error: unknown) => {
       if (error instanceof RpcError) throw error;
       throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${asset} is not a media file ffprobe can read.`, {
         op,
         reason: "unreadable media",
-        field: "assets",
+        field: camera ? "assets" : "mics",
       });
     });
-    if (!probe.video || probe.video.still) {
-      throw new RpcError(
-        ErrorCode.InvalidOperation,
-        `${op}: ${asset} has no moving picture; each angle needs a video file.`,
-        { op, reason: "no streams", field: "assets" },
-      );
+    if (camera && (!probe.video || probe.video.still)) {
+      throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${asset} has no moving picture; each camera needs a video file.`, {
+        op,
+        reason: "no streams",
+        field: "assets",
+        hint: "Give audio files as mics.",
+      });
     }
-    if (probe.audio) continue;
-    if (i === 0) {
-      throw new RpcError(
-        ErrorCode.InvalidOperation,
-        `${op}: ${asset} has no sound, and the first file sets the clock the others are synced to.`,
-        { op, reason: "no streams", field: "assets", hint: "Put a file with sound first." },
-      );
+    if (!camera && !probe.audio) {
+      throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${asset} has no sound; a mic needs an audio stream.`, { op, reason: "no streams", field: "mics" });
     }
-    silent.add(asset);
+    // A silent camera has nothing to match: unsynced, it starts with the reference and gets the usual warning.
+    profiles.push(probe.audio ? await profileOf(source, root, asset) : null);
   }
-  const reference = await profileOf(source, root, assets[0]!);
-  const estimates = [];
-  for (const asset of assets.slice(1)) {
-    // A silent file has nothing to match: unsynced, it starts with the first file and gets the usual warning.
-    estimates.push(silent.has(asset) ? { lag: 0, confidence: 0 } : correlateProfiles(reference, await profileOf(source, root, asset)));
+  if (profiles.every((profile) => profile === null)) {
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: none of the files has sound, so there is nothing to sync them by.`, {
+      op,
+      reason: "no streams",
+      field: "assets",
+      hint: "Add a mic file or a camera with sound.",
+    });
   }
-  return { assets, plan: planOffsets(estimates) };
+  return { assets, mics: micAssets, soundOf, plan: planSync(profiles, correlateProfiles) };
 }
 
 async function profileOf(source: MeasureSource, root: string, asset: string): Promise<EnergyProfile> {
@@ -111,29 +163,35 @@ async function profileOf(source: MeasureSource, root: string, asset: string): Pr
   }
 }
 
-/** Sync entries and warnings for the created `group`, whose angles follow the order of `plan`. */
+/** Sync entries and warnings for the created `group`, whose cameras then mics follow the order of `plan`. */
 export function syncReport(
   group: MulticamGroup,
   plan: readonly PlannedOffset[],
 ): { sync: z.output<typeof AngleSyncSchema>[]; warnings: string[] } {
-  const first = group.angles[0]!;
+  const files = [
+    ...group.angles.map((angle) => ({ kind: "camera" as const, ...angle })),
+    ...(group.mics ?? []).map((mic) => ({ kind: "mic" as const, ...mic })),
+  ];
+  const reference = files[plan.findIndex((planned) => planned.confidence === null)];
   const warnings: string[] = [];
-  const sync = group.angles.map((angle, i) => {
+  const sync = files.map((file, i) => {
     const planned = plan[i]!;
     if (!planned.synced) {
       const percent = Math.round((planned.confidence ?? 0) * 100);
+      const fix = file.kind === "mic" ? `multicam mic ${group.id} ${file.id} --offset <seconds>` : `multicam offset ${group.id} ${file.id} <seconds>`;
       warnings.push(
-        `${angle.name} (${angle.asset}): no shared sound with ${first.name} found (confidence ${percent}% < ${SYNC_LOW_CONFIDENCE * 100}%), ` +
-          `so it starts together with ${first.name}. Check it, then fix it with ` +
-          `\`frameshell multicam offset ${group.id} ${angle.id} <seconds>\`.`,
+        `${file.name} (${file.asset}): no shared sound with the other files found (best confidence ${percent}% < ${SYNC_LOW_CONFIDENCE * 100}%), ` +
+          `so it starts together with ${reference?.name ?? "the first file"}. Check it, then fix it with \`frameshell ${fix}\`.`,
       );
     }
     return {
-      angle: angle.id,
-      name: angle.name,
-      asset: angle.asset,
-      offset: angle.offset,
+      kind: file.kind,
+      angle: file.id,
+      name: file.name,
+      asset: file.asset,
+      offset: file.offset,
       confidence: planned.confidence === null ? null : Math.round(planned.confidence * 1000) / 1000,
+      against: planned.against === null ? null : files[planned.against]!.id,
       synced: planned.synced,
     };
   });

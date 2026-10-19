@@ -116,17 +116,19 @@ export function sameTurns(a: readonly SpeakingTurn[], b: readonly SpeakingTurn[]
 }
 
 /**
- * When `multicam.turns` must be asked again: the angles changed, or a transcript of an angle's asset did (a
- * diarization run, a speaker correction) or went stale. Angles sharing a file take their turns from it.
+ * When `multicam.turns` must be asked again: the angles or mics changed, or a transcript of a sound they are heard
+ * through (an angle's file, a mic's file) did (a diarization run, a speaker correction) or went stale. Angles sharing a
+ * file or mic take their turns from its transcript.
  */
 export function turnsKey(
   angles: readonly { asset: string }[],
   sources: readonly TranscriptSource[],
   hashes: ReadonlyMap<string, string | null>,
+  mics: readonly { asset: string }[] = [],
 ): string {
-  const assets = new Set(angles.map((angle) => angle.asset));
+  const assets = new Set([...angles, ...mics].map((sound) => sound.asset));
   const transcripts = sources
     .filter((source) => assets.has(source.transcript.asset))
     .map((source) => [source.path, source.transcript, hashes.get(source.transcript.asset) ?? null]);
-  return JSON.stringify([angles, transcripts]);
+  return JSON.stringify([angles, mics, transcripts]);
 }

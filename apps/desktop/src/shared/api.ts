@@ -133,6 +133,7 @@ export const TIMELINE_EDIT_OPS = [
   "shot.set",
   "multicam.angle",
   "multicam.offset",
+  "multicam.reframe",
 ] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */
@@ -143,6 +144,12 @@ export type TimelineEditOp = (typeof TIMELINE_EDIT_OPS)[number];
  * `cwd` and `timeline`, which main fills in for the window's project.
  */
 export type TimelineEdit = { [K in TimelineEditOp]: { op: K; args: Omit<MethodParams<K>, "cwd" | "timeline"> } }[TimelineEditOp];
+
+/**
+ * Stands for a `clip` arg in a multi-edit call, on the edit right after a `clip.split`: the new part of that
+ * split, whose id the caller cannot know before the call runs. Anywhere else it is an ordinary clip id.
+ */
+export const CREATED_CLIP = "$created";
 
 /**
  * How main groups and names the transaction of one `timeline.edit` call.
@@ -306,7 +313,7 @@ export interface FrameshellApi {
      * Resolves with the last result. Rejects with the daemon's message
      * (overlap, bounds) at the first refused edit, and undoes the call's
      * earlier ones, so a group move is all or nothing (in a gesture burst,
-     * earlier presses stay). `options` labels the transaction or joins a
+     * earlier calls stay, but this call's edits are still undone). `options` labels the transaction or joins a
      * gesture burst's.
      */
     edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;

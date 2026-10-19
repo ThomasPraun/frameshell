@@ -1,7 +1,7 @@
 // Cutting to an angle by number key or click (#242, ADR 0016 decision 5): which shot is under the playhead, what
 // to split and set, and the serial queue that sends it. The multicam viewer calls `cutToAngle` too.
 import type { OperationResult, TimelineView } from "@frameshell/protocol";
-import { EDIT_BURST_GAP_MAX_MS, type EditOptions, type TimelineEdit } from "../../../shared/api.js";
+import { CREATED_CLIP, EDIT_BURST_GAP_MAX_MS, type EditOptions, type TimelineEdit } from "../../../shared/api.js";
 import { transport as appTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "./layout.js";
@@ -113,7 +113,7 @@ export function createAngleCutter(host: AngleCutHost, transport: AngleCutTranspo
   return {
     /**
      * Cut to angle `number` (1-based, group order) at the playhead now; `additive` adds it to the shot's angles.
-     * The playhead is read at the call, not when the queue gets to it. Rejects with the daemon's message.
+     * The playhead is read at the call, not when the queue gets to it. Rejects with the daemon's message, the timeline unchanged by that press.
      */
     cut(number: number, additive = false): Promise<AngleCutOutcome> {
       const { time, playing } = transport.get();
@@ -125,15 +125,10 @@ export function createAngleCutter(host: AngleCutHost, transport: AngleCutTranspo
         if ("kind" in plan) return plan;
         const options: EditOptions = playing ? { burst, burstGap: TAKE_GAP_MS, label: "Cut to angles" } : { burst, label: `Cut to ${plan.angle}` };
         try {
-          let clip = plan.clip;
-          if (plan.splitAt !== null) {
-            const split = await host.edit(timeline, [{ op: "clip.split", args: { clip, at: plan.splitAt } }], options);
-            const created = split.changes.added.find((id) => id !== clip);
-            if (!created) throw new Error("The daemon did not report the new part of the split shot.");
-            clip = created;
-          }
-          const result = await host.edit(timeline, [{ op: "shot.set", args: { clip, ...plan.set } }], options);
-          return { kind: "cut", result, plan };
+          // One call: a refused `shot.set` undoes the split of its own call, so a refused switch changes nothing.
+          const edits: TimelineEdit[] = [{ op: "shot.set", args: { clip: plan.splitAt === null ? plan.clip : CREATED_CLIP, ...plan.set } }];
+          if (plan.splitAt !== null) edits.unshift({ op: "clip.split", args: { clip: plan.clip, at: plan.splitAt } });
+          return { kind: "cut", result: await host.edit(timeline, edits, options), plan };
         } finally {
           // A paused press is a history entry of its own: close it now rather than after the burst gap.
           if (!playing) await host.settle().catch(() => undefined);

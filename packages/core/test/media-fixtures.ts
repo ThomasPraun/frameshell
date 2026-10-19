@@ -144,6 +144,16 @@ export async function makeBurstClip(
   ]);
 }
 
+/** Sound-only recorder file (WAV) with the same burst pattern as {@link makeBurstClip}, `shiftS` seconds into it. */
+export async function makeBurstAudio(
+  path: string,
+  { shiftS = 0, durationS = 12, bursts = SYNC_BURSTS }: { shiftS?: number; durationS?: number; bursts?: readonly (readonly [number, number, number])[] } = {},
+): Promise<void> {
+  const { ffmpeg } = await mediaTools();
+  const tones = bursts.map(([start, length, hz]) => `between(t+${shiftS},${start},${start + length})*0.5*sin(2*PI*${hz}*t)`).join("+");
+  await run(ffmpeg, [...["-hide_banner", "-loglevel", "error", "-y"], ...["-f", "lavfi", "-i", `aevalsrc='${tones}':s=48000:d=${durationS}`], path]);
+}
+
 /** One person's mic for turns tests: own speech at full level, other people's (bleed) at -20 dB. */
 export interface VoiceOptions {
   /** Tone bursts (start s, length s, Hz) of this person. */

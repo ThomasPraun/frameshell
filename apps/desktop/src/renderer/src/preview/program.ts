@@ -10,8 +10,10 @@ import {
   movedProgramGroups,
   placementOf,
   programGroup,
+  shotGroupTime,
   shotLayers,
   shotSound,
+  soundSamples,
 } from "@frameshell/schema/composite";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -122,6 +124,8 @@ export interface AngleLayer {
   tile: LayerRect;
   crop: LayerRect;
   source: Size;
+  /** True: black fills the frame behind the tile (`ShotLayer.backdrop`). */
+  backdrop: boolean;
 }
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
@@ -272,14 +276,17 @@ export interface PlaceholdersAt {
   notes: { span: PlaceholderSpan; layer: number }[];
 }
 
-/** Where the placeholders at program frame `frame` show: a shot's angle never covers the frame, only its tile. */
-export function placeholdersAt(program: Program, frame: number): PlaceholdersAt {
+/**
+ * Where the placeholders at program frame `frame` show in an `output`-sized
+ * frame (default the project's): a shot's angle never covers the frame, only its tile.
+ */
+export function placeholdersAt(program: Program, frame: number, output: Size = program.resolution): PlaceholdersAt {
   const found: PlaceholdersAt = { base: null, tiles: [], notes: [] };
   program.layers.forEach((_, layer) => {
     const span = programAt(program, frame, layer);
     if (span?.kind !== "placeholder") return;
     if (span.angle) {
-      const shown = angleLayer({ angle: span.angle.id, layout: span.angle.layout }, program.resolution);
+      const shown = angleLayer({ angle: span.angle.id, layout: span.angle.layout }, output);
       if (shown) found.tiles.push({ span, layer, tile: shown.tile });
     } else if (layer === 0) found.base = span;
     else found.notes.push({ span, layer });
@@ -406,14 +413,15 @@ export type AngleSpan = Extract<VideoSpan, { kind: "angle" }>;
 
 /**
  * Where the angle of `span` shows in an `output`-sized frame, and which of
- * its source pixels fill it (`shotLayers`, as export lays shots out); null
- * when its shot does not show that angle.
+ * its source pixels fill it at timeline second `seconds` (`shotLayers`, as
+ * export lays shots out: a reframed angle's cut moves over time; default the
+ * shot's start); null when its shot does not show that angle.
  */
-export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Size): AngleLayer | null {
+export function angleLayer(span: Pick<AngleSpan, "angle" | "layout">, output: Size, seconds = span.layout.shot.start): AngleLayer | null {
   const { shot, group, sizes } = span.layout;
   const size = (asset: string) => sizes[asset] ?? output;
-  const layer = shotLayers(shot, group, output, size).find((candidate) => candidate.angle === span.angle);
-  return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset) } : null;
+  const layer = shotLayers(shot, group, output, size, shotGroupTime(shot, seconds)).find((candidate) => candidate.angle === span.angle);
+  return layer ? { tile: layer.tile, crop: layer.crop, source: size(layer.asset), backdrop: layer.backdrop } : null;
 }
 
 /** A shot as the preview plays it: program frames `[start, end)`. */
@@ -465,6 +473,11 @@ function angleSlots(shots: readonly PlacedShot[], group: MulticamGroup, assets: 
       if (free >= 0) next[free] = id;
       else next.push(id);
     }
+    // Slots paint bottom first: a pip inset (second angle) must sit above its screen (first angle).
+    if (placed.shot.shot === "pip") {
+      const [screen, inset] = [next.indexOf(shown[0] ?? ""), next.indexOf(shown[1] ?? "")];
+      if (screen > inset && inset >= 0) [next[screen], next[inset]] = [next[inset]!, next[screen]!];
+    }
     held = next;
     while (slots.length < next.length) slots.push([]);
     const layout: ShotFrame = { shot: placed.shot, group, sizes };
@@ -510,13 +523,14 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
     for (const clip of shotSound(shot, group)) {
       const sidecar = assets.get(clip.asset)?.sidecar;
       if (clip.audio?.muted === true || !sidecar) continue;
+      const samples = soundSamples(clip, rate, sidecar.sampleRate);
       const span: AudioSpan = {
         clip: clip.id,
-        start: Math.round(clip.start * rate),
-        end: Math.round((clip.start + clip.out - clip.in) * rate),
+        start: samples.start,
+        end: samples.end,
         sidecar: sidecar.path,
         channels: sidecar.channels,
-        in: Math.round(clip.in * sidecar.sampleRate),
+        in: samples.in,
         speed: 1,
         gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
       };

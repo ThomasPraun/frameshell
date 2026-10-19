@@ -36,6 +36,7 @@ import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
 import { type TurnsSource, groupTurns } from "./multicam/group-turns.js";
+import { MotionStore, groupMotion } from "./multicam/motion.js";
 import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
@@ -205,6 +206,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
     },
     extractAudio: options.extractAudio,
+  });
+  const motion = new MotionStore({
+    ffmpeg: async (dir) => {
+      const project = await readEnclosingProject(dir);
+      return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
+    },
   });
   const transactions = new TransactionTracker({
     idleGapMs: options.txIdleGapMs,
@@ -568,22 +575,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "multicam.create": async ({ cwd, timeline, assets, names, name }, caller) => {
+    "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name }, caller) => {
       const dir = await root(cwd);
       const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
         root: dir,
         cwd,
         assets,
         names,
+        mics,
+        micNames,
+        soundOf,
       });
       const angles = measured.assets.map((asset, i) => ({
         asset,
         ...(names ? { name: names[i]! } : {}),
         offset: measured.plan[i]!.offset,
+        ...(measured.soundOf[i] !== undefined ? { mic: measured.soundOf[i]! } : {}),
+      }));
+      const micFiles = measured.mics.map((asset, i) => ({
+        asset,
+        ...(micNames ? { name: micNames[i]! } : {}),
+        offset: measured.plan[measured.assets.length + i]!.offset,
       }));
       // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
       let written: Timeline | undefined;
-      const result = await operate("multicam.create", { cwd, timeline, angles, ...(name ? { name } : {}) }, caller, (after) => {
+      const result = await operate("multicam.create", { cwd, timeline, angles, ...(micFiles.length > 0 ? { mics: micFiles } : {}), ...(name ? { name } : {}) }, caller, (after) => {
         written = after;
       });
       const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
@@ -594,6 +610,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "multicam.offset": (params, caller) => operate("multicam.offset", params, caller),
     "multicam.angle": (params, caller) => operate("multicam.angle", params, caller),
+    "multicam.mic": (params, caller) => operate("multicam.mic", params, caller),
+    "multicam.reframe": (params, caller) => operate("multicam.reframe", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);
@@ -609,9 +627,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
       const measured = await groupTurns(turnsSource, dir, found);
       const turns = measured.turns.map(({ angle, start, end }) => ({ angle, start, end }));
+      const screens = loadedRules.rules.screen.motion === null ? null : await groupMotion(motion, dir, found, loadedRules.rules.screen.threshold);
       let written: Timeline | undefined;
       let keep: string[] = [];
-      const args = { cwd, timeline, group, from, to, turns, rules: loadedRules.rules, keep };
+      const args = { cwd, timeline, group, from, to, turns, ...(screens ? { motion: screens.motion } : {}), rules: loadedRules.rules, keep };
       // Human shots come from the timeline and journal the operation applies to: measuring turns
       // can take long, and a shot a person sets meanwhile must still be kept.
       const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
@@ -642,6 +661,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = [
         ...result.warnings,
         ...measured.warnings,
+        ...(screens?.warnings ?? []),
         ...(unknown.length > 0 ? [`weights name ${unknown.join(", ")}, not angles of group ${group} (angles: ${found.angles.map((angle) => angle.id).join(", ")}).`] : []),
       ];
       return {

@@ -3,6 +3,7 @@ import {
   type AdapterClip,
   type Clip,
   type ClipTrack,
+  type CropPath,
   type ExportPreset,
   type LayerRect,
   type MediaClip,
@@ -20,6 +21,7 @@ import {
   programGroup,
   programSound,
   shotLayers,
+  soundSamples,
   subtitleTracks,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
@@ -220,11 +222,16 @@ interface Placed {
   in: number;
   speed: number;
   placement: Placement;
+  /** Sound of a program track: placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
+  exact?: true;
   /**
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
+   * `move`: the angle's reframe moves the crop, and `clock` is the group second
+   * at timeline second 0 (the shot's `in - start`). `exact`: the angle has a
+   * reframe, so its still crop keeps odd edges like the moving one.
    */
-  tile?: { crop: LayerRect; rect: LayerRect };
+  tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean; exact?: boolean; move?: { path: CropPath; clock: number } };
 }
 
 /** What export v1 renders of a timeline. */
@@ -510,7 +517,7 @@ function layoutTimeline(
       for (const edge of shotEdges) frames = Math.max(frames, edge);
       pictures.push({ program: true, placed: layers });
       // Every angle's sound plays under every shot, whatever the shot shows.
-      for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound)));
+      for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound).map((placed) => ({ ...placed, exact: true as const }))));
       continue;
     }
     const placed = placeTrack(track);
@@ -614,7 +621,13 @@ function placeShots(shots: readonly ShotClip[], group: MulticamGroup, context: S
         in: Math.round((from + skipped) * fps),
         speed: 1,
         placement: placementOf(undefined),
-        tile: { crop: layer.crop, rect: layer.tile },
+        tile: {
+          crop: layer.crop,
+          rect: layer.tile,
+          backdrop: layer.backdrop,
+          ...(angle.reframe ? { exact: true } : {}),
+          ...(layer.reframe ? { move: { path: layer.reframe, clock: shot.in - shot.start } } : {}),
+        },
       });
     }
   });
@@ -743,19 +756,61 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
     const { opacity } = placed.placement;
     const crop = placed.tile?.crop;
+    const move = placed.tile?.move;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
-      ...(crop ? [`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`] : []),
+      ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
+      ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
     lines.push(`${chain.join(",")}[o${n}]`);
-    const overlay = `[${below}][o${n}]overlay=x=${rect.left}:y=${rect.top}:eof_action=pass:format=auto`;
+    const overlay = `[${below}][o${n}]overlay=x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
+}
+
+/**
+ * `crop` filter cutting `crop`. Chroma subsampling rounds an odd edge down;
+ * `exact` keeps it, only when asked and needed so unreframed output stays as it was.
+ */
+function staticCrop(crop: LayerRect, exact: boolean): string {
+  const odd = crop.left % 2 !== 0 || crop.top % 2 !== 0;
+  return `crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}${exact && odd ? ":exact=1" : ""}`;
+}
+
+/**
+ * `crop` filter cutting `path` ({@link cropAt} in `@frameshell/schema`) for a
+ * piece whose first frame shows group second `from` and that lasts `length`
+ * seconds: the group second is `from + t` (piece timestamps start at 0), the
+ * edges are the same straight lines between keys, rounded and clamped. Keys
+ * outside the piece are left out but for the one on each side. `exact`
+ * keeps odd edges, which chroma subsampling would otherwise round down.
+ */
+function movingCrop(path: CropPath, from: number, length: number): string {
+  const to = from + length;
+  const before = path.keys.filter((key) => key.at <= from).at(-1);
+  const after = path.keys.find((key) => key.at >= to);
+  const keys = [...(before ? [before] : []), ...path.keys.filter((key) => key.at > from && key.at < to), ...(after && after !== before ? [after] : [])];
+  const group = `(${num(from)}+t)`;
+  const edge = (value: (key: CropPath["keys"][number]) => number, size: number, [lo, hi]: readonly [number, number]) => {
+    if (lo === hi) return String(lo);
+    const at = (index: number) => num(keys[index]!.at);
+    const v = (index: number) => value(keys[index]!);
+    let line = num(v(keys.length - 1));
+    for (let index = keys.length - 2; index >= 0; index--) {
+      const slope = (v(index + 1) - v(index)) / (keys[index + 1]!.at - keys[index]!.at);
+      line = `if(lt(${group},${at(index + 1)}),${num(v(index))}+${num(slope)}*(${group}-${at(index)}),${line})`;
+    }
+    if (keys.length > 1) line = `if(lt(${group},${at(0)}),${num(v(0))},${line})`;
+    return `'clip(round(${line}-${num(size / 2)}),${lo},${hi})'`;
+  };
+  const x = edge((key) => key.x, path.width, path.left);
+  const y = edge((key) => key.y, path.height, path.top);
+  return `crop=w=${path.width}:h=${path.height}:x=${x}:y=${y}:exact=1`;
 }
 
 /**
@@ -800,15 +855,35 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
   const tracks = layout.audio.map((track) => {
     const items: AudioItem[] = [];
     let cursor = 0;
+    /** Last item when it is a program sound and its start sample, for joining the next shot to it. */
+    let joinable: { item: Extract<AudioItem, { kind: "clip" }>; start: number } | null = null;
     for (const placed of track) {
-      const start = at(placed.start);
-      const end = at(placed.end);
-      if (start > cursor) items.push({ kind: "silence", samples: start - cursor });
+      const exact = placed.exact ? soundSamples(placed.clip, sampleRate) : null;
+      // Program sound: exact samples of the clip's seconds, clamped to the video's length and the previous item.
+      const start = exact ? Math.min(samples, Math.max(cursor, exact.start)) : at(placed.start);
+      const end = exact ? Math.min(samples, exact.end) : at(placed.end);
+      if (exact && end <= start) continue;
+      const from = exact ? exact.in + (start - exact.start) : Math.round((placed.in / fps) * sampleRate);
+      const sourceSamples = exact ? end - start : Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate);
       let input = inputs.indexOf(placed.source.path);
       if (input === -1) input = inputs.push(placed.source.path) - 1;
-      const from = Math.round((placed.in / fps) * sampleRate);
-      const sourceSamples = Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate);
-      items.push({
+      const previous = joinable;
+      // A sound running on across a shot change stays one item: shots switch pictures, the edge fade belongs to real cuts (as in the preview).
+      if (
+        exact &&
+        previous &&
+        start - cursor <= 1 &&
+        previous.item.input === input &&
+        previous.item.gainDb === (placed.clip.audio?.gain ?? 0) &&
+        Math.abs(from - previous.item.to) <= 1
+      ) {
+        previous.item.samples = end - previous.start;
+        previous.item.to = previous.item.from + previous.item.samples;
+        cursor = end;
+        continue;
+      }
+      if (start > cursor) items.push({ kind: "silence", samples: start - cursor });
+      const item: Extract<AudioItem, { kind: "clip" }> = {
         kind: "clip",
         clip: placed.clip.id,
         input,
@@ -817,7 +892,9 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         speed: placed.speed,
         gainDb: placed.clip.audio?.gain ?? 0,
         samples: end - start,
-      });
+      };
+      items.push(item);
+      joinable = exact ? { item, start } : null;
       cursor = end;
     }
     if (samples > cursor) items.push({ kind: "silence", samples: samples - cursor });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { SHOT_CORNERS } from "./timeline.js";
 
 /** Canonical `$schema` URL for a project's `director.json`. */
 export const DIRECTOR_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/director.json`;
@@ -48,6 +49,21 @@ export const DirectorCutawaySchema = z.strictObject({
   length: z.number().positive().describe("Seconds the cutaway lasts before the picture returns to the speaker."),
 });
 
+/** When a screen angle (`angle.screen`) takes the picture. */
+export const DirectorScreenSchema = z.strictObject({
+  motion: Rule(
+    "A screen angle that changes for at least this long (a slide, a scroll, a demo) is shown: `screen` while nobody speaks, " +
+      "`pip` (screen with the speaker in an inset) while someone does.",
+  ),
+  hold: Seconds("Pauses in a screen's motion shorter than this stay inside the stretch, so a still moment mid-demo does not cut away."),
+  threshold: z
+    .number()
+    .positive()
+    .describe("How much of the picture must change to count as motion: mean brightness change between two samples (4 per second), 0 to 255."),
+  pip: z.boolean().describe("False: show the screen alone, never with an inset."),
+  corner: z.enum(SHOT_CORNERS).describe("Corner of the inset in `pip` shots."),
+});
+
 /**
  * Every rule the director applies, all fields present (a template, or a
  * template with `director.json` on top). Times are seconds.
@@ -65,6 +81,7 @@ export const DirectorRulesSchema = z.strictObject({
   twoShot: DirectorTwoShotSchema,
   wide: DirectorWideSchema,
   cutaway: DirectorCutawaySchema,
+  screen: DirectorScreenSchema,
   weights: z
     .record(z.string().min(1), z.number().nonnegative())
     .describe(
@@ -94,6 +111,7 @@ export const DirectorFileSchema = z.strictObject({
   twoShot: DirectorTwoShotSchema.partial().optional(),
   wide: DirectorWideSchema.partial().optional(),
   cutaway: DirectorCutawaySchema.partial().optional(),
+  screen: DirectorScreenSchema.partial().optional(),
   weights: DirectorRulesSchema.shape.weights.optional(),
 });
 
@@ -111,6 +129,7 @@ export const DIRECTOR_TEMPLATES: Readonly<Record<DirectorTemplateId, DirectorRul
     twoShot: { exchange: 1.5, overlap: 1.5 },
     wide: { silence: 4, laughter: 1.5, together: 3 },
     cutaway: { to: "listener", length: 3 },
+    screen: { motion: 3, hold: 2, threshold: 0.3, pip: true, corner: "bottom-right" },
     weights: {},
   },
   /** A relaxed conversation: long holds, slow cuts, two-shots on banter. */
@@ -121,6 +140,7 @@ export const DIRECTOR_TEMPLATES: Readonly<Record<DirectorTemplateId, DirectorRul
     twoShot: { exchange: 2.5, overlap: 1 },
     wide: { silence: 3, laughter: 1, together: 3 },
     cutaway: { to: "wide", length: 4 },
+    screen: { motion: 4, hold: 3, threshold: 0.3, pip: true, corner: "bottom-right" },
     weights: {},
   },
   /** Several people trading quickly: short shots, quick cuts, frequent reactions. */
@@ -131,6 +151,7 @@ export const DIRECTOR_TEMPLATES: Readonly<Record<DirectorTemplateId, DirectorRul
     twoShot: { exchange: 2, overlap: 0.6 },
     wide: { silence: 2.5, laughter: 0.8, together: 3 },
     cutaway: { to: "listener", length: 2 },
+    screen: { motion: 2, hold: 1.5, threshold: 0.3, pip: true, corner: "bottom-right" },
     weights: {},
   },
 };
@@ -158,6 +179,7 @@ export function resolveDirectorRules(file: DirectorFile | null, template?: Direc
     twoShot: { ...base.twoShot, ...defined<DirectorRules["twoShot"]>(file.twoShot) },
     wide: { ...base.wide, ...defined<DirectorRules["wide"]>(file.wide) },
     cutaway: { ...base.cutaway, ...defined<DirectorRules["cutaway"]>(file.cutaway) },
+    screen: { ...base.screen, ...defined<DirectorRules["screen"]>(file.screen) },
     weights: { ...base.weights, ...file.weights },
   };
   return { template: id, rules };

@@ -150,4 +150,18 @@ describe("turnsKey", () => {
     const other = { path: "transcripts/x.words.json", transcript: { asset: "assets/x.mp4" } } as never;
     expect(turnsKey(angles, [transcript("s1"), other], hashes)).toBe(before);
   });
+
+  it("follows the transcript of a mic the angles share, and changes when the mics do", () => {
+    const cameras = [
+      { id: "ana", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+      { id: "ben", asset: "assets/ben.mp4", offset: 0, mic: "lav" },
+    ];
+    const mics = [{ id: "lav", asset: "assets/room.mp4", offset: 0.5 }];
+    const before = turnsKey(cameras, [transcript("s1")], hashes, mics);
+    expect(turnsKey(cameras, [transcript("s1", { w1: { speaker: "s2" } })], hashes, mics)).not.toBe(before);
+    const moved = [{ ...mics[0]!, offset: 0.6 }];
+    expect(turnsKey(cameras, [transcript("s1")], hashes, moved)).not.toBe(before);
+    // Without the mic, room.mp4 is no angle's sound: its transcript does not count.
+    expect(turnsKey(cameras, [transcript("s1", { w1: { speaker: "s2" } })], hashes)).toBe(turnsKey(cameras, [transcript("s1")], hashes));
+  });
 });

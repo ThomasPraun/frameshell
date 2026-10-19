@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeBurstClip } from "../../core/test/media-fixtures.js";
+import { makeBurstAudio, makeBurstClip } from "../../core/test/media-fixtures.js";
 import { testBinariesDir } from "../../core/test/media-tools.js";
 import { UsageError, parseTimelineCommand } from "../src/timeline-commands.js";
 
@@ -39,7 +39,8 @@ beforeAll(async () => {
   const footage = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-footage-")));
   await makeBurstClip(join(footage, "ana.mp4"), { shiftS: 0 });
   await makeBurstClip(join(footage, "ben.mp4"), { shiftS: 1.5, durationS: 9 });
-  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4")]).code).toBe(0);
+  await makeBurstAudio(join(footage, "rec.wav"), { shiftS: 3, durationS: 8 });
+  expect(frameshell(["import", join(footage, "ana.mp4"), join(footage, "ben.mp4"), join(footage, "rec.wav")]).code).toBe(0);
   daemonPid = JSON.parse(frameshell(["status", "--json"]).stdout).daemon.pid;
 }, 120_000);
 
@@ -115,6 +116,29 @@ describe("frameshell multicam", () => {
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("a two-up shot takes exactly 2 angles; got 1");
   }, 120_000);
+
+  it("reframes an angle with keys at timeline seconds, removes one and clears them", () => {
+    const group = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].id as string;
+    const first = frameshell(["multicam", "reframe", group, "ana", "--time", "1", "--x", "0.3"]);
+    expect(first.stderr).toBe("");
+    expect(first.stdout).toContain("multicam.reframe: updated");
+    expect(frameshell(["multicam", "reframe", group, "ana", "--at", "4", "--x", "0.7", "--y", "0.4"]).code).toBe(0);
+    let angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    // The grid shot plays group 0 at timeline 0: timeline 1 is group 1.
+    expect(angle.reframe).toEqual([
+      { at: 1, x: 0.3, y: 0.5 },
+      { at: 4, x: 0.7, y: 0.4 },
+    ]);
+    expect(frameshell(["multicam", "reframe", group, "ana", "--at", "1", "--remove"]).code).toBe(0);
+    angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    expect(angle.reframe).toEqual([{ at: 4, x: 0.7, y: 0.4 }]);
+    const missing = frameshell(["multicam", "reframe", group, "ana", "--at", "2", "--remove"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("Keys at group seconds: 4");
+    expect(frameshell(["multicam", "reframe", group, "ana", "--clear"]).code).toBe(0);
+    angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
+    expect(angle).not.toHaveProperty("reframe");
+  }, 120_000);
 });
 
 describe("frameshell direct", () => {
@@ -137,6 +161,36 @@ describe("frameshell direct", () => {
   }, 120_000);
 });
 
+describe("frameshell multicam with separate mics", () => {
+  it("creates a group with a separate mic file, maps cameras to it, and fixes the mic by hand", () => {
+    const created = frameshell([
+      ...["multicam", "create", "assets/ana.mp4", "assets/ben.mp4"],
+      ...["--name", "Ana", "--name", "Ben", "--mic-file", "assets/rec.wav", "--mic-name", "Recorder", "--sound", "1", "--sound", "none"],
+    ]);
+    expect(created.stderr).toBe("");
+    expect(created.code).toBe(0);
+    expect(created.stdout).toMatch(/ {2}mic recorder {2}Recorder {2}assets\/rec.wav {2}offset \d+(\.\d+)? s {2}confidence \d+% with (ana|ben)/);
+    const json = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout);
+    const group = json.groups.at(-1) as { id: string; angles: { id: string; mic?: string | null }[]; mics: { id: string; offset: number }[] };
+    expect(group.angles.map((angle) => [angle.id, angle.mic])).toEqual([["ana", "recorder"], ["ben", null]]);
+    // The recorder started 3 s after Ana's file: it plays 3 s into the group clock.
+    expect(group.mics[0]!.offset).toBeCloseTo(3, 1);
+
+    const fixed = frameshell(["multicam", "mic", group.id, "recorder", "--offset", "0.25", "--gain=-2", "--name", "Lav"]);
+    expect(fixed.stderr).toBe("");
+    expect(fixed.code).toBe(0);
+    const again = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups.at(-1);
+    expect(again.mics[0]).toMatchObject({ name: "Lav", offset: 0.25, audio: { gain: -2 } });
+
+    const back = frameshell(["multicam", "angle", group.id, "ben", "--mic", "camera"]);
+    expect(back.code).toBe(0);
+    expect(JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups.at(-1).angles[1]).not.toHaveProperty("mic");
+    const bad = frameshell(["multicam", "angle", group.id, "ana", "--gain", "3"]);
+    expect(bad.code).not.toBe(0);
+    expect(bad.stderr).toContain("takes its sound from mic recorder");
+  }, 120_000);
+});
+
 describe("parsing multicam commands", () => {
   it("maps arguments to the methods and refuses a wrong name count, a bad number or conflicting flags", () => {
     expect(parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { name: ["A", "B"] })).toMatchObject({
@@ -149,6 +203,17 @@ describe("parsing multicam commands", () => {
       method: "multicam.offset",
       params: { group: "g_1", angle: "ben", offset: 1.5 },
     });
+    expect(
+      parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { "mic-file": ["m.wav"], "mic-name": ["M"], sound: ["none", "1"], "group-name": "Talk" }),
+    ).toMatchObject({ method: "multicam.create", params: { assets: ["a.mp4", "b.mp4"], mics: ["m.wav"], micNames: ["M"], soundOf: ["none", "1"], name: "Talk" } });
+    expect(() => parseTimelineCommand(["multicam", "create", "a.mp4", "b.mp4"], { "mic-name": ["M"] })).toThrow(/one per --mic-file/);
+    expect(parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { offset: "0.5", gain: "-3", muted: true })).toMatchObject({
+      method: "multicam.mic",
+      params: { group: "g_1", mic: "lav", offset: 0.5, gain: -3, muted: true },
+    });
+    expect(() => parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { offset: "later" })).toThrow(/--offset: expected a number/);
+    expect(() => parseTimelineCommand(["multicam", "mic", "g_1", "lav"], { muted: true, unmuted: true })).toThrow(/not both/);
+    expect(parseTimelineCommand(["multicam", "angle", "g_1", "ben"], { mic: "none" })).toMatchObject({ params: { mic: "none" } });
     expect(parseTimelineCommand(["multicam", "turns", "g_1"], {})).toMatchObject({ method: "multicam.turns", params: { group: "g_1" } });
     expect(() => parseTimelineCommand(["multicam", "turns"], {})).toThrow(UsageError);
     expect(() => parseTimelineCommand(["multicam", "offset", "g_1", "ben", "soon"], {})).toThrow(/expected a number/);
@@ -172,5 +237,16 @@ describe("parsing multicam commands", () => {
     expect(parseTimelineCommand(["direct", "g_1"], {})!.params).toEqual({ group: "g_1" });
     expect(() => parseTimelineCommand(["direct"], {})).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["direct", "g_1"], { layout: "solo" })).toThrow(/does not take --layout/);
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { time: "12.5", x: "0.3" })).toMatchObject({
+      method: "multicam.reframe",
+      params: { group: "g_1", angle: "ana", time: 12.5, x: 0.3 },
+    });
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "3", remove: true })).toMatchObject({ params: { at: 3, remove: true } });
+    expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true })!.params).toEqual({ group: "g_1", angle: "ana", clear: true });
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { x: "0.3" })).toThrow(/--time <timeline seconds> or --at/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", time: "1", x: "0.3" })).toThrow(/one of them/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1" })).toThrow(/--x and\/or --y/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", remove: true, x: "0.2" })).toThrow(/without --x/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true, at: "1" })).toThrow(/without --at/);
   });
 });

@@ -32,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 43;
+export const PROTOCOL_VERSION = 46;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1229,22 +1229,34 @@ export const methods = {
   "multicam.create": {
     mutating: true,
     description:
-      "Make a multicam group from one file per person (ADR 0016). Measures each file's offset against the FIRST by audio " +
-      "cross-correlation (the sound they share: a clap, the room, bleed from the other mic), shifts all so the earliest starts at 0, " +
-      "then adds the group, a program track and one `grid` shot over the whole length. Example: " +
-      "`{ assets: [\"assets/ana.mp4\", \"assets/ben.mp4\"], names: [\"Ana\", \"Ben\"] }`. `sync` reports each file's offset and " +
-      "`confidence` (0 to 1). Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the first file), " +
-      "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset`. Only the first ten minutes of " +
-      "each file are matched. Needs two or more files, each with a picture and sound. " +
-      "Fails with InvalidOperation (file missing or unreadable, no picture or sound, outside the project).",
+      "Make a multicam group from cameras (one file per camera or person) and, optionally, separate mic files (ADR 0016). Measures " +
+      "every file's offset by audio cross-correlation (the sound they share: a clap, the room, bleed from the other mic) against " +
+      "ALL the others, not only the first: each file is placed by its best match with a file already placed, so a camera whose " +
+      "sound is faint still lands through the mic that hears the same room. The earliest file starts at 0, then the group, a " +
+      "program track and one `grid` shot over the cameras' length are added. A camera's sound is its own file's unless a mic " +
+      "carries it: `soundOf` has one entry per camera, a 1-based index into `mics`, `none` (wide camera: no sound) or `camera` " +
+      "(its own file). Default: the camera n takes mic n while there are mics, the rest keep their own file; one mic may serve " +
+      "several cameras. Example: `{ assets: [\"assets/wide.mp4\", \"assets/ana.mp4\", \"assets/ben.mp4\"], mics: [\"assets/ana.wav\", " +
+      "\"assets/ben.wav\"], soundOf: [\"none\", \"1\", \"2\"] }`. `sync` reports each file's offset, `confidence` (0 to 1) and the file it " +
+      "was matched `against`. Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the reference), " +
+      "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset` (cameras) or " +
+      "`multicam.mic` (mics). Only the first ten minutes of each file are matched. Needs two or more cameras with a picture; " +
+      "the reference is the first file with sound; a file without sound is not synced. " +
+      "Fails with InvalidOperation (file missing or unreadable, no picture, no file with sound, outside the project, bad `soundOf`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       assets: z
         .array(z.string().min(1))
         .min(2)
-        .describe("Media files inside the project, absolute or relative to `cwd`; the first one sets the clock."),
+        .describe("Camera files with a picture, inside the project, absolute or relative to `cwd`; the first one sets the clock unless it has no sound."),
       names: z.array(z.string().min(1)).optional().describe("Angle names in the same order, e.g. the people. Default: file names."),
+      mics: z.array(z.string().min(1)).optional().describe("Separate sound files (audio or video files; only the sound is used), same rules as `assets`."),
+      micNames: z.array(z.string().min(1)).optional().describe("Mic names in the same order as `mics`. Default: file names."),
+      soundOf: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("One entry per camera, in order: a 1-based index into `mics`, `none` or `camera`. Default: see the description."),
       name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
     }),
     result: MulticamCreateResultSchema,
@@ -1260,43 +1272,77 @@ export const methods = {
     params: operationArgs["multicam.offset"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "multicam.mic": {
+    mutating: true,
+    description:
+      "Change one separate mic of a multicam group: `name`, `offset` (group-clock second at which its file's time 0 plays, absolute; " +
+      "fixes its sync) and its sound under every shot (`gain` dB, `muted`). The mic plays once, whichever angles use it. " +
+      "Example: `{ group: \"g_1a2b3c\", mic: \"ana-lav\", offset: 0.84, gain: -2 }`. Pick which mic an angle uses with `multicam.angle`. " +
+      "Fails with InvalidOperation when the group or mic does not exist or nothing is given.",
+    params: operationArgs["multicam.mic"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
   "multicam.angle": {
     mutating: true,
     description:
       "Change one angle of a multicam group: `name`, `crop` (fractions of its picture cut off each side, merged side by side; " +
-      "null removes it), its sound under every shot (`gain` dB, `muted`) and `speaker`: the transcript speaker (`s1`, from " +
-      "`transcribe.speakers` on the angle's file) whose words are this person's turns when people share a mic (null clears it). " +
-      "The angle id stays, so shots keep showing it. " +
+      "null removes it), its sound under every shot (`gain` dB, `muted`: the angle's own file; with a mic they belong to the mic, see " +
+      "`multicam.mic`), where it is heard (`mic`: a mic id of the group, `camera` for its own file, `none` for no sound), `screen` " +
+      "(true: a screen share, which the director shows while it moves, never as a speaker) and `speaker`: the transcript speaker (`s1`, from " +
+      "`transcribe.speakers` on the angle's sound: its mic's file, else its own) whose words are this person's turns when people share " +
+      "a file or mic (null clears it). The angle id stays, so shots keep showing it. " +
       "Example: `{ group: \"g_1a2b3c\", angle: \"ben\", crop: { left: 0.1, right: 0.1 }, gain: -3 }`. Sync is `multicam.offset`. " +
-      "Fails with InvalidOperation when the group or angle does not exist, nothing is given, or the crop would leave no picture " +
+      "Fails with InvalidOperation when the group, angle or mic does not exist, nothing is given, gain or muted is given for an angle that takes its sound from a mic or none, or the crop would leave no picture " +
       "(left + right, top + bottom must stay below 1).",
     params: operationArgs["multicam.angle"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "multicam.reframe": {
+    mutating: true,
+    description:
+      "Reframe one angle of a multicam group over time: set or remove a key of its `reframe`, the point of its picture (`x`, `y`: " +
+      "fractions of the source width and height) that a tile cutting the picture to its aspect centers on. This is how a 9:16 export " +
+      "(`vertical-1080x1920`) of 16:9 cameras keeps each face in its solo and two-up shots. Keys live in the group, on the group clock, " +
+      "so every shot of that angle follows them and ripple cuts keep them on the same picture; between keys the point moves in a " +
+      "straight line, before the first and after the last it holds. Give the key time as `at` (group seconds) or `time` (timeline " +
+      "seconds, mapped through the program track's shot playing then). A key in the same frame is replaced; an omitted `x` or `y` " +
+      "keeps the point there now. `remove: true` deletes the key in that frame, `clear: true` every key. A 16:9 frame of 16:9 " +
+      "cameras is not cut, so keys change nothing there; screens are never cut. " +
+      "Example: `{ group: \"g_1a2b3c\", angle: \"ana\", time: 12.5, x: 0.32 }`. " +
+      "Fails with InvalidOperation when the group or angle does not exist, neither or both of `at` and `time` are given, no shot of " +
+      "the group plays at `time`, nothing is given to set, or `remove` finds no key in that frame.",
+    params: operationArgs["multicam.reframe"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "shot.set": {
     mutating: true,
     description:
-      "Change a shot of a program track (ADR 0016): its layout `shot` (`solo` 1 angle, `two-up` 2, `grid` 2 or more) and/or the " +
+      "Change a shot of a program track (ADR 0016): its layout `shot` (`solo` 1 angle, `two-up` 2, `grid` 2 or more, `screen` 1 " +
+      "angle whole with bars, never cropped, `pip` 2: the screen first, then a speaker as an inset in `corner`) and/or the " +
       "`angles` it shows, in layout order. Only `shot`: the angles are kept, cut to the layout's count, or filled with the group's " +
-      "next angles in group order. Only `angles`: the layout stays when it takes that many, else it follows the count (1 `solo`, " +
-      "2 `two-up`, more `grid`). Both: they must fit. The shot becomes one a person chose: `confidence` and `reason` are removed. " +
+      "next angles in group order (`screen` and `pip` put angles marked `screen` first). Only `angles`: the layout stays when it " +
+      "takes that many, else it follows the count (1 `solo`, 2 `two-up`, more `grid`). Both: they must fit. `corner` " +
+      "(`top-left`, `top-right`, `bottom-left`, `bottom-right`; default `bottom-right`) only fits a `pip` shot. " +
+      "The shot becomes one a person chose: `confidence` and `reason` are removed. " +
       "Timing does not change: split the shot first (`clip.split`) to change only part of it. Examples: " +
-      "`{ clip: \"c_0301\", shot: \"solo\", angles: [\"ana\"] }`, `{ clip: \"c_0301\", angles: [\"ana\", \"ben\"] }`. " +
+      "`{ clip: \"c_0301\", shot: \"solo\", angles: [\"ana\"] }`, `{ clip: \"c_0301\", shot: \"pip\", angles: [\"screen\", \"ana\"], corner: \"top-right\" }`. " +
       "Fails with InvalidOperation (not a shot, unknown or repeated angle, angle without a picture, wrong count for the layout).",
     params: operationArgs["shot.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "multicam.turns": {
     description:
-      "Who speaks when in a multicam group (ADR 0016): the speaking turns of every angle, from that angle's own mic energy " +
-      "(the cached envelopes cut snapping uses), on the group clock (each angle's `offset` applied). Example: " +
+      "Who speaks when in a multicam group (ADR 0016): the speaking turns of every angle, from the energy of the angle's sound " +
+      "(its `mic` of the group's `mics`, with the mic's offset and gain, else its own file; the cached envelopes cut snapping uses), " +
+      "on the group clock (each angle's `offset` applied). Example: " +
       "`{ group: \"g_1a2b3c\" }` gives `turns: [{ angle: \"ana\", name: \"Ana\", start: 0.4, end: 5.2 }, …]` sorted by `start`. " +
       "A voice heard in another person's mic (bleed, more than 12 dB below the loudest mic at that time) does not count as " +
       "that person's turn; people talking at once keep overlapping turns. Pauses under 0.5 s stay inside a turn, sounds under " +
       "0.3 s are not turns. Read-only. Each angle's `audio.gain` (dB) is added to its mic level before mics are compared. An angle without sound has no turns and a " +
-      "warning. Shared mic: angles whose file another angle also uses, and angles with a `speaker`, take their turns from the " +
-      "words of that speaker in the file's transcript (`transcribe.speakers` first; corrections in `edits` count); an angle " +
-      "of a shared file with no `speaker` takes the first speaker no other angle names, in order, and a warning says so " +
+      "warning (`mic: null`: no warning); screen angles are never speakers. Shared sound: angles that hear the same file, angles that hear the same mic once its transcript has speakers (else they " +
+      "speak together: two cameras of one person), and angles with a `speaker`, take their turns from the " +
+      "words of that speaker in that sound's transcript (`transcribe.speakers` first; corrections in `edits` count); an angle " +
+      "of a shared sound with no `speaker` takes the first speaker no other angle names, in order, and a warning says so " +
       "(set it with `multicam.angle`). `speakers` lists the angles measured that way. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
       "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
@@ -1313,7 +1359,9 @@ export const methods = {
       "track by rules, in one operation. Deterministic: the same turns and rules give the same shots. Rules: the `template` " +
       "(`interview` default, `podcast-calm`, `panel-dynamic`) with `director.json` in the project (or `rules`) on top: shortest " +
       "and longest solo, two-up on quick exchanges and on two people talking at once, wide (`grid`) on silence and laughter, cut " +
-      "lead (the voice leads the cut, J-cut), weight per angle. The program track keeps what plays where: each shot in range is " +
+      "lead (the voice leads the cut, J-cut), weight per angle. Angles marked `screen` (`multicam.angle`) are measured for motion " +
+      "(the picture changing): a stretch of motion becomes a `screen` shot while nobody speaks and a `pip` (screen with the " +
+      "speaker as an inset) while someone does; screens never speak. The program track keeps what plays where: each shot in range is " +
       "replaced by directed shots over the same group time, gaps stay gaps; an empty track is filled over the whole group. " +
       "Shots a person chose in the app (`shot.set` by author `ui`, and pieces cut out of them) are kept unless " +
       "`replaceHuman: true`; `kept` lists those in the range. Every shot gets " +

@@ -398,10 +398,24 @@ describe("compileProgram with a multicam program track", () => {
     expect(angleLayer(ana, { width: 960, height: 540 })).toEqual({
       tile: { left: 480, top: 0, width: 480, height: 540 },
       crop: { left: 480, top: 0, width: 960, height: 1080 },
+      backdrop: false,
       source: HD,
     });
     expect(angleLayer(ben, { width: 960, height: 540 })?.tile).toEqual({ left: 0, top: 0, width: 480, height: 540 });
     expect(angleLayer(programAt(program, 15, 0) as AngleSpan, HD)?.tile).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+  });
+
+  it("cuts a reframed angle where its keys say at the frame shown, in a 9:16 frame as export does", () => {
+    const keyed = { ...group, angles: group.angles.map((a) => (a.id === "ana" ? { ...a, reframe: [{ at: 4, x: 0.25, y: 0.5 }, { at: 6, x: 0.75, y: 0.5 }] } : a)) };
+    // Timeline 0..4 plays group 4..8, so the cut moves during the first two seconds.
+    const program = compileProgram({ ...view([programTrack([shot("s1", 0, 4, 8, "solo", ["ana"])])]), groups: [keyed] }, angles);
+    const span = programAt(program, 0, 0) as AngleSpan;
+    const tall = { width: 1080, height: 1920 };
+    expect(angleLayer(span, tall, 0)?.crop).toEqual({ left: 176, top: 0, width: 608, height: 1080 });
+    expect(angleLayer(span, tall, 1)?.crop.left).toBe(656);
+    expect(angleLayer(span, tall, 3)?.crop.left).toBe(1136);
+    // The project's own 16:9 frame does not cut a 16:9 picture: keys change nothing there.
+    expect(angleLayer(span, HD, 1)?.crop).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
   });
 
   it("plays every angle's sound under every shot, sample-exact, one span per unbroken run", () => {
@@ -412,6 +426,18 @@ describe("compileProgram with a multicam program track", () => {
       { clip: "s1/eva", start: 12_000, end: 192_000, sidecar: sidecar("eva"), channels: 1, in: 0, speed: 1, gain: 1 },
       { clip: "s2/ben", start: 72_000, end: 192_000, sidecar: sidecar("ben"), channels: 1, in: 0, speed: 1, gain: 10 ** (-6 / 20) },
     ]);
+  });
+
+  it("places sub-frame offsets at the same exact samples as export", () => {
+    // Mirrors packages/core/test/export-multicam.test.ts "multicam sound at exact samples".
+    const room = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0.01 }, { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.025 }] };
+    const program = compileProgram(
+      { ...view([programTrack([shot("c_1", 0, 0.0105, 1.0105, "solo", ["ana"]), shot("c_2", 1, 1.0105, 2.0105, "solo", ["ben"])])]), groups: [room] },
+      angles,
+    );
+    const spans = (name: string) => program.audio.filter((s) => s.sidecar === sidecar(name)).map((s) => [s.start, s.end, s.in]);
+    expect(spans("ana")).toEqual([[0, 96_000, 24]]);
+    expect(spans("ben")).toEqual([[696, 96_000, 0]]);
   });
 
   it("splits an angle's sound where the group clock jumps (a ripple cut), and leaves muted angles out", () => {
@@ -425,6 +451,28 @@ describe("compileProgram with a multicam program track", () => {
       [48_000, 96_000, 144_000],
     ]);
     expect(program.audio.some((s) => s.sidecar === sidecar("ben"))).toBe(false);
+  });
+
+  it("plays a mic's file once, with its own offset and gain, instead of the angles' own sound", () => {
+    const miked = {
+      ...group,
+      angles: [
+        { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+        { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5, mic: "lav" },
+        { id: "eva", name: "Eva", asset: "assets/eva.mp4", offset: 0.25, mic: null },
+      ],
+      mics: [{ id: "lav", name: "Lav", asset: "assets/lav.wav", offset: 2, audio: { gain: -6 } }],
+    };
+    const program = compileProgram(
+      { ...view([programTrack([shot("s1", 0, 0, 3, "solo", ["ana"]), shot("s2", 3, 3, 4, "solo", ["ben"])])]), groups: [miked] },
+      assets(asset("assets/ana.mp4"), asset("assets/ben.mp4"), asset("assets/eva.mp4"), asset("assets/lav.wav", { proxy: null })),
+    );
+    // One unbroken span from the mic's start at group second 2 to the end of the program (4 s), across the shot change.
+    expect(program.audio).toEqual([
+      { clip: "s1/lav", start: 96_000, end: 192_000, sidecar: ".frameshell/proxies/assetslavwav.pcm", channels: 1, in: 0, speed: 1, gain: 10 ** (-6 / 20) },
+    ]);
+    // The pictures still come from the angles' files.
+    expect(program.layers.map(brief)).toEqual([["s1:ana@0-90<0", "s2:ben@90-120<45"]]);
   });
 
   it("shows a placeholder for an angle still ingesting, in its slot only", () => {
@@ -448,6 +496,21 @@ describe("compileProgram with a multicam program track", () => {
     const after = compileProgram(talk([base, programTrack(regrid)]), angles);
     expect(firstVideoDifference(before, after, 0, 1)).toBe(Infinity);
     expect(firstVideoDifference(before, after, 0, 2)).toBe(Infinity);
+  });
+
+  it("paints a pip inset above its screen: slots paint bottom first, so the screen takes the lower slot even when the inset was shown before", () => {
+    const pips = [shot("s1", 0, 0, 1, "solo", ["ana"]), shot("s2", 1, 1, 2, "pip", ["eva", "ana"])];
+    const program = compileProgram(talk([programTrack(pips)]), angles);
+    expect(program.layers.map(brief)).toEqual([
+      // Eva (the screen) swaps into slot 0 under Ana, who was there alone.
+      ["s1:ana@0-30<0", "s2:eva@30-60<23"],
+      ["s2:ana@30-60<30"],
+    ]);
+    const screen = programAt(program, 45, 0) as AngleSpan;
+    const inset = programAt(program, 45, 1) as AngleSpan;
+    // The screen fills the frame (bars where shapes differ) and the inset sits in the bottom-right corner over it.
+    expect(angleLayer(screen, HD)!.tile).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+    expect(angleLayer(inset, HD)!.tile).toEqual({ left: 1402, top: 772, width: 480, height: 270 });
   });
 
   it("refuses shots of a nested clip with a transform (they would fill the frame), and still plays their sound", () => {

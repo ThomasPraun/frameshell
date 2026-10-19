@@ -132,3 +132,111 @@ describe("groupTurns with a shared mic", () => {
     expect(unknown.warnings).toEqual([expect.stringMatching(/speaker s7 is not in transcripts\/room\.words\.json \(s1 Ana, s2 Ben\)/)]);
   });
 });
+
+describe("groupTurns with separate mics and screens", () => {
+  const roomMic = { path: "transcripts/room.words.json", transcript: { ...mixed, asset: "assets/room.wav" }, stale: false };
+  const withMics = (angles: MulticamGroup["angles"], mics: MulticamGroup["mics"]): MulticamGroup => ({ id: "g_1", angles, ...(mics ? { mics } : {}) });
+
+  it("takes turns of cameras sharing one mic from the mic's transcript speakers, on the mic's clock", async () => {
+    const result = await groupTurns(
+      source({ "assets/room.wav": roomMic }),
+      "/p",
+      withMics(
+        [
+          { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "lav", speaker: "s1" },
+          { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.2, mic: "lav", speaker: "s2" },
+        ],
+        [{ id: "lav", name: "Room", asset: "assets/room.wav", offset: 1 }],
+      ),
+    );
+    expect(result.turns).toEqual([
+      { angle: "ana", name: "Ana", start: 2, end: 2.5 },
+      { angle: "ben", name: "Ben", start: 3, end: 4 },
+      { angle: "ana", name: "Ana", start: 5, end: 5.6 },
+    ]);
+    expect(result.speakers.map(({ angle, speaker, transcript }) => [angle, speaker, transcript])).toEqual([
+      ["ana", "s1", "transcripts/room.words.json"],
+      ["ben", "s2", "transcripts/room.words.json"],
+    ]);
+    expect(result.duration).toBe(9);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("names the mic when cameras sharing it name a speaker but it has no transcript", async () => {
+    const result = await groupTurns(
+      source({ "assets/ana.mp4": roomMic }),
+      "/p",
+      withMics(
+        [
+          { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "lav", speaker: "s1" },
+          { id: "ben", name: "Ben", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+        ],
+        [{ id: "lav", name: "Room", asset: "assets/room.wav", offset: 0 }],
+      ),
+    );
+    expect(result.turns).toEqual([]);
+    expect(result.warnings).toEqual([expect.stringMatching(/^Ana, Ben share mic Room \(assets\/room\.wav\), which has no transcript.*on assets\/room\.wav\.$/)]);
+  });
+
+  it("lets cameras sharing an undiarized mic speak together from its energy: two cameras of one person", async () => {
+    const plain = { ...roomMic, transcript: { ...roomMic.transcript, speakers: [] } };
+    const angles: MulticamGroup["angles"] = [
+      { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, mic: "lav" },
+      { id: "ana-2", name: "Ana 2", asset: "assets/ana2.mp4", offset: 0, mic: "lav" },
+    ];
+    const mics = [{ id: "lav", name: "Ana lav", asset: "assets/room.wav", offset: 0 }];
+    for (const transcripts of [{}, { "assets/room.wav": plain }, { "assets/room.wav": { ...roomMic, stale: true } }]) {
+      const result = await groupTurns(source(transcripts), "/p", withMics(angles, mics));
+      expect(result.turns).toEqual([
+        { angle: "ana", name: "Ana", start: 0.5, end: 2 },
+        { angle: "ana-2", name: "Ana 2", start: 0.5, end: 2 },
+      ]);
+      expect(result.speakers).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  it("measures angles of one camera file heard through their own mics by energy, not speakers", async () => {
+    const result = await groupTurns(
+      source({ "assets/room.mp4": { path: "transcripts/room.words.json", transcript: mixed, stale: false } }),
+      "/p",
+      withMics(
+        [
+          { id: "ana", name: "Ana", asset: "assets/room.mp4", offset: 0, mic: "ana-lav" },
+          { id: "ben", name: "Ben", asset: "assets/room.mp4", offset: 0, mic: "ben-lav" },
+        ],
+        [
+          { id: "ana-lav", name: "Ana lav", asset: "assets/ana.wav", offset: 0 },
+          { id: "ben-lav", name: "Ben lav", asset: "assets/ben.wav", offset: 0 },
+        ],
+      ),
+    );
+    expect(result.speakers).toEqual([]);
+    expect(result.turns.map((turn) => turn.angle).sort()).toEqual(["ana", "ben"]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("uses the transcript of an angle's own mic when it names a speaker", async () => {
+    const result = await groupTurns(
+      source({ "assets/room.wav": roomMic }),
+      "/p",
+      withMics([{ id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0, mic: "lav", speaker: "s2" }], [{ id: "lav", name: "Room", asset: "assets/room.wav", offset: 0 }]),
+    );
+    expect(result.turns).toEqual([{ angle: "ben", name: "Ben", start: 2, end: 3 }]);
+  });
+
+  it("never makes a screen angle a speaker, even when it shares a file or names one", async () => {
+    const result = await groupTurns(
+      source({ "assets/room.mp4": { path: "transcripts/room.words.json", transcript: mixed, stale: false } }),
+      "/p",
+      group([
+        { id: "ana", name: "Ana", asset: "assets/room.mp4", offset: 0 },
+        { id: "screen", name: "Screen", asset: "assets/room.mp4", offset: 0, screen: true, speaker: "s2" },
+      ]),
+    );
+    // Ana alone on the file once the screen is set aside: her energy, not a speaker.
+    expect(result.speakers).toEqual([]);
+    expect(result.turns).toEqual([{ angle: "ana", name: "Ana", start: 0.5, end: 2 }]);
+    expect(result.warnings).toEqual([]);
+  });
+});

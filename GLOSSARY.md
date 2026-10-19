@@ -11,8 +11,16 @@ _Avoid_: storyboard, shot list
 ## Multicam (ADR 0016)
 
 **Angle**:
-One synced source of a multicam group (usually one person's picture and mic), with its offset, crop and gain.
+One synced picture of a multicam group (usually one person), with its offset and crop. Its sound is its own file's, a mic's, or none.
 _Avoid_: camera, feed, participant
+
+**Reframe**:
+An angle's keys over group time saying which point of its picture a tile centers on when it cuts the picture to its aspect (a solo in a 9:16 export of a 16:9 camera).
+_Avoid_: pan, crop track, auto-crop
+
+**Mic**:
+A separate sound file of a multicam group with its own offset and gain. Angles pick one; one mic may serve several angles and plays once.
+_Avoid_: audio track, recorder
 
 **Multicam group**:
 The set of angles of one conversation, on one shared clock.
@@ -23,7 +31,7 @@ The track that holds the shots of a multicam group.
 _Avoid_: switch track, edit track
 
 **Shot**:
-A clip on the program track that shows chosen angles in a layout (`solo`, `two-up`, `grid`) over a time range.
+A clip on the program track that shows chosen angles in a layout (`solo`, `two-up`, `grid`, `screen`, `pip`) over a time range.
 _Avoid_: cut, layout, scene
 
 **Director**:
