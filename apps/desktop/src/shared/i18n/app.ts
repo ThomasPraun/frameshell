@@ -67,8 +67,8 @@ const en = {
   },
   dialogs: {
     openFolder: "Open project folder",
-    chooseVideos: "Choose videos",
-    videos: "Videos",
+    chooseVideos: "Choose video or audio",
+    videos: "Video and audio",
     allFiles: "All files",
     chooseParent: "Choose where the project goes",
   },
@@ -173,8 +173,8 @@ const es: typeof en = {
   },
   dialogs: {
     openFolder: "Abrir la carpeta de un proyecto",
-    chooseVideos: "Elegir videos",
-    videos: "Videos",
+    chooseVideos: "Elegir video o audio",
+    videos: "Video y audio",
     allFiles: "Todos los archivos",
     chooseParent: "Elegir dónde va el proyecto",
   },

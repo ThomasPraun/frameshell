@@ -35,7 +35,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
-import { projectFormat } from "./media/format.js";
+import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
@@ -391,7 +391,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       };
     },
     "project.init": async (params) => {
-      let format = {};
+      let format: ProjectFormat = {};
       if (params.like) {
         const probe = await probeMedia(await binaries.ensure("ffprobe"), params.like).catch((error: unknown) => {
           throw new RpcError(ErrorCode.AssetNotFound, `${params.like} is not a media file ffprobe can read: ${(error as Error).message}`, {
@@ -400,6 +400,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         });
         format = projectFormat(probe);
       }
+      if (params.resolution) format = { ...format, resolution: params.resolution };
       return projects.init(params.dir, params.name, params.agentSkill, format);
     },
     doctor: async ({ cwd, install }) => {

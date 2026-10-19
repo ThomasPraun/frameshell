@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
-import { useTestBinaries } from "./media.js";
+import { makeAudio, useTestBinaries } from "./media.js";
 
 // Videos the OS asks the app to open (#184): launch arguments on Windows and Linux, `open-file` on macOS. Both end
 // in the same routing; launch arguments are what an e2e can pass.
@@ -28,6 +28,26 @@ test("a video opened from the OS is offered as a new project on the welcome scre
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("take", { timeout: 60_000 });
     expect(app.windows()).toHaveLength(1);
+  } finally {
+    await app.close();
+  }
+});
+
+test("audio opened from the OS is offered as a new project with the frame choice", async () => {
+  const episode = join(home, "episode.mp3");
+  await makeAudio(episode);
+  const { app, page } = await launch(box, { paths: [episode] });
+  try {
+    const form = page.getByRole("form", { name: "New project from video" });
+    await expect(form.getByText("episode.mp3")).toBeVisible();
+    await expect(form.getByText("This audio has no picture")).toBeVisible();
+    await form.getByLabel("Transcribe what is said").uncheck();
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("episode", { timeout: 60_000 });
+    await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1", { timeout: 30_000 });
+    const timeline = JSON.parse(readFileSync(join(home, "episode", "timelines", "main.json"), "utf8"));
+    expect(timeline.tracks).toHaveLength(1);
+    expect(timeline.tracks[0]).toMatchObject({ kind: "audio" });
   } finally {
     await app.close();
   }

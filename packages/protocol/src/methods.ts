@@ -29,7 +29,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 35;
+export const PROTOCOL_VERSION = 36;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -535,6 +535,13 @@ export const methods = {
           "to the nearest standard one, and sample rate. Probed first, downloading ffprobe on first use. Example: " +
           "`/home/ana/Movies/talk.mp4`. Fails with AssetNotFound when it is not a readable media file.",
       ),
+      resolution: z
+        .strictObject({ width: z.int().positive(), height: z.int().positive() })
+        .optional()
+        .describe(
+          "Frame size of the project, used instead of the default and of the size `like` gives. For a project made from " +
+            "an audio file, which has no picture: `{ width: 1080, height: 1920 }` makes it vertical. Example: `{ width: 1920, height: 1080 }`.",
+        ),
     }),
     result: z.object({
       project: ProjectSummarySchema,
