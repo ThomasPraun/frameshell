@@ -107,8 +107,10 @@ describe("multicam.direct", () => {
 
   it("keeps a shot the person sets while the turns are still being measured", async () => {
     // A copy without the envelope cache decodes every angle again, so the app's change lands first.
+    // Ingest jobs of earlier tests may still be writing proxies, thumbs and waveforms: copying them races their rename.
+    const skipped = [join(...ENERGY_DIR.split("/")), ...["proxies", "thumbs", "waveforms"].map((area) => join(".frameshell", area))];
     const copy = tempDir();
-    await cp(project, copy, { recursive: true, filter: (path) => !path.includes(join(...ENERGY_DIR.split("/"))) });
+    await cp(project, copy, { recursive: true, filter: (path) => !skipped.some((dir) => path.includes(dir)) });
     const ben = (await program(copy)).clips[1]!;
     const directing = agent.request("multicam.direct", { cwd: copy, group });
     const set = await app.request("shot.set", { cwd: copy, clip: ben.id, shot: "two-up", angles: ["ana", "ben"] });
