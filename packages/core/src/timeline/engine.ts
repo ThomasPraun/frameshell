@@ -34,6 +34,7 @@ import {
 } from "@frameshell/schema";
 import type { z } from "zod";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
+import { directShots } from "../multicam/director.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, sortClips } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
@@ -210,6 +211,8 @@ class Edit {
         return this.multicamAngle(request.args);
       case "shot.set":
         return this.shotSet(request.args);
+      case "multicam.direct":
+        return this.multicamDirect(request.args);
       case "timeline.patch":
         return this.patch(request.args);
     }
@@ -909,6 +912,120 @@ class Edit {
     clip.angles = angles;
     delete clip.confidence;
     delete clip.reason;
+  }
+
+  /**
+   * Rule-based shots over the program track of `args.group` (see the
+   * `multicam.direct` method). Each shot overlapping the range, except those
+   * in `keep`, gives up its group time to the director: parts outside the range
+   * stay, and back-to-back parts that play on in the group are directed as one
+   * stretch. An empty track is directed over the whole group, timeline = group clock.
+   */
+  async multicamDirect(args: OperationArgs<"multicam.direct">): Promise<void> {
+    const group = this.draft.groups?.find((candidate) => candidate.id === args.group);
+    if (!group) {
+      const ids = (this.draft.groups ?? []).map((candidate) => candidate.id);
+      throw this.invalid(`no multicam group "${args.group}" in timeline ${this.draft.id}.`, {
+        field: "group",
+        hint: ids.length > 0 ? `Groups: ${ids.join(", ")}.` : "There are none; make one with `frameshell multicam create`.",
+      });
+    }
+    const track = this.draft.tracks.find((candidate): candidate is ProgramTrack => candidate.kind === "program" && candidate.group === group.id);
+    if (!track) {
+      throw this.invalid(`group ${group.id} has no program track to direct.`, {
+        field: "group",
+        hint: "Add one by editing the timeline file, or make the group again with `frameshell multicam create`.",
+      });
+    }
+    const g = this.grid;
+    const from = g.snap(args.from ?? 0);
+    const to = args.to === undefined ? Number.POSITIVE_INFINITY : g.snap(args.to);
+    if (to <= from) throw this.invalid(`\`to\` (${to} s) must be after \`from\` (${from} s).`, { field: "to" });
+    const angles = [];
+    let groupEnd = 0;
+    for (const angle of group.angles) {
+      const info = await this.context.source(angle.asset);
+      angles.push({ id: angle.id, picture: info.video });
+      groupEnd = Math.max(groupEnd, info.duration === null ? Number.POSITIVE_INFINITY : angle.offset + info.duration);
+    }
+    if (!angles.some((angle) => angle.picture)) {
+      throw this.invalid(`no angle of group ${group.id} has a picture to show.`, { field: "group", hint: "Angles need a video stream." });
+    }
+    const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
+    const keep = new Set(args.keep);
+    const kept: ShotClip[] = [];
+    const spans: { start: number; in: number; out: number }[] = [];
+    const taken = new Set<string>();
+    const freshId = () => {
+      for (;;) {
+        const id = this.newId("c");
+        if (!taken.has(id)) {
+          taken.add(id);
+          return id;
+        }
+      }
+    };
+    if (track.clips.length === 0) {
+      const last = Math.min(to, g.floor(groupEnd));
+      if (last <= from) {
+        throw this.invalid(`the range starts at ${from} s, at or past the end of group ${group.id} (${g.floor(groupEnd)} s).`, {
+          field: "from",
+          valid: { min: 0, max: g.floor(groupEnd) },
+        });
+      }
+      spans.push({ start: from, in: from, out: last });
+    }
+    for (const shot of track.clips) {
+      const end = round(shot.start + shot.out - shot.in);
+      if (keep.has(shot.id) || g.frame(end) <= g.frame(from) || g.frame(shot.start) >= g.frame(to)) {
+        kept.push(shot);
+        continue;
+      }
+      const head = shot.start < from - 1e-9 ? { ...shot, out: round(shot.in + from - shot.start) } : null;
+      const tail = end > to + 1e-9 ? { ...shot, id: head ? freshId() : shot.id, start: to, in: round(shot.in + to - shot.start) } : null;
+      if (head) kept.push(head);
+      if (tail) kept.push(tail);
+      const start = Math.max(shot.start, from);
+      const span = { start, in: round(shot.in + start - shot.start), out: round(shot.in + Math.min(end, to) - shot.start) };
+      const previous = spans.at(-1);
+      if (previous && g.frame(previous.start + previous.out - previous.in) === g.frame(span.start) && g.frame(previous.out) === g.frame(span.in)) {
+        previous.out = span.out;
+      } else {
+        spans.push(span);
+      }
+    }
+    if (spans.length === 0) {
+      const reason = track.clips.some((shot) => keep.has(shot.id)) ? "every shot there is one a person chose" : "the program track has no shot there";
+      throw this.invalid(`nothing to direct between ${from} and ${to === Number.POSITIVE_INFINITY ? "the end" : `${to} s`}: ${reason}.`, {
+        field: keep.size > 0 ? "replaceHuman" : "from",
+        hint: "Pick a range with shots the director chose, or pass `replaceHuman: true` to redo the people's shots too.",
+      });
+    }
+    const directed: ShotClip[] = [];
+    for (const span of spans) {
+      const shots = directShots({
+        angles,
+        turns: args.turns,
+        rules: args.rules,
+        from: span.in,
+        to: span.out,
+        snap: (time) => round(span.in + g.snap(time - span.in)),
+      });
+      for (const shot of shots) {
+        directed.push({
+          id: freshId(),
+          type: "shot",
+          start: round(span.start + shot.in - span.in),
+          in: shot.in,
+          out: shot.out,
+          shot: shot.shot,
+          angles: shot.angles,
+          confidence: shot.confidence,
+          reason: shot.reason,
+        });
+      }
+    }
+    track.clips = [...kept, ...directed];
   }
 
   /** Group `groupId` and its angle `angleId` in the draft; InvalidOperation naming the ids there are. */

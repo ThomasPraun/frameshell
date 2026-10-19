@@ -2,9 +2,10 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { AgentLabelSchema } from "./agents.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
-import { ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
+import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
+  MulticamDirectResultSchema,
   MulticamTurnsResultSchema,
   OpIdSchema,
   OperationResultSchema,
@@ -31,7 +32,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 41;
+export const PROTOCOL_VERSION = 42;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1264,6 +1265,40 @@ export const methods = {
       group: z.string().min(1).describe("Group id (`g_…`) from `timeline.show` `groups` or `multicam.create`."),
     }),
     result: MulticamTurnsResultSchema,
+  },
+  "multicam.direct": {
+    mutating: true,
+    description:
+      "Direct a multicam group (ADR 0016): turn its speaking turns (`multicam.turns`, measured here) into shots on its program " +
+      "track by rules, in one operation. Deterministic: the same turns and rules give the same shots. Rules: the `template` " +
+      "(`interview` default, `podcast-calm`, `panel-dynamic`) with `director.json` in the project (or `rules`) on top: shortest " +
+      "and longest solo, two-up on quick exchanges and on two people talking at once, wide (`grid`) on silence and laughter, cut " +
+      "lead (the voice leads the cut, J-cut), weight per angle. The program track keeps what plays where: each shot in range is " +
+      "replaced by directed shots over the same group time, gaps stay gaps; an empty track is filled over the whole group. " +
+      "Shots a person chose in the app (`shot.set` by author `ui`) are kept unless `replaceHuman: true`. Every shot gets " +
+      "`confidence` and `reason`; `low` lists those below 0.5 to review (e.g. a reaction worth holding), then fix them with " +
+      "`shot.set`. `operation.args.turns` is the number of turns used (the journal keeps them all). " +
+      "Example: `{ group: \"g_1a2b3c\", template: \"podcast-calm\", from: 60, to: 120 }`. Fails with " +
+      "InvalidOperation (group or program track missing, invalid rules file, nothing to direct in the range: data says why), " +
+      "TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      group: z.string().min(1).describe("Group id (`g_…`) from `timeline.show` `groups` or `multicam.create`."),
+      template: z
+        .enum(DIRECTOR_TEMPLATE_IDS)
+        .optional()
+        .describe("Rule set to start from; replaces the rules file's `template`. Default: the file's, else `interview`."),
+      rules: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Rules file inside the project, absolute or relative to `cwd`. Default `director.json` at the project root, when it exists."),
+      from: z.number().nonnegative().optional().describe("Timeline seconds where directing starts. Default 0."),
+      to: z.number().nonnegative().optional().describe("Timeline seconds where it ends. Default: the end of the program track."),
+      replaceHuman: z.boolean().optional().describe("Also replace shots a person chose in the app. Default false."),
+    }),
+    result: MulticamDirectResultSchema,
   },
   "clip.move": {
     mutating: true,
