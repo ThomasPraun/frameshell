@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
-import { ffmpegRun, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
+import { makeAudio, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
 
 // Projects created from a video (ADR 0013, #182): the welcome screen plans the folder beside the video, creates the
 // project and imports the video without the terminal. The native file dialog is replaced in main.
@@ -133,12 +133,6 @@ test("the project takes the first video's format and starts with the videos on i
   }
 });
 
-/** A synthetic 44.1 kHz sine of one second: audio with no picture. */
-async function makeAudio(out: string): Promise<void> {
-  const ffmpeg = await testFfmpeg();
-  await ffmpegRun(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=44100:duration=1", out]);
-}
-
 for (const { frame, label, size } of [
   { frame: "horizontal", label: "Horizontal, 16:9 (1920x1080)", size: { width: 1920, height: 1080 } },
   { frame: "vertical", label: "Vertical, 9:16 (1080x1920)", size: { width: 1080, height: 1920 } },
@@ -148,7 +142,7 @@ for (const { frame, label, size } of [
     await useTestBinaries(own.configDir);
     const folder = join(dirname(own.projectDir), `podcasts-${frame}`);
     mkdirSync(folder, { recursive: true });
-    const episode = join(folder, "episode.wav");
+    const episode = join(folder, "episode.mp3");
     await makeAudio(episode);
     const { app, page } = await launch({ ...own, projectDir: folder });
     try {
@@ -177,10 +171,37 @@ for (const { frame, label, size } of [
       await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1", { timeout: 30_000 });
       const timeline = JSON.parse(readFileSync(join(dir, "timelines", "main.json"), "utf8"));
       expect(timeline.tracks).toHaveLength(1);
-      expect(timeline.tracks[0]).toMatchObject({ kind: "audio", clips: [{ asset: "assets/episode.wav" }] });
+      expect(timeline.tracks[0]).toMatchObject({ kind: "audio", clips: [{ asset: "assets/episode.mp3" }] });
       expect(existsSync(episode)).toBe(true);
     } finally {
       await app.close();
     }
   });
 }
+
+test("an audio-only project with transcription on runs the setup in the background", async () => {
+  const own = sandbox("demo");
+  await useTestBinaries(own.configDir);
+  const folder = join(dirname(own.projectDir), "podcasts-transcribed");
+  mkdirSync(folder, { recursive: true });
+  const episode = join(folder, "talk.mp3");
+  await makeAudio(episode);
+  // Same dead registry as the video test: the plugin install fails at once, which proves the setup ran.
+  const { app, page } = await launch(
+    { ...own, projectDir: folder },
+    { env: { npm_config_offline: "true", npm_config_cache: join(dirname(own.projectDir), "npm-cache") } },
+  );
+  try {
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [episode]);
+    await page.getByRole("button", { name: "New from video…" }).click();
+    const form = page.getByRole("form", { name: "New project from video" });
+    await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
+    await expect(page.getByTestId("project-setup")).toContainText("Could not download the transcription plugin.", { timeout: 120_000 });
+  } finally {
+    await app.close();
+  }
+});
