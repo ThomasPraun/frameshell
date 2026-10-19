@@ -22,6 +22,10 @@ _Avoid_: pan, crop track, auto-crop
 A separate sound file of a multicam group with its own offset and gain. Angles pick one; one mic may serve several angles and plays once.
 _Avoid_: audio track, recorder
 
+**Gallery recording**:
+One call recording (Zoom, Meet, Teams) in gallery view: every person in a tile of one picture, one mixed sound. `multicam gallery` makes one angle per tile, each a crop of that file.
+_Avoid_: grid recording, speaker view (that has one picture)
+
 **Multicam group**:
 The set of angles of one conversation, on one shared clock.
 _Avoid_: multicam clip, sync group

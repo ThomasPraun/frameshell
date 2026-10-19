@@ -6,6 +6,7 @@ import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@fra
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
+  MulticamGalleryResultSchema,
   MulticamTurnsResultSchema,
   OpIdSchema,
   OperationResultSchema,
@@ -32,7 +33,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 46;
+export const PROTOCOL_VERSION = 47;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1260,6 +1261,39 @@ export const methods = {
       name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
     }),
     result: MulticamCreateResultSchema,
+  },
+  "multicam.gallery": {
+    mutating: true,
+    description:
+      "Make a multicam group from one gallery-view call recording (Zoom, Meet, Teams: every person in a tile of one picture; " +
+      "ADR 0016). Finds the tile grid by its gutters (lines of one flat colour between tiles) on frames sampled across the " +
+      "whole file, then adds one angle per tile, each a `crop` of the same file in reading order (rows top to bottom, each " +
+      "left to right), a program track and one `grid` shot over the recording. The file's sound plays once for all tiles " +
+      "through one group mic (`mic`): every tile hears the same mixed track, so they speak together for `multicam.turns` " +
+      "until that file's transcript has speakers (`transcribe`, then `transcribe.speakers`; then name each tile's `speaker` " +
+      "with `multicam.angle`). Each tile reports a `confidence` (0 to 1); below 0.5 check it on a frame and fix it with " +
+      "`multicam.angle` `crop`. `layouts` lists the stretches of the call with their tile count: when the layout changes " +
+      "mid-call (someone joins or leaves, a screen share) a warning gives the times; the angles follow the layout held " +
+      "longest, or the one playing at `at`. Gallery recordings only: a speaker-view or single-camera file has no grid. " +
+      "Example: `{ asset: \"assets/call.mp4\", names: [\"Ana\", \"Ben\", \"Zoe\"] }`. Fails with InvalidOperation (file " +
+      "missing, outside the project or without a picture, no tile grid found, `at` in a stretch without one, wrong number " +
+      "of `names`: data has the tile count), or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      asset: z.string().min(1).describe("Gallery recording inside the project, absolute or relative to `cwd`, e.g. `assets/call.mp4`."),
+      names: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Angle names in reading order, one per tile, e.g. the people. Default `Tile 1`, `Tile 2`, …"),
+      name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
+      at: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Recording second whose layout the tiles are cut from. Default: the layout held longest."),
+    }),
+    result: MulticamGalleryResultSchema,
   },
   "multicam.offset": {
     mutating: true,

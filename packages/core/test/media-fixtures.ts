@@ -178,3 +178,45 @@ export async function makeVoiceClip(path: string, { own, bleed = [], shiftS = 0,
     ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
   ]);
 }
+
+/** Tile positions of a 2×2 gallery made by {@link makeGallery}. */
+export const GALLERY_FOUR: [number, number][] = [
+  [8, 8],
+  [324, 8],
+  [8, 184],
+  [324, 184],
+];
+/** Tile positions of a gallery of three: two on top, one centered below. */
+export const GALLERY_THREE: [number, number][] = [
+  [8, 8],
+  [324, 8],
+  [166, 184],
+];
+
+/**
+ * Gallery-view call recording, 640×360: moving test patterns in 308×168 tiles at `stretches[i]` positions on a
+ * dark gray background, for `seconds` each; tone bursts as the call's sound.
+ */
+export async function makeGallery(path: string, stretches: [number, number][][], seconds: number): Promise<void> {
+  const { ffmpeg } = await mediaTools();
+  const parts: string[] = [];
+  const ends: string[] = [];
+  stretches.forEach((positions, s) => {
+    parts.push(`color=c=0x303030:s=640x360:r=30:d=${seconds}[bg${s}]`);
+    let previous = `bg${s}`;
+    positions.forEach(([x, y], t) => {
+      parts.push(`testsrc2=s=308x168:r=30:d=${seconds},hue=h=${t * 70}[t${s}_${t}]`);
+      parts.push(`[${previous}][t${s}_${t}]overlay=${x}:${y}[o${s}_${t}]`);
+      previous = `o${s}_${t}`;
+    });
+    ends.push(`[${previous}]`);
+  });
+  const graph = `${parts.join(";")};${ends.join("")}concat=n=${stretches.length}:v=1:a=0[v]`;
+  const duration = seconds * stretches.length;
+  await run(ffmpeg, [
+    ...["-hide_banner", "-loglevel", "error", "-y", "-filter_complex", graph],
+    // Someone talks for 1.5 s every 3 s.
+    ...["-f", "lavfi", "-i", `aevalsrc='if(lt(mod(t,3),1.5),0.5*sin(2*PI*440*t),0)':s=48000:d=${duration}`],
+    ...["-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+  ]);
+}

@@ -21,6 +21,8 @@ export interface AngleTile {
   asset: string;
   /** Seconds in the angle's own file at the playhead, never negative. */
   sourceTime: number;
+  /** CSS `object-view-box` that shows only the angle's cropped picture (a tile of a gallery recording); null without a crop. */
+  viewBox: string | null;
   /** The shot under the playhead shows this angle. */
   inShot: boolean;
   /** A turn of this angle covers the playhead; several angles can speak at once. */
@@ -98,6 +100,7 @@ export function viewerModel(
       color: index % ANGLE_COLOR_COUNT,
       asset: angle.asset,
       sourceTime: Math.max(0, groupTime - angle.offset),
+      viewBox: cropViewBox(angle.crop),
       inShot: shown.has(angle.id),
       speaking: speakingAt(turns, angle.id, groupTime),
     })),
@@ -131,4 +134,12 @@ export function turnsKey(
     .filter((source) => assets.has(source.transcript.asset))
     .map((source) => [source.path, source.transcript, hashes.get(source.transcript.asset) ?? null]);
   return JSON.stringify([angles, mics, transcripts]);
+}
+
+/** `inset(top right bottom left)` in percent of the picture for an angle's crop fractions; null when nothing is cut. */
+export function cropViewBox(crop: { left?: number | undefined; top?: number | undefined; right?: number | undefined; bottom?: number | undefined } | undefined): string | null {
+  if (!crop) return null;
+  const sides = [crop.top, crop.right, crop.bottom, crop.left].map((side) => side ?? 0);
+  if (sides.every((side) => side === 0)) return null;
+  return `inset(${sides.map((side) => `${Math.round(side * 10000) / 100}%`).join(" ")})`;
 }

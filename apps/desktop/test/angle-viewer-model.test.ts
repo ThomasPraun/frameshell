@@ -1,6 +1,6 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { groupTimeAt, programRows, sameTurns, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
+import { cropViewBox, groupTimeAt, programRows, sameTurns, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
 
 // Seam under test: what the multicam viewer shows at a playhead time (#243): group clock, shot angles, speakers.
 
@@ -8,7 +8,7 @@ const GROUP = {
   id: "g_talk",
   angles: [
     { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0 },
-    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5 },
+    { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 1.5, crop: { left: 0.5, bottom: 0.125 } },
     { id: "cleo", name: "Cleo", asset: "assets/cleo.mp4", offset: 0 },
   ],
 };
@@ -53,6 +53,12 @@ describe("viewerModel", () => {
       [3, "cleo", "Cleo"],
     ]);
     expect(tiles.map((tile) => tile.color)).toEqual([0, 1, 2]);
+  });
+
+  it("shows only an angle's crop, as a tile of a gallery recording", () => {
+    expect(model(shots, 1)!.tiles.map((tile) => tile.viewBox)).toEqual([null, "inset(0% 0% 12.5% 50%)", null]);
+    expect(cropViewBox({})).toBeNull();
+    expect(cropViewBox({ top: 0.0222, right: 0.5125 })).toBe("inset(2.22% 51.25% 0% 0%)");
   });
 
   it("outlines the angles of the shot under the playhead", () => {
