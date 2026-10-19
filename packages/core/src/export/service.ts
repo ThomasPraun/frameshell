@@ -10,11 +10,11 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import type { ExportPreset, Size, Timeline, Transcript } from "@frameshell/schema";
+import { type ExportPreset, type Size, type Timeline, type Transcript, programGroup } from "@frameshell/schema";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
-import { resolveNested } from "../timeline/nested.js";
+import { readNestedFile, resolveNested, transformedProgram } from "../timeline/nested.js";
 import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type ExportSource,
@@ -296,7 +296,23 @@ export class ExportService {
    */
   async #resolved(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
     const { timeline, fps } = await this.#options.loadTimeline(root, id);
-    return { timeline: await resolveNested(root, timeline, this.#options.readNested), fps };
+    const read = this.#options.readNested ?? readNestedFile;
+    const seen = new Map<string, Timeline | null>();
+    const flat = await resolveNested(root, timeline, async (at, source) => {
+      const found = await read(at, source);
+      seen.set(source, found);
+      return found;
+    });
+    const hit = transformedProgram(timeline, (source) => seen.get(source) ?? null, [`timelines/${timeline.id}.json`]);
+    if (hit) {
+      throw new RpcError(
+        ErrorCode.ExportUnsupported,
+        `Clip ${hit.clip} nests ${hit.source}, which shows multicam shots, and has a transform (x, y, scale or opacity). ` +
+          `Shots fill the frame and cannot be placed under a transform. Clear it: \`frameshell clip set ${hit.clip} --x 0 --y 0 --scale 1 --opacity 1\`.`,
+        { timeline: id, clip: hit.clip },
+      );
+    }
+    return { timeline: flat, fps };
   }
 
   /** Transcripts of the assets subtitle tracks follow, by asset; assets without one are absent. */
@@ -320,11 +336,13 @@ export class ExportService {
     const sources = new Map<string, ExportSource>();
     for (const track of timeline.tracks) {
       if (track.kind === "subtitles") continue;
-      for (const clip of track.clips) {
-        if (!("asset" in clip) || sources.has(clip.asset)) continue;
-        const probe = await this.#options.probe(root, clip.asset);
-        sources.set(clip.asset, {
-          path: join(root, ...clip.asset.split("/")),
+      const assets =
+        track.kind === "program" ? (programGroup(timeline, track)?.angles.map((angle) => angle.asset) ?? []) : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : []));
+      for (const asset of assets) {
+        if (sources.has(asset)) continue;
+        const probe = await this.#options.probe(root, asset);
+        sources.set(asset, {
+          path: join(root, ...asset.split("/")),
           video: probe.video
             ? { codec: probe.video.codec, still: probe.video.still, width: probe.video.width, height: probe.video.height }
             : null,

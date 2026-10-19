@@ -1,5 +1,5 @@
 import { RpcError } from "@frameshell/protocol";
-import { type Timeline, flattenTimeline } from "@frameshell/schema";
+import { type Timeline, flattenTimeline, isIdentityPlacement, placementOf } from "@frameshell/schema";
 import { readTimelineFile } from "./service.js";
 
 /** Reads a nested timeline by clip `source` (project-relative); null when missing or invalid. */
@@ -37,4 +37,48 @@ export async function resolveNested(root: string, timeline: Timeline, read: Nest
     }
   }
   return flattenTimeline(timeline, (source) => nested.get(source) ?? null);
+}
+
+/** A transformed nested clip whose timeline shows multicam shots. */
+export interface TransformedProgram {
+  /** Id of the nested clip, in the timeline that holds it. */
+  clip: string;
+  /** Timeline file the clip nests. */
+  source: string;
+}
+
+/**
+ * First nested clip on a video track that has a transform and plays a
+ * timeline showing a program track (directly or nested deeper), or null.
+ * Shots fill the frame, so export cannot place them under a transform.
+ * `nested` gives a nested timeline by `source`, null when unreadable.
+ */
+export function transformedProgram(timeline: Timeline, nested: (source: string) => Timeline | null, stack: readonly string[] = []): TransformedProgram | null {
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video") continue;
+    for (const clip of track.clips) {
+      if (clip.type !== "timeline" || !clip.source || stack.includes(clip.source)) continue;
+      const inner = nested(clip.source);
+      if (!inner) continue;
+      if (!isIdentityPlacement(placementOf(clip.transform)) && showsProgram(inner, nested, [...stack, clip.source])) {
+        return { clip: clip.id, source: clip.source };
+      }
+      const deeper = transformedProgram(inner, nested, [...stack, clip.source]);
+      if (deeper) return deeper;
+    }
+  }
+  return null;
+}
+
+/** True when `timeline` has a program track, or a video-track nested clip that does. */
+function showsProgram(timeline: Timeline, nested: (source: string) => Timeline | null, stack: readonly string[]): boolean {
+  return timeline.tracks.some((track) => {
+    if (track.kind === "program") return true;
+    if (track.kind !== "video") return false;
+    return track.clips.some((clip) => {
+      if (clip.type !== "timeline" || !clip.source || stack.includes(clip.source)) return false;
+      const inner = nested(clip.source);
+      return inner !== null && showsProgram(inner, nested, [...stack, clip.source]);
+    });
+  });
 }

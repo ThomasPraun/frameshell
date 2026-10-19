@@ -2,9 +2,13 @@ import { ErrorCode, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
   type Clip,
+  type ClipTrack,
   type ExportPreset,
+  type LayerRect,
   type MediaClip,
+  type MulticamGroup,
   type Placement,
+  type ShotClip,
   type ResolvedSubtitleTrack,
   SUBTITLE_FONT,
   type Size,
@@ -13,6 +17,9 @@ import {
   isIdentityPlacement,
   layerRect,
   placementOf,
+  programGroup,
+  programSound,
+  shotLayers,
   subtitleTracks,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
@@ -213,6 +220,11 @@ interface Placed {
   in: number;
   speed: number;
   placement: Placement;
+  /**
+   * Set on a multicam angle's picture: the source rectangle cropped out and
+   * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
+   */
+  tile?: { crop: LayerRect; rect: LayerRect };
 }
 
 /** What export v1 renders of a timeline. */
@@ -230,6 +242,8 @@ interface Layout {
   overlays: Placed[][];
   /** Clips carrying sound, one list per track (base video track first). */
   audio: Placed[][];
+  /** Frames where a multicam shot starts or ends: segments prefer to split there. */
+  shotEdges: number[];
   /** Subtitle tracks with at least one cue, in track order. */
   subtitles: ResolvedSubtitleTrack[];
   warnings: string[];
@@ -248,17 +262,18 @@ interface GraphTarget {
 /**
  * Compile `timeline` into a render plan. Nested timelines must already be
  * flattened (`flattenTimeline`). Throws `ExportUnsupported` when the
- * timeline is empty or holds what export cannot render yet (adapter clips,
- * nested timelines left unresolved).
+ * timeline is empty or holds what export cannot render (adapter clips
+ * without a render, nested timelines left unresolved, a program track whose
+ * group is missing).
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, input.transcripts, input.generated);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
   const outFps = preset.video.fps ?? fps;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
-  const edges = layout.video.flatMap((placed) => [placed.start, placed.end]);
+  const edges = [...layout.video.flatMap((placed) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const bounds = segmentBounds(layout.frames, edges, segmentFrames);
   const ext = preset.container;
@@ -373,7 +388,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, input.transcripts, input.generated);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
   const frame = Math.floor((input.at + 0.0005) * fps);
   if (frame < 0 || frame >= layout.frames) {
     const last = seconds(layout.frames - 1, fps);
@@ -431,24 +446,20 @@ function layoutTimeline(
   timeline: Timeline,
   fps: number,
   sources: ReadonlyMap<string, ExportSource>,
+  output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
 ): Layout {
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
-  const video: Placed[][] = [];
+  /** Picture layers in track order (SPEC §5.3: track order is stacking order). */
+  const pictures: { program: boolean; placed: Placed[] }[] = [];
   const audio: Placed[][] = [];
+  const shotEdges: number[] = [];
+  const pictureless = new Set<string>();
   let frames = 0;
-  for (const track of timeline.tracks) {
-    if (track.kind === "subtitles") continue;
-    if (track.kind === "program") {
-      throw unsupported(
-        timeline.id,
-        `Track ${track.id} is a multicam program track (group ${track.group}); exporting multicam shots is not supported yet. ` +
-          `Remove the track to export the rest: \`frameshell track remove ${track.id} --force\`.`,
-        { track: track.id },
-      );
-    }
+  /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
+  const placeTrack = (track: ClipTrack): Placed[] => {
     const placed: Placed[] = [];
     for (const listed of track.clips) {
       const clip = track.kind === "video" ? asFootage(listed, generated) : listed;
@@ -483,9 +494,28 @@ function layoutTimeline(
       const before = placed[i - 1]!;
       if (before.end > placed[i]!.start) before.end = Math.max(before.start, placed[i]!.start);
     }
-    placed.splice(0, placed.length, ...placed.filter((p) => p.end > p.start));
-    if (track.kind === "video") video.push(placed);
-    audio.push(placed.filter(({ clip, source }) => source.audio && clip.audio?.muted !== true));
+    return placed.filter((p) => p.end > p.start);
+  };
+  const audible = (placed: Placed[]) => placed.filter(({ clip, source }) => source.audio && clip.audio?.muted !== true);
+  for (const track of timeline.tracks) {
+    if (track.kind === "subtitles") continue;
+    if (track.kind === "program") {
+      const group = programGroup(timeline, track);
+      if (!group) {
+        throw unsupported(timeline.id, `Program track ${track.id} shows group ${track.group}, which the timeline does not have. Remove the track: \`frameshell track remove ${track.id} --force\`.`, {
+          track: track.id,
+        });
+      }
+      const layers = placeShots(track.clips, group, { grid, fps, sources, output, pictureless, edges: shotEdges });
+      for (const edge of shotEdges) frames = Math.max(frames, edge);
+      pictures.push({ program: true, placed: layers });
+      // Every angle's sound plays under every shot, whatever the shot shows.
+      for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound)));
+      continue;
+    }
+    const placed = placeTrack(track);
+    if (track.kind === "video") pictures.push({ program: false, placed });
+    audio.push(audible(placed));
   }
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
@@ -503,20 +533,92 @@ function layoutTimeline(
       );
     }
   }
-  const [base = [], ...upper] = video;
+  // The first picture layer is the base when it is a video track; a program track first leaves the base black.
+  const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
+  const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
   const visible = (placed: Placed) => placed.source.video !== null && placed.placement.opacity > 0;
-  const overlays = [base.filter((p) => !isIdentityPlacement(p.placement)), ...upper]
+  const overlays = [baseLayer.filter((p) => !isIdentityPlacement(p.placement)), ...upper]
     .map((layer) => layer.filter(visible))
     .filter((layer) => layer.length > 0);
+  for (const angle of pictureless) {
+    warnings.push(`Multicam angle ${angle} has no picture; its tile stays black.`);
+  }
   return {
     frames,
-    base,
-    video: base.filter((p) => isIdentityPlacement(p.placement)),
+    base: baseLayer,
+    video: baseLayer.filter((p) => isIdentityPlacement(p.placement)),
     overlays,
     audio: audio.filter((track) => track.length > 0),
+    shotEdges,
     subtitles: subtitles.filter((track) => track.cues.length > 0),
     warnings,
   };
+}
+
+/** What {@link placeShots} needs from the timeline layout in progress. */
+interface ShotContext {
+  grid: FrameGrid;
+  fps: number;
+  sources: ReadonlyMap<string, ExportSource>;
+  output: Size;
+  /** Collects angles (`<group>/<angle>`) whose asset has no picture. */
+  pictureless: Set<string>;
+  /** Collects the frames where shots start and end. */
+  edges: number[];
+}
+
+/** Picture size assumed for an angle without a picture, so the layout of the others does not shift. */
+const NO_PICTURE: Size = { width: 16, height: 9 };
+
+/**
+ * The pictures of a program track's shots as layers, shot by shot: each
+ * angle's cropped picture from group time minus its offset, scaled into
+ * its tile ({@link shotLayers}). Shots clamp at the next shot's start, like
+ * overlapping clips. An angle that has not started yet at the shot's start
+ * appears from its first frame; before that its tile shows what is below.
+ */
+function placeShots(shots: readonly ShotClip[], group: MulticamGroup, context: ShotContext): Placed[] {
+  const { grid, fps, sources, output } = context;
+  const sorted = [...shots].sort((a, b) => a.start - b.start);
+  const out: Placed[] = [];
+  sorted.forEach((shot, index) => {
+    const start = grid.frame(shot.start);
+    let end = Math.max(start + 1, grid.frame(shot.start + (shot.out - shot.in)));
+    const next = sorted[index + 1];
+    if (next) end = Math.min(end, grid.frame(next.start));
+    if (end <= start) return;
+    context.edges.push(start, end);
+    const sizeOf = (asset: string): Size => {
+      const video = sources.get(asset)?.video;
+      return video ? { width: video.width, height: video.height } : NO_PICTURE;
+    };
+    for (const layer of shotLayers(shot, group, output, sizeOf)) {
+      const angle = group.angles.find((candidate) => candidate.id === layer.angle)!;
+      const source = sources.get(layer.asset);
+      if (!source) throw new Error(`no export source for ${layer.asset}`);
+      if (!source.video) {
+        context.pictureless.add(`${group.id}/${angle.id}`);
+        continue;
+      }
+      const from = shot.in - angle.offset;
+      const to = shot.out - angle.offset;
+      if (to <= 0) continue;
+      const skipped = Math.max(0, -from);
+      const first = Math.max(start, grid.frame(shot.start + skipped));
+      if (first >= end) continue;
+      out.push({
+        clip: { id: `${shot.id}/${angle.id}`, type: "media", asset: layer.asset, start: shot.start + skipped, in: from + skipped, out: to },
+        source,
+        start: first,
+        end,
+        in: Math.round((from + skipped) * fps),
+        speed: 1,
+        placement: placementOf(undefined),
+        tile: { crop: layer.crop, rect: layer.tile },
+      });
+    }
+  });
+  return out;
 }
 
 /**
@@ -638,10 +740,12 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
   lines.push(`${joined}[base]`);
   let below = "base";
   pieces.forEach(({ placed, start, end }, n) => {
-    const rect = layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
     const { opacity } = placed.placement;
+    const crop = placed.tile?.crop;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
+      ...(crop ? [`crop=${crop.width}:${crop.height}:${crop.left}:${crop.top}`] : []),
       `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
       ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
