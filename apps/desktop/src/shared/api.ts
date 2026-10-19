@@ -285,6 +285,11 @@ export interface FrameshellApi {
      * gesture burst's.
      */
     edit(timeline: string, edits: TimelineEdit[], options?: EditOptions): Promise<OperationResult>;
+    /**
+     * Pick an image with the OS dialog and show it in `clip` (a media clip on a video track) instead of
+     * what it shows, keeping its track, start and length, as one undoable step. False when cancelled.
+     */
+    replaceImage(timeline: string, clip: string): Promise<boolean>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
     undo(timeline: string): Promise<OperationResult | null>;
     /** Re-apply the latest undo by reverting its `revert`; null when there is none, e.g. after a new edit. */
@@ -471,6 +476,7 @@ export const Channel = {
   timelineChanged: "timeline:changed",
   timelineRejected: "timeline:rejected",
   timelineEdit: "timeline:edit",
+  timelineReplaceImage: "timeline:replace-image",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
   timelineHistoryCommand: "timeline:history-command",

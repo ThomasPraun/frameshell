@@ -66,9 +66,10 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
-import { MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
+import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { planVideoProject } from "./video-project.js";
+import { replaceClipImage } from "./replace-image.js";
 import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
 import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
 import { UpdatePreferences, updateMode } from "./update-check.js";
@@ -479,6 +480,15 @@ async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   return result.canceled ? undefined : result.filePaths[0];
 }
 
+async function pickImage(window: BrowserWindow): Promise<string | undefined> {
+  const result = await dialog.showOpenDialog(window, {
+    title: text.app.dialogs.chooseImage,
+    properties: ["openFile"],
+    filters: [{ name: text.app.dialogs.images, extensions: [...IMAGE_EXTENSIONS] }],
+  });
+  return result.canceled ? undefined : result.filePaths[0];
+}
+
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: text.app.dialogs.chooseVideos,
@@ -840,6 +850,19 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[], options?: EditOptions) =>
     outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits, options ?? {})),
+  );
+  ipcMain.handle(Channel.timelineReplaceImage, (event, timeline: string, clip: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const file = await pickImage(state.window);
+      if (!file) return false;
+      await replaceClipImage(project.dir, String(timeline), String(clip), file, {
+        request: (method, params) => daemon.request(method, params),
+        apply: (edits, label) => editor.apply(project.dir, String(timeline), edits, { label }),
+      });
+      return true;
+    }),
   );
   ipcMain.handle(Channel.timelineUndo, (event, timeline: string) =>
     outcome(async () => editor.undo((await requireProject(stateOf(event.sender))).project.dir, timeline)),

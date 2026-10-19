@@ -11,11 +11,11 @@ export const AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opu
 /** What starts a project: the Choose dialog, drops on the welcome screen, Open with. */
 export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] as const;
 
+/** Still images a clip can show. */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
+
 /** Media a drop on a project imports into `assets/`: videos, audio, images. */
-export const MEDIA_EXTENSIONS = [
-  ...START_EXTENSIONS,
-  ...["png", "jpg", "jpeg", "gif", "webp", "svg"],
-] as const;
+export const MEDIA_EXTENSIONS = [...START_EXTENSIONS, ...IMAGE_EXTENSIONS, "svg"] as const;
 
 /** `file` is an audio file by its extension (case-insensitive). */
 export function isAudioFile(file: string): boolean {

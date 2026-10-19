@@ -7,7 +7,7 @@ import { type BackgroundDeps, addAudioBackground, backgroundHtml } from "../src/
 
 type Track = { id: string; kind: "video" | "audio" | "subtitles"; clips: number; end: number | null };
 
-function harness(tracks: Track[], options: { failAt?: string } = {}) {
+function harness(tracks: Track[], options: { failAt?: string; listAfter?: Track[] } = {}) {
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   let scratchFile = "";
   const request = (async (method: string, params: Record<string, unknown>) => {
@@ -15,7 +15,7 @@ function harness(tracks: Track[], options: { failAt?: string } = {}) {
     if (method === options.failAt) throw new Error(`${method} failed`);
     switch (method) {
       case "track.list":
-        return { tracks };
+        return { tracks: calls.some((call) => call.method === "tx.begin") && options.listAfter ? options.listAfter : tracks };
       case "asset.import":
         return { imported: [{ asset: "assets/background.png" }] };
       case "track.add":
@@ -40,10 +40,10 @@ describe("addAudioBackground", () => {
   it("adds the background over the audio and a subtitle track following it, in one transaction", async () => {
     const { calls, deps, methods } = harness(audioOnly);
     expect(await addAudioBackground("/p", "Episode", { width: 1920, height: 1080 }, deps)).toBe(true);
-    expect(methods()).toEqual(["track.list", "asset.import", "tx.begin", "track.add", "clip.add", "track.add", "tx.commit"]);
-    expect(calls[3]?.params).toMatchObject({ kind: "video" });
-    expect(calls[4]?.params).toMatchObject({ track: "t_new", asset: "assets/background.png", start: 0, duration: 30 });
-    expect(calls[5]?.params).toMatchObject({ kind: "subtitles", follows: "t_audio" });
+    expect(methods()).toEqual(["track.list", "asset.import", "tx.begin", "track.list", "track.add", "clip.add", "track.add", "tx.commit"]);
+    expect(calls[4]?.params).toMatchObject({ kind: "video" });
+    expect(calls[5]?.params).toMatchObject({ track: "t_new", asset: "assets/background.png", start: 0, duration: 30 });
+    expect(calls[6]?.params).toMatchObject({ kind: "subtitles", follows: "t_audio" });
   });
 
   it("reuses an empty video track instead of adding one", async () => {
@@ -57,6 +57,12 @@ describe("addAudioBackground", () => {
     const { deps, methods } = harness([{ id: "t_v", kind: "video", clips: 1, end: 5 }, ...audioOnly]);
     expect(await addAudioBackground("/p", "Episode", { width: 1920, height: 1080 }, deps)).toBe(false);
     expect(methods()).toEqual(["track.list"]);
+  });
+
+  it("leaves the project alone when a video clip appears between the first look and the transaction", async () => {
+    const { deps, methods } = harness(audioOnly, { listAfter: [{ id: "t_v", kind: "video", clips: 1, end: 5 }, ...audioOnly] });
+    expect(await addAudioBackground("/p", "Episode", { width: 1920, height: 1080 }, deps)).toBe(false);
+    expect(methods()).toEqual(["track.list", "asset.import", "tx.begin", "track.list", "tx.abort"]);
   });
 
   it("leaves a project with no audio clip alone", async () => {

@@ -115,6 +115,18 @@ export function ClipInspector() {
           >
             {t.inspector.reset}
           </button>
+          {clip.type === "media" && (
+            <button
+              className="clip-inspector-button clip-inspector-replace"
+              title={t.inspector.replaceImageTitle}
+              onClick={() => {
+                setError(null);
+                window.frameshell.timeline.replaceImage(SELECTION_TIMELINE, clip.id).catch((failure: unknown) => setError((failure as Error).message));
+              }}
+            >
+              {t.inspector.replaceImage}
+            </button>
+          )}
         </div>
       )}
       {audible && (

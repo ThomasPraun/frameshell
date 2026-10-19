@@ -71,6 +71,8 @@ const en = {
     videos: "Video and audio",
     allFiles: "All files",
     chooseParent: "Choose where the project goes",
+    chooseImage: "Choose an image",
+    images: "Images",
   },
   setup: {
     starting: "Setting up transcription…",
@@ -179,6 +181,8 @@ const es: typeof en = {
     videos: "Video y audio",
     allFiles: "Todos los archivos",
     chooseParent: "Elegir dónde va el proyecto",
+    chooseImage: "Elegir una imagen",
+    images: "Imágenes",
   },
   setup: {
     starting: "Preparando la transcripción…",

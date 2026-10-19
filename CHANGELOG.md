@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Desktop: a new project can start from an audio file (`wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`, `opus`), from **New from video…**, a drop on the welcome screen or Open with (ADR 0015). The confirmation offers a 16:9 (default) or 9:16 frame; the audio goes on its own audio track in one undoable step, and is transcribed. Frameshell is also offered in Open with for audio, never as its default player.
 - Protocol v36: `project.init` takes `resolution`, the frame size for a project whose `like` file has no picture.
-- Desktop: a project made from audio gets a picture once its transcript exists: a plain background image with the project title in `assets/` over the audio, and a subtitle track following the audio (default preset), in one undoable step (ADR 0015). A project that already has clips on a video track is left alone; swap the image or the subtitle preset as usual.
+- Desktop: a project made from audio gets a picture once its transcript exists: a plain background image with the project title in `assets/` over the audio, and a subtitle track following the audio (default preset), in one undoable step (ADR 0015). A project that already has clips on a video track is left alone; swap the image with **Replace image…** in the clip inspector (one undoable step), or the subtitle preset as usual.
+- Desktop: **Replace image…** in the clip inspector shows a chosen image file in a media clip on a video track, keeping its track, start and length, as one undoable `ui` step.
 
 ### Changed
 

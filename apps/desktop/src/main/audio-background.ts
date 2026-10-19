@@ -10,7 +10,9 @@ const BACKGROUND_COLOUR = "#16191f";
 
 /** Project frame size in pixels. */
 export interface FrameSize {
+  /** Frame width in pixels. */
   width: number;
+  /** Frame height in pixels. */
   height: number;
 }
 
@@ -56,6 +58,7 @@ export async function renderBackgroundTo(title: string, size: FrameSize, path: s
 
 /** What {@link addAudioBackground} needs from the app; replaced in tests. */
 export interface BackgroundDeps {
+  /** The app's daemon connection (`ui` author). */
   request: DaemonLink["request"];
   /** Runs `work` between the editor's own transactions (`TimelineEditor.alone`). */
   alone: <T>(work: () => Promise<T>) => Promise<T>;
@@ -83,21 +86,29 @@ export async function addAudioBackground(dir: string, title: string, size: Frame
     const { imported } = await request("asset.import", { cwd: dir, files: [file], mode: "copy" });
     const asset = imported[0]?.asset;
     if (!asset) return false;
-    await deps.alone(async () => {
+    return await deps.alone(async () => {
       await request("tx.begin", { label: "Add subtitles on a background", autoCommitAfter: 30 });
       try {
-        let video = tracks.find((track) => track.kind === "video")?.id;
+        // Checked again: the user or an agent may have edited since the first look.
+        const fresh = (await request("track.list", { cwd: dir, timeline: "main" })).tracks;
+        const current = fresh.find((track) => track.id === audio.id && track.kind === "audio");
+        const end = current?.end ?? 0;
+        if (!current || end <= 0 || fresh.some((track) => track.kind === "video" && track.clips > 0)) {
+          await request("tx.abort", {});
+          return false;
+        }
+        let video = fresh.find((track) => track.kind === "video")?.id;
         video ??= (await request("track.add", { cwd: dir, timeline: "main", kind: "video", name: "Background" })).changes.added[0];
         if (!video) throw new Error("The video track was not created.");
-        await request("clip.add", { cwd: dir, timeline: "main", track: video, asset, start: 0, duration: length });
+        await request("clip.add", { cwd: dir, timeline: "main", track: video, asset, start: 0, duration: end });
         await request("track.add", { cwd: dir, timeline: "main", kind: "subtitles", follows: audio.id });
       } catch (error) {
         await request("tx.abort", {}).catch(() => undefined);
         throw error;
       }
       await request("tx.commit", {});
+      return true;
     });
-    return true;
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
