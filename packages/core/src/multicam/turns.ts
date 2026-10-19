@@ -21,18 +21,23 @@ export const MIN_TURN_S = 0.3;
 
 /** One angle's mic, placed on the group clock. */
 export interface TurnInput {
+  /** Angle id in the group. */
   id: string;
   /** Group-clock second at which the file's time 0 plays; see `Angle.offset`. */
   offset: number;
+  /** Angle gain in dB (`angle.audio.gain`), added to the mic's levels before mics are compared. Default 0. */
+  gain?: number;
   /** Null: the file has no sound; the angle never speaks. */
   profile: EnergyProfile | null;
 }
 
 /** A stretch of group time during which one angle's person speaks. */
 export interface Turn {
+  /** Angle id in the group. */
   angle: string;
   /** Group-clock seconds, millisecond precision. */
   start: number;
+  /** Group-clock seconds where the turn ends; greater than `start`. */
   end: number;
 }
 
@@ -43,9 +48,9 @@ export interface Turn {
  * voice heard in several mics counts for the nearest one only, while two
  * people talking at once both keep their turn (overlaps stay overlaps).
  * Hysteresis keeps a turn through dips; pauses under {@link MERGE_GAP_S}
- * are bridged and sounds under {@link MIN_TURN_S} dropped. Levels are compared
- * as recorded: mics set to very different gains need the louder one's gain
- * lowered first.
+ * are bridged unless another angle speaks in the pause, and sounds under
+ * {@link MIN_TURN_S} dropped. Each mic's level includes its `gain`, so mics
+ * recorded at very different volumes are levelled with the angle's gain.
  */
 export function speakingTurns(inputs: readonly TurnInput[], duration: number): Turn[] {
   const frames = Math.ceil(duration / TURN_FRAME_S - 1e-9);
@@ -54,19 +59,25 @@ export function speakingTurns(inputs: readonly TurnInput[], duration: number): T
   for (const level of levels) for (let f = 0; f < frames; f++) if (level[f]! > loudest[f]!) loudest[f] = level[f]!;
 
   const end = Math.round(duration * 1000) / 1000;
-  const turns: Turn[] = [];
-  for (const [i, input] of inputs.entries()) {
-    if (!input.profile) continue;
-    const { threshold } = input.profile;
-    const level = levels[i]!;
+  const actives = inputs.map((input, i) => {
     const active = new Uint8Array(frames);
+    if (!input.profile) return active;
+    const threshold = input.profile.threshold + (input.gain ?? 0);
+    const level = levels[i]!;
     let on = false;
     for (let f = 0; f < frames; f++) {
       const margin: number = on ? HYSTERESIS_DB : 0;
       on = level[f]! >= threshold + START_ABOVE_DB - margin && level[f]! >= loudest[f]! - BLEED_DB - margin;
       active[f] = on ? 1 : 0;
     }
-    for (const [from, to] of dropShort(bridge(runs(active)))) {
+    return active;
+  });
+
+  const turns: Turn[] = [];
+  for (const [i, input] of inputs.entries()) {
+    if (!input.profile) continue;
+    const others = actives.filter((_, j) => j !== i);
+    for (const [from, to] of dropShort(bridge(runs(actives[i]!), others))) {
       turns.push({ angle: input.id, start: seconds(from), end: Math.min(seconds(to), end) });
     }
   }
@@ -78,13 +89,14 @@ function frameLevels(input: TurnInput, frames: number): Float32Array {
   const out = new Float32Array(frames).fill(Number.NEGATIVE_INFINITY);
   if (!input.profile) return out;
   const { db } = input.profile;
+  const gain = input.gain ?? 0;
   const hops = Math.round(TURN_FRAME_S / ENERGY_HOP_S);
   const shift = Math.round(input.offset / ENERGY_HOP_S);
   for (let f = 0; f < frames; f++) {
     const first = f * hops - shift;
     let max = Number.NEGATIVE_INFINITY;
     for (let h = Math.max(0, first); h < Math.min(db.length, first + hops); h++) if (db[h]! > max) max = db[h]!;
-    out[f] = max;
+    out[f] = max + gain;
   }
   return out;
 }
@@ -104,11 +116,13 @@ function runs(active: Uint8Array): [number, number][] {
   return out;
 }
 
-function bridge(list: [number, number][]): [number, number][] {
+/** Joins runs across short pauses, except pauses in which another angle speaks: that is not one turn. */
+function bridge(list: [number, number][], others: readonly Uint8Array[]): [number, number][] {
   const out: [number, number][] = [];
   for (const run of list) {
     const last = out.at(-1);
-    if (last && (run[0] - last[1]) * TURN_FRAME_S <= MERGE_GAP_S + 1e-9) last[1] = run[1];
+    const quiet = last !== undefined && !others.some((other) => other.subarray(last[1], run[0]).includes(1));
+    if (last && quiet && (run[0] - last[1]) * TURN_FRAME_S <= MERGE_GAP_S + 1e-9) last[1] = run[1];
     else out.push([...run]);
   }
   return out;

@@ -103,4 +103,29 @@ describe("speakingTurns", () => {
   it("gives an angle without sound no turns and nobody turns in silence", () => {
     expect(speakingTurns([{ id: "ana", offset: 0, profile: null }, { id: "ben", offset: 0, profile: mic(5, []) }], 5)).toEqual([]);
   });
+
+  it("does not bridge a pause in which another person speaks, so no overlap is invented", () => {
+    const turns = speakingTurns(
+      [
+        { id: "ana", offset: 0, profile: mic(6, [[1, 3], [3.45, 5]], [[3, 3.4]]) },
+        { id: "ben", offset: 0, profile: mic(6, [[3, 3.4]], [[1, 3], [3.45, 5]]) },
+      ],
+      6,
+    );
+    const ana = turns.filter((turn) => turn.angle === "ana");
+    expect(ana).toHaveLength(2);
+    expect(ana[0]!.end).toBeLessThanOrEqual(3.06);
+    expect(turns.filter((turn) => turn.angle === "ben")).toHaveLength(1);
+  });
+
+  it("levels mics of different volume with the angle gain", () => {
+    const boost = 15;
+    const loud = mic(14, [[1, 4]], [[5, 8]]).db.map((value) => value + boost);
+    const ana = energyProfile(loud);
+    const ben = mic(14, [[5, 8]], [[1, 4]]);
+    const ids = (gain: number) =>
+      speakingTurns([{ id: "ana", offset: 0, gain, profile: ana }, { id: "ben", offset: 0, profile: ben }], 14).map((turn) => turn.angle);
+    expect(ids(0)).toEqual(["ana", "ana", "ben"]); // Ben leaks into the hot mic only 5 dB down
+    expect(ids(-boost)).toEqual(["ana", "ben"]);
+  });
 });

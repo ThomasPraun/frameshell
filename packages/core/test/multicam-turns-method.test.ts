@@ -94,6 +94,7 @@ describe("multicam.turns", () => {
     await expect(conn.request("multicam.turns", { cwd: project, group: "g_nope" })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       message: expect.stringContaining(created.group),
+      data: expect.objectContaining({ groups: expect.arrayContaining([created.group]) }),
     });
   }, MEDIA_TIMEOUT);
 });

@@ -1231,8 +1231,9 @@ export const methods = {
       "`{ group: \"g_1a2b3c\" }` gives `turns: [{ angle: \"ana\", name: \"Ana\", start: 0.4, end: 5.2 }, …]` sorted by `start`. " +
       "A voice heard in another person's mic (bleed, more than 12 dB below the loudest mic at that time) does not count as " +
       "that person's turn; people talking at once keep overlapping turns. Pauses under 0.5 s stay inside a turn, sounds under " +
-      "0.3 s are not turns. Read-only. Assumes the mics are set to similar gains. An angle without sound has no turns and a " +
-      "warning. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound.",
+      "0.3 s are not turns. Read-only. Each angle's `audio.gain` (dB) is added to its mic level before mics are compared. An angle without sound has no turns and a " +
+      "warning. Fails with InvalidOperation (group does not exist; data lists the groups), TimelineNotFound, AssetNotFound, " +
+      "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

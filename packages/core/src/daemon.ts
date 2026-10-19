@@ -545,7 +545,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         throw new RpcError(
           ErrorCode.InvalidOperation,
           `multicam.turns: no group "${group}" in this timeline${ids ? ` (groups: ${ids})` : " (it has no multicam groups; make one with `multicam create`)"}.`,
-          { op: "multicam.turns", reason: "unknown group", field: "group" },
+          {
+            op: "multicam.turns",
+            reason: "unknown group",
+            field: "group",
+            groups: loaded.groups?.map((candidate) => candidate.id) ?? [],
+          },
         );
       }
       const result = await groupTurns({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, dir, found);
