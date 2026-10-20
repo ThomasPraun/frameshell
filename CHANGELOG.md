@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Desktop: the status bar's setup lines during a new project's first transcription (preparing whisper.cpp, downloading the model, loading it, compiling Metal shaders, transcribing) are Spanish in the Spanish UI (#222). English reads as before.
+
+### Added
+
+- `progress` notifications carry an optional stable `stage` code (`hash`, `extract-audio`, `binary`, `binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, `gpu-retry`, `transcribe`, `retranscribe`, `diarize`) and `values` (model, size in MB, device, seconds…) beside the English `message`, so a UI can word the step in its own language; unknown codes fall back to `message`. Transcription providers set them through `context.progress({ message, stage, values })` (`@frameshell/plugin-api`). Protocol v49.
+
 ## [0.11.0] - 2026-10-19
 
 ### Added

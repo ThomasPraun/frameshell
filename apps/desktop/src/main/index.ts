@@ -42,6 +42,7 @@ import {
 import { writeCliShim } from "./cli-shim.js";
 import { type DiagnosticsInput, buildDiagnostics } from "./diagnostics.js";
 import { captureContextFrame } from "./context-frames.js";
+import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
@@ -606,7 +607,7 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
       await daemon.request(
         "transcribe",
         { cwd: dir, asset },
-        { onProgress: (update) => running(`${name(asset)}: ${update.message}`, update.fraction ?? null) },
+        { onProgress: (update) => running(`${name(asset)}: ${describeProgress(update, said.progress)}`, update.fraction ?? null) },
       );
     }
     if (background) {

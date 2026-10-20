@@ -158,14 +158,14 @@ export async function diarizeAsset(options: DiarizeAssetOptions): Promise<Transc
     const segmentation = await tools.ensureModel(SEGMENTATION_MODEL, progress);
     const embedding = await tools.ensureModel(SPEAKER_EMBEDDING_MODEL, progress);
     const message = `Finding who speaks in ${assetRel}`;
-    progress({ message });
+    progress({ message, stage: "diarize", values: { asset: assetRel } });
     segments = await (options.diarize ?? sherpaDiarizer)({
       binary,
       segmentation,
       embedding,
       audio,
       speakers: options.speakers,
-      onProgress: (fraction) => progress({ message, fraction }),
+      onProgress: (fraction) => progress({ message, fraction, stage: "diarize", values: { asset: assetRel } }),
     });
   } catch (error) {
     return failed(error);

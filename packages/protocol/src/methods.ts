@@ -33,7 +33,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 48;
+export const PROTOCOL_VERSION = 49;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1767,6 +1767,18 @@ export const notifications = {
       requestId: z.union([z.int(), z.string()]).describe("`id` of the request in progress."),
       message: z.string().describe("Human line, e.g. `Downloading model ggml-large-v3-turbo-q5_0 (574 MB, one time)`."),
       fraction: z.number().min(0).max(1).optional().describe("0..1 of the current step when known."),
+      stage: z
+        .string()
+        .optional()
+        .describe(
+          "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
+            "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`. Codes may be added: treat an unknown one as `message`.",
+        ),
+      values: z
+        .record(z.string(), z.union([z.string(), z.number()]))
+        .optional()
+        .describe("Facts the `stage` line is built from (`name`, `model`, `size` in MB, `device`, `seconds`…); `message` already has them in English."),
     }),
   },
   "asset.changed": {

@@ -56,9 +56,9 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
       if (!preset) {
         throw new Error(`Unknown whisper.cpp model "${model}". Available: ${Object.keys(MODELS).join(", ")} (default ${DEFAULT_MODEL}).`);
       }
-      context.progress({ message: "Preparing whisper.cpp" });
+      context.progress({ message: "Preparing whisper.cpp", stage: "binary", values: { name: "whisper.cpp" } });
       const binary = await context.ensureBinary(WHISPER_BINARY);
-      context.progress({ message: `Preparing model ${model}` });
+      context.progress({ message: `Preparing model ${model}`, stage: "model", values: { model } });
       const modelPath = await context.ensureModel(`ggml-${model}`);
 
       const work = await mkdtemp(join(tmpdir(), "frameshell-whisper-"));
@@ -78,14 +78,18 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
           ...(prompt?.trim() ? ["--prompt", prompt.trim()] : []),
         ];
         let monitor = engineMonitor(context, coldShaderNoticeMs);
-        context.progress({ message: "Loading model" });
+        context.progress({ message: "Loading model", stage: "model-load" });
         try {
           await runEngine(binary, args, monitor.line);
         } catch (error) {
           const gpu = monitor.device();
           if (gpu === "cpu") throw error;
           monitor.stop();
-          context.progress({ message: `whisper.cpp failed on ${gpu} (${lastLine(error)}); retrying on CPU` });
+          context.progress({
+            message: `whisper.cpp failed on ${gpu} (${lastLine(error)}); retrying on CPU`,
+            stage: "gpu-retry",
+            values: { device: gpu, reason: lastLine(error) },
+          });
           monitor = engineMonitor(context, coldShaderNoticeMs);
           await runEngine(binary, [...args, "-ng"], monitor.line);
         } finally {
@@ -128,7 +132,7 @@ function engineMonitor(context: TranscribeContext, coldShaderNoticeMs: number) {
     line(text: string) {
       if (text.includes("ggml_metal_library_init: using embedded metal library")) {
         shaderTimer = setTimeout(
-          () => context.progress({ message: "Compiling Metal GPU shaders (first run after install only, 15-25 s)" }),
+          () => context.progress({ message: "Compiling Metal GPU shaders (first run after install only, 15-25 s)", stage: "gpu-compile" }),
           coldShaderNoticeMs,
         );
         return;
@@ -138,7 +142,11 @@ function engineMonitor(context: TranscribeContext, coldShaderNoticeMs: number) {
         clearTimeout(shaderTimer);
         const seconds = Number(compiled[1]);
         if (seconds >= NOTICEABLE_COMPILE_SECONDS) {
-          context.progress({ message: `Compiled Metal GPU shaders in ${seconds.toFixed(1)} s (cached from now on)` });
+          context.progress({
+            message: `Compiled Metal GPU shaders in ${seconds.toFixed(1)} s (cached from now on)`,
+            stage: "gpu-compiled",
+            values: { seconds: seconds.toFixed(1) },
+          });
         }
         return;
       }
@@ -152,7 +160,7 @@ function engineMonitor(context: TranscribeContext, coldShaderNoticeMs: number) {
         const percent = Number(progress[1]);
         if (percent === lastPercent) return;
         lastPercent = percent;
-        context.progress({ message: `Transcribing (${device})`, fraction: Math.min(1, percent / 100) });
+        context.progress({ message: `Transcribing (${device})`, fraction: Math.min(1, percent / 100), stage: "transcribe", values: { device } });
       }
     },
   };
