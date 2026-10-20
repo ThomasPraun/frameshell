@@ -6,6 +6,13 @@ import { strings } from "../i18n";
 
 const t = strings(Astro.currentLocale).showcase;
 const p = t.project;
+// Fallback picture per director angle (wide, him, her) until the clip's frames paint the tile;
+// same crops as ANGLES in src/scripts/showcase.ts.
+const anglePic = [
+  "background-size: 100%; background-position: 50% 50%",
+  "background-size: 170%; background-position: 88% 36%",
+  "background-size: 160%; background-position: 6% 36%",
+];
 ---
 
 <div class="sc" data-showcase>
@@ -32,22 +39,33 @@ const p = t.project;
                 <div data-style="viewStyle">
                   <video data-ref="video" src="/media/podcast.mp4" poster="/media/podcast-poster.jpg" muted="" playsinline="" preload="auto" data-style="videoStyle"></video>
 
+                  <!-- From audio: only the clip's voice, over a plain background with the project title -->
+                  <template data-if="audioOn">
+                    <div class="beat" style="position: absolute; inset: 0; background: #263248">
+                      <p style="position: absolute; left: 0; right: 0; top: 16%; margin: 0; text-align: center; font-size: 3.2cqw; font-weight: 800; font-stretch: 118%; letter-spacing: -0.02em; color: rgba(255,255,255,0.82)">podcast-ep12</p>
+                    </div>
+                    <span class="beat mono" style="--d: .2s; position: absolute; left: 2.5%; top: 4%; display: flex; align-items: center; gap: 0.8cqw; padding: 0.5cqw 1cqw; border-radius: 0.6cqw; background: rgba(15,15,18,0.6); color: #8fd1ab; font-size: 1.5cqw">
+                      <svg viewBox="0 0 40 24" aria-hidden="true" style="width: 2.4cqw; height: 1.5cqw"><g fill="#6fae8b"><rect class="bar" x="0" y="6" width="5" height="12" rx="2.5" style="--d: 0s"></rect><rect class="bar" x="9" y="0" width="5" height="24" rx="2.5" style="--d: .2s"></rect><rect class="bar" x="18" y="4" width="5" height="16" rx="2.5" style="--d: .1s"></rect><rect class="bar" x="27" y="1" width="5" height="22" rx="2.5" style="--d: .3s"></rect><rect class="bar" x="35" y="7" width="5" height="10" rx="2.5" style="--d: .15s"></rect></g></svg>
+                      podcast-ep12.m4a <span style="color: #a3a49f">{t.audioOnly}</span>
+                    </span>
+                  </template>
+
                   <template data-if="showLogo">
-                    <div class="pop" style="position: absolute; left: 60%; top: 30%; display: flex; flex-direction: column; gap: 1cqw; padding: 1.6cqw 2cqw; border-radius: 1.4cqw; background: rgba(15,15,18,0.45); backdrop-filter: blur(4px)">
-                      <span style="font-size: 1.5cqw; color: #c9c9c4">{t.sponsoredBy}</span>
-                      <span style="display: flex; align-items: center; gap: 1cqw">
-                        <svg viewBox="200 230 624 564" aria-hidden="true" style="width: 4.6cqw; height: 4.6cqw">
+                    <div class="pop" style="position: absolute; right: 2.5%; top: 4%; display: flex; flex-direction: column; gap: 0.6cqw; padding: 1cqw 1.4cqw; border-radius: 1cqw; background: rgba(15,15,18,0.5); backdrop-filter: blur(4px)">
+                      <span style="font-size: 1.2cqw; color: #c9c9c4">{t.sponsoredBy}</span>
+                      <span style="display: flex; align-items: center; gap: 0.7cqw">
+                        <svg viewBox="200 230 624 564" aria-hidden="true" style="width: 3cqw; height: 3cqw">
                           <defs><linearGradient id="fs-accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb347"></stop><stop offset="0.55" stop-color="#ff6a3d"></stop><stop offset="1" stop-color="#e8336f"></stop></linearGradient></defs>
                           <g fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"><path d="M232 352 V262 H322"></path><path d="M702 262 H792 V352"></path><path d="M792 672 V762 H702"></path><path d="M322 762 H232 V672"></path></g>
                           <path d="M372 392 L532 512 L372 632" fill="none" stroke="url(#fs-accent)" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"></path>
                           <rect x="560" y="600" width="130" height="58" rx="29" fill="url(#fs-accent)"></rect>
                         </svg>
-                        <strong style="font-size: 3.4cqw; font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; color: #ffffff">frameshell</strong>
+                        <strong style="font-size: 2.3cqw; font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; color: #ffffff">frameshell</strong>
                       </span>
                     </div>
                   </template>
 
-                  <!-- Draw over it: chalk table, pointers and the show's title on the empty wall, live over the footage -->
+                  <!-- Logo and drawing: chalk table, pointers and the show's title on the empty wall, live over the footage -->
                   <template data-if="drawOn">
                     <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%">
                       <path class="draw" pathLength="1" style="--d: .2s" d="M195 1080 L667 757 L1282 757 L1755 1080" stroke="#e3a53c" stroke-width="7"></path>
@@ -81,6 +99,28 @@ const p = t.project;
                     <p class="cap" data-style="captionStyle"><span data-text="caption"></span></p>
                   </template>
                 </div>
+
+                <!-- Director: the group's angles (crops of the clip), the shot on air outlined, who speaks marked -->
+                <template data-if="anglesOn">
+                  <div class="beat" aria-hidden="true" style="position: absolute; left: 2.5%; top: 4%; z-index: 4; display: grid; grid-template-columns: repeat(3, max(13cqw, 64px)); gap: max(0.8cqw, 4px); padding: max(0.8cqw, 4px); border-radius: 1cqw; background: rgba(15,15,18,0.62); backdrop-filter: blur(6px)">
+                    {
+                      t.angles.map((name, i) => (
+                        <div data-style={`angle${i}`}>
+                          <span style={`position: absolute; inset: 0; background: url(/media/podcast-poster.jpg) no-repeat; ${anglePic[i]}`} />
+                          <canvas data-angle={i} width="208" height="117" style="position: absolute; inset: 0; width: 100%; height: 100%" />
+                          <span class="mono" style="position: absolute; left: 0.5cqw; bottom: 0.5cqw; padding: 0 0.5cqw; border-radius: 0.3cqw; background: rgba(15,15,18,0.75); color: #e4e3dc; font-size: max(1.1cqw, 9px); line-height: 1.6">{i + 1}</span>
+                          <span style="position: absolute; right: 0.5cqw; bottom: 0.5cqw; padding: 0 0.5cqw; border-radius: 0.3cqw; background: rgba(15,15,18,0.75); color: #e4e3dc; font-size: max(1.1cqw, 9px); line-height: 1.6">{name}</span>
+                          <template data-if={`speak${i}`}>
+                            <span style="position: absolute; right: 0.5cqw; top: 0.5cqw; display: flex; align-items: center; gap: 0.4cqw; padding: 0 0.5cqw; border-radius: 0.3cqw; background: rgba(15,15,18,0.75); color: #8fd1ab; font-size: max(1cqw, 8px); line-height: 1.6">
+                              <svg viewBox="0 0 22 24" style="width: 1cqw; height: 1.1cqw"><g fill="#6fae8b"><rect class="bar" x="0" y="4" width="5" height="16" rx="2.5" style="--d: 0s"></rect><rect class="bar" x="8.5" y="0" width="5" height="24" rx="2.5" style="--d: .2s"></rect><rect class="bar" x="17" y="5" width="5" height="14" rx="2.5" style="--d: .1s"></rect></g></svg>
+                              {t.speaking}
+                            </span>
+                          </template>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </template>
 
                 <!-- Into the project: a mouse pulls the clip out of full screen into the app, drops it into its folder and opens it -->
                 <template data-if="tourOn">
@@ -281,7 +321,7 @@ const p = t.project;
 
             </template>
 
-            <span style="color: #7092c4; font-weight: 600; line-height: 26px">{t.rows.video}</span>
+            <span style="color: #7092c4; font-weight: 600; line-height: 26px"><span data-text="videoRowLabel">{t.rows.video}</span></span>
             <div data-style="videoRowStyle">
               <div data-list="videoSegs" style="display: contents"></div>
             </div>
@@ -409,7 +449,7 @@ const p = t.project;
                 </div>
               </div>
             </template>
-            <!-- f5: HyperFrames composition (the overlay from part 06) -->
+            <!-- f5: HyperFrames composition (the overlay from part 04) -->
             <template data-if="f5">
               <div style="display: grid; grid-template-rows: auto auto; flex: 1">
                 <pre class="code type-in" style="border-bottom: 1px solid #34363a">&lt;<span class="k">div</span> <span class="a">data-composition-id</span>=<span class="s">"sketch"</span>

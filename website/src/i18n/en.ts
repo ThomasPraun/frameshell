@@ -5,7 +5,7 @@ export const en = {
   meta: {
     title: "Frameshell: an IDE for video",
     description:
-      "Edit any video by asking for it: an AI agent cuts pauses, adds subtitles, logos and zooms, turns one recording into shorts and builds explainer animations, while you watch and fix it in the timeline. Open source desktop app for macOS, Windows and Linux.",
+      "Edit any video by asking for it: an AI agent cuts pauses, adds subtitles and logos, cuts between cameras in podcasts, interviews and recorded calls, turns an audio file into a video and one recording into shorts, while you watch and fix it in the timeline. Open source desktop app for macOS, Windows and Linux.",
     ogLocale: "en_US",
   },
   header: {
@@ -22,7 +22,7 @@ export const en = {
   hero: {
     marker: "Intro",
     lines: ["An IDE", "for video."],
-    lede: "Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles, your logo and zooms, and turns one recording into vertical shorts. You watch every change in the preview and the timeline, and fix anything by hand.",
+    lede: "Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles and your logo, cuts between cameras in podcasts, interviews and recorded calls, and turns a recording into vertical shorts or an audio file into a video. You watch every change in the preview and the timeline, and fix anything by hand.",
     download: "Download",
     source: "View source on GitHub",
     platforms: "for macOS, Windows and Linux. Free and open source,",
@@ -45,16 +45,19 @@ export const en = {
     replies: [
       "Added 13 subtitles from the transcript on their own track. Click any word to fix a typo.",
       'Cut 1.8 s of silence and an "um". The cut lands in the pause, so no word is clipped.',
-      "Split the shot in four: wide for her question, close on his answer, wide again, then close on her.",
-      "Logo added on its own layer for the sponsor line, on the empty wall beside her.",
+      "Made three angles of this shot (wide, him, her) and ran frameshell direct, which cuts to whoever speaks: her question, his answer with a wide when it runs long, then her again. In the app, keys 1 to 9 change a shot while it plays.",
+      "The drawing is an HTML animation (HyperFrames) on a transparent layer above the video; it plays live in the preview while it renders. The logo has its own layer for the sponsor line. Remotion works the same way, in React.",
       "Short ready: his answer framed on him, 1080 × 1920, with big subtitles. The original stays as it is.",
-      "Built as an HTML animation (HyperFrames) on a transparent layer above the video. It plays live in the preview while it renders. Remotion works the same way, in React.",
+      "Frameshell does this one without me: open the audio with New from video or audio, and once it is transcribed you get a background with the project title and subtitles that follow the voice. Want more? I can plan scenes from the transcript and build them with Remotion or HyperFrames.",
       "Made explainer.mp4: a 10-second Remotion animation that uses your clip as footage, silent so you can add a voice-over. It is playing now.",
     ],
     seeProject: "See how the project is organized",
     undo: "Undo",
     byHand: "Edit by hand",
     rows: { subtitles: "Subtitles", logo: "Logo", animation: "Animation", video: "Video", voice: "Voice" },
+    angles: ["Wide", "Him", "Her"],
+    speaking: "Speaking",
+    audioOnly: "Audio only",
     everyStep: "Every step above happens inside Frameshell, and you can do each one: one folder, your agent, plain words.",
     aiFootage: "Footage generated with AI for this demo.",
     project: {
@@ -69,7 +72,7 @@ export const en = {
       script: {
         title: "# Episode 12: What can't you edit without?",
         question: "## Question",
-        questionBody: "She asks the one thing he can't edit without.\nWide shot, both in frame.",
+        questionBody: "She asks the one thing he can't edit without.\nClose on her.",
         answer: "## Answer",
         close: "Close on him.",
         isShort: "This is the short.",
@@ -77,7 +80,7 @@ export const en = {
         sponsorBody: "Close on her, logo on the wall beside her.",
         note: "Each clip on the timeline points back to the scene it plays.",
       },
-      shots: ["Wide", "Zoom on him", "Wide", "Zoom on her"],
+      shots: ["Her", "Him", "Wide", "Her"],
       mainNote: 'The edited episode: five layers, 7.6 s after the cut. Exported as <span class="mono">main-youtube-1080p.mp4</span>.',
       shortAlt: "Vertical crop framed on the guest",
       shortTitle: "A short is its own timeline",
@@ -173,10 +176,44 @@ export const en = {
       title: "MCP server",
       body: "Drive a project from Claude Code or any MCP client, frames included.",
     },
+    multicam: {
+      title: "Multicam, cut by key",
+      body: "One file per camera or per person, synced by their sound into one group. While it plays, press 1 to 9 to cut to that angle, or click it in the Angles view. Shift adds it to the shot.",
+      angles: ["Wide", "Host", "Guest"],
+      hint: "Click an angle, or focus one and press 1, 2 or 3.",
+      program: "Program",
+    },
+    director: {
+      title: "The agent directs",
+      body: "frameshell direct picks every shot by who speaks: both people on a quick exchange, wide on silence and laughter. The same recording gives the same shots, and the ones you chose by hand stay.",
+      // [group second, shot, reason, confidence]
+      shots: [
+        ["0:00", "Host", "speaks", 0.92],
+        ["0:06", "Host + Guest", "quick exchange", 0.81],
+        ["0:09", "Wide", "laughter", 0.74],
+        ["0:11", "Guest", "short turn", 0.38],
+      ] as [string, string, string, number][],
+      review: "review",
+    },
+    gallery: {
+      title: "Angles from a recorded call",
+      body: "A Zoom, Meet or Teams recording in gallery view becomes one angle per person. A shared screen shows whole, or as picture-in-picture with whoever speaks.",
+      people: ["Ana", "Ben", "Caro", "Dev"],
+      angles: "4 angles",
+    },
+    language: {
+      title: "In English and Spanish",
+      body: "The app follows your system language. Switch it in View > Language, no restart needed.",
+      // Language names and the welcome button in each, as the app shows them.
+      samples: [
+        ["English", "New from video or audio…"],
+        ["Español", "Nuevo desde un video o audio…"],
+      ] as [string, string][],
+    },
   },
   workflows: {
     marker: "Workflows",
-    title: "Two ways to make a video.",
+    title: "Four ways to make a video.",
     recording: {
       title: "From a recording",
       body: "Vlogs, interviews, podcasts, classes. The agent removes silences and repeated takes, trims the intro, adds subtitles, evens out loudness and cuts shorts for social media. You review the result and restore anything it shouldn't have cut.",
@@ -190,6 +227,23 @@ export const en = {
       clip: "![](clips/street.mov)",
       spot: "## The secret spot",
       spotLine: "Show the sign, then my reaction.",
+    },
+    audio: {
+      title: "From audio",
+      body: "Podcasts, talks, voice notes. Open the audio file and Frameshell puts it over a background with the title and subtitles. Want more? The agent plans scenes from the transcript, you correct the plan, and it builds them with Remotion or HyperFrames.",
+      lanes: ["Subtitles", "Background with the title", "Your audio"],
+    },
+    conversation: {
+      title: "From a conversation",
+      body: "Podcasts, interviews, panels, recorded calls: one camera per person or a call recorded in gallery view. The agent cuts to whoever speaks and holds both people when they answer each other. You change any shot with the number keys.",
+      // [shot, keys]
+      shots: [
+        ["Ana", "1"],
+        ["Ana + Ben", "1 2"],
+        ["Ben", "2"],
+        ["Wide", "3"],
+        ["Ana", "1"],
+      ] as [string, string][],
     },
   },
   start: {
@@ -431,6 +485,8 @@ export const en = {
         "Make a vertical version for Reels and TikTok.",
         "Put a title card with the episode name at the start.",
         "Export it for YouTube.",
+        "Make a video from this audio, with subtitles over a background.",
+        "Direct the interview: show whoever is talking, both of them when they answer each other.",
       ],
       undo: "Changed your mind? Open History in Frameshell and revert any change, yours or the agent's.",
     },
@@ -460,22 +516,24 @@ export const en = {
     labels: [
       "Subtitles",
       "Cut the pauses",
-      "Focus on the speaker",
-      "Sponsor logo",
+      "Direct the cameras",
+      "Logo and drawing",
       "Vertical short",
-      "Draw over it",
+      "From audio",
       "Explain with animations",
     ],
     asks: [
       "Add subtitles from what they say, two words at a time.",
       "Cut the dead air after her question.",
-      "Zoom in on whoever is talking.",
-      "Put our sponsor's logo next to her when she mentions them.",
+      "Treat it like a multicam shoot and show whoever is talking.",
+      "Draw the table in chalk, point out who's who, put the show's title on the wall and our sponsor's logo in the corner when she mentions them.",
       "Make a vertical short of his answer for Reels and TikTok.",
-      "Draw the table in chalk, point out who's who, and put the show's title on the wall.",
+      "Say I only had the audio of this episode. Make it a video with big subtitles.",
       "Make a new explainer video: pull this clip out of full screen, drop it into its project folder and open the folder to show what we made from it.",
     ],
-    shots: ["Wide", "Zoom on him", "Wide", "Zoom on her"],
+    shots: ["Her", "Him", "Wide", "Her"],
+    rowVideo: "Video",
+    rowProgram: "Program",
     silence: "silence",
     by: { you: "you", auto: "auto", youAgent: "you + agent", agentYou: "agent + you", agent: "agent", render: "render" },
     notes: [
@@ -484,7 +542,7 @@ export const en = {
       "The plan, kept as plain text next to the video. Write it yourself or ask the agent to; clips point back to the scene they play.",
       "The edited episode as one JSON file: every layer, every cut. You edit it in the timeline, the agent through the CLI.",
       "A second timeline from the same recording. Make as many shorts as you want; none of them copies the footage.",
-      "HyperFrames: the chalk table, the pointers and the show title from part 06, written in HTML and CSS and rendered with transparency over the footage. It plays live while it renders.",
+      "HyperFrames: the chalk table, the pointers and the show title from part 04, written in HTML and CSS and rendered with transparency over the footage. It plays live while it renders.",
       "Remotion: the explainer from part 07, written in React. It uses your clip as footage and renders to exports/explainer.mp4. It can even use components from your own app.",
       "The finished episode, rendered through ffmpeg with subtitles burned in and loudness evened out.",
       "The short, ready to post. Re-export any time the episode changes.",

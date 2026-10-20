@@ -4,6 +4,11 @@ import { strings } from "../i18n";
 const t = strings(Astro.currentLocale).workflows;
 // Tag colour per op, by position: Subtitles is a subtitle track, Shorts a video export.
 const opClass = ["", "", "sub", "", "vid"];
+// Lane colour per position: subtitle cues, the background image, the audio.
+const laneClass = ["sub", "vid", "aud"];
+// Per shot, by position: whose angle it shows (a, b, both, wide) and its length.
+const shotKind = ["a", "both", "b", "wide", "a"];
+const shotLength = [3, 2, 2.4, 1.2, 2];
 ---
 
 <section class="flows" data-marker={t.marker}>
@@ -27,6 +32,29 @@ const opClass = ["", "", "sub", "", "vid"];
 <span class="h">{t.script.spot}</span>
 {t.script.spotLine}</code></pre>
       </article>
+      <article>
+        <h3>{t.audio.title}</h3>
+        <p>{t.audio.body}</p>
+        <ul class="lanes">
+          {t.audio.lanes.map((lane, i) => <li class={laneClass[i]}><span>{lane}</span></li>)}
+        </ul>
+      </article>
+      <article>
+        <h3>{t.conversation.title}</h3>
+        <p>{t.conversation.body}</p>
+        <ol class="shots">
+          {
+            t.conversation.shots.map(([name, keys], i) => (
+              <li class={shotKind[i]} style={`--n: ${shotLength[i]}`}>
+                <span class="keys" aria-hidden="true">
+                  {keys.split(" ").map((k) => <kbd>{k}</kbd>)}
+                </span>
+                <span class="who">{name}</span>
+              </li>
+            ))
+          }
+        </ol>
+      </article>
     </div>
   </div>
 </section>
@@ -43,7 +71,7 @@ const opClass = ["", "", "sub", "", "vid"];
   .pair {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(32px, 5vw, 72px);
+    gap: clamp(48px, 6vw, 80px) clamp(32px, 5vw, 72px);
     margin-top: clamp(40px, 6vw, 72px);
   }
 
@@ -120,6 +148,118 @@ const opClass = ["", "", "sub", "", "vid"];
     box-shadow: inset 0 3px 0 var(--video);
   }
 
+  /* From audio: the three tracks the project starts with, stacked as on the timeline. */
+  .lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .lanes li {
+    padding: 9px 10px;
+    border-radius: 3px;
+    font-size: 13.5px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* Cues: short blocks with gaps, like a subtitle track. */
+  .lanes .sub {
+    background:
+      repeating-linear-gradient(90deg, #4a3a55 0 14%, transparent 14% 15.5%, #4a3a55 15.5% 24%, transparent 24% 25.5%),
+      transparent;
+    box-shadow: inset 0 3px 0 var(--sub);
+  }
+
+  .lanes .vid {
+    background: #3f5373;
+    box-shadow: inset 0 3px 0 var(--video);
+  }
+
+  .lanes .aud {
+    background:
+      repeating-linear-gradient(90deg, rgba(143, 209, 171, 0.45) 0 3px, transparent 3px 6px) center / 100% 60% no-repeat,
+      #2f4a3c;
+    box-shadow: inset 0 3px 0 var(--audio);
+  }
+
+  .lanes .sub span,
+  .lanes .aud span {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(15, 15, 18, 0.6);
+  }
+
+  /* From a conversation: a program track, one block per shot in its angles' colours. */
+  .shots {
+    display: flex;
+    gap: 3px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .shots li {
+    flex: var(--n) 1 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 14px;
+    min-width: 0;
+    padding: 10px;
+    border-radius: 3px;
+    font-size: 13.5px;
+  }
+
+  .shots .a {
+    background: #2b5260;
+    box-shadow: inset 0 3px 0 var(--gen);
+  }
+
+  .shots .b {
+    background: #4a3a55;
+    box-shadow: inset 0 3px 0 var(--sub);
+  }
+
+  .shots .wide {
+    background: #3f5373;
+    box-shadow: inset 0 3px 0 var(--video);
+  }
+
+  /* Two-up: both people's colours, striped. */
+  .shots .both {
+    background:
+      linear-gradient(90deg, var(--gen) 50%, var(--sub) 50%) top / 100% 3px no-repeat,
+      repeating-linear-gradient(-45deg, #2b5260 0 8px, #4a3a55 8px 16px);
+  }
+
+  .keys {
+    display: flex;
+    gap: 3px;
+  }
+
+  kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: rgba(15, 15, 18, 0.55);
+    color: var(--text);
+    font-size: 11.5px;
+  }
+
+  .who {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   @media (max-width: 760px) {
     .pair {
       grid-template-columns: minmax(0, 1fr);
@@ -131,6 +271,14 @@ const opClass = ["", "", "sub", "", "vid"];
 
     .ops li {
       flex: 1 1 30%;
+    }
+
+    .shots {
+      flex-wrap: wrap;
+    }
+
+    .shots li {
+      flex-basis: 28%;
     }
   }
 </style>

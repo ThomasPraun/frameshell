@@ -4,6 +4,18 @@ import { strings } from "../i18n";
 const t = strings(Astro.currentLocale).features;
 const words = t.transcript.words;
 const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)", "var(--gen)"];
+// Multicam demo angles, by position: wide, host (left of the clip), guest (right). Each is a crop
+// of the carousel's poster, the same framing the carousel's close shots use.
+const angleKind = ["wide", "host", "guest"];
+const anglePic = [
+  "background-size: 100%; background-position: 50% 50%",
+  "background-size: 160%; background-position: 6% 36%",
+  "background-size: 170%; background-position: 88% 36%",
+];
+const startShots = [1, 2, 0, 1];
+const personColors = ["var(--gen)", "var(--sub)", "var(--audio)", "var(--video)"];
+const sampleLang = ["en", "es"];
+const pageLang = Astro.currentLocale === "es" ? 1 : 0;
 ---
 
 <section id="features" class="features" data-marker={t.marker}>
@@ -71,6 +83,86 @@ const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)
           <li>youtube-1440p</li>
           <li>vertical-1080x1920</li>
         </ul>
+      </article>
+
+      <article class="cell span-2">
+        <h3>{t.multicam.title}</h3>
+        <p>{t.multicam.body}</p>
+        <div class="mc" data-mc>
+          <div class="mc-angles">
+            {
+              t.multicam.angles.map((name, i) => (
+                <button type="button" class:list={["mc-angle", angleKind[i]]} data-angle={i} data-kind={angleKind[i]} aria-pressed={i === 1 ? "true" : "false"}>
+                  <span class="mc-pic" style={anglePic[i]} />
+                  <kbd>{i + 1}</kbd>
+                  <span class="mc-name">{name}</span>
+                </button>
+              ))
+            }
+          </div>
+          <div class="mc-track">
+            <span class="mc-label">{t.multicam.program}</span>
+            <ol class="mc-shots" data-mc-shots aria-hidden="true">
+              {startShots.map((a) => <li class={angleKind[a]} data-a={a}>{t.multicam.angles[a]}</li>)}
+            </ol>
+          </div>
+          <p class="mc-hint">{t.multicam.hint}</p>
+        </div>
+      </article>
+
+      <article class="cell">
+        <h3>{t.gallery.title}</h3>
+        <p>{t.gallery.body}</p>
+        <div class="call" aria-hidden="true">
+          {
+            t.gallery.people.map((name, i) => (
+              <span class="tile" style={`--d: ${(0.25 * i).toFixed(2)}s`}>
+                <span class="face" style={`--c: ${personColors[i]}`} />
+                <span class="tile-name">{name}</span>
+              </span>
+            ))
+          }
+        </div>
+        <p class="call-out mono">{t.gallery.angles}</p>
+      </article>
+
+      <article class="cell span-2">
+        <h3>{t.director.title}</h3>
+        <p>{t.director.body}</p>
+        <div class="cmd mini"><code>frameshell direct podcast --template interview</code></div>
+        <ol class="dir">
+          {
+            t.director.shots.map(([at, shot, reason, confidence]) => (
+              <li class:list={{ low: confidence < 0.5 }}>
+                <span class="dir-at">{at}</span>
+                <span class="dir-shot">{shot}</span>
+                <span class="dir-why">{reason}</span>
+                <span class="dir-conf">
+                  <span class="meter" style={`--v: ${confidence}`} />
+                  {confidence.toFixed(2)}
+                </span>
+                <span class="dir-flag">{confidence < 0.5 ? t.director.review : ""}</span>
+              </li>
+            ))
+          }
+        </ol>
+      </article>
+
+      <article class="cell">
+        <h3>{t.language.title}</h3>
+        <p>{t.language.body}</p>
+        <div class="lang" data-lang-demo={JSON.stringify(t.language.samples)}>
+          <div class="lang-pick">
+            {
+              t.language.samples.map(([name], i) => (
+                <button type="button" lang={sampleLang[i]} data-lang-i={i} aria-pressed={i === pageLang ? "true" : "false"}>
+                  {name}
+                </button>
+              ))
+            }
+          </div>
+          <span class="lang-sample" lang={sampleLang[pageLang]} data-lang-sample aria-live="polite">{t.language.samples[pageLang][1]}</span>
+        </div>
       </article>
 
       <article class="cell">
@@ -349,9 +441,313 @@ const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)
     font-size: 12.5px;
   }
 
+  /* Multicam: angle tiles that cut the program track below them. */
+  .mc {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: auto;
+    padding-top: 18px;
+  }
+
+  .mc-angles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .mc-angle {
+    position: relative;
+    display: block;
+    aspect-ratio: 16 / 9;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    overflow: hidden;
+    background: #0b0b0c;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  .mc-pic {
+    position: absolute;
+    inset: 0;
+    background-image: url(/media/podcast-poster.jpg);
+    background-repeat: no-repeat;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+
+  .mc-angle:hover .mc-pic,
+  .mc-angle[aria-pressed="true"] .mc-pic {
+    opacity: 1;
+  }
+
+  .mc-angle[aria-pressed="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px var(--c);
+  }
+
+  .mc-angle kbd,
+  .mc-name {
+    position: absolute;
+    bottom: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(15, 15, 18, 0.72);
+    font-size: 12px;
+  }
+
+  .mc-angle kbd {
+    left: 6px;
+    color: var(--c);
+    font-weight: 600;
+  }
+
+  .mc-name {
+    right: 6px;
+    max-width: calc(100% - 44px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .mc :global(.wide) {
+    --c: var(--video);
+    --c-dark: #3f5373;
+  }
+
+  .mc :global(.host) {
+    --c: var(--gen);
+    --c-dark: #2b5260;
+  }
+
+  .mc :global(.guest) {
+    --c: var(--sub);
+    --c-dark: #4a3a55;
+  }
+
+  .mc-track {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mc-label {
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  .mc-shots {
+    display: flex;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+  }
+
+  .mc-shots :global(li) {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 7px;
+    border-radius: 3px;
+    background: var(--c-dark);
+    box-shadow: inset 0 2px 0 var(--c);
+    font-size: 12px;
+    line-height: 26px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mc-shots :global(li.fresh) {
+    animation: cutIn 0.45s var(--ease);
+  }
+
+  @keyframes cutIn {
+    from {
+      flex-grow: 0.001;
+      opacity: 0.4;
+    }
+  }
+
+  .mc-hint {
+    margin: 0;
+    color: var(--faint);
+    font-size: 13px;
+  }
+
+  /* Call recorded in gallery view: each tile gets cut out as an angle. */
+  .call {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    margin-top: auto;
+    padding: 6px;
+    border-radius: 6px;
+    background: #0b0b0c;
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  .tile {
+    position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 16 / 9;
+    border-radius: 3px;
+    background: var(--raised);
+  }
+
+  /* Dashed crop marks drawn over each tile. */
+  .tile::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border: 1.5px dashed var(--tally);
+    border-radius: 4px;
+    opacity: 0.85;
+  }
+
+  .face {
+    width: 34%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 38%, var(--c) 0 26%, transparent 27%),
+      radial-gradient(ellipse 60% 44% at 50% 100%, var(--c) 0 98%, transparent 100%);
+    opacity: 0.75;
+  }
+
+  .tile-name {
+    position: absolute;
+    left: 5px;
+    bottom: 4px;
+    padding: 0 5px;
+    border-radius: 2px;
+    background: rgba(15, 15, 18, 0.7);
+    font-size: 11.5px;
+  }
+
+  .call-out {
+    margin: 0;
+    color: var(--tally);
+    font: 12.5px var(--mono);
+  }
+
+  /* Director's shots: when, which, why and how sure. */
+  .dir {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .dir li {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1.2fr) minmax(0, 1fr) 96px 56px;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: var(--panel);
+  }
+
+  .dir-at,
+  .dir-conf {
+    color: var(--faint);
+    font: 12.5px var(--mono);
+  }
+
+  .dir-shot,
+  .dir-why {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .dir-why {
+    color: var(--muted);
+  }
+
+  .dir-conf {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .meter {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--audio) calc(var(--v) * 100%), var(--line) 0);
+  }
+
+  .dir .low .meter {
+    background: linear-gradient(90deg, var(--danger) calc(var(--v) * 100%), var(--line) 0);
+  }
+
+  .dir-flag {
+    color: var(--danger);
+    font-size: 12.5px;
+    text-align: right;
+  }
+
+  /* Language switch, showing the welcome button in the chosen language. */
+  .lang {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    margin-top: auto;
+    padding-top: 18px;
+  }
+
+  .lang-pick {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  .lang-pick button {
+    min-height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    font: 600 14px var(--sans);
+    cursor: pointer;
+  }
+
+  .lang-pick button[aria-pressed="true"] {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  .lang-sample {
+    padding: 9px 16px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+
   @media (max-width: 960px) {
     .grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-flow: dense;
     }
   }
 
@@ -362,6 +758,22 @@ const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)
 
     .span-2 {
       grid-column: auto;
+    }
+
+    .dir li {
+      grid-template-columns: 40px minmax(0, 1fr) 84px;
+      gap: 4px 10px;
+    }
+
+    .dir-why {
+      grid-column: 2;
+      grid-row: 2;
+      font-size: 13px;
+    }
+
+    .dir-flag {
+      grid-column: 3;
+      grid-row: 2;
     }
   }
 </style>
@@ -391,6 +803,47 @@ const layerColors = ["var(--video)", "var(--audio)", "var(--sub)", "var(--tally)
       }),
     );
     render();
+  }
+
+  // Multicam: a click or a number key cuts to that angle, adding a shot to the program track.
+  const mc = document.querySelector<HTMLElement>("[data-mc]");
+  if (mc) {
+    const angles = [...mc.querySelectorAll<HTMLButtonElement>("[data-angle]")];
+    const shots = mc.querySelector<HTMLOListElement>("[data-mc-shots]")!;
+    const cut = (a: number) => {
+      const btn = angles[a];
+      if (!btn) return;
+      angles.forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+      const li = document.createElement("li");
+      li.className = btn.dataset.kind + " fresh";
+      li.textContent = btn.querySelector(".mc-name")!.textContent;
+      shots.append(li);
+      while (shots.children.length > 6) shots.firstElementChild!.remove();
+    };
+    angles.forEach((b, i) => b.addEventListener("click", () => cut(i)));
+    mc.addEventListener("keydown", (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= angles.length) {
+        e.preventDefault();
+        cut(n - 1);
+        angles[n - 1].focus();
+      }
+    });
+  }
+
+  const lang = document.querySelector<HTMLElement>("[data-lang-demo]");
+  if (lang) {
+    const sample = lang.querySelector<HTMLElement>("[data-lang-sample]")!;
+    const samples = JSON.parse(lang.dataset.langDemo!) as [string, string][];
+    const buttons = [...lang.querySelectorAll<HTMLButtonElement>("[data-lang-i]")];
+    buttons.forEach((b, i) =>
+      b.addEventListener("click", () => {
+        buttons.forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+        sample.textContent = samples[i][1];
+        sample.lang = b.lang;
+      }),
+    );
   }
 
   const hist = document.querySelector<HTMLOListElement>("[data-hist]");
