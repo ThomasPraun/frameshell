@@ -16,6 +16,7 @@ import {
   type Timeline,
   type Transcript,
   isIdentityPlacement,
+  isProgramSound,
   layerRect,
   placementOf,
   programGroup,
@@ -222,8 +223,10 @@ interface Placed {
   in: number;
   speed: number;
   placement: Placement;
-  /** Sound of a program track: placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
+  /** Sound of a program track, own or flattened (`isProgramSound`): placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
   exact?: true;
+  /** The clip after this one on its track, muted or not: an `exact` sound ends where it starts (the later clip wins). */
+  next?: Placed;
   /**
    * Set on a multicam angle's picture: the source rectangle cropped out and
    * the output rectangle it fills. Replaces the fit-and-offset of `placement`.
@@ -492,13 +495,16 @@ function layoutTimeline(
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
-      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform) });
+      // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
+      const exact = isProgramSound(clip) ? { exact: true as const } : {};
+      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform), ...exact });
       frames = Math.max(frames, end);
     }
     placed.sort((a, b) => a.start - b.start);
     // The engine never overlaps clips, but a hand-edited file may: the later clip wins from its start.
     for (let i = 1; i < placed.length; i++) {
       const before = placed[i - 1]!;
+      before.next = placed[i]!;
       if (before.end > placed[i]!.start) before.end = Math.max(before.start, placed[i]!.start);
     }
     return placed.filter((p) => p.end > p.start);
@@ -857,14 +863,19 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
     let cursor = 0;
     /** Last item when it is a program sound and its start sample, for joining the next shot to it. */
     let joinable: { item: Extract<AudioItem, { kind: "clip" }>; start: number } | null = null;
+    /** First sample of `placed`, as this plan places it. */
+    const startOf = (placed: Placed) => (placed.exact ? soundSamples(placed.clip, sampleRate).start : at(placed.start));
     for (const placed of track) {
       const exact = placed.exact ? soundSamples(placed.clip, sampleRate) : null;
-      // Program sound: exact samples of the clip's seconds, clamped to the video's length and the previous item.
-      const start = exact ? Math.min(samples, Math.max(cursor, exact.start)) : at(placed.start);
-      const end = exact ? Math.min(samples, exact.end) : at(placed.end);
-      if (exact && end <= start) continue;
-      const from = exact ? exact.in + (start - exact.start) : Math.round((placed.in / fps) * sampleRate);
-      const sourceSamples = exact ? end - start : Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate);
+      // Program sound: exact samples of the clip's seconds, clamped to the video's length, the previous item and the next clip.
+      // Any other clip: frame samples, never before the previous item ends, so a track never outlasts the video.
+      const planned = exact ? exact.start : at(placed.start);
+      const start = Math.min(samples, Math.max(cursor, planned));
+      const end = exact ? Math.min(samples, exact.end, placed.next ? startOf(placed.next) : samples) : at(placed.end);
+      if (end <= start) continue;
+      const skipped = start - planned;
+      const from = exact ? exact.in + skipped : Math.round((placed.in / fps) * sampleRate) + Math.round(skipped * placed.speed);
+      const sourceSamples = exact ? end - start : Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate) - Math.round(skipped * placed.speed);
       let input = inputs.indexOf(placed.source.path);
       if (input === -1) input = inputs.push(placed.source.path) - 1;
       const previous = joinable;

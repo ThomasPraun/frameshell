@@ -149,6 +149,7 @@ export {
   groupSounds,
   type GroupSound,
   programSound,
+  isProgramSound,
   programGroup,
   withProgramSound,
 } from "./composite.js";

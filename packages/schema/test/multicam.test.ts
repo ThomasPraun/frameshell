@@ -6,6 +6,7 @@ import {
   type Timeline,
   createTimeline,
   flattenTimeline,
+  isProgramSound,
   movedProgramGroups,
   parseTimeline,
   programSound,
@@ -278,6 +279,35 @@ describe("flattening nested multicam timelines", () => {
     ]);
     expect((flat.tracks[0] as { clips: { id: string }[] }).clips.map((clip) => clip.id)).toEqual(["c_n/c_a/ana"]);
     expect(flat.groups).toBeUndefined();
+  });
+
+  it("marks the sound of a nested program track on an audio host track, at any depth, and only that", () => {
+    const hosted = (id: string, source: string): Timeline => ({
+      ...createTimeline(id),
+      tracks: [
+        { id: "a1", kind: "audio", clips: [{ id: "c_n", type: "timeline", source, start: 0, duration: 3 }] },
+        { id: "a2", kind: "audio", clips: [{ id: "c_own", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 3 }] },
+      ],
+    });
+    const wrapper: Timeline = { ...createTimeline("wrapper"), tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_w", type: "timeline", source: "timelines/mid.json", start: 1 }] }] };
+    const files: Record<string, Timeline> = { "timelines/podcast.json": podcast, "timelines/mid.json": hosted("mid", "timelines/podcast.json") };
+    const marked = (timeline: Timeline) =>
+      flattenTimeline(timeline, (source) => files[source] ?? null).tracks.flatMap((track) =>
+        track.kind === "subtitles" || track.kind === "program" ? [] : track.clips.map((clip) => [clip.id, isProgramSound(clip)]),
+      );
+    expect(marked(hosted("main", "timelines/podcast.json"))).toEqual([
+      ["c_n/c_a/ana", true],
+      ["c_n/c_a/ben", true],
+      ["c_n/c_a/eva", true],
+      ["c_own", false],
+    ]);
+    // Flattened again under a video host: the mark stays on its sound.
+    expect(marked(wrapper).filter(([, mark]) => mark).map(([id]) => id)).toEqual(["c_w/c_n/c_a/ana", "c_w/c_n/c_a/ben", "c_w/c_n/c_a/eva"]);
+    expect(marked(wrapper).filter(([, mark]) => !mark).map(([id]) => id)).toEqual(["c_w/c_own"]);
+    // The mark is no field: the flattened timeline still parses, and JSON drops it.
+    const flat = flattenTimeline(hosted("main", "timelines/podcast.json"), (source) => files[source] ?? null);
+    expect(parseTimeline(flat).ok).toBe(true);
+    expect(JSON.stringify(flat)).not.toContain("programSound");
   });
 
   it("leaves root program tracks and their groups as they are", () => {
