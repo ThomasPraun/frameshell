@@ -250,6 +250,10 @@ export interface TranscriptionProgress {
   message: string;
   /** 0..1 of the current step when known. */
   fraction?: number;
+  /** Stable code of the step (`model-load`, `transcribe`…) for apps that translate `message`; unknown codes fall back to it. */
+  stage?: string;
+  /** Facts `message` is built from (`device`, `seconds`…), for the app's own wording of `stage`. */
+  values?: Record<string, string | number>;
 }
 
 /** What a provider returns. */

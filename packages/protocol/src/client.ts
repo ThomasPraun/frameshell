@@ -88,12 +88,17 @@ export async function connectToDaemon(socketPath: string, options: ConnectOption
   };
 
   readMessages(socket, (message) => {
-    const note = message as { method?: unknown; params?: { requestId?: unknown; message?: unknown; fraction?: unknown } };
+    const note = message as { method?: unknown; params?: { requestId?: unknown; message?: unknown; fraction?: unknown; stage?: unknown; values?: unknown } };
     if (note.method === "progress") {
-      const { requestId, message: text, fraction } = note.params ?? {};
+      const { requestId, message: text, fraction, stage, values } = note.params ?? {};
       const listener = typeof requestId === "number" ? pending.get(requestId)?.onProgress : undefined;
       if (listener && typeof text === "string") {
-        listener(typeof fraction === "number" ? { message: text, fraction } : { message: text });
+        listener({
+          message: text,
+          ...(typeof fraction === "number" ? { fraction } : {}),
+          ...(typeof stage === "string" ? { stage } : {}),
+          ...(values && typeof values === "object" ? { values: values as Record<string, string | number> } : {}),
+        });
       }
       return;
     }

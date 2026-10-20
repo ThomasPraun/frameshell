@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `progress` notifications carry an optional stable `stage` code (`hash`, `extract-audio`, `binary`, `binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, `gpu-retry`, `transcribe`, `retranscribe`, `diarize`) and `values` (model, size in MB, device, seconds…) beside the English `message`, so a UI can word the step in its own language; unknown codes fall back to `message`. Transcription providers set them through `context.progress({ message, stage, values })` (`@frameshell/plugin-api`). Protocol v49.
+
+### Changed
+
+- Desktop: the status bar's setup lines during a new project's first transcription (preparing whisper.cpp, downloading the model, loading it, compiling Metal shaders, transcribing) are Spanish in the Spanish UI (#222). English reads as before.
+
 ### Fixed
 
 - Sound of a multicam program track nested inside an audio track now plays at exact samples in export and preview, like a program track's own sound (ADR 0016): mics of one room no longer drift up to half a frame apart there, and a sound running on across a shot change stays one item without an edge fade. It ends where a later clip of the host track starts, which keeps its own start. Flattening marks those clips (`isProgramSound` in `composite.ts`); no file, wire or protocol change.

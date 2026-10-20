@@ -182,8 +182,26 @@ describe("whisper-cpp provider", () => {
     // Warm shader cache (~20 ms): nothing worth telling the user.
     expect(progress.some((p) => p.message.includes("Metal"))).toBe(false);
     expect(progress.filter((p) => p.fraction !== undefined)).toEqual([
-      { message: "Transcribing (metal)", fraction: 0.5 },
-      { message: "Transcribing (metal)", fraction: 1 },
+      { message: "Transcribing (metal)", fraction: 0.5, stage: "transcribe", values: { device: "metal" } },
+      { message: "Transcribing (metal)", fraction: 1, stage: "transcribe", values: { device: "metal" } },
+    ]);
+  });
+
+  it("tags every setup line with a stable stage code", async () => {
+    const engine = fakeEngine({ transcription: [] }, [
+      "ggml_metal_library_init: using embedded metal library",
+      60,
+      "ggml_metal_library_compile_all: loaded 20 libraries from embedded data in 14.639 sec (max single = 14.639 sec)",
+    ]);
+    const { ctx, progress } = context();
+    await createWhisperProvider({ runEngine: engine.run, coldShaderNoticeMs: 10 }).transcribe(holaMundoWav(), {}, ctx);
+    const staged = progress.filter((p) => p.fraction === undefined).map((p) => [p.stage, p.values]);
+    expect(staged).toEqual([
+      ["binary", { name: "whisper.cpp" }],
+      ["model", { model: "large-v3-turbo-q5_0" }],
+      ["model-load", undefined],
+      ["gpu-compile", undefined],
+      ["gpu-compiled", { seconds: "14.6" }],
     ]);
   });
 

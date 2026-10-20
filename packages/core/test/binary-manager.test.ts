@@ -427,12 +427,17 @@ describe("BinaryManager models", () => {
   it("downloads a pinned model once, verified, and reports download progress", async () => {
     const binaries = modelManager(model(modelBytes));
     expect(await binaries.locateModel("ggml-test")).toMatchObject({ installed: false });
-    const progress: { message: string; fraction?: number }[] = [];
+    const progress: { message: string; fraction?: number; stage?: string; values?: Record<string, string | number> }[] = [];
     const path = await binaries.ensureModel("ggml-test", { onProgress: (p) => progress.push(p) });
 
     expect(readFileSync(path).equals(modelBytes)).toBe(true);
     expect(path).toContain(join("models", "ggml-test", "abc123"));
-    expect(progress.at(-1)).toMatchObject({ message: expect.stringContaining("ggml-test"), fraction: 1 });
+    expect(progress.at(-1)).toMatchObject({
+      message: expect.stringContaining("ggml-test"),
+      fraction: 1,
+      stage: "model-download",
+      values: { model: "ggml-test", size: expect.any(Number) },
+    });
     hits.clear();
     expect(await binaries.ensureModel("ggml-test")).toBe(path);
     expect(hits.size).toBe(0);
