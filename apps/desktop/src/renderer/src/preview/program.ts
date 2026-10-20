@@ -7,6 +7,7 @@ import {
   type Placement,
   type Size,
   flattenTimeline,
+  isProgramSound,
   movedProgramGroups,
   placementOf,
   programGroup,
@@ -162,8 +163,8 @@ export interface AudioSpan {
  * shot shows at most (one decoder each), its shots laid out by `shotLayers`,
  * and plays every angle's sound under every shot. Nested timelines are
  * flattened first. Timing and placement follow export exactly: clip edges
- * on the project frame grid, sample boundaries rounded from frames, layers
- * placed by `layerRect`.
+ * on the project frame grid, sample boundaries rounded from frames (program
+ * sound, own or nested: `soundSamples`), layers placed by `layerRect`.
  */
 export interface Program {
   fps: number;
@@ -236,6 +237,8 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     const kept = placed.filter((p) => p.end > p.start);
 
     const layer: VideoSpan[] = [];
+    /** Last sound span of this track and whether it is program sound, for {@link continuesSpan}. */
+    let last: { span: AudioSpan; exact: boolean } | null = null;
     for (const { clip, start, end } of kept) {
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
@@ -244,9 +247,33 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         if (span) layer.push(span);
       }
       if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) continue;
+      const gain = 10 ** ((clip.audio?.gain ?? 0) / 20);
+      if (isProgramSound(clip)) {
+        // Nested program sound, as export places it: exact samples, never before the track's previous sound ends.
+        const samples = soundSamples(clip, rate, info.sidecar.sampleRate);
+        const first = Math.max(samples.start, last?.span.end ?? 0);
+        const span: AudioSpan = {
+          clip: clip.id,
+          start: first,
+          end: samples.end,
+          sidecar: info.sidecar.path,
+          channels: info.sidecar.channels,
+          in: samples.in + Math.round(((first - samples.start) / rate) * info.sidecar.sampleRate),
+          speed: 1,
+          gain,
+        };
+        if (span.end <= span.start) continue;
+        if (last?.exact && continuesSpan(last.span, span)) {
+          last.span.end = span.end;
+          continue;
+        }
+        audio.push(span);
+        last = { span, exact: true };
+        continue;
+      }
       const speed = clip.speed ?? 1;
       const inFrame = frame(clip.in);
-      audio.push({
+      const span: AudioSpan = {
         clip: clip.id,
         start: sample(start),
         end: sample(end),
@@ -254,8 +281,10 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         channels: info.sidecar.channels,
         in: Math.round((inFrame / fps) * info.sidecar.sampleRate),
         speed,
-        gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
-      });
+        gain,
+      };
+      audio.push(span);
+      last = { span, exact: false };
     }
     if (track.kind === "video") layers.push(layer);
   }
@@ -538,13 +567,7 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
       // `shotSound` names its clips `<shot>/<angle>`.
       const angle = clip.id.slice(shot.id.length + 1);
       const previous = last.get(angle);
-      const continues =
-        previous !== undefined &&
-        previous.sidecar === span.sidecar &&
-        previous.gain === span.gain &&
-        Math.abs(span.start - previous.end) <= 1 &&
-        Math.abs(span.in - (previous.in + (span.start - previous.start))) <= 1;
-      if (continues) {
+      if (previous !== undefined && continuesSpan(previous, span)) {
         previous.end = span.end;
         continue;
       }
@@ -553,6 +576,16 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
     }
   }
   return spans;
+}
+
+/** True when `span` plays on unbroken from `previous` (same file and gain, no gap, no jump): one span, no edge fade. */
+function continuesSpan(previous: AudioSpan, span: AudioSpan): boolean {
+  return (
+    previous.sidecar === span.sidecar &&
+    previous.gain === span.gain &&
+    Math.abs(span.start - previous.end) <= 1 &&
+    Math.abs(span.in - (previous.in + (span.start - previous.start))) <= 1
+  );
 }
 
 /** Timeline seconds just after the clip's last frame; null when unknown (unreadable nested timeline). */

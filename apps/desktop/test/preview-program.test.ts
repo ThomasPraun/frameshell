@@ -440,6 +440,18 @@ describe("compileProgram with a multicam program track", () => {
     expect(spans("ben")).toEqual([[696, 96_000, 0]]);
   });
 
+  it("keeps exact samples for a program track nested in an audio track, as export does", () => {
+    // Mirrors packages/core/test/export-multicam.test.ts "keeps exact samples for a program track nested in an audio track".
+    const room = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0.01 }, { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.025 }] };
+    const nested = { ...view([programTrack([shot("c_1", 0, 0.0105, 1.0105, "solo", ["ana"]), shot("c_2", 1, 1.0105, 2.0105, "solo", ["ben"])])]), timeline: "talk", groups: [room] };
+    const main = view([{ id: "a1", kind: "audio", name: null, follows: null, clips: [{ id: "c_n", type: "timeline", source: "timelines/talk.json", start: 0.5, end: 2.5, in: 0, duration: 2 }] } as Track]);
+    const program = compileProgram(main, angles, { nested: new Map([["timelines/talk.json", nested]]) });
+    const spans = (name: string) => program.audio.filter((s) => s.sidecar === sidecar(name)).map((s) => [s.clip, s.start, s.end, s.in]);
+    // One span per sound across the shot change, no edge fade; frames would round Ana's 24 and Ben's 696 away.
+    expect(spans("ana")).toEqual([["c_n/c_1/ana", 24_000, 120_000, 24]]);
+    expect(spans("ben")).toEqual([["c_n/c_1/ben", 24_696, 120_000, 0]]);
+  });
+
   it("splits an angle's sound where the group clock jumps (a ripple cut), and leaves muted angles out", () => {
     const muted = { ...group, angles: group.angles.map((a) => (a.id === "ben" ? { ...a, audio: { muted: true } } : a)) };
     const program = compileProgram(

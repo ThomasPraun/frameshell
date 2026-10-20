@@ -116,7 +116,7 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * transform does not apply to them. Stacking follows the nested track order:
  * when the program track comes before the first video track, that track and
  * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
- * sound ({@link programSound}).
+ * sound ({@link programSound}), clips marked {@link isProgramSound} so they keep exact samples.
  *
  * A clip whose timeline `nested` cannot give, or that would nest a timeline
  * inside itself, stays as it is for the caller to report. The root is
@@ -176,7 +176,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       const children = flat.tracks.flatMap((child): Track[] => {
         if (child.kind !== "program" || track.kind !== "audio") return [child];
         const group = flat.groups.find((candidate) => candidate.id === child.group);
-        return group ? programSound(child, group) : [];
+        return group ? programSound(child, group).map((sound) => ({ ...sound, clips: sound.clips.map(markProgramSound) })) : [];
       });
       for (const child of children) {
         if (child.kind === "subtitles") continue;
@@ -663,6 +663,25 @@ export function programSound(track: ProgramTrack, group: MulticamGroup): ClipTra
     name: sound.name,
     clips: heard.flatMap((shot) => soundClip(shot, sound) ?? []),
   }));
+}
+
+/**
+ * Mark of a program sound clip that flattening moved onto a plain audio track. A symbol key: spreads keep
+ * it, JSON and Zod never see it, so the flattened timeline still parses and nothing writes it.
+ */
+const PROGRAM_SOUND = Symbol.for("frameshell.programSound");
+
+function markProgramSound<T extends Clip>(clip: T): T {
+  return Object.assign({ ...clip }, { [PROGRAM_SOUND]: true });
+}
+
+/**
+ * True for a clip of a nested program track's sound on an audio host track
+ * ({@link flattenTimeline}). Like a program track's own sound, it plays at
+ * {@link soundSamples}, not on frames: export and preview both check it.
+ */
+export function isProgramSound(clip: Clip | ShotClip): boolean {
+  return (clip as { [PROGRAM_SOUND]?: true })[PROGRAM_SOUND] === true;
 }
 
 /** The group `track` shows; null when the timeline has none by that id. */

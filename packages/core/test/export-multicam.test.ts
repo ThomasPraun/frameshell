@@ -254,6 +254,30 @@ describe("multicam sound at exact samples", () => {
       ["c_2/ana", 239_520, 48_000],
     ]);
   });
+
+  it("keeps exact samples for a program track nested in an audio track, the same samples as the preview", () => {
+    const talk: Timeline = {
+      ...timeline,
+      id: "talk",
+      tracks: [{ id: "t_p", kind: "program", group: "g_talk", clips: [shot("c_1", 0, "solo", ["ana"], 0.0105, 1.0105), shot("c_2", 1, "solo", ["ben"], 1.0105, 2.0105)] }],
+      groups: [room],
+    };
+    const host: Timeline = { ...timeline, tracks: [{ id: "a1", kind: "audio", clips: [{ id: "c_n", type: "timeline", source: "timelines/talk.json", start: 0.5, duration: 2 }] }] };
+    delete host.groups;
+    const flat = flattenTimeline(host, (at) => (at === "timelines/talk.json" ? talk : null));
+    const { audio } = compileRender({ timeline: flat, fps: 30, preset: youtube1080, loudness: -17, sources, resolution });
+    expect(audio.samples).toBe(120_000);
+    const [ana, ben] = audio.tracks;
+    // As the program track itself, moved by the host's 0.5 s (24 000 samples); frames would round Ana's 24 and Ben's 696 away.
+    expect(ana).toEqual([
+      { kind: "silence", samples: 24_000 },
+      { kind: "clip", clip: "c_n/c_1/ana", input: 0, from: 24, to: 96_024, speed: 1, gainDb: 0, samples: 96_000 },
+    ]);
+    expect(ben).toEqual([
+      { kind: "silence", samples: 24_696 },
+      { kind: "clip", clip: "c_n/c_1/ben", input: 1, from: 0, to: 95_304, speed: 1, gainDb: 0, samples: 95_304 },
+    ]);
+  });
 });
 
 describe("multicam under a nested timeline", () => {

@@ -16,6 +16,7 @@ import {
   type Timeline,
   type Transcript,
   isIdentityPlacement,
+  isProgramSound,
   layerRect,
   placementOf,
   programGroup,
@@ -222,7 +223,7 @@ interface Placed {
   in: number;
   speed: number;
   placement: Placement;
-  /** Sound of a program track: placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
+  /** Sound of a program track, own or flattened (`isProgramSound`): placed on exact samples from the clip's seconds, not on frames (`soundSamples`). */
   exact?: true;
   /**
    * Set on a multicam angle's picture: the source rectangle cropped out and
@@ -492,7 +493,9 @@ function layoutTimeline(
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
-      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform) });
+      // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
+      const exact = isProgramSound(clip) ? { exact: true as const } : {};
+      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform), ...exact });
       frames = Math.max(frames, end);
     }
     placed.sort((a, b) => a.start - b.start);
