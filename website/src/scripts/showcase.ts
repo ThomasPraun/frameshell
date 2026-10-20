@@ -16,7 +16,10 @@ const GAP_OUT = 3.18;
 const GAP = GAP_OUT - GAP_IN;
 const SHORT_IN = 3.18;
 const SHORT_OUT = 7.6;
-const LOGO_IN = 7.6;
+// Logo and drawing: the chalk starts to clear after "a mess." and the sponsor card lands just
+// before "Brought to you by our sponsor." (7.84).
+const CHALK_OUT = 7.05;
+const SPONSOR_IN = 7.6;
 const TOUR_MS = 10500;
 const TYPE_MS = 28;
 const TITLE_MS = 700;
@@ -48,6 +51,10 @@ const CUES: Cue[] = [
   { a: 8.02, b: 8.32, t: "you by" },
   { a: 8.32, b: 9.3, t: "our sponsor.", hot: true },
 ];
+// From audio: when each beat of the animation starts, from the words it illustrates. Her question
+// (question marks), "A good" (play), "timeline." (a clean track), "If your" (the track tangles),
+// "mess," (play greys out), "your video's" (worried face, more knots), the sponsor line (resolved).
+const AUDIO_BEATS = [CUES[0].a, CUES[3].a, CUES[4].a, CUES[5].a, CUES[7].a, CUES[8].a, CUES[10].a - 0.15];
 // Demo multicam angles, by index (wide, him, her): crops of the one clip, zoomed by `k` around
 // (ox, oy), fractions of the frame. Colours paint the angle's tile and its shots, as the app does.
 const ANGLES = [
@@ -389,8 +396,13 @@ export function startShowcase(): void {
         : "transform: scale(" + view.k + "); transform-origin: " + view.ox * 100 + "% " + view.oy * 100 + "%;");
     const isVertical = s === SHORT;
     if (isVertical) videoStyle = base + "object-position: 84% 50%; transform: none;";
-    videoStyle += intro ? " filter: grayscale(1) brightness(0.55);" : " filter: none;";
-    videoStyle += " transition: filter .4s ease;";
+    const sponsorOn = s === OVERLAY && !intro && t >= SPONSOR_IN;
+    videoStyle += intro
+      ? " filter: grayscale(1) brightness(0.55);"
+      : sponsorOn
+        ? " filter: brightness(0.5) saturate(0.75);"
+        : " filter: none;";
+    videoStyle += " transition: filter .8s ease;";
 
     const tourOn = s === TOUR && !intro;
     const viewStyle = isVertical
@@ -407,14 +419,16 @@ export function startShowcase(): void {
       (isVertical
         ? "position: absolute; left: 6%; right: 6%; bottom: 22%; font-size: 3.6cqw; line-height: 1.05;"
         : s === AUDIO
-          ? "position: absolute; left: 8%; right: 8%; top: 46%; font-size: 6.4cqw; line-height: 1.05;"
+          ? "position: absolute; left: 0; right: 0; bottom: 8%; font-size: 3cqw;"
           : "position: absolute; left: 0; right: 0; bottom: 7%; font-size: 3.8cqw;") +
       " margin: 0; text-align: center; font-weight: 900; font-stretch: 112%; text-transform: uppercase; letter-spacing: -0.01em; text-shadow: 0 0.3cqw 1.2cqw rgba(0,0,0,0.75), 0 0 0.2cqw rgba(0,0,0,0.9); color: " +
       (cue && cue.hot ? "#e3a53c" : "#ffffff");
 
     // Rows above Voice that the playhead spans (26 px lane + 6 px gap each), plus the video row.
     const overlays = s === OVERLAY && applied;
-    const reach = ((s <= AUDIO ? 1 : 0) + (overlays ? 2 : 0) + 1) * 32 + 8;
+    const reach = ((s <= AUDIO ? 1 : 0) + (overlays ? 2 : 0) + (fromAudio ? 1 : 0) + 1) * 32 + 8;
+    // Without motion the clip never plays: show the tangled beat as the still.
+    const beatsAt = still ? AUDIO_BEATS[5] : t;
     const two = (n: number) => String(Math.floor(n)).padStart(2, "0");
     const file = FILES[state.fi];
 
@@ -451,9 +465,13 @@ export function startShowcase(): void {
         "display: block; height: 100%; border-radius: 1cqw; background: #e3a53c; width: " +
         (s === TOUR ? state.tourP * 100 : (x(t) / x(TOTAL)) * 100).toFixed(1) +
         "%",
-      hasAnim: overlays,
-      animLabel: "sketch/index.html (HyperFrames)",
-      animStyle: box(0, TOTAL) + " border-radius: 3px; background: #2b5260; box-shadow: inset 0 2px 0 #66c2e0; font-size: 11px",
+      hasAnim: overlays || fromAudio,
+      animLabel: fromAudio ? "dialogue/index.html (HyperFrames)" : "sketch/index.html (HyperFrames)",
+      animStyle:
+        box(0, fromAudio ? TOTAL : CHALK_OUT + 0.9) + " border-radius: 3px; background: #2b5260; box-shadow: inset 0 2px 0 #66c2e0; font-size: 11px",
+      chalkCls: "chalk" + (t >= CHALK_OUT ? " out" : ""),
+      sponsorCls: "sponsor" + (sponsorOn ? " on" : ""),
+      audCls: "aud" + AUDIO_BEATS.map((at, i) => (beatsAt >= at ? " b" + (i + 1) : "")).join(""),
       videoRowStyle: "position: relative; height: 26px",
       isVertical,
       videoStyle,
@@ -461,11 +479,10 @@ export function startShowcase(): void {
       showCaption,
       caption: cue ? cue.t : "",
       captionStyle,
-      showLogo: s === OVERLAY && !intro && t >= LOGO_IN,
       hasLogo: overlays,
       shortOn: s === SHORT && applied,
       rowSubs: s <= AUDIO,
-      logoStyle: box(LOGO_IN, TOTAL) + " border-radius: 3px; background: #5a4a2a; box-shadow: inset 0 2px 0 #e3a53c; font-size: 11px",
+      logoStyle: box(SPONSOR_IN, TOTAL) + " border-radius: 3px; background: #5a4a2a; box-shadow: inset 0 2px 0 #e3a53c; font-size: 11px",
       shortStyle:
         "position: absolute; top: -" +
         reach +
