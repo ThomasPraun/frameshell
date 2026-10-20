@@ -679,8 +679,10 @@ function markProgramSound<T extends Clip>(clip: T): T {
  * True for a clip of a nested program track's sound on an audio host track
  * ({@link flattenTimeline}). Like a program track's own sound, it plays at
  * {@link soundSamples}, not on frames: export and preview both check it.
+ * The mark does not survive JSON or `structuredClone`: flatten in the same
+ * place that places the sound.
  */
-export function isProgramSound(clip: Clip | ShotClip): boolean {
+export function isProgramSound(clip: Clip): boolean {
   return (clip as { [PROGRAM_SOUND]?: true })[PROGRAM_SOUND] === true;
 }
 

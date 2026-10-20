@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Sound of a multicam program track nested inside an audio track now plays at exact samples in export and preview, like a program track's own sound (ADR 0016): mics of one room no longer drift up to half a frame apart there, and a sound running on across a shot change stays one item without an edge fade. Flattening marks those clips (`isProgramSound` in `composite.ts`); no file, wire or protocol change.
+- Sound of a multicam program track nested inside an audio track now plays at exact samples in export and preview, like a program track's own sound (ADR 0016): mics of one room no longer drift up to half a frame apart there, and a sound running on across a shot change stays one item without an edge fade. It ends where a later clip of the host track starts, which keeps its own start. Flattening marks those clips (`isProgramSound` in `composite.ts`); no file, wire or protocol change.
 
 ## [0.11.0] - 2026-10-19
 

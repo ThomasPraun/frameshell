@@ -1,6 +1,6 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import type { Angle, Clip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track } from "@frameshell/schema";
+import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track } from "@frameshell/schema";
 import {
   type LayerRect,
   type NestedTimelines,
@@ -239,53 +239,47 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     const layer: VideoSpan[] = [];
     /** Last sound span of this track and whether it is program sound, for {@link continuesSpan}. */
     let last: { span: AudioSpan; exact: boolean } | null = null;
-    for (const { clip, start, end } of kept) {
+    kept.forEach(({ clip, start, end }, index) => {
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
       if (track.kind === "video") {
         const span = pictureOf(clip, info, start, end, fps, options.renders);
         if (span) layer.push(span);
       }
-      if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) continue;
-      const gain = 10 ** ((clip.audio?.gain ?? 0) / 20);
+      if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) return;
+      const cursor = last?.span.end ?? 0;
       if (isProgramSound(clip)) {
-        // Nested program sound, as export places it: exact samples, never before the track's previous sound ends.
-        const samples = soundSamples(clip, rate, info.sidecar.sampleRate);
-        const first = Math.max(samples.start, last?.span.end ?? 0);
-        const span: AudioSpan = {
-          clip: clip.id,
-          start: first,
-          end: samples.end,
-          sidecar: info.sidecar.path,
-          channels: info.sidecar.channels,
-          in: samples.in + Math.round(((first - samples.start) / rate) * info.sidecar.sampleRate),
-          speed: 1,
-          gain,
-        };
-        if (span.end <= span.start) continue;
+        // Nested program sound, as export places it: exact samples, after the track's previous sound, until the next clip starts.
+        const next = kept[index + 1];
+        const until = next ? (isProgramSound(next.clip) ? Math.round(next.clip.start * rate) : sample(next.start)) : Number.POSITIVE_INFINITY;
+        const span = exactSpan(clip, info.sidecar, rate, cursor, until);
+        if (span.end <= span.start) return;
         if (last?.exact && continuesSpan(last.span, span)) {
           last.span.end = span.end;
-          continue;
+          return;
         }
         audio.push(span);
         last = { span, exact: true };
-        continue;
+        return;
       }
+      // Never before the track's previous sound ends, as in export.
       const speed = clip.speed ?? 1;
-      const inFrame = frame(clip.in);
+      const planned = sample(start);
+      const first = Math.max(cursor, planned);
+      if (sample(end) <= first) return;
       const span: AudioSpan = {
         clip: clip.id,
-        start: sample(start),
+        start: first,
         end: sample(end),
         sidecar: info.sidecar.path,
         channels: info.sidecar.channels,
-        in: Math.round((inFrame / fps) * info.sidecar.sampleRate),
+        in: Math.round((frame(clip.in) / fps) * info.sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * info.sidecar.sampleRate),
         speed,
-        gain,
+        gain: gainOf(clip),
       };
       audio.push(span);
       last = { span, exact: false };
-    }
+    });
     if (track.kind === "video") layers.push(layer);
   }
   audio.sort((a, b) => a.start - b.start);
@@ -552,17 +546,7 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
     for (const clip of shotSound(shot, group)) {
       const sidecar = assets.get(clip.asset)?.sidecar;
       if (clip.audio?.muted === true || !sidecar) continue;
-      const samples = soundSamples(clip, rate, sidecar.sampleRate);
-      const span: AudioSpan = {
-        clip: clip.id,
-        start: samples.start,
-        end: samples.end,
-        sidecar: sidecar.path,
-        channels: sidecar.channels,
-        in: samples.in,
-        speed: 1,
-        gain: 10 ** ((clip.audio?.gain ?? 0) / 20),
-      };
+      const span = exactSpan(clip, sidecar, rate);
       if (span.end <= span.start) continue;
       // `shotSound` names its clips `<shot>/<angle>`.
       const angle = clip.id.slice(shot.id.length + 1);
@@ -576,6 +560,30 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
     }
   }
   return spans;
+}
+
+/** Linear gain of the clip's `audio.gain` dB. */
+function gainOf(clip: Clip): number {
+  return 10 ** ((clip.audio?.gain ?? 0) / 20);
+}
+
+/**
+ * Program sound `clip` (own or nested, `isProgramSound`) at exact samples
+ * ({@link soundSamples}), started no earlier than `from` and ended by `until`.
+ */
+function exactSpan(clip: MediaClip, sidecar: NonNullable<AssetInfo["sidecar"]>, rate: number, from = 0, until = Number.POSITIVE_INFINITY): AudioSpan {
+  const samples = soundSamples(clip, rate, sidecar.sampleRate);
+  const start = Math.max(samples.start, from);
+  return {
+    clip: clip.id,
+    start,
+    end: Math.min(samples.end, until),
+    sidecar: sidecar.path,
+    channels: sidecar.channels,
+    in: samples.in + Math.round(((start - samples.start) / rate) * sidecar.sampleRate),
+    speed: 1,
+    gain: gainOf(clip),
+  };
 }
 
 /** True when `span` plays on unbroken from `previous` (same file and gain, no gap, no jump): one span, no edge fade. */

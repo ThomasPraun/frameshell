@@ -278,6 +278,74 @@ describe("multicam sound at exact samples", () => {
       { kind: "clip", clip: "c_n/c_1/ben", input: 1, from: 0, to: 95_304, speed: 1, gainDb: 0, samples: 95_304 },
     ]);
   });
+
+  describe("beside the host track's own clips", () => {
+    const talk: Timeline = {
+      ...timeline,
+      id: "talk",
+      tracks: [{ id: "t_p", kind: "program", group: "g_talk", clips: [shot("c_1", 0, "solo", ["ana"], 0.0105, 1.0105), shot("c_2", 1, "solo", ["ben"], 1.0105, 2.0105)] }],
+      groups: [room],
+    };
+    /** Host a1: the nested talk (2 s) from 0.5 s, then Eva's own clip of 1 s from `own`. */
+    const hostPlan = (own: number, nested: { duration?: number; audio?: { gain?: number; muted?: boolean } } = {}) => {
+      const host: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          {
+            id: "a1",
+            kind: "audio",
+            clips: [
+              { id: "c_n", type: "timeline", source: "timelines/talk.json", start: 0.5, ...nested },
+              { id: "c_m", type: "media", asset: "assets/eva.mp4", start: own, in: 0, out: 1 },
+            ],
+          },
+        ],
+      };
+      const flat = flattenTimeline(host, (at) => (at === "timelines/talk.json" ? talk : null));
+      const { audio } = compileRender({ timeline: flat, fps: 30, preset: youtube1080, loudness: -17, sources, resolution });
+      /** Each clip item as [clip, first sample, samples, gain dB]. */
+      const placed = audio.tracks.map((track) => {
+        let at = 0;
+        return track.flatMap((item) => {
+          const row = item.kind === "clip" ? [[item.clip, at, item.samples, item.gainDb]] : [];
+          at += item.samples;
+          return row;
+        });
+      });
+      for (const track of audio.tracks) expect(track.reduce((sum, item) => sum + item.samples, 0)).toBe(audio.samples);
+      return { samples: audio.samples, placed };
+    };
+
+    it("ends nested sound where a later own clip starts, which keeps its own start (the nested clip has no duration)", () => {
+      const { samples, placed } = hostPlan(2);
+      expect(samples).toBe(144_000);
+      expect(placed[0]).toEqual([
+        ["c_n/c_1/ana", 24_000, 72_000, 0],
+        ["c_m", 96_000, 48_000, 0],
+      ]);
+      expect(placed[1]).toEqual([["c_n/c_1/ben", 24_696, 95_304, 0]]);
+    });
+
+    it("places an own clip right after the nested sound at its own start", () => {
+      const { samples, placed } = hostPlan(2.5, { duration: 2 });
+      expect(samples).toBe(168_000);
+      expect(placed[0]).toEqual([
+        ["c_n/c_1/ana", 24_000, 96_000, 0],
+        ["c_m", 120_000, 48_000, 0],
+      ]);
+    });
+
+    it("puts the nested clip's gain and mute on its program sound", () => {
+      expect(hostPlan(2.5, { duration: 2, audio: { gain: -6 } }).placed.flat().map(([clip, , , gain]) => [clip, gain])).toEqual([
+        ["c_n/c_1/ana", -6],
+        ["c_m", 0],
+        ["c_n/c_1/ben", -6],
+      ]);
+      expect(hostPlan(2.5, { duration: 2, audio: { muted: true } }).placed.flat().map(([clip]) => clip)).toEqual(["c_m"]);
+    });
+  });
 });
 
 describe("multicam under a nested timeline", () => {

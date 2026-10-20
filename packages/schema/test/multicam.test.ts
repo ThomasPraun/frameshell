@@ -293,7 +293,7 @@ describe("flattening nested multicam timelines", () => {
     const files: Record<string, Timeline> = { "timelines/podcast.json": podcast, "timelines/mid.json": hosted("mid", "timelines/podcast.json") };
     const marked = (timeline: Timeline) =>
       flattenTimeline(timeline, (source) => files[source] ?? null).tracks.flatMap((track) =>
-        track.kind === "subtitles" ? [] : track.clips.map((clip) => [clip.id, isProgramSound(clip)]),
+        track.kind === "subtitles" || track.kind === "program" ? [] : track.clips.map((clip) => [clip.id, isProgramSound(clip)]),
       );
     expect(marked(hosted("main", "timelines/podcast.json"))).toEqual([
       ["c_n/c_a/ana", true],

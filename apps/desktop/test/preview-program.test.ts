@@ -452,6 +452,43 @@ describe("compileProgram with a multicam program track", () => {
     expect(spans("ben")).toEqual([["c_n/c_1/ben", 24_696, 120_000, 0]]);
   });
 
+  describe("nested program sound beside the host track's own clips (as export: export-multicam.test.ts)", () => {
+    const room = { id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0.01 }, { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0.025 }] };
+    const nested = { ...view([programTrack([shot("c_1", 0, 0.0105, 1.0105, "solo", ["ana"]), shot("c_2", 1, 1.0105, 2.0105, "solo", ["ben"])])]), timeline: "talk", groups: [room] };
+    /** Host a1: the nested talk (2 s) from 0.5 s, then Eva's own clip of 1 s from `own`. */
+    const spans = (own: number, extra: Record<string, unknown> = {}) => {
+      const host = { id: "c_n", type: "timeline", source: "timelines/talk.json", start: 0.5, end: 2.5, in: 0, ...extra };
+      const main = view([{ id: "a1", kind: "audio", name: null, follows: null, clips: [host, clip("c_m", own, 0, 1, { asset: "assets/eva.mp4" })] } as Track]);
+      const program = compileProgram(main, angles, { nested: new Map([["timelines/talk.json", nested]]) });
+      return program.audio.map((s) => [s.clip, s.start, s.end, Math.round(20 * Math.log10(s.gain))]);
+    };
+
+    it("ends nested sound where a later own clip starts, which keeps its own start (the nested clip has no duration)", () => {
+      expect(spans(2)).toEqual([
+        ["c_n/c_1/ana", 24_000, 96_000, 0],
+        ["c_n/c_1/ben", 24_696, 120_000, 0],
+        ["c_m", 96_000, 144_000, 0],
+      ]);
+    });
+
+    it("places an own clip right after the nested sound at its own start", () => {
+      expect(spans(2.5, { duration: 2 })).toEqual([
+        ["c_n/c_1/ana", 24_000, 120_000, 0],
+        ["c_n/c_1/ben", 24_696, 120_000, 0],
+        ["c_m", 120_000, 168_000, 0],
+      ]);
+    });
+
+    it("puts the nested clip's gain and mute on its program sound", () => {
+      expect(spans(2.5, { duration: 2, audio: { gain: -6 } }).map(([id, , , gain]) => [id, gain])).toEqual([
+        ["c_n/c_1/ana", -6],
+        ["c_n/c_1/ben", -6],
+        ["c_m", 0],
+      ]);
+      expect(spans(2.5, { duration: 2, audio: { muted: true } }).map(([id]) => id)).toEqual(["c_m"]);
+    });
+  });
+
   it("splits an angle's sound where the group clock jumps (a ripple cut), and leaves muted angles out", () => {
     const muted = { ...group, angles: group.angles.map((a) => (a.id === "ben" ? { ...a, audio: { muted: true } } : a)) };
     const program = compileProgram(
