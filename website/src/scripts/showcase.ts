@@ -16,7 +16,10 @@ const GAP_OUT = 3.18;
 const GAP = GAP_OUT - GAP_IN;
 const SHORT_IN = 3.18;
 const SHORT_OUT = 7.6;
-const LOGO_IN = 7.6;
+// Logo and drawing: the chalk starts to clear after "a mess." and the sponsor card lands just
+// before "Brought to you by our sponsor." (7.84).
+const CHALK_OUT = 7.05;
+const SPONSOR_IN = 7.6;
 const TOUR_MS = 10500;
 const TYPE_MS = 28;
 const TITLE_MS = 700;
@@ -48,13 +51,32 @@ const CUES: Cue[] = [
   { a: 8.02, b: 8.32, t: "you by" },
   { a: 8.32, b: 9.3, t: "our sponsor.", hot: true },
 ];
-// Hard-cut punch-ins: wide question, close on him, wide, close on her.
-const SHOTS = [
-  { a: 0, b: GAP_IN, zoom: "wide", label: STR.shots[0] },
-  { a: GAP_OUT, b: 6.32, zoom: "him", label: STR.shots[1] },
-  { a: 6.32, b: 7.6, zoom: "wide", label: STR.shots[2] },
-  { a: 7.6, b: TOTAL, zoom: "her", label: STR.shots[3] },
+// From audio: when each beat of the animation starts, from the words it illustrates. Her question
+// (question marks), "A good" (play), "timeline." (a clean track), "If your" (the track tangles),
+// "mess," (play greys out), "your video's" (worried face, more knots), the sponsor line (resolved).
+const AUDIO_BEATS = [CUES[0].a, CUES[3].a, CUES[4].a, CUES[5].a, CUES[7].a, CUES[8].a, CUES[10].a - 0.15];
+// Demo multicam angles, by index (wide, him, her): crops of the one clip, zoomed by `k` around
+// (ox, oy), fractions of the frame. Colours paint the angle's tile and its shots, as the app does.
+const ANGLES = [
+  { k: 1, ox: 0.5, oy: 0.5, color: "#7092c4", dark: "#3f5373" },
+  { k: 1.7, ox: 0.88, oy: 0.36, color: "#66c2e0", dark: "#2b5260" },
+  { k: 1.6, ox: 0.06, oy: 0.36, color: "#d98aa6", dark: "#5b3a47" },
 ];
+// What the director picks: her question, his answer with a wide cutaway when it runs long, her.
+const SHOTS = [
+  { a: 0, b: GAP_IN, angle: 2, label: STR.shots[0] },
+  { a: GAP_OUT, b: 6.32, angle: 1, label: STR.shots[1] },
+  { a: 6.32, b: 7.6, angle: 0, label: STR.shots[2] },
+  { a: 7.6, b: TOTAL, angle: 2, label: STR.shots[3] },
+];
+// Who is speaking, from the transcript: her until the cut and from the sponsor line, him between.
+const speaking = (angle: number, t: number) =>
+  angle === 2 ? (t >= 0.18 && t < GAP_IN) || (t >= 7.84 && t < 9.3) : angle === 1 && t >= GAP_OUT && t < SHORT_OUT;
+const DIRECT = 2;
+const OVERLAY = 3;
+const SHORT = 4;
+const AUDIO = 5;
+const TOUR = 6;
 
 // Project folder; `f` is the preview a file opens, `by` who made it.
 type By = keyof typeof STR.by;
@@ -122,6 +144,27 @@ export function startShowcase(): void {
   const tree = document.querySelector<HTMLElement>("[data-ref=tree]");
   if (!roots.length || !video) return;
 
+  // Every cut is a seek. A server that ignores Range requests (Cloudflare preview deployments)
+  // leaves the clip unseekable and the seek restarts it, so play it from memory instead.
+  video.addEventListener(
+    "loadedmetadata",
+    () => {
+      const v = video;
+      if (v.seekable.length && v.seekable.end(0) >= v.duration - 0.1) return;
+      fetch(v.currentSrc)
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          const at = v.currentTime;
+          const playing = !v.paused;
+          v.src = URL.createObjectURL(blob);
+          v.currentTime = at;
+          if (playing) v.play().catch(() => {});
+        })
+        .catch(() => {});
+    },
+    { once: true },
+  );
+
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let state: State = {
     slide: 0,
@@ -163,11 +206,11 @@ export function startShowcase(): void {
     lastFrame = 0;
     startScheduled = false;
     introAt = performance.now();
-    video!.muted = i === 6 ? true : !state.soundOn;
+    video!.muted = i === TOUR ? true : !state.soundOn;
     // Reset the clock with the clip, or layers timed to the clip read the last part's end time.
-    setState({ slide: i, cutDone: false, intro: true, typed: 0, ended: false, t: i === 4 ? SHORT_IN : 0, tourP: 0 });
+    setState({ slide: i, cutDone: false, intro: true, typed: 0, ended: false, t: i === SHORT ? SHORT_IN : 0, tourP: 0 });
     video!.pause();
-    video!.currentTime = i === 4 ? SHORT_IN : 0;
+    video!.currentTime = i === SHORT ? SHORT_IN : 0;
   }
 
   function startVideo() {
@@ -197,7 +240,7 @@ export function startShowcase(): void {
     if (state.intro || state.ended) return;
     const s = state.slide;
     let t = video!.currentTime;
-    if (s === 6) {
+    if (s === TOUR) {
       const now = performance.now();
       if (state.playing && lastFrame) tourMs += now - lastFrame;
       lastFrame = now;
@@ -216,7 +259,7 @@ export function startShowcase(): void {
       video!.currentTime = GAP_OUT;
       t = GAP_OUT;
     }
-    if (s === 4) {
+    if (s === SHORT) {
       if (t < SHORT_IN - 0.05) {
         video!.currentTime = SHORT_IN;
         t = SHORT_IN;
@@ -228,12 +271,25 @@ export function startShowcase(): void {
     }
     const rounded = Math.round(t * 20) / 20;
     if (rounded !== state.t) setState({ t: rounded });
+    if (s === DIRECT) drawAngles();
+  }
+
+  /** Paints each angle tile of the director part with its crop of the playing clip. */
+  function drawAngles() {
+    const v = video!;
+    if (v.readyState < 2 || !v.videoWidth) return;
+    for (const c of document.querySelectorAll<HTMLCanvasElement>("[data-showcase] canvas[data-angle]")) {
+      const a = ANGLES[Number(c.dataset.angle)];
+      const w = v.videoWidth / a.k;
+      const h = v.videoHeight / a.k;
+      c.getContext("2d")?.drawImage(v, a.ox * (v.videoWidth - w), a.oy * (v.videoHeight - h), w, h, 0, 0, c.width, c.height);
+    }
   }
 
   video.addEventListener("play", () => setState({ playing: true }));
   video.addEventListener("pause", () => setState({ playing: false }));
   video.addEventListener("ended", () => {
-    if (state.slide === 6) {
+    if (state.slide === TOUR) {
       if (!state.ended) {
         video.currentTime = 0;
         video.play().catch(() => {});
@@ -250,7 +306,7 @@ export function startShowcase(): void {
     },
     toggleSound() {
       const on = !state.soundOn;
-      if (state.slide !== 6) video.muted = !on;
+      if (state.slide !== TOUR) video.muted = !on;
       setState({ soundOn: on });
     },
   };
@@ -305,12 +361,19 @@ export function startShowcase(): void {
     const HATCH =
       "background: repeating-linear-gradient(-45deg, rgba(224,103,95,0.65) 0 3px, transparent 3px 7px), #3b2a2c; box-shadow: inset 0 2px 0 #e0675f;";
     const gapStyle = (base: string) => box(GAP_IN, GAP_OUT) + (s === 1 && !cut && applied ? HATCH : base);
-    const videoSegs =
-      (s === 2 && applied) || s === 3
-        ? SHOTS.map((shot) => ({ text: shot.label, style: box(shot.a, shot.b) + VIDEO + " border-radius: 3px; border-right: 2px solid #1d1e20" }))
-        : [
+    const directed = s === DIRECT && applied;
+    const fromAudio = s === AUDIO && applied;
+    const videoSegs = directed
+      ? SHOTS.map((shot) => {
+          const a = ANGLES[shot.angle];
+          return {
+            text: shot.label,
+            style: box(shot.a, shot.b) + "background-color: " + a.dark + "; box-shadow: inset 0 2px 0 " + a.color + "; border-radius: 3px; border-right: 2px solid #1d1e20",
+          };
+        })
+      : [
             {
-              text: "podcast-ep12.mp4",
+              text: fromAudio ? "background.png" : "podcast-ep12.mp4",
               style: box(0, GAP_IN) + VIDEO + (cut ? " border-radius: 3px; border-right: 2px solid #1d1e20" : " border-radius: 3px 0 0 3px"),
             },
             { text: s === 1 && !cut && applied ? STR.silence : "", style: gapStyle(VIDEO) + " color: #ffd2cc" },
@@ -322,18 +385,26 @@ export function startShowcase(): void {
       { text: "", style: box(GAP_OUT, TOTAL) + VOICE + " border-radius: 0 3px 3px 0" },
     ];
 
-    const shot = s === 2 || s === 3 ? SHOTS.find((sh) => t >= sh.a && t < sh.b) : null;
-    const zoom = shot ? shot.zoom : "wide";
+    const shot = s === DIRECT && !intro ? SHOTS.find((sh) => t >= sh.a && t < sh.b) : null;
+    const angle = shot ? shot.angle : 0;
+    const view = ANGLES[angle];
     const base = "display: block; width: 100%; height: 100%; object-fit: cover; ";
-    let videoStyle = base + "object-position: 50% 50%; transform: none;";
-    if (zoom === "him") videoStyle = base + "transform: scale(1.7); transform-origin: 88% 36%;";
-    if (zoom === "her") videoStyle = base + "transform: scale(1.6); transform-origin: 6% 36%;";
-    const isVertical = s === 4;
+    let videoStyle =
+      base +
+      (view.k === 1
+        ? "object-position: 50% 50%; transform: none;"
+        : "transform: scale(" + view.k + "); transform-origin: " + view.ox * 100 + "% " + view.oy * 100 + "%;");
+    const isVertical = s === SHORT;
     if (isVertical) videoStyle = base + "object-position: 84% 50%; transform: none;";
-    videoStyle += intro ? " filter: grayscale(1) brightness(0.55);" : " filter: none;";
-    videoStyle += " transition: filter .4s ease;";
+    const sponsorOn = s === OVERLAY && !intro && t >= SPONSOR_IN;
+    videoStyle += intro
+      ? " filter: grayscale(1) brightness(0.55);"
+      : sponsorOn
+        ? " filter: brightness(0.5) saturate(0.75);"
+        : " filter: none;";
+    videoStyle += " transition: filter .8s ease;";
 
-    const tourOn = s === 6 && !intro;
+    const tourOn = s === TOUR && !intro;
     const viewStyle = isVertical
       ? "position: absolute; top: 0; bottom: 0; left: 50%; width: 31.64%; transform: translateX(-50%); overflow: hidden; box-shadow: 0 0 0 2px #e3a53c, 0 20px 60px rgba(0,0,0,0.6); z-index: 2"
       : tourOn
@@ -343,16 +414,21 @@ export function startShowcase(): void {
         : "position: absolute; inset: 0; overflow: hidden";
 
     const cue = CUES.find((c, i) => t >= c.a && t < (CUES[i + 1] && CUES[i + 1].a - c.b < 0.6 ? CUES[i + 1].a : c.b + 0.3));
-    const showCaption = !!cue && !intro && s <= 4 && (!isVertical || (t >= SHORT_IN && t < SHORT_OUT));
+    const showCaption = !!cue && !intro && s <= AUDIO && (!isVertical || (t >= SHORT_IN && t < SHORT_OUT));
     const captionStyle =
       (isVertical
         ? "position: absolute; left: 6%; right: 6%; bottom: 22%; font-size: 3.6cqw; line-height: 1.05;"
-        : "position: absolute; left: 0; right: 0; bottom: 7%; font-size: 3.8cqw;") +
+        : s === AUDIO
+          ? "position: absolute; left: 0; right: 0; bottom: 8%; font-size: 3cqw;"
+          : "position: absolute; left: 0; right: 0; bottom: 7%; font-size: 3.8cqw;") +
       " margin: 0; text-align: center; font-weight: 900; font-stretch: 112%; text-transform: uppercase; letter-spacing: -0.01em; text-shadow: 0 0.3cqw 1.2cqw rgba(0,0,0,0.75), 0 0 0.2cqw rgba(0,0,0,0.9); color: " +
       (cue && cue.hot ? "#e3a53c" : "#ffffff");
 
     // Rows above Voice that the playhead spans (26 px lane + 6 px gap each), plus the video row.
-    const reach = ((s <= 4 ? 1 : 0) + (s === 3 && applied ? 1 : 0) + (s === 5 && applied ? 1 : 0) + 1) * 32 + 8;
+    const overlays = s === OVERLAY && applied;
+    const reach = ((s <= AUDIO ? 1 : 0) + (overlays ? 2 : 0) + (fromAudio ? 1 : 0) + 1) * 32 + 8;
+    // Without motion the clip never plays: show the tangled beat as the still.
+    const beatsAt = still ? AUDIO_BEATS[5] : t;
     const two = (n: number) => String(Math.floor(n)).padStart(2, "0");
     const file = FILES[state.fi];
 
@@ -373,22 +449,29 @@ export function startShowcase(): void {
       askTyped: ASKS[s].slice(0, state.typed),
       typing: state.typed < ASKS[s].length,
       replyOn: state.typed >= ASKS[s].length,
-      drawOn: s === 5 && !intro,
+      drawOn: s === OVERLAY && !intro,
+      anglesOn: s === DIRECT && !intro,
+      audioOn: fromAudio,
+      videoRowLabel: directed ? STR.rowProgram : STR.rowVideo,
       tourOn,
       tourBadge: tourOn,
       frameCls: state.playing || intro ? "" : "paused",
-      soundAvail: s !== 6,
+      soundAvail: s !== TOUR,
       clock:
-        s === 6
+        s === TOUR
           ? "0:" + two((state.tourP * TOUR_MS) / 1000) + " / 0:" + two(Math.round(TOUR_MS / 1000))
           : "0:" + two(x(t)) + " / 0:" + two(Math.round(x(TOTAL))),
       progressStyle:
         "display: block; height: 100%; border-radius: 1cqw; background: #e3a53c; width: " +
-        (s === 6 ? state.tourP * 100 : (x(t) / x(TOTAL)) * 100).toFixed(1) +
+        (s === TOUR ? state.tourP * 100 : (x(t) / x(TOTAL)) * 100).toFixed(1) +
         "%",
-      hasAnim: s === 5 && applied,
-      animLabel: "sketch/index.html (HyperFrames)",
-      animStyle: box(0, TOTAL) + " border-radius: 3px; background: #2b5260; box-shadow: inset 0 2px 0 #66c2e0; font-size: 11px",
+      hasAnim: overlays || fromAudio,
+      animLabel: fromAudio ? "dialogue/index.html (HyperFrames)" : "sketch/index.html (HyperFrames)",
+      animStyle:
+        box(0, fromAudio ? TOTAL : CHALK_OUT + 0.9) + " border-radius: 3px; background: #2b5260; box-shadow: inset 0 2px 0 #66c2e0; font-size: 11px",
+      chalkCls: "chalk" + (t >= CHALK_OUT ? " out" : ""),
+      sponsorCls: "sponsor" + (sponsorOn ? " on" : ""),
+      audCls: "aud" + AUDIO_BEATS.map((at, i) => (beatsAt >= at ? " b" + (i + 1) : "")).join(""),
       videoRowStyle: "position: relative; height: 26px",
       isVertical,
       videoStyle,
@@ -396,11 +479,10 @@ export function startShowcase(): void {
       showCaption,
       caption: cue ? cue.t : "",
       captionStyle,
-      showLogo: s === 3 && !intro && t >= LOGO_IN,
-      hasLogo: s === 3 && applied,
-      shortOn: s === 4 && applied,
-      rowSubs: s <= 4,
-      logoStyle: box(LOGO_IN, TOTAL) + " border-radius: 3px; background: #5a4a2a; box-shadow: inset 0 2px 0 #e3a53c; font-size: 11px",
+      hasLogo: overlays,
+      shortOn: s === SHORT && applied,
+      rowSubs: s <= AUDIO,
+      logoStyle: box(SPONSOR_IN, TOTAL) + " border-radius: 3px; background: #5a4a2a; box-shadow: inset 0 2px 0 #e3a53c; font-size: 11px",
       shortStyle:
         "position: absolute; top: -" +
         reach +
@@ -411,12 +493,22 @@ export function startShowcase(): void {
       playing: state.playing,
       paused: !state.playing,
       playLabel: state.ended ? STR.watchAgain : state.playing ? STR.pause : STR.play,
-      showTimeline: s !== 6,
+      showTimeline: s !== TOUR,
       soundOn: state.soundOn,
       soundOff: !state.soundOn,
       soundLabel: state.soundOn ? STR.mute : STR.soundOn,
     };
-    for (let i = 0; i < 7; i++) vals["s" + i] = s === i;
+    for (let i = 0; i < LABELS.length; i++) vals["s" + i] = s === i;
+    ANGLES.forEach((a, i) => {
+      const on = !!shot && shot.angle === i;
+      vals["angle" + i] =
+        "position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 0.6cqw; background: #0b0b0c; box-shadow: " +
+        (on ? "0 0 0 0.3cqw " + a.color : "0 0 0 1px rgba(255,255,255,0.18)") +
+        "; opacity: " +
+        (on ? "1" : "0.72") +
+        "; transition: opacity .2s, box-shadow .2s";
+      vals["speak" + i] = speaking(i, t);
+    });
     for (let i = 0; i < 9; i++) vals["f" + i] = state.fi === i;
     return vals;
   }
