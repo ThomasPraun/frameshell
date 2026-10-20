@@ -137,6 +137,27 @@ export function startShowcase(): void {
   const tree = document.querySelector<HTMLElement>("[data-ref=tree]");
   if (!roots.length || !video) return;
 
+  // Every cut is a seek. A server that ignores Range requests (Cloudflare preview deployments)
+  // leaves the clip unseekable and the seek restarts it, so play it from memory instead.
+  video.addEventListener(
+    "loadedmetadata",
+    () => {
+      const v = video;
+      if (v.seekable.length && v.seekable.end(0) >= v.duration - 0.1) return;
+      fetch(v.currentSrc)
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          const at = v.currentTime;
+          const playing = !v.paused;
+          v.src = URL.createObjectURL(blob);
+          v.currentTime = at;
+          if (playing) v.play().catch(() => {});
+        })
+        .catch(() => {});
+    },
+    { once: true },
+  );
+
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let state: State = {
     slide: 0,
