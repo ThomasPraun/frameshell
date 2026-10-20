@@ -83,6 +83,10 @@ export interface InstallProgress {
   message: string;
   /** 0..1 of the current step when known. */
   fraction?: number;
+  /** Stable stage code (`binary-download`, `model-download`, `binary-fallback`); see the `progress` notification. */
+  stage?: string;
+  /** Facts `message` is built from. */
+  values?: Record<string, string | number>;
 }
 
 /** Options for {@link BinaryManager.ensure} and {@link BinaryManager.ensureModel}. */
@@ -207,6 +211,8 @@ export class BinaryManager {
         await writeFile(marker, `${JSON.stringify({ failedAt: new Date().toISOString(), error: error.message }, null, 2)}\n`);
         options.onProgress?.({
           message: `${pkg.name} ${build.accelerator} build does not start here, using the next build (details in ${marker}; delete it to retry)`,
+          stage: "binary-fallback",
+          values: { name: pkg.name, accelerator: build.accelerator ?? "", marker },
         });
         const next = await this.locate(tool, project);
         if (!next.pinned || !next.path) throw error;
@@ -351,7 +357,8 @@ export class BinaryManager {
       for (const [index, archive] of build.archives.entries()) {
         const file = join(staging, `archive-${index}`);
         const label = `Downloading ${pkg.name} ${build.version} (${megabytes(archive.size)} MB)`;
-        const url = await download(archive, file, requestedBy, progressReporter(label, archive.size, report));
+        const facts = { stage: "binary-download", values: { name: pkg.name, version: build.version, size: megabytes(archive.size) } };
+        const url = await download(archive, file, requestedBy, progressReporter(label, archive.size, report, facts));
         sources.push({ url, sha256: archive.sha256 });
         const extracted = join(staging, `extract-${index}`);
         await mkdir(extracted);
@@ -425,7 +432,8 @@ export class BinaryManager {
       await mkdir(staging, { recursive: true });
       const file = join(staging, model.file);
       const label = `Downloading model ${model.id} (${megabytes(model.size)} MB, one time)`;
-      await download({ urls: model.urls, sha256: model.sha256, size: model.size, files: {} }, file, model.id, progressReporter(label, model.size, report));
+      const facts = { stage: "model-download", values: { model: model.id, size: megabytes(model.size) } };
+      await download({ urls: model.urls, sha256: model.sha256, size: model.size, files: {} }, file, model.id, progressReporter(label, model.size, report, facts));
       await mkdir(dirname(finalPath), { recursive: true });
       await renameRetrying(file, finalPath);
     } finally {
@@ -440,13 +448,18 @@ function megabytes(bytes: number): number {
 }
 
 /** Byte counter → progress reports, at most one per percent. */
-function progressReporter(message: string, total: number, report: (progress: InstallProgress) => void): (received: number) => void {
+function progressReporter(
+  message: string,
+  total: number,
+  report: (progress: InstallProgress) => void,
+  facts: Pick<InstallProgress, "stage" | "values">,
+): (received: number) => void {
   let lastPercent = -1;
   return (received) => {
     const percent = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0;
     if (percent === lastPercent) return;
     lastPercent = percent;
-    report({ message, fraction: percent / 100 });
+    report({ message, fraction: percent / 100, ...facts });
   };
 }
 

@@ -84,6 +84,11 @@ describe.skipIf(process.platform === "win32")("transcribe method with @frameshel
       expect(progress.map((p) => p.message)).toEqual(
         expect.arrayContaining([expect.stringMatching(/Metal GPU shaders/), expect.stringMatching(/^Transcribing/)]),
       );
+      // Stage codes cross the wire beside the English message, for the app to translate.
+      const stages = progress.flatMap((p) => (p.stage ? [p.stage] : []));
+      expect(stages).toEqual(expect.arrayContaining(["hash", "binary", "model", "model-load", "gpu-compiled", "transcribe"]));
+      expect(progress.find((p) => p.stage === "model")?.values).toEqual({ model: "large-v3-turbo-q5_0" });
+      expect(progress.find((p) => p.stage === "transcribe")?.values).toEqual({ device: "metal" });
       const args = cli.args();
       expect(args).toEqual(expect.arrayContaining(["-dtw", "large.v3.turbo", "-nfa", "-sow", "-ojf"]));
       expect(args[args.indexOf("-m") + 1]).toMatch(/ggml-large-v3-turbo-q5_0\.bin$/);

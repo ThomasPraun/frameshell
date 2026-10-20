@@ -9,6 +9,7 @@ import {
   type MethodParams,
   type MethodResult,
   type MethodSpec,
+  type Progress,
   RpcError,
   methods,
 } from "@frameshell/protocol";
@@ -103,7 +104,7 @@ export class DaemonLink {
   async request<M extends MethodName>(
     method: M,
     params: MethodParams<M>,
-    { onProgress }: { onProgress?: (progress: { message: string; fraction?: number | undefined }) => void } = {},
+    { onProgress }: { onProgress?: (progress: Progress) => void } = {},
   ): Promise<MethodResult<M>> {
     const spec: MethodSpec = methods[method];
     const options = { ...(spec.mutating ? { idempotencyKey: randomUUID() } : {}), onProgress };

@@ -146,7 +146,11 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     words: result.words,
     loadPcm: () => readPcmWav(audio),
     async transcribeWindow(pcm, from, to, prompt) {
-      progress({ message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech` });
+      progress({
+        message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech`,
+        stage: "retranscribe",
+        values: { from: round(from), to: round(to) },
+      });
       await mkdir(windowDir, { recursive: true });
       return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, { ...transcribeOptions, prompt }, context) });
     },
@@ -214,8 +218,8 @@ export async function hashAsset(options: {
   progress: (progress: Progress) => void;
 }): Promise<HashedAsset> {
   const { assetRel, progress } = options;
-  progress({ message: `Hashing ${assetRel}` });
-  const onHash = (fraction: number) => progress({ message: `Hashing ${assetRel}`, fraction });
+  progress({ message: `Hashing ${assetRel}`, stage: "hash", values: { asset: assetRel } });
+  const onHash = (fraction: number) => progress({ message: `Hashing ${assetRel}`, fraction, stage: "hash", values: { asset: assetRel } });
   const derived = options.media ? await options.media.derivedAudio(assetRel, onHash) : null;
   return {
     hash: derived ? derived.hash.replace(/^sha256:/, "") : await sha256File(options.assetPath),
@@ -250,7 +254,7 @@ export async function transcriptionAudio(options: {
     : { path: options.assetPath };
   const audio = join(projectDir, ...AUDIO_CACHE_DIR.split("/"), `${audioCacheKey(hashed.hash)}-${sidecar ? "sidecar" : "asset"}.wav`);
   if (!(await isFile(audio))) {
-    progress({ message: `Extracting audio from ${audioSource}` });
+    progress({ message: `Extracting audio from ${audioSource}`, stage: "extract-audio", values: { source: audioSource } });
     const temp = `${audio}.${process.pid}.tmp.wav`;
     try {
       await mkdir(dirname(audio), { recursive: true });
