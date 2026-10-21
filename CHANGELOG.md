@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-21
+
 ### Added
 
 - Image projects (ADR 0017): `"kind": "image"` in `frameshell.json` makes a project of one still picture, its main timeline's first frame, with video tracks as layers. The desktop app starts one from dropped or chosen pictures (welcome screen, Open with), sized like the first; each picture becomes a layer at its own pixel size. Pictures dropped on the project add layers. The UI hides time: a Layers panel in the timeline's place (select, rename, move up or down, delete, Ask agent, undo), the preview shows the picture's size instead of a timecode, keeps the Pick tool and adds **Export image** (PNG, JPEG or WebP). In an image project `clip.add` gives a still or a generated clip one frame without `duration`. `frameshell init --kind image`; agent skill `reference/image-projects.md`.
 - Desktop: File > New Image from Frame (Cmd/Ctrl+Shift+S, or right-click the preview) makes an image project from the frame at the playhead, beside the video's project, at a size picked in a dialog (YouTube thumbnail 1280x720, the video's size, square or vertical), with the frame covering the picture as its layer, and opens it in a new window. The video project does not change.
 - `frame` writes JPEG and WebP besides PNG: `format`, else the extension of `out`; `quality` 1-100, default 92 (`frameshell frame --format --quality`, MCP `frame_capture`). `track.set` takes `index` to move a track in the stack (`frameshell track set --index`). Protocol v50: also `project.init` `kind`.
-
 - `progress` notifications carry an optional stable `stage` code (`hash`, `extract-audio`, `binary`, `binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, `gpu-retry`, `transcribe`, `retranscribe`, `diarize`) and `values` (model, size in MB, device, seconds…) beside the English `message`, so a UI can word the step in its own language; unknown codes fall back to `message`. Transcription providers set them through `context.progress({ message, stage, values })` (`@frameshell/plugin-api`). Protocol v49.
 
 ### Changed
 
 - Desktop: the status bar's setup lines during a new project's first transcription (preparing whisper.cpp, downloading the model, loading it, compiling Metal shaders, transcribing) are Spanish in the Spanish UI (#222). English reads as before.
+- `@frameshell/whisper-cpp` 0.2.0 sets the stage codes of its progress steps, so new projects install it and show its setup lines in the UI language.
 
 ### Fixed
 
@@ -275,7 +277,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.0
 [0.11.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.11.0
 [0.8.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.1
 [0.8.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.0
