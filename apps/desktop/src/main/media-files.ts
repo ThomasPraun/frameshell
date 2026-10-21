@@ -1,4 +1,4 @@
-// Which files from the OS (dialog, drop, Open with) the app takes as videos, audio or project media.
+// Which files from the OS (dialog, drop, Open with) the app takes as videos, audio, images or project media.
 import { stat } from "node:fs/promises";
 import { extname } from "node:path";
 
@@ -8,18 +8,23 @@ export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "mts
 /** Audio extensions: they start a project too (ADR 0015) and a drop on a project imports them. */
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus"] as const;
 
-/** What starts a project: the Choose dialog, drops on the welcome screen, Open with. */
-export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] as const;
-
-/** Still images a clip can show. */
+/** Still images a clip can show; they also start an image project (ADR 0017). */
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 
+/** What starts a project: the Choose dialog, drops on the welcome screen, Open with. */
+export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS] as const;
+
 /** Media a drop on a project imports into `assets/`: videos, audio, images. */
-export const MEDIA_EXTENSIONS = [...START_EXTENSIONS, ...IMAGE_EXTENSIONS, "svg"] as const;
+export const MEDIA_EXTENSIONS = [...START_EXTENSIONS, "svg"] as const;
 
 /** `file` is an audio file by its extension (case-insensitive). */
 export function isAudioFile(file: string): boolean {
   return (AUDIO_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
+}
+
+/** `file` is a still image by its extension (case-insensitive). */
+export function isImageFile(file: string): boolean {
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
 }
 
 /**

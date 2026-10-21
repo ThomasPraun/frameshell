@@ -13,7 +13,7 @@ test("a Spanish OS gets the Spanish UI; View > Language switches to English and 
   const { app, page } = await launch(welcome, { lang: "es-419" });
   try {
     await expect(page.locator("html")).toHaveAttribute("lang", "es");
-    await expect(page.getByRole("button", { name: "Nuevo desde un video o audio…" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Nuevo desde un video, audio o imagen…" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Abrir carpeta…" })).toBeVisible();
     const menu = await app.evaluate(({ Menu }) => ({
       undo: Menu.getApplicationMenu()?.getMenuItemById("edit-undo")?.label,
@@ -22,7 +22,7 @@ test("a Spanish OS gets the Spanish UI; View > Language switches to English and 
     expect(menu).toEqual({ undo: "Deshacer", system: true });
 
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById("language-en")?.click());
-    await expect(page.getByRole("button", { name: "New from video or audio…" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New from video, audio or image…" })).toBeVisible();
     expect(await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById("edit-undo")?.label)).toBe("Undo");
     expect(JSON.parse(readFileSync(join(box.configDir, "language.json"), "utf8"))).toEqual({ language: "en" });
   } finally {
@@ -32,7 +32,7 @@ test("a Spanish OS gets the Spanish UI; View > Language switches to English and 
   // The choice outlives the app, whatever the OS language.
   const again = await launch(welcome, { lang: "es" });
   try {
-    await expect(again.page.getByRole("button", { name: "New from video or audio…" })).toBeVisible();
+    await expect(again.page.getByRole("button", { name: "New from video, audio or image…" })).toBeVisible();
   } finally {
     await again.app.close();
   }

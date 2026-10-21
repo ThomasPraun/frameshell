@@ -13,6 +13,14 @@
       "type": "string",
       "minLength": 1
     },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "video",
+        "image"
+      ],
+      "description": "What the project makes. `video` (default when absent): a timeline exported as a video. `image`: one still picture, the timeline's first frame, exported with `frame`; video tracks are its layers, first track at the bottom."
+    },
     "fps": {
       "type": "number",
       "exclusiveMinimum": 0

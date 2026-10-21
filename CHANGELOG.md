@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Image projects (ADR 0017): `"kind": "image"` in `frameshell.json` makes a project of one still picture, its main timeline's first frame, with video tracks as layers. The desktop app starts one from dropped or chosen pictures (welcome screen, Open with), sized like the first; each picture becomes a layer at its own pixel size. Pictures dropped on the project add layers. The UI hides time: a Layers panel in the timeline's place (select, rename, move up or down, delete, Ask agent, undo), the preview shows the picture's size instead of a timecode, keeps the Pick tool and adds **Export image** (PNG, JPEG or WebP). In an image project `clip.add` gives a still or a generated clip one frame without `duration`. `frameshell init --kind image`; agent skill `reference/image-projects.md`.
+- Desktop: File > New Image from Frame (Cmd/Ctrl+Shift+S, or right-click the preview) makes an image project from the frame at the playhead, beside the video's project, at a size picked in a dialog (YouTube thumbnail 1280x720, the video's size, square or vertical), with the frame covering the picture as its layer, and opens it in a new window. The video project does not change.
+- `frame` writes JPEG and WebP besides PNG: `format`, else the extension of `out`; `quality` 1-100, default 92 (`frameshell frame --format --quality`, MCP `frame_capture`). `track.set` takes `index` to move a track in the stack (`frameshell track set --index`). Protocol v50: also `project.init` `kind`.
+
 - `progress` notifications carry an optional stable `stage` code (`hash`, `extract-audio`, `binary`, `binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, `gpu-retry`, `transcribe`, `retranscribe`, `diarize`) and `values` (model, size in MB, device, seconds…) beside the English `message`, so a UI can word the step in its own language; unknown codes fall back to `message`. Transcription providers set them through `context.progress({ message, stage, values })` (`@frameshell/plugin-api`). Protocol v49.
 
 ### Changed

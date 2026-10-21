@@ -1,6 +1,6 @@
 ---
 name: frameshell
-description: Edit video in a Frameshell project (`frameshell.json`) with the `frameshell` CLI or its MCP tools. Cut footage by transcript (silences, retakes), make a video from an audio recording, cut a conversation with several people (multicam: one file per person, cameras with separate mics or a gallery-view call recording, a director that switches to whoever speaks), place clips, overlays and subtitles, export and verify. Also covers resuming after the human's timeline edits and resolving pasted `[frameshell]` selection lines. Use whenever the directory holds `frameshell.json` or the user mentions Frameshell.
+description: Edit video, or a still image made of layers, in a Frameshell project (`frameshell.json`) with the `frameshell` CLI or its MCP tools. Cut footage by transcript (silences, retakes), make a video from an audio recording, cut a conversation with several people (multicam: one file per person, cameras with separate mics or a gallery-view call recording, a director that switches to whoever speaks), place clips, overlays and subtitles, export and verify. Also covers resuming after the human's timeline edits and resolving pasted `[frameshell]` selection lines. Use whenever the directory holds `frameshell.json` or the user mentions Frameshell.
 ---
 
 # Frameshell
@@ -44,6 +44,7 @@ When you guide the human through the app, name only these places; do not invent 
 
 - **Transcript view.** Opened by the `Transcript` button in the editor tab strip, or by clicking a `transcripts/*.words.json` file in the Explorer sidebar. It lists the words of every asset on the timeline, in source order. Each asset section shows "N of M words on the timeline" and an `Open JSON` link to the raw file. A word you cut is **struck through**; clicking it restores it (a `ui` operation in history). Clicking or dragging over kept words selects them and moves the playhead there; right-click offers "Ask agent".
 - **Timeline panel.** Clips per track. A cut removes the range and closes the gap: the clip splits at the cut and later clips move earlier.
+- **Layers panel** (image projects, in place of the timeline). One row per video track, topmost layer first: select, rename, opacity, move up or down, delete. `Export image` in the preview header saves PNG, JPEG or WebP. In a video project, File > New Image from Frame (Cmd/Ctrl+Shift+S) starts an image project from the frame at the playhead.
 - **History** (sidebar tab beside Explorer). Transactions newest first: author (`You`, `Terminal`, `agent: <label>`, `File`, `Plugin`), label, operation count, time. Selecting one marks its changes on the timeline (`+` added, `−` removed, `↔` moved, `~` changed); `Revert` undoes it. `ui_show_tx_diff` opens it on your transaction.
 - **App terminal tools.** In an app terminal the ffmpeg, ffprobe and whisper-cli Frameshell uses are in `$FRAMESHELL_FFMPEG`, `$FRAMESHELL_FFPROBE`, `$FRAMESHELL_WHISPER_CLI` (e.g. `"$FRAMESHELL_FFMPEG" -i assets/talk.mp4 -af volumedetect -f null -`). Managed downloads are also on `PATH`; `binaries` overrides are only in the variables. Prefer the variables: a login profile may put another ffmpeg first on `PATH`. Unset = not downloaded when the terminal opened; Frameshell downloads them on first use, a new terminal then sees them.
 
@@ -54,6 +55,7 @@ When you guide the human through the app, name only these places; do not invent 
 | Editing footage by its words: import, transcribe, silences, retakes, subtitles, export, verify | [transcript-editing.md](reference/transcript-editing.md) |
 | A video made from an audio recording (podcast, talk, voice note): simple, medium or explainer, the scene plan, building clips per scene | [video-from-audio.md](reference/video-from-audio.md) |
 | A conversation with one file per person, cameras with separate mics, or a gallery-view call recording (podcast, interview, panel, Zoom/Meet/Teams): multicam group, sync check, mics, template, `direct`, reviewing low-confidence shots, keeping the human's shots, reframing for 9:16, correcting who speaks by hand; one file or mic for several people (speakers on transcript words) | [multicam.md](reference/multicam.md) |
+| An image project (`"kind": "image"` in `frameshell.json`): a still picture made of layers, edited by pointing at it, exported as PNG, JPEG or WebP | [image-projects.md](reference/image-projects.md) |
 | Any CLI command: what it does, key flags, output | [cli.md](reference/cli.md); `frameshell --help` has every flag |
 | MCP tools, CLI or MCP, frame capture, what the user sees in the app (`ui_state`, `ui_*`) | [mcp.md](reference/mcp.md) |
 | The prompt holds a `[frameshell] …` line | [selection.md](reference/selection.md) |

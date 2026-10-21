@@ -56,7 +56,7 @@ const STRIP_DESCRIPTION =
 const CAPTURE_SUFFIX =
   " Returns the frame as an image (scaled to fit " +
   `${CAPTURE_MAX_SIDE}x${CAPTURE_MAX_SIDE}) plus its frame index and clip; \`out\` is optional and also keeps the ` +
-  "full-size PNG there.";
+  "full-size image there, in the format its extension or `format` names.";
 
 /**
  * Every tool: one per public registry method, input schema generated from the

@@ -109,19 +109,38 @@ export function useAssets(revision: number | null): ReadonlyMap<string, AssetInf
   return assets?.map ?? null;
 }
 
-/** Project frame size from `frameshell.json` `resolution`, followed live; 1920x1080 until read or when unset. */
-export function useResolution(): { width: number; height: number } {
-  const [resolution, setResolution] = useState({ width: 1920, height: 1080 });
+/** What a project makes (ADR 0017): `image` hides time from the UI. */
+export type ProjectKind = "video" | "image";
+
+/** The `frameshell.json` fields the renderer follows. */
+interface ProjectConfigView {
+  resolution: { width: number; height: number };
+  kind: ProjectKind;
+}
+
+const DEFAULT_CONFIG: ProjectConfigView = { resolution: { width: 1920, height: 1080 }, kind: "video" };
+
+/**
+ * `resolution` and `kind` of `frameshell.json`, followed live; the defaults
+ * (1920x1080, video) until read or when unset. A bad field keeps its last good value.
+ */
+function useProjectConfig(): ProjectConfigView {
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
   useEffect(() => {
     let disposed = false;
     const read = async () => {
       try {
-        const config = JSON.parse(await window.frameshell.files.read("frameshell.json")) as { resolution?: { width?: unknown; height?: unknown } };
-        const { width, height } = config.resolution ?? {};
-        if (disposed || typeof width !== "number" || typeof height !== "number" || width <= 0 || height <= 0) return;
-        setResolution((current) => (current.width === width && current.height === height ? current : { width, height }));
+        const raw = JSON.parse(await window.frameshell.files.read("frameshell.json")) as { resolution?: { width?: unknown; height?: unknown }; kind?: unknown };
+        if (disposed) return;
+        const { width, height } = raw.resolution ?? {};
+        const sized = typeof width === "number" && typeof height === "number" && width > 0 && height > 0;
+        const kind: ProjectKind = raw.kind === "image" ? "image" : "video";
+        setConfig((current) => {
+          const resolution = sized && (current.resolution.width !== width || current.resolution.height !== height) ? { width, height } : current.resolution;
+          return resolution === current.resolution && kind === current.kind ? current : { resolution, kind };
+        });
       } catch {
-        // Unreadable or mid-save: keep the last good size.
+        // Unreadable or mid-save: keep the last good values.
       }
     };
     void read();
@@ -133,5 +152,15 @@ export function useResolution(): { width: number; height: number } {
       off();
     };
   }, []);
-  return resolution;
+  return config;
+}
+
+/** Project frame size from `frameshell.json` `resolution`, followed live; 1920x1080 until read or when unset. */
+export function useResolution(): { width: number; height: number } {
+  return useProjectConfig().resolution;
+}
+
+/** Project kind from `frameshell.json` `kind`, followed live; `video` until read or when unset. */
+export function useProjectKind(): ProjectKind {
+  return useProjectConfig().kind;
 }

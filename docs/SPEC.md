@@ -25,6 +25,7 @@ Frameshell does **not** ship its own LLM. Its value is what agent CLIs lack: a d
 | **A: Scripted / motion video** | Explainers, tutorials, product demos, shorts. Built from a script, assets, voice-over, subtitles and code-based motion graphics (HyperFrames, Remotion). The spine may also be an audio recording and its transcript, from subtitles on a background to a full explainer (ADR 0015). | "Turn `scripts/launch.md` into a 60 s 9:16 promo." / "Make an explainer video for `podcast.mp3`." |
 | **B: Transcript-driven footage editing** | Long recordings (talks, YouTube videos) cut by the agent from a word-level transcript: silences, repeated takes, intro, subtitles, loudness. | "Edit this video, add the intro, remove silences, prepare it for YouTube." |
 | **C: Conversations with several people** | Podcasts, interviews, panels and recorded calls with one picture per person. A rule-based director cuts to whoever speaks, two-shots and wides; the agent reviews doubtful shots; the human corrects with number keys (ADR 0016). | "Build the multicam, interview style, and remove the silences." |
+| **D: Images** | One picture made of layers: posters, thumbnails, social cards. The project's `kind` is `image`; its first frame is the picture and its video tracks are layers. The UI hides time, shows a Layers panel and exports PNG, JPEG or WebP (ADR 0017). | "Make a YouTube thumbnail from `photo.jpg` with this title." |
 
 Case B follows the workflow published by Facundo Corengia ("El prompt para no editar más"): the agent edits and the human's only job is to watch it once and correct. Frameshell makes that review step visual and reversible.
 
@@ -221,6 +222,7 @@ my-video/
   "$schema": "https://frameshell.dev/schema/v1/project.json",
   "schemaVersion": 1,
   "name": "Launch video",
+  "kind": "video",
   "fps": 30,
   "resolution": { "width": 2560, "height": 1440 },
   "sampleRate": 48000,
@@ -235,6 +237,8 @@ my-video/
   "editing": { "snapWindow": 0.5 }
 }
 ```
+
+`kind` is `video` (the default when absent) or `image` (ADR 0017).
 
 ### 5.3 Timeline (`timelines/*.json`)
 

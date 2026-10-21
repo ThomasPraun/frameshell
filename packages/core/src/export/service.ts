@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import {
   ErrorCode,
   type ExportPresetInfo,
+  type FrameFormat,
   type FrameResult,
   type MediaProbe,
   type RenderResult,
@@ -228,8 +229,12 @@ export class ExportService {
     };
   }
 
-  /** Capture one composited frame as PNG, written atomically to `out`. */
-  async frame(root: string, params: { timeline: string; at: number; out: string; preset?: string | undefined }): Promise<FrameResult> {
+  /** Capture one composited frame as an image, written atomically to `out`; the format defaults from its extension. */
+  async frame(
+    root: string,
+    params: { timeline: string; at: number; out: string; preset?: string | undefined; format?: FrameFormat | undefined; quality?: number | undefined },
+  ): Promise<FrameResult> {
+    const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
     const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
     const size = params.preset ? (await this.#preset(root, params.preset)).video : resolution;
@@ -248,6 +253,8 @@ export class ExportService {
       height: size.height,
       at: params.at,
       output: partial,
+      format,
+      ...(params.quality !== undefined ? { quality: params.quality } : {}),
     });
     const ffmpeg = await this.#options.ffmpeg(root);
     // Scratch cwd for the subtitle script and fonts the args name relatively.
@@ -265,6 +272,7 @@ export class ExportService {
     }
     return {
       path: params.out,
+      format,
       timeline: params.timeline,
       frame: plan.frame,
       at: plan.at,
@@ -358,6 +366,12 @@ export class ExportService {
 /** Files of a multicam group: the cameras and the separate mics. */
 function groupAssets(group: MulticamGroup | null): string[] {
   return group ? [...group.angles.map((angle) => angle.asset), ...(group.mics ?? []).map((mic) => mic.asset)] : [];
+}
+
+/** Image format a `frame` output path asks for by its extension; `png` when it names none. */
+export function frameFormatOf(path: string): FrameFormat {
+  const ext = extname(path).toLowerCase();
+  return ext === ".jpg" || ext === ".jpeg" ? "jpg" : ext === ".webp" ? "webp" : "png";
 }
 
 /** Ids of the generated (adapter) clips on video tracks: each needs a cached render to export. */

@@ -33,7 +33,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 49;
+export const PROTOCOL_VERSION = 50;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -369,6 +369,12 @@ const ExportPresetResultSchema = z.looseObject({
   plugin: z.string().nullable().describe("Package that contributed the preset; null for presets built into Frameshell."),
 });
 
+/** Image formats `frame` writes. */
+const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
+
+/** `frame` quality when the caller gives none: high, visually lossless for most pictures. */
+export const DEFAULT_FRAME_QUALITY = 92;
+
 const PresetParam = z
   .string()
   .min(1)
@@ -545,8 +551,16 @@ export const methods = {
       like: AbsolutePath.optional().describe(
         "Media file whose format the project takes instead of the defaults: its display size (even), frame rate snapped " +
           "to the nearest standard one, and sample rate. Probed first, downloading ffprobe on first use. Example: " +
-          "`/home/ana/Movies/talk.mp4`. Fails with AssetNotFound when it is not a readable media file.",
+          "`/home/ana/Movies/talk.mp4`. With `kind: \"image\"` and a picture file, the project takes the picture's exact " +
+          "size. Fails with AssetNotFound when it is not a readable media file.",
       ),
+      kind: z
+        .enum(["video", "image"])
+        .optional()
+        .describe(
+          "`image` makes an image project (ADR 0017): one still picture, the timeline's first frame, exported with " +
+            "`frame` as PNG, JPEG or WebP; its video tracks are layers. Default `video`.",
+        ),
       resolution: z
         .strictObject({ width: z.int().positive(), height: z.int().positive() })
         .optional()
@@ -725,19 +739,30 @@ export const methods = {
   },
   frame: {
     description:
-      "Capture the composited frame showing at timeline time `at` as a PNG, rendered by the export compiler " +
-      "(single-frame plan), so it matches `render` and works with the app closed. Size: the preset's when `preset` " +
-      "is given, else the project resolution. Fails with InvalidOperation (`at` outside the timeline; data.valid has " +
-      "the range), ExportUnsupported, PresetNotFound, TimelineNotFound.",
+      "Capture the composited frame showing at timeline time `at` as a PNG, JPEG or WebP image, rendered by the export " +
+      "compiler (single-frame plan), so it matches `render` and works with the app closed. This is how an image project " +
+      "(ADR 0017) is exported: `at: 0`. Size: the preset's when `preset` is given, else the project resolution. Fails " +
+      "with InvalidOperation (`at` outside the timeline; data.valid has the range), ExportUnsupported, PresetNotFound, " +
+      "TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`; the frame whose time span holds it is captured."),
-      out: AbsolutePath.describe("Absolute PNG path to write, e.g. `/tmp/frame.png`; its folder is created."),
+      out: AbsolutePath.describe("Absolute image path to write, e.g. `/tmp/frame.png`; its folder is created."),
       preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      format: FrameFormatSchema.optional().describe(
+        "Image format. Default: from the extension of `out` (`.jpg`/`.jpeg` JPEG, `.webp` WebP), else `png`.",
+      ),
+      quality: z
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
     }),
     result: z.object({
-      path: z.string().describe("Absolute PNG path written."),
+      path: z.string().describe("Absolute image path written."),
+      format: FrameFormatSchema.describe("Format written."),
       timeline: z.string(),
       frame: z.int().describe("Timeline frame index captured (0-based, project fps)."),
       at: z.number().describe("Start time of that frame, timeline seconds."),
@@ -1914,6 +1939,8 @@ export type RenderResult = MethodResult<"render">;
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
 export type FrameResult = MethodResult<"frame">;
+/** Image format `frame` writes; see {@link FrameFormatSchema}. */
+export type FrameFormat = z.output<typeof FrameFormatSchema>;
 /** One export preset as listed by `export.presets`. */
 export type ExportPresetInfo = z.output<typeof ExportPresetResultSchema>;
 /** `file.write` params. */

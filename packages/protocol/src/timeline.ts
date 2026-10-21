@@ -142,6 +142,11 @@ export const operationArgs = {
       .optional()
       .describe("Subtitle tracks only: id of the video or audio track whose clips' transcript words it shows."),
     style: SubtitleStyleArgSchema.optional().describe("Subtitle tracks only: the fields given change, the others keep their value."),
+    index: z
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("New stack position, 0 = bottom layer; the other tracks keep their order. Moves the layer up or down."),
   }),
   "track.remove": z.strictObject({
     track: TrackRef,
@@ -171,7 +176,10 @@ export const operationArgs = {
       .number()
       .positive()
       .optional()
-      .describe("Seconds on the timeline. Required for adapter types and still images; for `media` an alternative to `out`."),
+      .describe(
+        "Seconds on the timeline. Required for adapter types and still images, except in an image project, where they " +
+          "default to one frame; for `media` an alternative to `out`.",
+      ),
     speed: z.number().positive().optional().describe("`media` only: playback rate, e.g. 1.15. Default 1."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: properties checked by the adapter's schema."),
     transform: TransformSchema.optional(),

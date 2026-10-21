@@ -59,6 +59,24 @@ describe("project.init like (#197)", () => {
   );
 
   it(
+    "makes an image project the exact size of a picture, its kind after the name",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      const source = join(tempDir(), "poster.png");
+      await run(ffmpeg, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=801x601", "-frames:v", "1", source]);
+      const dir = join(tempDir(), "poster");
+      await conn.request("project.init", { dir, like: source, kind: "image" });
+      const config = JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8"));
+      expect(config).toMatchObject({ kind: "image", resolution: { width: 801, height: 601 }, fps: 30 });
+      expect(Object.keys(config).slice(0, 4)).toEqual(["$schema", "schemaVersion", "name", "kind"]);
+      const video = join(tempDir(), "video");
+      await conn.request("project.init", { dir: video, like: source });
+      expect(JSON.parse(readFileSync(join(video, "frameshell.json"), "utf8"))).not.toHaveProperty("kind");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "refuses a file that is not media and creates nothing",
     async () => {
       const notes = join(tempDir(), "notes.mp4");

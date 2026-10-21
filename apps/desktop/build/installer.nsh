@@ -3,9 +3,10 @@
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 
-; Open with Frameshell for videos and audio (#184, ADR 0015): a ProgID plus an OpenWithProgids entry per extension. Explorer lists the app
-; in Open with; the extension's default program stays the user's choice.
-; "Edit with Frameshell" in the right-click menu of videos and audio (#185), when the installer's box is checked.
+; Open with Frameshell for videos, audio and images (#184, ADR 0015, 0017): a ProgID plus an OpenWithProgids entry per extension.
+; Explorer lists the app in Open with; the extension's default program stays the user's choice. The ProgID keeps its first
+; name, Frameshell.Video, so an update still finds and removes what an older installer wrote.
+; "Edit with Frameshell" in the right-click menu of those files (#185), when the installer's box is checked.
 !macro frameshellVideoTypes ACTION
   !insertmacro ${ACTION} "mp4"
   !insertmacro ${ACTION} "mov"
@@ -19,6 +20,11 @@
   !insertmacro ${ACTION} "flac"
   !insertmacro ${ACTION} "ogg"
   !insertmacro ${ACTION} "opus"
+  !insertmacro ${ACTION} "png"
+  !insertmacro ${ACTION} "jpg"
+  !insertmacro ${ACTION} "jpeg"
+  !insertmacro ${ACTION} "gif"
+  !insertmacro ${ACTION} "webp"
 !macroend
 
 !macro frameshellOpenWithAdd EXT
@@ -60,12 +66,12 @@
     !insertmacro MUI_HEADER_TEXT "Options" "Choose how Frameshell fits into Explorer."
     nsDialogs::Create 1018
     Pop $0
-    ${NSD_CreateCheckbox} 0 0 100% 12u "Add $\"Edit with Frameshell$\" to the right-click menu of videos and audio"
+    ${NSD_CreateCheckbox} 0 0 100% 12u "Add $\"Edit with Frameshell$\" to the right-click menu of videos, audio and images"
     Pop $frameshellContextMenuBox
     ${If} $frameshellContextMenu == 1
       ${NSD_Check} $frameshellContextMenuBox
     ${EndIf}
-    ${NSD_CreateLabel} 0 18u 100% 24u "Frameshell is also listed in $\"Open with$\" for videos and audio. It never becomes their default program."
+    ${NSD_CreateLabel} 0 18u 100% 24u "Frameshell is also listed in $\"Open with$\" for videos, audio and images. It never becomes their default program."
     Pop $0
     nsDialogs::Show
   FunctionEnd

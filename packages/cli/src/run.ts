@@ -7,6 +7,7 @@ import {
   type AssetImportResult,
   type DoctorResult,
   ErrorCode,
+  type FrameFormat,
   type GcResult,
   type JobInfo,
   type MethodResult,
@@ -47,10 +48,11 @@ export const CLI_VERSION: string = SELF.version ?? (createRequire(import.meta.ur
 const USAGE = `Usage: frameshell <command> [options]
 
 Commands:
-  init [dir] [--name <name>] [--no-skill]
+  init [dir] [--name <name>] [--no-skill] [--kind video|image]
                                Scaffold a project in dir (default: current directory) with the agent skill
                                in .claude/skills/frameshell/, AGENTS.md, GEMINI.md and .claude/settings.json
-                               (asked first on a terminal; --no-skill: none)
+                               (asked first on a terminal; --no-skill: none). --kind image: a still picture,
+                               the first frame, exported with \`frame\`; video tracks are its layers
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
   doctor [--install] [--json]  Check binaries, encoders and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first
@@ -79,8 +81,9 @@ Commands:
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
                                Waits for the render job, printing progress; exit 1 if it fails
-  frame --at <s> --out <png> [--timeline id] [--preset p]
-                               Write the frame showing at <s> seconds as PNG (project resolution,
+  frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
+                               Write the frame showing at <s> seconds as an image, format from the
+                               extension of <file> unless --format (project resolution,
                                or the preset's)
   inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
@@ -106,11 +109,11 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "provider", "model", "language", "verify", "speakers", "people", "point", "px"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "kind", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
-  init: ["name", "no-skill"],
+  init: ["name", "no-skill", "kind"],
   status: [],
   doctor: ["install"],
   import: ["link", "wait"],
@@ -120,7 +123,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
   render: ["preset", "out", "timeline"],
-  frame: ["at", "out", "timeline", "preset"],
+  frame: ["at", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline"],
   "script outline": [],
   mcp: [],
@@ -149,7 +152,7 @@ export interface CliIo {
 }
 
 type Invocation =
-  | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined }
+  | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean }
@@ -162,7 +165,7 @@ type Invocation =
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
-  | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string }
+  | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string }
   | { kind: "script.outline"; file: string }
   | TimelineInvocation;
@@ -210,6 +213,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "dry-run": { type: "boolean", default: false },
           name: { type: "string", multiple: true },
           "no-skill": { type: "boolean", default: false },
+          kind: { type: "string" },
+          format: { type: "string" },
+          quality: { type: "string" },
           provider: { type: "string" },
           model: { type: "string" },
           language: { type: "string" },
@@ -305,6 +311,9 @@ function parseBuiltin(
   options: {
     name?: string | undefined;
     "no-skill"?: boolean | undefined;
+    kind?: string | undefined;
+    format?: string | undefined;
+    quality?: string | undefined;
     install: boolean;
     link: boolean;
     wait: boolean;
@@ -358,7 +367,15 @@ function parseBuiltin(
       throw new UsageError("`frameshell frame` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
     }
     if (!out) throw new UsageError("`frameshell frame` needs --out <file.png>.");
-    return { kind: "frame", at, out, ...common };
+    const { format } = options;
+    if (format !== undefined && format !== "png" && format !== "jpg" && format !== "webp") {
+      throw new UsageError(`--format: expected png, jpg or webp, got "${format}".`);
+    }
+    const quality = options.quality === undefined ? undefined : Number(options.quality);
+    if (quality !== undefined && (!Number.isInteger(quality) || quality < 1 || quality > 100)) {
+      throw new UsageError("--quality: expected an integer from 1 to 100.");
+    }
+    return { kind: "frame", at, out, ...common, ...(format ? { format } : {}), ...(quality !== undefined ? { quality } : {}) };
   }
   if (command === "transcribe") {
     const { provider, model, language } = options;
@@ -396,7 +413,11 @@ function parseBuiltin(
   }
   if (command === "script") return rest.length === 2 && rest[0] === "outline" ? { kind: "script.outline", file: rest[1]! } : null;
   if (command === "init" && rest.length <= 1) {
-    return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined };
+    const projectKind = options.kind;
+    if (projectKind !== undefined && projectKind !== "video" && projectKind !== "image") {
+      throw new UsageError(`--kind: expected video or image, got "${projectKind}".`);
+    }
+    return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined, ...(projectKind ? { projectKind } : {}) };
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
@@ -419,7 +440,12 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "init": {
       const dir = resolve(cwd, inv.dir ?? ".");
       const agentSkill = inv.skill ?? (await offerSkill(io));
-      const result = await conn.request("project.init", { dir, agentSkill, ...(inv.name ? { name: inv.name } : {}) });
+      const result = await conn.request("project.init", {
+        dir,
+        agentSkill,
+        ...(inv.name ? { name: inv.name } : {}),
+        ...(inv.projectKind ? { kind: inv.projectKind } : {}),
+      });
       if (flags.json) return json(result);
       const skillDir = `${SKILL_DIR}/`;
       const skill = result.created.some((path) => path.startsWith(skillDir))

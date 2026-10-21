@@ -2,12 +2,13 @@ import type { Placement, Size } from "@frameshell/schema/composite";
 import { type CSSProperties, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
+import { FRAME_IMAGE_SHORTCUT, imageFromFrame } from "../frame-image.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type PlaceholderSpan, type Program, placeholdersAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
-import { useProgram, useResolution } from "../preview/useProgram.js";
+import { useProgram, useProjectKind, useResolution } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { drawSubtitleLines, subtitleLines } from "../subtitles/model.js";
 import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
@@ -73,6 +74,10 @@ export function PreviewPanel({
 }) {
   const program = useProgram();
   const resolution = useResolution();
+  // An image project (ADR 0017) is its first frame: no playhead, no playback, an image export.
+  const still = useProjectKind() === "image";
+  const stillRef = useRef(still);
+  stillRef.current = still;
   const { time, playing, frames, fps } = useTransport();
   const frameBox = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -90,7 +95,7 @@ export function PreviewPanel({
   const [liveClip, setLiveClip] = useState<string | null>(null);
   const [verticalOn, setVerticalOn] = useState(false);
   /** Offered for frames wider than tall: a portrait project already is 9:16 or close to it. */
-  const verticalOffered = resolution.width > resolution.height;
+  const verticalOffered = resolution.width > resolution.height && !still;
   const vertical = verticalOn && verticalOffered;
   const shownFrame = vertical ? VERTICAL_FRAME : resolution;
 
@@ -125,6 +130,12 @@ export function PreviewPanel({
     transport.setProgram(program.frames, program.fps);
   }, [program]);
 
+  useEffect(() => {
+    if (!still) return;
+    transport.pause();
+    transport.seek(0);
+  }, [still, program]);
+
   /** Alpha of the pictures on the canvas at a point; empty (all opaque) without a player. */
   const alphaAt = useCallback(
     (point: { x: number; y: number }) => player.current?.alphaAt(point) ?? Promise.resolve({ frame: -1, layers: new Map<number, number>() }),
@@ -149,8 +160,11 @@ export function PreviewPanel({
       const doc = panel?.ownerDocument;
       // Full screen needs a key press in the window the preview is in: a browser grants it to that window alone.
       const here = panel !== null && windowOf(event.target) === windowOf(panel);
+      // Playback keys mean nothing in an image project; the picture is frame 0.
+      const timed = !stillRef.current;
       if (event.key === "Escape" && here && doc?.fullscreenElement) leaveFullScreen(doc);
       else if ((event.key === "f" || event.key === "F") && !event.shiftKey && here) toggleFullScreen(panel);
+      else if (!timed && [" ", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       else if (event.key === " " && !isTag(event.target, "BUTTON")) transport.toggle();
       else if (event.key === "ArrowLeft") transport.step(event.shiftKey ? -second : -1);
       else if (event.key === "ArrowRight") transport.step(event.shiftKey ? second : 1);
@@ -170,14 +184,27 @@ export function PreviewPanel({
   const live = useMemo(() => (program && !vertical ? liveTarget(program, frame) : null), [program, frame, vertical]);
   return (
     <div className="preview-body" ref={body} data-testid="preview-body">
-      <PanelHeader actions={<DetachButton name={t.workspace.preview.toLowerCase()} detached={detached} onClick={onDetach} testId="preview-detach" />}>
+      <PanelHeader
+        actions={
+          <>
+            {still && <ExportImageButton disabled={empty} onNotice={setNotice} />}
+            <DetachButton name={t.workspace.preview.toLowerCase()} detached={detached} onClick={onDetach} testId="preview-detach" />
+          </>
+        }
+      >
         <span className="panel-title">{t.workspace.preview}</span>
-        <span className="timecode" aria-label={t.preview.playhead} data-testid="playhead">
-          {formatTimecode(time, fps)}
-        </span>
-        <span className="panel-meta preview-duration" aria-label={t.preview.duration}>
-          {formatTimecode(frames / fps, fps)}
-        </span>
+        {still ? (
+          <span className="panel-meta preview-size" data-testid="preview-size">{`${resolution.width}×${resolution.height}`}</span>
+        ) : (
+          <>
+            <span className="timecode" aria-label={t.preview.playhead} data-testid="playhead">
+              {formatTimecode(time, fps)}
+            </span>
+            <span className="panel-meta preview-duration" aria-label={t.preview.duration}>
+              {formatTimecode(frames / fps, fps)}
+            </span>
+          </>
+        )}
       </PanelHeader>
       <div className="preview-stage">
         <div
@@ -188,12 +215,19 @@ export function PreviewPanel({
           data-playing={playing || undefined}
           data-vertical={vertical || undefined}
           role="img"
-          aria-label={empty ? t.preview.emptyMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
-          onContextMenu={openAskMenu}
+          aria-label={empty ? t.preview.emptyMonitor : still ? t.preview.pictureMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
+          onContextMenu={(event) =>
+            openAskMenu(
+              event,
+              still || empty
+                ? []
+                : [{ label: t.preview.imageFromFrame, shortcut: FRAME_IMAGE_SHORTCUT, run: () => void imageFromFrame().catch((error: Error) => setNotice(error.message)) }],
+            )
+          }
         >
           <div className="safe-area action" />
           <div className="safe-area title" />
-          {empty && <p className="preview-caption">{t.preview.emptyCaption}</p>}
+          {empty && <p className="preview-caption">{still ? t.preview.emptyPicture : t.preview.emptyCaption}</p>}
           {program && <Placeholder program={program} frame={frame} output={shownFrame} />}
           {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
           <LivePreview target={live} timeline={view?.timeline ?? null} time={time} fps={fps} resolution={resolution} onLive={setLiveClip} />
@@ -206,6 +240,7 @@ export function PreviewPanel({
       </div>
       <Inspector />
       <TransportBar
+        still={still}
         playing={playing}
         disabled={frames === 0}
         notice={notice}
@@ -467,6 +502,7 @@ function samePlacement(a: Placement, b: Placement): boolean {
 }
 
 function TransportBar({
+  still,
   playing,
   disabled,
   notice,
@@ -475,6 +511,8 @@ function TransportBar({
   vertical,
   onVertical,
 }: {
+  /** An image project: the tools stay, the playback buttons go. */
+  still: boolean;
   playing: boolean;
   disabled: boolean;
   notice: string | null;
@@ -512,45 +550,70 @@ function TransportBar({
           </button>
         )}
       </div>
-      <div className="preview-transport-buttons">
-        <button className="icon-button" aria-label={t.preview.goToStart} title={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4 3v10M12 3.5L6 8l6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button className="icon-button" aria-label={t.preview.prevFrame} title={t.preview.prevFrameHint} disabled={disabled} onClick={() => transport.step(-1)}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M10 3.5L4.5 8l5.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button
-          className={`icon-button preview-play${playing ? " playing" : ""}`}
-          aria-label={playing ? t.preview.pause : t.preview.play}
-          title={playing ? t.preview.pauseHint : t.preview.playHint}
-          disabled={disabled}
-          onClick={() => transport.toggle()}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            {playing ? <path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /> : <path d="M4.5 2.5v11L13 8z" fill="currentColor" />}
-          </svg>
-        </button>
-        <button className="icon-button" aria-label={t.preview.nextFrame} title={t.preview.nextFrameHint} disabled={disabled} onClick={() => transport.step(1)}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M6 3.5L11.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button className="icon-button" aria-label={t.preview.goToEnd} title={t.preview.goToEndHint} disabled={disabled} onClick={() => transport.seek(Infinity)}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M12 3v10M4 3.5L10 8l-6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
+      {!still && (
+        <div className="preview-transport-buttons">
+          <button className="icon-button" aria-label={t.preview.goToStart} title={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 3v10M12 3.5L6 8l6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button className="icon-button" aria-label={t.preview.prevFrame} title={t.preview.prevFrameHint} disabled={disabled} onClick={() => transport.step(-1)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M10 3.5L4.5 8l5.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            className={`icon-button preview-play${playing ? " playing" : ""}`}
+            aria-label={playing ? t.preview.pause : t.preview.play}
+            title={playing ? t.preview.pauseHint : t.preview.playHint}
+            disabled={disabled}
+            onClick={() => transport.toggle()}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              {playing ? <path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /> : <path d="M4.5 2.5v11L13 8z" fill="currentColor" />}
+            </svg>
+          </button>
+          <button className="icon-button" aria-label={t.preview.nextFrame} title={t.preview.nextFrameHint} disabled={disabled} onClick={() => transport.step(1)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M6 3.5L11.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button className="icon-button" aria-label={t.preview.goToEnd} title={t.preview.goToEndHint} disabled={disabled} onClick={() => transport.seek(Infinity)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M12 3v10M4 3.5L10 8l-6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      )}
       {notice && (
         <span className="preview-notice" role="status" title={notice}>
           {notice}
         </span>
       )}
     </div>
+  );
+}
+
+/** Header button of an image project: save the picture where the user picks (PNG, JPEG or WebP). */
+function ExportImageButton({ disabled, onNotice }: { disabled: boolean; onNotice: (notice: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="button preview-export"
+      title={t.preview.exportImageHint}
+      disabled={disabled || busy}
+      data-testid="preview-export-image"
+      onClick={() => {
+        setBusy(true);
+        window.frameshell.timeline
+          .exportImage(SELECTION_TIMELINE)
+          .then((path) => path && onNotice(t.preview.exported(path.split(/[\\/]/).pop() ?? path)))
+          .catch((error: Error) => onNotice(error.message))
+          .finally(() => setBusy(false));
+      }}
+    >
+      {t.preview.exportImage}
+    </button>
   );
 }
 

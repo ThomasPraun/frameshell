@@ -90,6 +90,22 @@ describe("frameshell render and frame", () => {
     expect(readFileSync(join(project, "shot.png")).subarray(1, 4).toString("latin1")).toBe("PNG");
   });
 
+  it("writes a frame as JPEG with --format and --quality, and refuses unknown values", () => {
+    const result = frameshell(["frame", "--at", "0.5", "--out", "shot.img", "--format", "jpg", "--quality", "40"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect([...readFileSync(join(project, "shot.img")).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    expect(frameshell(["frame", "--at", "0", "--out", "x.gif", "--format", "gif"]).stderr).toMatch(/--format: expected png, jpg or webp/);
+    expect(frameshell(["frame", "--at", "0", "--out", "x.jpg", "--quality", "0"]).stderr).toMatch(/--quality: expected an integer from 1 to 100/);
+  });
+
+  it("makes an image project with init --kind image", () => {
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-image-"))), "poster");
+    const result = frameshell(["init", dir, "--kind", "image", "--no-skill"], tmpdir());
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8"))).toMatchObject({ kind: "image" });
+    expect(frameshell(["init", `${dir}-2`, "--kind", "poster"], tmpdir()).stderr).toMatch(/--kind: expected video or image/);
+  });
+
   it("inspects a point: the clip under it, in fractions or pixels (ADR 0011)", () => {
     const text = frameshell(["inspect", "--at", "0.5", "--px", "960,540"]);
     expect(text.code, text.stderr).toBe(0);

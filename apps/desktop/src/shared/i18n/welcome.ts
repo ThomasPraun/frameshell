@@ -1,22 +1,23 @@
-// Welcome screen and new project from videos or audio (renderer/src/components/Welcome.tsx, file-drop.ts).
+// Welcome screen and new project from videos, audio or images (renderer/src/components/Welcome.tsx, file-drop.ts).
 
 const en = {
-  lede: "Start from a video or an audio recording. Your agent edits it from the terminal, you review on the timeline.",
-  dropHere: "Drop video or audio to start a project",
-  newFromVideo: "New from video or audio…",
+  lede: "Start from a video, an audio recording or an image. Your agent edits it from the terminal, you review and correct it here.",
+  dropHere: "Drop video, audio or images to start a project",
+  newFromVideo: "New from video, audio or image…",
   openFolder: "Open folder…",
   /** Slots: `{dir}`, `{file}`. */
   notProject: "{dir} has no {file} yet.",
   createHere: "Create a project here",
   recent: "Recent",
   recentProjects: "Recent projects",
-  notVideo: (names: string) => `Not a video or audio file: ${names}`,
-  form: "New project from video or audio",
+  notVideo: (names: string) => `Not a video, audio or image file: ${names}`,
+  form: "New project from video, audio or image",
   /** Three or more chosen videos: the first two named, the rest counted. */
   andMore: (first: string, more: number) => `${first} and ${more} more`,
   frameLegend: "This audio has no picture. The video will be:",
   frameLandscape: "Horizontal, 16:9 (1920x1080)",
   framePortrait: "Vertical, 9:16 (1080x1920)",
+  imageHint: "An image project: no timeline, just the picture. Each image is a layer, the first one at the bottom, and the picture takes the size of the first.",
   projectName: "Project name",
   folder: "Folder",
   change: "Change…",
@@ -34,20 +35,21 @@ const en = {
 };
 
 const es: typeof en = {
-  lede: "Empieza con un video o una grabación de audio. Tu agente lo edita desde la terminal y tú lo revisas en la línea de tiempo.",
-  dropHere: "Suelta video o audio para crear un proyecto",
-  newFromVideo: "Nuevo desde un video o audio…",
+  lede: "Empieza con un video, una grabación de audio o una imagen. Tu agente lo edita desde la terminal y tú lo revisas y corriges aquí.",
+  dropHere: "Suelta video, audio o imágenes para crear un proyecto",
+  newFromVideo: "Nuevo desde un video, audio o imagen…",
   openFolder: "Abrir carpeta…",
   notProject: "{dir} todavía no tiene {file}.",
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
   recentProjects: "Proyectos recientes",
-  notVideo: (names) => `No es un archivo de video ni de audio: ${names}`,
-  form: "Nuevo proyecto desde un video o audio",
+  notVideo: (names) => `No es un archivo de video, audio ni imagen: ${names}`,
+  form: "Nuevo proyecto desde un video, audio o imagen",
   andMore: (first, more) => `${first} y ${more} más`,
   frameLegend: "Este audio no tiene imagen. El video será:",
   frameLandscape: "Horizontal, 16:9 (1920x1080)",
   framePortrait: "Vertical, 9:16 (1080x1920)",
+  imageHint: "Un proyecto de imagen: sin línea de tiempo, solo la imagen. Cada imagen es una capa, la primera queda abajo, y la imagen toma el tamaño de la primera.",
   projectName: "Nombre del proyecto",
   folder: "Carpeta",
   change: "Cambiar…",

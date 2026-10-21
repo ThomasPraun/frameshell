@@ -208,16 +208,22 @@ function compact(value: unknown): string {
   });
 }
 
-/** `frame_capture`: the `frame` method into a temp PNG unless `out` is given, returned as an image. */
+/**
+ * `frame_capture`: the `frame` method into a temp PNG unless `out` is given, returned as an image. An `out`
+ * in JPEG or WebP is written as asked; the model is shown a PNG of the same frame.
+ */
 async function capture(conn: DaemonConnection, args: Record<string, unknown>): Promise<CallToolResult> {
   const { out, ...params } = args;
-  const temp = typeof out === "string" ? null : await mkdtemp(join(tmpdir(), "frameshell-mcp-"));
+  const temp = await mkdtemp(join(tmpdir(), "frameshell-mcp-"));
+  const shown = join(temp, "frame.png");
   try {
-    const result = await conn.request("frame", { ...params, out: temp ? join(temp, "frame.png") : out } as never);
-    const png = await readFile(result.path);
+    const { format: _format, quality: _quality, ...pngParams } = params;
+    const result = await conn.request("frame", (typeof out === "string" ? { ...params, out } : { ...pngParams, out: shown }) as never);
+    if (result.format !== "png") await conn.request("frame", { ...pngParams, out: shown } as never);
+    const png = await readFile(result.format === "png" ? result.path : shown);
     const image = pngForModel(png, CAPTURE_MAX_SIDE, CAPTURE_MAX_SIDE);
     const { path, ...facts } = result;
-    const meta = { ...facts, ...(temp ? {} : { path }), image: { width: image.width, height: image.height } };
+    const meta = { ...facts, ...(typeof out === "string" ? { path } : {}), image: { width: image.width, height: image.height } };
     return {
       content: [
         { type: "image", data: image.data.toString("base64"), mimeType: "image/png" },
@@ -225,7 +231,7 @@ async function capture(conn: DaemonConnection, args: Record<string, unknown>): P
       ],
     };
   } finally {
-    if (temp) await rm(temp, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true });
   }
 }
 

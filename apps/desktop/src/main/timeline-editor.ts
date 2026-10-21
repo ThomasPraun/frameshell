@@ -40,6 +40,7 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   cut: "Ripple delete",
   "track.add": "Add",
   "track.set": "Change",
+  "track.remove": "Delete",
   "shot.set": "Change",
   "multicam.angle": "Change",
   "multicam.offset": "Sync",

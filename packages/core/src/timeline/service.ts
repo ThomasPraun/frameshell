@@ -42,6 +42,9 @@ import { diffTimelines, isEmptyPatch } from "./patch.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
+/** Project settings an operation's {@link EditContext} takes from `frameshell.json`. */
+type EditSettings = Pick<EditContext, "snapWindow" | "defaultStillDuration">;
+
 /** Options for {@link TimelineService}. */
 export interface TimelineServiceOptions {
   /** ffprobe summary of a project-relative asset; see `MediaService.probe`. */
@@ -190,9 +193,9 @@ export class TimelineService {
     const problem = typeof scriptRef === "string" ? await checkScriptRef(root, scriptRef) : null;
     const warnings = problem ? [problem] : [];
     return this.#turn(root, id, async () => {
-      const { timeline, fps, snapWindow } = await this.#current(root, id);
+      const { timeline, fps, ...settings } = await this.#current(root, id);
       const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call);
-      const context = this.#context(root, id, fps, request.op, snapWindow);
+      const context = this.#context(root, id, fps, request.op, settings);
       const applied = await applyOperation(timeline, request, context);
       const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);
       call.onApplied?.(applied.timeline);
@@ -478,7 +481,7 @@ export class TimelineService {
     };
   }
 
-  #context(root: string, id: string, fps: number, op: string, snapWindow?: number): EditContext {
+  #context(root: string, id: string, fps: number, op: string, settings: EditSettings = {}): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: "c" | "t" | "g") => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
@@ -516,7 +519,7 @@ export class TimelineService {
       },
       newId,
       ...(resolveEditPoint ? { resolveEditPoint } : {}),
-      ...(snapWindow !== undefined ? { snapWindow } : {}),
+      ...settings,
     };
   }
 
@@ -552,16 +555,19 @@ export class TimelineService {
    * direct edit (see {@link TimelineService.reconcile}). Throws
    * TimelineNotFound (listing the ids) or InvalidProjectFile.
    */
-  load(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
+  load(root: string, id: string): Promise<{ timeline: Timeline; fps: number } & EditSettings> {
     return this.#turn(root, id, () => this.#current(root, id));
   }
 
   /** {@link TimelineService.load} for callers already holding the file's turn. */
-  async #current(root: string, id: string): Promise<{ timeline: Timeline; fps: number; snapWindow?: number }> {
+  async #current(root: string, id: string): Promise<{ timeline: Timeline; fps: number } & EditSettings> {
     const project = await readEnclosingProject(root);
     const fps = project?.config.fps ?? 30;
     const window = project?.config.editing?.snapWindow;
-    const snap = window !== undefined ? { snapWindow: window } : {};
+    const snap: EditSettings = {
+      ...(window !== undefined ? { snapWindow: window } : {}),
+      ...(project?.config.kind === "image" ? { defaultStillDuration: 1 / fps } : {}),
+    };
     const path = timelinePath(root, id);
     const key = await this.#key(root, id);
     let text: string;

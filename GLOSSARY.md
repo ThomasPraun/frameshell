@@ -2,6 +2,16 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Image projects (ADR 0017)
+
+**Image project**:
+A project with `"kind": "image"`: one still picture, the first frame of its main timeline, exported as PNG, JPEG or WebP.
+_Avoid_: still project, photo project
+
+**Layer**:
+A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
+_Avoid_: level, sheet
+
 ## Video from audio (ADR 0015)
 
 **Scene plan**:

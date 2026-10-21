@@ -1,4 +1,4 @@
-import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { DEFAULT_FRAME_QUALITY, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
   type Clip,
@@ -167,8 +167,12 @@ export interface FrameInput {
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
   at: number;
-  /** PNG to write (absolute, or relative to the work directory). */
+  /** Image to write (absolute, or relative to the work directory). */
   output: string;
+  /** Default `png`. */
+  format?: FrameFormat;
+  /** JPEG and WebP quality, 1 to 100; default {@link DEFAULT_FRAME_QUALITY}. */
+  quality?: number;
 }
 
 /** Single-frame plan (MCP `frame_capture`, `frameshell frame`). */
@@ -408,7 +412,8 @@ export function compileFrame(input: FrameInput): FramePlan {
       { op: "frame", reason: "out of range", field: "at", valid: { min: 0, max: last } },
     );
   }
-  const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: "rgb24", project: input.resolution });
+  const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
+  const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
   const burn = burnSubtitles(layout, frame, frame + 1, fps);
   return {
@@ -421,9 +426,23 @@ export function compileFrame(input: FrameInput): FramePlan {
       ...BASE,
       ...graph.inputs,
       ...["-filter_complex", `${graph.lines.join(";")}${burn}[v]`, "-map", "[v]", "-frames:v", "1"],
-      ...["-c:v", "png", "-f", "image2", "-update", "1", input.output],
+      ...encoding.args,
+      ...["-f", "image2", "-update", "1", input.output],
     ],
   };
+}
+
+/** Pixel format and encoder args of a `frame` image. */
+function frameEncoding(format: FrameFormat, quality: number): { pixFmt: string; args: string[] } {
+  switch (format) {
+    case "png":
+      return { pixFmt: "rgb24", args: ["-c:v", "png"] };
+    case "jpg":
+      // mjpeg's scale runs 2 (best) to 31; full-range 4:4:4 keeps text edges sharp.
+      return { pixFmt: "yuvj444p", args: ["-c:v", "mjpeg", "-q:v", String(Math.round(2 + ((100 - quality) * 29) / 99))] };
+    case "webp":
+      return { pixFmt: "yuv420p", args: ["-c:v", "libwebp", "-quality", String(quality)] };
+  }
 }
 
 /** Parse the pass-1 stats file; null when the mix is silent (nothing to normalize). */
