@@ -117,6 +117,22 @@ describe("render and frame methods", () => {
     MEDIA_TIMEOUT,
   );
 
+  it(
+    "writes JPEG and WebP as the extension or `format` asks, quality trading size",
+    async () => {
+      const dir = tempDir();
+      const jpeg = await conn.request("frame", { cwd: project, at: 0.5, out: join(dir, "half.jpg") });
+      expect(jpeg.format).toBe("jpg");
+      expect([...readFileSync(jpeg.path).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+      const webp = await conn.request("frame", { cwd: project, at: 0.5, out: join(dir, "half.img"), format: "webp" });
+      const riff = readFileSync(webp.path);
+      expect([riff.subarray(0, 4).toString("latin1"), riff.subarray(8, 12).toString("latin1")]).toEqual(["RIFF", "WEBP"]);
+      const small = await conn.request("frame", { cwd: project, at: 0.5, out: join(dir, "small.jpg"), quality: 5 });
+      expect(readFileSync(small.path).length).toBeLessThan(readFileSync(jpeg.path).length);
+    },
+    MEDIA_TIMEOUT,
+  );
+
   it("refuses a frame past the end with the valid range", async () => {
     await expect(conn.request("frame", { cwd: project, at: 5, out: join(tempDir(), "x.png") })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,

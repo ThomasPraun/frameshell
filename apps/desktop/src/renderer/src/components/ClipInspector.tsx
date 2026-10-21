@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEdit } from "../../../shared/api.js";
+import { useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -18,6 +19,7 @@ import { ShotInspector } from "./ShotInspector.js";
 export function ClipInspector() {
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const { clips } = useSelection();
+  const image = useProjectKind() === "image";
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const [error, setError] = useState<string | null>(null);
   const target = clips.length === 1 && layout ? find(layout.rows, clips[0]!) : null;
@@ -41,7 +43,8 @@ export function ClipInspector() {
   const setTransform = (name: "x" | "y" | "scale" | "opacity", value: number) =>
     send({ op: "clip.set", args: { clip: clip.id, transform: { [name]: value } } });
   const placed = row.kind === "video";
-  const audible = clip.kind === "media";
+  // An image project has no sound (ADR 0017).
+  const audible = clip.kind === "media" && !image;
   const moved = transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1;
 
   return (

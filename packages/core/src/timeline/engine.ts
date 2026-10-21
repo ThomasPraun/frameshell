@@ -119,6 +119,11 @@ export interface EditContext {
   resolveEditPoint?: EditPointResolver;
   /** Project default snap half-width, seconds (`editing.snapWindow`); an op's `snapWindow` overrides it. */
   snapWindow?: number;
+  /**
+   * Seconds a still image or adapter clip takes when `clip.add` gives no length: one frame in an image
+   * project (ADR 0017). Absent: they need one.
+   */
+  defaultStillDuration?: number;
 }
 
 /** Args of a public operation after param validation. */
@@ -262,13 +267,19 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
-    const { name, follows, style } = args;
-    if (name === undefined && follows === undefined && style === undefined) {
-      throw this.invalid("nothing to change.", { hint: "Pass `name`, or for subtitle tracks `follows` or `style`." });
+    const { name, follows, style, index } = args;
+    if (name === undefined && follows === undefined && style === undefined && index === undefined) {
+      throw this.invalid("nothing to change.", { hint: "Pass `name` or `index`, or for subtitle tracks `follows` or `style`." });
     }
     if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
     if (name === null) delete track.name;
     else if (name !== undefined) track.name = name;
+    if (index !== undefined) {
+      const top = this.draft.tracks.length - 1;
+      if (index > top) throw this.invalid(`index ${index} is past the top of the stack.`, { field: "index", valid: { min: 0, max: top } });
+      this.draft.tracks.splice(this.draft.tracks.indexOf(track), 1);
+      this.draft.tracks.splice(index, 0, track);
+    }
     if (track.kind !== "subtitles") return;
     if (follows !== undefined) {
       this.checkFollows(follows);
@@ -373,6 +384,8 @@ class Edit {
         out = this.boundOut(args.out, clipIn, info, args.asset);
       } else if (args.duration !== undefined) {
         out = this.boundOut(clipIn + args.duration * speed, clipIn, info, args.asset);
+      } else if (info.duration === null && this.context.defaultStillDuration !== undefined) {
+        out = this.boundOut(clipIn + this.context.defaultStillDuration * speed, clipIn, info, args.asset);
       } else if (info.duration === null) {
         throw this.invalid(`${args.asset} is a still image with no length.`, { field: "duration", hint: "Pass `duration` in seconds." });
       } else {
@@ -401,7 +414,8 @@ class Edit {
       this.refuse(args, ["asset", "out", "speed"], `${type} clips`);
       if (track.kind === "audio") throw this.invalid(`${type} clips render video; use a video track.`, { field: "track" });
       const adapter = await this.adapter(type);
-      if (args.duration === undefined) throw this.invalid(`${type} clips need \`duration\` in seconds.`, { field: "duration" });
+      const duration = args.duration ?? this.context.defaultStillDuration;
+      if (duration === undefined) throw this.invalid(`${type} clips need \`duration\` in seconds.`, { field: "duration" });
       const props = args.props ?? {};
       const problem = await adapter.validateProps(props);
       if (problem) throw this.invalid(`invalid props for ${type}: ${problem}`, { field: "props" });
@@ -412,7 +426,7 @@ class Edit {
         ...(args.source ? { source: args.source } : {}),
         start,
         ...(clipIn > 0 ? { in: clipIn } : {}),
-        duration: this.grid.snap(args.duration),
+        duration: this.grid.snap(duration),
         ...(args.props ? { props } : {}),
         ...extras,
       };

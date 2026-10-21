@@ -43,6 +43,15 @@ describe("planVideoProject", () => {
     expect(await planVideoProject([video(dir)])).toMatchObject({ audioOnly: false });
   });
 
+  it("marks a plan of images alone as an image project (ADR 0017), and one with any video or audio not", async () => {
+    const dir = folder();
+    const poster = video(dir, "poster.PNG");
+    const logo = video(dir, "logo.webp");
+    expect(await planVideoProject([poster, logo])).toMatchObject({ dir: join(dir, "poster"), imageOnly: true, audioOnly: false });
+    expect(await planVideoProject([poster, video(dir)])).toMatchObject({ imageOnly: false });
+    expect(await planVideoProject([video(dir, "podcast.mp3")])).toMatchObject({ imageOnly: false });
+  });
+
   it("puts the project beside the first video, named after it", async () => {
     const dir = folder();
     const first = video(dir);

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MEDIA_EXTENSIONS, START_EXTENSIONS, VIDEO_EXTENSIONS, isAudioFile, partitionFiles } from "../src/main/media-files.js";
+import { MEDIA_EXTENSIONS, START_EXTENSIONS, VIDEO_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "../src/main/media-files.js";
 import { importNotice } from "../src/renderer/src/file-drop.js";
 
 describe("partitionFiles", () => {
@@ -23,13 +23,20 @@ describe("partitionFiles", () => {
     expect((await partitionFiles(files, MEDIA_EXTENSIONS)).refused).toEqual([files[1]]);
   });
 
-  it("starts a project from video and audio, not from images", async () => {
+  it("starts a project from video, audio and images (ADR 0017), not from other files", async () => {
     const dir = mkdtempSync(join(tmpdir(), "frameshell-media-files-"));
-    const files = ["talk.mp4", "podcast.MP3", "voice.m4a", "logo.png"].map((name) => {
+    const files = ["talk.mp4", "podcast.MP3", "voice.m4a", "logo.png", "notes.pdf", "icon.svg"].map((name) => {
       writeFileSync(join(dir, name), "x");
       return join(dir, name);
     });
-    expect(await partitionFiles(files, START_EXTENSIONS)).toEqual({ accepted: files.slice(0, 3), refused: [files[3]] });
+    expect(await partitionFiles(files, START_EXTENSIONS)).toEqual({ accepted: files.slice(0, 4), refused: files.slice(4) });
+  });
+});
+
+describe("isImageFile", () => {
+  it("tells still images by extension, ignoring case", () => {
+    expect(["a.png", "b.JPG", "c.jpeg", "d.webp", "e.gif"].every(isImageFile)).toBe(true);
+    expect(["a.mp4", "b.svg", "c.mp3", "noext"].some(isImageFile)).toBe(false);
   });
 });
 

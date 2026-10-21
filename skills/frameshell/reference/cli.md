@@ -6,7 +6,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 
 | Command | Use |
 |---|---|
-| `frameshell init [dir] [--name <name>]` | Scaffold a project: `frameshell.json`, empty `timelines/main.json`, `assets/`, `transcripts/`, `scripts/`, `compositions/`, and this skill under `.claude/skills/frameshell/` (`--no-skill` leaves it out). Fails on an existing project. |
+| `frameshell init [dir] [--name <name>] [--kind image]` | Scaffold a project: `frameshell.json`, empty `timelines/main.json`, `assets/`, `transcripts/`, `scripts/`, `compositions/`, and this skill under `.claude/skills/frameshell/` (`--no-skill` leaves it out). `--kind image` makes an image project (see [image-projects.md](image-projects.md)). Fails on an existing project. |
 | `frameshell status` | Daemon, project, plugin trust, synced-folder warning, jobs, refused direct edits, open transactions. First command in a new session. |
 | `frameshell doctor [--install]` | ffmpeg/ffprobe and encoders; exit 1 with the fix when rendering is blocked. `--install` downloads the managed binaries. Also says which `frameshell` PATH runs and whether it is this CLI (a note, never an exit 1). |
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
@@ -21,7 +21,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell timeline show` | Every track and clip: ids, `start`/`end` (timeline), `in`/`out` (source), speed. `--json` is compact on purpose. |
 | `frameshell track list` | Tracks bottom to top (first video track = bottom layer). |
 | `frameshell track add <video\|audio\|subtitles> [--name n] [--index n]` | New track, on top unless `--index`. Subtitle tracks need `--follows <track>`; `--preset big-keyword\|plain`, `--position top\|center\|bottom`. |
-| `frameshell track set <track> …` | Rename (`--name`, `--clear-name`); subtitle `--follows`, `--preset`, `--position`. |
+| `frameshell track set <track> …` | Rename (`--name`, `--clear-name`); move in the stack (`--index n`, 0 = bottom layer); subtitle `--follows`, `--preset`, `--position`. |
 | `frameshell track remove <track> [--force]` | `--force` when it holds clips. |
 | `frameshell clip add <track> [asset] …` | Place media (`--start`, `--in`, `--out` or `--duration`, `--speed`), or an adapter clip (`--type hyperframes --source <html> --duration s --props '<json>'`). Overlay placement `--x --y --scale --opacity`. `--ripple` inserts, moving later clips right on every video, audio and program track; `--ripple-track <track>` (repeatable) limits that to the clip's track plus the named ones. `--snap` snaps media `in`/`out` into pauses. |
 | `frameshell clip move <clip> [--start s] [--track t]` | Same length, new place; refused on overlap. |
@@ -63,7 +63,7 @@ Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` li
 | `frameshell transcribe --speakers <asset> [--people n]` | Who says each word (local speaker diarization): `speaker` (`s1`, `s2`…) on the transcript's words and a `speakers` list with names (`Speaker 1`… until someone renames them in the file). Needs a current transcript. `--people` when you know how many talk: more reliable than guessing. Re-running keeps each voice's id and name where it matches, and speaker corrections in `edits` win. First run downloads about 60 MB. |
 | `frameshell transcribe --verify <export> [--timeline id]` | Re-transcribe an export and report words lost at cuts; exit 1 when any was. |
 | `frameshell render [--preset p] [--out file]` | Export; waits for the job and prints progress on stderr. Pending generated-clip renders are awaited. |
-| `frameshell frame --at <s> --out <file.png> [--preset p]` | Write the composited frame at timeline second `s`, exactly as export renders it. Open the PNG to look at it. |
+| `frameshell frame --at <s> --out <file> [--preset p] [--format png\|jpg\|webp] [--quality 1-100]` | Write the composited frame at timeline second `s`, exactly as export renders it; the format follows the extension of `<file>` unless `--format`. Open it to look at it. In an image project this is the export: `--at 0`. |
 | `frameshell inspect --at <s> (--point x,y \| --px X,Y) [--timeline id] [--json]` | What a point of the frame shows: the clips under it (topmost first, which one is seen) and, in a generated clip, the DOM element painting it (selector, text, box, styles, file or React components, ancestors). `--point` takes fractions of the frame, `--px` project pixels. Use it to find what "the box at the top right" is before editing it, and to check the edit landed. Generated clips load in headless Chrome (a second or two each) and need a trusted project. |
 
 ## Plugins

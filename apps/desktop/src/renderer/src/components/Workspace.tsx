@@ -12,16 +12,19 @@ import {
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
+import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
+import { useProjectKind } from "../preview/useProgram.js";
 import { cutToAngle } from "../timeline/angle-cut.js";
 import { angleKey } from "../timeline/angle-keys.js";
-import { selection } from "../selection.js";
+import { SELECTION_TIMELINE, selection } from "../selection.js";
 import { ContextMenuHost } from "./ContextMenu.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
+import { LayersPanel } from "./LayersPanel.js";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { PanelWindow } from "./PanelWindow.js";
 import { SIDEBAR_VIEWS, Sidebar, SidebarWindow } from "./Sidebar.js";
@@ -60,6 +63,8 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const setup = useProjectSetup();
+  // An image project (ADR 0017) shows its layers where the timeline goes.
+  const image = useProjectKind() === "image";
   const dragBase = useRef<Layout | null>(null);
   const centerRow = useRef<HTMLDivElement>(null);
   const terminals = useRef<AgentTerminal>(null);
@@ -167,14 +172,21 @@ export function Workspace({ project }: { project: ProjectView }) {
     return listenEverywhere("keydown", onKey);
   }, []);
 
-  // Media dropped from the OS goes into assets/ (#183). The terminal keeps drops for itself.
+  // Media dropped from the OS goes into assets/ (#183); in an image project each picture also becomes a layer on top.
+  // The terminal keeps drops for itself.
   const dropping = useFileDrop(
-    useCallback((paths: string[]) => {
-      void window.frameshell.media.import(paths).then(
-        ({ imported, refused }) => setNotice(importNotice(imported, refused)),
-        (error: Error) => setNotice(error.message),
-      );
-    }, []),
+    useCallback(
+      (paths: string[]) => {
+        void window.frameshell.media
+          .import(paths)
+          .then(async ({ imported, refused }) => {
+            setNotice(importNotice(imported, refused));
+            if (image && imported.length > 0) await window.frameshell.timeline.addLayers(SELECTION_TIMELINE, imported);
+          })
+          .catch((error: Error) => setNotice(error.message));
+      },
+      [image],
+    ),
     { ignore: ".terminal-view" },
   );
 
@@ -251,6 +263,33 @@ export function Workspace({ project }: { project: ProjectView }) {
     };
   }, [showTranscript]);
 
+  // New image from the frame at the playhead (ADR 0017): Mod+Shift+S or File > New Image from Frame; a video project's only.
+  useEffect(() => {
+    if (image) return;
+    const run = () =>
+      void imageFromFrame().then(
+        (dir) => dir && setNotice(t.workspace.frameImageOpened(dir.split(/[\\/]/).pop() ?? dir)),
+        (error: Error) => setNotice(error.message),
+      );
+    const offKeys = listenEverywhere(
+      "keydown",
+      (event) => {
+        if (!isFrameImageKey(event, isMac)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        run();
+      },
+      true,
+    );
+    const offMenu = window.frameshell.menu.onCommand((command) => {
+      if (command === "imageFromFrame") run();
+    });
+    return () => {
+      offKeys();
+      offMenu();
+    };
+  }, [image]);
+
   // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
   // so the state the agent gets back already shows the opened tab or panel.
   const editorState = useRef({ active, tabs });
@@ -284,6 +323,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
   if (!layout) return <div className="boot" />;
   const { sidebar, terminal, timeline } = layout.panels;
+  const bottomTitle = image ? t.workspace.layers : t.workspace.timeline;
 
   /** Drag handlers for a panel edge; `sign` maps pointer offset onto panel growth. */
   const edge = (id: PanelId, sign: 1 | -1) => ({
@@ -373,25 +413,40 @@ export function Workspace({ project }: { project: ProjectView }) {
           </div>
           {detached.has("timeline") ? (
             <div className="panel timeline">
-              <DockedElsewhere compact title={t.workspace.timeline} onBringBack={() => setPanelDetached("timeline", false)} />
+              <DockedElsewhere compact title={bottomTitle} onBringBack={() => setPanelDetached("timeline", false)} />
             </div>
           ) : (
             <>
-              {!timeline.collapsed && <Splitter orientation="horizontal" label={t.workspace.resizeTimeline} {...edge("timeline", -1)} />}
+              {!timeline.collapsed && (
+                <Splitter orientation="horizontal" label={image ? t.workspace.resizeLayers : t.workspace.resizeTimeline} {...edge("timeline", -1)} />
+              )}
               <div {...slot("timeline")} style={{ height: timeline.collapsed ? undefined : timeline.size }}>
-                <TimelinePanel
-                  collapsed={timeline.collapsed}
-                  onToggle={() => toggle("timeline")}
-                  onShowTranscript={showTranscript}
-                  onDetach={() => setPanelDetached("timeline", true)}
-                />
+                {image ? (
+                  <LayersPanel
+                    mediaUrl={project.mediaUrl}
+                    collapsed={timeline.collapsed}
+                    onToggle={() => toggle("timeline")}
+                    onDetach={() => setPanelDetached("timeline", true)}
+                  />
+                ) : (
+                  <TimelinePanel
+                    collapsed={timeline.collapsed}
+                    onToggle={() => toggle("timeline")}
+                    onShowTranscript={showTranscript}
+                    onDetach={() => setPanelDetached("timeline", true)}
+                  />
+                )}
               </div>
             </>
           )}
           {detached.has("timeline") && (
-            <PanelWindow panel="timeline" title={t.workspace.windowTitle(t.workspace.timeline, project.name)} onClosed={() => setPanelDetached("timeline", false)}>
+            <PanelWindow panel="timeline" title={t.workspace.windowTitle(bottomTitle, project.name)} onClosed={() => setPanelDetached("timeline", false)}>
               <div className="panel timeline">
-                <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
+                {image ? (
+                  <LayersPanel mediaUrl={project.mediaUrl} collapsed={false} detached onDetach={() => setPanelDetached("timeline", false)} />
+                ) : (
+                  <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
+                )}
               </div>
             </PanelWindow>
           )}

@@ -3,7 +3,7 @@ import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../s
 import { useFileDrop } from "../file-drop.js";
 import { rich, t } from "../i18n.js";
 
-/** First screen of a window with no project: start from a video or audio file, open a folder, reopen a recent one, or create a project. */
+/** First screen of a window with no project: start from a video, audio or image file, open a folder, reopen a recent one, or create a project. */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
   const [notProject, setNotProject] = useState<string | null>(null);
@@ -138,7 +138,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   );
 }
 
-/** Confirmation of a project made from videos or audio (ADR 0013, 0015): name, place, and copy or use in place when it matters. */
+/** Confirmation of a project made from videos, audio or images (ADR 0013, 0015, 0017): name, place, and copy or use in place when it matters. */
 function NewFromVideo({
   plan,
   busy,
@@ -215,6 +215,8 @@ function NewFromVideo({
         </div>
       </div>
 
+      {plan.imageOnly && !plan.existing && <p className="welcome-hint">{t.welcome.imageHint}</p>}
+
       {plan.audioOnly && !plan.existing && (
         <fieldset className="welcome-mode">
           <legend>{t.welcome.frameLegend}</legend>
@@ -247,7 +249,7 @@ function NewFromVideo({
         <p className="welcome-hint">{t.welcome.copyHint}</p>
       )}
 
-      {!plan.existing && (
+      {!plan.existing && !plan.imageOnly && (
         <label className="welcome-check">
           <input type="checkbox" checked={transcribe} onChange={(event) => setTranscribe(event.target.checked)} />
           <span>

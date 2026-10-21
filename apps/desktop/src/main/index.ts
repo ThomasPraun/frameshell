@@ -7,7 +7,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, protocol, screen, shell, utilityProcess } from "electron";
+import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, nativeImage, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { TimelineRejection, UiView } from "@frameshell/protocol";
@@ -67,9 +67,11 @@ import { terminalToolPaths } from "./terminal-tools.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
-import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, partitionFiles } from "./media-files.js";
+import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
+import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
-import { planVideoProject } from "./video-project.js";
+import { planVideoProject, projectName } from "./video-project.js";
 import { replaceClipImage } from "./replace-image.js";
 import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
 import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
@@ -490,6 +492,45 @@ async function pickImage(window: BrowserWindow): Promise<string | undefined> {
   return result.canceled ? undefined : result.filePaths[0];
 }
 
+/** Size of an image made from a frame, asked in a message box: the offered sizes and the video's own; undefined when cancelled. */
+async function pickFrameImageSize(window: BrowserWindow, dir: string): Promise<FrameSize | undefined> {
+  const said = text.app.dialogs;
+  const config = JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8").catch(() => "{}")) as { resolution?: FrameSize };
+  const own = config.resolution ?? { width: 1920, height: 1080 };
+  const sizes = [FRAME_IMAGE_SIZES.thumbnail, own, FRAME_IMAGE_SIZES.square, FRAME_IMAGE_SIZES.vertical];
+  const { response } = await dialog.showMessageBox(window, {
+    type: "question",
+    message: said.imageFromFrame,
+    detail: said.imageFromFrameDetail,
+    buttons: [
+      said.thumbnailSize,
+      said.videoSize(own.width, own.height),
+      said.squareSize,
+      said.verticalSize,
+      said.cancel,
+    ],
+    defaultId: 0,
+    cancelId: 4,
+    noLink: true,
+  });
+  return sizes[response];
+}
+
+/** Where to save an exported image, starting at `defaultPath`; the format follows the extension chosen. */
+async function pickImageExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, {
+    title: said.exportImage,
+    defaultPath,
+    filters: [
+      { name: said.png, extensions: ["png"] },
+      { name: said.jpeg, extensions: ["jpg", "jpeg"] },
+      { name: said.webp, extensions: ["webp"] },
+    ],
+  });
+  return result.canceled ? undefined : result.filePath;
+}
+
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: text.app.dialogs.chooseVideos,
@@ -517,17 +558,20 @@ async function createFromVideos(
     if (!plan.existing) {
       // The project takes the first video's size, frame rate and sample rate (#197); the defaults when ffprobe
       // cannot read it, so an odd file never blocks the project. Audio alone has no picture: the chosen frame (ADR 0015).
+      // Pictures make an image project the size of the first one (ADR 0017).
       const like = plan.files.find((file) => !isAudioFile(file)) ?? plan.files[0];
       const resolution = plan.audioOnly ? AUDIO_FRAMES[orientation] : undefined;
+      const kind = plan.imageOnly ? ({ kind: "image" } as const) : {};
       await daemon
-        .request("project.init", { dir: plan.dir, name: plan.name, like, ...(resolution && { resolution }) })
-        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name, ...(resolution && { resolution }) }));
+        .request("project.init", { dir: plan.dir, name: plan.name, like, ...kind, ...(resolution && { resolution }) })
+        .catch(() => daemon.request("project.init", { dir: plan.dir, name: plan.name, ...kind, ...(resolution && { resolution }) }));
       const { imported } = await daemon.request("asset.import", { cwd: plan.dir, files: plan.files, mode });
       assets = imported.map((item) => item.asset);
-      await placeOnTimeline(plan.dir, assets);
+      if (plan.imageOnly) await addImageLayers(plan.dir, "main", assets, await imageLayerDeps(plan.dir));
+      else await placeOnTimeline(plan.dir, assets);
     }
     const opened = await openFromWindow(state, plan.dir);
-    if (transcribe && assets.length > 0) {
+    if (transcribe && assets.length > 0 && !plan.imageOnly) {
       const background = plan.audioOnly ? { title: plan.name, size: AUDIO_FRAMES[orientation] } : undefined;
       void setUpTranscription(plan.dir, assets, background);
     }
@@ -535,6 +579,21 @@ async function createFromVideos(
   } catch (error) {
     return { status: "error", message: (error as Error).message };
   }
+}
+
+/** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read by Electron. */
+async function imageLayerDeps(dir: string): Promise<ImageLayersDeps> {
+  const config = JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8").catch(() => "{}")) as { resolution?: FrameSize };
+  return {
+    request: (method, params) => daemon.request(method, params),
+    alone: (work) => editor.alone(work),
+    resolution: config.resolution ?? { width: 1920, height: 1080 },
+    // nativeImage reads PNG and JPEG everywhere; another format reads as empty, and that layer fits the frame.
+    imageSize: (asset) => {
+      const size = nativeImage.createFromPath(join(dir, ...asset.split("/"))).getSize();
+      return size.width > 0 && size.height > 0 ? size : null;
+    },
+  };
 }
 
 /** Frame size of a project made from audio alone (ADR 0015). */
@@ -547,14 +606,14 @@ const AUDIO_FRAMES = {
  * Put the videos among `assets` one after another on a new video track of the
  * main timeline, and the audio files on a new audio track (A1, ADR 0015), as
  * one `ui` transaction, so a single undo takes them off (#197). A file that
- * cannot be placed (unreadable) is skipped; the rest still go in.
+ * cannot be placed (unreadable, or a picture, which has no length) is skipped; the rest still go in.
  */
 async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
   await editor.alone(async () => {
     await daemon.request("tx.begin", { label: "Place the media", autoCommitAfter: 30 });
     try {
       for (const kind of ["video", "audio"] as const) {
-        const group = assets.filter((asset) => isAudioFile(asset) === (kind === "audio"));
+        const group = assets.filter((asset) => !isImageFile(asset) && isAudioFile(asset) === (kind === "audio"));
         if (group.length === 0) continue;
         const name = kind === "video" ? "Video" : "Audio";
         const track = await daemon.request("track.add", { cwd: dir, timeline: "main", kind, name });
@@ -865,6 +924,36 @@ function registerIpc(): void {
       return true;
     }),
   );
+  ipcMain.handle(Channel.timelineAddLayers, (event, timeline: string, assets: string[]) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
+    }),
+  );
+  ipcMain.handle(Channel.timelineExportImage, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const out = await pickImageExport(state.window, join(project.dir, "exports", `${projectName(project.name)}.png`));
+      if (!out) return null;
+      return (await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out })).path;
+    }),
+  );
+  ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const size = await pickFrameImageSize(state.window, project.dir);
+      if (!size) return null;
+      const dir = await imageFromFrame(project, String(timeline), Math.max(0, Number(at) || 0), size, {
+        request: (method, params) => daemon.request(method, params),
+        layers: imageLayerDeps,
+        tempDir: app.getPath("temp"),
+      });
+      createWindow(dir);
+      return dir;
+    }),
+  );
   ipcMain.handle(Channel.timelineSettle, (event) =>
     outcome(async () => {
       await requireProject(stateOf(event.sender));
@@ -1010,6 +1099,13 @@ function buildMenu(): void {
       submenu: [
         { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
         { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
+        { type: "separator" },
+        {
+          id: "image-from-frame",
+          label: said.imageFromFrame,
+          accelerator: "CmdOrCtrl+Shift+S",
+          click: (_item, focused) => command("imageFromFrame", focused),
+        },
         { type: "separator" },
         { label: said.installCli, click: () => void cliCommand(installCli) },
         { label: said.uninstallCli, click: () => void cliCommand(uninstallCli) },

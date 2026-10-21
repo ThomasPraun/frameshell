@@ -84,6 +84,8 @@ export interface VideoProjectPlan {
   askMode: boolean;
   /** Every file is audio (ADR 0015): no picture, so the user picks the frame orientation before creating. */
   audioOnly: boolean;
+  /** Every file is a still image (ADR 0017): an image project, each picture a layer, sized like the first. */
+  imageOnly: boolean;
 }
 
 /** Frame of a project made from audio alone: 16:9 (1920x1080) or 9:16 (1080x1920). */
@@ -130,6 +132,7 @@ export const TIMELINE_EDIT_OPS = [
   "clip.set",
   "track.add",
   "track.set",
+  "track.remove",
   "shot.set",
   "multicam.angle",
   "multicam.offset",
@@ -198,8 +201,9 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
 /**
  * Command an application menu entry sends to the focused project window.
  * `showTranscript`: open the transcript view (View > Transcript).
+ * `imageFromFrame`: make an image project from the frame at the playhead (File > New Image from Frame, ADR 0017).
  */
-export type MenuCommand = "showTranscript";
+export type MenuCommand = "showTranscript" | "imageFromFrame";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -235,6 +239,12 @@ export interface FrameshellApi {
     onVideosOffered(listener: () => void): () => void;
     /** Pick the folder a new project goes in; null when cancelled. */
     chooseParent(): Promise<string | null>;
+    /**
+     * Make an image project from the frame of `timeline` at `at` seconds (ADR 0017): main asks the picture size
+     * in a dialog, creates the project beside this one with the frame as its layer, and opens it in a new window.
+     * Resolves with the new project's folder, or null when cancelled. Rejects with the daemon's message.
+     */
+    imageFromFrame(timeline: string, at: number): Promise<string | null>;
     /**
      * Create the planned project and open it in this window: `project.init`,
      * then `asset.import` of the files (`copy` clones where possible; `link`
@@ -323,6 +333,18 @@ export interface FrameshellApi {
      * what it shows, keeping its track, start and length, as one undoable step. False when cancelled.
      */
     replaceImage(timeline: string, clip: string): Promise<boolean>;
+    /**
+     * Put each image among `assets` (project-relative, e.g. from `media.import`) on a new video track on top,
+     * starting at 0, as one undoable step: the layers of an image project (ADR 0017). Other assets are skipped.
+     * Resolves with the new track ids.
+     */
+    addLayers(timeline: string, assets: string[]): Promise<string[]>;
+    /**
+     * Save the first frame of `timeline` as an image where the user picks in the OS dialog (PNG, JPEG or WebP
+     * by the extension chosen), through the daemon's `frame`: the export of an image project. Resolves with the
+     * absolute path written, or null when cancelled. Rejects with the daemon's message.
+     */
+    exportImage(timeline: string): Promise<string | null>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
@@ -500,6 +522,7 @@ export const Channel = {
   projectChooseVideos: "project:choose-videos",
   projectPlanVideos: "project:plan-videos",
   projectChooseParent: "project:choose-parent",
+  projectImageFromFrame: "project:image-from-frame",
   projectFromVideos: "project:from-videos",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
@@ -526,6 +549,8 @@ export const Channel = {
   timelineRejected: "timeline:rejected",
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
+  timelineAddLayers: "timeline:add-layers",
+  timelineExportImage: "timeline:export-image",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",

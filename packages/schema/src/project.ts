@@ -9,7 +9,23 @@ export const MIN_SNAP_WINDOW_S = 0.5;
 /** Largest snap search half-width, seconds; wider reaches into neighbouring sentences. */
 export const MAX_SNAP_WINDOW_S = 10;
 
-const snapWindowFix = `Use ${MIN_SNAP_WINDOW_S} to ${MAX_SNAP_WINDOW_S}, or remove \`editing.snapWindow\` for the default ${MIN_SNAP_WINDOW_S}.`;
+/** What a project makes (ADR 0017): `video` (default) or `image`, one still frame exported as a picture. */
+export const ProjectKindSchema = z
+  .enum(["video", "image"])
+  .describe(
+    "What the project makes. `video` (default when absent): a timeline exported as a video. `image`: one still picture, " +
+      "the timeline's first frame, exported with `frame`; video tracks are its layers, first track at the bottom.",
+  );
+
+/** See {@link ProjectKindSchema}. */
+export type ProjectKind = z.infer<typeof ProjectKindSchema>;
+
+/** Kind of a project config; `video` when it declares none. */
+export function projectKind(config: { kind?: ProjectKind | undefined }): ProjectKind {
+  return config.kind ?? "video";
+}
+
+const snapWindowFix =`Use ${MIN_SNAP_WINDOW_S} to ${MAX_SNAP_WINDOW_S}, or remove \`editing.snapWindow\` for the default ${MIN_SNAP_WINDOW_S}.`;
 
 /**
  * Zod model of `frameshell.json` (SPEC §5.2). Source of truth: the published
@@ -20,6 +36,7 @@ export const ProjectConfigSchema = z
     $schema: z.string().optional(),
     schemaVersion: z.literal(SCHEMA_VERSION),
     name: z.string().min(1),
+    kind: ProjectKindSchema.optional(),
     fps: z.number().positive(),
     resolution: z.strictObject({
       width: z.int().positive(),

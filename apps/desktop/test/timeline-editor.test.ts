@@ -125,8 +125,8 @@ describe("TimelineEditor.apply", () => {
 
   it("refuses operations the timeline panel never sends, before reaching the daemon", async () => {
     const { dir, editor } = await setup();
-    const sneaky = { op: "track.remove", args: { track: "v1", force: true } } as unknown as TimelineEdit;
-    await expect(editor.apply(dir, "main", [sneaky])).rejects.toThrow(/track\.remove/);
+    const sneaky = { op: "multicam.create", args: { files: ["assets/a.mp4"] } } as unknown as TimelineEdit;
+    await expect(editor.apply(dir, "main", [sneaky])).rejects.toThrow(/multicam\.create/);
   });
 
   it("passes the daemon's message through when an edit breaks a timeline rule", async () => {

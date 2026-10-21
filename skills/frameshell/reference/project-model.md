@@ -15,7 +15,7 @@ exports/                 render output
 
 ## `frameshell.json`
 
-`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `transcription` (`provider`, `model`, `language`), `export` (`defaultPreset`, `loudness`), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
+`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `kind` (`image` for an image project, see [image-projects.md](image-projects.md); absent = video), `transcription` (`provider`, `model`, `language`), `export` (`defaultPreset`, `loudness`), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
 
 ## Timeline
 

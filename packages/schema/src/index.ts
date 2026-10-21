@@ -5,6 +5,9 @@ export {
   MAX_SNAP_WINDOW_S,
   ProjectConfigSchema,
   type ProjectConfig,
+  ProjectKindSchema,
+  type ProjectKind,
+  projectKind,
   parseProjectConfig,
   createProjectConfig,
 } from "./project.js";

@@ -4,6 +4,8 @@
 const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
+  /** An image project made from a frame opened in its own window (ADR 0017). */
+  frameImageOpened: (name: string) => `Opened ${name} in a new window.`,
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
@@ -23,6 +25,8 @@ const en = {
   preview: "Preview",
   editor: "Editor",
   timeline: "Timeline",
+  layers: "Layers",
+  resizeLayers: "Resize layers",
   transcript: "Transcript",
   explorer: "Explorer",
   history: "History",
@@ -62,6 +66,7 @@ const en = {
 const es: typeof en = {
   imported: (names) => `Se importó ${names} a assets/.`,
   notMedia: (names) => `No es audio, video ni imagen: ${names}.`,
+  frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
   dropToImport: "Suelta para importar a assets/",
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,
@@ -81,6 +86,8 @@ const es: typeof en = {
   preview: "Vista previa",
   editor: "Editor",
   timeline: "Línea de tiempo",
+  layers: "Capas",
+  resizeLayers: "Cambiar el tamaño de las capas",
   transcript: "Transcripción",
   explorer: "Archivos",
   history: "Cambios",

@@ -150,6 +150,17 @@ describe("track operations", () => {
     expect(renamed.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", name: "Camera", clips: [] });
   });
 
+  it("track.set moves a track in the stack, keeping the others' order; the inverse moves it back", async () => {
+    const { timeline } = await apply(base(), "track.add", { kind: "video", name: "Logo" }, context({ newId: () => "t_logo" }));
+    const lowered = await apply(timeline, "track.set", { track: "t_logo", index: 0 });
+    expect(lowered.timeline.tracks.map((track) => track.id)).toEqual(["t_logo", "t_v", "t_a"]);
+    const undone = await apply(lowered.timeline, "timeline.patch", lowered.inverse.args);
+    expect(undone.timeline.tracks.map((track) => track.id)).toEqual(["t_v", "t_a", "t_logo"]);
+    const past = await rejection(apply(timeline, "track.set", { track: "t_logo", index: 3 }));
+    expect(past.message).toMatch(/index 3 is past the top/);
+    expect(past.data).toMatchObject({ field: "index", valid: { min: 0, max: 2 } });
+  });
+
   it("refuses to remove a track with clips unless forced, and names missing tracks", async () => {
     const { timeline } = await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4" });
     expect((await rejection(apply(timeline, "track.remove", { track: "t_v" }))).message).toMatch(/1 clip.*force: true/);
@@ -213,6 +224,16 @@ describe("clip.add", () => {
     expect((await rejection(apply(base(), "clip.add", { track: "t_v", asset: "assets/logo.png" }))).message).toMatch(/Pass `duration`/);
     const { timeline } = await apply(base(), "clip.add", { track: "t_v", asset: "assets/logo.png", duration: 2.5 });
     expect(clipsOf(timeline, "t_v")[0]).toMatchObject({ in: 0, out: 2.5 });
+  });
+
+  it("gives still images and adapter clips one frame without a duration in an image project", async () => {
+    const image = context({ defaultStillDuration: 1 / 30 });
+    const still = await apply(base(), "clip.add", { track: "t_v", asset: "assets/logo.png" }, image);
+    expect(clipsOf(still.timeline, "t_v")[0]).toMatchObject({ in: 0, out: 0.033 });
+    const card = await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", source: "compositions/card.html", props: { title: "Hola" } }, image);
+    expect(clipsOf(card.timeline, "t_v")[0]).toMatchObject({ type: "hyperframes", duration: 0.033 });
+    const video = await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4" }, image);
+    expect(clipsOf(video.timeline, "t_v")[0]).toMatchObject({ out: 10 });
   });
 
   it("validates adapter clip types and their props through the registered adapter", async () => {

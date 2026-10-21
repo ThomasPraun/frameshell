@@ -450,9 +450,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           });
         });
         format = projectFormat(probe);
+        // A picture keeps its exact size: no codec of an image export needs it even (ADR 0017).
+        if (params.kind === "image" && probe.video?.still) format = { ...format, resolution: { width: probe.video.width, height: probe.video.height } };
       }
       if (params.resolution) format = { ...format, resolution: params.resolution };
-      return projects.init(params.dir, params.name, params.agentSkill, format);
+      return projects.init(params.dir, params.name, params.agentSkill, format, params.kind);
     },
     doctor: async ({ cwd, install }) => {
       const found = await readEnclosingProject(cwd);
@@ -466,7 +468,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
     render: async ({ cwd, timeline, preset, out }) => exports.render(await root(cwd), { timeline, preset, out }),
-    frame: async ({ cwd, timeline, at, out, preset }) => exports.frame(await root(cwd), { timeline, at, out, preset }),
+    frame: async ({ cwd, timeline, at, out, preset, format, quality }) =>
+      exports.frame(await root(cwd), { timeline, at, out, preset, format, quality }),
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;

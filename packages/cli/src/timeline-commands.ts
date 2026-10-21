@@ -20,7 +20,7 @@ mutations print the new revision):
   timeline show [--json]       Tracks and clips with ids, start/end, in/out (--json: compact dump)
   track list                   Tracks in stacking order (first video track = bottom layer)
   track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n] [--preset p] [--position pos]
-  track set <track> [--name n | --clear-name] [--follows <track>] [--preset p] [--position pos]
+  track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
   track remove <track> [--force]
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
@@ -212,7 +212,7 @@ const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
   "track add": ["name", "follows", "index", "preset", "position"],
-  "track set": ["name", "clear-name", "follows", "preset", "position"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
   "clip move": ["start", "track"],
@@ -369,16 +369,20 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { kind: args[0], name: str("name"), follows: str("follows"), index, style: style() });
       break;
     }
-    case "track set":
+    case "track set": {
       method = "track.set";
       if (str("name") !== undefined && values["clear-name"] === true) throw new UsageError("Pass --name or --clear-name, not both.");
+      const index = num("index");
+      if (index !== undefined && (!Number.isInteger(index) || index < 0)) throw new UsageError("--index: expected an integer >= 0.");
       Object.assign(params, {
         track: args[0],
         name: values["clear-name"] === true ? null : str("name"),
+        index,
         follows: str("follows"),
         style: style(),
       });
       break;
+    }
     case "track remove":
       method = "track.remove";
       Object.assign(params, { track: args[0], force: values["force"] === true });
