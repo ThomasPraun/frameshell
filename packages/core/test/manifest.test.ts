@@ -19,8 +19,7 @@ import {
   FACE_DETECTION_MODELS,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
-  angleFaceKeys,
-  loadYunet,
+  yunetWorkerScanner,
   buildCandidates,
   frameshellWhisperUrl,
   currentPlatform,
@@ -334,17 +333,17 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
   );
 
   it(
-    "installs ONNX Runtime Web and YuNet, verified, and keys a drawn face that moves",
+    "installs ONNX Runtime Web and YuNet, verified, and keys a drawn face that moves, in a worker thread",
     async () => {
       const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
-      const detect = await loadYunet(await binaries.ensure(ONNX_RUNTIME_WEB), await binaries.ensureModel(FACE_DETECTION_MODEL));
+      const scan = yunetWorkerScanner({ runtime: await binaries.ensure(ONNX_RUNTIME_WEB), model: await binaries.ensureModel(FACE_DETECTION_MODEL) });
       const { ffmpeg } = await mediaTools();
       const path = join(tempDir(), "face.mp4");
       // 16:9, 6 s at 10 fps: the face sits at x 0.25 for 3 s, then at 0.75.
       const left = drawFace(512, 288, [{ x: 0.25, y: 0.45, size: 0.4 }]);
       const right = drawFace(512, 288, [{ x: 0.75, y: 0.45, size: 0.4 }]);
       await encodeFrames(ffmpeg, path, 512, 288, 10, Array.from({ length: 60 }, (_, i) => (i < 30 ? left : right)));
-      const found = await angleFaceKeys({ ffmpeg, path, width: 512, height: 288, duration: 6, detect });
+      const found = await scan({ ffmpeg, path, width: 512, height: 288, duration: 6 });
       expect(found).toMatchObject({ samples: 12, faces: 12 });
       expect(found.keys.map((key) => key.time)).toEqual([2.5, 3]);
       expect(found.keys[0]!.x).toBeCloseTo(0.25, 1);

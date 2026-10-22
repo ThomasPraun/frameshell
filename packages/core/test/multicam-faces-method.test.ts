@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import type { Angle, Timeline } from "@frameshell/schema";
-import { type Daemon, startDaemon } from "../src/index.js";
+import { type Daemon, angleFaceKeys, startDaemon } from "../src/index.js";
 import { makeMarkerClip, markerDetector } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
@@ -24,7 +24,7 @@ beforeAll(async () => {
     socketPath: uniqueSocketPath(),
     binaries: testBinaryManager(),
     idleTimeoutMs: Infinity,
-    faceDetector: async () => markerDetector,
+    faceScanner: (request) => angleFaceKeys({ ...request, detect: markerDetector }),
   });
   conn = await connectToDaemon(daemon.socketPath, { client: "cli/test", session: "term-1" });
   solo = await connectToDaemon(daemon.socketPath, { client: "cli/test" });
@@ -78,6 +78,11 @@ describe("multicam.faces", () => {
       const tx = history.transactions.find((entry) => entry.tx === result.tx)!;
       expect(tx.operations.map((op) => op.op)).toEqual(["multicam.reframe", "multicam.reframe"]);
       expect(tx.operations.map((op) => op.id)).toEqual(result.angles.map((entry) => entry.operation));
+
+      const { jobs } = await solo.request("job.list", { cwd: project });
+      expect(jobs.filter((job) => job.kind === "faces")).toEqual([
+        expect.objectContaining({ asset: "timelines/main.json", state: "done", step: null, progress: 1 }),
+      ]);
 
       await solo.request("revert", { cwd: project, target: result.tx! });
       expect(await angle("ana")).not.toHaveProperty("reframe");

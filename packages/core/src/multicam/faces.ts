@@ -1,9 +1,10 @@
 // Face-driven reframe keys (ADR 0016): sample frames with ffmpeg, find faces with YuNet on ONNX Runtime Web
-// (WebAssembly, in-process), follow the main face, then keep only the keys where it moves.
+// (WebAssembly, in a worker thread), follow the main face, then keep only the keys where it moves.
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import type { AngleCrop } from "@frameshell/schema";
 
 /** One face in a frame, in fractions of the frame: center `x`, `y` and size, plus the detector's score (0..1). */
@@ -244,7 +245,7 @@ export interface ReframeKeyOptions {
   deadband?: number;
   /** A position held for less than this many seconds is part of a move, not a stop. Default 1. */
   minHold?: number;
-  /** Seconds a move between two held positions takes, at most. Default 0.5. */
+  /** Seconds a move takes after a gap without faces. Default 0.5. */
   glide?: number;
   /** Samples a median smooths over. Default 5 (2.5 s at 2 per second). */
   window?: number;
@@ -259,11 +260,13 @@ interface Stretch {
 }
 
 /**
- * Reframe keys (source seconds) that follow `points`: smoothed by a running
- * median, cut into stretches where the face stays within `deadband`, short
- * stretches dropped as part of a move. Each stretch is held by a key at its
- * start and end (the first only at its end, the last only at its start: keys
- * hold outside them), and the move to the next starts `glide` before it.
+ * Reframe keys (source seconds) that follow `points`: smoothed by a centered
+ * median (detection is offline, so no lag), cut into stretches where the face
+ * stays within `deadband`, short stretches dropped as part of a move. Each
+ * stretch is held by a key at its start and end (the first only at its end,
+ * the last only at its start: keys hold outside them). The move to the next
+ * spans the faces seen moving between them, or the last `glide` seconds of a
+ * gap where no face was seen.
  */
 export function proposeReframeKeys(points: readonly FacePoint[], options: ReframeKeyOptions = {}): FacePoint[] {
   const { deadband = 0.05, minHold = 1, glide = 0.5, window = 5 } = options;
@@ -298,6 +301,8 @@ export function proposeReframeKeys(points: readonly FacePoint[], options: Refram
     }
   }
   const keys: FacePoint[] = [];
+  // Faces seen between two stops (dropped as too short) are the move itself: glide over their span.
+  const moving = (from: Stretch, to: Stretch) => smooth.some((point) => point.time > from.end && point.time < to.start);
   const key = (time: number, stretch: Stretch) => {
     const point = { time: Math.round(time * 1000) / 1000, x: round4(stretch.x), y: round4(stretch.y) };
     if (keys.at(-1)?.time === point.time) keys[keys.length - 1] = point;
@@ -306,7 +311,7 @@ export function proposeReframeKeys(points: readonly FacePoint[], options: Refram
   merged.forEach((stretch, i) => {
     const previous = merged[i - 1];
     if (previous) {
-      const moveFrom = Math.max(previous.end, stretch.start - glide);
+      const moveFrom = moving(previous, stretch) ? previous.end : Math.max(previous.end, stretch.start - glide);
       if (moveFrom > previous.end) key(moveFrom, previous);
       key(stretch.start, stretch);
     }
@@ -315,7 +320,7 @@ export function proposeReframeKeys(points: readonly FacePoint[], options: Refram
   return keys;
 }
 
-/** Each point's `x` and `y` replaced by the median over the `window` points around it. */
+/** Each point's `x` and `y` replaced by the median over the `window` points centered on it. */
 function medianSmooth(points: readonly FacePoint[], window: number): FacePoint[] {
   const half = Math.floor(Math.max(1, window) / 2);
   const median = (values: number[]) => {
@@ -333,8 +338,8 @@ function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000;
 }
 
-/** Input of {@link angleFaceKeys}. */
-export interface AngleFaceOptions {
+/** What a {@link FaceScanner} looks at: one angle's file. */
+export interface FaceScanRequest {
   ffmpeg: string;
   /** Absolute path of the angle's file. */
   path: string;
@@ -344,10 +349,19 @@ export interface AngleFaceOptions {
   /** Seconds of the file, for progress; unknown: no fraction. */
   duration?: number | undefined;
   crop?: AngleCrop | undefined;
-  detect: FaceDetector;
   /** 0..1 of the file looked at. */
   onProgress?: ((fraction: number) => void) | undefined;
+  /** Stops the scan; it then rejects. */
+  signal?: AbortSignal | undefined;
 }
+
+/** Input of {@link angleFaceKeys}. */
+export interface AngleFaceOptions extends FaceScanRequest {
+  detect: FaceDetector;
+}
+
+/** Samples, detects, follows and proposes keys for one angle's file. */
+export type FaceScanner = (request: FaceScanRequest) => Promise<AngleFaces>;
 
 /** What {@link angleFaceKeys} found in one angle's file. */
 export interface AngleFaces {
@@ -364,9 +378,64 @@ export async function angleFaceKeys(options: AngleFaceOptions): Promise<AngleFac
   const size = faceFrameSize(options.width, options.height);
   const samples: FaceSample[] = [];
   for await (const { time, frame } of sampleFaceFrames(options.ffmpeg, options.path, size)) {
+    options.signal?.throwIfAborted();
     samples.push({ time, faces: await options.detect(frame) });
     if (options.duration && options.duration > 0) options.onProgress?.(Math.min(1, time / options.duration));
   }
   const track = mainFaceTrack(samples, options.crop);
   return { samples: samples.length, faces: track.length, keys: proposeReframeKeys(track) };
+}
+
+/** Files the face worker loads: ONNX Runtime Web's module and the YuNet model. */
+export interface YunetFiles {
+  runtime: string;
+  model: string;
+}
+
+/** Messages from `faces-worker.js`. */
+export type FaceWorkerMessage =
+  | { type: "progress"; fraction: number }
+  | { type: "done"; result: AngleFaces }
+  | { type: "error"; message: string };
+
+/**
+ * Worker script beside this module. Under the test runner this module is the
+ * TypeScript source, so the worker runs from the build (`pnpm test` builds first).
+ */
+const FACE_WORKER = import.meta.url.endsWith(".ts")
+  ? new URL("../../dist/multicam/faces-worker.js", import.meta.url)
+  : new URL("./faces-worker.js", import.meta.url);
+
+/**
+ * {@link FaceScanner} running YuNet in a worker thread per scan, so decoding
+ * and inference never block the daemon's event loop. Aborting terminates it.
+ */
+export function yunetWorkerScanner(files: YunetFiles): FaceScanner {
+  return ({ onProgress, signal, ...request }) =>
+    new Promise<AngleFaces>((resolve, reject) => {
+      signal?.throwIfAborted();
+      const worker = new Worker(FACE_WORKER, { workerData: { ...files, ...request } });
+      const abort = () => {
+        void worker.terminate();
+        reject(signal!.reason as Error);
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      const settle = () => signal?.removeEventListener("abort", abort);
+      worker.on("message", (message: FaceWorkerMessage) => {
+        if (message.type === "progress") return onProgress?.(message.fraction);
+        settle();
+        void worker.terminate();
+        if (message.type === "done") resolve(message.result);
+        else reject(new Error(message.message));
+      });
+      worker.once("error", (error) => {
+        settle();
+        reject(error);
+      });
+      // A promise settles once: after a result this rejection is ignored.
+      worker.once("exit", (code) => {
+        settle();
+        reject(new Error(`face detection worker exited (code ${code}) without a result`));
+      });
+    });
 }

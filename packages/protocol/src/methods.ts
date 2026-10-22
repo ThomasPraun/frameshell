@@ -195,18 +195,19 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip"])
+    .enum(["ingest", "render", "clip", "faces"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`render`: export a timeline to a video file (`render` method). " +
-        "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`).",
+        "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
+        "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
     .string()
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
-        "`render` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
+        "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
     ),
   output: z
     .string()
@@ -217,15 +218,15 @@ const JobSchema = z.object({
     ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
-    .describe("`canceled`: the daemon stopped before the job finished; it is queued again when the project reopens."),
+    .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
-        "`clip`: render (the adapter plugin renders the composition).",
+        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1386,7 +1387,7 @@ export const methods = {
       "so one revert undoes the lot; the person corrects keys in the app or with `multicam.reframe` as usual. Angles that " +
       "already have keys are skipped (`kept`) unless `replace: true`; screens are never looked at. An angle where no face is " +
       "found is left as it was, with a warning. Takes a while on long recordings (progress arrives as `progress` " +
-      "notifications). Example: `{ group: \"g_1a2b3c\", angles: [\"ana\"] }`. Fails with InvalidOperation (group or angle " +
+      "notifications). It runs as a background job of kind `faces` (`job.list`), so it goes on if the caller disconnects. Example: `{ group: \"g_1a2b3c\", angles: [\"ana\"] }`. Fails with InvalidOperation (group or angle " +
       "missing, an angle named that is a screen), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg, ONNX " +
       "Runtime or the model cannot be fetched.",
     params: z.strictObject({

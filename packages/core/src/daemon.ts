@@ -30,7 +30,7 @@ import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync } from "./fs-util.js";
 import { BinaryManager } from "./binaries/manager.js";
-import { JobQueue } from "./jobs/queue.js";
+import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
@@ -41,7 +41,7 @@ import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multi
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
-import { type FaceDetector, angleFaceKeys, loadYunet } from "./multicam/faces.js";
+import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
 import { FACE_DETECTION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
@@ -93,8 +93,8 @@ export interface DaemonOptions {
   extractAudio?: AudioExtractor;
   /** Speaker diarization for `transcribe.speakers`. Defaults to sherpa-onnx from {@link DaemonOptions.binaries}. */
   diarize?: Diarizer;
-  /** Face detector for `multicam.faces`, made on first need. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}. */
-  faceDetector?: () => Promise<FaceDetector>;
+  /** Face scan of one angle for `multicam.faces`. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  faceScanner?: FaceScanner;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -341,6 +341,48 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     });
     await transactions.applied(key, tx);
     return result;
+  };
+  /** Results of jobs queued by {@link inJob}, by job id: a request that finds one running for its input waits it out. */
+  const awaitedJobs = new Map<string, Promise<unknown>>();
+  /**
+   * Run `work` as a background job of `jobs` and resolve with what it returns:
+   * the job (and its writes) goes on if the caller disconnects, `job.list` shows
+   * it, and the daemon stays up while it runs. A job of the same kind on the
+   * same input already running is waited for, then this one is queued.
+   */
+  const inJob = async <T>(job: Omit<JobRequest, "run">, work: (ctx: JobContext) => Promise<T>): Promise<T> => {
+    for (;;) {
+      let settle!: { resolve: (value: T) => void; reject: (error: unknown) => void };
+      const done = new Promise<T>((resolve, reject) => (settle = { resolve, reject }));
+      const info = jobs.enqueue({
+        ...job,
+        run: async (ctx) => {
+          try {
+            settle.resolve(await work(ctx));
+          } catch (error) {
+            settle.reject(error);
+            throw error;
+          }
+        },
+      });
+      const running = awaitedJobs.get(info.id);
+      if (running) {
+        await running.catch(() => {});
+        continue;
+      }
+      awaitedJobs.set(info.id, done);
+      const canceled = () => settle.reject(new RpcError(ErrorCode.InternalError, `The daemon stopped before job ${info.id} (${job.kind}) finished.`));
+      const stop = jobs.watch(({ job: change }) => {
+        if (change.id === info.id && change.state === "canceled") canceled();
+      });
+      if (info.state === "canceled") canceled();
+      try {
+        return await done;
+      } finally {
+        stop();
+        awaitedJobs.delete(info.id);
+      }
+    }
   };
   /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
   const turnsSource: TurnsSource = {
@@ -662,81 +704,102 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       const kept = replace === true ? [] : chosen.filter((angle) => angle.reframe).map((angle) => angle.id);
       const todo = chosen.filter((angle) => !kept.includes(angle.id));
-      const warnings: string[] = [];
-      const report: MethodResult<"multicam.faces">["angles"] = [];
-      const proposed = new Map<string, { at: number; x: number; y: number }[]>();
-      if (todo.length > 0) {
-        const project = await projectBinaries(dir);
-        const onProgress = request.progress;
-        const ffmpeg = await binaries.ensure("ffmpeg", project, { onProgress });
-        const detect = options.faceDetector
-          ? await options.faceDetector()
-          : await loadYunet(await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress }), await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress }));
-        for (const angle of todo) {
-          const probe = await media.probe(dir, angle.asset);
-          if (!probe.video || probe.video.still) {
-            warnings.push(`${angle.name} (${angle.asset}) has no moving picture: no keys.`);
-            report.push({ angle: angle.id, name: angle.name, samples: 0, faces: 0, keys: 0, operation: null });
+      // The caller may be gone (the job outlives it): its progress is then dropped.
+      const tell = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      return inJob({ kind: "faces", project: dir, asset: `timelines/${timeline}.json` }, async (ctx) => {
+        const warnings: string[] = [];
+        const report: MethodResult<"multicam.faces">["angles"] = [];
+        const proposed = new Map<string, { at: number; x: number; y: number }[]>();
+        if (todo.length > 0) {
+          const project = await projectBinaries(dir);
+          const ffmpeg = await binaries.ensure("ffmpeg", project, { onProgress: tell });
+          const scan =
+            options.faceScanner ??
+            yunetWorkerScanner({
+              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: tell }),
+              model: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
+            });
+          ctx.update({ step: "faces", progress: 0 });
+          for (const [index, angle] of todo.entries()) {
+            const probe = await media.probe(dir, angle.asset);
+            if (!probe.video || probe.video.still) {
+              warnings.push(`${angle.name} (${angle.asset}) has no moving picture: no keys.`);
+              report.push({ angle: angle.id, name: angle.name, samples: 0, faces: 0, keys: 0, operation: null });
+              continue;
+            }
+            const message = `Finding faces in ${angle.name}`;
+            const detected = await scan({
+              ffmpeg,
+              path: join(dir, ...angle.asset.split("/")),
+              width: probe.video.width,
+              height: probe.video.height,
+              duration: probe.duration ?? undefined,
+              crop: angle.crop,
+              signal: ctx.signal,
+              onProgress: (fraction) => {
+                ctx.update({ progress: (index + fraction) / todo.length });
+                tell({ message, fraction, stage: "faces", values: { angle: angle.name } });
+              },
+            });
+            // Keys sit on the group clock; a file that starts before the group loses what plays before group second 0.
+            const keys = detected.keys
+              .map((key) => ({ at: Math.round((key.time + angle.offset) * 1000) / 1000, x: key.x, y: key.y }))
+              .filter((key) => key.at >= 0);
+            if (keys.length > 0) proposed.set(angle.id, keys);
+            if (detected.faces === 0) warnings.push(`${angle.name}: no face found in ${detected.samples} frames, so it keeps its framing.`);
+            else if (detected.faces < detected.samples / 4) {
+              warnings.push(`${angle.name}: a face in only ${detected.faces} of ${detected.samples} frames; check its keys.`);
+            }
+            report.push({ angle: angle.id, name: angle.name, samples: detected.samples, faces: detected.faces, keys: keys.length, operation: null });
+          }
+        }
+        // Every write joins one transaction, so one revert undoes all angles.
+        const author = authorOf(caller);
+        const tx = transactions.next(author);
+        let revision = loaded.revision;
+        let wrote = false;
+        for (const entry of report) {
+          const keys = proposed.get(entry.angle);
+          if (!keys) continue;
+          await transactions.touching(author, tx, { root: dir, timeline });
+          const reframe = { op: "multicam.reframe" as const, args: { group, angle: entry.angle, keys } };
+          const result = await timelines
+            .apply({
+              root: dir,
+              cwd,
+              timeline,
+              request: reframe,
+              author: journalAuthorOf(caller),
+              tx,
+              // A person may have set keys while faces were being found: theirs stay unless `replace`.
+              prepare: async (current) => {
+                const now = current.groups?.find((candidate) => candidate.id === group)?.angles.find((angle) => angle.id === entry.angle);
+                if (replace !== true && now?.reframe) throw new KeptAngle();
+                return reframe;
+              },
+            })
+            .catch((error: unknown) => {
+              if (error instanceof KeptAngle) return null;
+              throw error;
+            });
+          if (!result) {
+            kept.push(entry.angle);
+            entry.keys = 0;
             continue;
           }
-          const message = `Finding faces in ${angle.name}`;
-          const detected = await angleFaceKeys({
-            ffmpeg,
-            path: join(dir, ...angle.asset.split("/")),
-            width: probe.video.width,
-            height: probe.video.height,
-            duration: probe.duration ?? undefined,
-            crop: angle.crop,
-            detect,
-            onProgress: (fraction) => onProgress({ message, fraction, stage: "faces", values: { angle: angle.name } }),
-          });
-          // Keys sit on the group clock; a file that starts before the group loses what plays before group second 0.
-          const keys = detected.keys.map((key) => ({ at: Math.round((key.time + angle.offset) * 1000) / 1000, x: key.x, y: key.y })).filter((key) => key.at >= 0);
-          if (keys.length > 0) proposed.set(angle.id, keys);
-          if (detected.faces === 0) warnings.push(`${angle.name}: no face found in ${detected.samples} frames, so it keeps its framing.`);
-          else if (detected.faces < detected.samples / 4) {
-            warnings.push(`${angle.name}: a face in only ${detected.faces} of ${detected.samples} frames; check its keys.`);
-          }
-          report.push({ angle: angle.id, name: angle.name, samples: detected.samples, faces: detected.faces, keys: keys.length, operation: null });
+          await transactions.applied(author, tx);
+          entry.operation = result.operation.id;
+          revision = result.revision;
+          wrote = true;
         }
-      }
-      // Every write joins one transaction, so one revert undoes all angles.
-      const author = authorOf(caller);
-      const tx = transactions.next(author);
-      let revision = loaded.revision;
-      let wrote = false;
-      for (const entry of report) {
-        const keys = proposed.get(entry.angle);
-        if (!keys) continue;
-        await transactions.touching(author, tx, { root: dir, timeline });
-        const result = await timelines.apply({
-          root: dir,
-          cwd,
-          timeline,
-          request: { op: "multicam.reframe", args: { group, angle: entry.angle, keys } },
-          author: journalAuthorOf(caller),
-          tx,
-          // A person may have set keys while faces were being found: theirs stay unless `replace`.
-          prepare: async (current) => {
-            const now = current.groups?.find((candidate) => candidate.id === group)?.angles.find((angle) => angle.id === entry.angle);
-            if (replace !== true && now?.reframe) throw new KeptAngle();
-            return { op: "multicam.reframe", args: { group, angle: entry.angle, keys } };
-          },
-        }).catch((error: unknown) => {
-          if (error instanceof KeptAngle) return null;
-          throw error;
-        });
-        if (!result) {
-          kept.push(entry.angle);
-          entry.keys = 0;
-          continue;
-        }
-        await transactions.applied(author, tx);
-        entry.operation = result.operation.id;
-        revision = result.revision;
-        wrote = true;
-      }
-      return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
+        return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
+      });
     },
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);

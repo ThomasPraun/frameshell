@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type Face, type FacePoint, angleFaceKeys, decodeYunet, faceFrameSize, mainFaceTrack, proposeReframeKeys } from "../src/index.js";
+import { type Face, type FacePoint, angleFaceKeys, decodeYunet, faceFrameSize, mainFaceTrack, proposeReframeKeys, yunetWorkerScanner } from "../src/index.js";
 import { makeMarkerClip, markerDetector } from "./face-fixture.js";
 import { tempDir } from "./helpers.js";
 import { mediaTools } from "./media-tools.js";
@@ -26,6 +26,15 @@ describe("proposeReframeKeys", () => {
     const keys = proposeReframeKeys([...still(0, 6, 0.25), ...still(6, 12, 0.7)]);
     expect(keys).toEqual([
       { time: 5.5, x: 0.25, y: 0.4 },
+      { time: 6, x: 0.7, y: 0.4 },
+    ]);
+  });
+
+  it("glides over the frames where the face was seen moving, without trailing the move", () => {
+    // The face slides from 0.25 at 5 s to 0.7 at 6 s; the frame at 5.5 s caught it halfway.
+    const keys = proposeReframeKeys([...still(0, 5.5, 0.25), { time: 5.5, x: 0.475, y: 0.4 }, ...still(6, 12, 0.7)]);
+    expect(keys).toEqual([
+      { time: 5, x: 0.25, y: 0.4 },
       { time: 6, x: 0.7, y: 0.4 },
     ]);
   });
@@ -126,4 +135,11 @@ describe("angleFaceKeys", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it("runs the real scan in a worker thread and passes its errors back", async () => {
+    const { ffmpeg } = await mediaTools();
+    const dir = tempDir();
+    const scan = yunetWorkerScanner({ runtime: join(dir, "missing.mjs"), model: join(dir, "missing.onnx") });
+    await expect(scan({ ffmpeg, path: join(dir, "none.mp4"), width: 320, height: 180 })).rejects.toThrow(/missing\.mjs/);
+  });
 });
