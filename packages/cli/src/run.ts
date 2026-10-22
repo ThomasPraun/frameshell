@@ -544,7 +544,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
         await settleTrust(conn, flags, io);
       }
-      return executeTimeline(conn, inv, cwd, flags.json);
+      const long = inv.method === "multicam.faces" && !flags.json;
+      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined);
     }
     case "render": {
       // Plugin presets load only for trusted projects.

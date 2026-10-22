@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Reframe keys from faces (ADR 0016, #277): `frameshell multicam faces <group> [<angle>…] [--replace]` (MCP `multicam_faces`) looks at 2 frames per second of each angle that is not a screen, follows the largest face inside its crop and writes `reframe` keys only where it moves, so a `vertical-1080x1920` export of 16:9 cameras keeps each person in frame. One `multicam.reframe` operation per angle in one transaction (one revert undoes the run); angles that already have keys are kept unless `--replace`; the person corrects keys as before. Runs only when asked, locally on CPU: the YuNet face detector (MIT, OpenCV model zoo) on ONNX Runtime Web (MIT, WebAssembly, one pin for every platform), about 33 MB downloaded from the builders on first use and listed by `doctor` (`docs/binaries.md`). `multicam.reframe` takes `keys` to replace every key at once. Protocol v51.
+
 ### Changed
 
 - Desktop: an image project has no transcript view (#289). Mod+Shift+T does nothing there, the editor's tab strip has no Transcript button, and transcript files in the explorer open as JSON. View > Transcript and File > New Image from Frame are disabled while an image project's window is focused.

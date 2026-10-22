@@ -41,6 +41,8 @@ import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multi
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
+import { type FaceDetector, angleFaceKeys, loadYunet } from "./multicam/faces.js";
+import { FACE_DETECTION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
@@ -91,6 +93,8 @@ export interface DaemonOptions {
   extractAudio?: AudioExtractor;
   /** Speaker diarization for `transcribe.speakers`. Defaults to sherpa-onnx from {@link DaemonOptions.binaries}. */
   diarize?: Diarizer;
+  /** Face detector for `multicam.faces`, made on first need. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}. */
+  faceDetector?: () => Promise<FaceDetector>;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -644,6 +648,96 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "multicam.reframe": (params, caller) => operate("multicam.reframe", params, caller),
     "multicam.paint": (params, caller) => operate("multicam.paint", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
+    "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await timelines.load(dir, timeline);
+      const found = groupOf(loaded, group, "multicam.faces");
+      const chosen = (named ?? found.angles.filter((angle) => angle.screen !== true).map((angle) => angle.id)).map((id) => {
+        const angle = found.angles.find((candidate) => candidate.id === id);
+        const invalid = (reason: string) =>
+          new RpcError(ErrorCode.InvalidOperation, `multicam.faces: ${reason}`, { op: "multicam.faces", reason, field: "angles" });
+        if (!angle) throw invalid(`group ${group} has no angle "${id}" (angles: ${found.angles.map((candidate) => candidate.id).join(", ")}).`);
+        if (angle.screen === true) throw invalid(`angle ${id} is a screen: screens are never cut, so they take no reframe keys.`);
+        return angle;
+      });
+      const kept = replace === true ? [] : chosen.filter((angle) => angle.reframe).map((angle) => angle.id);
+      const todo = chosen.filter((angle) => !kept.includes(angle.id));
+      const warnings: string[] = [];
+      const report: MethodResult<"multicam.faces">["angles"] = [];
+      const proposed = new Map<string, { at: number; x: number; y: number }[]>();
+      if (todo.length > 0) {
+        const project = await projectBinaries(dir);
+        const onProgress = request.progress;
+        const ffmpeg = await binaries.ensure("ffmpeg", project, { onProgress });
+        const detect = options.faceDetector
+          ? await options.faceDetector()
+          : await loadYunet(await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress }), await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress }));
+        for (const angle of todo) {
+          const probe = await media.probe(dir, angle.asset);
+          if (!probe.video || probe.video.still) {
+            warnings.push(`${angle.name} (${angle.asset}) has no moving picture: no keys.`);
+            report.push({ angle: angle.id, name: angle.name, samples: 0, faces: 0, keys: 0, operation: null });
+            continue;
+          }
+          const message = `Finding faces in ${angle.name}`;
+          const detected = await angleFaceKeys({
+            ffmpeg,
+            path: join(dir, ...angle.asset.split("/")),
+            width: probe.video.width,
+            height: probe.video.height,
+            duration: probe.duration ?? undefined,
+            crop: angle.crop,
+            detect,
+            onProgress: (fraction) => onProgress({ message, fraction, stage: "faces", values: { angle: angle.name } }),
+          });
+          // Keys sit on the group clock; a file that starts before the group loses what plays before group second 0.
+          const keys = detected.keys.map((key) => ({ at: Math.round((key.time + angle.offset) * 1000) / 1000, x: key.x, y: key.y })).filter((key) => key.at >= 0);
+          if (keys.length > 0) proposed.set(angle.id, keys);
+          if (detected.faces === 0) warnings.push(`${angle.name}: no face found in ${detected.samples} frames, so it keeps its framing.`);
+          else if (detected.faces < detected.samples / 4) {
+            warnings.push(`${angle.name}: a face in only ${detected.faces} of ${detected.samples} frames; check its keys.`);
+          }
+          report.push({ angle: angle.id, name: angle.name, samples: detected.samples, faces: detected.faces, keys: keys.length, operation: null });
+        }
+      }
+      // Every write joins one transaction, so one revert undoes all angles.
+      const author = authorOf(caller);
+      const tx = transactions.next(author);
+      let revision = loaded.revision;
+      let wrote = false;
+      for (const entry of report) {
+        const keys = proposed.get(entry.angle);
+        if (!keys) continue;
+        await transactions.touching(author, tx, { root: dir, timeline });
+        const result = await timelines.apply({
+          root: dir,
+          cwd,
+          timeline,
+          request: { op: "multicam.reframe", args: { group, angle: entry.angle, keys } },
+          author: journalAuthorOf(caller),
+          tx,
+          // A person may have set keys while faces were being found: theirs stay unless `replace`.
+          prepare: async (current) => {
+            const now = current.groups?.find((candidate) => candidate.id === group)?.angles.find((angle) => angle.id === entry.angle);
+            if (replace !== true && now?.reframe) throw new KeptAngle();
+            return { op: "multicam.reframe", args: { group, angle: entry.angle, keys } };
+          },
+        }).catch((error: unknown) => {
+          if (error instanceof KeptAngle) return null;
+          throw error;
+        });
+        if (!result) {
+          kept.push(entry.angle);
+          entry.keys = 0;
+          continue;
+        }
+        await transactions.applied(author, tx);
+        entry.operation = result.operation.id;
+        revision = result.revision;
+        wrote = true;
+      }
+      return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
+    },
     "multicam.turns": async ({ cwd, timeline, group }) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await timelines.load(dir, timeline);
@@ -881,6 +975,9 @@ function transactionKey(author: string): string {
   if (!match) return author;
   return match[1] ? `cli:${match[1]}` : "cli";
 }
+
+/** Thrown from `multicam.faces`' prepare step: the angle got keys meanwhile, so nothing is written for it. */
+class KeptAngle extends Error {}
 
 /** Group `group` of `timeline`; InvalidOperation for `op` listing the groups there are. */
 function groupOf(timeline: Timeline, group: string, op: string): MulticamGroup {

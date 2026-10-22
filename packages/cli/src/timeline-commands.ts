@@ -3,11 +3,13 @@ import type {
   HistoryResult,
   MulticamCreateResult,
   MulticamDirectResult,
+  MulticamFacesResult,
   MulticamGalleryResult,
   MulticamTurnsResult,
   MethodName,
   MethodResult,
   OperationResult,
+  Progress,
   TimelineProblem,
   TimelineView,
   TrackSummary,
@@ -74,6 +76,12 @@ mutations print the new revision):
                                centering the cut on --x/--y (fractions of the picture, 0 left/top, 1 right/bottom;
                                omitted: the point there now). The point moves in a straight line between keys and
                                holds outside them. --remove deletes the key in that frame, --clear every key
+  multicam faces <group> [<angle>…] [--replace]
+                               Propose reframe keys from faces: looks at 2 frames per second of each angle (default:
+                               every angle that is not a screen), follows the largest face in its crop and writes keys
+                               where it moves, in one transaction (one revert undoes it). Skips angles that already
+                               have keys unless --replace. First run downloads ONNX Runtime and the YuNet face
+                               detector (about 33 MB). Correct the keys with multicam reframe or in the app
   multicam paint <group> [<angle>] --from s --to s (--speaking [--alone] | --silent | --measured)
                                Correct who speaks by hand, on the group clock: --speaking marks the angle as
                                speaking from --from to --to (--alone: everyone else that can speak is silent
@@ -189,6 +197,7 @@ export const TIMELINE_OPTIONS = {
   template: { type: "string" },
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
+  replace: { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -226,6 +235,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam angle": ["name", "crop-left", "crop-top", "crop-right", "crop-bottom", "clear-crop", "gain", "muted", "unmuted", "mic", "screen", "no-screen", "speaker", "clear-speaker"],
   "multicam mic": ["name", "offset", "gain", "muted", "unmuted"],
   "multicam reframe": ["time", "at", "x", "y", "remove", "clear"],
+  "multicam faces": ["replace"],
   "multicam paint": ["from", "to", "speaking", "silent", "measured", "alone"],
   "shot set": ["layout", "angles", "corner"],
   "multicam turns": [],
@@ -257,6 +267,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam angle": [2, 2],
   "multicam mic": [2, 2],
   "multicam reframe": [2, 2],
+  "multicam faces": [1, Number.POSITIVE_INFINITY],
   "multicam paint": [1, 2],
   "shot set": [1, 1],
   "multicam turns": [1, 1],
@@ -526,6 +537,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       });
       break;
     }
+    case "multicam faces":
+      method = "multicam.faces";
+      Object.assign(params, {
+        group: args[0],
+        angles: args.length > 1 ? args.slice(1) : undefined,
+        replace: values["replace"] === true ? true : undefined,
+      });
+      break;
     case "multicam paint": {
       method = "multicam.paint";
       const kinds = ["speaking", "silent", "measured"].filter((flag) => values[flag] === true);
@@ -588,11 +607,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   return { kind: "timeline", method, params: clean(params)!, withCwd: true };
 }
 
-/** Run a parsed timeline command; returns stdout text. */
-export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvocation, cwd: string, json: boolean): Promise<string> {
+/** Run a parsed timeline command; returns stdout text. `onProgress` gets the progress of long ones (`multicam faces`). */
+export async function executeTimeline(
+  conn: DaemonConnection,
+  inv: TimelineInvocation,
+  cwd: string,
+  json: boolean,
+  onProgress?: (progress: Progress) => void,
+): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
   // Params are validated by the daemon against the method registry.
-  const result = (await conn.request(inv.method, params as never)) as unknown;
+  const result = (await conn.request(inv.method, params as never, onProgress ? { onProgress } : {})) as unknown;
   if (inv.method === "timeline.show") {
     // Compact on purpose: agents read this, and indentation roughly doubles its tokens.
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
@@ -617,6 +642,7 @@ export async function executeTimeline(conn: DaemonConnection, inv: TimelineInvoc
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
+  if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   return formatOperation(result as OperationResult);
 }
 
@@ -637,6 +663,18 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
     lines.push(`  ${shot.clip}  ${shot.start}–${shot.end} s  ${shot.shot} ${shot.angles.join(",")}  ${Math.round(shot.confidence * 100)}%  ${shot.reason}`);
   }
   return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatMulticamFaces(result: MulticamFacesResult): string {
+  const lines = [`Faces in group ${result.group}:`];
+  for (const angle of result.angles) {
+    const keys = angle.keys > 0 ? `${angle.keys} key${angle.keys === 1 ? "" : "s"} (op ${angle.operation})` : "no keys";
+    lines.push(`  ${angle.angle}  ${angle.name}  face in ${angle.faces} of ${angle.samples} frames  ${keys}`);
+  }
+  if (result.kept.length > 0) lines.push(`Kept the keys of ${result.kept.join(", ")} (--replace redoes them)`);
+  lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatMulticamCreate(result: MulticamCreateResult): string {
