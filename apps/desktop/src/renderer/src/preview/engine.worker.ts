@@ -15,7 +15,16 @@ import {
   heardTime,
   programSample,
 } from "./engine-protocol.js";
-import { type AngleSpan, type Program, type VideoSpan, angleLayer, firstAudioDifference, firstVideoDifference, programAt } from "./program.js";
+import {
+  type AngleSpan,
+  type Program,
+  type VideoSpan,
+  angleLayer,
+  firstAudioDifference,
+  firstVideoDifference,
+  programAt,
+  spanPlacement,
+} from "./program.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
 import { type EncodedPicture, type VideoSource, isReadWhole, openVideoSource } from "./video-source.js";
 
@@ -99,7 +108,7 @@ interface LayerHost {
 function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | null {
   if (span.kind === "media" || span.kind === "angle") return { path: span.proxy, timing: span };
   if (span.kind === "generated" && span.render?.state === "ready") {
-    return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: 1 } };
+    return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: span.hold ? 0 : 1 } };
   }
   return null;
 }
@@ -654,11 +663,14 @@ class Engine implements LayerHost {
       pipeline.dropBefore(want);
       const span = programAt(program, want, pipeline.layer);
       if (!span || span.kind === "placeholder") continue;
+      // Keys and transitions (ADR 0018) move or fade a picture from frame to frame, even one that holds.
+      const placement = span.kind === "angle" ? IDENTITY_PLACEMENT : spanPlacement(span, want, program.fps);
+      if (span.kind !== "angle" && span.motion) key += `|m${pipeline.layer}@${want}`;
       if (span.kind === "still") {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement: span.placement, angle: null, frame: want });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -673,7 +685,7 @@ class Engine implements LayerHost {
           // Shots fill opaque tiles: an angle's alpha plane is not used.
           parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span, frame: want });
         } else {
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement: span.placement, angle: null, frame: want });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -741,6 +753,7 @@ class Engine implements LayerHost {
         context.drawImage(part.image, crop.left * fx, crop.top * fy, crop.width * fx, crop.height * fy, tile.left, tile.top, tile.width, tile.height);
         continue;
       }
+      if (part.placement.opacity <= 0) continue;
       const rect = layerRect(part.size, output, project, part.placement);
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {

@@ -31,7 +31,10 @@ export interface DecodeStep {
   to: number;
 }
 
-/** Placement of a media span: program frames `[start, end)` showing source frame `in` at `start`, `speed` source frames per frame. */
+/**
+ * Placement of a media span: program frames `[start, end)` showing source frame `in` at `start`, `speed` source
+ * frames per frame (0: `in` holds).
+ */
 export interface SpanTiming {
   start: number;
   end: number;
@@ -50,8 +53,11 @@ export interface SpanTiming {
 export function* decodeSteps(span: SpanTiming, from: number, table: SyncTable): Generator<DecodeStep> {
   const last = table.count - 1;
   if (last < 0) return;
-  // Round half down: a held frame changes on the later program frame, as export's `fps` filter does.
-  const source = (frame: number) => Math.min(last, Math.max(0, span.in + Math.ceil((frame - span.start) * span.speed - 0.5)));
+  // Round half down: a held frame changes on the later program frame, as export's `fps` filter does. `in` is
+  // fractional only for a piece of a sped-up clip (a dissolve's split, ADR 0018); the fraction joins the rounding.
+  const whole = Math.floor(span.in);
+  const fraction = span.in - whole;
+  const source = (frame: number) => Math.min(last, Math.max(0, whole + Math.ceil(fraction + (frame - span.start) * span.speed - 0.5)));
   let frame = Math.max(from, span.start);
   let next = -1;
   while (frame < span.end) {
