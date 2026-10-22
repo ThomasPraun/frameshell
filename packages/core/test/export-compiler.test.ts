@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import type { Timeline, Transcript } from "@frameshell/schema";
+import type { Clip, Timeline, Transcript } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -356,5 +356,137 @@ describe("export compiler", () => {
     const stats = (i: string) => JSON.stringify({ ...MEASURED, input_i: i, output_i: "-17.0" });
     expect(parseLoudnessStats(stats("-23.10"))).toEqual(MEASURED);
     expect(parseLoudnessStats(stats("-inf"))).toBeNull();
+  });
+
+  describe("transitions and keys (ADR 0018)", () => {
+    /** The fixture sources with probed lengths: media handles after `out` need them. */
+    const sized = new Map([...sources].map(([asset, source]) => [asset, source.video?.still ? source : { ...source, duration: 20 }]));
+    const animated: Timeline = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 4,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_talk1", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 6.2, fadeIn: 0.5 },
+            // Dissolve from c_talk1's tail; c_talk2's head is a layer over it.
+            { id: "c_talk2", type: "media", asset: "assets/talk.mp4", start: 3, in: 10, out: 12, dissolve: 1 },
+            // From source 0: no handle before it, so a dip through black.
+            { id: "c_talk3", type: "media", asset: "assets/talk.mp4", start: 5, in: 0, out: 1, dissolve: 0.4 },
+            // A render's head holds its first frame.
+            { id: "c_end", type: "hyperframes", source: "compositions/end/index.html", start: 6, duration: 1, dissolve: 0.5, fadeOut: 0.3 },
+          ],
+        },
+        {
+          id: "v2",
+          kind: "video",
+          clips: [
+            { id: "c_logo1", type: "media", asset: "assets/logo.png", start: 0.5, in: 0, out: 2, transform: { scale: 0.3, x: -600, y: -300 } },
+            {
+              id: "c_logo2",
+              type: "media",
+              asset: "assets/logo.png",
+              start: 2.5,
+              in: 0,
+              out: 2,
+              dissolve: 0.6,
+              transform: { y: 200 },
+              keys: {
+                x: [
+                  { at: 0, value: -400, ease: "in-out" },
+                  { at: 1.5, value: 400 },
+                ],
+                scale: [
+                  { at: 0.2, value: 0.2, ease: "out" },
+                  { at: 1, value: 0.5 },
+                ],
+                opacity: [
+                  { at: 0.5, value: 1, ease: "in" },
+                  { at: 1.8, value: 0.3 },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          id: "a1",
+          kind: "audio",
+          clips: [
+            {
+              id: "c_music1",
+              type: "media",
+              asset: "assets/music.wav",
+              start: 0,
+              in: 0,
+              out: 4,
+              fadeIn: 1,
+              keys: {
+                gain: [
+                  { at: 1, value: -24, ease: "in-out" },
+                  { at: 3, value: -12 },
+                ],
+              },
+            },
+            { id: "c_music2", type: "media", asset: "assets/music.wav", start: 4, in: 10, out: 13, dissolve: 2, fadeOut: 1, audio: { gain: -15 } },
+          ],
+        },
+      ],
+    };
+    const generated = new Map([["c_end", { path: "/project/.frameshell/cache/clips/bbbb.mp4", hasAlpha: false, width: 1920, height: 1080 }]]);
+    const input = { timeline: animated, fps: 30, preset: youtube1080, loudness: -17, sources: sized, resolution, generated, segmentSeconds: 2 };
+    const animatedPlan = compileRender(input);
+
+    it("compiles dissolves, dips, fades, held render frames, keyed layers and sound envelopes (golden)", () => {
+      golden("transitions-plan", {
+        segments: animatedPlan.segments,
+        files: animatedPlan.files,
+        audio: animatedPlan.audio,
+        mix: mixStep(animatedPlan),
+        frame: compileFrame({ ...input, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
+      });
+      expect(animatedPlan).toMatchObject({ frames: 210, duration: 7 });
+    });
+
+    it("draws an incoming dissolve over the outgoing clip's tail, never an xfade, and concatenates the bottom track around it", () => {
+      const graphs = Object.values(animatedPlan.files).join("\n");
+      expect(graphs).not.toContain("xfade");
+      // c_talk2's head: 0.5 s each side of the cut at 3 s, rising alpha over the extended c_talk1.
+      expect(graphs).toContain("fade=t=in:alpha=1:st=2.5:d=1");
+      // The dip: c_talk2 fades to black over its last 0.2 s, c_talk3 in from black.
+      expect(graphs).toContain("fade=t=out:st=4.8:d=0.2");
+      expect(graphs).toContain("fade=t=in:st=5:d=0.2");
+      // The render's head (8 frames before 6 s): 7 clones of its first rendered frame, then that frame.
+      expect(graphs).toContain("trim=end_frame=1,setpts=PTS-STARTPTS,tpad=start=7:start_mode=clone");
+    });
+
+    it("crossfades sound on a second sequence of the track, the outgoing clip read into its handle", () => {
+      // v1's sound takes two sequences (c_talk2 dissolves in), a1 two (c_music2 crossfades).
+      expect(animatedPlan.audio.tracks).toHaveLength(4);
+      const [, , music, crossfade] = animatedPlan.audio.tracks;
+      // c_music1 plays 0-5 s: 1 s past its out, the second half of c_music2's 2 s crossfade.
+      expect(music![0]).toMatchObject({ kind: "clip", clip: "c_music1", from: 0, to: 240_000, samples: 240_000, gainDb: 0 });
+      expect(crossfade!.map((item) => item.kind)).toEqual(["silence", "clip"]);
+      expect(crossfade![1]).toMatchObject({ kind: "clip", clip: "c_music2", from: 432_000, gainDb: -15 });
+      const graph = mixStep(animatedPlan)!.files["mix.filter"]!;
+      expect(graph).toContain("curve=qsin");
+      expect(graph).toContain(":eval=frame");
+    });
+
+    it("leaves a timeline without transitions or keys compiling exactly as before", () => {
+      const plain: Timeline = {
+        ...animated,
+        tracks: animated.tracks.map((track) =>
+          track.kind === "subtitles" || track.kind === "program"
+            ? track
+            : { ...track, clips: track.clips.map(({ dissolve: _d, fadeIn: _i, fadeOut: _o, keys: _k, ...clip }) => clip as Clip) },
+        ),
+      };
+      const withSizes = compileRender({ ...input, timeline: plain });
+      const withoutSizes = compileRender({ ...input, timeline: plain, sources });
+      expect(withSizes).toEqual(withoutSizes);
+      expect(JSON.stringify(withSizes)).not.toMatch(/qsin|eval=frame|alpha=1|clone/);
+    });
   });
 });
