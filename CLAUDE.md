@@ -30,6 +30,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Daemon events (subscribe, notifications, reconnect) | `notifications` in `packages/protocol/src/methods.ts`; `packages/core/src/events.ts`; `apps/desktop/src/main/daemon-link.ts` |
 | Image projects (`kind: image`, layers, export as image, Layers panel, start from pictures or a video frame) | ADR 0017; `apps/desktop/src/main/image-layers.ts`, `main/frame-image.ts` (image from a video frame), `renderer/src/components/LayersPanel.tsx`, `renderer/src/layers/model.ts`; `useProjectKind` in `renderer/src/preview/useProgram.ts` |
 | Timeline panel (canvas layout, paint, live updates, scene band from `script.outline` spans) | `apps/desktop/src/renderer/src/timeline/` (`scenes.ts` = band data); ADR 0015 |
+| Transition marks, key diamonds, edge right-click menu, inspector Transitions + Keyframes (hidden in image projects) | `timeline/transitions.ts`, `components/ClipInspector.tsx`; ADR 0018 |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
 | Multicam model (groups, angles, program track, shots: invariants, shot layout + sound) | `packages/schema/src/timeline.ts`, `composite.ts` (`shotLayers`, `shotSound`); engine `checkShots`; SPEC §5.3; ADR 0016 |
 | Clip inspector, preview layer handles | `renderer/src/components/ClipInspector.tsx`, `renderer/src/preview/transform-edit.ts` |

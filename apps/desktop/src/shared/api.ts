@@ -120,7 +120,8 @@ export type AssetChange = { path: string; asset: AssetInfo | null } | { path: nu
  * (rippled trim or insert); clip settings (transform, gain, mute) from the
  * clip inspector and the preview's handles; subtitle tracks added from the
  * timeline and styled from their inspector; shots and multicam angles from
- * the shot inspector, who speaks painted on the timeline's turn lanes.
+ * the shot inspector, who speaks painted on the timeline's turn lanes; transitions from a clip edge's menu and
+ * the clip inspector, which also keys properties.
  */
 export const TIMELINE_EDIT_OPS = [
   "clip.move",
@@ -130,6 +131,9 @@ export const TIMELINE_EDIT_OPS = [
   "cut",
   "clip.add",
   "clip.set",
+  "clip.key",
+  "transition.set",
+  "transition.remove",
   "track.add",
   "track.set",
   "track.remove",

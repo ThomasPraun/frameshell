@@ -1,8 +1,12 @@
+import type { ClipKey } from "@frameshell/schema";
+import { keyedValueAt } from "@frameshell/schema/composite";
 import { useEffect, useMemo, useState } from "react";
-import type { TimelineEdit } from "../../../shared/api.js";
+import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
+import { useTransport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
+import { type EdgeState, KEY_PROPS, type KeyBox, type KeyProp, clipClock, edgeState, keyAt } from "../timeline/transitions.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { t } from "../i18n.js";
 import { sendClipEdit } from "./clip-edits.js";
@@ -15,10 +19,13 @@ import { ShotInspector } from "./ShotInspector.js";
  * shot's layout and angles in {@link ShotInspector}. Each
  * change is one `clip.set` by `ui`, saved at once and undoable from the
  * timeline; values shown are the saved ones, from the shared timeline feed.
+ * Video projects add the clip's edge transitions and keyframes (ADR 0018):
+ * a keyed property shows its value at the playhead, and editing it keys it there.
  */
 export function ClipInspector() {
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const { clips } = useSelection();
+  const { time: playhead, fps } = useTransport();
   const image = useProjectKind() === "image";
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const [error, setError] = useState<string | null>(null);
@@ -35,13 +42,16 @@ export function ClipInspector() {
   }
   const { row, clip } = target;
   if (clip.shot && view) return <ShotInspector row={row} clip={clip} shot={clip.shot} view={view} />;
-  const send = (edit: TimelineEdit) => {
+  const send = (edit: TimelineEdit, options?: EditOptions) => {
     setError(null);
-    sendClipEdit(edit).catch((failure: unknown) => setError((failure as Error).message));
+    sendClipEdit(edit, options).catch((failure: unknown) => setError((failure as Error).message));
   };
   const transform = clip.transform ?? { x: 0, y: 0, scale: 1, opacity: 1 };
+  // A keyed property follows its keys, so an entry there keys it at the playhead instead of changing the unused static value.
+  const keyed = (prop: KeyProp) => keyedValueAt(clip.keys[prop] as ClipKey[] | undefined, clipClock(clip, playhead));
+  const setKeyed = (prop: KeyProp, value: number) => send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, value } }, { label: "Change keyframe" });
   const setTransform = (name: "x" | "y" | "scale" | "opacity", value: number) =>
-    send({ op: "clip.set", args: { clip: clip.id, transform: { [name]: value } } });
+    clip.keys[name] ? setKeyed(name, value) : send({ op: "clip.set", args: { clip: clip.id, transform: { [name]: value } } });
   const placed = row.kind === "video";
   // An image project has no sound (ADR 0017).
   const audible = clip.kind === "media" && !image;
@@ -56,7 +66,7 @@ export function ClipInspector() {
       {placed && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.placement}>
           {(["x", "y", "scale", "opacity"] as const).map((name) => (
-            <NumberField key={name} name={name} stored={transform[name]} onCommit={(value) => setTransform(name, value)} />
+            <NumberField key={name} name={name} stored={keyed(name) ?? transform[name]} onCommit={(value) => setTransform(name, value)} />
           ))}
           <button
             className="clip-inspector-button"
@@ -82,7 +92,12 @@ export function ClipInspector() {
       )}
       {audible && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.sound}>
-          <NumberField name="gain" stored={clip.gain} disabled={clip.muted} onCommit={(value) => send({ op: "clip.set", args: { clip: clip.id, gain: value } })} />
+          <NumberField
+            name="gain"
+            stored={keyed("gain") ?? clip.gain}
+            disabled={clip.muted}
+            onCommit={(value) => (clip.keys.gain ? setKeyed("gain", value) : send({ op: "clip.set", args: { clip: clip.id, gain: value } }))}
+          />
           <button
             className={`clip-inspector-button clip-inspector-mute${clip.muted ? " on" : ""}`}
             aria-pressed={clip.muted}
@@ -91,6 +106,27 @@ export function ClipInspector() {
           >
             {t.inspector.mute}
           </button>
+        </div>
+      )}
+      {!image && (
+        <div className="clip-inspector-group" role="group" aria-label={t.inspector.transitions}>
+          {(["in", "out"] as const).map((side) => (
+            <TransitionEdge key={side} side={side} state={edgeState(row, clip, side)} onSend={send} />
+          ))}
+        </div>
+      )}
+      {!image && (placed || audible) && (
+        <div className="clip-inspector-group" role="group" aria-label={t.inspector.keyframes}>
+          {KEY_PROPS.filter((prop) => (prop === "gain" ? audible : placed)).map((prop) => (
+            <KeyControl
+              key={prop}
+              prop={prop}
+              keyed={clip.keys[prop] !== undefined}
+              atKey={keyAt(clip, clip.keys[prop], playhead, fps)}
+              outside={playhead < clip.start || playhead > clip.end}
+              onSend={(args, label) => send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, ...args } }, { label })}
+            />
+          ))}
         </div>
       )}
       {!placed && !audible && <span className="clip-inspector-hint">{t.inspector.nothingToAdjust}</span>}
@@ -109,4 +145,102 @@ function find(rows: readonly TrackRow[], id: string): { row: TrackRow; clip: Cli
     if (clip) return { row, clip };
   }
   return null;
+}
+
+const EDGE_LABELS = { in: () => t.inspector.transitionStart, out: () => t.inspector.transitionEnd };
+const PROP_LABELS: Record<KeyProp, () => string> = {
+  x: () => t.inspector.fieldX,
+  y: () => t.inspector.fieldY,
+  scale: () => t.inspector.fieldScale,
+  opacity: () => t.inspector.fieldOpacity,
+  gain: () => t.inspector.fieldGain,
+};
+/** Seconds a new transition plays over (the daemon's default). */
+const DEFAULT_TRANSITION_S = 0.5;
+
+/**
+ * One edge's transition: kind (none, dissolve, fade; a dissolve needs a cut) and length. The daemon applies it to
+ * every video and audio track with an edge at that time, as `transition.set` does without `tracks`.
+ */
+function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: EdgeState; onSend: (edit: TimelineEdit, options: EditOptions) => void }) {
+  const edge = EDGE_LABELS[side]();
+  const kinds = [
+    { id: "none", label: t.inspector.transitionNone },
+    ...(state.butted || state.kind === "dissolve" ? [{ id: "dissolve", label: t.inspector.transitionDissolve }] : []),
+    { id: "fade", label: t.inspector.transitionFade },
+  ];
+  const set = (kind: "dissolve" | "fade", duration: number, label: string) => onSend({ op: "transition.set", args: { at: state.at, kind, duration } }, { label });
+  return (
+    <span className="transition-edge" data-edge={side}>
+      <select
+        className="clip-field-select"
+        aria-label={t.inspector.transitionEdge(edge)}
+        title={t.inspector.transitionEdgeTitle(edge)}
+        value={state.kind ?? "none"}
+        onChange={(event) => {
+          const kind = event.target.value;
+          if (kind === "none") onSend({ op: "transition.remove", args: { at: state.at } }, { label: "Remove transition" });
+          else set(kind as "dissolve" | "fade", state.length > 0 ? state.length : DEFAULT_TRANSITION_S, kind === "dissolve" ? "Add dissolve" : "Add fade");
+        }}
+      >
+        {kinds.map((kind) => (
+          <option key={kind.id} value={kind.id}>{`${edge}: ${kind.label}`}</option>
+        ))}
+      </select>
+      {state.kind && <NumberField name="length" stored={state.length} onCommit={(value) => set(state.kind!, value, "Change transition length")} />}
+    </span>
+  );
+}
+
+/**
+ * One property's keyframe at the playhead: a diamond that adds one there (value: what plays now) or, when there is
+ * one, removes it, and the ease the value leaves it by. The diamond is outlined once the property has any key.
+ */
+function KeyControl({
+  prop,
+  keyed,
+  atKey,
+  outside,
+  onSend,
+}: {
+  prop: KeyProp;
+  keyed: boolean;
+  atKey: KeyBox | null;
+  outside: boolean;
+  onSend: (args: { ease?: KeyBox["ease"]; remove?: boolean }, label: string) => void;
+}) {
+  const label = PROP_LABELS[prop]();
+  const name = label.toLowerCase();
+  return (
+    <span className={`key-control${keyed ? " is-keyed" : ""}`} data-prop={prop}>
+      <span className="key-control-label">{label}</span>
+      <button
+        className={`clip-inspector-button key-button${atKey ? " on" : ""}`}
+        aria-pressed={atKey !== null}
+        aria-label={atKey ? t.inspector.keyRemove(name) : t.inspector.keyAdd(name)}
+        title={atKey ? t.inspector.keyRemove(name) : t.inspector.keyAdd(name)}
+        disabled={outside && !atKey}
+        onClick={() => (atKey ? onSend({ remove: true }, "Remove keyframe") : onSend({}, "Add keyframe"))}
+      >
+        <svg viewBox="0 0 10 10" aria-hidden="true">
+          <path d="M5 1 9 5 5 9 1 5Z" fill={atKey ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      </button>
+      {atKey && (
+        <select
+          className="clip-field-select"
+          aria-label={t.inspector.keyEase(name)}
+          title={t.inspector.keyEaseTitle}
+          value={atKey.ease ?? "linear"}
+          onChange={(event) => onSend({ ease: event.target.value as KeyBox["ease"] }, "Change keyframe")}
+        >
+          {Object.entries(t.inspector.keyEases).map(([id, text]) => (
+            <option key={id} value={id}>
+              {text}
+            </option>
+          ))}
+        </select>
+      )}
+    </span>
+  );
 }

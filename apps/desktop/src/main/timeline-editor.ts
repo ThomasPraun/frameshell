@@ -33,6 +33,9 @@ export const BURST_GAP_MS = 1_500;
 const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "clip.add": "Insert",
   "clip.set": "Edit",
+  "clip.key": "Edit",
+  "transition.set": "Add",
+  "transition.remove": "Remove",
   "clip.move": "Move",
   "clip.trim": "Trim",
   "clip.split": "Split",
@@ -53,8 +56,10 @@ function editNoun(edits: readonly TimelineEdit[]): string {
   const prefixes: [string, string][] = [
     ["track.", "track"],
     ["shot.", "shot"],
+    ["transition.", "transition"],
     ["multicam.", "angle"],
   ];
+  if (edits.every((edit) => edit.op === "clip.key")) return "keyframe";
   return prefixes.find(([prefix]) => edits.every((edit) => edit.op.startsWith(prefix)))?.[1] ?? "clip";
 }
 

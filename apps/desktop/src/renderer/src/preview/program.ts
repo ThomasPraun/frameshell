@@ -763,7 +763,7 @@ function hasEdges(weights: EdgeWeights): boolean {
 }
 
 /** Seconds of material `clip` draws from, for its handles: the asset's duration, unlimited for a still; unknown otherwise. */
-function sourceSeconds(clip: Clip, assets: ReadonlyMap<string, AssetInfo>): number | undefined {
+export function sourceSeconds(clip: Clip, assets: ReadonlyMap<string, AssetInfo>): number | undefined {
   if (!("asset" in clip)) return undefined;
   const media = assets.get(clip.asset)?.media;
   if (media?.video?.still) return Number.POSITIVE_INFINITY;
