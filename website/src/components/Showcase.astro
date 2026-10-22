@@ -252,6 +252,7 @@ const anglePic = [
                   <span style="flex: 1; height: 0.35cqw; border-radius: 1cqw; background: rgba(255,255,255,0.22); overflow: hidden"><span data-style="progressStyle"></span></span>
                 </div>
 
+                <template data-if="started">
                 <div style="position: absolute; right: 2.5%; bottom: 5%; display: flex; gap: 8px; z-index: 8">
                   <button type="button" class="ctl" data-on="togglePlay" data-aria="playLabel">
                     <template data-if="playing">
@@ -272,6 +273,26 @@ const anglePic = [
                     </button>
                   </template>
                 </div>
+                </template>
+
+                <!-- Until the first click: the clip waits, so it can start with sound; the small sound button on the play button's corner picks a muted start. -->
+                <template data-if="waiting">
+                  <div class="start-veil" data-on="togglePlay">
+                    <span class="start-pair">
+                    <button type="button" class="start-play" data-on="togglePlay" data-aria="playLabel">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z" fill="currentColor"></path></svg>
+                    </button>
+                    <button type="button" class="start-sound" data-on="toggleSound" data-aria="soundLabel">
+                      <template data-if="soundOn">
+                        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3V5L6 8z" fill="currentColor"></path><path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+                      </template>
+                      <template data-if="soundOff">
+                        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3V5L6 8z" fill="currentColor"></path><path d="M13 8l4 4m0-4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+                      </template>
+                    </button>
+                    </span>
+                  </div>
+                </template>
               </div>
             </div>
 
