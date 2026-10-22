@@ -41,6 +41,7 @@ export const es: Dict = {
     guest: "invitado",
     explorer: "Explorador",
     playing: "Reproduciendo",
+    watch: "Reproducir con sonido",
     madeWith: ", hecho con Remotion",
     ask: "Pídelo con tus palabras",
     agent: "Agente",

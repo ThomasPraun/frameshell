@@ -252,6 +252,7 @@ const anglePic = [
                   <span style="flex: 1; height: 0.35cqw; border-radius: 1cqw; background: rgba(255,255,255,0.22); overflow: hidden"><span data-style="progressStyle"></span></span>
                 </div>
 
+                <template data-if="started">
                 <div style="position: absolute; right: 2.5%; bottom: 5%; display: flex; gap: 8px; z-index: 8">
                   <button type="button" class="ctl" data-on="togglePlay" data-aria="playLabel">
                     <template data-if="playing">
@@ -272,6 +273,15 @@ const anglePic = [
                     </button>
                   </template>
                 </div>
+                </template>
+
+                <!-- Until the first click: the clip waits, so it can start with sound. -->
+                <template data-if="waiting">
+                  <button type="button" class="big-play" data-on="togglePlay">
+                    <span class="big-play-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z" fill="currentColor"></path></svg></span>
+                    <span class="big-play-label">{t.watch}</span>
+                  </button>
+                </template>
               </div>
             </div>
 

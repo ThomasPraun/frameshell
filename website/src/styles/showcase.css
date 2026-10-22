@@ -31,6 +31,12 @@
 @keyframes cap{from{opacity:0;transform:translateY(12%) scale(.94)}}
 .sc .ctl{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:8px;background:rgba(15,15,18,0.62);color:#ffffff;cursor:pointer;backdrop-filter:blur(6px)}
 .sc .ctl:hover{background:rgba(15,15,18,0.85)}
+.sc .big-play{position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:max(10px,1.6cqw);padding:0;border:0;background:rgba(11,11,12,0.38);color:#ffffff;font:inherit;cursor:pointer}
+.sc .big-play-icon{display:grid;place-items:center;width:max(64px,11cqw);height:max(64px,11cqw);border-radius:50%;background:#e3a53c;color:#1a1408;box-shadow:0 1cqw 4cqw rgba(0,0,0,0.55);transition:transform .2s cubic-bezier(0.2,0.7,0.1,1)}
+.sc .big-play-icon svg{width:44%;height:44%;margin-left:8%}
+.sc .big-play:hover .big-play-icon,.sc .big-play:focus-visible .big-play-icon{transform:scale(1.08)}
+.sc .big-play:focus-visible{outline:3px solid #e3a53c;outline-offset:-3px}
+.sc .big-play-label{padding:max(5px,0.6cqw) max(12px,1.6cqw);border-radius:99px;background:rgba(15,15,18,0.72);font-size:max(14px,1.8cqw);font-weight:600}
 .sc .playhead{position:absolute;top:-136px;bottom:-4px;width:2px;margin-left:-1px;background:#e3a53c;z-index:3;transition:left .1s linear;pointer-events:none}
 
 /* Slide intro: footage goes grey, the step's title trims in for a second. */

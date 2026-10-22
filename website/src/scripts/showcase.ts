@@ -1,6 +1,7 @@
 /*
  * Hero carousel and project tree. One real clip; each part adds a layer, introduced by a title
- * while the request types itself out, then the clip plays once the agent answers.
+ * while the request types itself out, then the clip plays once the agent answers. It waits for a
+ * click to start, so it can play with sound (browsers mute media that starts by itself).
  * Times are source seconds of the clip, from its word-level transcript.
  *
  * Markup hooks (Showcase.astro): <template data-if="key"> mounts its content while key is true
@@ -129,6 +130,7 @@ interface State {
   cutDone: boolean;
   t: number;
   tourP: number;
+  started: boolean;
   playing: boolean;
   soundOn: boolean;
   fi: number;
@@ -174,6 +176,7 @@ export function startShowcase(): void {
     cutDone: false,
     t: 0,
     tourP: 0,
+    started: false,
     playing: false,
     soundOn: false,
     fi: 0,
@@ -213,10 +216,26 @@ export function startShowcase(): void {
     video!.currentTime = i === SHORT ? SHORT_IN : 0;
   }
 
+  // First click, on the big play button or a part's tab: sound on. play() inside the click lets later
+  // plays of this element keep their sound (Safari); goTo pauses it again for the part's intro.
+  function begin(i: number) {
+    setState({ started: true, soundOn: true });
+    video!.muted = false;
+    video!.play().catch(() => {});
+    goTo(i);
+  }
+
   function startVideo() {
     clearTimeout(introTimer);
     setState({ intro: false, typed: ASKS[state.slide].length });
-    if (!still) video!.play().catch(() => {});
+    if (still) return;
+    video!.play().catch((error: DOMException) => {
+      // Sound refused after all: play muted, the sound button turns it on.
+      if (error.name !== "NotAllowedError" || video!.muted) return;
+      video!.muted = true;
+      setState({ soundOn: false });
+      video!.play().catch(() => {});
+    });
   }
 
   const next = () => goTo((state.slide + 1) % LABELS.length);
@@ -299,7 +318,8 @@ export function startShowcase(): void {
 
   const handlers: Record<string, () => void> = {
     togglePlay() {
-      if (state.ended) goTo(0);
+      if (!state.started) begin(0);
+      else if (state.ended) goTo(0);
       else if (state.intro) startVideo();
       else if (video.paused) video.play().catch(() => {});
       else video.pause();
@@ -316,7 +336,7 @@ export function startShowcase(): void {
       const el = (e.target as Element).closest<HTMLElement>("[data-on], [data-pick], [data-file]");
       if (!el) return;
       if (el.dataset.on) handlers[el.dataset.on]?.();
-      else if (el.dataset.pick) goTo(Number(el.dataset.pick));
+      else if (el.dataset.pick) (state.started ? goTo : begin)(Number(el.dataset.pick));
       else if (el.dataset.file) setState({ fi: Number(el.dataset.file), pickedFile: true });
     });
   }
@@ -490,6 +510,8 @@ export function startShowcase(): void {
         box(SHORT_IN, SHORT_OUT) +
         " border: 2px solid #e3a53c; border-radius: 4px; background: rgba(227,165,60,0.08); pointer-events: none; z-index: 2",
       playheadStyle: "top: -" + reach + "px; left: " + pct(t).toFixed(2) + "%",
+      started: state.started,
+      waiting: !state.started,
       playing: state.playing,
       paused: !state.playing,
       playLabel: state.ended ? STR.watchAgain : state.playing ? STR.pause : STR.play,
@@ -642,6 +664,5 @@ export function startShowcase(): void {
   render();
   requestAnimationFrame(tick);
   video.muted = true;
-  if (!still) goTo(0);
-  else setState({ treeSeen: true });
+  if (still) setState({ treeSeen: true });
 }
