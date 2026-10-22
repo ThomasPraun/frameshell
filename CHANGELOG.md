@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Transitions and keyframes, schema level (ADR 0018, #298): optional `dissolve`, `fadeIn`, `fadeOut` and `keys` (`x`, `y`, `scale`, `opacity`, `gain`; ease `linear`, `in`, `out`, `in-out`) on video and audio clips, plus `edgeTransitions` (effective lengths from handles, dip fallback) and `placementAt`, `gainAt` and transition weights in `@frameshell/schema`. Timelines without them are unchanged. The engine operations, export and preview follow in v0.13.
+- Export renders transitions and keyframes (ADR 0018, #300, #301). Dissolves draw the incoming clip from its handle over the outgoing clip's tail (opaque on the bottom track, `1 - w` on upper tracks); fades go to black on the bottom track and to transparent above; generated clips hold their first or last rendered frame for handles. Keyed position and scale use `overlay` and `scale` expressions with `eval=frame`, keyed opacity sets the alpha per frame through `sendcmd`. Sound crossfades and fades are equal-power (`afade` `qsin`), the outgoing clip read into its handle; gain keys use `volume` with `eval=frame` on 64-sample frames. Every expression reads timeline time, so a segment join may fall inside a transition. Timelines without transitions or keys export the same plan as before.
 
 ### Changed
 
