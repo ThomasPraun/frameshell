@@ -31,6 +31,9 @@ mutations print the new revision):
            [--no-snap] [--snap-window s]
   clip split <clip> --at s
   clip remove <clip>
+  clip key <clip> --prop x|y|scale|opacity|gain --at s [--value v] [--ease linear|in|out|in-out] [--remove] [--clear]
+                               Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
+                               there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
@@ -95,6 +98,11 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
+  transition set --at s [--kind dissolve|fade] [--duration s] [--track <track>…]
+                               At the clip edge at --at on every video and audio track (--track limits): dissolve
+                               (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's
+                               start or end with nothing butted fades in or out. Short material shortens it, with a warning
+  transition remove --at s [--track <track>…]
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
@@ -121,7 +129,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -157,7 +165,11 @@ export const TIMELINE_OPTIONS = {
   props: { type: "string" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
-  track: { type: "string" },
+  track: { type: "string", multiple: true },
+  kind: { type: "string" },
+  prop: { type: "string" },
+  ease: { type: "string" },
+  value: { type: "string" },
   at: { type: "string" },
   from: { type: "string" },
   to: { type: "string" },
@@ -219,7 +231,10 @@ const ALLOWED: Record<string, string[]> = {
   "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window"],
   "clip split": ["at"],
   "clip remove": [],
+  "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
+  "transition set": ["at", "kind", "duration", "track"],
+  "transition remove": ["at", "track"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at"],
   "multicam offset": [],
@@ -250,6 +265,9 @@ const ARITY: Record<string, [number, number]> = {
   "clip trim": [1, 1],
   "clip split": [1, 1],
   "clip remove": [1, 1],
+  "clip key": [1, 1],
+  "transition set": [0, 0],
+  "transition remove": [0, 0],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -353,6 +371,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     if (tracks !== undefined && values["ripple"] !== true) throw new UsageError("--ripple-track needs --ripple.");
     return { ripple: values["ripple"] === true ? true : undefined, rippleTracks: tracks };
   };
+  const tracks = values["track"] as string[] | undefined;
   const params: Record<string, unknown> = { timeline: str("timeline") };
   let method: MethodName;
   switch (command) {
@@ -411,7 +430,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "clip move":
       method = "clip.move";
-      Object.assign(params, { clip: args[0], start: num("start"), track: str("track") });
+      if ((tracks?.length ?? 0) > 1) throw new UsageError("--track: clip move takes one track.");
+      Object.assign(params, { clip: args[0], start: num("start"), track: tracks?.[0] });
       break;
     case "clip trim":
       method = "clip.trim";
@@ -426,6 +446,36 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "clip.remove";
       params["clip"] = args[0];
       break;
+    case "clip key": {
+      method = "clip.key";
+      if (str("prop") === undefined) throw new UsageError("`frameshell clip key <clip>` needs --prop x, y, scale, opacity or gain.");
+      if (values["clear"] === true) {
+        const other = ["at", "value", "ease", "remove"].find((flag) => values[flag] !== undefined);
+        if (other) throw new UsageError(`--clear removes every key: pass it without --${other}.`);
+      } else if (values["at"] === undefined) {
+        throw new UsageError("Pass the key time --at <timeline seconds>, or --clear.");
+      } else if (values["remove"] === true && (values["value"] !== undefined || values["ease"] !== undefined)) {
+        throw new UsageError("--remove deletes the key: pass it without --value or --ease.");
+      }
+      Object.assign(params, {
+        clip: args[0],
+        prop: str("prop"),
+        time: num("at"),
+        value: num("value"),
+        ease: str("ease"),
+        remove: values["remove"] === true ? true : undefined,
+        clear: values["clear"] === true ? true : undefined,
+      });
+      break;
+    }
+    case "transition set":
+    case "transition remove": {
+      method = command === "transition set" ? "transition.set" : "transition.remove";
+      if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds>, a clip edge.`);
+      Object.assign(params, { at: num("at"), tracks });
+      if (method === "transition.set") Object.assign(params, { kind: str("kind"), duration: num("duration") });
+      break;
+    }
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");

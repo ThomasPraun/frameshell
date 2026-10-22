@@ -1,4 +1,5 @@
 import type { ClipDiff, OperationResult } from "@frameshell/protocol";
+import type { Clip } from "@frameshell/schema";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -20,7 +21,9 @@ import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
 import { listenEverywhere, windowOf } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
+import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
+import { useAssets, useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
 import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
@@ -56,11 +59,12 @@ import {
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
+import { type EdgeHit, edgeAt } from "../timeline/transitions.js";
 import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import { uiLink } from "../ui-link.js";
-import { contextMenu } from "./ContextMenu.js";
+import { type MenuItem, contextMenu } from "./ContextMenu.js";
 import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
@@ -168,7 +172,9 @@ export function TimelinePanel({
   }, [view, lanesOpen, sources, hashes]);
   const measured = useGroupsTurns(wanted, true);
   const turnLanes = useMemo(() => ({ open: lanesOpen, turns: new Map([...measured].map(([group, found]) => [group, found.turns])) }), [lanesOpen, measured]);
-  const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes) : null), [view, scenes, turnLanes]);
+  const assets = useAssets(view?.revision ?? null);
+  const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets) : undefined) }), [assets]);
+  const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes, transitions) : null), [view, scenes, turnLanes, transitions]);
   const empty = layout !== null && layout.clipCount === 0;
   const toggleLanes = useCallback(
     (track: string) =>
@@ -333,6 +339,7 @@ function TimelineCanvas({
   lanesOpen: ReadonlySet<string>;
   onToggleLanes: (track: string) => void;
 }) {
+  const image = useProjectKind() === "image";
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const sizer = useRef<HTMLDivElement>(null);
@@ -759,6 +766,13 @@ function TimelineCanvas({
   /** What a stroke does by the keys held: Alt marks the angle silent, Shift keeps the others, else it takes the floor. */
   const paintMode = (event: { altKey: boolean; shiftKey: boolean }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
 
+  /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (every track with an edge at that time). */
+  const edgeItems = (edge: EdgeHit): MenuItem[] => [
+    { label: t.timeline.addDissolve, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "dissolve" } }], undefined, { label: "Add dissolve" }) },
+    { label: t.timeline.addFade, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "fade" } }], undefined, { label: "Add fade" }) },
+    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([{ op: "transition.remove", args: { at: edge.at } }], undefined, { label: "Remove transition" }) },
+  ];
+
   /** Right-click on a turn lane: take what was painted there back to the measured turns. */
   const openLaneMenu = (event: MouseEvent, hit: NonNullable<ReturnType<typeof laneAt>>) => {
     event.preventDefault();
@@ -1013,11 +1027,12 @@ function TimelineCanvas({
       openLaneMenu(event, onLane);
       return;
     }
+    const edge = layout && !image ? edgeAt(layout, state.current, x, y) : null;
     const grab = layout && y >= layout.head ? grabAt(layout, state.current, x, y) : null;
     const scene = layout && !grab ? sceneAt(layout, state.current, x, y) : null;
     if (scene) pickScene(scene);
-    else if (grab && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
-    openAskMenu(event);
+    else if (grab && !edge && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    openAskMenu(event, edge ? edgeItems(edge) : []);
   };
 
   return (

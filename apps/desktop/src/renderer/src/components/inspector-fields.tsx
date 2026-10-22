@@ -76,6 +76,15 @@ const FIELDS = {
     step: 0.5,
     decimals: 1,
   },
+  length: {
+    label: t.inspector.fieldLength,
+    title: t.inspector.fieldLengthTitle,
+    unit: "s",
+    show: (v) => round(v, 3),
+    store: (v) => (v > 0 ? round(v, 3) : null),
+    step: 0.1,
+    decimals: 2,
+  },
   offset: {
     label: t.inspector.fieldOffset,
     title: t.inspector.fieldOffsetTitle,

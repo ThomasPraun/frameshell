@@ -1612,6 +1612,39 @@ code {
   font-size: 11.5px;
 }
 
+/* Transitions and keyframes of the clip inspector (ADR 0018). */
+.transition-edge,
+.key-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-control-label {
+  color: var(--text-faint);
+}
+
+.key-control.is-keyed .key-control-label {
+  color: var(--text-muted);
+}
+
+.key-button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  padding: 0;
+}
+
+.key-button svg {
+  width: 10px;
+  height: 10px;
+}
+
+.key-button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ---------- Editor ---------- */
 
 .editor-area {
