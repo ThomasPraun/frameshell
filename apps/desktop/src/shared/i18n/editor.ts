@@ -12,6 +12,7 @@ const en = {
   loadDisk: "Load disk version",
   notSaved: (reason: string) => `Not saved: ${reason}`,
   emptyOpen: (shortcut: string) => `Open a script or JSON file from the explorer, or the transcript (${shortcut}).`,
+  emptyOpenFile: "Open a script or JSON file from the explorer.",
   emptyHint: "Saved files go through frameshelld, so the agent sees your edits right away.",
   wholeScriptLinked: (count: number, clips: string) =>
     `${count} ${count === 1 ? "clip" : "clips"} linked to the whole script (${clips}). Click to select ${count === 1 ? "it" : "them"}.`,
@@ -35,6 +36,7 @@ const es: typeof en = {
   loadDisk: "Cargar la versión del disco",
   notSaved: (reason) => `No se guardó: ${reason}`,
   emptyOpen: (shortcut) => `Abre un guion o un archivo JSON desde Archivos, o la transcripción (${shortcut}).`,
+  emptyOpenFile: "Abre un guion o un archivo JSON desde Archivos.",
   emptyHint: "Los archivos guardados pasan por frameshelld, así que el agente ve tus cambios al instante.",
   wholeScriptLinked: (count, clips) =>
     `${count === 1 ? "1 clip vinculado" : `${count} clips vinculados`} a todo el guion (${clips}). Haz clic para seleccionar${count === 1 ? "lo" : "los"}.`,

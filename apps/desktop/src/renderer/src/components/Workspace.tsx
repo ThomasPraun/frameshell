@@ -235,18 +235,20 @@ export function Workspace({ project }: { project: ProjectView }) {
   }, []);
 
   // The explorer opens transcript files in the transcript view; its "Open JSON" opens the file itself.
+  // An image project has no transcript view (ADR 0017): there they open as JSON.
   const browseFile = useCallback(
     (path: string) => {
-      if (!isTranscriptPath(path)) return openFile(path);
+      if (image || !isTranscriptPath(path)) return openFile(path);
       openFile(TRANSCRIPT_TAB);
       setTranscriptFocus({ path });
     },
-    [openFile],
+    [openFile, image],
   );
 
   // The transcript view from anywhere: Mod+Shift+T, View > Transcript, the timeline header, the tab strip.
   const showTranscript = useCallback(() => openFile(TRANSCRIPT_TAB), [openFile]);
   useEffect(() => {
+    if (image) return;
     const onKey = (event: KeyboardEvent) => {
       if (!(isMac ? event.metaKey : event.ctrlKey) || event.altKey || !event.shiftKey || event.key.toLowerCase() !== "t") return;
       event.preventDefault();
@@ -261,7 +263,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       offKeys();
       offMenu();
     };
-  }, [showTranscript]);
+  }, [showTranscript, image]);
 
   // New image from the frame at the playhead (ADR 0017): Mod+Shift+S or File > New Image from Frame; a video project's only.
   useEffect(() => {
@@ -320,6 +322,11 @@ export function Workspace({ project }: { project: ProjectView }) {
       return next;
     });
   }, []);
+
+  // A project that becomes an image project (`kind` edited) closes its transcript tab.
+  useEffect(() => {
+    if (image) closeFile(TRANSCRIPT_TAB);
+  }, [image, closeFile]);
 
   if (!layout) return <div className="boot" />;
   const { sidebar, terminal, timeline } = layout.panels;
@@ -405,6 +412,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 onClose={closeFile}
                 onOpenFile={openFile}
                 transcriptFocus={transcriptFocus}
+                transcript={!image}
                 detached={detached.has("editor")}
                 target={editorWindow}
                 onDetach={(out) => setPanelDetached("editor", out)}

@@ -116,6 +116,7 @@ daemon.on("ui.command", (params) => ui.command(params));
 app.on("browser-window-focus", (_event, focused) => {
   const state = projectWindowOf(focused);
   if (state) ui.focus(String(state.window.webContents.id));
+  void syncKindMenu(state);
 });
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
@@ -426,6 +427,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   revokeLive(state);
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
+  if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   await rememberRecent(project.dir);
   return { status: "opened", project };
 }
@@ -495,7 +497,7 @@ async function pickImage(window: BrowserWindow): Promise<string | undefined> {
 /** Size of an image made from a frame, asked in a message box: the offered sizes and the video's own; undefined when cancelled. */
 async function pickFrameImageSize(window: BrowserWindow, dir: string): Promise<FrameSize | undefined> {
   const said = text.app.dialogs;
-  const config = JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8").catch(() => "{}")) as { resolution?: FrameSize };
+  const config = await projectConfig(dir);
   const own = config.resolution ?? { width: 1920, height: 1080 };
   const sizes = [FRAME_IMAGE_SIZES.thumbnail, own, FRAME_IMAGE_SIZES.square, FRAME_IMAGE_SIZES.vertical];
   const { response } = await dialog.showMessageBox(window, {
@@ -581,9 +583,27 @@ async function createFromVideos(
   }
 }
 
+/** The `frameshell.json` fields main reads; empty when the file is missing. */
+async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kind?: string }> {
+  return JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8").catch(() => "{}")) as { resolution?: FrameSize; kind?: string };
+}
+
+/** Menu items of video projects only (ADR 0017): an image project's window disables them. */
+const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame"];
+
+/** Enable the video-only menu items for the project in `state`'s window, the focused one. */
+async function syncKindMenu(state: WindowState | undefined): Promise<void> {
+  const config = state?.project ? await projectConfig(state.project.dir).catch(() => ({ kind: undefined })) : {};
+  const video = config.kind !== "image";
+  for (const id of VIDEO_MENU_ITEMS) {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (item) item.enabled = video;
+  }
+}
+
 /** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read by Electron. */
 async function imageLayerDeps(dir: string): Promise<ImageLayersDeps> {
-  const config = JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8").catch(() => "{}")) as { resolution?: FrameSize };
+  const config = await projectConfig(dir);
   return {
     request: (method, params) => daemon.request(method, params),
     alone: (work) => editor.alone(work),
@@ -1170,6 +1190,7 @@ function buildMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
 }
 
 /**

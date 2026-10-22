@@ -47,6 +47,7 @@ export function EditorArea({
   onClose,
   onOpenFile,
   transcriptFocus,
+  transcript,
   detached,
   target,
   onDetach,
@@ -59,6 +60,8 @@ export function EditorArea({
   onOpenFile: (path: string) => void;
   /** Transcript file to bring into view in the transcript tab. */
   transcriptFocus: TranscriptFocus | null;
+  /** Offer the transcript view: false in an image project (ADR 0017). */
+  transcript: boolean;
   /** The area is in its own window. */
   detached: boolean;
   /** Root of the area's window while it is open; null otherwise. */
@@ -320,7 +323,7 @@ export function EditorArea({
             </div>
           );
         })}
-        {!tabs.includes(TRANSCRIPT_TAB) && (
+        {transcript && !tabs.includes(TRANSCRIPT_TAB) && (
           <button
             className="tab-strip-action"
             title={t.editor.showTranscript(TRANSCRIPT_SHORTCUT)}
@@ -356,7 +359,7 @@ export function EditorArea({
       {active === TRANSCRIPT_TAB && <TranscriptView onOpenFile={onOpenFile} focus={transcriptFocus} />}
       {!active && (
         <div className="empty editor-empty">
-          <p>{t.editor.emptyOpen(TRANSCRIPT_SHORTCUT)}</p>
+          <p>{transcript ? t.editor.emptyOpen(TRANSCRIPT_SHORTCUT) : t.editor.emptyOpenFile}</p>
           <p className="hint">{t.editor.emptyHint}</p>
         </div>
       )}

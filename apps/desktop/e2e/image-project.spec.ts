@@ -2,12 +2,22 @@
 /// <reference lib="dom" />
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { type ElectronApplication, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 import { ffmpegRun, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
 
 // Image projects (ADR 0017): pictures start a project without a timeline. Each picture is a layer, the preview hides
 // time, and the picture exports as PNG, JPEG or WebP. The native file dialogs are replaced in main.
+
+/** Whether the video-only menu items (View > Transcript, File > New Image from Frame) are enabled now. */
+async function videoMenu(app: ElectronApplication): Promise<boolean[]> {
+  return app.evaluate(({ Menu }) => ["view-transcript", "image-from-frame"].map((id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? false));
+}
+
+/** Focus the window showing `title`, as a click on it would. */
+async function focusWindow(app: ElectronApplication, title: string): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, title) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === `${title} — Frameshell`)?.focus(), title);
+}
 
 async function picture(ffmpeg: string, out: string, color: string, size: string): Promise<void> {
   await ffmpegRun(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=${color}:s=${size}`, "-frames:v", "1", out]);
@@ -50,6 +60,14 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect
       .poll(() => layers.locator(".layers-thumb img").evaluateAll((images) => images.map((image) => (image as HTMLImageElement).naturalWidth > 0)))
       .toEqual([true, true]);
+
+    // No transcript view in an image project (#289): no key, no tab-strip button, no View menu item.
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+t" : "Control+Shift+t");
+    await expect(page.getByRole("tab", { name: "Transcript" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Transcript", exact: true })).toHaveCount(0);
+    await expect(page.locator(".editor-empty")).toContainText("Open a script or JSON file from the explorer.");
+    await focusWindow(app, "poster");
+    await expect.poll(() => videoMenu(app)).toEqual([false, false]);
 
     // Move the logo under the poster, then undo: one history step each. Row buttons show on the selected row.
     await layers.locator(".layers-row", { hasText: "logo" }).click();
@@ -124,6 +142,11 @@ test("Mod+Shift+S makes an image project from the frame at the playhead, beside 
     // The video project is unchanged and still open.
     await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
     await expect(page.locator(".statusbar")).toContainText("Opened interview frame 00-00 in a new window.");
+    // The video-only menu items follow the focused window's kind (#289).
+    await focusWindow(app, "interview frame 00-00");
+    await expect.poll(() => videoMenu(app)).toEqual([false, false]);
+    await focusWindow(app, "interview");
+    await expect.poll(() => videoMenu(app)).toEqual([true, true]);
   } finally {
     await app.close();
   }

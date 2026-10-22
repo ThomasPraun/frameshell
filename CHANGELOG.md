@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Desktop: an image project has no transcript view (#289). Mod+Shift+T does nothing there, the editor's tab strip has no Transcript button, and transcript files in the explorer open as JSON. View > Transcript and File > New Image from Frame are disabled while an image project's window is focused.
+
 ## [0.12.0] - 2026-10-21
 
 ### Added
