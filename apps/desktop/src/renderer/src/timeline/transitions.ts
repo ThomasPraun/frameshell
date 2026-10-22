@@ -123,19 +123,20 @@ const near = (a: number, b: number) => Math.abs(a - b) < EDGE_EPSILON;
 /**
  * The stored transition of one edge of `clip` on `row`: its start edge reads `dissolve` (a dissolve is the incoming
  * clip's) or `fadeIn`; its end edge reads the next butted clip's `dissolve` or its own `fadeOut`. A fade where clips
- * butt is two halves, so its length is twice one of them.
+ * butt is two halves (`transition.set` splits it in whole frames), so its length is their sum.
  */
 export function edgeState(row: TrackRow, clip: ClipBox, side: "in" | "out"): EdgeState {
   if (side === "in") {
-    const butted = row.clips.some((other) => other.id !== clip.id && !other.problem && near(other.end, clip.start));
+    const previous = row.clips.find((other) => other.id !== clip.id && !other.problem && near(other.end, clip.start));
+    const butted = previous !== undefined;
     if (clip.dissolve !== null) return { at: clip.start, kind: "dissolve", length: clip.dissolve, butted };
-    if (clip.fadeIn !== null) return { at: clip.start, kind: "fade", length: butted ? clip.fadeIn * 2 : clip.fadeIn, butted };
+    if (clip.fadeIn !== null) return { at: clip.start, kind: "fade", length: clip.fadeIn + (previous?.fadeOut ?? 0), butted };
     return { at: clip.start, kind: null, length: 0, butted };
   }
   const next = row.clips.find((other) => other.id !== clip.id && near(other.start, clip.end));
   const butted = next !== undefined;
   if (next?.dissolve != null) return { at: clip.end, kind: "dissolve", length: next.dissolve, butted };
-  if (clip.fadeOut !== null) return { at: clip.end, kind: "fade", length: butted ? clip.fadeOut * 2 : clip.fadeOut, butted };
+  if (clip.fadeOut !== null) return { at: clip.end, kind: "fade", length: clip.fadeOut + (next?.fadeIn ?? 0), butted };
   return { at: clip.end, kind: null, length: 0, butted };
 }
 

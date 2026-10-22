@@ -92,6 +92,16 @@ describe("transition.set", () => {
     expect(clip(dipped.timeline, "v2")).toMatchObject({ fadeIn: 0.267 });
   });
 
+  it("a fade's two halves sum to the requested length in whole frames", async () => {
+    // 0.5 s at 30 fps is 15 frames: 7 out, 8 in.
+    const { timeline } = await apply(butted(), "transition.set", { at: 4, kind: "fade", duration: 0.5 });
+    expect(clip(timeline, "v1")).toMatchObject({ fadeOut: 0.233 });
+    expect(clip(timeline, "v2")).toMatchObject({ fadeIn: 0.267 });
+    const single = await apply(butted(), "transition.set", { at: 4, kind: "fade", duration: 1 / 30 });
+    expect(clip(single.timeline, "v1")).not.toHaveProperty("fadeOut");
+    expect(clip(single.timeline, "v2")).toMatchObject({ fadeIn: 0.033 });
+  });
+
   it("a lone edge fades in or out of the full length for both kinds", async () => {
     const start = await apply(butted(), "transition.set", { at: 0, duration: 1 });
     expect(clip(start.timeline, "v1")).toMatchObject({ fadeIn: 1 });

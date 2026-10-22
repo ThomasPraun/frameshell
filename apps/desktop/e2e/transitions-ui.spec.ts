@@ -75,15 +75,15 @@ test("right-clicking a cut adds a dissolve, and removes it again", async () => {
 });
 
 test("right-clicking a cut adds a fade as two halves; the inspector reads and edits it", async () => {
-  // Halves land on the 30 fps grid: 0.25 s rounds up to 8 frames.
+  // 0.5 s is 15 frames at 30 fps: 7 for the outgoing half, 8 for the incoming one.
   await rightClickEdge(4, "Add fade");
-  await expect.poll(() => [saved("c_one")["fadeOut"], saved("c_two")["fadeIn"]]).toEqual([0.267, 0.267]);
+  await expect.poll(() => [saved("c_one")["fadeOut"], saved("c_two")["fadeIn"]]).toEqual([0.233, 0.267]);
 
   await page.mouse.click((await at(7)).x, (await at(7)).y);
   await expect(lanes()).toHaveAttribute("data-selected", "c_two");
   await expect(inspector().getByRole("combobox", { name: "Start transition" })).toHaveValue("fade");
   const length = inspector().getByRole("textbox", { name: "Length (s)" });
-  await expect(length).toHaveValue("0.534");
+  await expect(length).toHaveValue("0.5");
   await length.fill("1");
   await length.press("Enter");
   await expect.poll(() => [saved("c_one")["fadeOut"], saved("c_two")["fadeIn"]]).toEqual([0.5, 0.5]);

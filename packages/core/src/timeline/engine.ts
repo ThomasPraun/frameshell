@@ -881,7 +881,9 @@ class Edit {
     const g = this.grid;
     const frame = g.seconds(1);
     const length = Math.max(g.snap(args.duration), frame);
-    const half = Math.max(g.snap(length / 2), frame);
+    // A fade at a cut is two halves that sum to `length` in whole frames; the incoming one takes an odd frame.
+    const frames = g.frame(length);
+    const outgoingHalf = Math.floor(frames / 2);
     await this.eachEdge(g.snap(args.at), args.tracks, ({ incoming, outgoing }) => {
       for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
       if (incoming) {
@@ -892,8 +894,8 @@ class Edit {
       if (incoming && outgoing) {
         if (args.kind === "dissolve") incoming.dissolve = length;
         else {
-          outgoing.fadeOut = half;
-          incoming.fadeIn = half;
+          if (outgoingHalf > 0) outgoing.fadeOut = g.seconds(outgoingHalf);
+          incoming.fadeIn = g.seconds(frames - outgoingHalf);
         }
       } else if (incoming) incoming.fadeIn = length;
       else outgoing!.fadeOut = length;

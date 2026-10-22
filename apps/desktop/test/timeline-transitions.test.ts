@@ -109,6 +109,10 @@ describe("edges", () => {
     const [first, second] = cut.rows[0]!.clips;
     expect(edgeState(cut.rows[0]!, first!, "out")).toMatchObject({ kind: "fade", length: 0.5 });
     expect(edgeState(cut.rows[0]!, second!, "in")).toMatchObject({ kind: "fade", length: 0.5 });
+    const uneven = layoutTimeline(view([video([clip("a", 0, 0, 2, { fadeOut: 0.233 }), clip("b", 2, 0, 2, { fadeIn: 0.267 })])]), [], undefined, plenty);
+    const [out, into] = uneven.rows[0]!.clips;
+    expect(edgeState(uneven.rows[0]!, out!, "out").length).toBeCloseTo(0.5, 6);
+    expect(edgeState(uneven.rows[0]!, into!, "in").length).toBeCloseTo(0.5, 6);
   });
 
   it("finds the edge near a point of a video lane and says whether it holds a transition", () => {
