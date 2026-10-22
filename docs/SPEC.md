@@ -51,7 +51,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 12 | Native binaries | **Downloaded on first use**: pinned versions + checksums (ffmpeg GPL build with x264, whisper.cpp, whisper models). Override with system binaries. `frameshell doctor` | Small installer; controlled versions; x264 quality; Frameshell does not redistribute GPL binaries | Bundled in installer (size, GPL obligations), system only (version chaos) |
 | 13 | Plugins | **Node/TS packages** + `frameshell-plugin.json`; official adapters built on the same API; GitHub topic discovery; per-project pinning; project trust | herdr-style zero-friction ecosystem; API proven by first-party plugins; every plugin teaches the agent via its skill | Curated marketplace, UI extension points in MVP |
 | 14 | Scripts | **Markdown with optional conventions** (`##` = scene, optional frontmatter); clips carry `scriptRef` | Free writing; traceability when useful; generation stays with the agent | Structured script format |
-| 15 | Agent changes | **Applied immediately, grouped in transactions**; history with author; diff review; revert whole tx or single ops | Keeps autonomy (agent works for an hour unattended) and adds review afterwards; `history --since` lets the agent resume from human edits | Plain undo, blocking proposal/diff mode (v0.2 opt-in) |
+| 15 | Agent changes | **Applied immediately, grouped in transactions**; history with author; diff review; revert whole tx or single ops. Opt-in **review mode** per project, off by default (ADR 0019): changes not made in the app wait as one proposal per transaction, accepted or rejected whole | Keeps autonomy (agent works for an hour unattended) and adds review afterwards; `history --since` lets the agent resume from human edits; who wants to see changes first turns one switch | Plain undo, review as the default, a per-transaction opt-in chosen by the agent |
 | 16 | Platforms | **macOS + Linux stable, Windows beta**; CI on all three from day one | Focus plus early detection of OS assumptions; signing cost only on macOS at v0.1 | macOS only, all three stable |
 | 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left**. Any panel can be **detached** into its own window (sharing the project window's state) and docked back, or maximized in place (ADR 0012) | Agent, preview and timeline visible together; a second monitor holds the preview or the agent | Terminal tabbed with timeline, free docking |
 | 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
@@ -212,7 +212,8 @@ my-video/
     ├── waveforms/, thumbs/    # regenerable
     ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
     ├── rejected/              # refused direct edits kept for recovery
-    └── rejected.jsonl         # why each was refused (listed by `status`)
+    ├── rejected.jsonl         # why each was refused (listed by `status`)
+    └── proposals/             # review mode (ADR 0019): open proposal, decided ones for 7 days, decisions.jsonl
 ```
 
 ### 5.2 `frameshell.json`
@@ -381,6 +382,7 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 - UI: History panel lists transactions ("agent: remove silences, 180 ops"). Actions: show diff on timeline, revert transaction, revert single op.
 - Revert is itself a new operation (history is append-only).
 - `frameshell history --since <tx> --json`: lets the agent see what the human changed since its last transaction.
+- **Review mode (ADR 0019):** a per-project switch in the app, off by default, stored per user in `<configDir>/review.json` (never in project files; only `ui` sets it, through internal `review.set`). While on, a timeline change by any author but `ui` becomes a **proposal**: the transaction it joins, applied to a proposal timeline (current file plus its patches) instead of the file, kept in `.frameshell/proposals/<tx>.json` across restarts. It is building while the transaction is open and ready when it closes (commit, auto-commit, idle gap, or at once for authors without grouping). Its author's reads (`timeline.show`, `track.list`, `frame`, `inspect.point`) default to `view: "proposal"`, everyone else's to `current`; `render` exports the current timeline. One proposal at a time: other non-`ui` changes, a new `tx begin`, and its author's changes once ready fail with `ProposalPending`; `proposal.wait` blocks until `accepted`, `rejected` or `stale` (or `pending` after its timeout). A `ui` edit that touches none of the proposal's groups, tracks, clips or track order rebases it; one that does, or a replay breaking a timeline rule, makes it **stale**: closed unapplied, with the ids touched by both. Only `ui` accepts or rejects (internal `proposal.accept`/`proposal.reject`). Accept journals the operations as their author made them, each marked `proposal: <tx>`, all timelines or none; reject journals nothing. Outcomes go to `.frameshell/proposals/decisions.jsonl`, read by `status`, `proposal.status` and `history` (`proposals`). Event `proposal.changed` reports each step.
 
 ### 6.3 Asset ingestion
 
@@ -392,6 +394,7 @@ The watcher sees a timeline file change that the daemon did not write:
 
 - **`revision` equals current:** schema-validate, diff against in-memory state, record as ops with author `file`, bump revision. Invalid content is rejected with a precise error.
 - **`revision` is stale:** reject. Restore the daemon's version, save the incoming file to `.frameshell/rejected/<timestamp>-<timeline>.json`, emit an event (shown in UI and returned by `frameshell doctor`/`status`). `status` reads rejections back from disk, so they survive restarts, until the kept file is deleted.
+- **Review mode on (ADR 0019):** a valid edit with the current `revision` becomes a ready proposal (`Edit timelines/<id>.json`, author `file`) instead of being journaled: the daemon's version goes back on disk and the edited text is kept in the proposal. While another proposal is open the edit is rejected with reason `proposal-pending`. The offline catch-up on open follows the same rule; `file.write` by `ui` stays immediate.
 
 ### 6.5 Clip render cache
 
@@ -431,6 +434,8 @@ frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
 
 frameshell tx begin "<label>" | commit | abort
+frameshell proposal status [--json]           # review mode on/off, the open proposal, last decisions (ADR 0019)
+frameshell proposal wait [--timeout s] [--json]   # block until the open proposal is accepted, rejected or stale
 frameshell history [--since <tx>] [--json]
 frameshell revert <tx|op>
 
@@ -465,6 +470,7 @@ Design rules:
 - The UI publishes its state to the daemon; the daemon is the only broker. MCP never talks to Electron directly.
 - Default project of a call without `cwd`: the project enclosing the server's directory; when that is in no project (one global server, e.g. Claude Desktop), the project of the app window focused last, named in the result. No window: the call fails asking to open a project or pass `cwd` (ADR 0014).
 - CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
+- Review mode (ADR 0019): `proposal_status` and `proposal_wait` are tools; accepting, rejecting and turning review on or off are internal methods only the app calls, never tools.
 
 ## 8. Plugin system
 
@@ -547,6 +553,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - **Correcting who speaks (ADR 0016 decision 3):** in the transcript view, any selection of words (dragged here, or picked from the timeline or a subtitle cue) is said by a speaker chosen from the toolbar picker or the context menu, a new speaker included; a speaker is renamed from its label. Both are saved as transcript `edits`/`speakers` through `file.write`. On a program track, a toggle on its header opens one turn lane per angle under the shots: it shows the angle's turns (measured and painted, painted ones marked); dragging paints the angle as speaking and everyone else silent there, Shift adds the angle without silencing others, Alt marks it silent, and the context menu takes a stretch back to measured. Each stroke is a `multicam.paint` by `ui` (one per shot it crosses, one transaction). The angle panel of the shot inspector picks an angle's transcript speaker (`multicam.angle` `speaker`).
 - **Timeline v0.1:** multiple video tracks (overlay transform: position, scale, opacity), audio tracks with gain and waveform, subtitle tracks. Move, trim, split, ripple delete, snapping, zoom. Generated clips show render state. Ripple trim (R toggles it, Shift when pressing an edge inverts it). Multi-select (Shift/Cmd/Ctrl+click, Cmd/Ctrl+A) moves the selected clips together. Undo and redo in the Edit menu, and their keys anywhere outside text fields.
 - **History panel:** transactions by author, diff highlight, revert.
+- **Review mode (ADR 0019):** "Review agent changes before applying", per project (project menu and History panel header), off by default. While a proposal is open, every window of the project, detached panels included, shows a bar above preview and timeline: label, author, operation count, a **Before / After** toggle (window state shared with its detached panels, so preview and timeline show the same side; After when a proposal becomes ready), **Accept** (when ready) and **Reject**. After plays and shows the proposal timeline with the History diff marks on what changes. A stale proposal shows "Out of date" until dismissed.
 - **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Pick tool (`I`, ADR 0011): hover outlines the element under the cursor, ↑/↓ moves to its parent or child, click picks a point, Shift+click adds points (each keeps its time), drag selects a region. A point names the clip stack under it (topmost painting layer first) and the composition element there; a region names the clips it touches. Details (full stack, element facts) and the frame capture go under `.frameshell/context/` (regenerable, gitignored, swept by `gc` after 7 days). The reference is typed at once; while a render is pending the frame is `frame pending`. Reference format, one line per selected item:
   ```
   [frameshell] subtitle "hola a todos" · 00:03:12.40–00:03:14.10 · clip c_0012 · words w_000123–w_000127
@@ -597,11 +604,12 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 
 | Version | Content |
 |---|---|
-| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; opt-in proposal mode per transaction; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
+| **v0.2** | `@frameshell/remotion` adapter; `livePreview()` for the active clip; cloud transcription providers (OpenAI, Deepgram, ElevenLabs Scribe) |
 | **v0.3** | Transitions and keyframes; effects/LUT extension point; UI panel extension point (webviews); public plugin index website; OTIO / Premiere XML export |
 | **v0.9** | Video from audio (ADR 0015): new project from an audio file, built-in subtitles-on-background video, scene plan tied to transcript words |
 | **v0.10** | Multicam (ADR 0016): one file per person, audio sync, multicam group and program track, `solo`/`two-up`/`grid` shots, `frameshell direct` with `director.json`, number-key switching and multicam viewer |
 | **v0.11** | Multicam sources and shots: speaker diarization and `speaker` on words, gallery-view call recordings, camera sets with separate mics, `screen` and picture-in-picture shots with director rules for screen motion, 9:16 reframing |
+| **v0.14** | Review mode (ADR 0019): per-project switch, agent transactions as proposals with before/after view, accept or reject, rebase or stale on human edits, `proposal wait` |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
 
