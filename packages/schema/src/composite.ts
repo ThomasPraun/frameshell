@@ -5,7 +5,9 @@ import type {
   AngleCrop,
   Clip,
   ClipAudio,
+  ClipKey,
   ClipTrack,
+  KeyEase,
   MediaClip,
   MulticamGroup,
   ProgramTrack,
@@ -18,6 +20,7 @@ import type {
   Transform,
 } from "./timeline.js";
 import { DEFAULT_SHOT_CORNER } from "./timeline.js";
+import type { ClipEdges } from "./transitions.js";
 
 /** A clip {@link Transform} with every default filled in. */
 export interface Placement {
@@ -704,4 +707,95 @@ export function withProgramSound(timeline: Timeline): Timeline {
     return group ? programSound(track, group) : [];
   });
   return { ...timeline, tracks };
+}
+
+/** Second of the clip's own clock (what its `in` counts, ADR 0018 decision 6) playing at timeline second `t`. */
+export function clipTime(clip: Clip, t: number): number {
+  const speed = "asset" in clip ? (clip.speed ?? 1) : 1;
+  return (clip.in ?? 0) + (t - clip.start) * speed;
+}
+
+/** `f` (0 to 1, the fraction of the way between two keys) through `ease`: `in` f², `out` f(2-f), `in-out` f²(3-2f). */
+export function easeFraction(ease: KeyEase | undefined, f: number): number {
+  switch (ease) {
+    case "in":
+      return f * f;
+    case "out":
+      return f * (2 - f);
+    case "in-out":
+      return f * f * (3 - 2 * f);
+    default:
+      return f;
+  }
+}
+
+/** Value of `keys` at clip-clock second `at`: held before the first and after the last, eased between; null without keys. */
+export function keyedValueAt(keys: readonly ClipKey[] | undefined, at: number): number | null {
+  if (!keys || keys.length === 0) return null;
+  const first = keys[0]!;
+  if (at <= first.at) return first.value;
+  for (let k = 1; k < keys.length; k++) {
+    const b = keys[k]!;
+    if (at >= b.at) continue;
+    const a = keys[k - 1]!;
+    return a.value + (b.value - a.value) * easeFraction(a.ease, (at - a.at) / (b.at - a.at));
+  }
+  return keys.at(-1)!.value;
+}
+
+/** Placement of `clip` at timeline second `t`: a keyed property follows its keys, the others their `transform` value. */
+export function placementAt(clip: Clip, t: number): Placement {
+  const base = placementOf(clip.transform);
+  const keys = clip.keys;
+  if (!keys) return base;
+  const at = clipTime(clip, t);
+  return {
+    x: keyedValueAt(keys.x, at) ?? base.x,
+    y: keyedValueAt(keys.y, at) ?? base.y,
+    scale: keyedValueAt(keys.scale, at) ?? base.scale,
+    opacity: keyedValueAt(keys.opacity, at) ?? base.opacity,
+  };
+}
+
+/** Gain in dB of `clip` at timeline second `t`: its `gain` keys, else `audio.gain`, else 0. `audio.muted` is for the caller. */
+export function gainAt(clip: Clip, t: number): number {
+  return keyedValueAt(clip.keys?.gain, clipTime(clip, t)) ?? clip.audio?.gain ?? 0;
+}
+
+const clamp01 = (f: number) => Math.min(1, Math.max(0, f));
+
+/** Quarter sine, `sin(f·π/2)`: the equal-power curve of sound fades and crossfades (ffmpeg `qsin`). `f` clamps to 0..1. */
+export function soundCurve(f: number): number {
+  return Math.sin((clamp01(f) * Math.PI) / 2);
+}
+
+/**
+ * How far a dissolve has come at timeline second `t`: 0 to 1 across its `2 * half` seconds centered on the
+ * incoming clip's start; 0 before and 1 after.
+ */
+export function dissolveProgress(clipStart: number, half: number, t: number): number {
+  if (half <= 0) return 1;
+  return clamp01((t - (clipStart - half)) / (2 * half));
+}
+
+/**
+ * Factor 0 to 1 of a clip's fades at `t` (`fadeIn` and `fadeOut` of its {@link ClipEdges}): linear for pictures,
+ * {@link soundCurve} for sound. Multiply it into the clip's opacity or gain.
+ */
+export function fadeWeight(edges: Pick<ClipEdges, "fadeIn" | "fadeOut">, clipStart: number, clipEnd: number, t: number, sound = false): number {
+  const shape = sound ? soundCurve : clamp01;
+  const fadeIn = edges.fadeIn > 0 ? shape((t - clipStart) / edges.fadeIn) : 1;
+  const fadeOut = edges.fadeOut > 0 ? shape((clipEnd - t) / edges.fadeOut) : 1;
+  return fadeIn * fadeOut;
+}
+
+/**
+ * Weights of the incoming and outgoing clip of a dissolve at progress `f` (0 to 1). Pictures: the incoming clip
+ * rides `f`; the outgoing one rides `1 - f` on an `upper` track and stays opaque on the `bottom` track (the incoming
+ * clip is drawn over it, an exact mix). `sound`: both follow {@link soundCurve}, equal power.
+ */
+export function dissolveWeights(f: number, kind: "bottom" | "upper" | "sound"): { incoming: number; outgoing: number } {
+  const w = clamp01(f);
+  if (kind === "sound") return { incoming: soundCurve(w), outgoing: soundCurve(1 - w) };
+  return { incoming: w, outgoing: kind === "bottom" ? 1 : 1 - w };
 }

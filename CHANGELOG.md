@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Transitions and keyframes, schema level (ADR 0018, #298): optional `dissolve`, `fadeIn`, `fadeOut` and `keys` (`x`, `y`, `scale`, `opacity`, `gain`; ease `linear`, `in`, `out`, `in-out`) on video and audio clips, plus `edgeTransitions` (effective lengths from handles, dip fallback) and `placementAt`, `gainAt` and transition weights in `@frameshell/schema`. Timelines without them are unchanged. The engine operations, export and preview follow in v0.13.
+
 ### Changed
 
 - Desktop: an image project has no transcript view (#289). Mod+Shift+T does nothing there, the editor's tab strip has no Transcript button, and transcript files in the explorer open as JSON. View > Transcript and File > New Image from Frame are disabled while an image project's window is focused.
