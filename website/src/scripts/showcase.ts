@@ -1,7 +1,8 @@
 /*
  * Hero carousel and project tree. One real clip; each part adds a layer, introduced by a title
  * while the request types itself out, then the clip plays once the agent answers. It waits for a
- * click to start, so it can play with sound (browsers mute media that starts by itself).
+ * click to start, so it can play with sound (browsers mute media that starts by itself); the
+ * sound button beside the start button picks a muted start instead.
  * Times are source seconds of the clip, from its word-level transcript.
  *
  * Markup hooks (Showcase.astro): <template data-if="key"> mounts its content while key is true
@@ -178,7 +179,7 @@ export function startShowcase(): void {
     tourP: 0,
     started: false,
     playing: false,
-    soundOn: false,
+    soundOn: true,
     fi: 0,
     treeSeen: false,
     pickedFile: false,
@@ -216,11 +217,12 @@ export function startShowcase(): void {
     video!.currentTime = i === SHORT ? SHORT_IN : 0;
   }
 
-  // First click, on the big play button or a part's tab: sound on. play() inside the click lets later
-  // plays of this element keep their sound (Safari); goTo pauses it again for the part's intro.
+  // First click, on the start button or a part's tab, with the sound the visitor left on or off.
+  // play() inside the click lets later plays of this element keep their sound (Safari); goTo pauses
+  // it again for the part's intro.
   function begin(i: number) {
-    setState({ started: true, soundOn: true });
-    video!.muted = false;
+    setState({ started: true });
+    video!.muted = !state.soundOn;
     video!.play().catch(() => {});
     goTo(i);
   }
@@ -326,7 +328,7 @@ export function startShowcase(): void {
     },
     toggleSound() {
       const on = !state.soundOn;
-      if (state.slide !== TOUR) video.muted = !on;
+      if (state.started && state.slide !== TOUR) video.muted = !on;
       setState({ soundOn: on });
     },
   };

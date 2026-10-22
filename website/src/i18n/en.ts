@@ -39,7 +39,6 @@ export const en = {
     guest: "the guest",
     explorer: "Explorer",
     playing: "Playing",
-    watch: "Play with sound",
     madeWith: ", made with Remotion",
     ask: "Ask in plain words",
     agent: "Agent",
