@@ -1,5 +1,6 @@
 // Program audio spans to sidecar reads and output samples. Pure: the engine worker does the I/O.
-import type { AudioSpan } from "./program.js";
+import { gainAt } from "@frameshell/schema/composite";
+import { type AudioSpan, edgeWeight } from "./program.js";
 
 /** Program samples `[from, to)` of one span. */
 export interface AudioRead {
@@ -33,7 +34,8 @@ export function sourceWindow(read: AudioRead): { first: number; count: number } 
 
 /**
  * Output samples of `read`, mono float: channels averaged, linear
- * interpolation when sped up, the clip's gain applied. `pcm` holds
+ * interpolation when sped up, the clip's gain applied ({@link envelopeGain}
+ * per sample when the span has an envelope). `pcm` holds
  * interleaved s16 frames from sidecar frame `first` on; frames it lacks
  * (past the sidecar's end) are silence. At speed 1 and unity gain on a mono
  * sidecar the output is exactly `s16 / 32768`.
@@ -55,9 +57,22 @@ export function renderRead(read: AudioRead, pcm: Int16Array, first: number): Flo
     const whole = Math.floor(pos);
     const frac = pos - whole;
     const value = frac === 0 ? at(whole) : at(whole) + (at(whole + 1) - at(whole)) * frac;
-    out[i] = span.gain === 1 ? value : value * span.gain;
+    const gain = span.envelope ? envelopeGain(span, read.from + i) : span.gain;
+    out[i] = gain === 1 ? value : value * gain;
   }
   return out;
+}
+
+/**
+ * Linear gain of `span` at program sample `sample` (ADR 0018): its clip's
+ * `gainAt` (else `gain`) times its equal-power fades and crossfades.
+ */
+export function envelopeGain(span: AudioSpan, sample: number): number {
+  const { envelope } = span;
+  if (!envelope) return span.gain;
+  const t = sample / envelope.rate;
+  const gain = envelope.keyed ? 10 ** (gainAt(envelope.keyed, t) / 20) : span.gain;
+  return gain * edgeWeight(envelope, t, "sound");
 }
 
 /** Sidecar position (fractional frames) of program sample `sample`. */
