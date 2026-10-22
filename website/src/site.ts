@@ -2,7 +2,7 @@ export const REPO = "https://github.com/ThomasPraun/frameshell";
 export const RELEASES = `${REPO}/releases/latest`;
 
 /** Shown until the build or the visitor's browser reads the latest release from the GitHub API. */
-export const FALLBACK_VERSION = "0.11.0";
+export const FALLBACK_VERSION = "0.12.0";
 
 /** Release asset per platform; `{v}` is the version without the leading `v`. */
 export const ASSETS = {
