@@ -9,6 +9,8 @@ const laneClass = ["sub", "vid", "aud"];
 // Per shot, by position: whose angle it shows (a, b, both, wide) and its length.
 const shotKind = ["a", "both", "b", "wide", "a"];
 const shotLength = [3, 2, 2.4, 1.2, 2];
+// Layer swatch per position, topmost first: the title (generated), the logo, the frame (video).
+const layerClass = ["gen", "sub", "vid"];
 ---
 
 <section class="flows" data-marker={t.marker}>
@@ -54,6 +56,29 @@ const shotLength = [3, 2, 2.4, 1.2, 2];
             ))
           }
         </ol>
+      </article>
+      <article class="picture">
+        <div class="text">
+          <h3>{t.picture.title}</h3>
+          <p>{t.picture.body}</p>
+          <p class="keys" aria-hidden="true">
+            {t.picture.shortcut.split(" ").map((k) => <kbd>{k}</kbd>)}
+          </p>
+        </div>
+        <figure aria-label={t.picture.alt}>
+          <div class="thumb">
+            <img src="/media/podcast-poster.jpg" alt="" loading="lazy" />
+            <span class="logo mono">EP 12</span>
+            <span class="headline">{t.picture.headline}</span>
+          </div>
+          <div class="layers">
+            <span class="layers-head">{t.picture.layersLabel}<span class="mono">{t.picture.size}</span></span>
+            <ol>
+              {t.picture.layers.map((layer, i) => <li class={layerClass[i]}>{layer}</li>)}
+            </ol>
+            <span class="export">{t.picture.export}</span>
+          </div>
+        </figure>
       </article>
     </div>
   </div>
@@ -260,8 +285,142 @@ const shotLength = [3, 2, 2.4, 1.2, 2];
     text-overflow: ellipsis;
   }
 
+  /* From a frame or a picture: the fifth card spans the row, text beside a thumbnail and its layers. */
+  .picture {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: clamp(24px, 4vw, 56px);
+    align-items: start;
+  }
+
+  .picture .text {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .picture figure {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    gap: 3px;
+    margin: 0;
+  }
+
+  .thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--panel);
+    container-type: inline-size;
+  }
+
+  .thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .thumb .logo {
+    position: absolute;
+    top: 5cqw;
+    right: 5cqw;
+    padding: 0.8cqw 2cqw;
+    border-radius: 99px;
+    background: var(--tally);
+    color: #1a1408;
+    font-size: 2.6cqw;
+    font-weight: 700;
+  }
+
+  .thumb .headline {
+    position: absolute;
+    left: 5cqw;
+    bottom: 5cqw;
+    max-width: 62%;
+    color: #fff;
+    font-size: 6.4cqw;
+    font-weight: 800;
+    font-stretch: 118%;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-shadow: 0 0.4cqw 2cqw rgba(0, 0, 0, 0.7);
+  }
+
+  .layers {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px;
+    border-radius: 3px;
+    background: var(--panel);
+    font-size: 13px;
+  }
+
+  .layers-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .layers-head .mono {
+    color: var(--faint);
+  }
+
+  .layers ol {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 4px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .layers li {
+    padding: 7px 8px;
+    border-radius: 3px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .layers .gen {
+    background: #2b5260;
+    box-shadow: inset 3px 0 0 var(--gen);
+  }
+
+  .layers .sub {
+    background: #4a3a55;
+    box-shadow: inset 3px 0 0 var(--sub);
+  }
+
+  .layers .vid {
+    background: #3f5373;
+    box-shadow: inset 3px 0 0 var(--video);
+  }
+
+  .export {
+    margin-top: auto;
+    padding: 7px 8px;
+    border-radius: 3px;
+    background: var(--tally);
+    color: #1a1408;
+    font-weight: 700;
+    text-align: center;
+  }
+
   @media (max-width: 760px) {
     .pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .picture,
+    .picture figure {
       grid-template-columns: minmax(0, 1fr);
     }
 

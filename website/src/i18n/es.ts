@@ -7,7 +7,7 @@ export const es: Dict = {
   meta: {
     title: "Frameshell: un IDE para video",
     description:
-      "Edita cualquier video pidiéndolo: un agente de IA corta pausas, agrega subtítulos y logos, cambia de cámara en podcasts, entrevistas y llamadas grabadas, convierte un audio en video y una grabación en shorts, mientras tú lo ves y lo corriges en la línea de tiempo. App de escritorio de código abierto para macOS, Windows y Linux.",
+      "Edita cualquier video pidiéndolo: un agente de IA corta pausas, agrega subtítulos y logos, cambia de cámara en podcasts, entrevistas y llamadas grabadas, convierte un audio en video y una grabación en shorts, y hace miniaturas y pósters, mientras tú lo ves y lo corriges en la línea de tiempo. App de escritorio de código abierto para macOS, Windows y Linux.",
     ogLocale: "es_LA",
   },
   header: {
@@ -24,7 +24,7 @@ export const es: Dict = {
   hero: {
     marker: "Intro",
     lines: ["Un IDE", "para video."],
-    lede: "Edita cualquier video pidiéndolo. Un agente de IA corta las pausas, agrega subtítulos y tu logo, cambia de cámara en podcasts, entrevistas y llamadas grabadas, y convierte una grabación en shorts verticales o un audio en video. Ves cada cambio en la vista previa y en la línea de tiempo, y corriges lo que quieras a mano.",
+    lede: "Edita cualquier video pidiéndolo. Un agente de IA corta las pausas, agrega subtítulos y tu logo, cambia de cámara en podcasts, entrevistas y llamadas grabadas, y convierte una grabación en shorts verticales o un audio en video. Las miniaturas y los pósters se hacen igual. Ves cada cambio en la vista previa y en la línea de tiempo, y corriges lo que quieras a mano.",
     download: "Descargar",
     source: "Ver el código en GitHub",
     platforms: "para macOS, Windows y Linux. Gratis y de código abierto,",
@@ -208,14 +208,14 @@ export const es: Dict = {
       title: "En inglés y en español",
       body: "La app sigue el idioma de tu sistema. Cámbialo en Ver > Idioma, sin reiniciar.",
       samples: [
-        ["English", "New from video or audio…"],
-        ["Español", "Nuevo desde un video o audio…"],
+        ["English", "New from video, audio or image…"],
+        ["Español", "Nuevo desde un video, audio o imagen…"],
       ],
     },
   },
   workflows: {
     marker: "Flujos",
-    title: "Cuatro formas de hacer un video.",
+    title: "Cinco formas de empezar.",
     recording: {
       title: "Desde una grabación",
       body: "Vlogs, entrevistas, podcasts, clases. El agente quita silencios y tomas repetidas, recorta la intro, agrega subtítulos, nivela el volumen y corta shorts para redes. Tú revisas el resultado y recuperas lo que no debió cortar.",
@@ -245,6 +245,17 @@ export const es: Dict = {
         ["General", "3"],
         ["Ana", "1"],
       ],
+    },
+    picture: {
+      title: "Desde un fotograma o una imagen",
+      body: "Miniaturas, pósters, imágenes para redes. Pulsa Cmd+Shift+S en cualquier fotograma de tu video, o suelta tus imágenes: cada una queda como una capa. El agente agrega el título y el logo, tú señalas lo que quieras cambiar, y exportas en PNG, JPEG o WebP.",
+      layers: ["Título", "Logo", "frame-00-04"],
+      layersLabel: "Capas",
+      shortcut: "Cmd Shift S",
+      export: "Exportar imagen",
+      size: "1280 × 720",
+      headline: "What can't you edit without?",
+      alt: "Una miniatura de YouTube hecha con un fotograma del podcast, con sus capas",
     },
   },
   start: {
@@ -487,6 +498,7 @@ export const es: Dict = {
         "Expórtalo para YouTube.",
         "Haz un video con este audio, con subtítulos sobre un fondo.",
         "Dirige la entrevista: muestra a quien esté hablando, y a los dos cuando se responden.",
+        "Haz una miniatura de YouTube con el fotograma de 0:04 y el título del episodio en grande.",
       ],
       undo: "¿Cambiaste de idea? Abre History en Frameshell y revierte cualquier cambio, tuyo o del agente.",
     },

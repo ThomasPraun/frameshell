@@ -5,7 +5,7 @@ export const en = {
   meta: {
     title: "Frameshell: an IDE for video",
     description:
-      "Edit any video by asking for it: an AI agent cuts pauses, adds subtitles and logos, cuts between cameras in podcasts, interviews and recorded calls, turns an audio file into a video and one recording into shorts, while you watch and fix it in the timeline. Open source desktop app for macOS, Windows and Linux.",
+      "Edit any video by asking for it: an AI agent cuts pauses, adds subtitles and logos, cuts between cameras in podcasts, interviews and recorded calls, turns an audio file into a video and one recording into shorts, and makes thumbnails and posters, while you watch and fix it in the timeline. Open source desktop app for macOS, Windows and Linux.",
     ogLocale: "en_US",
   },
   header: {
@@ -22,7 +22,7 @@ export const en = {
   hero: {
     marker: "Intro",
     lines: ["An IDE", "for video."],
-    lede: "Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles and your logo, cuts between cameras in podcasts, interviews and recorded calls, and turns a recording into vertical shorts or an audio file into a video. You watch every change in the preview and the timeline, and fix anything by hand.",
+    lede: "Edit any video by asking for it. An AI agent cuts the pauses, adds subtitles and your logo, cuts between cameras in podcasts, interviews and recorded calls, and turns a recording into vertical shorts or an audio file into a video. Thumbnails and posters work the same way. You watch every change in the preview and the timeline, and fix anything by hand.",
     download: "Download",
     source: "View source on GitHub",
     platforms: "for macOS, Windows and Linux. Free and open source,",
@@ -206,14 +206,14 @@ export const en = {
       body: "The app follows your system language. Switch it in View > Language, no restart needed.",
       // Language names and the welcome button in each, as the app shows them.
       samples: [
-        ["English", "New from video or audio…"],
-        ["Español", "Nuevo desde un video o audio…"],
+        ["English", "New from video, audio or image…"],
+        ["Español", "Nuevo desde un video, audio o imagen…"],
       ] as [string, string][],
     },
   },
   workflows: {
     marker: "Workflows",
-    title: "Four ways to make a video.",
+    title: "Five ways to start.",
     recording: {
       title: "From a recording",
       body: "Vlogs, interviews, podcasts, classes. The agent removes silences and repeated takes, trims the intro, adds subtitles, evens out loudness and cuts shorts for social media. You review the result and restore anything it shouldn't have cut.",
@@ -244,6 +244,19 @@ export const en = {
         ["Wide", "3"],
         ["Ana", "1"],
       ] as [string, string][],
+    },
+    picture: {
+      title: "From a frame or a picture",
+      body: "Thumbnails, posters, social cards. Press Cmd+Shift+S on any frame of your video, or drop in your pictures: each one becomes a layer. The agent adds the title and the logo, you point at anything to change it, and export PNG, JPEG or WebP.",
+      // Topmost first, as the app's Layers panel lists them.
+      layers: ["Title", "Logo", "frame-00-04"],
+      layersLabel: "Layers",
+      shortcut: "Cmd Shift S",
+      export: "Export image",
+      size: "1280 × 720",
+      // On the picture itself; the clip is in English, so it stays English on both pages.
+      headline: "What can't you edit without?",
+      alt: "A YouTube thumbnail made from a frame of the podcast, with its layers",
     },
   },
   start: {
@@ -487,6 +500,7 @@ export const en = {
         "Export it for YouTube.",
         "Make a video from this audio, with subtitles over a background.",
         "Direct the interview: show whoever is talking, both of them when they answer each other.",
+        "Make a YouTube thumbnail from the frame at 0:04, with the episode title big.",
       ],
       undo: "Changed your mind? Open History in Frameshell and revert any change, yours or the agent's.",
     },
