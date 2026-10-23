@@ -2,6 +2,8 @@
 
 Pick (ADR 0011) names the clip under a click, and inside a photo that is all it can name. In an image project (ADR 0017) "the person on the left" or "the sky" cannot be addressed, masked or cut out. This spike measured segmentation models that run on the ONNX Runtime Web pin Frameshell already has for face detection (`docs/binaries.md`, `packages/core/src/multicam/faces.ts`). It recommends a model, where it lives, what Pick returns and the first operation.
 
+Decided in [ADR 0022](../adr/0022-photo-segmentation.md) on 2026-10-23. Where the ADR's file names or method shapes differ from the sketches below, the ADR wins.
+
 ## Recommendation
 
 - **Model: MobileSAM**, the ONNX export in [`Acly/MobileSAM`](https://huggingface.co/Acly/MobileSAM) (image encoder plus SAM's multi-mask decoder). It has the fastest encoder measured: about **2.6 s once per photo**, then about **0.17 s per click**, on one WebAssembly thread of an Apple M3. It adds a **45 MB** download, and it gives clean masks for objects, parts and people. Licence: Apache-2.0 (MobileSAM code and weights; the decoder is SAM's, also Apache-2.0). The export's card says MIT. Both are permissive.
