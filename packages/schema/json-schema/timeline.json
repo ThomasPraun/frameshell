@@ -1078,6 +1078,10 @@
                       "center",
                       "bottom"
                     ]
+                  },
+                  "speakerNames": {
+                    "description": "Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false.",
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": {}

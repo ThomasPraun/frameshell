@@ -3423,6 +3423,259 @@ button.track-head:focus-visible {
   background: #4ade80;
 }
 
+/* ---------- People (ADR 0020) ---------- */
+
+.people-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  outline: none;
+}
+
+.people-add,
+.people-scan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.people-add .people-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.people-input {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-app);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+
+.people-input:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.people-panel .button {
+  padding: 4px 10px;
+}
+
+.people-heading {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.people-notice,
+.people-scan-state,
+.suggestion-meta,
+.person-spans {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.people-error {
+  color: var(--danger);
+}
+
+.people-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestion {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+.suggestion-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.suggestion-text {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.face-thumb {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  overflow: hidden;
+  background: #000;
+  border-radius: 4px;
+}
+
+.face-thumb video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--person-color);
+  border-radius: 4px;
+}
+
+.person.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  border-left-color: var(--person-color);
+}
+
+.person-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.person-head .people-input {
+  flex: 1;
+}
+
+.person-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 600;
+}
+
+.person-swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--person-color);
+}
+
+.person-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-agent,
+.person-link-missing {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+.person-link-missing {
+  color: var(--danger);
+}
+
+.person-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.person-toggle {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.person-toggle button {
+  padding: 2px 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+.person-toggle button.is-active {
+  background: var(--accent);
+  color: #1d1e20;
+  font-weight: 600;
+}
+
+.person-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.person-link.is-missing .person-link-label {
+  text-decoration: line-through;
+}
+
+.person-link-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-link-agent {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.person-link-pick {
+  align-self: flex-start;
+  max-width: 100%;
+  font-size: 11.5px;
+}
+
 /* ---------- Review mode (ADR 0019) ---------- */
 
 .proposal-bar {

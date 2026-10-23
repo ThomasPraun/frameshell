@@ -2,6 +2,7 @@ import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useMemo,
 import type { TimelineView } from "@frameshell/protocol";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { rich, t } from "../i18n.js";
+import { linkedPerson } from "../people/model.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, selection, unionRange, useSelection } from "../selection.js";
 import { formatTimecode, layoutTimeline } from "../timeline/layout.js";
@@ -232,8 +233,13 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     setRenaming(null);
     if (name === null || name.trim() === "" || name.trim() === speaker.name) return;
     try {
-      const content = await window.frameshell.files.read(path);
-      await window.frameshell.files.write(path, withSpeakerName(content, speaker.id, name));
+      // A speaker linked to a person is that person (ADR 0020): renaming the person names them in every linked transcript.
+      const person = linkedPerson(await window.frameshell.people.list().catch(() => null), path, speaker.id);
+      if (person) await window.frameshell.people.rename(person.id, name.trim());
+      else {
+        const content = await window.frameshell.files.read(path);
+        await window.frameshell.files.write(path, withSpeakerName(content, speaker.id, name));
+      }
       setStatus({ tone: "info", text: t.transcript.speakerRenamed(speaker.name, name.trim()) });
     } catch (failure) {
       setStatus({ tone: "error", text: t.transcript.speakerNotRenamed((failure as Error).message) });

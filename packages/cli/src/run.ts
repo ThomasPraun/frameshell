@@ -26,6 +26,7 @@ import {
 } from "@frameshell/protocol";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
+import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import {
@@ -99,7 +100,7 @@ Commands:
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
+${PEOPLE_USAGE}  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
                                files as resources. Register: claude mcp add frameshell -- frameshell mcp
@@ -113,13 +114,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "segment"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -139,6 +140,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "proposal status": [],
   "proposal wait": ["timeout"],
   "proposal diff": ["tx"],
+  ...PEOPLE_FLAGS,
   mcp: [],
 };
 
@@ -184,6 +186,7 @@ type Invocation =
   | { kind: "proposal.status" }
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
+  | PeopleInvocation
   | TimelineInvocation;
 
 interface Flags {
@@ -244,6 +247,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           segment: { type: "boolean", default: false },
           timeout: { type: "string" },
           tx: { type: "string" },
+          angle: { type: "string" },
+          face: { type: "string" },
+          "on-screen": { type: "boolean", default: false },
+          onscreen: { type: "boolean", default: false },
+          reject: { type: "boolean", default: false },
+          person: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -310,7 +319,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -351,10 +360,18 @@ function parseBuiltin(
     px?: string | undefined;
     timeout?: string | undefined;
     tx?: string | undefined;
+    speaker?: string | undefined;
+    angle?: string | undefined;
+    face?: string | undefined;
+    "on-screen"?: boolean | undefined;
+    onscreen?: boolean | undefined;
+    reject?: boolean | undefined;
+    person?: string | undefined;
     segment?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
+  if (command === "people") return parsePeople(rest, options);
   if (command === "inspect") {
     if (rest.length > 0) return null;
     const at = Number(options.at);
@@ -563,6 +580,19 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       outcome.code = PROPOSAL_EXIT_CODES[result.outcome];
       return flags.json ? json(result) : formatProposalWait(result);
     }
+    case "people.list":
+    case "people.add":
+    case "people.rename":
+    case "people.remove":
+    case "people.link":
+    case "people.unlink":
+    case "people.scan":
+      return executePeople(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
+    case "people.ranges":
+      return executePeople(conn, inv, cwd, flags.json);
+    case "people.suggest":
+    case "people.confirm":
+      return executePeople(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "proposal.diff": {
       const result = await conn.request("proposal.diff", { cwd, ...(inv.tx ? { tx: inv.tx } : {}) });
       return flags.json ? json(result) : formatProposalDiff(result);

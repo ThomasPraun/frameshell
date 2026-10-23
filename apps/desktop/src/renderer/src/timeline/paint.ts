@@ -141,6 +141,8 @@ export interface PaintInput<Img> {
   diff?: readonly ClipDiff[];
   /** Timeline range of selected transcript words: tinted over the lanes, barred on the ruler. */
   range?: { from: number; to: number } | null;
+  /** Timeline ranges of a selected person (People panel): drawn in place of {@link PaintInput.range}, each on its own. */
+  spans?: readonly { from: number; to: number }[];
   /** Cues of each subtitle track, by track id; a lane without any shows a hint. */
   subtitles?: ReadonlyMap<string, readonly CueBox[]>;
   /** Selected track (shared selection store): its cues are framed in the accent color. */
@@ -255,18 +257,18 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   });
   if (input.diff) paintDiff(ctx, input, input.diff);
   if (input.drag) paintDrag(ctx, input, input.drag);
-  const range = input.range ? rangeSpan(input) : null;
-  if (range) {
+  const marks = selectionMarks(input);
+  for (const mark of marks) {
     ctx.fillStyle = withAlpha(theme.accent, RANGE_ALPHA);
-    ctx.fillRect(range.x, layout.head, range.w, height - layout.head);
+    ctx.fillRect(mark.x, layout.head, mark.w, height - layout.head);
   }
   ctx.restore();
 
   paintRuler(ctx, input);
   if (layout.scenes.length > 0) paintScenes(ctx, input);
-  if (range) {
+  for (const mark of marks) {
     ctx.fillStyle = theme.accent;
-    ctx.fillRect(range.x, RULER_HEIGHT - RANGE_BAR, range.w, RANGE_BAR);
+    ctx.fillRect(mark.x, RULER_HEIGHT - RANGE_BAR, mark.w, RANGE_BAR);
   }
   paintPlayhead(ctx, input);
   return { clipsDrawn, mediaDrawn };
@@ -856,13 +858,17 @@ function paintScenes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
   }
 }
 
-/** Visible px span of {@link PaintInput.range}, at least 1 px wide; null when off screen. */
-function rangeSpan<Img>(input: PaintInput<Img>): { x: number; w: number } | null {
+/** Visible px spans of the selection: each of {@link PaintInput.spans}, else {@link PaintInput.range}. */
+function selectionMarks<Img>(input: PaintInput<Img>): { x: number; w: number }[] {
+  const ranges = input.spans && input.spans.length > 0 ? input.spans : input.range ? [input.range] : [];
   const { pxPerSecond, scrollLeft, width } = input.viewport;
-  const x0 = Math.max(0, Math.round(input.range!.from * pxPerSecond - scrollLeft));
-  const x1 = Math.min(width, Math.round(input.range!.to * pxPerSecond - scrollLeft));
-  if (x1 < 0 || x0 > width) return null;
-  return { x: x0, w: Math.max(1, x1 - x0) };
+  const marks: { x: number; w: number }[] = [];
+  for (const { from, to } of ranges) {
+    const x0 = Math.max(0, Math.round(from * pxPerSecond - scrollLeft));
+    const x1 = Math.min(width, Math.round(to * pxPerSecond - scrollLeft));
+    if (x1 >= 0 && x0 <= width) marks.push({ x: x0, w: Math.max(1, x1 - x0) });
+  }
+  return marks;
 }
 
 function paintPlayhead<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {

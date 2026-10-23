@@ -19,7 +19,7 @@ const POSITION_LABELS: Record<SubtitlePosition, string> = { top: t.inspector.pos
 
 /**
  * Settings of the selected subtitle track (SPEC §5.3): the track whose words
- * it shows, its style preset and position. Each change is one `track.set` by
+ * it shows, its style preset, position and speaker names. Each change is one `track.set` by
  * `ui`, saved at once and undoable from the timeline; the preview and export
  * both follow it.
  */
@@ -69,6 +69,10 @@ export function SubtitleInspector({ track }: { track: string }) {
         value={style.position}
         onPick={(position) => send({ track, style: { position: position as SubtitlePosition } })}
       />
+      <label className="clip-field" title={t.inspector.speakerNamesTitle}>
+        <input type="checkbox" aria-label={t.inspector.speakerNames} checked={style.speakerNames} onChange={(event) => send({ track, style: { speakerNames: event.target.checked } })} />
+        <span className="clip-field-label is-static">{t.inspector.speakerNames}</span>
+      </label>
       {missing.length > 0 && (
         <span className="clip-inspector-hint" title={missing.join("\n")}>
           {t.inspector.noTranscript(missing.length === 1 ? missing[0]! : t.inspector.clipsAssets(missing.length))}

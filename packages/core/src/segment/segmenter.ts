@@ -1,7 +1,6 @@
 // Photo segmentation (ADR 0022): MobileSAM on ONNX Runtime Web. The encoder runs once per photo and its
 // embedding is cached; each click only runs the small decoder and is turned into three masks in photo pixels.
-import { readFile } from "node:fs/promises";
-import { importOrt } from "../multicam/faces.js";
+import { loadOnnxModel } from "../onnx-web.js";
 
 /** Long side, in pixels, of the picture the encoder sees; the model's native input size. */
 export const SEGMENT_LONG_SIDE = 1024;
@@ -218,9 +217,10 @@ export class Segmenter {
  * this process. Inputs and outputs are those of Acly/MobileSAM's export.
  */
 export async function loadMobileSam(runtime: string, encoder: string, decoder: string): Promise<SegmentEngine> {
-  const ort = await importOrt(runtime);
-  const create = async (path: string) => ort.InferenceSession.create(new Uint8Array(await readFile(path)));
-  const [encoderSession, decoderSession] = await Promise.all([create(encoder), create(decoder)]);
+  const [{ ort, session: encoderSession }, { session: decoderSession }] = await Promise.all([
+    loadOnnxModel(runtime, encoder),
+    loadOnnxModel(runtime, decoder),
+  ]);
   const tensor = (data: Float32Array, dims: readonly number[]) => new ort.Tensor("float32", data, dims);
   return {
     async encode(rgb, size) {

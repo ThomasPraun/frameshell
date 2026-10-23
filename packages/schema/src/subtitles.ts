@@ -2,7 +2,7 @@
 // burns exactly these cues (as ASS), the preview draws exactly these cues over the picture.
 import type { Size } from "./composite.js";
 import type { Clip, SubtitleTrack, Timeline } from "./timeline.js";
-import type { Transcript } from "./transcript.js";
+import { type Transcript, wordSpeaker } from "./transcript.js";
 
 /** Where a subtitle line sits in the frame. */
 export type SubtitlePosition = "top" | "center" | "bottom";
@@ -92,11 +92,13 @@ export const DEFAULT_SUBTITLE_PRESET: SubtitlePresetId = "big-keyword";
 /** A preset with the track's overrides applied. */
 export interface SubtitleStyle extends SubtitlePreset {
   preset: SubtitlePresetId;
+  /** Cues start a speaker's turn with their name and never span two speakers (ADR 0020). */
+  speakerNames: boolean;
 }
 
 /**
  * The style a track's `style` field asks for: its preset (default
- * {@link DEFAULT_SUBTITLE_PRESET}) with `position` overridden. An unknown
+ * {@link DEFAULT_SUBTITLE_PRESET}) with `position` and `speakerNames` (default false) overridden. An unknown
  * preset name (hand-edited file) falls back to the default and is returned
  * in `unknownPreset` for a warning.
  */
@@ -105,7 +107,7 @@ export function resolveSubtitleStyle(style: SubtitleTrack["style"]): { style: Su
   const known = asked !== undefined && Object.hasOwn(SUBTITLE_PRESETS, asked);
   const preset = known ? (asked as SubtitlePresetId) : DEFAULT_SUBTITLE_PRESET;
   const position = style?.position ?? SUBTITLE_PRESETS[preset].position;
-  return { style: { ...SUBTITLE_PRESETS[preset], preset, position }, unknownPreset: asked !== undefined && !known ? asked : null };
+  return { style: { ...SUBTITLE_PRESETS[preset], preset, position, speakerNames: style?.speakerNames === true }, unknownPreset: asked !== undefined && !known ? asked : null };
 }
 
 /** One transcript word placed on the timeline by a subtitle track. */
@@ -123,6 +125,10 @@ export interface SubtitleWord {
   /** Source-asset seconds of the word in its transcript. */
   sourceStart: number;
   sourceEnd: number;
+  /** Speaker id in the word's transcript (an `edits` correction wins), when it names a listed speaker. */
+  speaker?: string;
+  /** That speaker's transcript name, ASS markup characters removed. */
+  speakerName?: string;
 }
 
 /** A clip's transcript, by asset; null when there is none. */
@@ -166,7 +172,19 @@ export function subtitleWords(timeline: Timeline, trackId: string, transcripts: 
       const from = at(Math.max(word.start, clip.in));
       if (text === "" || from >= end) continue;
       const to = Math.max(from, at(Math.min(word.end, clip.out)));
-      words.push({ id: word.id, asset: clip.asset, clip: clip.id, text, start: from, end: to, sourceStart: word.start, sourceEnd: word.end });
+      const speaker = wordSpeaker(transcript, word);
+      const name = speaker === undefined ? undefined : transcript.speakers?.find((candidate) => candidate.id === speaker)?.name;
+      words.push({
+        id: word.id,
+        asset: clip.asset,
+        clip: clip.id,
+        text,
+        start: from,
+        end: to,
+        sourceStart: word.start,
+        sourceEnd: word.end,
+        ...(speaker !== undefined && name !== undefined ? { speaker, speakerName: cleanText(name) } : {}),
+      });
     }
   }
   return words;
@@ -178,6 +196,8 @@ export interface SubtitleCue {
   end: number;
   /** Words as displayed (preset case applied), in order. Word `i` is spoken from its `start` until word `i + 1` starts. */
   words: SubtitleWord[];
+  /** Speaker name and colon ("Juan:", preset case applied) when the cue starts that speaker's turn. */
+  label?: string;
   /** The style highlights the word being spoken. */
   highlight: boolean;
 }
@@ -186,28 +206,52 @@ export interface SubtitleCue {
 const CUE_PAUSE_S = 0.6;
 const SENTENCE_END = /[.!?…]["»”')]?$/;
 
+/** What a cue shows as space-joined tokens: its label (if any), then its words. */
+export function cueTokens(cue: SubtitleCue): string[] {
+  return cue.label === undefined ? cue.words.map((word) => word.text) : [cue.label, ...cue.words.map((word) => word.text)];
+}
+
 /**
  * Group `words` into cues: at most `maxWords` words and `maxChars`
  * characters, broken after a sentence end and at a pause. A cue shows from
  * its first word's start to its last word's end (never into the next cue).
+ * With `style.speakerNames` a cue never spans two speakers (words of one
+ * transcript speaker, or with none), and the first cue of a turn carries the
+ * speaker's name as `label`, counted in `maxChars`.
  */
 export function subtitleCues(words: readonly SubtitleWord[], style: SubtitleStyle, fps: number): SubtitleCue[] {
   const pause = Math.round(CUE_PAUSE_S * fps);
+  const turn = (word: SubtitleWord) => (word.speaker === undefined ? "" : `${word.asset}\0${word.speaker}`);
   const cues: SubtitleCue[] = [];
   let current: SubtitleWord[] = [];
+  let label: string | undefined;
+  let previous: SubtitleWord | undefined;
   const flush = () => {
     if (current.length === 0) return;
-    cues.push({ start: current[0]!.start, end: Math.max(current[0]!.start + 1, current.at(-1)!.end), words: current, highlight: style.highlight !== null });
+    cues.push({
+      start: current[0]!.start,
+      end: Math.max(current[0]!.start + 1, current.at(-1)!.end),
+      words: current,
+      ...(label === undefined ? {} : { label }),
+      highlight: style.highlight !== null,
+    });
     current = [];
+    label = undefined;
   };
   for (const word of words) {
     const shown = { ...word, text: style.uppercase ? word.text.toUpperCase() : word.text };
     const last = current.at(-1);
+    const newTurn = style.speakerNames && (previous === undefined || turn(previous) !== turn(shown));
     if (last) {
-      const chars = current.reduce((sum, w) => sum + w.text.length + 1, 0) + shown.text.length;
-      if (current.length >= style.maxWords || chars > style.maxChars || shown.start - last.end >= pause || SENTENCE_END.test(last.text)) flush();
+      const chars = (label === undefined ? 0 : label.length + 1) + current.reduce((sum, w) => sum + w.text.length + 1, 0) + shown.text.length;
+      if (newTurn || current.length >= style.maxWords || chars > style.maxChars || shown.start - last.end >= pause || SENTENCE_END.test(last.text)) flush();
+    }
+    if (current.length === 0 && newTurn && shown.speakerName !== undefined) {
+      const name = `${shown.speakerName}:`;
+      label = style.uppercase ? name.toUpperCase() : name;
     }
     current.push(shown);
+    previous = word;
   }
   flush();
   for (let i = 1; i < cues.length; i++) cues[i - 1]!.end = Math.max(cues[i - 1]!.start + 1, Math.min(cues[i - 1]!.end, cues[i]!.start));

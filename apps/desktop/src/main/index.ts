@@ -23,6 +23,8 @@ import {
   type OpenOutcome,
   type Outcome,
   type ProjectView,
+  type PeopleChange,
+  type PersonTarget,
   type ProposalChange,
   type ReviewEvent,
   type TimelineChange,
@@ -432,8 +434,17 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("job.progress", project.dir, {
       onEvent: ({ job }) => {
         if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+        else if (job.kind === "people") send(contents, Channel.peopleScanJob, job);
       },
-      onResync: () => send(contents, Channel.clipsJob, null),
+      onResync: () => {
+        send(contents, Channel.clipsJob, null);
+        send(contents, Channel.peopleScanJob, null);
+      },
+    }),
+    // People (ADR 0020): the People panel follows changes by anyone, agents included.
+    daemon.subscribe("people.changed", project.dir, {
+      onEvent: ({ project: _project, ...change }) => send(contents, Channel.peopleChanged, change satisfies PeopleChange),
+      onResync: () => send(contents, Channel.peopleChanged, null),
     }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.daemonEvents = subscriptions;
@@ -843,6 +854,42 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/** The People panel's calls (ADR 0020): thin daemon requests for the window's project, made by the app (no `by`). */
+function registerPeopleIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  ipcMain.handle(Channel.peopleList, (event) => outcome(async () => daemon.request("people.list", { cwd: await dirOf(event.sender) })));
+  ipcMain.handle(Channel.peopleAdd, (event, name: string) =>
+    outcome(async () => daemon.request("people.add", { cwd: await dirOf(event.sender), name })),
+  );
+  ipcMain.handle(Channel.peopleRename, (event, person: string, name: string) =>
+    outcome(async () => daemon.request("people.rename", { cwd: await dirOf(event.sender), person, name })),
+  );
+  ipcMain.handle(Channel.peopleRemove, (event, person: string) =>
+    outcome(async () => daemon.request("people.remove", { cwd: await dirOf(event.sender), person })),
+  );
+  ipcMain.handle(Channel.peopleLink, (event, person: string, target: PersonTarget) =>
+    outcome(async () => daemon.request("people.link", { cwd: await dirOf(event.sender), person, ...target })),
+  );
+  ipcMain.handle(Channel.peopleUnlink, (event, person: string, target: PersonTarget) =>
+    outcome(async () => daemon.request("people.unlink", { cwd: await dirOf(event.sender), person, ...target })),
+  );
+  ipcMain.handle(Channel.peopleScan, (event) => outcome(async () => daemon.request("people.scan", { cwd: await dirOf(event.sender) })));
+  ipcMain.handle(Channel.peopleSuggest, (event) => outcome(async () => daemon.request("people.suggest", { cwd: await dirOf(event.sender) })));
+  ipcMain.handle(Channel.peopleConfirm, (event, suggestions: string[], options: { reject?: boolean; person?: string }) =>
+    outcome(async () =>
+      daemon.request("people.confirm", {
+        cwd: await dirOf(event.sender),
+        suggestions,
+        reject: options.reject === true,
+        ...(options.person ? { person: options.person } : {}),
+      }),
+    ),
+  );
+  ipcMain.handle(Channel.peopleRanges, (event, person: string, kind: "speaks" | "onscreen") =>
+    outcome(async () => daemon.request("people.ranges", { cwd: await dirOf(event.sender), person, kind, timeline: "main" })),
+  );
+}
+
 function registerIpc(): void {
   ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
   ipcMain.handle(Channel.agentsDetect, () => findAgents());
@@ -1080,6 +1127,7 @@ function registerIpc(): void {
   ipcMain.handle(Channel.multicamTurns, (event, timeline: string, group: string) =>
     outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),
   );
+  registerPeopleIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
   );

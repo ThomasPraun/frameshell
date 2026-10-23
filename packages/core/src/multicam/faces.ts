@@ -1,11 +1,9 @@
 // Face-driven reframe keys (ADR 0016): sample frames with ffmpeg, find faces with YuNet on ONNX Runtime Web
 // (WebAssembly, in a worker thread), follow the main face, then keep only the keys where it moves.
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { Worker } from "node:worker_threads";
 import type { AngleCrop } from "@frameshell/schema";
+import { loadOnnxModel } from "../onnx-web.js";
+import { runWorkerTask } from "../worker-task.js";
 
 /** One face in a frame, in fractions of the frame: center `x`, `y` and size, plus the detector's score (0..1). */
 export interface Face {
@@ -14,6 +12,8 @@ export interface Face {
   width: number;
   height: number;
   score: number;
+  /** YuNet's five landmarks as fractions of the frame: eye at image left, eye at image right, nose tip, mouth corner at image left, mouth corner at image right. */
+  landmarks?: readonly (readonly [number, number])[];
 }
 
 /** A frame as packed 8-bit BGR, rows top to bottom. */
@@ -102,29 +102,6 @@ export async function* sampleFaceFrames(
   }
 }
 
-/** The part of ONNX Runtime Web's API used here; the module is downloaded, so it has no types at build time. */
-export interface OrtModule {
-  env: { wasm: { numThreads: number; wasmPaths: string } };
-  InferenceSession: { create(model: Uint8Array): Promise<OrtSession> };
-  Tensor: new (type: "float32", data: Float32Array, dims: readonly number[]) => unknown;
-}
-
-export interface OrtSession {
-  readonly inputNames: readonly string[];
-  run(feeds: Record<string, unknown>): Promise<Record<string, { data: unknown }>>;
-}
-
-/**
- * The ONNX Runtime Web module at `runtime` (its `.wasm` beside it), set to run
- * single-threaded: the threaded build cannot start its workers under Node.
- */
-export async function importOrt(runtime: string): Promise<OrtModule> {
-  const ort = (await import(/* @vite-ignore */ pathToFileURL(runtime).href)) as OrtModule;
-  ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmPaths = pathToFileURL(join(dirname(runtime), "/")).href;
-  return ort;
-}
-
 /** Below this score a YuNet candidate is not a face (OpenCV's demo uses 0.9; lower keeps turned heads). */
 const FACE_SCORE = 0.6;
 /** Candidates overlapping a better one by more than this (intersection over union) are the same face. */
@@ -136,8 +113,7 @@ const FACE_OVERLAP = 0.3;
  * this process.
  */
 export async function loadYunet(runtime: string, model: string): Promise<FaceDetector> {
-  const ort = await importOrt(runtime);
-  const session = await ort.InferenceSession.create(new Uint8Array(await readFile(model)));
+  const { ort, session } = await loadOnnxModel(runtime, model);
   const input = session.inputNames[0] ?? "input";
   return async (frame) => {
     const { width, height, data } = frame;
@@ -159,7 +135,9 @@ export async function loadYunet(runtime: string, model: string): Promise<FaceDet
  * Faces from YuNet's outputs (`cls_<s>`, `obj_<s>`, `bbox_<s>` per stride
  * 8, 16, 32), decoded as OpenCV's `FaceDetectorYN` does: one candidate per
  * grid cell, score `sqrt(cls * obj)`, box center offset from the cell and size
- * `exp` of the output, both in strides; then non-maximum suppression.
+ * `exp` of the output, both in strides; then non-maximum suppression. When
+ * the model gives `kps_<s>` the faces carry their five landmarks, each offset
+ * from the cell in strides.
  */
 export function decodeYunet(output: (name: string) => Float32Array | undefined, width: number, height: number): Face[] {
   const candidates: Face[] = [];
@@ -168,6 +146,7 @@ export function decodeYunet(output: (name: string) => Float32Array | undefined, 
     const obj = output(`obj_${stride}`);
     const bbox = output(`bbox_${stride}`);
     if (!cls || !obj || !bbox) throw new Error(`YuNet gave no outputs for stride ${stride}: not the pinned model?`);
+    const kps = output(`kps_${stride}`);
     const cols = Math.floor(width / stride);
     const rows = Math.floor(height / stride);
     for (let row = 0; row < rows; row++) {
@@ -181,13 +160,16 @@ export function decodeYunet(output: (name: string) => Float32Array | undefined, 
           width: (Math.exp(bbox[i * 4 + 2]!) * stride) / width,
           height: (Math.exp(bbox[i * 4 + 3]!) * stride) / height,
           score,
+          ...(kps
+            ? { landmarks: Array.from({ length: 5 }, (_, n): [number, number] => [((col + kps[i * 10 + 2 * n]!) * stride) / width, ((row + kps[i * 10 + 2 * n + 1]!) * stride) / height]) }
+            : {}),
         });
       }
     }
   }
   candidates.sort((a, b) => b.score - a.score);
   const faces: Face[] = [];
-  for (const candidate of candidates) if (faces.every((face) => overlap(face, candidate) <= FACE_OVERLAP)) faces.push(candidate);
+  for (const candidate of candidates) if (faces.every((face) => faceOverlap(face, candidate) <= FACE_OVERLAP)) faces.push(candidate);
   return faces;
 }
 
@@ -196,7 +178,7 @@ function clamp01(value: number): number {
 }
 
 /** Intersection over union of two boxes. */
-function overlap(a: Face, b: Face): number {
+export function faceOverlap(a: Face, b: Face): number {
   const w = Math.min(a.x + a.width / 2, b.x + b.width / 2) - Math.max(a.x - a.width / 2, b.x - b.width / 2);
   const h = Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2);
   if (w <= 0 || h <= 0) return 0;
@@ -401,12 +383,6 @@ export interface YunetFiles {
   model: string;
 }
 
-/** Messages from `faces-worker.js`. */
-export type FaceWorkerMessage =
-  | { type: "progress"; fraction: number }
-  | { type: "done"; result: AngleFaces }
-  | { type: "error"; message: string };
-
 /**
  * Worker script beside this module. Under the test runner this module is the
  * TypeScript source, so the worker runs from the build (`pnpm test` builds first).
@@ -421,30 +397,5 @@ const FACE_WORKER = import.meta.url.endsWith(".ts")
  */
 export function yunetWorkerScanner(files: YunetFiles): FaceScanner {
   return ({ onProgress, signal, ...request }) =>
-    new Promise<AngleFaces>((resolve, reject) => {
-      signal?.throwIfAborted();
-      const worker = new Worker(FACE_WORKER, { workerData: { ...files, ...request } });
-      const abort = () => {
-        void worker.terminate();
-        reject(signal!.reason as Error);
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      const settle = () => signal?.removeEventListener("abort", abort);
-      worker.on("message", (message: FaceWorkerMessage) => {
-        if (message.type === "progress") return onProgress?.(message.fraction);
-        settle();
-        void worker.terminate();
-        if (message.type === "done") resolve(message.result);
-        else reject(new Error(message.message));
-      });
-      worker.once("error", (error) => {
-        settle();
-        reject(error);
-      });
-      // A promise settles once: after a result this rejection is ignored.
-      worker.once("exit", (code) => {
-        settle();
-        reject(new Error(`face detection worker exited (code ${code}) without a result`));
-      });
-    });
+    runWorkerTask<AngleFaces>(FACE_WORKER, { ...files, ...request }, "face detection", { signal, onProgress });
 }

@@ -46,9 +46,11 @@ import { analyseGallery } from "./multicam/gallery.js";
 import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
 import {
   FACE_DETECTION_MODEL,
+  FACE_RECOGNITION_MODEL,
   ONNX_RUNTIME_WEB,
   PHOTO_SEGMENTATION_DECODER_MODEL,
   PHOTO_SEGMENTATION_ENCODER_MODEL,
+  SPEAKER_EMBEDDING_MODEL,
 } from "./binaries/manifest.js";
 import { workerSegmentEngine } from "./segment/engine.js";
 import type { SegmentEngine } from "./segment/segmenter.js";
@@ -58,6 +60,11 @@ import { type GallerySource, galleryReport, planGallery } from "./multicam/galle
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
+import { type FaceScans, PeopleService, type VoicePrinter } from "./people/service.js";
+import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
+import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
+import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
+import { computeVoicePrints } from "./people/voices.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -69,7 +76,7 @@ import { TimelineService, type TxRef } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
-import type { AudioExtractor } from "./transcripts/audio.js";
+import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
@@ -107,6 +114,10 @@ export interface DaemonOptions {
   diarize?: Diarizer;
   /** Face scan of one angle for `multicam.faces`. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   faceScanner?: FaceScanner;
+  /** Face scan of one video for `people.scan`. Defaults to YuNet and SFace on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  peopleScanner?: PeopleScanner;
+  /** Speaker embeddings for `people.suggest` voice prints. Defaults to CAM++ on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  voiceEmbedder?: VoiceEmbedder;
   /** Photo segmentation model for `segment.prepare`. Defaults to MobileSAM on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   segmentEngine?: SegmentEngine;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
@@ -257,6 +268,40 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   await transactions.restore();
   const review = new ReviewSwitch(dirs);
+  const people = new PeopleService({
+    onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, ...(person !== undefined ? { person } : {}) }),
+  });
+  /** Cached face scans of every file in `assets/`; content hashes come from the media index. */
+  const faceScans =
+    (dir: string): FaceScans =>
+    async () =>
+      readProjectFaceScans(
+        dir,
+        (await media.list(dir)).map((asset) => asset.path),
+        async (d, rel) => (await media.derivedAudio(d, rel)).hash,
+      );
+  /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
+  const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
+    const embed: VoiceEmbedder =
+      options.voiceEmbedder ??
+      (async (request) => {
+        const project = await projectBinaries(dir);
+        return campplusWorkerEmbedder({
+          runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: progress }),
+          model: await binaries.ensureModel(SPEAKER_EMBEDDING_MODEL, { onProgress: progress }),
+        })(request);
+      });
+    return (wanted) =>
+      computeVoicePrints({
+        root: dir,
+        wanted,
+        embed,
+        tools: { ensureBinary: async (name, onProgress) => binaries.ensure(name, await projectBinaries(dir), { onProgress }) },
+        media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
+        extractAudio: options.extractAudio ?? extractAudioWithFfmpeg,
+        progress,
+      });
+  };
   /** After an operation of `key` in `tx`: a proposal whose transaction is already over (no grouping) is ready. */
   const settle = async (key: string, tx: TxRef) => {
     if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
@@ -1091,6 +1136,83 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "proposal.reject": async ({ cwd, tx }, caller) => {
       onlyUi(caller, "reject a proposal", tx);
       return timelines.rejectProposal(await root(cwd), tx);
+    },
+    "people.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, ...(await people.list(dir)) };
+    },
+    "people.add": async ({ cwd, name }) => {
+      const dir = await root(cwd);
+      return { dir, person: await people.add(dir, name) };
+    },
+    "people.rename": async ({ cwd, person, name }) => {
+      const dir = await root(cwd);
+      return { dir, ...(await people.rename(dir, person, name)) };
+    },
+    "people.remove": async ({ cwd, person }) => {
+      const dir = await root(cwd);
+      return { dir, removed: await people.remove(dir, person) };
+    },
+    "people.link": async ({ cwd, person, speaker, angle, face }, caller) => {
+      const dir = await root(cwd);
+      // An agent's confirmation is marked on the link (ADR 0020 §10); a person's own is not.
+      const author = journalAuthorOf(caller);
+      return { dir, ...(await people.link(dir, person, { speaker, angle, face }, author.startsWith("agent:") ? author : undefined)) };
+    },
+    "people.unlink": async ({ cwd, person, speaker, angle, face }) => {
+      const dir = await root(cwd);
+      return { dir, person: await people.unlink(dir, person, { speaker, angle, face }) };
+    },
+    "people.scan": async ({ cwd, assets, force }, _caller, request) => {
+      const dir = await root(cwd);
+      // The caller may be gone (the job outlives it): its progress is then dropped.
+      const tell = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      const names = assets ?? (await media.list(dir)).map((asset) => asset.path);
+      return inJob({ kind: "people", project: dir, asset: [...names].sort().join(",") }, async (ctx) => {
+        ctx.update({ step: "people", progress: 0 });
+        const project = await projectBinaries(dir);
+        const result = await scanProjectFaces(dir, { assets, force }, {
+          listAssets: async () => names,
+          probe: (d, rel) => media.probe(d, rel),
+          hash: async (d, rel) => (await media.derivedAudio(d, rel)).hash,
+          ffmpeg: () => binaries.ensure("ffmpeg", project, { onProgress: tell }),
+          scanner: async () =>
+            options.peopleScanner ??
+            peopleScanWorker({
+              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: tell }),
+              detector: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
+              recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: tell }),
+            }),
+          onProgress: (progress) => ctx.update({ progress }),
+          report: tell,
+          signal: ctx.signal,
+        });
+        return { dir, ...result };
+      });
+    },
+    "people.ranges": async ({ cwd, person, kind, timeline }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const flat = await resolveNested(dir, loaded);
+      const found = await people.ranges(dir, person, kind, flat, (group) => groupTurns(turnsSource, dir, group), faceScans(dir));
+      return { dir, person: { id: found.person.id, name: found.person.name }, kind, timeline, spans: found.spans, total: found.total, warnings: found.warnings };
+    },
+    // Both read transcription WAVs: `transcribing` keeps `gc` off them meanwhile.
+    "people.suggest": async ({ cwd }, _caller, request) => {
+      const dir = await root(cwd);
+      return { dir, ...(await transcribing(dir, () => people.suggest(dir, { voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
+    },
+    "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
+      const dir = await root(cwd);
+      const author = journalAuthorOf(caller);
+      const by = author.startsWith("agent:") ? author : undefined;
+      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),

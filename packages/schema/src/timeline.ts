@@ -396,6 +396,7 @@ export const SubtitleTrackSchema = z.strictObject({
     .looseObject({
       preset: z.string().optional(),
       position: z.enum(["top", "center", "bottom"]).optional(),
+      speakerNames: z.boolean().optional().describe("Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false."),
     })
     .optional(),
 });

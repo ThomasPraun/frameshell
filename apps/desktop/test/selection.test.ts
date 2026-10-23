@@ -12,14 +12,14 @@ describe("selection store", () => {
     selection.selectClips(["c_a"], "timeline");
     expect(selection.get()).toBe(first);
     selection.selectClips(["c_a"], "script");
-    expect(selection.get()).toEqual({ clips: ["c_a"], words: [], range: null, origin: "script", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: ["c_a"], words: [], range: null, origin: "script", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     selection.toggleClip("c_b", "timeline");
-    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     selection.toggleClip("c_a", "timeline");
     expect(selection.get().clips).toEqual(["c_b"]);
     selection.clear();
     selection.clear();
-    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     expect(changes).toBe(5);
     off();
   });
@@ -30,9 +30,9 @@ describe("selection store", () => {
     selection.retainClips(new Set(["c_a", "c_b", "c_gone"]));
     expect(selection.get()).toBe(before);
     selection.retainClips(new Set(["c_b", "c_a"]));
-    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], words: [], range: null, origin: "script", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: ["c_a", "c_b"], words: [], range: null, origin: "script", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     selection.retainClips(new Set());
-    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
   });
 
   it("issues a new reveal request each time, even for the same clips (a scene heading clicked again)", () => {
@@ -61,19 +61,19 @@ describe("selection store", () => {
     const place = { track: "v1", start: 4, end: 6 };
     selection.selectHistory("tx_0000000a", ["c_a"], { clip: "c_a", place });
     const first = selection.get();
-    expect(first).toEqual({ clips: ["c_a"], words: [], range: null, origin: "history", reveal: { clip: "c_a", place }, history: "tx_0000000a", files: [], scene: null, region: null, points: [], track: null });
+    expect(first).toEqual({ clips: ["c_a"], words: [], range: null, origin: "history", reveal: { clip: "c_a", place }, history: "tx_0000000a", files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     // Clicked again: a new reveal request, as for scene headings.
     selection.selectHistory("tx_0000000a", ["c_a"], { clip: "c_a", place });
     expect(selection.get().reveal).not.toBe(first.reveal);
     // A timeline click replaces it: nothing stays highlighted.
     selection.selectClips(["c_b"], "timeline");
-    expect(selection.get()).toEqual({ clips: ["c_b"], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: ["c_b"], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
   });
 
   it("pruning keeps a History panel selection whose clips are all gone: removed clips stay highlighted", () => {
     selection.selectHistory("op_0000000b", ["c_a"], null);
     selection.retainClips(new Set());
-    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: "history", reveal: null, history: "op_0000000b", files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: "history", reveal: null, history: "op_0000000b", files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     selection.selectHistory("op_0000000c", [], null);
     expect(selection.get().history).toBe("op_0000000c");
     selection.clear();
@@ -85,7 +85,7 @@ describe("selection store", () => {
     selection.toggleClip("c_b", "timeline");
     expect(selection.get().reveal).toBeNull();
     selection.selectClips([], "script", { reveal: true });
-    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+    expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
   });
 
   describe("words", () => {
@@ -102,14 +102,14 @@ describe("selection store", () => {
     it("selecting words replaces clips with words and their timeline range, revealing the range on request", () => {
       selection.selectClips(["c_a"], "timeline");
       selection.selectWords(words, { from: 10, to: 11.4 }, "transcript", { reveal: true });
-      expect(selection.get()).toEqual({ clips: [], words, range: { from: 10, to: 11.4 }, origin: "transcript", reveal: { range: { from: 10, to: 11.4 } }, history: null, files: [], scene: null, region: null, points: [], track: null });
+      expect(selection.get()).toEqual({ clips: [], words, range: { from: 10, to: 11.4 }, origin: "transcript", reveal: { range: { from: 10, to: 11.4 } }, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
       const same = selection.get();
       selection.selectWords([...words], { from: 10, to: 11.4 }, "transcript", { reveal: true });
       expect(selection.get().reveal).not.toBe(same.reveal);
       selection.selectClips(["c_b"], "timeline");
       expect(selection.get()).toMatchObject({ clips: ["c_b"], words: [], range: null });
       selection.selectWords([], { from: 0, to: 1 }, "transcript");
-      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     });
 
     it("re-places words on a new revision: cut ones drop, the range follows, the reveal request stays", () => {
@@ -125,7 +125,7 @@ describe("selection store", () => {
       selection.retainWords((w) => (w.word === "w_000001" ? null : { from: 13, to: 13.4 }));
       expect(selection.get()).toMatchObject({ words: [words[1]], range: { from: 13, to: 13.4 }, origin: "transcript" });
       selection.retainWords(() => null);
-      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
     });
 
     it("words picked on a subtitle track name the track; a track alone can be selected too", () => {
@@ -135,7 +135,7 @@ describe("selection store", () => {
       selection.selectWords(words, { from: 10, to: 11.4 }, "transcript");
       expect(selection.get().track).toBeNull();
       selection.selectTrack("s1", "timeline");
-      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: "s1" });
+      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: "timeline", reveal: null, history: null, files: [], scene: null, region: null, points: [], track: "s1", person: null, spans: [] });
       const same = selection.get();
       selection.selectTrack("s1", "timeline");
       expect(selection.get()).toBe(same);
@@ -149,14 +149,42 @@ describe("selection store", () => {
       selection.retainTrack(new Set(["s1", "v1"]));
       expect(selection.get()).toBe(before);
       selection.retainTrack(new Set(["v1"]));
-      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null });
+      expect(selection.get()).toEqual({ clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] });
       selection.selectWords(words, { from: 10, to: 11.4 }, "timeline", { track: "s1" });
       selection.retainTrack(new Set(["v1"]));
       expect(selection.get()).toMatchObject({ words: [], track: null });
     });
   });
+  describe("person (ADR 0020)", () => {
+    const juan = { id: "p_3fa2c1", name: "Juan", what: "speaks" as const };
+
+    it("holds the person, their spans and words, with the union of the spans as the range", () => {
+      selection.selectPerson(juan, [{ from: 5, to: 8 }, { from: 20, to: 22 }], [], "people", { reveal: true });
+      expect(selection.get()).toMatchObject({
+        person: juan,
+        spans: [{ from: 5, to: 8 }, { from: 20, to: 22 }],
+        range: { from: 5, to: 22 },
+        origin: "people",
+        reveal: { range: { from: 5, to: 8 } },
+      });
+    });
+
+    it("is replaced by any other selection", () => {
+      selection.selectPerson(juan, [{ from: 5, to: 8 }], [], "people");
+      selection.selectClips(["c_a"], "timeline");
+      expect(selection.get()).toMatchObject({ person: null, spans: [] });
+      selection.selectPerson(juan, [], [], "people");
+      selection.clear();
+      expect(selection.get().person).toBeNull();
+    });
+
+    it("selects the person alone while their spans are still being read", () => {
+      selection.selectPerson(juan, [], [], "people");
+      expect(selection.get()).toMatchObject({ person: juan, spans: [], range: null, reveal: null });
+    });
+  });
   describe("ask-agent kinds (#49)", () => {
-    const blank = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null };
+    const blank = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] };
 
     it("a timeline range selects time alone; an empty range selects nothing", () => {
       selection.selectClips(["c_a"], "timeline");

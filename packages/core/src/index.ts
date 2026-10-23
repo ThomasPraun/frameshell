@@ -6,6 +6,92 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
+export {
+  type FaceScans,
+  type NameWrites,
+  type PeopleChange,
+  type PeopleServiceOptions,
+  type PeopleTarget,
+  PeopleService,
+  type SuggestSources,
+  type VoicePrinter,
+} from "./people/service.js";
+export {
+  FACE_EMBEDDING_DIMS,
+  type FaceEmbedder,
+  type FaceTrack,
+  FaceTracker,
+  type Landmarks,
+  MIN_EMBED_PX,
+  type PeopleScanFiles,
+  type PeopleScanOptions,
+  type PeopleScanRequest,
+  type PeopleScanResult,
+  type PeopleScanner,
+  type Similarity,
+  type TrackBox,
+  alignFace,
+  loadSface,
+  peopleScanWorker,
+  scanFrameSize,
+  scanPeopleFaces,
+  shrinkFrame,
+  similarityTransform,
+} from "./people/scan.js";
+export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
+export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, faceSpans, mergeSpans, personRanges } from "./people/ranges.js";
+export {
+  type ClusterTrack,
+  FACE_ANCHOR_WINDOW_S,
+  FACE_CLUSTER_MATCH,
+  FACE_SAMPLE_SPAN_S,
+  type FaceCluster,
+  type FaceModel,
+  type FaceOwners,
+  type FaceAnchorPoint,
+  type ScannedAsset,
+  clusterFaces,
+  facesOfPeople,
+  overlapSeconds,
+  personFacePrint,
+  presence,
+  resolveAnchor,
+  spanSeconds,
+} from "./people/face-clusters.js";
+export {
+  FACE_MIN_SCREEN_S,
+  FACE_PERSON_MARGIN,
+  FACE_PERSON_MATCH,
+  FACE_SPEAKER_MIN_S,
+  FACE_SPEAKER_SHARE,
+  type FaceSuggestInput,
+  faceSuggestions,
+} from "./people/face-suggest.js";
+export { ANGLE_SPEAKER_SHARE, type AngleSuggestInput, angleSuggestions } from "./people/angle-suggest.js";
+export { type ScanProjectDeps, readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
+export { FBANK_BINS, FBANK_SAMPLE_RATE, type Fbank, fbank, subtractMean } from "./people/fbank.js";
+export {
+  type CampplusFiles,
+  type Stretch,
+  type VoiceEmbedRequest,
+  type VoiceEmbedder,
+  campplusWorkerEmbedder,
+  embedStretches,
+} from "./people/voice-embed.js";
+export {
+  VOICES_DIR,
+  type VoiceOutcome,
+  type VoicePrint,
+  type VoicePrintOptions,
+  type VoiceWanted,
+  classifyVoiceCache,
+  computeVoicePrints,
+  meanPrint,
+  voiceKey,
+  voiceStretches,
+} from "./people/voices.js";
+export { type PersonVoice, SPEAKER_MARGIN, SPEAKER_MATCH, type SpeakerVoice, speakerSuggestions, suggestionId } from "./people/suggest.js";
+export { cosine } from "./people/vector.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
@@ -35,6 +121,8 @@ export {
   SPEAKER_EMBEDDING_MODEL,
   FACE_DETECTION_MODEL,
   FACE_DETECTION_MODELS,
+  FACE_RECOGNITION_MODEL,
+  FACE_RECOGNITION_MODELS,
   PHOTO_SEGMENTATION_DECODER_MODEL,
   PHOTO_SEGMENTATION_ENCODER_MODEL,
   PHOTO_SEGMENTATION_MODELS,

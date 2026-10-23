@@ -63,7 +63,8 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 24 | Transitions | **A property of the clip edge**: optional `dissolve` (on the incoming clip), `fadeIn`, `fadeOut`, centered on the cut, using handles; short handles shorten the dissolve or turn it into a dip through black, never fail; one schema function computes what plays; audio crossfades equal-power; multicam shots keep hard cuts (ADR 0018) | Clips stay butted, so the no-overlap invariant and every ripple operation stay as they are; an agent sets a dissolve with one time | Overlapping clips on a track, a transition list per track, failing on short handles, `xfade` |
 | 25 | Keyframes | **Optional `keys` per property** (`x`, `y`, `scale`, `opacity`, `gain`) on the clip's own clock (the seconds `in` counts), ease `linear`/`in`/`out`/`in-out`, held outside; a keyed property ignores its static value; one evaluator in `composite.ts`, export expressions pinned by a parity test (ADR 0018) | Keys stay on their frames through trim, split and ripple cut; four eases are easy to hand-edit and to write as ffmpeg expressions | Keys in seconds from `start`, Bézier curves, a keyframe lane in v0.13 |
 | 26 | Element adjustments | **Optional clip `elements`** (CSS selector → `x`, `y`, `scale`) applied as one host-made CSS sheet over the composition, live and in the render; source untouched; journaled `clip.set`; part of the render key (ADR 0021) | Works for script-made and animated elements and for both adapters; undo, history and review mode come free; the agent reads one flat field | Adapter patches the source, overrides inside `props`, rotation and text in v1 |
-| 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). Numbered 28 because 27 is claimed by an open PR | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
+| 27 | People | **Optional `people.json`**: each person links transcript speakers (any transcript), multicam angles and face anchors. Frameshell **suggests** links (same voice across files from CAM++ voice prints, face on screen while a voice speaks, the person behind an angle); a person or an agent confirms each. Faces recognized locally (SFace on ONNX Runtime Web) by an on-demand scan; embeddings only in `.frameshell/people/`. `people ranges` gives timeline spans per person; subtitles may show speaker names (ADR 0020) | "When does Juan speak" and "when is Ana on screen" become one command; names and references in the project file, regenerable prints outside it; without the file nothing changes | People fields in transcripts or angles, automatic assignment above a threshold, prints or cluster ids in the project file |
+| 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
 
 ### Cross-cutting rules
 
@@ -211,6 +212,7 @@ my-video/
 ├── transcripts/
 │   └── raw-01.words.json      # word-level transcript per asset
 ├── director.json              # optional: multicam director rules on top of a template (ADR 0016)
+├── people.json                # optional: who is who across transcripts, angles and faces (ADR 0020)
 └── .frameshell/               # gitignored
     ├── cache/clips/           # rendered generated clips (regenerable)
     ├── proxies/               # CFR preview proxies (regenerable)
@@ -218,7 +220,8 @@ my-video/
     ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
     ├── rejected/              # refused direct edits kept for recovery
     ├── rejected.jsonl         # why each was refused (listed by `status`)
-    └── proposals/             # review mode (ADR 0019): open proposal, decided ones for 7 days, decisions.jsonl
+    ├── proposals/             # review mode (ADR 0019): open proposal, decided ones for 7 days, decisions.jsonl
+    └── people/                # face scans, voice prints, clusters, thumbnails (ADR 0020; regenerable)
 ```
 
 ### 5.2 `frameshell.json`
@@ -299,7 +302,7 @@ Rules:
 - **Layering:** track order = stacking order; first video track is the bottom layer.
 - **Timing:** `start` is timeline time; `in`/`out` are source time. `media` duration = `(out - in) / speed`. Generated clips carry `duration`. All times are seconds, snapped by the core to `1/fps`, stored with 3 decimals.
 - **IDs:** stable, generated by core (`c_` / `t_` + random hex); hand-written ids (e.g. `v1`) are accepted in files. Agents reference clips by ID.
-- **Subtitle tracks do not copy words.** A subtitle track `follows` a video/audio track: its words are the transcript words that fall inside each followed clip's `[in, out]`, mapped to timeline time. Cutting a clip automatically removes its words from subtitles. Word text corrections live in the transcript file.
+- **Subtitle tracks do not copy words.** A subtitle track `follows` a video/audio track: its words are the transcript words that fall inside each followed clip's `[in, out]`, mapped to timeline time. Cutting a clip automatically removes its words from subtitles. Word text corrections live in the transcript file. `style.speakerNames: true` (default false, ADR 0020) starts the first cue of each turn with its speaker's transcript name ("Juan: …") and never lets a cue span two speakers.
 - **Nested timelines:** `type: "timeline"` embeds another timeline file as a clip.
 - **Clip types:** `media`, `timeline` and `shot` are core types. Others (`hyperframes`, `remotion`, …) are registered by adapter plugins, each with its own `props` schema.
 - **Multicam (ADR 0016):** `groups` (optional) holds multicam groups; a `program` track shows one group with `shot` clips:
@@ -378,6 +381,32 @@ Plain Markdown. Optional conventions:
 
 Every file carries `schemaVersion`. `packages/schema` ships forward migrations; the daemon migrates on open (with a backup under `.frameshell/`).
 
+### 5.7 People (`people.json`)
+
+Optional (ADR 0020). Without it, nothing changes.
+
+```json
+{
+  "schemaVersion": 1,
+  "people": [
+    { "id": "p_3fa2c1", "name": "Juan",
+      "speakers": [{ "transcript": "transcripts/ep1.words.json", "speaker": "s1" }],
+      "angles": [{ "timeline": "main", "group": "g_talk", "angle": "juan" }],
+      "faces": [{ "asset": "assets/ep1.mp4", "at": 12.5, "x": 0.41, "y": 0.33 }] }
+  ],
+  "dismissed": ["sg_9c04e1d2"]
+}
+```
+
+- `id`: `p_` + 6 hex, core-generated, stable (hand-written ids accepted); `name` unique, case-insensitive; commands take either.
+- Links: `speakers` (a transcript and a speaker id; no `speaker` = every word of the transcript), `angles` (timeline, group, angle id), `faces` (**face anchors**: asset, source second, point of the face as fractions of the picture). Optional `by` on a link names the author that confirmed it. A transcript speaker, angle or anchor belongs to at most one person. A link whose target is gone is reported `missing` and ignored, never removed.
+- `dismissed`: suggestion ids answered "no".
+- Names only, no embeddings: voice prints (CAM++ on the transcription WAV, per speaker), face scans (2 samples a second, YuNet then SFace, per asset) and face clusters live in `.frameshell/people/`, keyed by asset hash and model ids, and are regenerated on demand. A face is a person's when it is closest to that person's anchors.
+- Linking a transcript speaker, or renaming its person, writes the person's name into the transcript's `speakers` entry, so subtitles and export need no knowledge of people. Angle names are not rewritten.
+- Only the daemon writes it (atomically); a hand edit is read on the next call; an invalid file fails people methods with `InvalidProjectFile` and nothing else. Not journaled, not held by review mode (ADR 0019): an agent's confirmation applies and shows as confirmed by agent. Cmd/Ctrl+Z in the People panel undoes the last people change (one step).
+- **Suggestions** (`people suggest`): `speaker` (an unlinked speaker close to a person's voice print), `face-speaker` (the face on screen for most of a speaker's time in one asset), `angle` (person named like a multicam angle, with its voice and face), `face` (an unnamed cluster on screen at least 10 s). Each has a stable `sg_` id, a score and a reason; `people confirm` links, `--reject` dismisses. Nothing is linked without a confirmation by a person or an agent.
+- **Ranges** (`people ranges`): merged timeline spans where a person speaks (their linked speakers' words placed by clips, their angles' turns placed by shots) or is on screen (shots showing their angles, face samples placed by clips showing the asset; occlusion by upper tracks not subtracted).
+
 ---
 
 ## 6. Core behaviours
@@ -448,6 +477,13 @@ frameshell cut [--track <id>…] --from <s> --to <s> [--no-snap] [--snap-window 
 frameshell timeline show [--json]             # compact dump for agents
 
 frameshell transcribe <asset> [--provider p]  # writes transcripts/<asset>.words.json
+frameshell people list [--json]               # people, their links, missing links (ADR 0020)
+frameshell people add <name> | rename <person> <name> | remove <person>
+frameshell people link|unlink <person> (--speaker <transcript>[:<speaker>] | --angle [<timeline>:]<group>:<angle> | --face <asset>@<s>[:x,y])
+frameshell people scan [<asset>…]             # background job: faces of video assets (YuNet + SFace), cached in .frameshell/people/
+frameshell people suggest [--json]            # speaker, face-speaker, angle and face suggestions with ids
+frameshell people confirm <suggestion>… [--reject] [--person <person>]
+frameshell people ranges <person> [--on-screen] [--json]   # timeline spans where the person speaks (default) or is on screen
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
 
@@ -490,6 +526,7 @@ Design rules:
 - The UI publishes its state to the daemon; the daemon is the only broker. MCP never talks to Electron directly.
 - Default project of a call without `cwd`: the project enclosing the server's directory; when that is in no project (one global server, e.g. Claude Desktop), the project of the app window focused last, named in the result. No window: the call fails asking to open a project or pass `cwd` (ADR 0014).
 - CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
+- People (ADR 0020): every `people.*` method is a tool (`people_suggest`, `people_confirm`, `people_ranges`, …); a person picked in the People panel shows in `ui_state`.
 - Review mode (ADR 0019): `proposal_status` and `proposal_wait` are tools; accepting, rejecting and turning review on or off are internal methods only the app calls, never tools.
 
 ## 8. Plugin system
@@ -552,6 +589,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - Headless Chrome for HTML engines (HyperFrames): managed like other binaries and passed via `PRODUCER_HEADLESS_SHELL_PATH`.
 - Speaker diarization (ADR 0016): sherpa-onnx's offline diarization (Apache-2.0), upstream prebuilt CPU builds per platform, with a pyannote segmentation model (MIT) and a 3D-Speaker embedding model (Apache-2.0), about 60 MB together, downloaded from the builders on first use; not mirrored.
 - Face detection for reframe keys (ADR 0016, `multicam.faces`): ONNX Runtime Web (MIT), the WebAssembly build from Microsoft's npm tarball, one pin for every platform, imported by a daemon worker thread (no native code), with OpenCV zoo's YuNet model (MIT), about 33 MB, downloaded from the builders on first use; not mirrored.
+- Face recognition for people (ADR 0020, `people scan`): OpenCV zoo's SFace model (Apache-2.0, 38.7 MB, pinned at the YuNet commit), run by the same ONNX Runtime Web pin; voice prints reuse the diarization's CAM++ model. Downloaded on first scan; not mirrored.
 - Photo segmentation (ADR 0022, Pick in image projects, `image.cutout`): MobileSAM's encoder and decoder (Apache-2.0, ONNX export pinned by revision on Hugging Face), about 45 MB, run on the same ONNX Runtime Web pin by a daemon worker; downloaded on first use, not mirrored.
 - whisper.cpp: pinned version, prebuilt per platform. macOS (Metal) and Linux builds are compiled reproducibly by Frameshell CI and published once on a Frameshell GitHub Release (MIT licence; bytes must match the pin); Windows uses upstream prebuilt assets. v0.1 ships CPU builds on Linux and Windows; GPU builds (CUDA/Vulkan) come from a user override (`binaries.whisper-cli`). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
@@ -578,6 +616,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - **Transitions and keys (v0.13, ADR 0018):** an edge with a transition is marked across the cut at its effective length; right-click on an edge adds a dissolve or a fade or removes it; selecting the mark shows kind and duration in the inspector. Keys show as diamonds on the clip; the clip inspector has an "add keyframe at playhead" button per property (position, scale, opacity, gain), the key's ease, and remove. Hidden in image projects. Dragging keys and a keyframe lane come later.
 - **Element adjustments (v0.16, ADR 0021):** in the paused preview of a trusted project, double-click a generated clip to enter its elements: the element under the cursor gets handles (body moves, corners scale uniformly), an inline element steps up to its block ancestor, Escape returns to the clip; a normal drag still moves the whole clip. While dragging, a topmost clip shows its live page with the sheet swapped live (the engine skips its render layer); a covered clip moves only an outline. Each drag is one `clip.set` by `ui`, one undo step; the clip then re-renders in the background. The inspector lists the clip's adjustments with a reset each, marks fragile selectors (no `id`, `:nth-child`) "may not follow code edits" with an Ask agent shortcut to add an `id`, and marks adjustments that match nothing. Image and video projects alike.
 - **History panel:** transactions by author, diff highlight, revert.
+- **People (v0.15, ADR 0020):** a People sidebar view, detachable, next to Angles. Suggestions on top (listen to the voice, see the face, Yes / No, a name for a new person), then each person: colour, linked speakers, angles and faces (agent-confirmed ones marked), seconds speaking and on screen. Clicking a person selects their words in the transcript view and their spans on the timeline (Speaks / On screen toggle); Ask agent quotes `[frameshell] person p_3fa2c1 "Juan" · speaks · 14 spans, 03:20 total`. The transcript view's speaker label menu has "Link to person"; the subtitle inspector has "Show speaker names". "Scan faces" starts `people scan`.
 - **Review mode (ADR 0019):** "Review agent changes before applying", per project (project menu and History panel header), off by default. While a proposal is open, every window of the project, detached panels included, shows a bar above preview and timeline: label, author, operation count, a **Before / After** toggle (window state shared with its detached panels, so preview and timeline show the same side; After when a proposal becomes ready), **Accept** (when ready) and **Reject**. After plays and shows the proposal timeline with the History diff marks on what changes. A stale proposal shows "Out of date" until dismissed.
 - **Ask agent from selection** (decision 21): Cmd/Ctrl+L or context menu on any selection focuses the active agent terminal and types a reference into its prompt without sending. Pick tool (`I`, ADR 0011): hover outlines the element under the cursor, ↑/↓ moves to its parent or child, click picks a point, Shift+click adds points (each keeps its time), drag selects a region. A point names the clip stack under it (topmost painting layer first) and the composition element there; a region names the clips it touches. In an image project a click on a photo also names the part under it (ADR 0022): photos are prepared when Pick turns on, the chosen mask is outlined, ↑/↓ steps to a larger or smaller mask, and the context menu offers "Cut out as layer". Details (full stack, element facts) and the frame capture go under `.frameshell/context/` (regenerable, gitignored, swept by `gc` after 7 days). The reference is typed at once; while a render is pending the frame is `frame pending`. Reference format, one line per selected item:
   ```
@@ -637,6 +676,7 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 | **v0.11** | Multicam sources and shots: speaker diarization and `speaker` on words, gallery-view call recordings, camera sets with separate mics, `screen` and picture-in-picture shots with director rules for screen motion, 9:16 reframing |
 | **v0.13** | Transitions and keyframes (ADR 0018): dissolves, fades from and to black, audio crossfades and fades, keys for position, scale, opacity and gain; wipes later |
 | **v0.14** | Review mode (ADR 0019): per-project switch, agent transactions as proposals with before/after view, accept or reject, rebase or stale on human edits, `proposal wait` |
+| **v0.15** | People (ADR 0020): `people.json`, voice suggestions across files, face recognition scan and clusters, voice↔face by co-occurrence, people from multicam angles, ranges per person, speaker names in subtitles, People panel |
 | **v0.16** | Drag to edit composition elements (ADR 0021): double-click a generated clip, move or scale an element inside it, saved as clip `elements` (CSS selector → move, scale) applied over the source in live preview and render; HyperFrames first, then Remotion |
 | **v0.17** | Photo segmentation (ADR 0022): Pick names parts inside a photo in image projects (MobileSAM masks), cut-out layer, background removal as cut-out plus hiding the photo. |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |

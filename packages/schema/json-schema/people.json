@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "people": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^p_[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "description": "Stable; commands take it or the exact name."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free text, unique ignoring case in the file."
+          },
+          "speakers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transcript": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Project-relative transcript file, e.g. `transcripts/ep1.words.json`."
+                },
+                "speaker": {
+                  "description": "Speaker id in that transcript. Absent: every word of the transcript (a person's own mic, a talking head never diarized).",
+                  "type": "string",
+                  "pattern": "^s\\d+$"
+                },
+                "by": {
+                  "description": "Author that confirmed the link when it was an agent, e.g. `agent:claude:s1`. Shown in the app; absent for a person's own links.",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "transcript"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "angles": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timeline": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Timeline id; the file is `timelines/<id>.json`."
+                },
+                "group": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Multicam group id in that timeline."
+                },
+                "angle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Angle id in that group."
+                },
+                "by": {
+                  "description": "Author that confirmed the link when it was an agent, e.g. `agent:claude:s1`. Shown in the app; absent for a person's own links.",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "timeline",
+                "group",
+                "angle"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "faces": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "asset": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Project-relative video file, e.g. `assets/ep1.mp4`."
+                },
+                "at": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Source seconds of the sample."
+                },
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Point of the face, fraction of the picture width (0 left, 1 right)."
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Point of the face, fraction of the picture height (0 top, 1 bottom)."
+                },
+                "by": {
+                  "description": "Author that confirmed the link when it was an agent, e.g. `agent:claude:s1`. Shown in the app; absent for a person's own links.",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "asset",
+                "at",
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dismissed": {
+      "default": [],
+      "description": "Ids of suggestions answered \"no\", so they are not asked again.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/people.json"
+}

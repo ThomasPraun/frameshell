@@ -110,6 +110,18 @@ export interface TerminalInfo {
  */
 export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
 
+/** A people change (daemon `people.changed`, ADR 0020) without the project root. */
+export type PeopleChange = Omit<EventParams<"people.changed">, "project">;
+
+/**
+ * What a people link names: exactly one of a transcript speaker (no `speaker` = the whole transcript), a multicam
+ * angle or a face anchor, as `people.link` and `people.unlink` take it.
+ */
+export type PersonTarget =
+  | { speaker: { transcript: string; speaker?: string } }
+  | { angle: { timeline: string; group: string; angle: string } }
+  | { face: { asset: string; at: number; x: number; y: number } };
+
 /** A review-mode proposal step (daemon `proposal.changed`) without the project root. */
 export type ProposalChange = Omit<EventParams<"proposal.changed">, "project">;
 
@@ -501,6 +513,35 @@ export interface FrameshellApi {
      */
     turns(timeline: string, group: string): Promise<MulticamTurnsResult>;
   };
+  people: {
+    /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
+    list(): Promise<MethodResult<"people.list">>;
+    /** `people.add`. Rejects with the daemon's message, e.g. `name taken`. */
+    add(name: string): Promise<MethodResult<"people.add">>;
+    /** `people.rename`: also writes the name into the person's linked transcripts. */
+    rename(person: string, name: string): Promise<MethodResult<"people.rename">>;
+    /** `people.remove`. */
+    remove(person: string): Promise<MethodResult<"people.remove">>;
+    /** `people.link`; made by the person, so the link has no `by`. */
+    link(person: string, target: PersonTarget): Promise<MethodResult<"people.link">>;
+    /** `people.unlink`. */
+    unlink(person: string, target: PersonTarget): Promise<MethodResult<"people.unlink">>;
+    /** `people.scan` of every video: resolves when the scan job ends; progress comes through {@link people.onScan}. */
+    scan(): Promise<MethodResult<"people.scan">>;
+    /** `people.suggest`: computes voice prints on first use, so it can take seconds. */
+    suggest(): Promise<MethodResult<"people.suggest">>;
+    /** `people.confirm`; `reject` dismisses instead. `person` names who a suggestion without a person is. */
+    confirm(suggestions: string[], options?: { reject?: boolean; person?: string }): Promise<MethodResult<"people.confirm">>;
+    /** `people.ranges` of the main timeline: merged spans where `person` speaks or is on screen. */
+    ranges(person: string, kind: "speaks" | "onscreen"): Promise<MethodResult<"people.ranges">>;
+    /**
+     * Called on every {@link PeopleChange} of the project (any author), or with `null` after a daemon reconnect,
+     * when changes may have been missed. Returns an unsubscribe function.
+     */
+    onChanged(listener: (change: PeopleChange | null) => void): () => void;
+    /** Called on every change of a `people` scan job of the project; `null` after a daemon reconnect. Returns an unsubscribe function. */
+    onScan(listener: (job: JobInfo | null) => void): () => void;
+  };
   scripts: {
     /**
      * `script.outline` of a script of the window's project (project-relative path): its scenes with the
@@ -644,6 +685,18 @@ export const Channel = {
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
   multicamTurns: "multicam:turns",
+  peopleList: "people:list",
+  peopleAdd: "people:add",
+  peopleRename: "people:rename",
+  peopleRemove: "people:remove",
+  peopleLink: "people:link",
+  peopleUnlink: "people:unlink",
+  peopleScan: "people:scan",
+  peopleSuggest: "people:suggest",
+  peopleConfirm: "people:confirm",
+  peopleRanges: "people:ranges",
+  peopleChanged: "people:changed",
+  peopleScanJob: "people:scan-job",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",

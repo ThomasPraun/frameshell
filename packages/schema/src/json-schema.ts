@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DIRECTOR_SCHEMA_URL, DirectorFileSchema } from "./director.js";
+import { PEOPLE_SCHEMA_URL, PeopleFileSchema } from "./people.js";
 import { PLUGIN_MANIFEST_SCHEMA_URL, PluginManifestSchema } from "./plugin.js";
 import { PROJECT_SCHEMA_URL, ProjectConfigSchema } from "./project.js";
 import { TIMELINE_SCHEMA_URL, TimelineSchema } from "./timeline.js";
@@ -21,5 +22,6 @@ export function generateJsonSchemas(): Record<string, object> {
     "plugin.json": toJson(PluginManifestSchema, PLUGIN_MANIFEST_SCHEMA_URL),
     "transcript.json": toJson(TranscriptSchema, TRANSCRIPT_SCHEMA_URL),
     "director.json": toJson(DirectorFileSchema, DIRECTOR_SCHEMA_URL),
+    "people.json": toJson(PeopleFileSchema, PEOPLE_SCHEMA_URL),
   };
 }

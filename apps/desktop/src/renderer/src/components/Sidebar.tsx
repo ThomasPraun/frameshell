@@ -5,6 +5,7 @@ import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { PeoplePanel } from "./PeoplePanel.js";
 import { ReviewSwitch } from "./ReviewSwitch.js";
 
 /** The sidebar's views, in tab order, with their names. */
@@ -13,7 +14,13 @@ export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
   { id: "history", label: t.workspace.history },
   { id: "plugins", label: t.workspace.plugins },
   { id: "angles", label: t.workspace.angles },
+  { id: "people", label: t.workspace.people },
 ];
+
+/** The views an image project (ADR 0017) offers: no one speaks in a picture, so no People view. */
+export function sidebarViews(image: boolean): readonly { id: SidebarView; label: string }[] {
+  return image ? SIDEBAR_VIEWS.filter(({ id }) => id !== "people") : SIDEBAR_VIEWS;
+}
 
 /** Name of a sidebar view, as its tab shows it. */
 export function sidebarLabel(view: SidebarView): string {
@@ -25,7 +32,8 @@ export function sidebarLabel(view: SidebarView): string {
  * can move to its own window (ADR 0012); its tab then shows where it went.
  */
 export function Sidebar({
-  view,
+  image,
+  view: asked,
   onView,
   onCollapse,
   onOpenFile,
@@ -34,6 +42,8 @@ export function Sidebar({
   detached,
   onDetach,
 }: {
+  /** An image project: the views that need sound or faces are left out. */
+  image: boolean;
   view: SidebarView;
   onView: (view: SidebarView) => void;
   onCollapse: () => void;
@@ -46,6 +56,8 @@ export function Sidebar({
   /** Move a view to its own window (`true`) or dock it back. */
   onDetach: (view: SidebarView, detached: boolean) => void;
 }) {
+  const views = sidebarViews(image);
+  const view = views.some(({ id }) => id === asked) ? asked : "explorer";
   const label = sidebarLabel(view).toLowerCase();
   return (
     <>
@@ -58,7 +70,7 @@ export function Sidebar({
         }
       >
         <div className="view-switch" role="tablist" aria-label={t.workspace.sidebarViews}>
-          {SIDEBAR_VIEWS.map(({ id, label: name }) => (
+          {views.map(({ id, label: name }) => (
             <button
               key={id}
               role="tab"
@@ -131,6 +143,7 @@ function SidebarViewBody({
     );
   }
   if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
+  if (view === "people") return <PeoplePanel mediaUrl={mediaUrl} />;
   return (
     <p className="empty">
       {t.workspace.noPlugins}

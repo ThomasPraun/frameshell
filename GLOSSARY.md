@@ -2,6 +2,32 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## People (ADR 0020)
+
+**Person**:
+Someone in the project's footage, kept in `people.json` with a name and links to transcript speakers, multicam angles and face anchors, across any number of files.
+_Avoid_: speaker (one voice in one transcript), participant, character, cast member, identity
+
+**Voice print**:
+A summary of how one transcript speaker sounds, computed from their speech and used only to suggest that speakers of different files are the same person; regenerable, never stored in the project.
+_Avoid_: voice embedding, voiceprint, speaker profile
+
+**Face cluster**:
+The faces a face scan judges to be the same face across the scanned footage, not yet named; it may change when footage is added or scanned again.
+_Avoid_: face group, face id, identity
+
+**Face anchor**:
+One face sample (a file, a second and a point in the picture) confirmed as a person's; faces closest to a person's anchors are that person's.
+_Avoid_: face print, reference face, tag
+
+**Suggestion**:
+A link between a person and a speaker, angle or face that Frameshell computed and that waits for a person or an agent to confirm or reject it; nothing is linked without that answer.
+_Avoid_: proposal (review mode's word), match, guess, auto-assignment
+
+**Person range**:
+A span of timeline time where a person speaks or is on screen, as `people ranges` returns it.
+_Avoid_: segment, turn (a turn is an angle's speaking stretch on the group clock), occurrence
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:

@@ -27,7 +27,7 @@ import { useSyncExternalStore } from "react";
  * request (a script heading, a History row), never under the user's click;
  * a click on a layer in the preview selects its clip without moving the playhead.
  */
-export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "explorer" | "preview" | "agent";
+export type SelectionOrigin = "timeline" | "script" | "history" | "transcript" | "explorer" | "preview" | "people" | "agent";
 
 /** Timeline seconds `[from, to)`. */
 export interface TimeRange {
@@ -51,6 +51,16 @@ export interface SelectedWord {
   /** Source-asset seconds. */
   readonly start: number;
   readonly end: number;
+}
+
+/** A person picked in the People panel (ADR 0020) and which of their time is shown. */
+export interface SelectedPerson {
+  /** Person id, e.g. `p_3fa2c1`. */
+  readonly id: string;
+  /** Name as shown when it was picked. */
+  readonly name: string;
+  /** `speaks`: their words and turns; `onscreen`: where they are in the picture. */
+  readonly what: "speaks" | "onscreen";
 }
 
 /** A script scene (SPEC §5.5) picked in the script editor. */
@@ -182,6 +192,13 @@ export interface Selection {
    * selected words were picked on (a subtitle track); null otherwise.
    */
   readonly track: string | null;
+  /** Person picked in the People panel; null otherwise. Their words are {@link Selection.words}, their time {@link Selection.spans}. */
+  readonly person: SelectedPerson | null;
+  /**
+   * Disjoint, sorted timeline ranges of {@link Selection.person}; empty otherwise. {@link Selection.range}
+   * holds their union, but the timeline draws the spans.
+   */
+  readonly spans: readonly TimeRange[];
 }
 
 /** Timeline whose clips {@link Selection.clips} names: the one the timeline panel shows. */
@@ -199,6 +216,8 @@ const EMPTY: Selection = {
   region: null,
   points: [],
   track: null,
+  person: null,
+  spans: [],
 };
 let current: Selection = EMPTY;
 const listeners = new Set<() => void>();
@@ -319,6 +338,29 @@ export const selection = {
       track === current.track;
     if (same && !options.reveal && origin === current.origin && current.reveal === null) return;
     replace({ ...EMPTY, words: [...words], range, origin, reveal: options.reveal ? { range } : null, track });
+  },
+  /**
+   * Replace the selection with a person (People panel): their `words` (maybe none, e.g. on screen) and their
+   * timeline `spans` (`people.ranges`). `reveal` brings the first span into view and moves the player there,
+   * as for words. No spans and no words selects the person alone.
+   */
+  selectPerson(
+    person: SelectedPerson,
+    spans: readonly TimeRange[],
+    words: readonly SelectedWord[],
+    origin: SelectionOrigin,
+    options: { reveal?: boolean } = {},
+  ): void {
+    const range = unionRange(spans);
+    replace({
+      ...EMPTY,
+      words: [...words],
+      range,
+      spans: spans.map(({ from, to }) => ({ from, to })),
+      person: { ...person },
+      origin,
+      reveal: options.reveal && range ? { range: { from: spans[0]!.from, to: spans[0]!.to } } : null,
+    });
   },
   /** Replace the selection with one track (a subtitle lane clicked); no-op when it is already that alone. */
   selectTrack(id: string, origin: SelectionOrigin): void {

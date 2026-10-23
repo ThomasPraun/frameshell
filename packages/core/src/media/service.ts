@@ -23,7 +23,9 @@ import { ENERGY_DIR, classifyEnergy, energyCacheKey } from "./energy-store.js";
 import { renameRetrying } from "../fs-util.js";
 import { CONTEXT_DIR, CONTEXT_MAX_AGE_MS, classifyContext } from "../context.js";
 import { sweep } from "../gc.js";
+import { PEOPLE_DIR, classifyFaceScan, faceScanKey } from "../people/scan-cache.js";
 import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcripts/transcriber.js";
+import { VOICES_DIR, classifyVoiceCache } from "../people/voices.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
 import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
 
@@ -258,7 +260,7 @@ export class MediaService {
 
   /**
    * Delete derived media (proxies, sidecars, manifests, waveforms,
-   * thumbnails, energy envelopes, transcription WAVs) of content no file of the project has now,
+   * thumbnails, energy envelopes, face scans, transcription WAVs) of content no file of the project has now,
    * keyed by the media index at the current fps and recipe. The files are
    * every one under `assets/` plus every other path the index holds (a
    * deleted asset's entry is dropped). Never touches `assets/`. A key whose
@@ -294,6 +296,7 @@ export class MediaService {
     }
     const mediaKeys = new Set([...hashes].map((hash) => store.key(hash, fps)));
     const energyKeys = new Set([...hashes].map(energyCacheKey));
+    const peopleKeys = new Set([...hashes].map(faceScanKey));
     const common = {
       root,
       temps: options.temps,
@@ -315,6 +318,7 @@ export class MediaService {
     }
     removed.push(
       ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
+      ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || peopleKeys.has(key) })),
       // "Ask agent" captures: by age only, never by key.
       ...(await sweep({
         ...common,
@@ -330,6 +334,7 @@ export class MediaService {
       const audioKeys = new Set([...hashes].map(audioCacheKey));
       removed.push(
         ...(await sweep({ ...common, dir: AUDIO_CACHE_DIR, classify: classifyAudioCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
+        ...(await sweep({ ...common, dir: VOICES_DIR, classify: classifyVoiceCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
         ...(await sweep({ ...common, dir: VERIFY_CACHE_DIR, classify: classifyVerifyCache, keep: () => true })),
         ...(await sweep({ ...common, dir: TRANSCRIBE_WINDOW_DIR, classify: classifyWindowWav, keep: () => true })),
       );

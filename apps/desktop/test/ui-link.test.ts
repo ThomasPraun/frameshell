@@ -95,6 +95,16 @@ describe("uiView region", () => {
   });
 });
 
+describe("uiView person", () => {
+  it("publishes the picked person with their spans in thousandths, and no person key otherwise", () => {
+    const read = () => uiView({ transport: createTransport().get(), selection: selection.get(), editor: { active: null, tabs: [] }, visible: null });
+    expect(read().selection).not.toHaveProperty("person");
+    selection.selectPerson({ id: "p_3fa2c1", name: "Juan", what: "onscreen" }, [{ from: 1.00049, to: 4 }], [], "people");
+    expect(read().selection.person).toEqual({ id: "p_3fa2c1", name: "Juan", what: "onscreen", spans: [{ from: 1, to: 4 }] });
+    selection.clear();
+  });
+});
+
 describe("createPublisher", () => {
   it("sends the first change on the next tick, then at most every interval with the newest view, never a repeat", () => {
     vi.useFakeTimers();

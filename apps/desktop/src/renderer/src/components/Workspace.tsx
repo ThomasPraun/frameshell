@@ -29,7 +29,7 @@ import { PreviewPanel } from "./PreviewPanel.js";
 import { ProposalBar } from "./ProposalBar.js";
 import { reviewState, setReviewEnabled, startReview } from "../review/store.js";
 import { PanelWindow } from "./PanelWindow.js";
-import { SIDEBAR_VIEWS, Sidebar, SidebarWindow } from "./Sidebar.js";
+import { Sidebar, SidebarWindow, sidebarViews } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { StatusBar } from "./StatusBar.js";
 import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
@@ -91,8 +91,8 @@ export function Workspace({ project }: { project: ProjectView }) {
     setPanelDetached("editor", false),
   );
   const detachedViews = useMemo(
-    () => new Set(SIDEBAR_VIEWS.map(({ id }) => id).filter((view) => detached.has(view))) as ReadonlySet<SidebarView>,
-    [detached],
+    () => new Set(sidebarViews(image).map(({ id }) => id).filter((view) => detached.has(view))) as ReadonlySet<SidebarView>,
+    [detached, image],
   );
   const [maximized, setMaximized] = useState<WorkspacePanel | null>(null);
 
@@ -379,6 +379,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           <>
             <div {...slot("sidebar")} style={{ flexBasis: sidebar.size }}>
               <Sidebar
+                image={image}
                 view={layout.sidebarView}
                 onView={(view) => setLayout({ ...layout, sidebarView: view })}
                 onCollapse={() => toggle("sidebar")}
@@ -499,7 +500,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         notice={notice}
         setup={setup}
       />
-      {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
+      {sidebarViews(image).filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
           <ProposalBar />
           <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} mediaUrl={project.mediaUrl} />
