@@ -5,7 +5,10 @@ import type {
   HistoryDiffResult,
   HistoryResult,
   JobInfo,
+  EventParams,
   MethodParams,
+  MethodResult,
+  TimelineViewName,
   OperationResult,
   RevertConflict,
   MulticamTurnsResult,
@@ -105,6 +108,16 @@ export interface TerminalInfo {
  * timeline may have changed meanwhile.
  */
 export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
+
+/** A review-mode proposal step (daemon `proposal.changed`) without the project root. */
+export type ProposalChange = Omit<EventParams<"proposal.changed">, "project">;
+
+/**
+ * Review mode of the window's project changed: a proposal step, the switch turned on or off (here or in
+ * another window of the project), or, with `resync`, the daemon connection was re-established and
+ * `review.status` must be read again.
+ */
+export type ReviewEvent = { proposal: ProposalChange } | { enabled: boolean } | { resync: true };
 
 /**
  * An asset of the window's project changed (daemon `asset.changed`): `asset`
@@ -206,8 +219,9 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * Command an application menu entry sends to the focused project window.
  * `showTranscript`: open the transcript view (View > Transcript).
  * `imageFromFrame`: make an image project from the frame at the playhead (File > New Image from Frame, ADR 0017).
+ * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame";
+export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -311,8 +325,11 @@ export interface FrameshellApi {
     detached(): Promise<DetachablePanel[]>;
   };
   timeline: {
-    /** `timeline.show` of the window's project. Rejects with the daemon's message. */
-    show(timeline: string): Promise<TimelineView>;
+    /**
+     * `timeline.show` of the window's project. `view: "proposal"` shows the open review-mode proposal's version
+     * (ADR 0019); omitted, the file as it is. Rejects with the daemon's message.
+     */
+    show(timeline: string, view?: TimelineViewName): Promise<TimelineView>;
     /** Called on every change of the project's timelines; see {@link TimelineChange}. Returns an unsubscribe function. */
     onChanged(listener: (change: TimelineChange) => void): () => void;
     /**
@@ -371,6 +388,20 @@ export interface FrameshellApi {
      * (SPEC §6.2). Conflicts resolve as {@link RevertOutcome}; other failures reject.
      */
     revert(timeline: string, target: string): Promise<RevertOutcome>;
+  };
+  review: {
+    /** `proposal.status` of the window's project: the switch, the open proposal, recent decisions. Rejects with the daemon's message. */
+    status(): Promise<MethodResult<"proposal.status">>;
+    /** Turn review mode on or off for the window's project (`review.set` as `ui`); other windows of it follow. */
+    setEnabled(enabled: boolean): Promise<void>;
+    /** Apply the ready proposal `tx` (`proposal.accept` as `ui`). Rejects with the daemon's message, e.g. ProposalState `decided`. */
+    accept(tx: string): Promise<void>;
+    /** Discard the open proposal `tx` (`proposal.reject` as `ui`). Rejects like `accept`. */
+    reject(tx: string): Promise<void>;
+    /** `proposal.diff`: what the open proposal changes, per timeline. Rejects with the daemon's message. */
+    diff(): Promise<MethodResult<"proposal.diff">>;
+    /** Called on each {@link ReviewEvent} of the window's project. Returns an unsubscribe function. */
+    onChanged(listener: (event: ReviewEvent) => void): () => void;
   };
   agents: {
     /** Agent CLIs the guide offers, with where each is installed (the login shell's PATH and usual folders). */
@@ -562,6 +593,12 @@ export const Channel = {
   historyList: "history:list",
   historyDiff: "history:diff",
   historyRevert: "history:revert",
+  reviewStatus: "review:status",
+  reviewSet: "review:set",
+  reviewAccept: "review:accept",
+  reviewReject: "review:reject",
+  reviewDiff: "review:diff",
+  reviewChanged: "review:changed",
   menuCommand: "menu:command",
   uiPublish: "ui:publish",
   uiCommand: "ui:command",

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, nativeImage, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { TimelineRejection, UiView } from "@frameshell/protocol";
+import type { MethodResult, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
@@ -23,6 +23,8 @@ import {
   type OpenOutcome,
   type Outcome,
   type ProjectView,
+  type ProposalChange,
+  type ReviewEvent,
   type TimelineChange,
   type TimelineEdit,
   type ProjectSetup,
@@ -117,6 +119,7 @@ app.on("browser-window-focus", (_event, focused) => {
   const state = projectWindowOf(focused);
   if (state) ui.focus(String(state.window.webContents.id));
   void syncKindMenu(state);
+  syncReviewMenu(state);
 });
 daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
@@ -410,6 +413,11 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: ({ project: _project, ...rejection }) =>
         send(contents, Channel.timelineRejected, rejection satisfies TimelineRejection),
     }),
+    // Review mode (ADR 0019): every window of the project shows the proposal bar.
+    daemon.subscribe("proposal.changed", project.dir, {
+      onEvent: ({ project: _project, ...change }) => send(contents, Channel.reviewChanged, { proposal: change satisfies ProposalChange } satisfies ReviewEvent),
+      onResync: () => send(contents, Channel.reviewChanged, { resync: true } satisfies ReviewEvent),
+    }),
     daemon.subscribe("asset.changed", project.dir, {
       onEvent: ({ path, asset }) => send(contents, Channel.mediaChanged, { path, asset } satisfies AssetChange),
       onResync: () => send(contents, Channel.mediaChanged, { path: null } satisfies AssetChange),
@@ -428,6 +436,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   state.project = project;
   state.window.setTitle(`${project.name} — Frameshell`);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
+  void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
   await rememberRecent(project.dir);
   return { status: "opened", project };
 }
@@ -599,6 +608,35 @@ async function syncKindMenu(state: WindowState | undefined): Promise<void> {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);
     if (item) item.enabled = video;
   }
+}
+
+/** Review mode switch per project root, as the daemon last said; drives the File menu's checkmark. */
+const reviewSwitch = new Map<string, boolean>();
+
+/** `proposal.status` of the project at `dir`; remembers its switch for the menu. */
+async function readReview(dir: string): Promise<MethodResult<"proposal.status">> {
+  const status = await daemon.request("proposal.status", { cwd: dir });
+  reviewSwitch.set(status.dir, status.enabled);
+  return status;
+}
+
+/** Turn review mode on or off for the project at `dir` (as `ui`) and tell every window of it. */
+async function setReview(dir: string, enabled: boolean): Promise<void> {
+  const set = await daemon.request("review.set", { cwd: dir, enabled });
+  reviewSwitch.set(set.dir, set.enabled);
+  for (const state of windows.values()) {
+    if (state.project?.dir !== dir) continue;
+    send(state.window.webContents, Channel.reviewChanged, { enabled: set.enabled } satisfies ReviewEvent);
+    if (BrowserWindow.getFocusedWindow() === state.window) syncReviewMenu(state);
+  }
+}
+
+/** Check the File menu's review item when the focused window's project has review mode on. */
+function syncReviewMenu(state: WindowState | undefined): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById("review-mode");
+  if (!item) return;
+  item.enabled = Boolean(state?.project);
+  item.checked = state?.project ? (reviewSwitch.get(state.project.dir) ?? false) : false;
 }
 
 /** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read by Electron. */
@@ -922,11 +960,24 @@ function registerIpc(): void {
   );
   ipcMain.on(Channel.terminalKill, (event, id: string) => stateOf(event.sender).terminals.kill(id));
 
-  ipcMain.handle(Channel.timelineShow, (event, timeline: string) =>
+  ipcMain.handle(Channel.timelineShow, (event, timeline: string, view?: TimelineViewName) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
-      return daemon.request("timeline.show", { cwd: project.dir, timeline });
+      return daemon.request("timeline.show", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
     }),
+  );
+  ipcMain.handle(Channel.reviewStatus, (event) => outcome(async () => readReview((await requireProject(stateOf(event.sender))).project.dir)));
+  ipcMain.handle(Channel.reviewSet, (event, enabled: boolean) =>
+    outcome(async () => setReview((await requireProject(stateOf(event.sender))).project.dir, enabled === true)),
+  );
+  ipcMain.handle(Channel.reviewAccept, (event, tx: string) =>
+    outcome(async () => void (await daemon.request("proposal.accept", { cwd: (await requireProject(stateOf(event.sender))).project.dir, tx }))),
+  );
+  ipcMain.handle(Channel.reviewReject, (event, tx: string) =>
+    outcome(async () => void (await daemon.request("proposal.reject", { cwd: (await requireProject(stateOf(event.sender))).project.dir, tx }))),
+  );
+  ipcMain.handle(Channel.reviewDiff, (event) =>
+    outcome(async () => daemon.request("proposal.diff", { cwd: (await requireProject(stateOf(event.sender))).project.dir })),
   );
   ipcMain.handle(Channel.timelineEdit, (event, timeline: string, edits: TimelineEdit[], options?: EditOptions) =>
     outcome(async () => editor.apply((await requireProject(stateOf(event.sender))).project.dir, timeline, edits, options ?? {})),
@@ -1126,6 +1177,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "review-mode", label: said.reviewMode, type: "checkbox", checked: false, click: (_item, focused) => command("toggleReview", focused) },
         { type: "separator" },
         { label: said.installCli, click: () => void cliCommand(installCli) },
         { label: said.uninstallCli, click: () => void cliCommand(uninstallCli) },
@@ -1191,6 +1243,7 @@ function buildMenu(): void {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+  syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
 }
 
 /**

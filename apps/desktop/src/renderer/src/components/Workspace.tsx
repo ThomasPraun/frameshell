@@ -26,6 +26,8 @@ import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
 import { LayersPanel } from "./LayersPanel.js";
 import { PreviewPanel } from "./PreviewPanel.js";
+import { ProposalBar } from "./ProposalBar.js";
+import { reviewState, setReviewEnabled, startReview } from "../review/store.js";
 import { PanelWindow } from "./PanelWindow.js";
 import { SIDEBAR_VIEWS, Sidebar, SidebarWindow } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
@@ -245,6 +247,18 @@ export function Workspace({ project }: { project: ProjectView }) {
     [openFile, image],
   );
 
+  // Review mode (ADR 0019): follow the proposal; File > Review agent changes before applying flips the switch.
+  useEffect(() => {
+    const stop = startReview();
+    const offMenu = window.frameshell.menu.onCommand((command) => {
+      if (command === "toggleReview") void setReviewEnabled(!reviewState().enabled);
+    });
+    return () => {
+      stop();
+      offMenu();
+    };
+  }, []);
+
   // The transcript view from anywhere: Mod+Shift+T, View > Transcript, the timeline header, the tab strip.
   const showTranscript = useCallback(() => openFile(TRANSCRIPT_TAB), [openFile]);
   useEffect(() => {
@@ -355,6 +369,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         <span className="titlebar-path">{project.dir}</span>
       </header>
       {project.synced && <SyncWarning synced={project.synced} />}
+      <ProposalBar />
 
       <div className="main-row">
         {sidebar.collapsed ? (
@@ -389,6 +404,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             {previewWindow &&
               createPortal(
                 <div className="panel preview">
+                  <ProposalBar />
                   <PreviewPanel project={project} detached onDetach={() => setPanelDetached("preview", false)} />
                 </div>,
                 previewWindow,
@@ -450,6 +466,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           {detached.has("timeline") && (
             <PanelWindow panel="timeline" title={t.workspace.windowTitle(bottomTitle, project.name)} onClosed={() => setPanelDetached("timeline", false)}>
               <div className="panel timeline">
+                <ProposalBar />
                 {image ? (
                   <LayersPanel mediaUrl={project.mediaUrl} collapsed={false} detached onDetach={() => setPanelDetached("timeline", false)} />
                 ) : (
@@ -483,6 +500,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       />
       {SIDEBAR_VIEWS.filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
+          <ProposalBar />
           <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} mediaUrl={project.mediaUrl} />
         </PanelWindow>
       ))}

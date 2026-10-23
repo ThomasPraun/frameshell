@@ -21,6 +21,8 @@ import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
 import { listenEverywhere, windowOf } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
+import { showSide } from "../review/store.js";
+import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
 import { useAssets, useProjectKind } from "../preview/useProgram.js";
@@ -246,7 +248,9 @@ export function TimelinePanel({
   // The History panel's pick, marked on the lanes: what that transaction or operation did.
   const { history } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, history, view?.revision ?? null);
-  const marks = history !== null && diff?.target === history ? diff.clips : null;
+  const proposed = useProposalMarks(TIMELINE);
+  // A History pick wins over the proposal's marks (After, ADR 0019).
+  const marks = history !== null ? (diff?.target === history ? diff.clips : null) : (proposed?.marks ?? null);
 
   useEffect(() => {
     if (!status) return;
@@ -267,7 +271,11 @@ export function TimelinePanel({
         <span className={`timeline-status${status?.tone === "error" || (!status && turnsError) ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
           {status?.text ?? (turnsError ? t.timeline.turnsFailed(turnsError) : "")}
         </span>
-        {history !== null && <DiffLegend target={history} marks={marks} />}
+        {history !== null ? (
+          <DiffLegend target={history} marks={marks} />
+        ) : (
+          proposed && <DiffLegend target={proposed.tx} marks={proposed.marks} onStop={() => showSide("before")} />
+        )}
         {onShowTranscript && (
           <button className="link" aria-label={t.timeline.showTranscript} title={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
             {t.workspace.transcript}
@@ -1205,7 +1213,7 @@ function TimelineCanvas({
 }
 
 /** Header chip while a history entry's changes are marked on the lanes: counts by kind, and a way out. */
-function DiffLegend({ target, marks }: { target: string; marks: readonly ClipDiff[] | null }) {
+function DiffLegend({ target, marks, onStop = () => selection.clear() }: { target: string; marks: readonly ClipDiff[] | null; onStop?: () => void }) {
   const counts = marks ? diffCounts(marks) : null;
   return (
     <span className="timeline-diff-legend" data-history={target}>
@@ -1216,7 +1224,7 @@ function DiffLegend({ target, marks }: { target: string; marks: readonly ClipDif
         (["added", "removed", "moved", "changed"] as const)
           .filter((kind) => counts[kind] > 0)
           .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${t.timeline.diffKinds[kind]}`}</span>)}
-      <button className="icon-button" aria-label={t.timeline.stopShowing} title={t.timeline.stopShowingTitle} onClick={() => selection.clear()}>
+      <button className="icon-button" aria-label={t.timeline.stopShowing} title={t.timeline.stopShowingTitle} onClick={onStop}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
