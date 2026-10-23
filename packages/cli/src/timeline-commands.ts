@@ -332,7 +332,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (group === "tx") {
     if (values["timeline"] !== undefined) throw new UsageError("`frameshell tx` spans every timeline; it does not take --timeline.");
     const method = `tx.${rest[0]}` as "tx.begin" | "tx.commit" | "tx.abort";
-    return { kind: "timeline", method, params: method === "tx.begin" ? { label: args[0] } : {}, withCwd: false };
+    return { kind: "timeline", method, params: method === "tx.begin" ? { label: args[0] } : {}, withCwd: method === "tx.begin" };
   }
   const num = (flag: string): number | undefined => {
     const raw = values[flag];

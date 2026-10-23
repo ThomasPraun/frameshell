@@ -1629,9 +1629,14 @@ export const methods = {
       "one per shell. Example: `{ label: \"remove silences\" }`. Pass `autoCommitAfter` when a crash of the caller must " +
       "not leave the transaction open: it is then committed automatically once that many seconds pass without an " +
       "operation of this author. Fails with TransactionState when one is already open, and with ProposalPending while " +
-      "a review-mode proposal waits (ADR 0019): run `proposal.wait`, then begin. With review mode on, the label is what " +
-      "the person reads when reviewing: give one intent one transaction.",
+      "a review-mode proposal waits (ADR 0019) in the project enclosing `cwd` (without `cwd`: in any open project): run " +
+      "`proposal.wait`, then begin. With review mode on, the label is what the person reads when reviewing: give one " +
+      "intent one transaction.",
     params: z.strictObject({
+      cwd: CwdParam.optional().describe(
+        "Absolute directory inside the project the transaction works on, e.g. `/home/ana/videos/launch`; only that " +
+          "project's review-mode proposal refuses it. Omitted: a proposal in any open project does.",
+      ),
       label: z.string().min(1).describe("What the transaction does, shown in the History panel, e.g. `remove silences`."),
       autoCommitAfter: z
         .number()

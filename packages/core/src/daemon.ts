@@ -924,9 +924,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         warnings,
       };
     },
-    "tx.begin": async ({ label, autoCommitAfter }, caller) => {
+    "tx.begin": async ({ label, autoCommitAfter, cwd }, caller) => {
       const author = authorOf(caller);
-      timelines.assertCanBegin(author);
+      const project = cwd === undefined ? undefined : ((await readEnclosingProject(cwd))?.dir ?? null);
+      // A directory in no project has no proposal to wait for.
+      if (project !== null) await timelines.assertCanBegin(author, project);
       const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;
       const tx = await transactions.begin(author, label, { autoCommitMs });
       return { tx: tx.id, label, author };

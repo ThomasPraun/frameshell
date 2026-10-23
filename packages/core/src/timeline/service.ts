@@ -615,9 +615,17 @@ export class TimelineService {
     return false;
   }
 
-  /** ProposalPending when `author` (not `ui`) may not open a transaction now: a proposal is open in a loaded project (ADR 0019 §6). */
-  assertCanBegin(author: string): void {
+  /**
+   * ProposalPending when `author` (not `ui`) may not open a transaction now (ADR 0019 §6): a proposal is open in
+   * project `root`, or, without `root`, in any loaded project.
+   */
+  async assertCanBegin(author: string, root?: string): Promise<void> {
     if (author === "ui") return;
+    if (root !== undefined) {
+      const open = (await this.#book(root)).proposal;
+      if (open) throw proposalPending(open);
+      return;
+    }
     for (const book of this.#loaded.values()) if (book.proposal) throw proposalPending(book.proposal);
   }
 

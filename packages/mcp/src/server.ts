@@ -130,7 +130,9 @@ export function createMcpServer(options: McpServerOptions): Server {
     try {
       let note: string | null = null;
       if (tool.takesCwd && args["cwd"] === undefined) {
-        const project = await resolve();
+        // `tx_begin` works outside any project too: without one it simply goes without `cwd`.
+        const project = tool.method === "tx.begin" ? await resolve().catch(() => null) : await resolve();
+        if (!project) return await run(tool, args, onProgress);
         args["cwd"] = project.cwd;
         if (project.source === "app") note = appProjectNote(project.root);
       }

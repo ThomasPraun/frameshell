@@ -165,6 +165,19 @@ describe("review mode on: proposals (#315)", () => {
     expect(JSON.parse(read()).tracks[1].name).toBe("Score");
   });
 
+  it("refuses tx begin only for the project holding the proposal when cwd is given; without cwd, for any", async () => {
+    const { dir, connect, t1 } = await setup({ review: true });
+    const other = join(tempDir(), "other");
+    const agent = await connect("cli/test");
+    await agent.request("project.init", { dir: other });
+    await agent.request("track.set", { cwd: dir, track: t1, name: "Wide" });
+    const elsewhere = await connect("cli/test", "term-b");
+    expect(await elsewhere.request("tx.begin", { label: "Other work", cwd: other })).toMatchObject({ label: "Other work" });
+    await elsewhere.request("tx.abort", {});
+    expect((await rejection(elsewhere.request("tx.begin", { label: "Here", cwd: dir }))).code).toBe(ErrorCode.ProposalPending);
+    expect((await rejection(elsewhere.request("tx.begin", { label: "Anywhere" }))).code).toBe(ErrorCode.ProposalPending);
+  });
+
   it("survives a daemon restart: rebuilt, still the author's view, still decidable", async () => {
     const { dir, connect, restart, t1, read } = await setup({ review: true });
     const agent = await connect("cli/test", "term-1");

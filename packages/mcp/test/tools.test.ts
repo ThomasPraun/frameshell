@@ -69,8 +69,8 @@ describe("MCP tool catalog", () => {
       },
     });
     const txBegin = tools.find((tool) => tool.name === "tx_begin")!;
-    expect(txBegin.inputSchema).toMatchObject({ required: ["label"] });
-    expect(txBegin.inputSchema.properties).not.toHaveProperty("cwd");
+    // `cwd` scopes the review-mode check to one project (ADR 0019); defaulted like every other tool's.
+    expect(txBegin.inputSchema).toMatchObject({ required: ["label"], properties: { cwd: { type: "string", description: expect.stringContaining(CWD) } } });
   });
 
   it("exposes the SPEC §7b UI state and navigation tools, each defaulting cwd", async () => {
