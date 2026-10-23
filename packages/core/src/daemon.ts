@@ -1000,6 +1000,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, person: await people.unlink(dir, person, { speaker, angle, face }) };
     },
+    "people.ranges": async ({ cwd, person, kind, timeline }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const flat = await resolveNested(dir, loaded);
+      const found = await people.ranges(dir, person, kind, flat, (group) => groupTurns(turnsSource, dir, group));
+      return { dir, person: { id: found.person.id, name: found.person.name }, kind, timeline, spans: found.spans, total: found.total, warnings: found.warnings };
+    },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),

@@ -7,6 +7,7 @@ export {
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
 export { type NameWrites, type PeopleChange, type PeopleServiceOptions, type PeopleTarget, PeopleService } from "./people/service.js";
+export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, mergeSpans, personRanges } from "./people/ranges.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {

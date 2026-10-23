@@ -118,7 +118,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -246,6 +246,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           tx: { type: "string" },
           angle: { type: "string" },
           face: { type: "string" },
+          "on-screen": { type: "boolean", default: false },
+          onscreen: { type: "boolean", default: false },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -356,6 +358,8 @@ function parseBuiltin(
     speaker?: string | undefined;
     angle?: string | undefined;
     face?: string | undefined;
+    "on-screen"?: boolean | undefined;
+    onscreen?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -573,6 +577,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "people.remove":
     case "people.link":
     case "people.unlink":
+    case "people.ranges":
       return executePeople(conn, inv, cwd, flags.json);
     case "proposal.diff": {
       const result = await conn.request("proposal.diff", { cwd, ...(inv.tx ? { tx: inv.tx } : {}) });

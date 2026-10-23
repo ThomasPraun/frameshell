@@ -18,6 +18,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell people remove <person>` | Remove the person and their links (names already written into transcripts stay). |
 | `frameshell people link <person> (--speaker <transcript>[:<speaker>] \| --angle [<timeline>:]<group>:<angle> \| --face <asset>@<seconds>[:x,y])` | Link a transcript speaker (no `:speaker` = the whole transcript), a multicam angle or a face anchor. Linking a speaker writes the person's name into that transcript. One speaker, angle or anchor per person; the target must exist. |
 | `frameshell people unlink <person> (--speaker … \| --angle … \| --face …)` | Remove one link, spelled as when linked; works when the target is gone. |
+| `frameshell people ranges <person> [--on-screen] [--timeline id]` | Timeline spans where the person speaks (default) or is on screen, pauses under 0.5 s bridged, with the total. `--json`: `spans`, `total`, `warnings`. Spans are timeline seconds now: ripple-cut from the last span to the first. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
 ## Timeline
