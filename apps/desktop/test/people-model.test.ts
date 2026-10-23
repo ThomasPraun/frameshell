@@ -7,6 +7,7 @@ import {
   faceViewBox,
   inverseOf,
   linkChoices,
+  linkedPerson,
   personColour,
   personWords,
   toRanges,
@@ -184,6 +185,15 @@ describe("helpers", () => {
   it("crops a face thumbnail around the anchor and keeps it inside the picture", () => {
     expect(faceViewBox({ x: 0.5, y: 0.5 }, 16 / 9)).toBe("inset(23.3% 35% 23.3% 35%)");
     expect(faceViewBox({ x: 0, y: 1 }, 16 / 9)).toBe("inset(46.7% 70% 0% 0%)");
+  });
+
+  it("finds the person a transcript speaker is, never through a whole-transcript link", () => {
+    const juan = person("p_1", "Juan", { speakers: [speaker("transcripts/a.words.json", "s1")] });
+    const ana = person("p_2", "Ana", { speakers: [speaker("transcripts/b.words.json")] });
+    expect(linkedPerson(snap([juan, ana]), "transcripts/a.words.json", "s1")?.id).toBe("p_1");
+    expect(linkedPerson(snap([juan, ana]), "transcripts/a.words.json", "s2")).toBeUndefined();
+    expect(linkedPerson(snap([juan, ana]), "transcripts/b.words.json", "s1")).toBeUndefined();
+    expect(linkedPerson(null, "transcripts/a.words.json", "s1")).toBeUndefined();
   });
 
   it("writes seconds as minutes and seconds", () => {

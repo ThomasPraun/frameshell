@@ -177,6 +177,11 @@ export function angleName(view: TimelineView | null, group: string, angle: strin
   return view?.groups?.find((candidate) => candidate.id === group)?.angles.find((candidate) => candidate.id === angle)?.name ?? angle;
 }
 
+/** The person speaker `speaker` of transcript `transcript` is linked to (a whole-transcript link names no speaker). */
+export function linkedPerson(snapshot: { people: readonly PersonInfo[] } | null, transcript: string, speaker: string): PersonInfo | undefined {
+  return snapshot?.people.find((person) => person.speakers.some((link) => link.transcript === transcript && link.speaker === speaker));
+}
+
 /** `people.ranges` spans as selection ranges. */
 export function toRanges(spans: readonly { start: number; end: number }[]): TimeRange[] {
   return spans.filter((span) => span.end > span.start).map(({ start, end }) => ({ from: start, to: end }));

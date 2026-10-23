@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, type MethodResult, type Progress, RpcError } from "@frameshell/protocol";
-import { readFaceScan, writeFaceScan } from "./scan-cache.js";
+import { exists } from "../fs-util.js";
+import { PEOPLE_DIR, readFaceScan, writeFaceScan } from "./scan-cache.js";
 import type { ScannedAsset } from "./face-clusters.js";
 import type { PeopleScanner } from "./scan.js";
 import { projectPath } from "./service.js";
@@ -101,10 +102,12 @@ function embeddingCount(tracks: readonly { embeddings: readonly unknown[] }[]): 
 /**
  * The cached face scan of each of `assets` (project-relative) that has one,
  * keyed by its current content: nothing is decoded. Files that cannot be
- * hashed (gone meanwhile) are left out.
+ * hashed (gone meanwhile) are left out. Without {@link PEOPLE_DIR} nothing was
+ * scanned, so no file is hashed.
  */
 export async function readProjectFaceScans(root: string, assets: readonly string[], hash: ScanProjectDeps["hash"]): Promise<ScannedAsset[]> {
   const found: ScannedAsset[] = [];
+  if (!(await exists(join(root, ...PEOPLE_DIR.split("/"))))) return found;
   for (const asset of assets) {
     const content = await hash(root, asset).catch(() => null);
     const scan = content === null ? null : await readFaceScan(root, content);

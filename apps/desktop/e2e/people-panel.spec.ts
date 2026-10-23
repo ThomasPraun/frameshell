@@ -10,7 +10,8 @@ import { waitForIngest } from "./preview-probe.js";
 
 // People panel (#344, ADR 0020) in the built app: a real daemon, a synthetic 8 s take with a diarized transcript
 // (Ana says words 1-5, Ben the rest). The person is added, a voice linked, picked (words and spans selected),
-// renamed (the transcript follows), and every change undone with Cmd/Ctrl+Z.
+// renamed (the transcript follows, and a rename in the transcript renames the person), every change undone with
+// Cmd/Ctrl+Z; a multicam angle is suggested as a person.
 const box = sandbox("transcript");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const ASSET = "assets/talk.mp4";
@@ -71,6 +72,8 @@ test.beforeAll(async () => {
   await waitForIngest(page, ASSET);
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
   timeline.tracks[0].clips = [{ id: "c_a", type: "media", asset: ASSET, start: 0, in: 0, out: 8 }];
+  // One multicam angle named like nobody yet, heard as Ben: the panel suggests a new person Ben with that voice.
+  timeline.groups = [{ id: "g_talk", angles: [{ id: "cam", name: "Ben", asset: ASSET, offset: 0, speaker: "s2" }] }];
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
   await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
   await page.getByRole("button", { name: "Transcript", exact: true }).click();
@@ -79,6 +82,18 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await app?.close();
+});
+
+test("an angle suggestion adds the person behind the angle with its voice in one confirmation", async () => {
+  const row = page.locator('[data-testid="suggestion"][data-kind="angle"]');
+  await expect(row).toContainText("The angle Ben shows someone not in People yet");
+  await expect(row.getByTestId("suggestion-also")).toHaveText("Confirm also links Ben in talk.words.json.");
+  await expect(row.getByTestId("suggestion-name")).toHaveValue("Ben");
+  await row.getByTestId("suggestion-confirm").click();
+  await expect(person("Ben")).toBeVisible();
+  await expect(person("Ben").locator('[data-testid="person-link"][data-kind="angle"]')).toHaveCount(1);
+  await expect(person("Ben").locator('[data-testid="person-link"][data-kind="voice"]')).toHaveCount(1);
+  await expect(row).toHaveCount(0);
 });
 
 test("a person is added and a transcript speaker linked: the transcript takes the person's name", async () => {
@@ -145,8 +160,17 @@ test("an unlink and a removal are undone one step at a time", async () => {
   await expect(person("Juan")).toBeVisible();
 });
 
+test("renaming a linked speaker in the transcript renames the person", async () => {
+  await label("s1").dblclick();
+  const field = page.getByRole("textbox", { name: "Name of Juan" });
+  await field.fill("Juanito");
+  await field.press("Enter");
+  await expect(person("Juanito")).toBeVisible();
+  await expect.poll(() => speakers()[0]!.name).toBe("Juanito");
+});
+
 test("the panel opens in its own window with the same people", async () => {
   await page.getByTestId("sidebar-detach").click();
   const detached = await panelWindow(app, "people");
-  await expect(detached.locator('[data-testid="person"][data-name="Juan"]')).toBeVisible();
+  await expect(detached.locator('[data-testid="person"][data-name="Juanito"]')).toBeVisible();
 });

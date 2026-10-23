@@ -1,9 +1,9 @@
 // Face-driven reframe keys (ADR 0016): sample frames with ffmpeg, find faces with YuNet on ONNX Runtime Web
 // (WebAssembly, in a worker thread), follow the main face, then keep only the keys where it moves.
 import { spawn } from "node:child_process";
-import { Worker } from "node:worker_threads";
 import type { AngleCrop } from "@frameshell/schema";
 import { loadOnnxModel } from "../onnx-web.js";
+import { runWorkerTask } from "../worker-task.js";
 
 /** One face in a frame, in fractions of the frame: center `x`, `y` and size, plus the detector's score (0..1). */
 export interface Face {
@@ -383,12 +383,6 @@ export interface YunetFiles {
   model: string;
 }
 
-/** Messages from `faces-worker.js`. */
-export type FaceWorkerMessage =
-  | { type: "progress"; fraction: number }
-  | { type: "done"; result: AngleFaces }
-  | { type: "error"; message: string };
-
 /**
  * Worker script beside this module. Under the test runner this module is the
  * TypeScript source, so the worker runs from the build (`pnpm test` builds first).
@@ -403,30 +397,5 @@ const FACE_WORKER = import.meta.url.endsWith(".ts")
  */
 export function yunetWorkerScanner(files: YunetFiles): FaceScanner {
   return ({ onProgress, signal, ...request }) =>
-    new Promise<AngleFaces>((resolve, reject) => {
-      signal?.throwIfAborted();
-      const worker = new Worker(FACE_WORKER, { workerData: { ...files, ...request } });
-      const abort = () => {
-        void worker.terminate();
-        reject(signal!.reason as Error);
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      const settle = () => signal?.removeEventListener("abort", abort);
-      worker.on("message", (message: FaceWorkerMessage) => {
-        if (message.type === "progress") return onProgress?.(message.fraction);
-        settle();
-        void worker.terminate();
-        if (message.type === "done") resolve(message.result);
-        else reject(new Error(message.message));
-      });
-      worker.once("error", (error) => {
-        settle();
-        reject(error);
-      });
-      // A promise settles once: after a result this rejection is ignored.
-      worker.once("exit", (code) => {
-        settle();
-        reject(new Error(`face detection worker exited (code ${code}) without a result`));
-      });
-    });
+    runWorkerTask<AngleFaces>(FACE_WORKER, { ...files, ...request }, "face detection", { signal, onProgress });
 }

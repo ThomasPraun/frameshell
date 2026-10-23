@@ -5,7 +5,7 @@ import type { Person } from "@frameshell/schema";
 import type { FaceTrack, TrackBox } from "./scan.js";
 import type { StoredFaceScan } from "./scan-cache.js";
 import { type Span, mergeSpans } from "./ranges.js";
-import { cosine } from "./vector.js";
+import { cosine, meanDirection } from "./vector.js";
 
 /**
  * Lowest average similarity (cosine of track mean face prints, average
@@ -217,14 +217,8 @@ function holds(box: TrackBox, point: { x: number; y: number }): boolean {
 }
 
 function meanOf(vectors: readonly ArrayLike<number>[]): Float32Array | null {
-  const first = vectors[0];
-  if (!first) return null;
-  const sum = new Float32Array(first.length);
-  for (const vector of vectors) for (let i = 0; i < sum.length; i++) sum[i]! += vector[i]!;
-  let length = 0;
-  for (const value of sum) length += value * value;
-  length = Math.sqrt(length);
-  return length === 0 ? null : sum.map((value) => value / length);
+  const mean = meanDirection(vectors);
+  return mean ? Float32Array.from(mean) : null;
 }
 
 function presenceSeconds(tracks: readonly ClusterTrack[]): number {

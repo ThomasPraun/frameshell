@@ -77,6 +77,17 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
     // Runs on what moves a person's spans only; `pick` reads the rest as it is now.
   }, [view?.revision, sources, links]);
 
+  // Suggestions read transcripts and multicam groups: new speakers or angles change them without a people event.
+  const groups = JSON.stringify(view?.groups?.map((group) => [group.id, group.angles.map((angle) => [angle.id, angle.name, angle.screen])]) ?? []);
+  const seen = useRef(false);
+  useEffect(() => {
+    if (!seen.current) {
+      seen.current = true;
+      return;
+    }
+    void peopleActions.refreshSuggestions();
+  }, [sources, groups]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (historyShortcut(event.nativeEvent, isMac) !== "undo" || editsText(event.target)) return;
     // Handled here, so neither the timeline's undo nor the Edit menu also runs.
@@ -356,15 +367,30 @@ function LinkChip({
   );
 }
 
+/** What confirming an `angle` suggestion links besides the angle: its mic's voice and the face most on its screen. */
+function angleExtras(suggestion: PeopleSuggestion): string | null {
+  const parts: string[] = [];
+  const { speaker } = suggestion;
+  if (speaker && suggestion.links.includes("speaker")) {
+    parts.push(speaker.speaker ? t.people.voice(speaker.name ?? speaker.speaker, fileName(speaker.transcript)) : t.people.voiceWhole(fileName(speaker.transcript)));
+  }
+  if (suggestion.face && suggestion.links.includes("face")) parts.push(t.people.angleFace);
+  return parts.length > 0 ? t.people.angleAlso(parts.join(", ")) : null;
+}
+
 /** What a suggestion says, in the UI's language. */
 function suggestionText(suggestion: PeopleSuggestion): string {
   const { speaker, person, score } = suggestion;
   const points = score === undefined ? "" : score.toFixed(2);
-  if (suggestion.kind === "speaker" && speaker && person) return t.people.suggestSpeaker(speaker.name, fileName(speaker.transcript), person.name, points);
+  const voice = speaker?.name ?? speaker?.speaker ?? "";
+  if (suggestion.kind === "speaker" && speaker && person) return t.people.suggestSpeaker(voice, fileName(speaker.transcript), person.name, points);
   if (suggestion.kind === "face-speaker" && speaker) {
-    return person ? t.people.suggestFaceSpeaker(speaker.name, fileName(speaker.transcript), person.name) : t.people.suggestFaceSpeakerNew(speaker.name, fileName(speaker.transcript));
+    return person ? t.people.suggestFaceSpeaker(voice, fileName(speaker.transcript), person.name) : t.people.suggestFaceSpeakerNew(voice, fileName(speaker.transcript));
   }
   if (suggestion.kind === "face") return person ? t.people.suggestFace(person.name, points) : t.people.whoIsThis;
+  if (suggestion.kind === "angle" && suggestion.angle) {
+    return person ? t.people.suggestAngle(suggestion.angle.name, person.name) : t.people.suggestAngleNew(suggestion.angle.name);
+  }
   // Kinds this app does not know yet read as the daemon words them.
   return t.people.suggestOther(suggestion.reason);
 }
@@ -384,15 +410,23 @@ function SuggestionRow({
   onConfirm: (person: string | undefined) => void;
   onDismiss: () => void;
 }) {
-  const [who, setWho] = useState("");
+  // A new person from an angle takes the angle's name unless the field says otherwise.
+  const fromAngle = suggestion.kind === "angle" && !suggestion.person ? (suggestion.angle?.name ?? "") : "";
+  const [who, setWho] = useState(fromAngle);
   const needsName = !suggestion.person;
+  const extras = suggestion.kind === "angle" ? angleExtras(suggestion) : null;
   const listId = `people-names-${suggestion.id}`;
   return (
     <li className="suggestion" data-testid="suggestion" data-kind={suggestion.kind} data-suggestion={suggestion.id}>
       {suggestion.face && <FaceThumb face={suggestion.face} asset={assets?.get(suggestion.face.anchor.asset)} mediaUrl={mediaUrl} />}
       <div className="suggestion-body">
         <p className="suggestion-text">{suggestionText(suggestion)}</p>
-        {suggestion.face && <p className="suggestion-meta">{t.people.faceSeconds(`${Math.round(suggestion.face.seconds)}`)}</p>}
+        {extras && (
+          <p className="suggestion-meta" data-testid="suggestion-also">
+            {extras}
+          </p>
+        )}
+        {suggestion.face && suggestion.kind !== "angle" && <p className="suggestion-meta">{t.people.faceSeconds(`${Math.round(suggestion.face.seconds)}`)}</p>}
         {needsName && (
           <>
             <input
@@ -401,7 +435,7 @@ function SuggestionRow({
               list={listId}
               value={who}
               placeholder={t.people.whoNamePlaceholder}
-              aria-label={t.people.whoName}
+              aria-label={fromAngle ? t.people.newPersonName : t.people.whoName}
               onChange={(event) => setWho(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && who.trim()) onConfirm(who.trim());

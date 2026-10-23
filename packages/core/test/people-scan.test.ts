@@ -13,6 +13,7 @@ import {
   cosine,
   faceScanKey,
   readFaceScan,
+  readProjectFaceScans,
   scanFrameSize,
   scanPeopleFaces,
   shrinkFrame,
@@ -341,6 +342,21 @@ describe("face scan cache", () => {
     expect(Array.from(read.tracks[0]!.embeddings[0]!.vector)).toEqual(Array.from(unit(3, 0.5)));
     expect(read.tracks[1]!.embeddings).toEqual([]);
     expect(await readFaceScan(root, `sha256:${"cd".repeat(32)}`)).toBeNull();
+  });
+
+  it("reads cached scans by content, and hashes no file while nothing was ever scanned", async () => {
+    const root = tempDir();
+    const hashed: string[] = [];
+    const hashOf = async (_root: string, rel: string) => {
+      hashed.push(rel);
+      return hash;
+    };
+    expect(await readProjectFaceScans(root, ["assets/a.mp4"], hashOf)).toEqual([]);
+    expect(hashed).toEqual([]);
+    await writeFaceScan(root, hash, scan);
+    const found = await readProjectFaceScans(root, ["assets/a.mp4"], hashOf);
+    expect(found.map((entry) => [entry.asset, entry.scan.tracks.length])).toEqual([["assets/a.mp4", 2]]);
+    expect(hashed).toEqual(["assets/a.mp4"]);
   });
 
   it("treats a damaged or truncated cache as missing", async () => {

@@ -1,6 +1,5 @@
 // Face scan of one video (ADR 0020 decision 4): sample frames, find faces with YuNet, embed them with SFace,
 // and join detections over time into tracks. The models run in a worker thread (`scan-worker.ts`).
-import { Worker } from "node:worker_threads";
 import {
   type BgrFrame,
   type Face,
@@ -11,7 +10,8 @@ import {
   sampleFaceFrames,
 } from "../multicam/faces.js";
 import { loadOnnxModel } from "../onnx-web.js";
-import { cosine } from "./vector.js";
+import { runWorkerTask } from "../worker-task.js";
+import { cosine, unit } from "./vector.js";
 
 /** Numbers SFace gives per face. */
 export const FACE_EMBEDDING_DIMS = 128;
@@ -123,10 +123,7 @@ export async function loadSface(runtime: string, model: string): Promise<FaceEmb
 }
 
 function normalized(vector: ArrayLike<number>): Float32Array {
-  let sum = 0;
-  for (let i = 0; i < vector.length; i++) sum += vector[i]! * vector[i]!;
-  const length = Math.sqrt(sum) || 1;
-  return Float32Array.from(vector as ArrayLike<number> & Iterable<number>, (value) => value / length);
+  return Float32Array.from(unit(vector) ?? Array.from(vector));
 }
 
 /**
@@ -349,12 +346,6 @@ export interface PeopleScanFiles {
   recognizer: string;
 }
 
-/** Messages from `scan-worker.js`. */
-export type PeopleScanWorkerMessage =
-  | { type: "progress"; fraction: number }
-  | { type: "done"; result: PeopleScanResult }
-  | { type: "error"; message: string };
-
 /** Loads both models: what the worker does before scanning. */
 export async function loadScanModels(files: PeopleScanFiles): Promise<{ detect: FaceDetector; embed: FaceEmbedder }> {
   return { detect: await loadYunet(files.runtime, files.detector), embed: await loadSface(files.runtime, files.recognizer) };
@@ -374,30 +365,5 @@ const SCAN_WORKER = import.meta.url.endsWith(".ts")
  */
 export function peopleScanWorker(files: PeopleScanFiles): PeopleScanner {
   return ({ onProgress, signal, ...request }) =>
-    new Promise<PeopleScanResult>((resolve, reject) => {
-      signal?.throwIfAborted();
-      const worker = new Worker(SCAN_WORKER, { workerData: { ...files, ...request } });
-      const abort = () => {
-        void worker.terminate();
-        reject(signal!.reason as Error);
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      const settle = () => signal?.removeEventListener("abort", abort);
-      worker.on("message", (message: PeopleScanWorkerMessage) => {
-        if (message.type === "progress") return onProgress?.(message.fraction);
-        settle();
-        void worker.terminate();
-        if (message.type === "done") resolve(message.result);
-        else reject(new Error(message.message));
-      });
-      worker.once("error", (error) => {
-        settle();
-        reject(error);
-      });
-      // A promise settles once: after a result this rejection is ignored.
-      worker.once("exit", (code) => {
-        settle();
-        reject(new Error(`face scan worker exited (code ${code}) without a result`));
-      });
-    });
+    runWorkerTask<PeopleScanResult>(SCAN_WORKER, { ...files, ...request }, "face scan", { signal, onProgress });
 }

@@ -18,6 +18,7 @@ import {
   transcriptionAudio,
 } from "../transcripts/transcriber.js";
 import type { Stretch, VoiceEmbedder } from "./voice-embed.js";
+import { meanDirection } from "./vector.js";
 
 /** Project-relative folder of the voice print caches, one file per asset content (`<audio cache key>.json`). */
 export const VOICES_DIR = ".frameshell/people/voices";
@@ -94,20 +95,7 @@ export function voiceStretches(transcript: Pick<Transcript, "words" | "edits">, 
 
 /** Mean of L2-normalized `embeddings` weighted by their stretch's length, normalized; null when there are none. */
 export function meanPrint(embeddings: readonly (readonly number[])[], weights: readonly number[]): number[] | null {
-  if (embeddings.length === 0) return null;
-  const sum = new Array<number>(embeddings[0]!.length).fill(0);
-  embeddings.forEach((embedding, i) => {
-    const scale = weights[i]! / norm(embedding);
-    embedding.forEach((value, d) => (sum[d]! += value * scale));
-  });
-  const length = norm(sum);
-  return length === 0 ? null : sum.map((value) => value / length);
-}
-
-function norm(vector: readonly number[]): number {
-  let sum = 0;
-  for (const value of vector) sum += value * value;
-  return Math.sqrt(sum);
+  return meanDirection(embeddings, weights);
 }
 
 function round(seconds: number): number {

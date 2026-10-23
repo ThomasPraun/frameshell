@@ -44,6 +44,7 @@ const listeners = new Set<() => void>();
 let stop: (() => void) | null = null;
 let settleNow: (() => Promise<void>) | null = null;
 let beginUndo: (() => Promise<void>) | null = null;
+let suggestNow: (() => Promise<void>) | null = null;
 
 function publish(update: Partial<PeopleState>): void {
   state = { ...state, ...update };
@@ -106,6 +107,7 @@ function follow(): () => void {
     void suggest();
   };
   settleNow = settle;
+  suggestNow = suggest;
 
   beginUndo = async () => {
     const entry = state.undo;
@@ -177,6 +179,7 @@ function subscribe(listener: () => void): () => void {
     stop = null;
     settleNow = null;
     beginUndo = null;
+    suggestNow = null;
     state = INITIAL;
   };
 }
@@ -230,6 +233,10 @@ export const peopleActions = {
       publish({ scan: { running: false, progress: 0, error: (error as Error).message } });
     }
     await settleNow?.();
+  },
+  /** Ask for suggestions again: transcripts or multicam groups changed, which no `people.changed` reports. */
+  async refreshSuggestions(): Promise<void> {
+    await suggestNow?.();
   },
   /** Put the last change back; false when there was nothing to undo. */
   async undo(): Promise<boolean> {

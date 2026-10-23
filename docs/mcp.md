@@ -80,6 +80,20 @@ While a proposal is open, another author's change, a new `tx_begin`, and its aut
 
 There is no accept, reject or switch tool: `proposal.accept`, `proposal.reject` and `review.set` are internal registry methods (skipped like `handshake`), and the daemon refuses them with `ProposalState` (reason `forbidden`) for any caller but the app (author `ui`). Review exists so the person decides; an agent that could accept its own proposal would make it pointless.
 
+## People (ADR 0020)
+
+Optional `people.json`: who is who across transcripts, multicam angles and faces. Until a tool writes it (`people_add` creates it), the people tools only read (an empty list, suggestions from multicam angles alone): no download, no job, no transcript change.
+
+| Tool | Does |
+|---|---|
+| `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` | Edit people and their links (`speaker`, `angle` or `face`, one per call). Linking a speaker or renaming its person writes the name into the transcript. Links whose target is gone are `missing`, never removed. |
+| `people_scan(assets?, force?)` | Face scan job (kind `people`): YuNet + SFace, locally, cached in `.frameshell/people/`. The only tool that downloads the face models. |
+| `people_suggest` | Suggested links with `sg_…` ids (`speaker`, `face-speaker`, `face`, `angle`) and `hints`. Computes voice prints (CAM++, local) only when a person already has a linked speaker; faces come from cached scans only. |
+| `people_confirm(suggestions, reject?, person?)` | Apply or dismiss suggestions. Confirm only what the person agreed to or what is certain. |
+| `people_ranges(person, kind?, timeline?)` | Timeline spans where the person speaks or is on screen; cut from the last span to the first. |
+
+People changes are not timeline operations: review mode does not hold them, `history` does not list them. A link an agent makes (`people_link`, `people_confirm`) carries `by` and shows as "Confirmed by agent" in the People panel, where the person can unlink it or undo it with Cmd/Ctrl+Z. Nothing leaves the machine: prints stay in `.frameshell/people/`, never in `people.json`.
+
 ## Resources
 
 Compact JSON, the same as the matching `--json` CLI output:

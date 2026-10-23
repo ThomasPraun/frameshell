@@ -1,6 +1,6 @@
 // CAM++ speaker embeddings (ADR 0020 decision 3): fbank features in TypeScript, the model on ONNX Runtime
 // Web in a worker thread, one 512-value embedding per stretch of a transcription WAV.
-import { Worker } from "node:worker_threads";
+import { runWorkerTask } from "../worker-task.js";
 import { loadOnnxModel } from "../onnx-web.js";
 import { readPcmWav } from "../transcripts/window.js";
 import { FBANK_BINS, FBANK_SAMPLE_RATE, fbank, subtractMean } from "./fbank.js";
@@ -57,9 +57,6 @@ export async function embedStretches(files: CampplusFiles, audio: string, stretc
   return embeddings;
 }
 
-/** Messages from `voice-worker.js`. */
-export type VoiceWorkerMessage = { type: "progress"; fraction: number } | { type: "done"; embeddings: number[][] } | { type: "error"; message: string };
-
 /**
  * Worker script beside this module. Under the test runner this module is the
  * TypeScript source, so the worker runs from the build (`pnpm test` builds first).
@@ -75,30 +72,5 @@ const VOICE_WORKER = import.meta.url.endsWith(".ts")
  */
 export function campplusWorkerEmbedder(files: CampplusFiles): VoiceEmbedder {
   return ({ audio, stretches, signal, onProgress }) =>
-    new Promise<number[][]>((resolve, reject) => {
-      signal?.throwIfAborted();
-      const worker = new Worker(VOICE_WORKER, { workerData: { ...files, audio, stretches } });
-      const abort = () => {
-        void worker.terminate();
-        reject(signal!.reason as Error);
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      const settle = () => signal?.removeEventListener("abort", abort);
-      worker.on("message", (message: VoiceWorkerMessage) => {
-        if (message.type === "progress") return onProgress?.(message.fraction);
-        settle();
-        void worker.terminate();
-        if (message.type === "done") resolve(message.embeddings);
-        else reject(new Error(message.message));
-      });
-      worker.once("error", (error) => {
-        settle();
-        reject(error);
-      });
-      // A promise settles once: after a result this rejection is ignored.
-      worker.once("exit", (code) => {
-        settle();
-        reject(new Error(`voice print worker exited (code ${code}) without a result`));
-      });
-    });
+    runWorkerTask<number[][]>(VOICE_WORKER, { ...files, audio, stretches }, "voice print", { signal, onProgress });
 }
