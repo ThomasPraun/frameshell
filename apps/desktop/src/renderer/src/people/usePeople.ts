@@ -45,6 +45,8 @@ let stop: (() => void) | null = null;
 let settleNow: (() => Promise<void>) | null = null;
 let beginUndo: (() => Promise<void>) | null = null;
 let suggestNow: (() => Promise<void>) | null = null;
+/** Suggestions answered here that a `people.suggest` in flight may still list. */
+const answeredIds = new Set<string>();
 
 function publish(update: Partial<PeopleState>): void {
   state = { ...state, ...update };
@@ -74,7 +76,9 @@ function follow(): () => void {
       suggestingAgain = false;
       try {
         const { suggestions } = await window.frameshell.people.suggest();
-        if (live) publish({ suggestions });
+        // A run that started before an answer still lists it; once a run leaves it out the daemon has caught up.
+        for (const id of answeredIds) if (!suggestions.some((suggestion) => suggestion.id === id)) answeredIds.delete(id);
+        if (live) publish({ suggestions: suggestions.filter((suggestion) => !answeredIds.has(suggestion.id)) });
       } catch {
         // Suggestions are a convenience: a model that cannot be fetched must not block the list.
         if (live) publish({ suggestions: [] });
@@ -169,6 +173,15 @@ async function apply(step: UndoStep): Promise<void> {
   }
 }
 
+/**
+ * Drop an answered suggestion at once: the next `people.suggest` may take seconds (voice prints, a model download)
+ * and must not leave it on screen meanwhile.
+ */
+function answered(id: string): void {
+  answeredIds.add(id);
+  publish({ suggestions: state.suggestions.filter((suggestion) => suggestion.id !== id) });
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   stop ??= follow();
@@ -217,10 +230,12 @@ export const peopleActions = {
   /** Say yes to a suggestion; `person` names who it is when the suggestion names nobody. */
   async confirm(suggestion: string, person?: string): Promise<void> {
     await window.frameshell.people.confirm([suggestion], person ? { person } : {});
+    answered(suggestion);
     await settleNow?.();
   },
   async dismiss(suggestion: string): Promise<void> {
     await window.frameshell.people.confirm([suggestion], { reject: true });
+    answered(suggestion);
     await settleNow?.();
   },
   /** Scan every video for faces; progress is in {@link PeopleState.scan}. */
