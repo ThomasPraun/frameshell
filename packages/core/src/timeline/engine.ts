@@ -10,12 +10,14 @@ import {
 import { basename } from "node:path/posix";
 import {
   type Angle,
+  type AdapterClip,
   type AngleCrop,
   type AnyClip,
   type AnyClipTrack,
   CORE_CLIP_TYPES,
   RESERVED_MIC_IDS,
   type Clip,
+  type ElementAdjust,
   type ClipKey,
   type ClipKeys,
   type ClipTrack,
@@ -33,6 +35,7 @@ import {
   type Track,
   clipTime,
   edgeTransitions,
+  elementStyles,
   gainAt,
   isShotClip,
   paintStretches,
@@ -65,6 +68,8 @@ export interface SourceInfo {
 export interface ClipTypeInfo {
   /** Null when `props` are valid, else a human-readable reason. */
   validateProps(props: Record<string, unknown>): Promise<string | null>;
+  /** The adapter applies `elements` (ADR 0021); absent means it does not. */
+  elementStyles?: boolean;
 }
 
 /**
@@ -694,13 +699,13 @@ class Edit {
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
     const { track, clip } = this.clip(args.clip);
-    const { speed, gain, muted, transform, props, scriptRef } = args;
-    if ([speed, gain, muted, transform, props, scriptRef].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, transform, props, scriptRef." });
+    const { speed, gain, muted, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, transform, props, elements, scriptRef." });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
     if (isShotClip(clip)) {
-      const given = (["speed", "gain", "muted", "transform", "props"] as const).filter((field) => args[field] !== undefined);
+      const given = (["speed", "gain", "muted", "transform", "props", "elements"] as const).filter((field) => args[field] !== undefined);
       if (given.length > 0) {
         throw this.invalid(`shots take no ${given.map((f) => `\`${f}\``).join(", ")}; only \`scriptRef\` is set per shot.`, {
           field: given[0]!,
@@ -731,8 +736,40 @@ class Edit {
       if (problem) throw this.invalid(`invalid props for ${clip.type}: ${problem}`, { field: "props" });
       (clip as { props?: Record<string, unknown> }).props = props;
     }
+    if (elements !== undefined) {
+      if (isMedia(clip) || isNested(clip)) {
+        throw this.invalid(`only adapter clips take \`elements\`; ${clip.id} is ${clip.type}.`, { field: "elements" });
+      }
+      this.setElements(clip, elements, await this.adapter(clip.type));
+    }
     if (scriptRef === null) delete clip.scriptRef;
     else if (scriptRef !== undefined) clip.scriptRef = scriptRef;
+  }
+
+  /** Merge `elements` per selector (`null` removes one, `null` for all clears); empty ends up absent. */
+  setElements(clip: AdapterClip, elements: OperationArgs<"clip.set">["elements"], adapter: ClipTypeInfo): void {
+    if (elements === null) {
+      delete clip.elements;
+      return;
+    }
+    if (!adapter.elementStyles) {
+      throw this.invalid(`the ${clip.type} plugin does not support \`elements\` yet.`, {
+        field: "elements",
+        hint: "Update the plugin, or change the composition file itself.",
+      });
+    }
+    const merged: Record<string, ElementAdjust> = { ...clip.elements };
+    for (const [selector, adjust] of Object.entries(elements ?? {})) {
+      if (adjust === null) delete merged[selector];
+      else merged[selector] = adjust;
+    }
+    try {
+      elementStyles(merged);
+    } catch (error) {
+      throw this.invalid((error as Error).message, { field: "elements" });
+    }
+    if (Object.keys(merged).length === 0) delete clip.elements;
+    else clip.elements = merged;
   }
 
   async cut(args: OperationArgs<"cut">): Promise<void> {

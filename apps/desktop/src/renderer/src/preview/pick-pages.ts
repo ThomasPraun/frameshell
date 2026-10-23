@@ -1,7 +1,8 @@
-// Pick pages (ADR 0011): live pages of generated clips loaded only to answer the Pick tool's element probes. They sit
-// invisible over the frame, are seeked to the paused time and asked what element paints a point; the preview keeps
-// showing renders and live frames as before.
-import type { ProbedElement } from "@frameshell/protocol";
+// Pick pages (ADR 0011): live pages of generated clips loaded to answer element probes, for the Pick tool and element
+// mode (ADR 0021). They sit invisible over the frame, are seeked to the paused time and asked what element paints a
+// point; the preview keeps showing renders and live frames as before. Element mode also swaps a page's element sheet
+// and shows the page while a drag lasts.
+import type { MovableElement, ProbedElement } from "@frameshell/protocol";
 import type { Size } from "@frameshell/schema/composite";
 import { livePage } from "./live-pages.js";
 import type { FrameBox } from "./transform-edit.js";
@@ -27,6 +28,12 @@ export interface PickTarget {
   seconds: number;
 }
 
+/** What a page's bridge answers a probe: the elements, and for `probeMovable`/`probeSelector` the element's unit. */
+interface ProbeAnswer {
+  elements: ProbedElement[];
+  unit?: number;
+}
+
 interface Page {
   identity: string;
   host: HTMLDivElement;
@@ -36,7 +43,9 @@ interface Page {
   shown: number | null;
   /** Seeks waiting for `shown`. */
   waiting: { seconds: number; resolve: () => void }[];
-  probes: Map<number, (elements: ProbedElement[]) => void>;
+  probes: Map<number, (answer: ProbeAnswer) => void>;
+  /** `elements` requests waiting for their match counts. */
+  restyles: Map<number, (counts: Record<string, number>) => void>;
   settleReady: { resolve: () => void; reject: (error: Error) => void };
 }
 
@@ -67,12 +76,63 @@ export class PickPages {
    * project, no adapter, adapter without live preview).
    */
   async probeAt(target: PickTarget, x: number, y: number, depth: number): Promise<ProbedElement[]> {
-    return this.#probe(target, { x, y, depth });
+    return (await this.#probe(target, { probe: { x, y, depth } })).elements;
   }
 
   /** Up to `max` elements of `target` that paint at least half inside the page-pixel rectangle, topmost first. */
   async probeRect(target: PickTarget, rect: { x0: number; y0: number; x1: number; y1: number }, max: number): Promise<ProbedElement[]> {
-    return this.#probe(target, rect, max);
+    return (await this.#probe(target, { probeRect: { ...rect, max } })).elements;
+  }
+
+  /**
+   * The element an adjustment moves for page pixel (`x`, `y`) (ADR 0021): the
+   * one painting there, stepped up from an inline box, then `depth`
+   * ancestors; null when nothing paints there. Rejects as {@link probeAt}.
+   */
+  async movableAt(target: PickTarget, x: number, y: number, depth: number): Promise<MovableElement | null> {
+    return movable(await this.#probe(target, { probeMovable: { x, y, depth } }));
+  }
+
+  /** The first element of `target` matching `selector`; null when none does. Rejects as {@link probeAt}. */
+  async elementOf(target: PickTarget, selector: string): Promise<MovableElement | null> {
+    return movable(await this.#probe(target, { probeSelector: { selector } }));
+  }
+
+  /**
+   * Swap `target`'s element sheet for `css` (undefined keeps it, "" clears it)
+   * and count, at the target's time, how many elements each of `selectors`
+   * matches; empty when the page does not answer in time. Rejects as {@link probeAt}.
+   */
+  async restyle(target: PickTarget, css: string | undefined, selectors: readonly string[]): Promise<Record<string, number>> {
+    const page = await this.#page(target);
+    await page.ready;
+    await this.#seek(page, target.seconds);
+    const id = ++this.#nextProbe;
+    return new Promise((resolve) => {
+      const timer = this.#view.setTimeout(() => {
+        page.restyles.delete(id);
+        resolve({});
+      }, PROBE_TIMEOUT_MS);
+      page.restyles.set(id, (counts) => {
+        this.#view.clearTimeout(timer);
+        resolve(counts);
+      });
+      page.frame.contentWindow?.postMessage({ source: TO_PAGE, elements: { id, css, selectors } }, "*");
+    });
+  }
+
+  /** Swap the element sheet of `clip`'s open page now, unanswered: once per pointer move of a drag. */
+  sheet(clip: string, css: string): void {
+    const page = this.#pages.get(clip);
+    page?.frame.contentWindow?.postMessage({ source: TO_PAGE, elements: { id: ++this.#nextProbe, css } }, "*");
+  }
+
+  /** Show `clip`'s open page at `opacity` over the picture, where its render would be; null hides it again. */
+  show(clip: string, opacity: number | null): void {
+    const page = this.#pages.get(clip);
+    if (!page) return;
+    page.host.classList.toggle("is-shown", opacity !== null);
+    page.host.style.opacity = opacity === null ? "" : String(opacity);
   }
 
   /** Close every page. */
@@ -82,22 +142,23 @@ export class PickPages {
     this.#pages.clear();
   }
 
-  async #probe(target: PickTarget, where: { x: number; y: number; depth: number } | { x0: number; y0: number; x1: number; y1: number }, max?: number) {
+  /** Send one probe request (`{ kind: fields }`, the bridge's message without its id) and wait for its answer. */
+  async #probe(target: PickTarget, request: Record<string, Record<string, unknown>>): Promise<ProbeAnswer> {
     const page = await this.#page(target);
     await page.ready;
     await this.#seek(page, target.seconds);
     const id = ++this.#nextProbe;
-    return new Promise<ProbedElement[]>((resolve) => {
+    return new Promise<ProbeAnswer>((resolve) => {
       const timer = this.#view.setTimeout(() => {
         page.probes.delete(id);
-        resolve([]);
+        resolve({ elements: [] });
       }, PROBE_TIMEOUT_MS);
-      page.probes.set(id, (elements) => {
+      page.probes.set(id, (answer) => {
         this.#view.clearTimeout(timer);
-        resolve(elements);
+        resolve(answer);
       });
-      const message = "depth" in where ? { probe: { id, ...where } } : { probeRect: { id, ...where, max } };
-      page.frame.contentWindow?.postMessage({ source: TO_PAGE, ...message }, "*");
+      const [kind, fields] = Object.entries(request)[0]!;
+      page.frame.contentWindow?.postMessage({ source: TO_PAGE, [kind]: { id, ...fields } }, "*");
     });
   }
 
@@ -146,7 +207,7 @@ export class PickPages {
     const ready = new Promise<void>((resolve, reject) => (settleReady = { resolve, reject }));
     // Nobody may await it yet: an unawaited failure is not an error.
     ready.catch(() => undefined);
-    const page: Page = { identity: target.identity, host, frame, ready, shown: null, waiting: [], probes: new Map(), settleReady };
+    const page: Page = { identity: target.identity, host, frame, ready, shown: null, waiting: [], probes: new Map(), restyles: new Map(), settleReady };
     this.#place(page, target.box);
     return page;
   }
@@ -169,13 +230,21 @@ export class PickPages {
 
   #close(page: Page): void {
     page.settleReady.reject(new Error("The pick page was closed"));
-    for (const answer of page.probes.values()) answer([]);
+    for (const answer of page.probes.values()) answer({ elements: [] });
+    for (const answer of page.restyles.values()) answer({});
     for (const wait of page.waiting) wait.resolve();
     page.host.remove();
   }
 
   readonly #onMessage = (event: MessageEvent): void => {
-    const data = event.data as { source?: unknown; ready?: unknown; shown?: unknown; error?: unknown; probe?: { id?: unknown; elements?: unknown } } | null;
+    const data = event.data as {
+      source?: unknown;
+      ready?: unknown;
+      shown?: unknown;
+      error?: unknown;
+      probe?: { id?: unknown; elements?: unknown; unit?: unknown };
+      elements?: { id?: unknown; counts?: unknown };
+    } | null;
     if (!data || data.source !== FROM_PAGE) return;
     const page = [...this.#pages.values()].find((candidate) => candidate.frame.contentWindow === event.source);
     if (!page) return;
@@ -189,7 +258,13 @@ export class PickPages {
     } else if (data.probe && typeof data.probe.id === "number") {
       const answer = page.probes.get(data.probe.id);
       page.probes.delete(data.probe.id);
-      answer?.(Array.isArray(data.probe.elements) ? (data.probe.elements as ProbedElement[]) : []);
+      const elements = Array.isArray(data.probe.elements) ? (data.probe.elements as ProbedElement[]) : [];
+      answer?.({ elements, ...(typeof data.probe.unit === "number" ? { unit: data.probe.unit } : {}) });
+    } else if (data.elements && typeof data.elements.id === "number") {
+      const answer = page.restyles.get(data.elements.id);
+      page.restyles.delete(data.elements.id);
+      const counts = data.elements.counts;
+      answer?.(counts && typeof counts === "object" ? (counts as Record<string, number>) : {});
     } else if (typeof data.error === "string") {
       page.settleReady.reject(new Error(data.error));
       // A seek that failed shows nothing new: let waiters go on with what is there.
@@ -197,4 +272,11 @@ export class PickPages {
       page.waiting = [];
     }
   };
+}
+
+/** The movable element of a `probeMovable` or `probeSelector` answer; null when the page found none. */
+function movable(answer: ProbeAnswer): MovableElement | null {
+  const element = answer.elements[0];
+  const unit = answer.unit;
+  return element ? { element, unit: typeof unit === "number" && Number.isFinite(unit) && unit > 0 ? unit : 1 } : null;
 }

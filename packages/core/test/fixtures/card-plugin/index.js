@@ -57,6 +57,8 @@ export function activate(api) {
   api.registerClipType({
     ...still,
     type: "card",
+    // Takes `elements` (ADR 0021); its flat render ignores the sheet, the live bridge applies it.
+    elementStyles: true,
     async livePreview(clip, ctx) {
       const card = await readCard(clip);
       if (card.liveFail) throw new Error(`card ${clip.source} asks live preview to fail`);

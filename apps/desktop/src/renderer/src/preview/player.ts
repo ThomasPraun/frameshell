@@ -101,6 +101,11 @@ export class PreviewPlayer implements TransportPlayer {
     this.#send({ type: "program", program });
   }
 
+  /** Leave generated clip `clip` (flattened id) out of the picture while its live page shows instead; null shows every clip. */
+  hideClip(clip: string | null): void {
+    this.#send({ type: "hide", clip });
+  }
+
   /** Canvas size in pixels (the program frame at proxy resolution). */
   setSize(width: number, height: number): void {
     this.#send({ type: "size", width, height });
