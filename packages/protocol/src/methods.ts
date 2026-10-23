@@ -10,6 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
+import { PeopleChangedSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
@@ -42,7 +43,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 53;
+export const PROTOCOL_VERSION = 56;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -355,11 +356,12 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
       "`proposal.changed`: the project's review-mode proposal opened, grew, became ready, was rebased or closed. " +
+      "`people.changed`: a person was added, renamed or removed, or a link was added or removed (`people.json`). " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -1133,7 +1135,7 @@ export const methods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json` and `transcripts/**/*.words.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json` and `people.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. " +
@@ -1811,6 +1813,111 @@ export const methods = {
     params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
     result: z.object({ tx: z.string() }),
   },
+  "people.list": {
+    description:
+      "The project's people (ADR 0020, `people.json`): who is who across transcripts, multicam angles and faces. Each " +
+      "person has an id (`p_3fa2c1`), a unique name and links: `speakers` (a transcript and one of its speaker ids, or " +
+      "every word of it), `angles` (timeline, group, angle) and `faces` (anchors: video, second, point of the face). A " +
+      "link whose target is gone (transcript, speaker, timeline, group, angle or video) has `missing: true` and a " +
+      "`reason`; it is ignored, never removed (a later run may bring it back). `dismissed` holds suggestion ids " +
+      "answered \"no\". Empty `people` when the project has no `people.json`: everything works without it. Fails " +
+      "with InvalidProjectFile when the file is invalid.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      people: z.array(PersonInfoSchema).describe("In file order."),
+      dismissed: z.array(z.string()),
+    }),
+  },
+  "people.add": {
+    mutating: true,
+    description:
+      "Add a person to `people.json` (created when missing) with no links yet; link voices, angles and faces with " +
+      "`people.link`. `name` is free text, unique ignoring case. The id is generated (`p_` + 6 hex). Example: " +
+      "`{ name: \"Juan\" }`. Fails with InvalidOperation (reason `name taken`, naming who has it) or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, name: z.string().trim().min(1).describe("Display name, e.g. `Juan`.") }),
+    result: z.object({ dir: z.string().describe("Project root."), person: PersonInfoSchema }),
+  },
+  "people.rename": {
+    mutating: true,
+    description:
+      "Rename a person. Every transcript speaker linked to them gets the new name in its transcript's `speakers` " +
+      "list too, so subtitles, export and anyone reading a words file see it (`transcripts` lists the files " +
+      "written). Linked transcripts that are missing or invalid are listed in `skipped` and left alone; angle names " +
+      "are not rewritten (that is a timeline edit: use `multicam.angle`). `person` is an id or the exact name. " +
+      "Example: `{ person: \"Juan\", name: \"Juan Pérez\" }`. Fails with InvalidOperation (reason `unknown person` or " +
+      "`name taken`) or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      person: z.string().min(1).describe("Person id (`p_3fa2c1`) or exact name (ignoring case)."),
+      name: z.string().trim().min(1).describe("New display name, unique ignoring case."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      person: PersonInfoSchema,
+      previous: z.string().describe("The name before."),
+      transcripts: z.array(z.string()).describe("Transcript files whose speaker name was set to the new name."),
+      skipped: z
+        .array(z.object({ transcript: z.string(), reason: z.string() }))
+        .describe("Linked transcripts the name could not be written to, and why. Empty when all went well."),
+    }),
+  },
+  "people.remove": {
+    mutating: true,
+    description:
+      "Remove a person and all their links from `people.json`. Transcript speaker names already written stay as " +
+      "they are. `removed` is the person as they were, links included, so a mistake is undone by `people.add` and " +
+      "`people.link` again. `person` is an id or the exact name. Fails with InvalidOperation (reason `unknown " +
+      "person`) or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, person: z.string().min(1).describe("Person id or exact name.") }),
+    result: z.object({ dir: z.string().describe("Project root."), removed: PersonInfoSchema }),
+  },
+  "people.link": {
+    mutating: true,
+    description:
+      "Link something to a person: pass exactly one of `speaker` (a transcript speaker, or a whole transcript with " +
+      "no `speaker`), `angle` (timeline, group, angle id) or `face` (an anchor: video, source second, and the point " +
+      "of the face as fractions of the picture, default the center). The target must exist now. A speaker, angle or " +
+      "anchor belongs to at most one person; a whole transcript excludes other people's speakers of it. Linking a " +
+      "transcript speaker writes the person's name into that transcript's `speakers` entry (`transcripts`), so " +
+      "subtitles and export show it; angle names are not rewritten. Linking what is already theirs changes nothing " +
+      "(`linked: false`). Called by an agent, the link records it in `by`. Example: `{ person: \"Juan\", speaker: " +
+      "{ transcript: \"transcripts/ep1.words.json\", speaker: \"s1\" } }`. Fails with InvalidOperation (reason " +
+      "`unknown person`, `bad target`, `target missing` or `already linked`, naming the owner) or InvalidProjectFile.",
+    params: z
+      .strictObject({
+        cwd: CwdParam,
+        person: z.string().min(1).describe("Person id or exact name."),
+        ...PersonTargetParams,
+      })
+      .refine((params) => [params.speaker, params.angle, params.face].filter((target) => target !== undefined).length === 1, {
+        message: "pass exactly one of `speaker`, `angle` or `face`",
+      }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      person: PersonInfoSchema,
+      linked: z.boolean().describe("False when the link already existed."),
+      transcripts: z.array(z.string()).describe("Transcript files whose speaker name was set to the person's name."),
+    }),
+  },
+  "people.unlink": {
+    mutating: true,
+    description:
+      "Remove one link from a person: pass exactly one of `speaker`, `angle` or `face`, as `people.link` took it " +
+      "(a face by its asset, `at`, `x` and `y`). Works when the target is gone. The name already written into a " +
+      "transcript stays. Fails with InvalidOperation (reason `unknown person`, `bad target` or `not linked`, " +
+      "listing the person's links) or InvalidProjectFile.",
+    params: z
+      .strictObject({
+        cwd: CwdParam,
+        person: z.string().min(1).describe("Person id or exact name."),
+        ...PersonTargetParams,
+      })
+      .refine((params) => [params.speaker, params.angle, params.face].filter((target) => target !== undefined).length === 1, {
+        message: "pass exactly one of `speaker`, `angle` or `face`",
+      }),
+    result: z.object({ dir: z.string().describe("Project root."), person: PersonInfoSchema }),
+  },
   "ui.state": {
     description:
       "What the user sees in the Frameshell app for this project: the playhead and whether it plays, the selection " +
@@ -2066,6 +2173,13 @@ export const notifications = {
       timelines: z.array(z.string()).describe("Ids of the timelines it changes."),
       conflicts: z.array(z.string()).describe("`stale`: ids both the person and the proposal changed. Empty otherwise."),
     }),
+  },
+  "people.changed": {
+    description:
+      "`people.json` changed by a people method (ADR 0020): a person was added, renamed or removed, or one of their " +
+      "links was added or removed. Sent to connections subscribed with `events.subscribe`, after the file is written. " +
+      "A hand edit of the file sends nothing. Re-read with `people.list`.",
+    params: PeopleChangedSchema,
   },
   "ui.command": {
     description:

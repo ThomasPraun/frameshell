@@ -7,7 +7,7 @@ const committed = (file: string): unknown =>
 
 describe("published JSON Schema", () => {
   it("is generated for project, timeline, plugin manifest, transcript and director files", () => {
-    expect(Object.keys(generateJsonSchemas()).sort()).toEqual(["director.json", "plugin.json", "project.json", "timeline.json", "transcript.json"]);
+    expect(Object.keys(generateJsonSchemas()).sort()).toEqual(["director.json", "people.json", "plugin.json", "project.json", "timeline.json", "transcript.json"]);
   });
 
   it("carries the $id that project files reference in $schema", () => {

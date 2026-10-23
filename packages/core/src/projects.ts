@@ -9,11 +9,13 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import {
+  PEOPLE_FILE,
   type ParseResult,
   type ProjectConfig,
   type ProjectKind,
   createProjectConfig,
   createTimeline,
+  parsePeopleFile,
   parseProjectConfig,
   parseTimeline,
   parseTranscript,
@@ -234,6 +236,7 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => rel === PROJECT_FILE, parse: parseProjectConfig },
   { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
   { match: (rel) => /^transcripts\/.+\.words\.json$/.test(rel), parse: parseTranscript },
+  { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
 ];
 
 function notInProject(target: string): RpcError {

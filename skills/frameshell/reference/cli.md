@@ -12,6 +12,12 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell import <file…> [--link] [--wait]` | Copy media into `assets/` and ingest it (proxy, audio sidecar, waveform, thumbnails). Without `--wait` it returns at once; `status` shows progress. |
 | `frameshell gc [--dry-run]` | Free disk: delete regenerable files under `.frameshell/` nothing uses (proxies, sidecars, waveforms, thumbnails, transcription audio of deleted or replaced assets; clip renders no clip keys; Ask agent captures in `.frameshell/context/` older than 7 days). `--dry-run` lists them first. Never touches `assets/`; deleted outputs rebuild on demand. |
 | `frameshell script outline <file>` | Scenes (`## ` headings) of a Markdown script with their `scriptRef` anchors and linked clips, and for scenes with a `<!-- words: ... -->` comment the timeline span of their words. |
+| `frameshell people list` | Optional `people.json` (see [people.md](people.md)): who is who across files. Each person's links; `MISSING` ones with the reason (kept, ignored). `--json`: `people`, `dismissed`. |
+| `frameshell people add <name>` | New person, id `p_…` generated; names are unique ignoring case. |
+| `frameshell people rename <person> <name>` | `<person>` is an id or the exact name. Writes the new name into the transcript of each linked speaker. |
+| `frameshell people remove <person>` | Remove the person and their links (names already written into transcripts stay). |
+| `frameshell people link <person> (--speaker <transcript>[:<speaker>] \| --angle [<timeline>:]<group>:<angle> \| --face <asset>@<seconds>[:x,y])` | Link a transcript speaker (no `:speaker` = the whole transcript), a multicam angle or a face anchor. Linking a speaker writes the person's name into that transcript. One speaker, angle or anchor per person; the target must exist. |
+| `frameshell people unlink <person> (--speaker … \| --angle … \| --face …)` | Remove one link, spelled as when linked; works when the target is gone. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
 ## Timeline

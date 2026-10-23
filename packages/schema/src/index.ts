@@ -89,6 +89,28 @@ export {
   parseDirectorFile,
   resolveDirectorRules,
 } from "./director.js";
+export {
+  PEOPLE_SCHEMA_URL,
+  PEOPLE_FILE,
+  PersonIdSchema,
+  PersonSchema,
+  PersonSpeakerLinkSchema,
+  PersonAngleLinkSchema,
+  PersonFaceAnchorSchema,
+  PeopleFileSchema,
+  type PeopleFile,
+  type Person,
+  type PersonSpeakerLink,
+  type PersonAngleLink,
+  type PersonFaceAnchor,
+  personNameKey,
+  speakerLinkKey,
+  angleLinkKey,
+  faceAnchorKey,
+  createPeopleFile,
+  findPerson,
+  parsePeopleFile,
+} from "./people.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {

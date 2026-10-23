@@ -49,6 +49,7 @@ import { type GallerySource, galleryReport, planGallery } from "./multicam/galle
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
+import { PeopleService } from "./people/service.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -233,6 +234,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   await transactions.restore();
   const review = new ReviewSwitch(dirs);
+  const people = new PeopleService({ onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, person }) });
   /** After an operation of `key` in `tx`: a proposal whose transaction is already over (no grouping) is ready. */
   const settle = async (key: string, tx: TxRef) => {
     if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
@@ -971,6 +973,32 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "proposal.reject": async ({ cwd, tx }, caller) => {
       onlyUi(caller, "reject a proposal", tx);
       return timelines.rejectProposal(await root(cwd), tx);
+    },
+    "people.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, ...(await people.list(dir)) };
+    },
+    "people.add": async ({ cwd, name }) => {
+      const dir = await root(cwd);
+      return { dir, person: await people.add(dir, name) };
+    },
+    "people.rename": async ({ cwd, person, name }) => {
+      const dir = await root(cwd);
+      return { dir, ...(await people.rename(dir, person, name)) };
+    },
+    "people.remove": async ({ cwd, person }) => {
+      const dir = await root(cwd);
+      return { dir, removed: await people.remove(dir, person) };
+    },
+    "people.link": async ({ cwd, person, speaker, angle, face }, caller) => {
+      const dir = await root(cwd);
+      // An agent's confirmation is marked on the link (ADR 0020 §10); a person's own is not.
+      const author = journalAuthorOf(caller);
+      return { dir, ...(await people.link(dir, person, { speaker, angle, face }, author.startsWith("agent:") ? author : undefined)) };
+    },
+    "people.unlink": async ({ cwd, person, speaker, angle, face }) => {
+      const dir = await root(cwd);
+      return { dir, person: await people.unlink(dir, person, { speaker, angle, face }) };
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
