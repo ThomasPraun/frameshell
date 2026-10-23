@@ -1,0 +1,39 @@
+import type { PersonInfo, TimelineView } from "@frameshell/protocol";
+import { selection } from "../selection.js";
+import { type TranscriptSource, buildTranscriptModel } from "../transcript/model.js";
+import { personWords, toRanges } from "./model.js";
+
+/** Which of a person's time a pick selects. */
+export type PersonTime = "speaks" | "onscreen";
+
+/** Latest pick, so a slow answer never replaces a newer pick. */
+let latest = 0;
+
+/**
+ * Select `person` in the shared store (ADR 0020): at once, so "Ask agent" and `ui_state` know the pick, then with
+ * their spans from `people.ranges` of the main timeline and, for `speaks`, the words of their linked
+ * voices the timeline plays. `reveal` moves the timeline and the playhead to the first span (a click does; a
+ * refresh after an edit does not). Resolves with the daemon's message when the spans could not be read, else null.
+ */
+export async function pickPerson(
+  person: Pick<PersonInfo, "id" | "name">,
+  what: PersonTime,
+  context: { view: TimelineView | null; sources: readonly TranscriptSource[]; info: PersonInfo },
+  options: { reveal: boolean },
+): Promise<string | null> {
+  const ticket = ++latest;
+  const picked = { id: person.id, name: person.name, what };
+  const current = selection.get();
+  if (current.person?.id !== person.id || current.person.what !== what || current.person.name !== person.name) {
+    selection.selectPerson(picked, [], [], "people");
+  }
+  try {
+    const { spans } = await window.frameshell.people.ranges(person.id, what);
+    if (ticket !== latest) return null;
+    const words = what === "speaks" && context.view ? personWords(context.info, buildTranscriptModel(context.view, context.sources)) : [];
+    selection.selectPerson(picked, toRanges(spans), words, "people", { reveal: options.reveal });
+    return null;
+  } catch (error) {
+    return ticket === latest ? (error as Error).message : null;
+  }
+}

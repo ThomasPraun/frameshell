@@ -21,7 +21,7 @@ describe("panelWindowRequest", () => {
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview/1")).toBe("preview");
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview/27")).toBe("preview");
     expect(panelWindowRequest("about:blank", "frameshell-panel:terminal/3")).toBe("terminal");
-    for (const panel of ["timeline", "editor", "explorer", "history", "plugins", "angles"]) {
+    for (const panel of ["timeline", "editor", "explorer", "history", "plugins", "angles", "people"]) {
       expect(panelWindowRequest("about:blank", `frameshell-panel:${panel}/1`)).toBe(panel);
     }
     expect(panelWindowRequest("about:blank", "frameshell-panel:preview")).toBeNull();

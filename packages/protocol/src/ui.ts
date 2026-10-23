@@ -69,6 +69,15 @@ export const UiSelectionSchema = z.object({
     .string()
     .nullable()
     .describe("Transaction `tx_…` or operation `op_…` whose changes the timeline marks (History panel); null when none."),
+  person: z
+    .object({
+      id: z.string().describe("Person id, e.g. `p_3fa2c1` (`people.list`)."),
+      name: z.string(),
+      what: z.enum(["speaks", "onscreen"]).describe("Which time of theirs is selected: when they speak or when they are on screen."),
+      spans: z.array(TimeRangeSchema).describe("Timeline seconds of that time (`people.ranges` of `timeline`), sorted, disjoint."),
+    })
+    .optional()
+    .describe("Person the user picked in the People panel, with their selected spans (the words they speak are in `words`); absent when none."),
   region: z
     .object({
       x0: z.number().min(0).max(1).describe("Left edge, fraction of the frame width (0 = left)."),

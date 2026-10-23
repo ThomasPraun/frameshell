@@ -122,6 +122,20 @@ const api: FrameshellApi = {
   multicam: {
     turns: (timeline, group) => invokeOutcome(Channel.multicamTurns, timeline, group),
   },
+  people: {
+    list: () => invokeOutcome(Channel.peopleList),
+    add: (name) => invokeOutcome(Channel.peopleAdd, name),
+    rename: (person, name) => invokeOutcome(Channel.peopleRename, person, name),
+    remove: (person) => invokeOutcome(Channel.peopleRemove, person),
+    link: (person, target) => invokeOutcome(Channel.peopleLink, person, target),
+    unlink: (person, target) => invokeOutcome(Channel.peopleUnlink, person, target),
+    scan: () => invokeOutcome(Channel.peopleScan),
+    suggest: () => invokeOutcome(Channel.peopleSuggest),
+    confirm: (suggestions, options) => invokeOutcome(Channel.peopleConfirm, suggestions, options ?? {}),
+    ranges: (person, kind) => invokeOutcome(Channel.peopleRanges, person, kind),
+    onChanged: (listener) => subscribe(Channel.peopleChanged, listener),
+    onScan: (listener) => subscribe(Channel.peopleScanJob, listener),
+  },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),
   },

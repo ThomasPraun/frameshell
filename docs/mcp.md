@@ -58,7 +58,7 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 
 | Tool | Does |
 |---|---|
-| `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked, preview `region` with the clips under it, topmost first, picked `points` with the clip and element at each), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
+| `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked, preview `region` with the clips under it, topmost first, picked `points` with the clip and element at each, the `person` picked in the People panel with their `spans`), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
 | `ui_seek(at)` / `ui_play` / `ui_pause` | Drive the preview's transport. |
 | `ui_select(clips?, words?, range?, reveal?, points?)` | Replace the selection; unknown clip ids fail. `reveal` scrolls to the first clip. `points` (`{ at, x, y }`, fractions of the frame) are inspected by the daemon (`inspect.point`) and shown as picks, the playhead at the first (ADR 0011). |
 | `ui_open_file(file)` | Open a project file in an active editor tab. |

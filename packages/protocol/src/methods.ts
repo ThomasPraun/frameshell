@@ -2044,7 +2044,8 @@ export const methods = {
   "ui.state": {
     description:
       "What the user sees in the Frameshell app for this project: the playhead and whether it plays, the selection " +
-      "(clip ids, transcript words, a time range, and the History entry whose changes the timeline marks), the " +
+      "(clip ids, transcript words, a time range, the History entry whose changes the timeline marks, and the person picked " +
+      "in the People panel with their spans), the " +
       "editor tabs and the timeline seconds visible in the timeline panel. Read it to resolve \"this clip\", \"here\" " +
       "or \"the selected words\" before acting. The app reports every change within 200 ms. `connected: false` (and " +
       "no other field) when no app window shows the project; the other `ui.*` tools then fail with UiNotConnected.",

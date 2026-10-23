@@ -43,7 +43,8 @@ export function hasSelection(current: Selection): boolean {
     current.files.length > 0 ||
     current.scene !== null ||
     current.region !== null ||
-    current.points.length > 0
+    current.points.length > 0 ||
+    current.person !== null
   );
 }
 

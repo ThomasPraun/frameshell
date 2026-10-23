@@ -48,6 +48,9 @@ export function uiView({ transport: t, selection: s, editor, visible }: UiViewIn
       words: s.words.map(({ transcript, word }) => ({ transcript, word })),
       range: s.range ? { from: ms(s.range.from), to: ms(s.range.to) } : null,
       history: s.history,
+      ...(s.person
+        ? { person: { id: s.person.id, name: s.person.name, what: s.person.what, spans: s.spans.map((span) => ({ from: ms(span.from), to: ms(span.to) })) } }
+        : {}),
       region: s.region
         ? {
             x0: ms(s.region.x0),

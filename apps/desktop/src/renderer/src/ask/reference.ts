@@ -18,6 +18,14 @@ export function referenceTime(seconds: number): string {
 
 const span = (from: number, to: number) => `${referenceTime(from)}–${referenceTime(to)}`;
 
+/** Seconds as `MM:SS`, or `H:MM:SS` from an hour on. */
+function clock(seconds: number): string {
+  const whole = Math.round(Math.max(0, seconds));
+  const two = (n: number) => String(n).padStart(2, "0");
+  const hours = Math.floor(whole / 3600);
+  return `${hours > 0 ? `${hours}:` : ""}${two(Math.floor(whole / 60) % 60)}:${two(whole % 60)}`;
+}
+
 /** Quoted, escaped and shortened text. */
 function quote(text: string): string {
   const short = text.length > MAX_QUOTE ? `${text.slice(0, MAX_QUOTE - 1).trimEnd()}…` : text;
@@ -151,10 +159,17 @@ function pointLine(point: SelectedPoint, view: TimelineView | null, extras: Refe
  * under `assets/`, else `file`), a preview region naming the clips under it
  * (topmost first) and its saved `frame` capture when there is one, or
  * `frame pending` while a render it needs is not ready (ADR 0011), and
- * points picked with the Pick tool, one line each. Times are timeline times
+ * points picked with the Pick tool, one line each, and a person picked in the People panel (one line: id, name, speaks or on
+ * screen, span count and total; the spans themselves are `people ranges`). Times are timeline times
  * of `view`; ids are the project files'. Empty for an empty selection.
  */
 export function referenceLines(selection: Selection, view: TimelineView | null, options: ReferenceExtras = {}): string[] {
+  if (selection.person) {
+    const { id, name, what } = selection.person;
+    const total = selection.spans.reduce((sum, { from, to }) => sum + (to - from), 0);
+    const spans = `${selection.spans.length} span${selection.spans.length === 1 ? "" : "s"}, ${clock(total)} total`;
+    return [`${TAG} person ${id} ${quote(name)} · ${what === "speaks" ? "speaks" : "on screen"} · ${spans}`];
+  }
   if (selection.points.length > 0) return selection.points.map((point, index) => pointLine(point, view, options, index));
   if (selection.region) {
     const { x0, y0, x1, y1, at, clips } = selection.region;

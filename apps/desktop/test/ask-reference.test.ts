@@ -38,7 +38,7 @@ const view: TimelineView = {
   ],
 };
 
-const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null };
+const blank: Selection = { clips: [], words: [], range: null, origin: null, reveal: null, history: null, files: [], scene: null, region: null, points: [], track: null, person: null, spans: [] };
 const word = (id: string, text: string, start: number, end: number): SelectedWord => ({ transcript: TRANSCRIPT, asset: ASSET, word: id, text, start, end });
 
 describe("reference lines", () => {
@@ -162,6 +162,21 @@ describe("reference lines", () => {
     ]);
     const dark = { x: 0.5, y: 0.5, at: 1, layers: [], target: null, elements: [], unavailable: null };
     expect(referenceLines({ ...blank, points: [dark], origin: "preview" }, view)).toEqual(["[frameshell] point (0.50,0.50) @ 00:00:01.00 · black"]);
+  });
+
+  it("names a picked person with the span count and total instead of their words (ADR 0020)", () => {
+    const words = [word("w_000123", "hola", 10, 10.4)];
+    const spans = [
+      { from: 10, to: 100 },
+      { from: 200, to: 310 },
+    ];
+    const person = { id: "p_3fa2c1", name: "Juan", what: "speaks" as const };
+    expect(referenceLines({ ...blank, person, spans, words, range: { from: 10, to: 310 }, origin: "people" }, view)).toEqual([
+      '[frameshell] person p_3fa2c1 "Juan" · speaks · 2 spans, 03:20 total',
+    ]);
+    expect(referenceLines({ ...blank, person: { ...person, what: "onscreen" }, spans: [spans[0]!], origin: "people" }, view)).toEqual([
+      '[frameshell] person p_3fa2c1 "Juan" · on screen · 1 span, 01:30 total',
+    ]);
   });
 
   it("has nothing to say about an empty selection", () => {

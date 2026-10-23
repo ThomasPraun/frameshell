@@ -358,7 +358,7 @@ function TimelineCanvas({
   const frameView = useRef<Window>(window);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, range, reveal, track: selectedTrack, scene: selectedScene } = useSelection();
+  const { clips: selectedClips, range, spans, reveal, track: selectedTrack, scene: selectedScene } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
   const subtitles = useSubtitles();
   const cues = useMemo(() => new Map(subtitles.tracks.map((track) => [track.track, cueBoxes(track, subtitles.fps)] as const)), [subtitles]);
@@ -375,8 +375,8 @@ function TimelineCanvas({
    * are pending, and the latest revision they produced.
    */
   const inFlight = useRef<{ starts: Map<string, number>; pending: number; until: number } | null>(null);
-  const latest = useRef({ layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene });
-  latest.current = { layout, fps, selected, range, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene };
+  const latest = useRef({ layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene });
+  latest.current = { layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
@@ -391,7 +391,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, range: words, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, range: words, spans: personSpans, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -417,6 +417,7 @@ function TimelineCanvas({
       selected: chosen,
       ...(marks ? { diff: marks } : {}),
       range: words,
+      spans: personSpans,
       subtitles: subtitleCues,
       selectedTrack: track,
       selectedScene: chosenScene,
@@ -492,7 +493,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, range, diff, cues, selectedTrack, selectedScene, settle, settleNudges, draw]);
+  }, [layout, revision, selected, range, spans, diff, cues, selectedTrack, selectedScene, settle, settleNudges, draw]);
 
   // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
   useEffect(() => {
@@ -1181,6 +1182,7 @@ function TimelineCanvas({
         data-selected={selectedClips.join(" ")}
         data-diff={diff?.map((mark) => `${mark.change}:${mark.clip}`).join(" ")}
         data-range={range ? `${range.from}-${range.to}` : undefined}
+        data-spans={spans.length > 0 ? spans.map((span) => `${span.from}-${span.to}`).join(" ") : undefined}
         ref={lanesEl}
         data-playhead={transport.get().time}
         data-dragging={dragging ? dragging.preview.part : undefined}
