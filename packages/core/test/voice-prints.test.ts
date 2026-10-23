@@ -71,6 +71,7 @@ describe("speakerSuggestions", () => {
       kind: "speaker",
       person: { id: "p_juan", name: "Juan" },
       speaker: { transcript: "transcripts/ep2.words.json", speaker: "s1", name: "Speaker 1" },
+      links: ["speaker"],
       score: 0.9,
       reason: "s1 (Speaker 1) in transcripts/ep2.words.json sounds like Juan (0.90).",
     });
@@ -89,7 +90,7 @@ describe("speakerSuggestions", () => {
 
   it("orders by score", () => {
     const suggestions = speakerSuggestions([juan, ana], [speaker("s1", voice(2, 0, 0.8)), speaker("s2", voice(3, 1, 0.95))]);
-    expect(suggestions.map((suggestion) => suggestion.person.name)).toEqual(["Ana", "Juan"]);
+    expect(suggestions.map((suggestion) => suggestion.person?.name)).toEqual(["Ana", "Juan"]);
   });
 });
 

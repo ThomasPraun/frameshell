@@ -6,7 +6,16 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
-export { type NameWrites, type PeopleChange, type PeopleServiceOptions, type PeopleTarget, PeopleService, type VoicePrinter } from "./people/service.js";
+export {
+  type FaceScans,
+  type NameWrites,
+  type PeopleChange,
+  type PeopleServiceOptions,
+  type PeopleTarget,
+  PeopleService,
+  type SuggestSources,
+  type VoicePrinter,
+} from "./people/service.js";
 export {
   FACE_EMBEDDING_DIMS,
   type FaceEmbedder,
@@ -30,7 +39,35 @@ export {
   similarityTransform,
 } from "./people/scan.js";
 export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
-export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, mergeSpans, personRanges } from "./people/ranges.js";
+export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, faceSpans, mergeSpans, personRanges } from "./people/ranges.js";
+export {
+  type ClusterTrack,
+  FACE_ANCHOR_WINDOW_S,
+  FACE_CLUSTER_MATCH,
+  FACE_SAMPLE_SPAN_S,
+  type FaceCluster,
+  type FaceModel,
+  type FaceOwners,
+  type FaceAnchorPoint,
+  type ScannedAsset,
+  clusterFaces,
+  facesOfPeople,
+  overlapSeconds,
+  personFacePrint,
+  presence,
+  resolveAnchor,
+  spanSeconds,
+} from "./people/face-clusters.js";
+export {
+  FACE_MIN_SCREEN_S,
+  FACE_PERSON_MARGIN,
+  FACE_PERSON_MATCH,
+  FACE_SPEAKER_MIN_S,
+  FACE_SPEAKER_SHARE,
+  type FaceSuggestInput,
+  faceSuggestions,
+} from "./people/face-suggest.js";
+export { type ScanProjectDeps, readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 export { FBANK_BINS, FBANK_SAMPLE_RATE, type Fbank, fbank, subtractMean } from "./people/fbank.js";
 export {
   type CampplusFiles,

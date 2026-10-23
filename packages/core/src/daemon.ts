@@ -49,8 +49,8 @@ import { type GallerySource, galleryReport, planGallery } from "./multicam/galle
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
-import { PeopleService, type VoicePrinter } from "./people/service.js";
-import { scanProjectFaces } from "./people/scan-run.js";
+import { type FaceScans, PeopleService, type VoicePrinter } from "./people/service.js";
+import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints } from "./people/voices.js";
@@ -242,7 +242,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   await transactions.restore();
   const review = new ReviewSwitch(dirs);
-  const people = new PeopleService({ onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, person }) });
+  const people = new PeopleService({
+    onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, ...(person !== undefined ? { person } : {}) }),
+  });
+  /** Cached face scans of every file in `assets/`; content hashes come from the media index. */
+  const faceScans =
+    (dir: string): FaceScans =>
+    async () =>
+      readProjectFaceScans(
+        dir,
+        (await media.list(dir)).map((asset) => asset.path),
+        async (d, rel) => (await media.derivedAudio(d, rel)).hash,
+      );
   /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
   const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
     const embed: VoiceEmbedder =
@@ -1067,19 +1078,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
       const flat = await resolveNested(dir, loaded);
-      const found = await people.ranges(dir, person, kind, flat, (group) => groupTurns(turnsSource, dir, group));
+      const found = await people.ranges(dir, person, kind, flat, (group) => groupTurns(turnsSource, dir, group), faceScans(dir));
       return { dir, person: { id: found.person.id, name: found.person.name }, kind, timeline, spans: found.spans, total: found.total, warnings: found.warnings };
     },
     // Both read transcription WAVs: `transcribing` keeps `gc` off them meanwhile.
     "people.suggest": async ({ cwd }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, ...(await transcribing(dir, () => people.suggest(dir, voicePrinter(dir, request.progress)))) };
+      return { dir, ...(await transcribing(dir, () => people.suggest(dir, { voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
     },
-    "people.confirm": async ({ cwd, suggestions, reject }, caller, request) => {
+    "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
       const dir = await root(cwd);
       const author = journalAuthorOf(caller);
       const by = author.startsWith("agent:") ? author : undefined;
-      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, voices: voicePrinter(dir, request.progress) }))) };
+      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),

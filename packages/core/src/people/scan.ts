@@ -74,8 +74,9 @@ export function similarityTransform(from: Landmarks, to: Landmarks): Similarity 
 
 /**
  * The face of `frame` with `landmarks` (pixels), warped to the 112×112 SFace
- * takes as `[1, 3, 112, 112]` floats, RGB in 0..255 (OpenCV swaps BGR to RGB
- * and does no other scaling). Bilinear, outside the picture black, as
+ * takes as `[1, 3, 112, 112]` floats, RGB in 0..255, as OpenCV's
+ * `FaceRecognizerSF::feature` feeds it: `blobFromImage(aligned, 1, Size(112, 112),
+ * Scalar(0, 0, 0), swapRB = true)`. Bilinear, outside the picture black, as
  * `warpAffine` does.
  */
 export function alignFace(frame: BgrFrame, landmarks: Landmarks): Float32Array {

@@ -118,7 +118,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -249,6 +249,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "on-screen": { type: "boolean", default: false },
           onscreen: { type: "boolean", default: false },
           reject: { type: "boolean", default: false },
+          person: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -362,6 +363,7 @@ function parseBuiltin(
     "on-screen"?: boolean | undefined;
     onscreen?: boolean | undefined;
     reject?: boolean | undefined;
+    person?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;

@@ -52,9 +52,10 @@ export function speakerSuggestions(people: readonly PersonVoice[], speakers: rea
       kind: "speaker",
       person: { id: best.person.id, name: best.person.name },
       speaker: { transcript: speaker.transcript, speaker: speaker.speaker, name: speaker.name },
+      links: ["speaker"],
       score,
       reason: `${speaker.speaker} (${speaker.name}) in ${speaker.transcript} sounds like ${best.person.name} (${score.toFixed(2)}).`,
     });
   }
-  return suggestions.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return suggestions.sort((a, b) => b.score! - a.score! || a.id.localeCompare(b.id));
 }

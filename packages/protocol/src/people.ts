@@ -58,19 +58,51 @@ export const PersonTargetParams = {
 /** Notification `people.changed` payload kinds. */
 export const PEOPLE_CHANGES = ["add", "rename", "remove", "link", "unlink", "dismiss"] as const;
 
+/** A face sample: the fields of a face anchor without `by`. */
+export const FacePointSchema = PersonFaceAnchorSchema.pick({ asset: true, at: true, x: true, y: true });
+
+/** A face as suggestions name it: a cluster of face tracks and the sample a confirmation anchors. */
+export const SuggestedFaceSchema = z.object({
+  cluster: z.string().describe("Face cluster id `fc_…`, for display: it changes when scans change."),
+  anchor: FacePointSchema.describe(
+    "The cluster's most central face sample: the face anchor a confirmation links. Show the frame at `at` to a person.",
+  ),
+  seconds: z.number().describe("Seconds the face is on screen across the scanned videos."),
+});
+
 /** One suggested link (ADR 0020 decision 5); applied only by `people.confirm`. */
 export const PeopleSuggestionSchema = z.object({
   id: z.string().describe("`sg_` + 8 hex, the same for the same kind and targets on every run: pass it to `people.confirm`."),
-  kind: z.literal("speaker").describe("`speaker`: a transcript speaker linked to nobody sounds like a person's linked voices."),
-  person: z.object({ id: PersonIdSchema, name: z.string() }).describe("The person to link to."),
+  kind: z
+    .enum(["speaker", "face", "face-speaker"])
+    .describe(
+      "`speaker`: a transcript speaker linked to nobody sounds like a person's linked voices. `face`: a face on screen for " +
+        "10 s or more that nobody has: who it looks like, or nobody yet (\"Who is this?\"). `face-speaker`: in one video, " +
+        "the face on screen for most of a speaker's time: the voice and the face are one person.",
+    ),
+  person: z
+    .object({ id: PersonIdSchema, name: z.string() })
+    .optional()
+    .describe("The person to link to. Absent: nobody yet, so `people.confirm` needs `person` (a new name creates them)."),
   speaker: z
     .object({
       transcript: z.string().describe("Project-relative transcript file."),
       speaker: SpeakerIdSchema,
       name: z.string().describe("Its name in the transcript now."),
     })
-    .describe("The transcript speaker to link."),
-  score: z.number().describe("Voice similarity, cosine of the voice prints (about 0.7 and up is suggested), 2 decimals."),
+    .optional()
+    .describe("The transcript speaker to link (`speaker`, `face-speaker`)."),
+  face: SuggestedFaceSchema.optional().describe("The face to link (`face`, `face-speaker`)."),
+  links: z
+    .array(z.enum(["speaker", "face"]))
+    .describe("What confirming links: `speaker`, `face` or both (`face-speaker` with a new person); the other side is linked already."),
+  score: z
+    .number()
+    .optional()
+    .describe(
+      "2 decimals. `speaker`: voice similarity (cosine of voice prints, about 0.7 and up). `face`: face similarity to the " +
+        "person (cosine of face prints); absent when it names nobody. `face-speaker`: share of the speaker's time the face is on screen (0.6 and up).",
+    ),
   reason: z.string().describe("One line for a person, e.g. `s2 (Speaker 2) in transcripts/ep2.words.json sounds like Juan (0.78).`"),
 });
 
@@ -83,7 +115,7 @@ export const PeopleChangedSchema = z.object({
   change: z
     .enum(PEOPLE_CHANGES)
     .describe("What happened: a person was added, renamed or removed, a link was added or removed, or a suggestion was dismissed."),
-  person: PersonIdSchema.describe("Id of the person it happened to (`dismiss`: the person the suggestion named)."),
+  person: PersonIdSchema.optional().describe("Id of the person it happened to (`dismiss`: the person the suggestion named; absent when it named nobody)."),
 });
 
 /** One video of a `people.scan` result. */

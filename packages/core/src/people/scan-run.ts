@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, type MethodResult, type Progress, RpcError } from "@frameshell/protocol";
 import { readFaceScan, writeFaceScan } from "./scan-cache.js";
+import type { ScannedAsset } from "./face-clusters.js";
 import type { PeopleScanner } from "./scan.js";
 import { projectPath } from "./service.js";
 
@@ -95,4 +96,19 @@ export async function scanProjectFaces(
 
 function embeddingCount(tracks: readonly { embeddings: readonly unknown[] }[]): number {
   return tracks.reduce((sum, track) => sum + track.embeddings.length, 0);
+}
+
+/**
+ * The cached face scan of each of `assets` (project-relative) that has one,
+ * keyed by its current content: nothing is decoded. Files that cannot be
+ * hashed (gone meanwhile) are left out.
+ */
+export async function readProjectFaceScans(root: string, assets: readonly string[], hash: ScanProjectDeps["hash"]): Promise<ScannedAsset[]> {
+  const found: ScannedAsset[] = [];
+  for (const asset of assets) {
+    const content = await hash(root, asset).catch(() => null);
+    const scan = content === null ? null : await readFaceScan(root, content);
+    if (scan) found.push({ asset, scan });
+  }
+  return found;
 }

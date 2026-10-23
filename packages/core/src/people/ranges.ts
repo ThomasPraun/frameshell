@@ -19,6 +19,11 @@ export interface RangesSource {
   transcript(file: string): Transcript | null;
   /** Speaking turns of a group; see `groupTurns`. */
   turns(group: MulticamGroup): Promise<Pick<GroupTurns, "turns" | "warnings">>;
+  /**
+   * Source seconds each video shows the person's face, by project-relative
+   * asset, with notes on anchors that name no face. Absent: faces are not used.
+   */
+  faces?(person: Person): Promise<{ spans: Map<string, Span[]>; warnings: string[] }>;
 }
 
 /** Result of {@link personRanges}. */
@@ -37,13 +42,18 @@ export interface PersonRanges {
  * subtracted. Links whose target is gone are skipped with a warning.
  *
  * - speaks: {@link speakerSpans} and {@link angleSpans}.
- * - onscreen: {@link angleSpans}. Face anchors (#341) add a third source here.
+ * - onscreen: {@link angleSpans} and {@link faceSpans}.
  */
 export async function personRanges(person: Person, kind: RangeKind, timeline: Timeline, source: RangesSource): Promise<PersonRanges> {
   const warnings: string[] = [];
   const spans: Span[] = [];
   if (kind === "speaks") spans.push(...speakerSpans(person, timeline, source, warnings));
   spans.push(...(await angleSpans(person, kind, timeline, source, warnings)));
+  if (kind === "onscreen" && source.faces) {
+    const faces = await source.faces(person);
+    warnings.push(...faces.warnings);
+    spans.push(...faceSpans(timeline, faces.spans));
+  }
   const merged = mergeSpans(spans);
   return { spans: merged, total: round(merged.reduce((sum, span) => sum + span.end - span.start, 0)), warnings };
 }
@@ -99,6 +109,29 @@ export function speakerSpans(person: Person, timeline: Timeline, source: Pick<Ra
         const middle = (word.start + word.end) / 2;
         if (middle < clip.in || middle >= clip.out) continue;
         spans.push({ start: at(Math.max(word.start, clip.in)), end: at(Math.min(word.end, clip.out)) });
+      }
+    }
+  }
+  return spans;
+}
+
+/**
+ * Source spans of each asset (`faces`: where the person's face shows) placed
+ * by the media clips of video tracks that show that asset: cut to the clip's
+ * `[in, out)`, then moved by `start` and `speed`. Program tracks are left
+ * out: there only the shot's angles count.
+ */
+export function faceSpans(timeline: Timeline, faces: ReadonlyMap<string, readonly Span[]>): Span[] {
+  const spans: Span[] = [];
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video") continue;
+    for (const clip of track.clips) {
+      if (clip.type !== "media" || !("asset" in clip)) continue;
+      const speed = clip.speed ?? 1;
+      for (const span of faces.get(clip.asset) ?? []) {
+        const from = Math.max(span.start, clip.in);
+        const to = Math.min(span.end, clip.out);
+        if (to > from) spans.push({ start: clip.start + (from - clip.in) / speed, end: clip.start + (to - clip.in) / speed });
       }
     }
   }

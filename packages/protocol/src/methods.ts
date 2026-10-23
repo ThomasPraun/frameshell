@@ -10,7 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
-import { PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
+import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
@@ -1953,8 +1953,10 @@ export const methods = {
       "sorted, pauses under 0.5 s bridged, with their `total`. `kind` `speaks` (default): the words of the person's linked " +
       "transcript speakers placed by the clips that play their video or audio (in, out, speed and cuts honoured; nested " +
       "timelines flattened; a mic's words through the shots) plus the speaking turns of their linked multicam angles inside " +
-      "the program track's shots. `onscreen`: the shots that show one of their angles. Clips covered by a layer above are not " +
-      "subtracted, and faces are not used yet. Spans are timeline seconds NOW: to cut several out with `ripple`, go from the " +
+      "the program track's shots. `onscreen`: the shots that show one of their angles, plus their faces (`people.scan`; the " +
+      "faces their face anchors name, and the faces clustered with those) placed by the video clips that show each video, " +
+      "0.25 s either side of each face sample. Clips covered by a layer above are not subtracted; on a program track only " +
+      "the shot's angles count. Spans are timeline seconds NOW: to cut several out with `ripple`, go from the " +
       "last span to the first so earlier spans keep their times. Links whose target is gone are skipped with a `warnings` " +
       "line. Read-only. Fails with InvalidOperation (reason `unknown person`), InvalidProjectFile or TimelineNotFound.",
     params: z.strictObject({
@@ -1978,27 +1980,35 @@ export const methods = {
       "Links Frameshell suggests and nobody confirmed yet (ADR 0020); nothing is linked until `people.confirm`. Kind " +
       "`speaker`: a transcript speaker linked to nobody whose voice sounds like one person's linked speakers (voice " +
       "prints: CAM++ embeddings of each speaker's longest stretches alone, computed locally on first use, a few " +
-      "seconds per transcript, then cached in `.frameshell/people/voices/`; the speaker model is downloaded once). " +
-      "At most one suggestion per speaker, best score first; suggestions answered \"no\" (`dismissed`) are left out. " +
-      "`hints` say what keeps voices from being matched: no person has a linked speaker yet, a transcript has no " +
-      "speakers (run `transcribe.speakers`), is stale, or a speaker says too little. Confirm only what the person " +
-      "agreed to or what is certain.",
+      "seconds per transcript, then cached in `.frameshell/people/voices/`; the speaker model is downloaded once); at " +
+      "most one per speaker. Faces come from `people.scan` (cached scans only; this never scans): face tracks of every " +
+      "video are clustered by face print, and a face anchor makes its cluster the person's. Kind `face`: a face on " +
+      "screen for 10 s or more that nobody has, with the person it looks like or none (ask \"Who is this?\" and show " +
+      "the frame at `face.anchor`). Kind `face-speaker`: in a video with a diarized transcript, the face on screen for " +
+      "60% or more of a speaker's time (and the only one): the voice and the face are one person, joined to the person " +
+      "either side already has, or a new one. Suggestions answered \"no\" (`dismissed`) are left out. `hints` say what " +
+      "keeps voices or faces from being matched: no person has a linked speaker yet, a transcript has no speakers (run " +
+      "`transcribe.speakers`), is stale, a speaker says too little, a video has no face scan (run `people.scan`), or a " +
+      "face anchor names no face. Confirm only what the person agreed to or what is certain.",
     params: z.strictObject({ cwd: CwdParam }),
     result: z.object({
       dir: z.string().describe("Project root."),
       suggestions: z.array(PeopleSuggestionSchema),
-      hints: z.array(z.string()).describe("Why some voices could not be compared, with the command that fixes it. Empty when none."),
+      hints: z.array(z.string()).describe("Why some voices or faces could not be compared, with the command that fixes it. Empty when none."),
     }),
   },
   "people.confirm": {
     mutating: true,
     description:
-      "Answer suggestions from `people.suggest` by id: yes applies each one's link (as `people.link`: the person's " +
-      "name is written into the transcript; called by an agent, the link records it in `by`), `reject: true` adds " +
-      "the ids to `dismissed` in `people.json` so they are not suggested again. Ids are checked against the current " +
-      "suggestions first: one no longer suggested fails the call before anything changes. Undo a yes with " +
-      "`people.unlink`. Example: `{ suggestions: [\"sg_9c04e1d2\"] }`. Fails with InvalidOperation (reason `unknown " +
-      "suggestion`, or a `people.link` reason) or InvalidProjectFile.",
+      "Answer suggestions from `people.suggest` by id: yes applies each one's links (as `people.link`: a speaker's " +
+      "person's name is written into the transcript, a face is linked as a face anchor at `face.anchor`; called by an " +
+      "agent, the link records it in `by`), `reject: true` adds the ids to `dismissed` in `people.json` so they are not " +
+      "suggested again. A suggestion without `person` (a new face, or a voice and face nobody has) needs `person`: an " +
+      "existing person, or a new name, which adds that person. Ids are checked against the current suggestions first: " +
+      "one no longer suggested, or one needing `person` without it, fails the call before anything changes. Undo a yes " +
+      "with `people.unlink` (and `people.remove` for a person it added). Example: `{ suggestions: [\"sg_9c04e1d2\"] }`, " +
+      "`{ suggestions: [\"sg_51aa07c3\"], person: \"Ana\" }`. Fails with InvalidOperation (reason `unknown suggestion`, " +
+      "`needs person`, or a `people.add` or `people.link` reason) or InvalidProjectFile.",
     params: z.strictObject({
       cwd: CwdParam,
       suggestions: z
@@ -2006,6 +2016,12 @@ export const methods = {
         .min(1)
         .describe("Suggestion ids from `people.suggest`."),
       reject: z.boolean().default(false).describe("True dismisses them instead of linking. Default false."),
+      person: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe("For suggestions that name no person: who it is, by id or exact name; a name nobody has adds that person. Ignored by the others."),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -2014,8 +2030,10 @@ export const methods = {
           z.object({
             id: z.string(),
             person: z.object({ id: z.string(), name: z.string() }),
-            speaker: z.object({ transcript: z.string(), speaker: z.string() }),
-            linked: z.boolean().describe("False when the link already existed."),
+            added: z.boolean().describe("True when the person was added by this confirmation (`person` named nobody)."),
+            speaker: z.object({ transcript: z.string(), speaker: z.string() }).optional().describe("The speaker linked, when the suggestion linked one."),
+            face: FacePointSchema.optional().describe("The face anchor linked, when the suggestion linked one."),
+            linked: z.boolean().describe("False when every link already existed."),
             transcripts: z.array(z.string()).describe("Transcript files whose speaker name was set to the person's name."),
           }),
         )

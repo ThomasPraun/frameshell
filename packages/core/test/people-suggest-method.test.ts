@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type AppDirs, type DaemonConnection, ErrorCode, RpcError, connectToDaemon, methods } from "@frameshell/protocol";
 import { SCHEMA_VERSION } from "@frameshell/schema";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AudioExtractor, type Daemon, VOICES_DIR, type VoiceEmbedRequest, startDaemon } from "../src/index.js";
+import { type AudioExtractor, type Daemon, FACE_EMBEDDING_DIMS, type FaceTrack, VOICES_DIR, type VoiceEmbedRequest, startDaemon, writeFaceScan } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools } from "./media-tools.js";
 
@@ -87,13 +87,13 @@ async function setup() {
     return hash;
   };
   // Juan speaks first in both episodes (a little different the second time); Ben and Carla are different voices.
-  episode("ep1", voice(0), voice(1));
+  const ep1 = episode("ep1", voice(0), voice(1));
   const ep2 = episode("ep2", voice(2, 0, 0.92), voice(3));
   episode("ep3", voice(4), voice(5), false);
   await cli.request("people.add", { cwd: dir, name: "Juan" });
   await cli.request("people.link", { cwd: dir, person: "Juan", speaker: { transcript: EP1, speaker: "s1" } });
   const read = (rel: string) => JSON.parse(readFileSync(join(dir, rel), "utf8"));
-  return { dir, cli, connect, asked, read, ep2 };
+  return { dir, cli, connect, asked, read, ep1, ep2 };
 }
 
 async function failure(call: Promise<unknown>): Promise<RpcError> {
@@ -207,6 +207,65 @@ describe("people.confirm", () => {
     expect(error.code).toBe(ErrorCode.InvalidOperation);
     expect(error.data).toMatchObject({ op: "people.confirm", reason: "unknown suggestion" });
     expect(read("people.json")).toEqual(before);
+  });
+});
+
+/** A face at `x` sampled twice a second from `start` to `end`, with face print `axis` once a second. */
+function faceTrack(id: string, start: number, end: number, x: number, axis: number): FaceTrack {
+  const vector = new Float32Array(FACE_EMBEDDING_DIMS);
+  vector[axis] = 1;
+  const boxes = [];
+  for (let time = start; time <= end; time += 0.5) boxes.push({ time, x, y: 0.4, width: 0.2, height: 0.3, score: 0.9 });
+  return { id, start, end, boxes, embeddings: boxes.filter((box) => Number.isInteger(box.time)).map((box) => ({ time: box.time, vector })) };
+}
+
+describe("faces", () => {
+  /** ep1's scan: the first speaker's face on the left while they talk, the second's on the right. */
+  async function scanned() {
+    const context = await setup();
+    await writeFaceScan(context.dir, `sha256:${context.ep1}`, { width: 1280, height: 720, samples: 20, tracks: [faceTrack("t1", 0, 5, 0.3, 0), faceTrack("t2", 5, 10, 0.7, 1)] });
+    return context;
+  }
+
+  it("suggests the face on screen while each speaker talks, and hints at videos with speakers but no scan", async () => {
+    const { dir, cli } = await scanned();
+    const result = await cli.request("people.suggest", { cwd: dir });
+    expect(methods["people.suggest"].result.parse(result)).toEqual(result);
+    const pairs = result.suggestions.filter((suggestion) => suggestion.kind === "face-speaker");
+    expect(pairs).toEqual([
+      expect.objectContaining({ person: expect.objectContaining({ name: "Juan" }), speaker: expect.objectContaining({ transcript: EP1, speaker: "s1" }), links: ["face"] }),
+      expect.objectContaining({ speaker: expect.objectContaining({ transcript: EP1, speaker: "s2" }), links: ["speaker", "face"] }),
+    ]);
+    expect(pairs[0]!.face!.anchor).toMatchObject({ asset: "assets/ep1.mp4", x: 0.3, y: 0.4 });
+    expect(result.hints).toContain("assets/ep2.mp4 has no face scan, so the faces of transcripts/ep2.words.json's speakers are not matched: frameshell people scan assets/ep2.mp4");
+  });
+
+  it("links a confirmed face as an anchor, and needs a person for a suggestion that names nobody", async () => {
+    const { dir, cli, read } = await scanned();
+    const pairs = (await cli.request("people.suggest", { cwd: dir })).suggestions.filter((suggestion) => suggestion.kind === "face-speaker");
+    const [juan, nobody] = pairs;
+    const result = await cli.request("people.confirm", { cwd: dir, suggestions: [juan!.id] });
+    expect(methods["people.confirm"].result.parse(result)).toEqual(result);
+    expect(result.confirmed).toEqual([{ id: juan!.id, person: juan!.person, added: false, face: juan!.face!.anchor, linked: true, transcripts: [] }]);
+    expect(read("people.json").people[0].faces).toEqual([juan!.face!.anchor]);
+
+    const error = await failure(cli.request("people.confirm", { cwd: dir, suggestions: [nobody!.id] }));
+    expect(error.data).toMatchObject({ op: "people.confirm", reason: "needs person" });
+    const named = await cli.request("people.confirm", { cwd: dir, suggestions: [nobody!.id], person: "Ben" });
+    expect(named.confirmed).toEqual([
+      expect.objectContaining({ person: expect.objectContaining({ name: "Ben" }), added: true, speaker: { transcript: EP1, speaker: "s2" }, face: nobody!.face!.anchor, linked: true, transcripts: [EP1] }),
+    ]);
+    expect(read(EP1).speakers).toEqual([{ id: "s1", name: "Juan" }, { id: "s2", name: "Ben" }]);
+    expect(read("people.json").people[1]).toMatchObject({ name: "Ben", speakers: [{ transcript: EP1, speaker: "s2" }], faces: [nobody!.face!.anchor] });
+    // Both faces now have their person: nothing more to ask about ep1.
+    expect((await cli.request("people.suggest", { cwd: dir })).suggestions.filter((suggestion) => suggestion.kind !== "speaker")).toEqual([]);
+  });
+
+  it("dismisses a suggestion that names nobody", async () => {
+    const { dir, cli, read } = await scanned();
+    const nobody = (await cli.request("people.suggest", { cwd: dir })).suggestions.find((suggestion) => !suggestion.person)!;
+    expect((await cli.request("people.confirm", { cwd: dir, suggestions: [nobody.id], reject: true })).dismissed).toEqual([nobody.id]);
+    expect(read("people.json").dismissed).toEqual([nobody.id]);
   });
 });
 

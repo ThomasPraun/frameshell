@@ -46,13 +46,13 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_VOICES"] === "1" && process.pla
       const speakers = VOICES.map((name) => ({ transcript: `transcripts/${name}.words.json`, speaker: "s1", name, print: prints.get(`${name}-1`)! }));
       const all = speakerSuggestions(people, speakers);
       console.log(all.map((suggestion) => suggestion.reason).join("\n"));
-      expect(all.map((suggestion) => [suggestion.speaker.name, suggestion.person.name])).toEqual(
+      expect(all.map((suggestion) => [suggestion.speaker?.name, suggestion.person?.name])).toEqual(
         expect.arrayContaining(VOICES.map((name) => [name, name])),
       );
       expect(all).toHaveLength(VOICES.length);
       // Only Daniel is known: Samantha's and Fred's second passages must not be suggested as him.
       const daniel = speakerSuggestions([people[0]!], speakers);
-      expect(daniel.map((suggestion) => suggestion.speaker.name)).toEqual(["Daniel"]);
+      expect(daniel.map((suggestion) => suggestion.speaker?.name)).toEqual(["Daniel"]);
     },
     600_000,
   );

@@ -479,7 +479,7 @@ frameshell people add <name> | rename <person> <name> | remove <person>
 frameshell people link|unlink <person> (--speaker <transcript>[:<speaker>] | --angle [<timeline>:]<group>:<angle> | --face <asset>@<s>[:x,y])
 frameshell people scan [<asset>…]             # background job: faces of video assets (YuNet + SFace), cached in .frameshell/people/
 frameshell people suggest [--json]            # speaker, face-speaker, angle and face suggestions with ids
-frameshell people confirm <suggestion>… [--reject]
+frameshell people confirm <suggestion>… [--reject] [--person <person>]
 frameshell people ranges <person> [--on-screen] [--json]   # timeline spans where the person speaks (default) or is on screen
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]

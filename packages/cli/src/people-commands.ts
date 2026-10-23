@@ -23,10 +23,12 @@ export const PEOPLE_USAGE = `  people list                  The project's people
   people ranges <person> [--on-screen] [--timeline id]
                                Timeline spans where the person speaks (default) or is on screen, pauses under
                                0.5 s bridged. Cut several from the last span to the first
-  people suggest               Links Frameshell suggests (a speaker that sounds like a person's linked voices),
-                               each with an id sg_…, a score and why; hints say what kept voices apart
-  people confirm <suggestion>… [--reject]
-                               Apply suggested links (yes), or with --reject dismiss them for good
+  people suggest               Links Frameshell suggests (a speaker that sounds like a person's linked voices,
+                               the face on screen while a speaker talks, a face nobody has), each with an id
+                               sg_…, a score and why; hints say what kept voices or faces apart
+  people confirm <suggestion>… [--reject] [--person <person>]
+                               Apply suggested links (yes), or with --reject dismiss them for good. A suggestion
+                               naming nobody (a new face) needs --person: an existing person or a new name
 `;
 
 /** Flags each `people` command takes besides the global ones. */
@@ -40,7 +42,7 @@ export const PEOPLE_FLAGS: Record<string, readonly string[]> = {
   "people scan": [],
   "people ranges": ["on-screen", "onscreen", "timeline"],
   "people suggest": [],
-  "people confirm": ["reject"],
+  "people confirm": ["reject", "person"],
 };
 
 /** A parsed `people` command; paths are as typed, resolved against the working directory when run. */
@@ -53,7 +55,7 @@ export type PeopleInvocation =
   | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput }
   | { kind: "people.ranges"; person: string; onScreen: boolean; timeline?: string }
   | { kind: "people.suggest" }
-  | { kind: "people.confirm"; suggestions: string[]; reject: boolean };
+  | { kind: "people.confirm"; suggestions: string[]; reject: boolean; person?: string };
 
 /** One target of `people link`, as typed. */
 export type PeopleTargetInput =
@@ -72,6 +74,7 @@ export function parsePeople(
     onscreen?: boolean | undefined;
     timeline?: string | undefined;
     reject?: boolean | undefined;
+    person?: string | undefined;
   },
 ): PeopleInvocation | null {
   const [sub, ...args] = rest;
@@ -81,7 +84,7 @@ export function parsePeople(
     if (args.length === 0) return null;
     const bad = args.find((id) => !/^sg_[0-9a-f]{8}$/.test(id));
     if (bad) throw new UsageError(`\`frameshell people confirm\` takes suggestion ids like sg_9c04e1d2 (from \`people suggest\`), got "${bad}".`);
-    return { kind: "people.confirm", suggestions: args, reject: options.reject === true };
+    return { kind: "people.confirm", suggestions: args, reject: options.reject === true, ...(options.person !== undefined ? { person: options.person } : {}) };
   }
   if (sub === "add") return args.length > 0 ? { kind: "people.add", name: args.join(" ") } : null;
   if (sub === "rename") return args.length >= 2 ? { kind: "people.rename", person: args[0]!, name: args.slice(1).join(" ") } : null;
@@ -187,15 +190,25 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
       return json ? print(result) : formatSuggestions(result);
     }
     case "people.confirm": {
-      const result = await conn.request("people.confirm", { cwd, suggestions: inv.suggestions, reject: inv.reject }, onProgress ? { onProgress } : {});
+      const result = await conn.request(
+        "people.confirm",
+        { cwd, suggestions: inv.suggestions, reject: inv.reject, ...(inv.person !== undefined ? { person: inv.person } : {}) },
+        onProgress ? { onProgress } : {},
+      );
       if (json) return print(result);
       if (inv.reject) return `Dismissed ${result.dismissed.length} suggestion${result.dismissed.length === 1 ? "" : "s"}${result.dismissed.length < inv.suggestions.length ? " (the others were already dismissed)" : ""}\n`;
       return result.confirmed
-        .map(
-          (entry) =>
-            `${entry.linked ? "Linked" : "Already linked:"} speaker ${entry.speaker.speaker} of ${entry.speaker.transcript} to ${entry.person.name} (${entry.person.id})\n` +
-            entry.transcripts.map((file) => `  speaker name written in ${file}\n`).join(""),
-        )
+        .map((entry) => {
+          const what = [
+            ...(entry.speaker ? [`speaker ${entry.speaker.speaker} of ${entry.speaker.transcript}`] : []),
+            ...(entry.face ? [`the face at ${entry.face.asset} ${entry.face.at} s`] : []),
+          ].join(" and ");
+          return (
+            (entry.added ? `Added ${entry.person.name} (${entry.person.id})\n` : "") +
+            `${entry.linked ? "Linked" : "Already linked:"} ${what} to ${entry.person.name} (${entry.person.id})\n` +
+            entry.transcripts.map((file) => `  speaker name written in ${file}\n`).join("")
+          );
+        })
         .join("");
     }
   }
@@ -229,6 +242,7 @@ function linkCount(person: PersonInfo): string {
 function formatSuggestions(result: MethodResult<"people.suggest">): string {
   const lines = result.suggestions.length === 0 ? ["No suggestions."] : result.suggestions.map((suggestion) => `${suggestion.id}  ${suggestion.reason}`);
   if (result.suggestions.length > 0) lines.push("", "Yes: frameshell people confirm <id>…   No: frameshell people confirm <id>… --reject");
+  if (result.suggestions.some((suggestion) => !suggestion.person)) lines.push("Naming nobody: frameshell people confirm <id> --person <name>");
   if (result.hints.length > 0) lines.push("", ...result.hints.map((hint) => `hint: ${hint}`));
   return `${lines.join("\n")}\n`;
 }

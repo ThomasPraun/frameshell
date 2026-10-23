@@ -22,20 +22,25 @@ import {
 } from "@frameshell/schema";
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { readPrevious } from "../transcripts/transcriber.js";
-import { type PersonRanges, type RangeKind, type RangesSource, personRanges } from "./ranges.js";
+import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFaces, facesOfPeople, presence } from "./face-clusters.js";
+import { faceSuggestions } from "./face-suggest.js";
+import { type PersonRanges, type RangeKind, type RangesSource, type Span, personRanges } from "./ranges.js";
 import { type PersonVoice, type SpeakerVoice, speakerSuggestions } from "./suggest.js";
 import { type VoiceOutcome, type VoiceWanted, meanPrint, voiceKey } from "./voices.js";
 
 /** Voice prints of transcript speakers, by {@link voiceKey}; the daemon backs it with `computeVoicePrints`. */
 export type VoicePrinter = (wanted: VoiceWanted[]) => Promise<Map<string, VoiceOutcome>>;
 
+/** Cached face scans of the project's videos (never scans); the daemon backs it with the scan cache of each asset in `assets/`. */
+export type FaceScans = () => Promise<ScannedAsset[]>;
+
 /** What happened, as `people.changed` names it. */
 export type PeopleChange = (typeof PEOPLE_CHANGES)[number];
 
 /** Options of {@link PeopleService}. */
 export interface PeopleServiceOptions {
-  /** Called after `people.json` is written, with the project root as the caller spelled it and the person's id. */
-  onChanged?: (root: string, change: PeopleChange, person: string) => void;
+  /** Called after `people.json` is written, with the project root as the caller spelled it and the person's id (none for a dismissed suggestion that named nobody). */
+  onChanged?: (root: string, change: PeopleChange, person: string | undefined) => void;
 }
 
 /** What a link or unlink names: exactly one field is set. */
@@ -70,7 +75,7 @@ interface Lookups {
  * kept.
  */
 export class PeopleService {
-  readonly #onChanged: (root: string, change: PeopleChange, person: string) => void;
+  readonly #onChanged: (root: string, change: PeopleChange, person: string | undefined) => void;
   /** Last change of each project in flight, by canonical root: the next one waits for it. */
   readonly #tails = new Map<string, Promise<unknown>>();
 
@@ -89,17 +94,21 @@ export class PeopleService {
 
   /**
    * When a person (id or exact name) speaks or is on screen on `timeline`, which has its nested timelines
-   * flattened (see `personRanges`). Throws `InvalidOperation` (`unknown person`) or `InvalidProjectFile`.
+   * flattened (see `personRanges`); on screen includes their faces in `faces`. Throws `InvalidOperation`
+   * (`unknown person`) or `InvalidProjectFile`.
    */
-  async ranges(root: string, ref: string, kind: RangeKind, timeline: Timeline, turns: RangesSource["turns"]): Promise<{ person: Person } & PersonRanges> {
-    const person = requirePerson("people.ranges", await readPeople(root), ref);
+  async ranges(root: string, ref: string, kind: RangeKind, timeline: Timeline, turns: RangesSource["turns"], faces?: FaceScans): Promise<{ person: Person } & PersonRanges> {
+    const file = await readPeople(root);
+    const person = requirePerson("people.ranges", file, ref);
     const lookups = newLookups();
     const transcripts = new Map<string, Transcript>();
     for (const link of person.speakers) {
       const found = await readTranscript(root, link.transcript, lookups);
       if (typeof found !== "string") transcripts.set(link.transcript, found);
     }
-    return { person, ...(await personRanges(person, kind, timeline, { transcript: (file) => transcripts.get(file) ?? null, turns })) };
+    const source: RangesSource = { transcript: (rel) => transcripts.get(rel) ?? null, turns };
+    if (faces) source.faces = async (whose) => personFaces(await faceState(file, faces), whose);
+    return { person, ...(await personRanges(person, kind, timeline, source)) };
   }
 
   /** Add a person with no links. Throws `InvalidOperation` (`name taken`) or `InvalidProjectFile`. */
@@ -177,46 +186,88 @@ export class PeopleService {
 
   /**
    * Suggested links nobody answered yet (ADR 0020 decision 5), with hints on
-   * what kept voices from being compared. Kind `speaker` only: prints are
-   * computed only when some person has a linked speaker.
+   * what kept voices or faces from being compared. Voice prints are computed
+   * only when some person has a linked speaker; faces come from cached scans.
    */
-  async suggest(root: string, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+  async suggest(root: string, sources: SuggestSources): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
     const file = await readPeople(root);
     const dismissed = new Set(file.dismissed);
-    const { suggestions, hints } = await suggestAll(root, file, voices);
+    const { suggestions, hints } = await suggestAll(root, file, sources);
     return { suggestions: suggestions.filter((suggestion) => !dismissed.has(suggestion.id)), hints };
   }
 
   /**
-   * Answer suggestions by id: link each (`by` recorded, as `link`), or with
-   * `reject` add the ids to `dismissed`. Every id must be among the current
-   * suggestions (dismissed ones included), else nothing changes. Throws
-   * `InvalidOperation` (`unknown suggestion`, or a `link` reason).
+   * Answer suggestions by id: apply each one's links (`by` recorded, as
+   * `link`), or with `reject` add the ids to `dismissed`. A suggestion naming
+   * nobody is linked to `person` (id or name; a new name adds the person).
+   * Every id must be among the current suggestions (dismissed ones included)
+   * and have a person, else nothing changes. Throws `InvalidOperation`
+   * (`unknown suggestion`, `needs person`, or an `add` or `link` reason).
    */
-  async confirm(root: string, ids: readonly string[], options: { reject: boolean; by?: string | undefined; voices: VoicePrinter }): Promise<Omit<MethodResult<"people.confirm">, "dir">> {
-    const { suggestions } = await suggestAll(root, await readPeople(root), options.voices);
+  async confirm(
+    root: string,
+    ids: readonly string[],
+    options: SuggestSources & { reject: boolean; by?: string | undefined; person?: string | undefined },
+  ): Promise<Omit<MethodResult<"people.confirm">, "dir">> {
+    const { suggestions } = await suggestAll(root, await readPeople(root), options);
     const known = new Map(suggestions.map((suggestion) => [suggestion.id, suggestion]));
     const unknown = ids.filter((id) => !known.has(id));
     if (unknown.length > 0) {
-      throw refused("people.confirm", `no current suggestion ${unknown.join(", ")}: the voices or links changed since, or the id is mistyped.`, "unknown suggestion", "frameshell people suggest");
+      throw refused(
+        "people.confirm",
+        `no current suggestion ${unknown.join(", ")}: the voices, faces or links changed since, or the id is mistyped.`,
+        "unknown suggestion",
+        "frameshell people suggest",
+      );
     }
     const chosen = [...new Set(ids)].map((id) => known.get(id)!);
+    const nameless = chosen.filter((suggestion) => !suggestion.person);
+    if (!options.reject && nameless.length > 0 && options.person === undefined) {
+      throw refused(
+        "people.confirm",
+        `${nameless.map((suggestion) => suggestion.id).join(", ")} name${nameless.length === 1 ? "s" : ""} nobody: pass person (an existing person, or a new name).`,
+        "needs person",
+        "frameshell people confirm <suggestion> --person <name>",
+      );
+    }
     if (options.reject) {
       const dismissed = await this.#change(root, async () => {
         const file = await readPeople(root);
         const added = chosen.filter((suggestion) => !file.dismissed.includes(suggestion.id));
         if (added.length === 0) return [];
         await writeJsonAtomic(join(root, PEOPLE_FILE), { ...file, dismissed: [...file.dismissed, ...added.map((suggestion) => suggestion.id)] });
-        for (const suggestion of added) this.#onChanged(root, "dismiss", suggestion.person.id);
+        for (const suggestion of added) this.#onChanged(root, "dismiss", suggestion.person?.id);
         return added.map((suggestion) => suggestion.id);
       });
       return { confirmed: [], dismissed };
     }
-    const confirmed = [];
+    const confirmed: MethodResult<"people.confirm">["confirmed"] = [];
     for (const suggestion of chosen) {
-      const { transcript, speaker } = suggestion.speaker;
-      const result = await this.link(root, suggestion.person.id, { speaker: { transcript, speaker } }, options.by);
-      confirmed.push({ id: suggestion.id, person: suggestion.person, speaker: { transcript, speaker }, linked: result.linked, transcripts: result.transcripts });
+      let person = suggestion.person;
+      let added = false;
+      if (!person) {
+        const existing = findPerson(await readPeople(root), options.person!);
+        if (existing) person = { id: existing.id, name: existing.name };
+        else {
+          const created = await this.add(root, options.person!);
+          person = { id: created.id, name: created.name };
+          added = true;
+        }
+      }
+      const entry: MethodResult<"people.confirm">["confirmed"][number] = { id: suggestion.id, person, added, linked: false, transcripts: [] };
+      if (suggestion.links.includes("speaker") && suggestion.speaker) {
+        const { transcript, speaker } = suggestion.speaker;
+        const result = await this.link(root, person.id, { speaker: { transcript, speaker } }, options.by);
+        entry.speaker = { transcript, speaker };
+        entry.linked ||= result.linked;
+        entry.transcripts.push(...result.transcripts);
+      }
+      if (suggestion.links.includes("face") && suggestion.face) {
+        const result = await this.link(root, person.id, { face: suggestion.face.anchor }, options.by);
+        entry.face = suggestion.face.anchor;
+        entry.linked ||= result.linked;
+      }
+      confirmed.push(entry);
     }
     return { confirmed, dismissed: [] };
   }
@@ -239,15 +290,59 @@ export class PeopleService {
   }
 }
 
+/** Where suggestions get voice prints and face scans. */
+export interface SuggestSources {
+  voices: VoicePrinter;
+  faces: FaceScans;
+}
+
 /**
- * Every `speaker` suggestion for the project, dismissed ones included, and
- * hints. A person's voice is the mean of their linked speakers' prints
- * (weighted by seconds of speech); candidates are the speakers of transcripts
- * linked to nobody.
+ * Every suggestion for the project, dismissed ones included: `speaker`
+ * first, then `face-speaker` and `face`; and hints, each once.
  */
-async function suggestAll(root: string, file: PeopleFile, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+async function suggestAll(root: string, file: PeopleFile, sources: SuggestSources): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
   const hints: string[] = [];
   const transcripts = await readAllTranscripts(root, hints);
+  const voice = await voiceSuggestions(file, transcripts, sources.voices);
+  const state = await faceState(file, sources.faces);
+  const faces = faceSuggestions({ ...state, people: file.people, transcripts });
+  // Faces are in use once a video is scanned or a person has an anchor; until then a scan is not nagged for.
+  if (state.model.scans.size > 0 || file.people.some((person) => person.faces.length > 0)) {
+    for (const [rel, transcript] of transcripts) {
+      if (transcript.speakers?.length && !state.model.scans.has(transcript.asset)) {
+        hints.push(`${transcript.asset} has no face scan, so the faces of ${rel}'s speakers are not matched: frameshell people scan ${transcript.asset}`);
+      }
+    }
+  }
+  for (const { person, anchor, reason } of state.owners.unresolved) {
+    hints.push(`${person.name}'s face anchor ${anchor.asset}@${anchor.at} names no face (${reason}), so it is not used.`);
+  }
+  return { suggestions: [...voice.suggestions, ...faces.suggestions], hints: [...new Set([...hints, ...voice.hints, ...faces.hints])] };
+}
+
+/** Faces of the project and whose they are. */
+async function faceState(file: PeopleFile, faces: FaceScans): Promise<{ model: FaceModel; owners: FaceOwners }> {
+  const model = clusterFaces(await faces());
+  return { model, owners: facesOfPeople(model, file.people) };
+}
+
+/** Source seconds each video shows `person`'s face, and their anchors that name no face. */
+function personFaces({ owners }: { owners: FaceOwners }, person: Person): { spans: Map<string, Span[]>; warnings: string[] } {
+  const tracks = owners.tracks.get(person.id) ?? [];
+  const spans = new Map([...new Set(tracks.map((track) => track.asset))].map((asset) => [asset, presence(tracks, asset)]));
+  const warnings = owners.unresolved
+    .filter((entry) => entry.person.id === person.id)
+    .map(({ anchor, reason }) => `${person.name}: the face anchor ${anchor.asset}@${anchor.at} names no face (${reason}), so it is ignored.`);
+  return { spans, warnings };
+}
+
+/**
+ * `speaker` suggestions and their hints. A person's voice is the mean of
+ * their linked speakers' prints (weighted by seconds of speech); candidates
+ * are the speakers of transcripts linked to nobody.
+ */
+async function voiceSuggestions(file: PeopleFile, transcripts: Map<string, Transcript>, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+  const hints: string[] = [];
   const claimed = new Set(file.people.flatMap((person) => person.speakers.map(speakerLinkKey)));
   const owned: { person: Person; wanted: VoiceWanted[] }[] = [];
   for (const person of file.people) {
