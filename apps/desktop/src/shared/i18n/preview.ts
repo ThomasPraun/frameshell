@@ -53,6 +53,13 @@ const en = {
   liveLabelHint: (type: string, clip: string) => `Live preview of ${type} clip ${clip}: export uses the render`,
   liveFrame: (clip: string) => `Live preview of clip ${clip}`,
   noLivePage: "no live page",
+  /** Pick in a photo: status line while photos get ready (the first time downloads the model; `null` percent = unknown). */
+  segmentPreparing: "Preparing photos…",
+  segmentDownloading: (percent: number | null) => (percent === null ? "Downloading the photo model (once)…" : `Downloading the photo model (once) ${percent}%`),
+  segmentFinding: "Finding the part…",
+  segmentFailed: (reason: string) => `Could not prepare photos: ${reason}`,
+  /** Label of the outlined part: size `n` of `of`, `percent` of the photo. */
+  segmentSize: (n: number, of: number, percent: number) => `size ${n}/${of} · ${percent}% (↑ larger, ↓ smaller)`,
 };
 
 const es: typeof en = {
@@ -104,6 +111,11 @@ const es: typeof en = {
   liveLabelHint: (type, clip) => `Vista previa en vivo del clip ${type} ${clip}: la exportación usa el render`,
   liveFrame: (clip) => `Vista previa en vivo del clip ${clip}`,
   noLivePage: "sin página en vivo",
+  segmentPreparing: "Preparando las fotos…",
+  segmentDownloading: (percent) => (percent === null ? "Descargando el modelo de fotos (una vez)…" : `Descargando el modelo de fotos (una vez) ${percent}%`),
+  segmentFinding: "Buscando la parte…",
+  segmentFailed: (reason) => `No se pudieron preparar las fotos: ${reason}`,
+  segmentSize: (n, of, percent) => `tamaño ${n}/${of} · ${percent}% (↑ más grande, ↓ más pequeño)`,
 };
 
 export const preview = { en, es };

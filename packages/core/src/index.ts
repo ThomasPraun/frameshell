@@ -237,7 +237,8 @@ export {
   preparedSize,
   upscaleMask,
 } from "./segment/segmenter.js";
-export { type SegmentFiles, type WorkerSegmentEngine, workerSegmentEngine } from "./segment/engine.js";
+export { standInSegmentEngine } from "./segment/stand-in.js";
+export { type SegmentFiles,type WorkerSegmentEngine, workerSegmentEngine } from "./segment/engine.js";
 export { type PreparedPhoto, SEGMENT_MODEL_PIN, SegmentService, type SegmentServiceOptions, readPhotoRgb } from "./segment/service.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";

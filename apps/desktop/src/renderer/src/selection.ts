@@ -372,6 +372,11 @@ export const selection = {
   selectPoints(points: readonly SelectedPoint[], origin: SelectionOrigin): void {
     replace(points.length === 0 ? EMPTY : { ...EMPTY, points: [...points], origin });
   },
+  /** Replace the picked points with updated copies of them (a point's masks arrived or changed size); keeps the origin. */
+  replacePoints(points: readonly SelectedPoint[], origin: SelectionOrigin): void {
+    if (current.points.length === 0) return;
+    replace({ ...current, points: [...points], origin });
+  },
   /** Add a picked point (Shift+click), keeping points picked before, at any time. */
   addPoint(point: SelectedPoint, origin: SelectionOrigin): void {
     replace({ ...EMPTY, points: [...current.points, point], origin });

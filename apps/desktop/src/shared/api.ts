@@ -13,6 +13,7 @@ import type {
   RevertConflict,
   MulticamTurnsResult,
   ScriptOutlineResult,
+  SegmentedPoint,
   TimelineRejection,
   TimelineView,
   UiCommand,
@@ -457,6 +458,20 @@ export interface FrameshellApi {
      */
     writeDetails(name: string, content: string): Promise<string>;
   };
+  segment: {
+    /**
+     * Get photos (project-relative image files) ready to be pointed into (daemon `segment.prepare`, ADR 0022), one
+     * after the other. The first run downloads the model; see {@link onProgress}. Rejects with the daemon's message.
+     */
+    prepare(assets: string[]): Promise<void>;
+    /**
+     * `inspect.point` with `segment` at a point of the main timeline (`x`, `y` fractions of the frame): the masks
+     * of the photo part there, or why there are none. Rejects with the daemon's message.
+     */
+    point(at: number, x: number, y: number): Promise<{ segment: SegmentedPoint | null; unavailable: string | null }>;
+    /** Called with the progress of a running {@link prepare} or {@link point}. Returns an unsubscribe function. */
+    onProgress(listener: (progress: SegmentProgress) => void): () => void;
+  };
   clips: {
     /** `clip.renders` of a timeline of the window's project: render cache state per generated clip. Rejects with the daemon's message. */
     renders(timeline: string): Promise<ClipRendersResult>;
@@ -506,6 +521,13 @@ export interface FrameshellApi {
  * `ready`: downloaded and installed on restart (macOS, AppImage).
  */
 export type UpdateStatus = { state: "available"; version: string; url: string } | { state: "ready"; version: string };
+
+/** Progress of preparing photos for Pick: `download` while the model or its runtime is fetched (first use only). */
+export interface SegmentProgress {
+  download: boolean;
+  /** 0..1 of the current step; null when unknown. */
+  fraction: number | null;
+}
 
 /** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */
 export interface LiveClipPage {
@@ -610,6 +632,9 @@ export const Channel = {
   contextWriteDetails: "context:write-details",
   clipsRenders: "clips:renders",
   clipsJob: "clips:job",
+  segmentPrepare: "segment:prepare",
+  segmentPoint: "segment:point",
+  segmentProgress: "segment:progress",
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
   multicamTurns: "multicam:turns",

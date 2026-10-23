@@ -114,6 +114,11 @@ const api: FrameshellApi = {
     captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),
     writeDetails: (name, content) => invokeOutcome(Channel.contextWriteDetails, name, content),
   },
+  segment: {
+    prepare: (assets) => invokeOutcome(Channel.segmentPrepare, assets),
+    point: (at, x, y) => invokeOutcome(Channel.segmentPoint, at, x, y),
+    onProgress: (listener) => subscribe(Channel.segmentProgress, listener),
+  },
   clips: {
     renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
