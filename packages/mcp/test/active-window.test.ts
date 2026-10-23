@@ -114,15 +114,15 @@ describe("default project of an MCP server started outside any project", () => {
     const status = await mcp.readResource({ uri: "frameshell://status" });
     expect(JSON.parse((status.contents[0] as { text: string }).text)).toEqual({ project: { dir: A } });
     await mcp.subscribeResource({ uri: "frameshell://timelines/main" });
-    expect(calls).toContainEqual({ method: "events.subscribe", params: { cwd: A, events: ["timeline.changed"] } });
+    expect(calls).toContainEqual({ method: "events.subscribe", params: { cwd: A, events: ["timeline.changed", "proposal.changed"] } });
 
     active = B;
     const timeline = await mcp.readResource({ uri: "frameshell://timelines/main" });
     expect(JSON.parse((timeline.contents[0] as { text: string }).text)).toMatchObject({ project: B });
     await expect.poll(() => updated).toContain("frameshell://timelines/main");
     expect(listChanged).toBeGreaterThan(0);
-    expect(calls).toContainEqual({ method: "events.subscribe", params: { cwd: B, events: ["timeline.changed"] } });
-    expect(calls).toContainEqual({ method: "events.unsubscribe", params: { cwd: A, events: ["timeline.changed"] } });
+    expect(calls).toContainEqual({ method: "events.subscribe", params: { cwd: B, events: ["timeline.changed", "proposal.changed"] } });
+    expect(calls).toContainEqual({ method: "events.unsubscribe", params: { cwd: A, events: ["timeline.changed", "proposal.changed"] } });
   });
 
   it("lists only the status resource, and refuses project resources, while there is no project", async () => {

@@ -46,6 +46,14 @@ describe("MCP tool catalog", () => {
     for (const name of byName.keys()) expect(name).toMatch(/^[a-z][a-z0-9_]*$/);
   });
 
+  it("offers review mode status and wait, never deciding a proposal or switching review mode (ADR 0019)", async () => {
+    const { tools } = await (await connect()).listTools();
+    const names = new Set(tools.map((tool) => tool.name));
+    expect(names.has("proposal_status")).toBe(true);
+    expect(names.has("proposal_wait")).toBe(true);
+    for (const name of ["proposal_accept", "proposal_reject", "review_set"]) expect(names.has(name), name).toBe(false);
+  });
+
   it("generates input schemas from the registry, with cwd defaulting to the server's directory", async () => {
     const { tools } = await (await connect()).listTools();
     const cut = tools.find((tool) => tool.name === "cut")!;

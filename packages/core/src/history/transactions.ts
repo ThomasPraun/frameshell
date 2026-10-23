@@ -46,6 +46,13 @@ export interface TransactionTrackerOptions {
   now?: () => number;
   /** Where explicit transactions persist. Default: memory only. */
   store?: TransactionStore | undefined;
+  /**
+   * Called when a transaction closes: commit, auto-commit, the idle gap of
+   * automatic grouping (on a timer, so it is reported even when no operation
+   * follows), or a revert ending a group. May be called twice for one
+   * automatic group. Not called for {@link TransactionTracker.drop}.
+   */
+  onClosed?: ((author: string, tx: TxRef) => void) | undefined;
 }
 
 interface Open {
@@ -58,7 +65,7 @@ interface Open {
   openedAt: string | null;
   /** Explicit only: commit by itself this long after `lastAt`. */
   autoCommitMs?: number | undefined;
-  /** Pending auto-commit check. */
+  /** Pending auto-commit check, or for automatic grouping the idle gap check. */
   timer?: NodeJS.Timeout | undefined;
 }
 
@@ -82,6 +89,7 @@ export class TransactionTracker {
   readonly #idleGapMs: number;
   readonly #now: () => number;
   readonly #store: TransactionStore | undefined;
+  readonly #onClosed: ((author: string, tx: TxRef) => void) | undefined;
   readonly #open = new Map<string, Open>();
   /** Saves run one at a time, each writing the state current when it starts. */
   #saving: Promise<void> = Promise.resolve();
@@ -90,6 +98,7 @@ export class TransactionTracker {
     this.#idleGapMs = options.idleGapMs ?? DEFAULT_TX_IDLE_GAP_MS;
     this.#now = options.now ?? Date.now;
     this.#store = options.store;
+    this.#onClosed = options.onClosed;
   }
 
   /**
@@ -143,7 +152,33 @@ export class TransactionTracker {
     const tx = { id: newTxId(), label: null };
     if (grouping) this.#open.set(author, { tx, explicit: false, lastAt: now, operations: 0, touched: new Map(), openedAt: null });
     else this.#open.delete(author);
+    if (open) {
+      clearTimeout(open.timer);
+      this.#onClosed?.(author, open.tx);
+    }
     return tx;
+  }
+
+  /** Whether `tx` is still `author`'s open transaction: explicit and not past its auto-commit, or grouping within the idle gap. */
+  isOpen(author: string, tx: TxRef): boolean {
+    const open = this.#open.get(author);
+    if (open?.tx.id !== tx.id) return false;
+    return open.explicit ? !this.#due(open) : this.#now() - open.lastAt <= this.#idleGapMs;
+  }
+
+  /** {@link TransactionTracker.isOpen} for transaction id `tx` of any author. */
+  isOpenTx(tx: string): boolean {
+    for (const [author, open] of this.#open) if (open.tx.id === tx) return this.isOpen(author, open.tx);
+    return false;
+  }
+
+  /** Forget `author`'s transaction `tx` without reporting it closed (its review-mode proposal closed unapplied). */
+  async drop(author: string, tx: string): Promise<void> {
+    const open = this.#open.get(author);
+    if (open?.tx.id !== tx) return;
+    clearTimeout(open.timer);
+    this.#open.delete(author);
+    if (open.explicit) await this.#persist();
   }
 
   /**
@@ -164,6 +199,7 @@ export class TransactionTracker {
     open.operations++;
     open.lastAt = this.#now();
     this.#arm(author, open);
+    if (!open.explicit) this.#armGap(author, open);
     // The count is informational: a lost save must not fail an operation already applied.
     if (open.explicit) await this.#persist().catch(() => {});
   }
@@ -218,6 +254,7 @@ export class TransactionTracker {
     const open = this.#explicit(author);
     clearTimeout(open.timer);
     this.#open.delete(author);
+    this.#onClosed?.(author, open.tx);
     await this.#persist();
     return summary(open);
   }
@@ -270,9 +307,22 @@ export class TransactionTracker {
     open.timer.unref?.();
   }
 
+  /** Report automatic group `open` closed once its idle gap passes with no operation. Only with {@link TransactionTrackerOptions.onClosed}. */
+  #armGap(author: string, open: Open): void {
+    if (!this.#onClosed) return;
+    clearTimeout(open.timer);
+    open.timer = setTimeout(() => {
+      if (this.#open.get(author) !== open) return;
+      if (this.#now() - open.lastAt > this.#idleGapMs) this.#onClosed?.(author, open.tx);
+      else this.#armGap(author, open);
+    }, Math.max(0, open.lastAt + this.#idleGapMs + 1 - this.#now()));
+    open.timer.unref?.();
+  }
+
   #autoCommit(author: string, open: Open): void {
     clearTimeout(open.timer);
     this.#open.delete(author);
+    this.#onClosed?.(author, open.tx);
     // Closed in memory already; a failed save is redone by the next persist.
     void this.#persist().catch(() => {});
   }
