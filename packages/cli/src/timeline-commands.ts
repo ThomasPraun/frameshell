@@ -691,9 +691,14 @@ export async function executeTimeline(
     return `Committed ${tx} "${label}" (${operations} operation${operations === 1 ? "" : "s"})\n`;
   }
   if (inv.method === "tx.abort") {
-    const { tx, label, reverted } = result as MethodResult<"tx.abort">;
+    const { tx, label, reverted, proposal } = result as MethodResult<"tx.abort">;
     const lines = reverted.map((r) => `  ${r.timeline}: revision ${r.revision} · op ${r.operation.id}`);
-    return `Aborted ${tx} "${label}"${reverted.length === 0 ? " (nothing to undo)" : ", changes undone:"}\n${lines.map((l) => `${l}\n`).join("")}`;
+    const outcome = proposal
+      ? `: the undo waits for review as proposal ${proposal.tx}; run \`frameshell proposal wait\`${reverted.length === 0 ? "" : ". Undone at once:"}`
+      : reverted.length === 0
+        ? " (nothing to undo)"
+        : ", changes undone:";
+    return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);

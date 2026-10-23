@@ -14,7 +14,7 @@ import {
   RpcError,
   markGenerated,
 } from "@frameshell/protocol";
-import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementOf, programGroup, shotLayers } from "@frameshell/schema";
+import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementAt, programGroup, shotLayers } from "@frameshell/schema";
 import { Chrome } from "./chrome.js";
 
 /** Alpha × opacity below this does not count as painting, as in the app (`PAINT_MIN`). */
@@ -157,7 +157,8 @@ export class InspectService {
       // Renders are made at the project format.
       const size = generated ? resolution : await this.#options.pictureSize(root, (clip as { asset: string }).asset);
       if (!size) continue;
-      const placement = placementOf(clip.transform);
+      // Keys and the nested clips it plays inside move it: where it is on this frame.
+      const placement = placementAt(clip, frame / fps);
       const rect = layerRect(size, resolution, resolution, placement);
       if (pixel.x < rect.left || pixel.x >= rect.left + rect.width || pixel.y < rect.top || pixel.y >= rect.top + rect.height) continue;
       hits.unshift({ clip, type: generated ? clip.type : "media", paints: placement.opacity >= PAINT_MIN, generated, rect });

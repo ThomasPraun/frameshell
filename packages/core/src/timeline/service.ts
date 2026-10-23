@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
@@ -46,6 +46,7 @@ import {
 import {
   type OpenProposal,
   type ProposalPart,
+  type ProposedFile,
   type ProposedOp,
   appendDecision,
   loadOpenProposals,
@@ -157,6 +158,13 @@ export interface Viewed {
   /** The project's open proposal; null when none. */
   proposal: { tx: string; state: "building" | "ready" } | null;
 }
+
+/**
+ * What goes back on disk after a refused or proposed direct edit: the daemon's
+ * version, or for a file it has none of, the earlier unreadable text (null: no
+ * file, it is removed).
+ */
+type Restore = Timeline | { unread: string | null };
 
 /** Decisions `status` and `proposal.status` list. */
 const MAX_DECISIONS = 10;
@@ -274,6 +282,11 @@ export class TimelineService {
   readonly #books = new Map<string, Promise<Book>>();
   /** {@link TimelineService.#books} already loaded. */
   readonly #loaded = new Map<string, Book>();
+  /**
+   * Timeline ids on disk when each canonical root was first read, minus ids seen
+   * missing since: a file outside it that the daemon never wrote is new (ADR 0019 §9).
+   */
+  readonly #baselines = new Map<string, Promise<Set<string>>>();
 
   constructor(options: TimelineServiceOptions) {
     this.#options = options;
@@ -354,9 +367,11 @@ export class TimelineService {
    * `revert` per timeline in `call.tx`. Timelines whose journal holds no
    * operation of the target (an operation that failed) are skipped. Throws
    * RevertConflict listing every conflicting timeline, with nothing undone;
-   * other errors (TimelineNotFound, engine errors) also before any write.
+   * other errors (TimelineNotFound, engine errors, ProposalPending) also
+   * before any write. In review mode (ADR 0019) a project's undo is not
+   * written: it waits as one ready proposal in a new transaction, `proposal`.
    */
-  async revertAll(call: RevertAllCall): Promise<OperationResult[]> {
+  async revertAll(call: RevertAllCall): Promise<{ reverted: OperationResult[]; proposal: { tx: string; state: "ready" } | null }> {
     const { timelines, target } = call;
     const keys = await Promise.all(timelines.map(({ root, timeline }) => this.#key(root, timeline)));
     return this.#exclusive(
@@ -381,12 +396,50 @@ export class TimelineService {
           planned.push({ where, before: timeline, applied: await applyOperation(timeline, patch, this.#context(root, id, fps, "revert")) });
         }
         if (failures.length > 0) throw abortConflictError(target, failures);
-        const results: OperationResult[] = [];
-        for (const { where, before, applied } of planned) {
-          const context = { root: where.root, cwd: where.root, timeline: where.timeline, author: call.author, tx: call.tx };
-          results.push(await this.#record(context, before, applied, "revert", { target }));
+        // ADR 0019: undoing what reached the file is a change too; in review mode it waits as a ready proposal of its own.
+        const undo: TxRef = { id: newTxId(), label: `Abort "${call.tx.label ?? target}"` };
+        const routes = new Map<string, Route | null>();
+        try {
+          for (const { where } of planned) {
+            const real = await this.#realRoot(where.root);
+            if (!routes.has(real)) routes.set(real, await this.#route(where.root, call.author, undo));
+          }
+          const at = new Date().toISOString();
+          const direct: typeof planned = [];
+          for (const step of planned) {
+            const route = routes.get(await this.#realRoot(step.where.root));
+            if (!route) {
+              direct.push(step);
+              continue;
+            }
+            const { before, applied } = step;
+            const patch = diffTimelines(before, applied.timeline);
+            const op: ProposedOp = { id: newOpId(), op: "revert", args: { target }, patch, inverse: applied.inverse, at };
+            route.proposal.parts.push({ timeline: step.where.timeline, base: before, shadow: applied.timeline, ops: [op] });
+          }
+          let proposal: { tx: string; state: "ready" } | null = null;
+          for (const route of routes.values()) {
+            if (!route) continue;
+            route.proposal.state = "ready";
+            route.book.proposal = route.proposal;
+            try {
+              await this.#persist(route.book);
+            } catch (error) {
+              route.book.proposal = null;
+              throw error;
+            }
+            this.#emit(route.book, route.proposal, "ready");
+            proposal = { tx: undo.id, state: "ready" };
+          }
+          const reverted: OperationResult[] = [];
+          for (const { where, before, applied } of direct) {
+            const context = { root: where.root, cwd: where.root, timeline: where.timeline, author: call.author, tx: call.tx };
+            reverted.push(await this.#record(context, before, applied, "revert", { target }));
+          }
+          return { reverted, proposal };
+        } finally {
+          for (const route of routes.values()) route?.release();
         }
-        return results;
       },
     );
   }
@@ -408,8 +461,9 @@ export class TimelineService {
    * refusal throws instead of touching the disk: InvalidProjectFile (not
    * JSON or schema), StaleRevision (`revision` is not the current one) or
    * the engine's errors (timeline rules). Without a readable current version
-   * (new or broken file), valid content is written as is. Returns the
-   * journaled operation; null when nothing was journaled.
+   * (new or broken file), valid content is written as is; in review mode
+   * (ADR 0019) it is kept with the proposal instead, out of `timelines/`.
+   * Returns the journaled operation; null when nothing was journaled.
    */
   writeFile(root: string, id: string, content: string, saver?: Saver): Promise<OperationResult | null> {
     return this.#turn(root, id, async () => {
@@ -418,8 +472,7 @@ export class TimelineService {
       try {
         base = (await this.#current(root, id)).timeline;
       } catch (error) {
-        const code = error instanceof RpcError ? error.code : undefined;
-        if (code !== ErrorCode.TimelineNotFound && code !== ErrorCode.InvalidProjectFile) throw error;
+        if (!unreadable(error)) throw error;
       }
       if (base) {
         const who = saver ?? this.#fileSaver();
@@ -442,20 +495,60 @@ export class TimelineService {
       }
       const parsed = parseText(content);
       if (!parsed.ok) throw invalidFile(path, parsed.error);
+      const who = saver ?? this.#fileSaver();
+      const route = await this.#route(root, who.author, who.tx);
+      if (route) {
+        try {
+          await this.#proposeFile(id, route, content);
+          return null;
+        } finally {
+          route.release();
+        }
+      }
+      let result: OperationResult | null = null;
       const journaled = await this.#journaledBase(root, id, content, parsed.value);
       if (journaled) {
         const patch = diffTimelines(journaled, parsed.value);
-        const { timeline, result } = await this.#extend(root, id, journaled, patch, await projectFps(root), saver ?? this.#fileSaver());
-        if (!result) await this.#announce(root, id, timeline);
-        return result;
+        const extended = await this.#extend(root, id, journaled, patch, await projectFps(root), who);
+        result = extended.result;
+        if (!result) await this.#announce(root, id, extended.timeline);
+      } else {
+        await this.#install(root, id, content, parsed.value);
       }
-      await writeTextAtomic(path, content);
-      const key = await this.#key(root, id);
-      const replaced = this.#known.has(key);
-      this.#known.set(key, { text: content, timeline: parsed.value });
-      if (replaced) await this.#announce(root, id, parsed.value);
-      return null;
+      // ADR 0019 §7: the person wrote a timeline the open proposal adds.
+      const book = await this.#book(root);
+      if (book.proposal && proposedFile(book.proposal, id)) await this.#close(book, book.proposal, "stale", [id]);
+      return result;
     });
+  }
+
+  /** Write `content` (parsed: `timeline`) as timeline `id` with no journal entry: a new or repaired file. */
+  async #install(root: string, id: string, content: string, timeline: Timeline): Promise<void> {
+    await writeTextAtomic(timelinePath(root, id), content);
+    const key = await this.#key(root, id);
+    const replaced = this.#known.has(key);
+    this.#known.set(key, { text: content, timeline });
+    if (replaced) await this.#announce(root, id, timeline);
+  }
+
+  /**
+   * Keep `text`, new timeline `id` or one replacing an unreadable file, in the
+   * proposal of `route` instead of `timelines/`; the author writing it again
+   * replaces it. Saved before this returns. Caller holds the turn.
+   */
+  async #proposeFile(id: string, route: Route, text: string): Promise<void> {
+    const { book, proposal } = route;
+    const previous = proposal.files;
+    proposal.files = [...(previous ?? []).filter((file) => file.timeline !== id), { timeline: id, text }];
+    if (route.created) book.proposal = proposal;
+    try {
+      await this.#persist(book);
+    } catch (error) {
+      proposal.files = previous;
+      if (route.created) book.proposal = null;
+      throw error;
+    }
+    this.#emit(book, proposal, proposal.state);
   }
 
   /**
@@ -523,6 +616,14 @@ export class TimelineService {
       if (!diff) return this.proposalDiff(root, tx); // Went stale meanwhile: now `decided`, or nothing open.
       timelines.push(diff);
     }
+    // A timeline it adds: every clip is new.
+    for (const file of proposal.files ?? []) {
+      const added = parseIncoming(timelinePath(root, file.timeline), file.text);
+      const changes: ClipChange[] = added.tracks.flatMap((track) =>
+        track.kind === "subtitles" ? [] : track.clips.map((clip) => ({ clip: clip.id, change: "added" as const, before: null, after: { track: track.id, clip } })),
+      );
+      timelines.push(await this.#placeDiff(root, file.timeline, await projectFps(root), proposal.tx, changes));
+    }
     return { tx: proposal.tx, timelines };
   }
 
@@ -551,11 +652,22 @@ export class TimelineService {
   /**
    * Timeline `id` as a read with `view` shows it (ADR 0019 §5): the file, or
    * the open proposal's version of it (the file when the proposal does not
-   * change it), with the open proposal's id and state.
+   * change it; the kept file when it adds the timeline), with the open
+   * proposal's id and state.
    */
   viewTimeline(root: string, id: string, view: TimelineViewName): Promise<Viewed> {
     return this.#turn(root, id, async () => {
-      const { timeline, fps } = await this.#current(root, id);
+      let loaded: { timeline: Timeline; fps: number };
+      try {
+        loaded = await this.#current(root, id);
+      } catch (error) {
+        const open = (await this.#book(root)).proposal;
+        const kept = view === "proposal" && open ? proposedFile(open, id) : undefined;
+        if (!kept || !unreadable(error)) throw error;
+        const timeline = parseIncoming(timelinePath(root, id), kept.text);
+        return { timeline, fps: await projectFps(root), view, proposal: { tx: open!.tx, state: open!.state } };
+      }
+      const { timeline, fps } = loaded;
       const book = await this.#book(root);
       let shown = timeline;
       if (view === "proposal" && book.proposal && (await this.#sync(root, id, book, timeline, fps))) {
@@ -640,9 +752,21 @@ export class TimelineService {
     const book = await this.#book(root);
     const proposal = await this.#decidable(real, book, tx);
     if (proposal.state !== "ready") throw proposalState(tx, "building", `Proposal ${tx} is still building: its transaction is open. Accept it once it is ready.`);
-    const keys = await Promise.all(proposal.parts.map((part) => this.#key(root, part.timeline)));
+    const keys = await Promise.all(proposalTimelines(proposal).map((id) => this.#key(root, id)));
     return this.#exclusive(keys, async () => {
       if (book.proposal !== proposal) await this.#decidable(real, book, tx);
+      const installs: { file: ProposedFile; timeline: Timeline; journaled: Timeline | null; patch: TimelinePatch | null; applied: AppliedOperation | null }[] = [];
+      for (const file of proposal.files ?? []) {
+        const timeline = parseIncoming(timelinePath(root, file.timeline), file.text);
+        if (await this.#readable(root, file.timeline)) {
+          await this.#close(book, proposal, "stale", [file.timeline]);
+          throw proposalState(tx, "stale", `Proposal ${tx} is out of date: ${timelineRel(file.timeline)} exists now. It was closed unapplied.`, [file.timeline]);
+        }
+        // As `writeFile` does without review mode: on top of what the journal last recorded, else as is.
+        const journaled = await this.#journaledBase(root, file.timeline, file.text, timeline);
+        const planned = journaled ? await this.#plan(root, file.timeline, journaled, diffTimelines(journaled, timeline), await projectFps(root)) : null;
+        installs.push({ file, timeline, journaled, patch: planned?.patch ?? null, applied: planned?.applied ?? null });
+      }
       const planned: { part: ProposalPart; steps: { before: Timeline; applied: AppliedOperation; op: ProposedOp }[] }[] = [];
       for (const part of proposal.parts) {
         const { timeline: current, fps } = await this.#current(root, part.timeline);
@@ -662,6 +786,17 @@ export class TimelineService {
       }
       const operations: OperationResult[] = [];
       const txRef = { id: proposal.tx, label: proposal.label };
+      for (const { file, timeline, journaled, patch, applied } of installs) {
+        const id = file.timeline;
+        if (journaled && patch && applied) {
+          const context = { root, cwd: root, timeline: id, author: proposal.author, tx: txRef };
+          operations.push(await this.#record(context, journaled, applied, "timeline.patch", patch, [], { id: newOpId(), proposal: proposal.tx }));
+        } else if (journaled) {
+          await this.#announce(root, id, (await this.#extend(root, id, journaled, {}, await projectFps(root), { author: proposal.author, tx: txRef })).timeline);
+        } else {
+          await this.#install(root, id, file.text, timeline);
+        }
+      }
       for (const { part, steps } of planned) {
         const context = { root, cwd: root, timeline: part.timeline, author: proposal.author, tx: txRef };
         for (const { before, applied, op } of steps) {
@@ -679,7 +814,7 @@ export class TimelineService {
     const book = await this.#book(root);
     const proposal = await this.#decidable(real, book, tx);
     // Under the timelines' locks: an accept already writing them finishes first, then this finds it decided.
-    const keys = await Promise.all(proposal.parts.map((part) => this.#key(root, part.timeline)));
+    const keys = await Promise.all(proposalTimelines(proposal).map((id) => this.#key(root, id)));
     await this.#exclusive(keys, async () => this.#close(book, await this.#decidable(real, book, tx), "rejected", []));
     return { tx };
   }
@@ -786,6 +921,7 @@ export class TimelineService {
     make: (base: Timeline, current: Timeline, fps: number, settings: EditSettings) => Promise<Proposed | null>,
   ): Promise<{ result: OperationResult; shadow: Timeline } | null> {
     const { book, proposal } = route;
+    if (proposedFile(proposal, id)) throw keptAside(proposal, id);
     const { timeline: current, fps, ...settings } = await this.#current(root, id);
     if (!route.created && !(await this.#sync(root, id, book, current, fps))) {
       const notice = book.notices.get(who.author) ?? { tx: proposal.tx, reason: "stale" as const, conflicts: [] };
@@ -906,7 +1042,7 @@ export class TimelineService {
       label: proposal.label,
       author: proposal.author,
       outcome,
-      timelines: proposal.parts.map((part) => part.timeline),
+      timelines: proposalTimelines(proposal),
       conflicts,
       at,
     };
@@ -942,7 +1078,7 @@ export class TimelineService {
       author: proposal.author,
       state,
       operations: operationCount(proposal),
-      timelines: proposal.parts.map((part) => part.timeline),
+      timelines: proposalTimelines(proposal),
       conflicts,
       endsTx,
     });
@@ -996,6 +1132,14 @@ export class TimelineService {
         return book;
       }
       Object.assign(part, { base: current, ops: rebased.ops, shadow: rebased.shadow });
+    }
+    for (const file of proposal.files ?? []) {
+      // A timeline it adds that is readable now (the person wrote it), or kept text that no longer parses.
+      const readable = await readTimelineFile(real, timelineRel(file.timeline)).then(() => true, (error: unknown) => (unreadable(error) ? false : Promise.reject(error)));
+      if (readable || !parseText(file.text).ok) {
+        await this.#close(book, proposal, "stale", [file.timeline]);
+        return book;
+      }
     }
     if (proposal.state === "building" && !this.#options.txOpen?.(proposal.tx)) proposal.state = "ready";
     await this.#persist(book);
@@ -1238,18 +1382,15 @@ export class TimelineService {
     };
     const path = timelinePath(root, id);
     const key = await this.#key(root, id);
+    const baseline = await this.#baseline(root);
     let text: string;
     try {
       text = await readFile(path, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       this.#known.delete(key);
-      const available = await listTimelines(root);
-      throw new RpcError(
-        ErrorCode.TimelineNotFound,
-        `No timeline "${id}" (${timelineRel(id)}) in ${root}` + (available.length > 0 ? `; timelines: ${available.join(", ")}.` : "."),
-        { timeline: id, path: timelineRel(id), available },
-      );
+      baseline.delete(id);
+      throw await timelineNotFound(root, id);
     }
     const known = this.#known.get(key);
     if (known?.timeline && known.text === text) return { timeline: structuredClone(known.timeline), fps, ...snap };
@@ -1262,6 +1403,14 @@ export class TimelineService {
     }
     const journaled = await this.#journaledBase(root, id, text, parsed.value);
     if (!journaled) {
+      const arrived = await this.#reviewsArrival(root, id, known !== undefined, baseline);
+      if (arrived) {
+        // Review mode (ADR 0019 §9): a new or repaired file is kept with a proposal, not taken in.
+        const previous = known?.text ?? null;
+        await this.#proposeArrival(root, id, arrived, text, previous);
+        if (previous === null) throw await timelineNotFound(root, id);
+        throw invalidFile(path, (parseText(previous) as { error: string }).error);
+      }
       this.#known.set(key, { text, timeline: parsed.value });
       if (known) await this.#announce(root, id, parsed.value);
       return { timeline: structuredClone(parsed.value), fps, ...snap };
@@ -1382,6 +1531,75 @@ export class TimelineService {
   }
 
   /**
+   * The project's book when review mode takes in timeline file `id` as a
+   * proposal (ADR 0019 §9) rather than as a timeline: it is new since the
+   * project was first read (or was seen missing), or `wasUnreadable`, has no
+   * journal, and review mode is on or a proposal is open. Null otherwise.
+   */
+  async #reviewsArrival(root: string, id: string, wasUnreadable: boolean, baseline: Set<string>): Promise<Book | null> {
+    if (!wasUnreadable && baseline.has(id)) return null;
+    const book = await this.#book(root);
+    if (!book.proposal && !(await this.#reviewEnabled(root))) return null;
+    return (await readJournal(root, id)).length === 0 ? book : null;
+  }
+
+  /**
+   * A valid timeline file `text` that appeared on disk while review mode
+   * applies (see {@link TimelineService.#reviewsArrival}): a ready proposal by
+   * author `file` that keeps it, or a rejection with reason `proposal-pending`
+   * when another proposal is open. Either way `previous` (the unreadable text
+   * it replaced; null: none) is back on disk. Caller holds the turn.
+   */
+  async #proposeArrival(root: string, id: string, book: Book, text: string, previous: string | null): Promise<void> {
+    const restore = { unread: previous };
+    while (book.creating) await book.creating;
+    if (book.proposal) {
+      const { message } = proposalPending(book.proposal);
+      await this.#reject(root, id, text, restore, "proposal-pending", `${message} The file was not taken in; write it again once the proposal is decided.`);
+      return;
+    }
+    const { tx } = this.#fileSaver();
+    const proposal: OpenProposal = {
+      tx: tx.id,
+      label: `${previous === null ? "Add" : "Replace"} ${timelineRel(id)}`,
+      author: "file",
+      state: "ready",
+      openedAt: new Date().toISOString(),
+      parts: [],
+      files: [{ timeline: id, text }],
+    };
+    book.proposal = proposal;
+    try {
+      await this.#persist(book);
+    } catch (error) {
+      book.proposal = null;
+      throw error;
+    }
+    await this.#putBack(root, id, restore);
+    this.#emit(book, proposal, "ready");
+  }
+
+  /** Timeline ids in `root`'s `timelines/` when it was first read; see {@link TimelineService.#baselines}. */
+  #baseline(root: string): Promise<Set<string>> {
+    return this.#realRoot(root).then((real) => {
+      let ids = this.#baselines.get(real);
+      if (!ids) this.#baselines.set(real, (ids = listTimelines(real).then((names) => new Set(names))));
+      return ids;
+    });
+  }
+
+  /** Whether timeline `id` has a readable file now. Caller holds the turn. */
+  async #readable(root: string, id: string): Promise<boolean> {
+    try {
+      await this.#current(root, id);
+      return true;
+    } catch (error) {
+      if (!unreadable(error)) throw error;
+      return false;
+    }
+  }
+
+  /**
    * A valid direct edit `text` of timeline `id` while review mode applies:
    * a ready proposal by author `file`, or a rejection with reason
    * `proposal-pending` when another proposal is open. Either way `base` is
@@ -1452,7 +1670,7 @@ export class TimelineService {
 
   /** Author `file` in a transaction from {@link TimelineServiceOptions.fileTx}. */
   #fileSaver(): Saver {
-    return { author: "file", tx: this.#options.fileTx?.() ?? { id: `tx_${randomBytes(4).toString("hex")}`, label: null } };
+    return { author: "file", tx: this.#options.fileTx?.() ?? { id: newTxId(), label: null } };
   }
 
   /** Restore `base` on disk, keep `text` under `.frameshell/rejected/`, report it (SPEC §6.4). */
@@ -1460,7 +1678,7 @@ export class TimelineService {
     root: string,
     id: string,
     text: string,
-    base: Timeline,
+    base: Restore,
     reason: RejectionInfo["reason"],
     message: string,
   ): Promise<void> {
@@ -1469,7 +1687,7 @@ export class TimelineService {
     let preserved = `.frameshell/rejected/${stamp}-${id}.json`;
     for (let n = 2; await exists(join(root, preserved)); n++) preserved = `.frameshell/rejected/${stamp}-${n}-${id}.json`;
     await writeTextAtomic(join(root, preserved), text);
-    await this.#restore(root, id, base);
+    await this.#putBack(root, id, base);
     const real = await this.#realRoot(root);
     const rejection: TimelineRejection = {
       root: real,
@@ -1478,12 +1696,25 @@ export class TimelineService {
       message,
       preserved,
       revision: revisionOf(text),
-      current: base.revision,
+      current: "unread" in base ? null : base.revision,
       at,
     };
     const { root: _root, ...record } = rejection;
     await recordRejection(root, record);
     this.#options.onRejected?.(rejection);
+  }
+
+  /** Put `restore` back on disk: the daemon's version, else the earlier unreadable text or no file. */
+  async #putBack(root: string, id: string, restore: Restore): Promise<void> {
+    if (!("unread" in restore)) return this.#restore(root, id, restore);
+    const key = await this.#key(root, id);
+    if (restore.unread === null) {
+      await rm(timelinePath(root, id), { force: true });
+      this.#known.delete(key);
+      return;
+    }
+    await writeTextAtomic(timelinePath(root, id), restore.unread);
+    this.#known.set(key, { text: restore.unread, timeline: null });
   }
 
   /** Put `base` back on disk as the known version of timeline `id`. */
@@ -1562,6 +1793,16 @@ async function listTimelines(root: string): Promise<string[]> {
 
 async function projectFps(root: string): Promise<number> {
   return (await readEnclosingProject(root))?.config.fps ?? 30;
+}
+
+/** TimelineNotFound for timeline `id` of `root`, listing the timelines there are. */
+async function timelineNotFound(root: string, id: string): Promise<RpcError> {
+  const available = await listTimelines(root);
+  return new RpcError(
+    ErrorCode.TimelineNotFound,
+    `No timeline "${id}" (${timelineRel(id)}) in ${root}` + (available.length > 0 ? `; timelines: ${available.join(", ")}.` : "."),
+    { timeline: id, path: timelineRel(id), available },
+  );
 }
 
 /** Timeline file content, JSON syntax and schema checked. */
@@ -1653,9 +1894,38 @@ function proposedEntries(part: ProposalPart, proposal: OpenProposal): { state: T
   return { state, entries };
 }
 
-/** Operations of `proposal`, every timeline. */
+/** Operations of `proposal`, every timeline; a timeline it adds counts as one. */
 function operationCount(proposal: OpenProposal): number {
-  return proposal.parts.reduce((sum, part) => sum + part.ops.length, 0);
+  return proposal.parts.reduce((sum, part) => sum + part.ops.length, 0) + (proposal.files?.length ?? 0);
+}
+
+/** Timelines `proposal` changes or adds. */
+function proposalTimelines(proposal: OpenProposal): string[] {
+  return [...proposal.parts.map((part) => part.timeline), ...(proposal.files ?? []).map((file) => file.timeline)];
+}
+
+/** The file `proposal` keeps for timeline `id`, which it adds; undefined when none. */
+function proposedFile(proposal: OpenProposal, id: string): ProposedFile | undefined {
+  return proposal.files?.find((file) => file.timeline === id);
+}
+
+/** TimelineNotFound for an operation on timeline `id`, which only `proposal` holds so far. */
+function keptAside(proposal: OpenProposal, id: string): RpcError {
+  return new RpcError(
+    ErrorCode.TimelineNotFound,
+    `${timelineRel(id)} is new in proposal ${proposal.tx}, which waits for review: it becomes a timeline once accepted. ` +
+      "Rewrite the whole file with `file.write`, or run operations on it after `frameshell proposal wait`.",
+    { timeline: id, path: timelineRel(id), available: [] },
+  );
+}
+
+/** TimelineNotFound or InvalidProjectFile: no readable version of the file. */
+function unreadable(error: unknown): boolean {
+  return error instanceof RpcError && (error.code === ErrorCode.TimelineNotFound || error.code === ErrorCode.InvalidProjectFile);
+}
+
+function newTxId(): string {
+  return `tx_${randomBytes(4).toString("hex")}`;
 }
 
 /** `proposal` as `status` and `proposal.status` list it. */
@@ -1666,7 +1936,7 @@ function summary(proposal: OpenProposal): Proposal {
     author: proposal.author,
     state: proposal.state,
     operations: operationCount(proposal),
-    timelines: proposal.parts.map((part) => part.timeline),
+    timelines: proposalTimelines(proposal),
     openedAt: proposal.openedAt,
     ageMs: Math.max(0, Date.now() - Date.parse(proposal.openedAt)),
   };

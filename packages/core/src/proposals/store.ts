@@ -51,6 +51,16 @@ export interface ProposalPart {
   ops: ProposedOp[];
 }
 
+/**
+ * A timeline file the proposal adds, or writes over an unreadable one: kept
+ * here, not in `timelines/`, until accepted.
+ */
+export interface ProposedFile {
+  timeline: string;
+  /** The whole file content, valid against the timeline schema. */
+  text: string;
+}
+
 /** The open proposal of a project. */
 export interface OpenProposal {
   tx: string;
@@ -61,6 +71,8 @@ export interface OpenProposal {
   parts: ProposalPart[];
   /** Direct file edit turned proposal: the edited file text, kept for recovery. */
   edit?: { timeline: string; text: string } | undefined;
+  /** Timelines it creates (or replaces while unreadable); never also in `parts`. */
+  files?: ProposedFile[] | undefined;
 }
 
 const ProposedOpSchema = z.object({
@@ -83,6 +95,7 @@ const ProposalFileSchema = z.object({
   conflicts: z.array(z.string()).optional(),
   timelines: z.array(z.object({ timeline: z.string(), base: z.unknown(), ops: z.array(ProposedOpSchema) })),
   edit: z.object({ timeline: z.string(), text: z.string() }).optional(),
+  files: z.array(z.object({ timeline: z.string(), text: z.string() })).optional(),
 });
 
 /** A proposal file read back: an open proposal without shadows. */
@@ -112,6 +125,7 @@ export async function saveProposal(
     ...(closed ? { decidedAt: closed.at, conflicts: closed.conflicts } : {}),
     timelines: proposal.parts.map(({ timeline, base, ops }) => ({ timeline, base, ops })),
     ...(proposal.edit ? { edit: proposal.edit } : {}),
+    ...(proposal.files?.length ? { files: proposal.files } : {}),
   };
   await writeJsonAtomic(proposalPath(root, proposal.tx), file);
 }
@@ -135,7 +149,7 @@ export async function loadOpenProposals(root: string): Promise<StoredProposal[]>
     }
     const parsed = ProposalFileSchema.safeParse(value);
     if (!parsed.success) continue;
-    const { state, timelines, edit, tx, label, author, openedAt } = parsed.data;
+    const { state, timelines, edit, files, tx, label, author, openedAt } = parsed.data;
     if (state !== "building" && state !== "ready") continue;
     const parts: StoredProposal["parts"] = [];
     for (const part of timelines) {
@@ -144,7 +158,7 @@ export async function loadOpenProposals(root: string): Promise<StoredProposal[]>
       parts.push({ timeline: part.timeline, base: base.value, ops: part.ops });
     }
     if (parts.length !== timelines.length) continue;
-    found.push({ tx, label, author, state, openedAt, parts, ...(edit ? { edit } : {}) });
+    found.push({ tx, label, author, state, openedAt, parts, ...(edit ? { edit } : {}), ...(files ? { files } : {}) });
   }
   return found.sort((a, b) => (a.openedAt < b.openedAt ? -1 : a.openedAt > b.openedAt ? 1 : 0));
 }

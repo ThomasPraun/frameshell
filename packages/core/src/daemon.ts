@@ -310,7 +310,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const inspector = new InspectService({
     timeline: async (dir, id) => {
       const { timeline, fps } = await timelines.load(dir, id);
-      return { timeline: await resolveNested(dir, timeline), fps };
+      return { timeline: await resolveNested(dir, timeline, undefined, fps), fps };
     },
     resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
     pictureSize: async (dir, asset) => {
@@ -647,7 +647,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "inspect.point": async ({ cwd, timeline, at, x, y, unit, view }, caller) => {
       const dir = await root(cwd);
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
-      const loaded = { timeline: await resolveNested(dir, shown.timeline), fps: shown.fps };
+      const loaded = { timeline: await resolveNested(dir, shown.timeline, undefined, shown.fps), fps: shown.fps };
       return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit }, loaded)) };
     },
     "job.list": async ({ cwd, active }) => {
@@ -944,9 +944,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A proposal still building holds what the file never got (ADR 0019 §3).
       await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
-      const reverted = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
+      // In review mode an undo of what reached the file waits as a proposal of its own.
+      const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
       await transactions.end(author);
-      return { tx: tx.id, label: tx.label, author, reverted };
+      return { tx: tx.id, label: tx.label, author, reverted, proposal };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),

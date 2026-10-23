@@ -6,6 +6,7 @@ import type {
   Clip,
   ClipAudio,
   ClipKey,
+  ClipKeys,
   ClipTrack,
   KeyEase,
   MediaClip,
@@ -20,7 +21,7 @@ import type {
   Transform,
 } from "./timeline.js";
 import { DEFAULT_SHOT_CORNER } from "./timeline.js";
-import type { ClipEdges } from "./transitions.js";
+import { type ClipEdges, type NestHost, type Nesting, type TransitionContext, nestedFades, nestingOf } from "./transitions.js";
 
 /** A clip {@link Transform} with every default filled in. */
 export interface Placement {
@@ -113,10 +114,21 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * composes with each video clip's ({@link composePlacement}), its gain adds,
  * its mute wins. Subtitle tracks of nested timelines are dropped.
  *
+ * Keys and edges (ADR 0018 decision 9): a clip cut by the window loses its
+ * own transition fields at the cut. When the nested clip has keys or fades,
+ * or the clip has keys, the composition happens at each time instead: the
+ * clip keeps its own fields and records the nested clip in its
+ * {@link nestingOf} hosts, which {@link placementAt}, {@link gainAt} and
+ * {@link hostFades} fold. With `fps` (flattening for playback), the nested
+ * clip's `fadeIn` and `fadeOut` become host fades of every clip it plays,
+ * its `dissolve` goes onto the clip of T that starts the window (its extra
+ * tracks fade in instead, {@link nestedFades}), and clips on a window edge
+ * record the nested timeline's seconds outside it as their handle limit.
+ *
  * A nested program track on a video track T becomes program track `T/p1`,
  * `T/p2`, … above T, showing a copy of its group renamed `<nested clip>/<group>`
  * (appended to `groups`); shots fill the frame, so the nested clip's
- * transform does not apply to them. Stacking follows the nested track order:
+ * transform, keys and fades do not apply to them. Stacking follows the nested track order:
  * when the program track comes before the first video track, that track and
  * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
  * sound ({@link programSound}), clips marked {@link isProgramSound} so they keep exact samples.
@@ -125,9 +137,9 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * inside itself, stays as it is for the caller to report. The root is
  * assumed to be `timelines/<id>.json`.
  */
-export function flattenTimeline(timeline: Timeline, nested: NestedTimelines): Timeline {
+export function flattenTimeline(timeline: Timeline, nested: NestedTimelines, fps?: number): Timeline {
   const own = timeline.groups ?? [];
-  const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`]);
+  const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`], fps);
   // Every group of the root stays, shown or not; nested ones only when shown.
   const groups = [...own, ...flat.groups.filter((group) => !own.includes(group))];
   return { ...timeline, tracks: flat.tracks, ...(groups.length > 0 ? { groups } : {}) };
@@ -139,8 +151,25 @@ interface Flat {
   groups: MulticamGroup[];
 }
 
+/** A nested timeline clip, resolved. */
+type NestedClip = Extract<Clip, { type: "timeline" }>;
+
+/** A clip of a nested timeline cut to its nested clip's window, before the nested clip composes into it. */
+interface Windowed {
+  placed: Clip;
+  part: Clip;
+  /** Clips it lands among: the host track's own, or an extra track's. */
+  target: Clip[];
+  /** On the host track itself (in the nested clip's slot). */
+  own: boolean;
+  /** Has a picture: a video clip on a video host track. */
+  video: boolean;
+  /** Starts where the window starts. */
+  atStart: boolean;
+}
+
 /** `tracks`, whose program tracks show groups of `ownGroups`, flattened. */
-function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGroup[], nested: NestedTimelines, stack: readonly string[]): Flat {
+function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGroup[], nested: NestedTimelines, stack: readonly string[], fps: number | undefined): Flat {
   const out: Track[] = [];
   const groups: MulticamGroup[] = [];
   for (const track of tracks) {
@@ -152,6 +181,16 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       out.push(track);
       continue;
     }
+    // Each nested timeline flattened once; its length sizes the nested clips for their fades.
+    const inners = new Map<Clip, { flat: Flat; duration: number }>();
+    for (const clip of track.clips) {
+      if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
+      const inner = nested(clip.source);
+      if (!inner) continue;
+      const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source], fps);
+      inners.set(clip, { flat, duration: durationOf(flat.tracks) });
+    }
+    const context: TransitionContext | null = fps === undefined ? null : { fps, sourceDuration: (clip) => inners.get(clip)?.duration };
     const own: Clip[] = [];
     /** Extra tracks by id, in first-seen order: layers `T/2`…, program tracks `T/p1`… and sound `T/a1`…. */
     const extra = new Map<string, ClipTrack | ProgramTrack>();
@@ -163,19 +202,20 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
     // Per host track, not per nested clip: each nested clip has its own renamed group, so its own program track.
     let programIndex = 0;
     for (const clip of track.clips) {
-      const inner = isNestedClip(clip) && !stack.includes(clip.source) ? nested(clip.source) : null;
-      if (!isNestedClip(clip) || !inner) {
+      const resolved = inners.get(clip);
+      if (!isNestedClip(clip) || !resolved) {
         own.push(clip);
         continue;
       }
-      const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source]);
+      const { flat, duration } = resolved;
       const from = clip.in ?? 0;
-      const to = clip.duration !== undefined ? from + clip.duration : durationOf(flat.tracks);
+      const to = clip.duration !== undefined ? from + clip.duration : duration;
       let videoIndex = 0;
       let audioIndex = 0;
       let ownTaken = false;
       // A program track listed before the first video track keeps its place under the later ones.
       let programFirst = false;
+      const windowed: Windowed[] = [];
       const children = flat.tracks.flatMap((child): Track[] => {
         if (child.kind !== "program" || track.kind !== "audio") return [child];
         const group = flat.groups.find((candidate) => candidate.id === child.group);
@@ -216,9 +256,18 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
         }
         const video = child.kind === "video" && track.kind === "video";
         for (const part of child.clips) {
-          const placed = window(part, from, to, clip, video);
-          if (placed) target.push(placed);
+          const cut = window(part, { from, to, duration, host: clip, playback: context !== null });
+          if (cut) windowed.push({ ...cut, target, own: target === own, video });
         }
+      }
+      const fades = context && (clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined) ? nestedFades(clip, track.clips, context) : null;
+      // The dissolve plays on the host track when a clip starts the window there; else every track fades in.
+      const opener = fades && clip.dissolve !== undefined ? windowed.find((w) => w.own && w.atStart) : undefined;
+      for (const w of windowed) {
+        const fadeIn = fades ? Math.max(fades.fadeIn, opener && w.own ? 0 : fades.dissolveIn) : 0;
+        composeHost(w, clip, from, to, fadeIn, fades?.fadeOut ?? 0);
+        if (w === opener) w.placed.dissolve = clip.dissolve!;
+        w.target.push(w.placed);
       }
     }
     const byStart = (a: { start: number }, b: { start: number }) => a.start - b.start;
@@ -233,8 +282,8 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
 
 /**
  * Ids (as {@link flattenTimeline} renames them) of the groups whose program
- * tracks come from a nested clip on a video track that has a transform, at
- * any depth. Flattening makes their shots fill the frame, not the nested
+ * tracks come from a nested clip on a video track that has a transform or
+ * picture keys, at any depth. Flattening makes their shots fill the frame, not the nested
  * clip's place in it, so a caller that draws them must refuse them instead.
  */
 export function movedProgramGroups(timeline: Timeline, nested: NestedTimelines): Set<string> {
@@ -251,8 +300,7 @@ export function movedProgramGroups(timeline: Timeline, nested: NestedTimelines):
         if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
         const inner = nested(clip.source);
         if (!inner) continue;
-        const own = !isIdentityPlacement(placementOf(clip.transform));
-        walk(inner.tracks, `${prefix}${clip.id}/`, moved || own, [...stack, clip.source]);
+        walk(inner.tracks, `${prefix}${clip.id}/`, moved || movesPicture(clip), [...stack, clip.source]);
       }
     }
   };
@@ -260,8 +308,13 @@ export function movedProgramGroups(timeline: Timeline, nested: NestedTimelines):
   return found;
 }
 
+/** True when `clip` moves or fades its picture away from an untransformed one: a transform, or `x`, `y`, `scale` or `opacity` keys. */
+export function movesPicture(clip: Clip): boolean {
+  return !isIdentityPlacement(placementOf(clip.transform)) || PICTURE_PROPS.some((prop) => clip.keys?.[prop] !== undefined);
+}
+
 /** `shot` (nested seconds) cut to `[from, to)` and moved to the nested clip's timeline position; null when nothing of it plays. */
-function windowShot(shot: ShotClip, from: number, to: number, host: Extract<Clip, { type: "timeline" }>): ShotClip | null {
+function windowShot(shot: ShotClip, from: number, to: number, host: NestedClip): ShotClip | null {
   const a = Math.max(shot.start, from);
   const b = Math.min(shot.start + (shot.out - shot.in), to);
   if (b <= a) return null;
@@ -269,7 +322,7 @@ function windowShot(shot: ShotClip, from: number, to: number, host: Extract<Clip
 }
 
 /** Adapter types never match `timeline` (ADAPTER_CLIP_TYPE_PATTERN), so `type` alone narrows. */
-function isNestedClip(clip: Clip): clip is Extract<Clip, { type: "timeline" }> {
+function isNestedClip(clip: Clip): clip is NestedClip {
   return clip.type === "timeline";
 }
 
@@ -290,12 +343,23 @@ function durationOf(tracks: readonly Track[]): number {
   return end;
 }
 
+/** The window of nested clip `host`: nested seconds `[from, to)` of a nested timeline `duration` seconds long. */
+interface Window {
+  from: number;
+  to: number;
+  duration: number;
+  host: NestedClip;
+  /** Flattening for playback: record the nested timeline's seconds outside the window as handles. */
+  playback: boolean;
+}
+
 /**
- * `part` (nested seconds) cut to `[from, to)`, moved to the nested clip's
- * timeline position, with its transform and audio composed in; null when
- * nothing of it plays.
+ * `part` (nested seconds) cut to the window and moved to the nested clip's
+ * timeline position; null when nothing of it plays. A cut edge drops the
+ * part's transition fields there, and its dissolve when it starts the window
+ * (the clip it dissolves from is outside). Hosts it already records move with it.
  */
-function window(part: Clip, from: number, to: number, host: Extract<Clip, { type: "timeline" }>, video: boolean): Clip | null {
+function window(part: Clip, { from, to, duration, host, playback }: Window): Pick<Windowed, "placed" | "part" | "atStart"> | null {
   const end = clipEnd(part) ?? part.start;
   const a = Math.max(part.start, from);
   const b = Math.min(end, to);
@@ -312,14 +376,72 @@ function window(part: Clip, from: number, to: number, host: Extract<Clip, { type
     // Unresolved nested clip of unknown length: keep it, moved; the caller reports it.
     placed = { ...part, id, start } as Clip;
   }
-  if (video && host.transform) {
-    placed.transform = composePlacement(placementOf(host.transform), placementOf(part.transform));
-  } else if (!video) {
-    delete placed.transform;
+  const atStart = part.start <= from;
+  if (atStart) delete placed.dissolve;
+  if (part.start < from) delete placed.fadeIn;
+  if (end > to) delete placed.fadeOut;
+  const nesting = nestingOf(part);
+  const shift = host.start - from;
+  const hosts = (nesting?.hosts ?? []).map((inner) => ({ ...inner, id: `${host.id}/${inner.id}`, start: inner.start + shift, end: inner.end + shift }));
+  const before = playback && atStart ? Math.min(nesting?.before ?? Number.POSITIVE_INFINITY, from) : nesting?.before;
+  const after = playback && end >= to ? Math.min(nesting?.after ?? Number.POSITIVE_INFINITY, Math.max(0, duration - to)) : nesting?.after;
+  delete (placed as { nesting?: Nesting }).nesting;
+  if (hosts.length > 0 || before !== undefined || after !== undefined) {
+    const recorded: Nesting = { hosts, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) };
+    Object.assign(placed, { nesting: recorded });
   }
-  const audio = composeAudio(host.audio, part.audio);
-  if (audio) placed.audio = audio;
-  return placed;
+  return { placed, part, atStart };
+}
+
+/**
+ * Nested clip `host` (window nested seconds `[from, to)`, effective fades
+ * `fadeIn`, `fadeOut`) composed into `w`'s clip: baked into its transform and
+ * audio when neither changes over time, else recorded as its outermost host.
+ */
+function composeHost({ placed, part, video }: Windowed, host: NestedClip, from: number, to: number, fadeIn: number, fadeOut: number): void {
+  const keys = hostKeys(host.keys, video);
+  const animated = hasKeys(part.keys) || (nestingOf(placed)?.hosts.length ?? 0) > 0;
+  const gain = host.audio?.gain ?? 0;
+  const moves = (video && !isIdentityPlacement(placementOf(host.transform))) || gain !== 0;
+  if (keys === undefined && fadeIn === 0 && fadeOut === 0 && !(animated && moves)) {
+    if (video && host.transform) {
+      placed.transform = composePlacement(placementOf(host.transform), placementOf(part.transform));
+    } else if (!video) {
+      delete placed.transform;
+    }
+    const audio = composeAudio(host.audio, part.audio);
+    if (audio) placed.audio = audio;
+    return;
+  }
+  if (!video) delete placed.transform;
+  if (host.audio?.muted === true) placed.audio = { ...placed.audio, muted: true };
+  const entry: NestHost = {
+    id: host.id,
+    start: host.start,
+    end: host.start + (to - from),
+    in: from,
+    ...(video && host.transform ? { transform: host.transform } : {}),
+    ...(keys ? { keys } : {}),
+    ...(gain !== 0 ? { gain } : {}),
+    ...(fadeIn > 0 ? { fadeIn } : {}),
+    ...(fadeOut > 0 ? { fadeOut } : {}),
+  };
+  const nesting = nestingOf(placed);
+  Object.assign(placed, { nesting: { ...nesting, hosts: [entry, ...(nesting?.hosts ?? [])] } satisfies Nesting });
+}
+
+/** Properties of a picture's placement that keys can animate. */
+const PICTURE_PROPS = ["x", "y", "scale", "opacity"] as const;
+
+/** The keys of a nested clip that reach one of its clips: all of them on a picture, else only `gain`; undefined when none do. */
+function hostKeys(keys: ClipKeys | undefined, video: boolean): ClipKeys | undefined {
+  if (!keys) return undefined;
+  const reaching = video ? keys : keys.gain ? { gain: keys.gain } : {};
+  return hasKeys(reaching) ? reaching : undefined;
+}
+
+function hasKeys(keys: ClipKeys | undefined): boolean {
+  return keys !== undefined && Object.values(keys).some((list) => list !== undefined && list.length > 0);
 }
 
 function composeAudio(outer: ClipAudio | undefined, inner: ClipAudio | undefined): ClipAudio | undefined {
@@ -745,10 +867,30 @@ export function keyedValueAt(keys: readonly ClipKey[] | undefined, at: number): 
 
 /** Placement of `clip` at timeline second `t`: a keyed property follows its keys, the others their `transform` value. */
 export function placementAt(clip: Clip, t: number): Placement {
-  const base = placementOf(clip.transform);
-  const keys = clip.keys;
+  let placement = keyedPlacement(clip.transform, clip.keys, clipTime(clip, t));
+  // A flattened clip sits inside its hosts' frames: innermost first ({@link composePlacement}).
+  const hosts = nestingOf(clip)?.hosts;
+  if (hosts) for (let i = hosts.length - 1; i >= 0; i--) placement = composePlacement(hostPlacementAt(hosts[i]!, t), placement);
+  return placement;
+}
+
+/**
+ * Placement of `clip` that holds while nothing animates it ({@link hasPictureKeys} false): its `transform` inside its
+ * hosts' ({@link nestingOf}). With keys, the value at its start.
+ */
+export function fixedPlacement(clip: Clip): Placement {
+  return nestingOf(clip)?.hosts.length ? placementAt(clip, clip.start) : placementOf(clip.transform);
+}
+
+/** Placement of nested clip `host` at timeline second `t`, on its own clock. */
+function hostPlacementAt(host: NestHost, t: number): Placement {
+  return keyedPlacement(host.transform, host.keys, hostTime(host, t));
+}
+
+/** `transform` with each keyed property replaced by its keys' value at clock second `at`. */
+function keyedPlacement(transform: Transform | undefined, keys: ClipKeys | undefined, at: number): Placement {
+  const base = placementOf(transform);
   if (!keys) return base;
-  const at = clipTime(clip, t);
   return {
     x: keyedValueAt(keys.x, at) ?? base.x,
     y: keyedValueAt(keys.y, at) ?? base.y,
@@ -757,9 +899,54 @@ export function placementAt(clip: Clip, t: number): Placement {
   };
 }
 
-/** Gain in dB of `clip` at timeline second `t`: its `gain` keys, else `audio.gain`, else 0. `audio.muted` is for the caller. */
+/** Second of nested clip `host`'s own clock (nested-timeline seconds) playing at timeline second `t`. */
+export function hostTime(host: NestHost, t: number): number {
+  return host.in + (t - host.start);
+}
+
+/**
+ * Gain in dB of `clip` at timeline second `t`: its `gain` keys, else `audio.gain`, else 0, plus each host's the same
+ * way ({@link nestingOf}). `audio.muted` is for the caller.
+ */
 export function gainAt(clip: Clip, t: number): number {
-  return keyedValueAt(clip.keys?.gain, clipTime(clip, t)) ?? clip.audio?.gain ?? 0;
+  let gain = keyedValueAt(clip.keys?.gain, clipTime(clip, t)) ?? clip.audio?.gain ?? 0;
+  for (const host of nestingOf(clip)?.hosts ?? []) gain += keyedValueAt(host.keys?.gain, hostTime(host, t)) ?? host.gain ?? 0;
+  return gain;
+}
+
+/** Gain in dB of `clip` where no key changes it: its `audio.gain` plus its hosts'. */
+export function staticGain(clip: Clip): number {
+  let gain = clip.audio?.gain ?? 0;
+  for (const host of nestingOf(clip)?.hosts ?? []) gain += host.gain ?? 0;
+  return gain;
+}
+
+/** A property keys can animate (`ClipKeys`). */
+export type KeyedProp = keyof ClipKeys;
+
+/** True when keys animate `prop` of `clip`: its own, or a host's ({@link nestingOf}). */
+export function isKeyed(clip: Clip, prop: KeyedProp): boolean {
+  return clip.keys?.[prop] !== undefined || (nestingOf(clip)?.hosts.some((host) => host.keys?.[prop] !== undefined) ?? false);
+}
+
+/** True when keys animate `clip`'s placement: `x`, `y`, `scale` or `opacity`, its own or a host's. */
+export function hasPictureKeys(clip: Clip): boolean {
+  return PICTURE_PROPS.some((prop) => isKeyed(clip, prop));
+}
+
+/** A fade of a nested clip over its window, timeline seconds; `fadeIn`/`fadeOut` 0 for none. */
+export interface HostFade {
+  start: number;
+  end: number;
+  fadeIn: number;
+  fadeOut: number;
+}
+
+/** Fades of the hosts of `clip` that have any ({@link nestingOf}), outermost first. Multiply each in like the clip's own. */
+export function hostFades(clip: Clip): HostFade[] {
+  return (nestingOf(clip)?.hosts ?? []).flatMap((host) =>
+    host.fadeIn || host.fadeOut ? [{ start: host.start, end: host.end, fadeIn: host.fadeIn ?? 0, fadeOut: host.fadeOut ?? 0 }] : [],
+  );
 }
 
 const clamp01 = (f: number) => Math.min(1, Math.max(0, f));

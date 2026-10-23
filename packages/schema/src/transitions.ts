@@ -1,6 +1,45 @@
 // What a clip's `dissolve`, `fadeIn` and `fadeOut` play as (ADR 0018 decisions 2 to 5). The file stores the requested
 // lengths; export, preview and engine warnings all read the effective ones from here.
-import type { Clip } from "./timeline.js";
+import type { Clip, ClipKeys, Transform } from "./timeline.js";
+
+/**
+ * A nested clip that a flattened clip plays inside (ADR 0018 decision 9), as `flattenTimeline` records it: what of
+ * it composes with the clip at each time. Plain data, so it survives JSON and `structuredClone`.
+ */
+export interface NestHost {
+  /** Id of the nested clip, as flattened (`<outer>/<inner>` deeper down). */
+  id: string;
+  /** Timeline seconds of its window: where it starts, and just after its last frame. */
+  start: number;
+  end: number;
+  /** Second of its own clock (nested-timeline seconds, what its `in` counts) at `start`. */
+  in: number;
+  /** Its transform; only on clips with a picture. */
+  transform?: Transform;
+  /** Its keys on its own clock: picture keys only on clips with a picture. */
+  keys?: ClipKeys;
+  /** Its `audio.gain`, dB. */
+  gain?: number;
+  /** Seconds of its fade from black after `start` (whole frames); absent for none. */
+  fadeIn?: number;
+  /** Seconds of its fade to black before `end`; absent for none. */
+  fadeOut?: number;
+}
+
+/** What flattening records on a clip of a nested timeline (`flattenTimeline`); absent on clips that need none. */
+export interface Nesting {
+  /** Nested clips it plays inside whose transform, keys, gain or fades compose with its own, outermost first. */
+  hosts: NestHost[];
+  /** Most timeline seconds it can play before its start: the nested timeline's seconds before the window it starts. */
+  before?: number;
+  /** Most timeline seconds it can play after its end: the nested timeline's seconds after the window it ends. */
+  after?: number;
+}
+
+/** The {@link Nesting} flattening recorded on `clip`; undefined on clips that are not flattened or need none. */
+export function nestingOf(clip: Clip): Nesting | undefined {
+  return (clip as { nesting?: Nesting }).nesting;
+}
 
 /** What the schema layer cannot know: the project frame rate and the length of each clip's material. */
 export interface TransitionContext {
@@ -61,9 +100,17 @@ export function clipLength(clip: Clip, context: TransitionContext): number {
 /**
  * Seconds `clip` can play past each edge. Media: the source before `in` and after `out`, divided by `speed`; still
  * images and adapter clips (first or last rendered frame held): unlimited; nested timelines: their own seconds
- * outside the window.
+ * outside the window. A flattened clip on a window edge of its nested clip gets no more than the nested timeline's
+ * seconds outside that edge (`nestingOf`).
  */
 export function clipHandles(clip: Clip, context: TransitionContext): ClipHandles {
+  const own = ownHandles(clip, context);
+  const nesting = nestingOf(clip);
+  if (nesting?.before === undefined && nesting?.after === undefined) return own;
+  return { before: Math.min(own.before, nesting.before ?? Infinity), after: Math.min(own.after, nesting.after ?? Infinity) };
+}
+
+function ownHandles(clip: Clip, context: TransitionContext): ClipHandles {
   const unlimited = { before: Number.POSITIVE_INFINITY, after: Number.POSITIVE_INFINITY };
   if ("asset" in clip) {
     const speed = clip.speed ?? 1;
@@ -132,4 +179,38 @@ export function edgeTransitions(clips: readonly Clip[], context: TransitionConte
   });
 
   return new Map(sorted.map((clip, i) => [clip.id, edges[i]!]));
+}
+
+/** What a nested clip's own edges give every clip it plays (ADR 0018 decision 9). Timeline seconds, whole frames. */
+export interface NestedFades {
+  /** Its `fadeIn`, effective: at most half the nested clip. */
+  fadeIn: number;
+  /** Its `fadeOut`, effective. */
+  fadeOut: number;
+  /**
+   * The fade in its extra layers and sound ride for its `dissolve`, which plays as a dissolve on its own track only:
+   * the half after the cut when a clip ends where it starts, else the whole length (it plays as a fade in).
+   */
+  dissolveIn: number;
+}
+
+/**
+ * {@link NestedFades} of nested clip `clip` among the clips of its track, from the requested lengths: whole frames,
+ * each at most half the clip, as {@link edgeTransitions} cuts them. `context.sourceDuration` must give the length of
+ * nested timelines without a `duration`.
+ */
+export function nestedFades(clip: Clip, track: readonly Clip[], context: TransitionContext): NestedFades {
+  const frame = 1 / context.fps;
+  const quantize = (seconds: number) => Math.round(seconds * context.fps) * frame;
+  const length = clipLength(clip, context);
+  const room = Number.isFinite(length) ? Math.floor((length / 2) * context.fps + GRID_EPSILON) * frame : length;
+  const fade = (seconds: number | undefined) => (seconds === undefined ? 0 : Math.min(quantize(seconds), room));
+  let dissolveIn = 0;
+  if (clip.dissolve !== undefined) {
+    const sorted = [...track].sort((a, b) => a.start - b.start);
+    const previous = sorted[sorted.indexOf(clip) - 1];
+    const butted = previous !== undefined && Math.abs(previous.start + clipLength(previous, context) - clip.start) <= BUTT_EPSILON;
+    dissolveIn = fade(butted ? clip.dissolve / 2 : clip.dissolve);
+  }
+  return { fadeIn: fade(clip.fadeIn), fadeOut: fade(clip.fadeOut), dissolveIn };
 }
