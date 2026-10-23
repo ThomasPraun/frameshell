@@ -26,6 +26,8 @@ describe("classifyContext", () => {
   it("knows frame captures and details files, nothing else", () => {
     expect(classifyContext("f_0421.png", false)).toEqual({ kind: "context", key: "f_0421.png" });
     expect(classifyContext("e_0421_12.json", false)).toEqual({ kind: "context", key: "e_0421_12.json" });
+    expect(classifyContext("m_0421_1210_1530_3.png", false)).toEqual({ kind: "context", key: "m_0421_1210_1530_3.png" });
+    expect(classifyContext("m_0421_1210_1530_4.png", false)).toBeNull();
     expect(classifyContext("notes.txt", false)).toBeNull();
     expect(classifyContext("e_0421_1.json", true)).toBeNull();
   });

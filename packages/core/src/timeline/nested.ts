@@ -1,5 +1,5 @@
 import { RpcError } from "@frameshell/protocol";
-import { type Timeline, flattenTimeline, isIdentityPlacement, placementOf } from "@frameshell/schema";
+import { type Timeline, flattenTimeline, movesPicture } from "@frameshell/schema";
 import { readTimelineFile } from "./service.js";
 
 /** Reads a nested timeline by clip `source` (project-relative); null when missing or invalid. */
@@ -19,9 +19,10 @@ export async function readNestedFile(root: string, source: string): Promise<Time
  * `timeline` with its nested timelines flattened (SPEC §3.5 step 1), as
  * export and the preview see it: nested clips become `<nested clip>/<clip>`
  * on the host track (`<track>/<n>` for extra layers). Every file the nesting
- * reaches is read once; unreadable ones stay `timeline` clips.
+ * reaches is read once; unreadable ones stay `timeline` clips. With `fps`,
+ * flattened for playback: nested clips' edges reach their clips (`flattenTimeline`).
  */
-export async function resolveNested(root: string, timeline: Timeline, read: NestedReader = readNestedFile): Promise<Timeline> {
+export async function resolveNested(root: string, timeline: Timeline, read: NestedReader = readNestedFile, fps?: number): Promise<Timeline> {
   const nested = new Map<string, Timeline | null>();
   const pending = [timeline];
   // flattenTimeline itself stops cycles.
@@ -36,7 +37,7 @@ export async function resolveNested(root: string, timeline: Timeline, read: Nest
       }
     }
   }
-  return flattenTimeline(timeline, (source) => nested.get(source) ?? null);
+  return flattenTimeline(timeline, (source) => nested.get(source) ?? null, fps);
 }
 
 /** A transformed nested clip whose timeline shows multicam shots. */
@@ -50,9 +51,9 @@ export interface TransformedProgram {
 }
 
 /**
- * First nested clip on a video track that has a transform and plays a
+ * First nested clip on a video track that has a transform or picture keys and plays a
  * timeline showing a program track (directly or nested deeper), or null.
- * Shots fill the frame, so export cannot place them under a transform.
+ * Shots fill the frame, so export cannot place them under a transform or keys.
  * `nested` gives a nested timeline by `source`, null when unreadable.
  */
 export function transformedProgram(timeline: Timeline, nested: (source: string) => Timeline | null, stack: readonly string[] = []): TransformedProgram | null {
@@ -62,7 +63,7 @@ export function transformedProgram(timeline: Timeline, nested: (source: string) 
       if (clip.type !== "timeline" || !clip.source || stack.includes(clip.source)) continue;
       const inner = nested(clip.source);
       if (!inner) continue;
-      if (!isIdentityPlacement(placementOf(clip.transform)) && showsProgram(inner, nested, [...stack, clip.source])) {
+      if (movesPicture(clip) && showsProgram(inner, nested, [...stack, clip.source])) {
         return { clip: clip.id, timeline: timeline.id, source: clip.source };
       }
       const deeper = transformedProgram(inner, nested, [...stack, clip.source]);

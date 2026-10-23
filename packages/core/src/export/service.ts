@@ -310,18 +310,24 @@ export class ExportService {
     const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, id));
     const read = this.#options.readNested ?? readNestedFile;
     const seen = new Map<string, Timeline | null>();
-    const flat = await resolveNested(root, timeline, async (at, source) => {
-      const found = await read(at, source);
-      seen.set(source, found);
-      return found;
-    });
+    const flat = await resolveNested(
+      root,
+      timeline,
+      async (at, source) => {
+        const found = await read(at, source);
+        seen.set(source, found);
+        return found;
+      },
+      fps,
+    );
     const hit = transformedProgram(timeline, (source) => seen.get(source) ?? null, [`timelines/${timeline.id}.json`]);
     if (hit) {
       const where = hit.timeline === timeline.id ? "" : ` --timeline ${hit.timeline}`;
       throw new RpcError(
         ErrorCode.ExportUnsupported,
-        `Clip ${hit.clip} nests ${hit.source}, which shows multicam shots, and has a transform (x, y, scale or opacity). ` +
-          `Shots fill the frame and cannot be placed under a transform. Clear it: \`frameshell clip set ${hit.clip}${where} --x 0 --y 0 --scale 1 --opacity 1\`.`,
+        `Clip ${hit.clip} nests ${hit.source}, which shows multicam shots, and has a transform or keys (x, y, scale or opacity). ` +
+          `Shots fill the frame and cannot be placed under a transform. Clear it: \`frameshell clip set ${hit.clip}${where} --x 0 --y 0 --scale 1 --opacity 1\`, ` +
+          `and any keys of those: \`frameshell clip key ${hit.clip}${where} --prop <x|y|scale|opacity> --clear\`.`,
         { timeline: hit.timeline, clip: hit.clip },
       );
     }

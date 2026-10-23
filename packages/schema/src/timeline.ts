@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { ElementsSchema } from "./element-styles.js";
 
 /** Canonical `$schema` URL for `timelines/*.json`. */
 export const TIMELINE_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/timeline.json`;
@@ -162,6 +163,7 @@ export const AdapterClipSchema = z.strictObject({
   in: Seconds.optional().describe("Composition seconds of the first frame. Default 0."),
   duration: z.number().positive().describe("Seconds on the timeline."),
   props: z.record(z.string(), z.unknown()).optional().describe("Adapter-specific properties, validated by the adapter."),
+  elements: ElementsSchema.optional(),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */

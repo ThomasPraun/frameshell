@@ -41,6 +41,16 @@ export interface ProbedElement {
   generated?: boolean;
 }
 
+/** An element an adjustment can move (ADR 0021), as the probe's `movable` and `element` describe it. */
+export interface MovableElement {
+  element: ProbedElement;
+  /**
+   * Page pixels per CSS pixel of a `translate` on the element: the scale its
+   * parent is drawn at, 1 unless the composition scales its stage to the page.
+   */
+  unit: number;
+}
+
 /** Most ancestors a point probe returns after the hit element. */
 export const PROBE_MAX_DEPTH = 8;
 /** Most elements a rectangle probe returns. */
@@ -55,6 +65,13 @@ export const PROBE_MAX_ELEMENTS = 10;
  *   the layer below shows).
  * - `within(x0, y0, x1, y1, max)`: up to `max` elements that paint and lie
  *   at least half inside the rectangle, topmost (latest in the document) first.
+ * - `movable(x, y, depth)`: the element an element adjustment (ADR 0021) moves
+ *   for pixel (`x`, `y`): the hit of `at` without the page background, an
+ *   inline hit stepped up to its nearest ancestor that is not inline, then up
+ *   to `depth` ancestors below `body`; as a {@link MovableElement}, null when
+ *   nothing paints there.
+ * - `element(selector)`: the first element matching `selector`, as a
+ *   {@link MovableElement}; null when none does or it is not valid.
  *
  * An element paints when it is visible (no `display: none`, `visibility:
  * hidden` or zero opacity on it or an ancestor) and draws something itself:
@@ -145,11 +162,28 @@ export const PROBE_SCRIPT = `(function () {
       adapter: adapter
     };
   };
+  var hitAt = function (x, y) {
+    var hits = document.elementsFromPoint(x, y);
+    for (var i = 0; i < hits.length; i++) if (counts(hits[i])) return hits[i];
+    return null;
+  };
+  var below = function (element) { return element && element !== document.body && element !== document.documentElement; };
+  // translate and scale do nothing on a non-replaced inline box: its nearest ancestor that is not inline moves.
+  var block = function (element) {
+    for (var e = element; below(e); e = e.parentElement) {
+      if (e.ownerSVGElement || REPLACED.test(e.tagName.toLowerCase()) || getComputedStyle(e).display !== "inline") return e;
+    }
+    return element;
+  };
+  // Page px per CSS px of a translate on the element: the scale its parent is drawn at (a stage scaled to fit).
+  var unit = function (element) {
+    var parent = element.parentElement;
+    return parent && parent.offsetWidth > 0 ? parent.getBoundingClientRect().width / parent.offsetWidth : 1;
+  };
+  var movable = function (element) { return { element: describe(element), unit: unit(element) }; };
   window.__frameshellProbe = {
     at: function (x, y, depth) {
-      var hits = document.elementsFromPoint(x, y);
-      var hit = null;
-      for (var i = 0; i < hits.length; i++) if (counts(hits[i])) { hit = hits[i]; break; }
+      var hit = hitAt(x, y);
       // The page's own background: what the user sees there is the composition, not the layer below.
       if (!hit && document.body && visible(document.body) && paints(document.body)) hit = document.body;
       if (!hit && visible(document.documentElement) && paints(document.documentElement)) hit = document.documentElement;
@@ -172,6 +206,18 @@ export const PROBE_SCRIPT = `(function () {
         found.push(describe(element));
       }
       return found;
+    },
+    movable: function (x, y, depth) {
+      var hit = hitAt(x, y);
+      if (!hit) return null;
+      var element = block(hit);
+      for (var up = 0; up < depth && below(element.parentElement); up++) element = element.parentElement;
+      return movable(element);
+    },
+    element: function (selector) {
+      var element = null;
+      try { element = document.querySelector(selector); } catch (error) { element = null; }
+      return element ? movable(element) : null;
     }
   };
 })();`;

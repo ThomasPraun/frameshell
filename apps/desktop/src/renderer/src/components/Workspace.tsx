@@ -195,11 +195,12 @@ export function Workspace({ project }: { project: ProjectView }) {
   // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
   useEffect(() => {
     let asking = false;
-    return askAgent.install(() => {
+    return askAgent.install((extra) => {
       if (asking) return;
       asking = true;
       void composeReference()
-        .then(({ lines, warning }) => {
+        .then(({ lines: reference, warning }) => {
+          const lines = [...reference, ...extra];
           if (lines.length === 0) {
             setNotice(t.workspace.askNothing);
             return;

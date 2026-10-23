@@ -456,3 +456,182 @@ describe("direct file edits (#318)", () => {
     expect((await ui.request("proposal.status", { cwd: dir })).proposal).toMatchObject({ author: "file", state: "ready", label: "Edit timelines/main.json" });
   });
 });
+
+describe("new timeline files and aborted transactions (#328)", () => {
+  /** A valid timeline file for `timelines/<id>.json`: main's content with one track named `name`. */
+  function timelineText(read: () => string, name: string): string {
+    const timeline = JSON.parse(read());
+    timeline.tracks = [{ ...timeline.tracks[0], id: "t_new", name }];
+    return `${JSON.stringify(timeline, null, 2)}\n`;
+  }
+
+  it("review off: a new timeline file is written at once and tx abort undoes at once, as before", async () => {
+    const { dir, read, connect, t1, events } = await setup();
+    const agent = await connect("cli/test", "term-1");
+    const extra = join(dir, "timelines", "extra.json");
+    const content = timelineText(read, "Extra");
+    await agent.request("file.write", { path: extra, content });
+    expect(readFileSync(extra, "utf8")).toBe(content);
+    const direct = join(dir, "timelines", "direct.json");
+    writeFileSync(direct, timelineText(read, "Direct"));
+    expect(names(await agent.request("timeline.show", { cwd: dir, timeline: "direct" }))).toEqual(["Direct"]);
+    expect(existsSync(direct)).toBe(true);
+
+    const { tx } = await agent.request("tx.begin", { label: "Try" });
+    await agent.request("track.set", { cwd: dir, track: t1, name: "Wide" });
+    const aborted = await agent.request("tx.abort", {});
+    expect(aborted).toMatchObject({ tx, proposal: null, reverted: [{ timeline: "main", operation: { op: "revert", tx } }] });
+    expect(JSON.parse(read()).tracks[0].name).toBe("Camera");
+    expect(events).toEqual([]);
+    expect(existsSync(join(dir, ".frameshell", "proposals"))).toBe(false);
+  });
+
+  it("keeps an agent's new timeline file with its proposal, out of timelines/, until accepted", async () => {
+    const { dir, read, connect, ui } = await setup({ review: true });
+    const agent = await connect("cli/test");
+    const extra = join(dir, "timelines", "extra.json");
+    const content = timelineText(read, "Extra");
+    expect(await agent.request("file.write", { path: extra, content })).toEqual({ project: dir, path: "timelines/extra.json" });
+    expect(existsSync(extra)).toBe(false);
+    const { proposal } = await ui().request("proposal.status", { cwd: dir });
+    expect(proposal).toMatchObject({ author: "cli", state: "ready", operations: 1, timelines: ["extra"] });
+    const stored = JSON.parse(readFileSync(join(dir, ".frameshell", "proposals", `${proposal!.tx}.json`), "utf8"));
+    expect(stored.files).toEqual([{ timeline: "extra", text: content }]);
+    // Not a timeline yet; the proposal view shows it.
+    expect((await rejection(ui().request("timeline.show", { cwd: dir, timeline: "extra" }))).code).toBe(ErrorCode.TimelineNotFound);
+    const shown = await ui().request("timeline.show", { cwd: dir, timeline: "extra", view: "proposal" });
+    expect(shown).toMatchObject({ view: "proposal", proposal: { tx: proposal!.tx, state: "ready" } });
+    expect(names(shown)).toEqual(["Extra"]);
+    expect((await ui().request("proposal.diff", { cwd: dir })).timelines).toMatchObject([{ timeline: "extra", target: proposal!.tx, clips: [] }]);
+    // One at a time, as for any proposal.
+    const other = join(dir, "timelines", "other.json");
+    expect((await rejection(agent.request("file.write", { path: other, content }))).code).toBe(ErrorCode.ProposalPending);
+
+    expect(await ui().request("proposal.accept", { cwd: dir, tx: proposal!.tx })).toEqual({ tx: proposal!.tx, operations: [] });
+    expect(readFileSync(extra, "utf8")).toBe(content);
+    expect(names(await ui().request("timeline.show", { cwd: dir, timeline: "extra" }))).toEqual(["Extra"]);
+    expect(existsSync(join(dir, ".frameshell", "proposals", `${proposal!.tx}.json`))).toBe(false);
+  });
+
+  it("reject discards the new file; the author's rewrite while building replaces it; operations on it wait", async () => {
+    const { dir, read, connect, restart } = await setup({ review: true });
+    const agent = await connect("cli/test", "term-1");
+    const extra = join(dir, "timelines", "extra.json");
+    await agent.request("tx.begin", { label: "Add extra" });
+    await agent.request("file.write", { path: extra, content: timelineText(read, "First") });
+    await agent.request("file.write", { path: extra, content: timelineText(read, "Second") });
+    expect(names(await agent.request("timeline.show", { cwd: dir, timeline: "extra" }))).toEqual(["Second"]);
+    const refused = await rejection(agent.request("track.add", { cwd: dir, timeline: "extra", kind: "video", name: "More" }));
+    expect(refused.code).toBe(ErrorCode.TimelineNotFound);
+    expect(refused.message).toContain("is new in proposal");
+    const { tx } = await agent.request("tx.commit", {});
+    expect(existsSync(extra)).toBe(false);
+
+    const ui = await restart();
+    expect((await ui.request("proposal.status", { cwd: dir })).proposal).toMatchObject({ tx, state: "ready", operations: 1, timelines: ["extra"] });
+    await ui.request("proposal.reject", { cwd: dir, tx });
+    expect(existsSync(extra)).toBe(false);
+    expect((await rejection(ui.request("timeline.show", { cwd: dir, timeline: "extra" }))).code).toBe(ErrorCode.TimelineNotFound);
+    const kept = JSON.parse(readFileSync(join(dir, ".frameshell", "proposals", `${tx}.json`), "utf8"));
+    expect(kept).toMatchObject({ state: "rejected", files: [{ timeline: "extra" }] });
+    expect(names(JSON.parse(kept.files[0].text))).toEqual(["Second"]);
+  });
+
+  it("an agent's write over an unreadable timeline file waits too; the broken file stays until accepted", async () => {
+    const { dir, read, connect, ui } = await setup({ review: true });
+    const broken = join(dir, "timelines", "broken.json");
+    writeFileSync(broken, "{ not json");
+    expect((await rejection(ui().request("timeline.show", { cwd: dir, timeline: "broken" }))).code).toBe(ErrorCode.InvalidProjectFile);
+    const agent = await connect("cli/test");
+    const content = timelineText(read, "Fixed");
+    await agent.request("file.write", { path: broken, content });
+    expect(readFileSync(broken, "utf8")).toBe("{ not json");
+    const { proposal } = await ui().request("proposal.status", { cwd: dir });
+    expect(proposal).toMatchObject({ timelines: ["broken"], state: "ready" });
+    await ui().request("proposal.accept", { cwd: dir, tx: proposal!.tx });
+    expect(readFileSync(broken, "utf8")).toBe(content);
+  });
+
+  it("the person writing the same new timeline makes the proposal stale", async () => {
+    const { dir, read, connect, ui } = await setup({ review: true });
+    const agent = await connect("cli/test");
+    const extra = join(dir, "timelines", "extra.json");
+    await agent.request("file.write", { path: extra, content: timelineText(read, "Agent") });
+    const waiting = agent.request("proposal.wait", { cwd: dir });
+    await ui().request("file.write", { path: extra, content: timelineText(read, "Person") });
+    expect(await waiting).toMatchObject({ outcome: "stale", conflicts: ["extra"] });
+    expect(names(JSON.parse(readFileSync(extra, "utf8")))).toEqual(["Person"]);
+  });
+
+  it("a timeline file created on disk becomes a ready proposal and leaves timelines/; accept puts it back", async () => {
+    const { dir, read, ui, events } = await setup({ review: true });
+    const extra = join(dir, "timelines", "extra.json");
+    const content = timelineText(read, "Direct");
+    writeFileSync(extra, content);
+    await until(() => events.some((event) => event.author === "file" && event.state === "ready"), "file proposal");
+    await until(() => !existsSync(extra), "file kept aside");
+    const { proposal } = await ui().request("proposal.status", { cwd: dir });
+    expect(proposal).toMatchObject({ label: "Add timelines/extra.json", author: "file", state: "ready", timelines: ["extra"] });
+    expect((await rejection(ui().request("timeline.show", { cwd: dir, timeline: "extra" }))).code).toBe(ErrorCode.TimelineNotFound);
+    await ui().request("proposal.accept", { cwd: dir, tx: proposal!.tx });
+    expect(readFileSync(extra, "utf8")).toBe(content);
+    expect(names(await ui().request("timeline.show", { cwd: dir, timeline: "extra" }))).toEqual(["Direct"]);
+  });
+
+  it("a timeline file created on disk while another proposal is open is rejected with proposal-pending and removed", async () => {
+    const { dir, read, connect, t1 } = await setup({ review: true });
+    const watcher = await connect("cli/test", "watcher");
+    await watcher.request("events.subscribe", { cwd: dir, events: ["timeline.rejected"] });
+    const rejected = new Promise<EventParams<"timeline.rejected">>((resolve) => watcher.on("timeline.rejected", resolve));
+    const agent = await connect("cli/test");
+    await agent.request("track.set", { cwd: dir, track: t1, name: "Wide" });
+    const extra = join(dir, "timelines", "extra.json");
+    writeFileSync(extra, timelineText(read, "Direct"));
+    const event = await rejected;
+    expect(event).toMatchObject({ reason: "proposal-pending", timeline: "extra", current: null });
+    expect(names(JSON.parse(readFileSync(join(dir, event.preserved), "utf8")))).toEqual(["Direct"]);
+    await until(() => !existsSync(extra), "file removed");
+  });
+
+  it("tx abort of operations applied before review mode was on proposes the undo instead of applying it", async () => {
+    const { dir, read, connect, ui, t1, journalLines } = await setup();
+    const agent = await connect("cli/test", "term-1");
+    const { tx } = await agent.request("tx.begin", { label: "Rework" });
+    await agent.request("track.set", { cwd: dir, track: t1, name: "Wide" });
+    await ui().request("review.set", { cwd: dir, enabled: true });
+    // After the switch the same transaction's next change builds a proposal, which abort drops.
+    await agent.request("track.add", { cwd: dir, kind: "video", name: "Close" });
+    const before = read();
+    const journaled = journalLines();
+
+    const aborted = await agent.request("tx.abort", {});
+    expect(aborted).toMatchObject({ tx, reverted: [], proposal: { state: "ready" } });
+    const undo = aborted.proposal!.tx;
+    expect(undo).not.toBe(tx);
+    expect(read()).toBe(before);
+    expect(journalLines()).toEqual(journaled);
+    expect((await rejection(agent.request("tx.commit", {}))).code).toBe(ErrorCode.TransactionState);
+    const { proposal, decisions } = await ui().request("proposal.status", { cwd: dir });
+    expect(proposal).toMatchObject({ tx: undo, label: 'Abort "Rework"', author: "cli:term-1", state: "ready", operations: 1, timelines: ["main"] });
+    expect(decisions[0]).toMatchObject({ tx, outcome: "aborted" });
+    expect(names(await ui().request("timeline.show", { cwd: dir, timeline: "main", view: "proposal" }))).toEqual(["Camera", "Music"]);
+
+    await ui().request("proposal.accept", { cwd: dir, tx: undo });
+    expect(JSON.parse(read()).tracks.map((track: { name: string }) => track.name)).toEqual(["Camera", "Music"]);
+    expect(JSON.parse(journalLines().at(-1)!)).toMatchObject({ op: "revert", args: { target: tx }, author: "cli:term-1", tx: undo, proposal: undo });
+  });
+
+  it("tx abort fails with ProposalPending while another proposal is open; the transaction stays open", async () => {
+    const { dir, connect, ui, t1, t2, read } = await setup();
+    const agent = await connect("cli/test", "term-1");
+    const { tx } = await agent.request("tx.begin", { label: "Rework" });
+    await agent.request("track.set", { cwd: dir, track: t1, name: "Wide" });
+    await ui().request("review.set", { cwd: dir, enabled: true });
+    const other = await connect("cli/test");
+    const pending = await other.request("track.set", { cwd: dir, track: t2, name: "Score" });
+    expect((await rejection(agent.request("tx.abort", {}))).code).toBe(ErrorCode.ProposalPending);
+    expect(JSON.parse(read()).tracks[0].name).toBe("Wide");
+    await ui().request("proposal.reject", { cwd: dir, tx: pending.operation.tx });
+    expect(await agent.request("tx.abort", {})).toMatchObject({ tx, reverted: [], proposal: { state: "ready" } });
+  });
+});

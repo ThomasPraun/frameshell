@@ -70,6 +70,7 @@ const api: FrameshellApi = {
     edit: (timeline, edits, options) => invokeOutcome(Channel.timelineEdit, timeline, edits, options),
     replaceImage: (timeline, clip) => invokeOutcome(Channel.timelineReplaceImage, timeline, clip),
     addLayers: (timeline, assets) => invokeOutcome(Channel.timelineAddLayers, timeline, assets),
+    cutOut: (timeline, clip, mask) => invokeOutcome(Channel.timelineCutOut, timeline, clip, mask),
     exportImage: (timeline) => invokeOutcome(Channel.timelineExportImage, timeline),
     settle: () => invokeOutcome(Channel.timelineSettle),
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
@@ -113,6 +114,11 @@ const api: FrameshellApi = {
   context: {
     captureFrame: (at) => invokeOutcome(Channel.contextCaptureFrame, at),
     writeDetails: (name, content) => invokeOutcome(Channel.contextWriteDetails, name, content),
+  },
+  segment: {
+    prepare: (assets) => invokeOutcome(Channel.segmentPrepare, assets),
+    point: (at, x, y) => invokeOutcome(Channel.segmentPoint, at, x, y),
+    onProgress: (listener) => subscribe(Channel.segmentProgress, listener),
   },
   clips: {
     renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),

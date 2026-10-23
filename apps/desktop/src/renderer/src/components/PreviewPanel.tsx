@@ -1,12 +1,16 @@
+import type { ElementAdjust } from "@frameshell/schema";
 import type { Placement, Size } from "@frameshell/schema/composite";
-import { type CSSProperties, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { FRAME_IMAGE_SHORTCUT, imageFromFrame } from "../frame-image.js";
+import { cutOut, pickedCutout } from "../preview/cut-out.js";
+import { holdSettled } from "../preview/element-edit.js";
+import { elementMode, useElementMode } from "../preview/element-mode.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type PlaceholderSpan, type Program, placeholdersAt } from "../preview/program.js";
-import { dragPlacement, frameBox as placedBox, layerAt, layerBox, placementEdit } from "../preview/transform-edit.js";
+import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersAt, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useProjectKind, useResolution } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
@@ -18,7 +22,8 @@ import { PickLayer } from "./PickLayer.js";
 import { forgetLivePages } from "../preview/live-pages.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { DetachButton } from "./DetachControls.js";
-import { LivePreview } from "./LivePreview.js";
+import { ElementLayer } from "./ElementLayer.js";
+import { LivePreview, type LiveShown } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
 import { GroupInspector } from "./ShotInspector.js";
@@ -31,6 +36,10 @@ import { rich, t } from "../i18n.js";
 const CANVAS_SHORT_SIDE = 540;
 /** Frame of the `vertical-1080x1920` export preset, which the 9:16 view shows. */
 const VERTICAL_FRAME = { width: 1080, height: 1920 };
+/** A clip without element adjustments. */
+const NO_ELEMENTS: Readonly<Record<string, ElementAdjust>> = {};
+/** Longest an element drag's page waits for the new render or live page before it goes anyway (ADR 0021), ms. */
+const HOLD_MAX_MS = 60_000;
 /** `FRAMESHELL_PREVIEW_PROBE=1` (main adds `?probe=1`): expose measurement hooks (ADR 0001 harness). */
 const PROBE = new URLSearchParams(location.search).get("probe") === "1";
 
@@ -54,6 +63,8 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * playhead's time; Escape clears it. Right-click opens "Ask agent".
  * A generated clip whose render is not ready plays its composition live
  * when it is the topmost picture and its adapter supports it (ADR 0010).
+ * Double-clicking a generated clip enters its elements (ADR 0021,
+ * {@link ElementLayer}); Escape leaves, as do playing and selecting another clip.
  * The 9:16 button shows the frame as a 9:16 export cuts it (multicam shots
  * reframed, other clips fitted as export fits them); handles, picking and
  * live pages stay in the project frame, so they are off there.
@@ -92,7 +103,8 @@ export function PreviewPanel({
     setPickTool((on) => !on);
   }, []);
   const { view } = useTimelineView(SELECTION_TIMELINE);
-  const [liveClip, setLiveClip] = useState<string | null>(null);
+  const [liveClip, setLiveClip] = useState<LiveShown | null>(null);
+  const mode = useElementMode();
   const [verticalOn, setVerticalOn] = useState(false);
   /** Offered for frames wider than tall: a portrait project already is 9:16 or close to it. */
   const verticalOffered = resolution.width > resolution.height && !still;
@@ -163,6 +175,7 @@ export function PreviewPanel({
       // Playback keys mean nothing in an image project; the picture is frame 0.
       const timed = !stillRef.current;
       if (event.key === "Escape" && here && doc?.fullscreenElement) leaveFullScreen(doc);
+      else if (event.key === "Escape" && elementMode.get().clip) elementMode.leave();
       else if ((event.key === "f" || event.key === "F") && !event.shiftKey && here) toggleFullScreen(panel);
       else if (!timed && [" ", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       else if (event.key === " " && !isTag(event.target, "BUTTON")) transport.toggle();
@@ -182,6 +195,31 @@ export function PreviewPanel({
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
   const live = useMemo(() => (program && !vertical ? liveTarget(program, frame) : null), [program, frame, vertical]);
+
+  // Element mode belongs to one paused frame of the project frame, and to the selected clip.
+  const { clips: selectedClips } = useSelection();
+  const editing = mode.clip !== null && selectedClips.length === 1 && selectedClips[0] === mode.clip;
+  useEffect(() => {
+    if (mode.clip && (playing || vertical || pickTool || !editing)) elementMode.leave();
+  }, [mode.clip, playing, vertical, pickTool, editing]);
+  useEffect(() => () => elementMode.leave(), [project.mediaUrl]);
+  // An element drag's page shows instead of the clip's render until the new render or live page is there.
+  useEffect(() => {
+    player.current?.hideClip(mode.held?.clip ?? null);
+  }, [mode.held]);
+  useEffect(() => {
+    if (mode.held && program && holdSettled(program, frame, mode.held, liveClip)) elementMode.release();
+  }, [mode.held, program, frame, liveClip]);
+  useEffect(() => {
+    if (!mode.held) return;
+    const view = windowOf(body.current);
+    const timer = view.setTimeout(() => elementMode.release(), HOLD_MAX_MS);
+    return () => view.clearTimeout(timer);
+  }, [mode.held]);
+  const elements = useMemo(() => {
+    const stored = view?.tracks.flatMap((track) => track.clips).find((clip) => clip.id === mode.clip)?.["elements"];
+    return typeof stored === "object" && stored !== null ? (stored as Record<string, ElementAdjust>) : NO_ELEMENTS;
+  }, [view, mode.clip]);
   return (
     <div className="preview-body" ref={body} data-testid="preview-body">
       <PanelHeader
@@ -216,26 +254,40 @@ export function PreviewPanel({
           data-vertical={vertical || undefined}
           role="img"
           aria-label={empty ? t.preview.emptyMonitor : still ? t.preview.pictureMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
-          onContextMenu={(event) =>
+          onContextMenu={(event) => {
+            const picked = still ? pickedCutout(selection.get()) : null;
             openAskMenu(
               event,
-              still || empty
-                ? []
-                : [{ label: t.preview.imageFromFrame, shortcut: FRAME_IMAGE_SHORTCUT, run: () => void imageFromFrame().catch((error: Error) => setNotice(error.message)) }],
-            )
-          }
+              picked
+                ? [{ label: t.preview.cutOut, run: () => void cutOut(picked).catch((error: Error) => setNotice(error.message)) }]
+                : still || empty
+                  ? []
+                  : [{ label: t.preview.imageFromFrame, shortcut: FRAME_IMAGE_SHORTCUT, run: () => void imageFromFrame().catch((error: Error) => setNotice(error.message)) }],
+            );
+          }}
         >
           <div className="safe-area action" />
           <div className="safe-area title" />
           {empty && <p className="preview-caption">{still ? t.preview.emptyPicture : t.preview.emptyCaption}</p>}
           {program && <Placeholder program={program} frame={frame} output={shownFrame} />}
           {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
-          <LivePreview target={live} timeline={view?.timeline ?? null} time={time} fps={fps} resolution={resolution} onLive={setLiveClip} />
-          {program && <RenderSlates program={program} frame={frame} live={liveClip} />}
+          <LivePreview
+            target={live}
+            timeline={view?.timeline ?? null}
+            time={time}
+            fps={fps}
+            resolution={resolution}
+            hidden={live !== null && mode.held?.clip === live.clip}
+            onLive={setLiveClip}
+          />
+          {program && <RenderSlates program={program} frame={frame} live={mode.held?.clip ?? liveClip?.clip ?? null} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} />
-          {program && !playing && !vertical && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
-          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} />
+          {program && !playing && !vertical && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
+          {program && editing && view && !playing && !vertical && !pickTool && (
+            <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
+          )}
+          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
         </div>
       </div>
       <Inspector />
@@ -387,7 +439,8 @@ const timelineClip = (id: string) => id.split("/")[0]!;
  * clip while it shows. A drag moves a ghost of its box; release saves the
  * placement as one `clip.set` (the picture follows once the daemon has it).
  * Clips of nested timelines select their nested clip and get no handles:
- * their placement is composed, not stored.
+ * their placement is composed, not stored. A double-click on a generated
+ * clip of the timeline enters its elements (ADR 0021).
  */
 function Handles({
   program,
@@ -432,6 +485,19 @@ function Handles({
     });
   };
 
+  // The generated clip the user sees at that pixel, and nothing above it that paints there.
+  const enterAt = (event: MouseEvent<HTMLDivElement>) => {
+    const rect = frameRef.current!.getBoundingClientRect();
+    const point = { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
+    void alphaAt(point).then((shown) => {
+      const alpha = shown.frame === frame ? (layer: number) => shown.layers.get(layer) : undefined;
+      const hit = layersAt(program, frame, point, alpha).find((candidate) => candidate.paints);
+      if (!hit || hit.kind !== "generated" || hit.clip.includes("/")) return;
+      selection.selectClips([hit.clip], "preview");
+      elementMode.enter(hit.clip);
+    });
+  };
+
   const onHandleDown = (kind: "move" | "scale") => (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || !target) return;
     event.stopPropagation();
@@ -468,7 +534,7 @@ function Handles({
   const editable = target !== null && selected !== null && !selected.includes("/");
   const shown = editable ? (ghost?.clip === selected ? placedBox(program.resolution, target.size, ghost.placement) : target.box) : null;
   return (
-    <div className="preview-hit" onPointerDown={onSelect} data-testid="preview-hit">
+    <div className="preview-hit" onPointerDown={onSelect} onDoubleClick={enterAt} data-testid="preview-hit">
       {shown && (
         <div
           className="layer-handles"

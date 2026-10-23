@@ -1,8 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
+import { classifyContext } from "../src/context.js";
+import { encodeGrayPng } from "../src/segment/png.js";
+import type { PhotoPoint } from "../src/segment/segmenter.js";
 import { type InspectOptions, InspectService } from "../src/inspect/service.js";
 import { tempDir } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
@@ -36,6 +39,10 @@ function service(overrides: Partial<InspectOptions> = {}): InspectService {
     },
     chrome: async () => {
       throw new Error("Chrome must not start");
+    },
+    imageProject: async () => false,
+    segment: async () => {
+      throw new Error("nothing is segmented here");
     },
     ...overrides,
   });
@@ -103,6 +110,95 @@ describe("inspect.point", () => {
     await expect(service().point("/p", { timeline: "main", at: 4, x: 0.5, y: 0.5 })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
     await expect(service().point("/p", { timeline: "main", at: 1, x: 2000, y: 10, unit: "pixel" })).rejects.toThrow(/outside the 1920x1080 frame/);
     await expect(service().point("/p", { timeline: "main", at: 1, x: 1.5, y: 0.5 })).rejects.toThrow(/not a fraction/);
+  });
+});
+
+// Seam under test: `inspect.point` with `segment` (ADR 0022): the point mapped through the photo's placement into
+// asset pixels, the masks written as PNGs under `.frameshell/context/`, and why nothing was segmented elsewhere.
+describe("inspect.point segment", () => {
+  const PHOTO = { width: 400, height: 200 };
+  /** A 400x200 photo fitted into 1920x1080 (1920x960), halved, moved 100 px right and 50 px down. */
+  const photoTimeline = {
+    ...timeline,
+    tracks: [
+      { id: "v1", kind: "video", clips: [{ id: "c_photo", type: "media", asset: "assets/photo.jpg", start: 0, in: 0, out: 5, transform: { scale: 0.5, x: 100, y: 50 } }] },
+    ],
+  } as Timeline;
+
+  function fakeMasks(width: number, height: number) {
+    const masks = [8, 40, 120].map((side, index) => {
+      const mask = new Uint8Array(width * height);
+      for (let y = 0; y < side; y++) mask.fill(255, y * width, y * width + side);
+      return { mask, bbox: [0, 0, side, side] as [number, number, number, number], area: (side * side) / (width * height), score: 0.5 + index * 0.1 };
+    });
+    return { width, height, masks, chosen: 2 };
+  }
+
+  function photoService(calls: PhotoPoint[], overrides: Partial<InspectOptions> = {}): InspectService {
+    return service({
+      timeline: async () => ({ timeline: photoTimeline, fps: 30 }),
+      pictureSize: async () => PHOTO,
+      imageProject: async () => true,
+      segment: async (_root, _asset, point) => {
+        calls.push(point);
+        return { ...fakeMasks(PHOTO.width, PHOTO.height), model: "mobilesam@abcdef12" };
+      },
+      ...overrides,
+    });
+  }
+
+  it("maps the point through the scaled, offset layer into asset pixels and writes three mask PNGs", async () => {
+    const root = tempDir();
+    const calls: PhotoPoint[] = [];
+    // Layer box 960x480 centered at (1060, 590): left 580, top 350. Pixel (1060, 590) is its center.
+    const point = await photoService(calls).point(root, { timeline: "main", at: 1, x: 1060, y: 590, unit: "pixel", segment: true });
+    expect(calls).toEqual([{ x: 200, y: 100 }]);
+    expect(point.target).toBe("c_photo");
+    expect(point.segment).toMatchObject({ asset: "assets/photo.jpg", size: PHOTO, model: "mobilesam@abcdef12", chosen: 2 });
+    const names = point.segment!.masks.map((mask) => mask.mask);
+    expect(names).toEqual([1, 2, 3].map((k) => `.frameshell/context/m_0030_200_100_${k}.png`));
+    expect(point.segment!.masks[0]).toMatchObject({ bbox: [0, 0, 8, 8], area: 0.0008, score: 0.5 });
+    // 8 asset px = 19.2 project px from the layer's corner (580, 350).
+    expect(point.segment!.masks[0]!.frameBox).toEqual([0.3021, 0.3241, 0.3121, 0.3419]);
+    for (const name of names) {
+      const file = name.split("/").pop()!;
+      expect(readFileSync(join(root, ...name.split("/"))).subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      expect(classifyContext(file, false)).toEqual({ kind: "context", key: file });
+    }
+    // The same click gives the same files.
+    const again = await photoService([]).point(root, { timeline: "main", at: 1, x: 1060, y: 590, unit: "pixel", segment: true });
+    expect(again.segment!.masks.map((mask) => mask.mask)).toEqual(names);
+  });
+
+  it("encodes a mask as an 8-bit grayscale PNG of the asset's size", () => {
+    const png = encodeGrayPng(new Uint8Array([0, 255, 255, 0]), 2, 2);
+    expect([png.readUInt32BE(16), png.readUInt32BE(20), png[24], png[25]]).toEqual([2, 2, 8, 0]);
+    expect(() => encodeGrayPng(new Uint8Array(3), 2, 2)).toThrow();
+  });
+
+  it("says why nothing is segmented: video project, nothing there, not a still, generated clip", async () => {
+    const root = tempDir();
+    const calls: PhotoPoint[] = [];
+    const video = photoService(calls, { imageProject: async () => false });
+    expect(await video.point(root, { timeline: "main", at: 1, x: 0.5, y: 0.5, segment: true })).toMatchObject({ target: "c_photo", segmentUnavailable: "not an image project" });
+    expect(await photoService(calls).point(root, { timeline: "main", at: 1, x: 5, y: 5, unit: "pixel", segment: true })).toMatchObject({ target: null, segmentUnavailable: "black" });
+    const notStill = photoService(calls, {
+      segment: async () => {
+        throw new RpcError(ErrorCode.InvalidOperation, "segment: assets/photo.jpg is not a still image.");
+      },
+    });
+    expect(await notStill.point(root, { timeline: "main", at: 1, x: 0.5, y: 0.5, segment: true })).toMatchObject({ segmentUnavailable: "not a still image" });
+    const generated = service({ imageProject: async () => true });
+    expect(await generated.point(root, { timeline: "main", at: 2, x: 0.5, y: 0.5, segment: true })).toMatchObject({ target: "c_card", segmentUnavailable: "not a still image" });
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves `segment` out unless asked", async () => {
+    const calls: PhotoPoint[] = [];
+    const point = await photoService(calls).point(tempDir(), { timeline: "main", at: 1, x: 0.5, y: 0.5 });
+    expect(point).not.toHaveProperty("segment");
+    expect(point).not.toHaveProperty("segmentUnavailable");
+    expect(calls).toEqual([]);
   });
 });
 

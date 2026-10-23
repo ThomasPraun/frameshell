@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, nativeImage, protocol, screen, shell, utilityProcess } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { MethodResult, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
@@ -379,6 +379,12 @@ function projectWindowOf(base: BaseWindow | null | undefined): WindowState | und
 
 function send(contents: WebContents, channel: string, ...args: unknown[]): void {
   if (!contents.isDestroyed()) contents.send(channel, ...args);
+}
+
+/** Forward the daemon's progress of a segmentation call to the window that asked. */
+function segmentProgressTo(contents: WebContents): (progress: Progress) => void {
+  return ({ stage, fraction }) =>
+    send(contents, Channel.segmentProgress, { download: stage === "binary-download" || stage === "model-download", fraction: fraction ?? null });
 }
 
 /** Resolve `dir` to its project through the daemon and attach it to the window. */
@@ -1048,6 +1054,13 @@ function registerIpc(): void {
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
     }),
   );
+  ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const cut = await editor.alone(() => daemon.request("image.cutout", { cwd: project.dir, timeline: String(timeline), clip: String(clip), mask: String(mask) }));
+      return cut.clip;
+    }),
+  );
   ipcMain.handle(Channel.timelineExportImage, (event, timeline: string) =>
     outcome(async () => {
       const state = stateOf(event.sender);
@@ -1125,7 +1138,7 @@ function registerIpc(): void {
       const page = await daemon.request("clip.live", { cwd: project.dir, timeline, clip });
       // The project may have changed while the daemon answered: never serve a page of a project the window left.
       if (state.project !== project) throw new Error("The project changed while its live page loaded");
-      const url = livePages.issue({ project: project.dir, root: page.root, entry: page.entry, head: page.head });
+      const url = livePages.issue({ project: project.dir, root: page.root, entry: page.entry, head: page.head, ...(page.elementCss ? { elementCss: page.elementCss } : {}) });
       const previous = state.live.get(clip);
       if (previous) livePages.revoke(previous);
       state.live.set(clip, url);
@@ -1146,6 +1159,25 @@ function registerIpc(): void {
     outcome(async () =>
       captureContextFrame((method, params) => daemon.request(method, params), (await requireProject(stateOf(event.sender))).project.dir, at),
     ),
+  );
+
+  ipcMain.handle(Channel.segmentPrepare, (event, assets: string[]) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const onProgress = segmentProgressTo(event.sender);
+      for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
+    }),
+  );
+  ipcMain.handle(Channel.segmentPoint, (event, at: number, x: number, y: number) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const result = await daemon.request(
+        "inspect.point",
+        { cwd: project.dir, timeline: "main", at, x, y, unit: "fraction", segment: true },
+        { onProgress: segmentProgressTo(event.sender) },
+      );
+      return { segment: result.segment ?? null, unavailable: result.segmentUnavailable ?? null };
+    }),
   );
 
   ipcMain.handle(Channel.layoutLoad, async (event): Promise<Layout> => {

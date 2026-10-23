@@ -305,6 +305,13 @@ describe("clip.live", () => {
     expect(page.head).toContain('"green"');
   });
 
+  it("returns the sheet of the clip's elements for the host bridge (ADR 0021), and none without them", async () => {
+    const clip = await addLive("live-elements", {});
+    expect(await live(clip)).not.toHaveProperty("elementCss");
+    await conn.request("clip.set", { cwd: project, clip, elements: { "#title": { y: -40 }, "#a": { scale: 2 } } });
+    expect(await live(clip)).toMatchObject({ elementCss: "#a { scale: 2 !important; }\n#title { translate: 0px -40px !important; }" });
+  });
+
   it("addresses a clip inside a nested timeline as clip.renders does", async () => {
     const page = await live("c_nest/c_card");
     expect(page).toMatchObject({ clip: "c_nest/c_card", entry: "compositions/cards/live.html", key: (await renders()).get("c_nest/c_card")!.key });

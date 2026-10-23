@@ -28,6 +28,16 @@ _Avoid_: proposal (review mode's word), match, guess, auto-assignment
 A span of timeline time where a person speaks or is on screen, as `people ranges` returns it.
 _Avoid_: segment, turn (a turn is an angle's speaking stretch on the group clock), occurrence
 
+## Element adjustments (ADR 0021)
+
+**Element adjustment**:
+A move (`x`, `y`, composition CSS pixels) and uniform `scale` of one element inside a generated clip, stored in the clip's `elements` under the element's CSS selector and applied over the composition; the source file stays untouched.
+_Avoid_: override, patch, element transform (a clip's `transform` places the whole clip)
+
+**Element mode**:
+The preview state entered by double-clicking a generated clip, where handles move and scale the element under the cursor instead of the clip; Escape leaves it.
+_Avoid_: edit mode, isolation mode
+
 ## Transitions and keyframes (ADR 0018)
 
 **Transition**:
@@ -63,6 +73,20 @@ _Avoid_: still project, photo project
 **Layer**:
 A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
 _Avoid_: level, sheet
+
+## Photo segmentation (ADR 0022)
+
+**Mask**:
+A grayscale PNG at a photo's own pixel size marking one part of it (255 inside, 0 outside), written under `.frameshell/context/` when Pick segments a point; one click gives three, from a small part to the whole object.
+_Avoid_: selection, matte, segment (the reference part that names a mask)
+
+**Cut-out**:
+A new layer holding only the masked part of a photo, as a PNG with alpha in `assets/`, placed exactly over the photo (`image.cutout`).
+_Avoid_: sticker, extraction, crop
+
+**Background removal**:
+A cut-out followed by hiding or removing the photo layer under it; two steps, not an operation of its own.
+_Avoid_: remove bg, matting
 
 ## Review mode (ADR 0019)
 

@@ -879,6 +879,33 @@
                             "type": "string"
                           },
                           "additionalProperties": {}
+                        },
+                        "elements": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "description": "Horizontal move in composition CSS px. Default 0.",
+                                "type": "number"
+                              },
+                              "y": {
+                                "description": "Vertical move in composition CSS px. Default 0.",
+                                "type": "number"
+                              },
+                              "scale": {
+                                "description": "Uniform factor about the element's centre. Default 1.",
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "description": "Moves and scales of elements inside the composition, by CSS selector (composition CSS px), applied over the source file. E.g. `{\"#title\": {\"y\": -40, \"scale\": 1.2}}`."
                         }
                       },
                       "required": [

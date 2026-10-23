@@ -72,3 +72,18 @@ describe("clip render cache key", () => {
     expect(new Set(keys).size).toBe(variants.length);
   });
 });
+
+describe("clip render cache key with elements (ADR 0021)", () => {
+  it("is the old key when the field is absent or empty, and changes with any adjustment", () => {
+    const key = clipCacheKey(base);
+    expect(clipCacheKey({ ...base, clip: { ...clip, elements: {} } })).toBe(key);
+    const adjusted = clipCacheKey({ ...base, clip: { ...clip, elements: { "#title": { y: -40 } } } });
+    expect(adjusted).not.toBe(key);
+    expect(clipCacheKey({ ...base, clip: { ...clip, elements: { "#title": { y: -41 } } } })).not.toBe(adjusted);
+    expect(clipCacheKey({ ...base, clip: { ...clip, elements: { "#title": { y: -40 } } } })).toBe(adjusted);
+  });
+
+  it("keeps the key the recipe gave before `elements` existed", () => {
+    expect(clipCacheKey(base)).toBe("860bfe02caf248cce3c57980b63d9441");
+  });
+});

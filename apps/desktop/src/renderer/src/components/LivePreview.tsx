@@ -8,6 +8,12 @@ import { t } from "../i18n.js";
 const TO_PAGE = "frameshell-preview";
 const FROM_PAGE = "frameshell-live";
 
+/** The clip whose live page shows, and the render key the page was built for. */
+export interface LiveShown {
+  clip: string;
+  key: string;
+}
+
 /** Live page of one clip render key: loading, loaded at `url`, or failed (the slate stays). */
 type PageState = { status: "loading" } | { status: "loaded"; url: string } | { status: "failed"; error: string };
 
@@ -18,7 +24,9 @@ type PageState = { status: "loading" } | { status: "loaded"; url: string } | { s
  * is asked for once per clip and render key, so a new key (the composition
  * or its props changed) reloads it; a clip whose adapter has no live
  * preview, or whose page fails, keeps its slate. `onLive` names the clip
- * while its page shows, so the slate can step aside; null otherwise.
+ * and key while its page shows, so the slate can step aside; null otherwise.
+ * `hidden` keeps the page loaded but unseen, while an element drag's page
+ * shows that clip instead (ADR 0021).
  */
 export function LivePreview({
   target,
@@ -26,6 +34,7 @@ export function LivePreview({
   time,
   fps,
   resolution,
+  hidden = false,
   onLive,
 }: {
   target: LiveTarget | null;
@@ -33,7 +42,8 @@ export function LivePreview({
   time: number;
   fps: number;
   resolution: Size;
-  onLive: (clip: string | null) => void;
+  hidden?: boolean;
+  onLive: (live: LiveShown | null) => void;
 }) {
   const pages = useRef(new Map<string, PageState>());
   const [, setVersion] = useState(0);
@@ -65,6 +75,7 @@ export function LivePreview({
       time={time}
       fps={fps}
       resolution={resolution}
+      hidden={hidden}
       onLive={onLive}
       onError={(error) => {
         pages.current.set(id, { status: "failed", error });
@@ -80,6 +91,7 @@ function LiveFrame({
   time,
   fps,
   resolution,
+  hidden,
   onLive,
   onError,
 }: {
@@ -88,7 +100,8 @@ function LiveFrame({
   time: number;
   fps: number;
   resolution: Size;
-  onLive: (clip: string | null) => void;
+  hidden: boolean;
+  onLive: (live: LiveShown | null) => void;
   onError: (error: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -131,8 +144,8 @@ function LiveFrame({
   }, [ready, seconds]);
 
   useEffect(() => {
-    onLive(ready ? target.clip : null);
-  }, [ready, target.clip, onLive]);
+    onLive(ready ? { clip: target.clip, key: target.key } : null);
+  }, [ready, target.clip, target.key, onLive]);
   useEffect(() => () => onLive(null), [onLive]);
 
   const percent = (value: number) => `${value * 100}%`;
@@ -148,7 +161,7 @@ function LiveFrame({
         top: percent(target.box.top),
         width: percent(target.box.width),
         height: percent(target.box.height),
-        opacity: ready ? target.opacity : 0,
+        opacity: ready && !hidden ? target.opacity : 0,
       }}
     >
       <iframe

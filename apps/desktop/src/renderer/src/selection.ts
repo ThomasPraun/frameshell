@@ -1,4 +1,4 @@
-import type { ProbedElement } from "@frameshell/protocol";
+import type { ProbedElement, SegmentedPoint } from "@frameshell/protocol";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -123,6 +123,8 @@ export interface SelectedPoint {
   readonly elements: readonly ProbedElement[];
   /** Why the target's elements are unknown (no live page: untrusted project, no adapter); null otherwise. */
   readonly unavailable: string | null;
+  /** The masks of the photo part under the point (`inspect.point` with `segment`, ADR 0022); absent otherwise. */
+  readonly segment?: SegmentedPoint | undefined;
 }
 
 /** A clip under a preview region. */
@@ -411,6 +413,11 @@ export const selection = {
   /** Replace the selection with points picked on the preview (empty clears it). */
   selectPoints(points: readonly SelectedPoint[], origin: SelectionOrigin): void {
     replace(points.length === 0 ? EMPTY : { ...EMPTY, points: [...points], origin });
+  },
+  /** Replace the picked points with updated copies of them (a point's masks arrived or changed size); keeps the origin. */
+  replacePoints(points: readonly SelectedPoint[], origin: SelectionOrigin): void {
+    if (current.points.length === 0) return;
+    replace({ ...current, points: [...points], origin });
   },
   /** Add a picked point (Shift+click), keeping points picked before, at any time. */
   addPoint(point: SelectedPoint, origin: SelectionOrigin): void {

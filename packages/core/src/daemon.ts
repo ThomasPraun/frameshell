@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type EventName,
@@ -44,7 +44,18 @@ import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
-import { FACE_DETECTION_MODEL, FACE_RECOGNITION_MODEL, ONNX_RUNTIME_WEB, SPEAKER_EMBEDDING_MODEL } from "./binaries/manifest.js";
+import {
+  FACE_DETECTION_MODEL,
+  FACE_RECOGNITION_MODEL,
+  ONNX_RUNTIME_WEB,
+  PHOTO_SEGMENTATION_DECODER_MODEL,
+  PHOTO_SEGMENTATION_ENCODER_MODEL,
+  SPEAKER_EMBEDDING_MODEL,
+} from "./binaries/manifest.js";
+import { workerSegmentEngine } from "./segment/engine.js";
+import type { SegmentEngine } from "./segment/segmenter.js";
+import { checkMask, cutoutTransform, freeCutoutName, isMediaClip, renderCutout, resolveMask } from "./segment/cutout.js";
+import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
@@ -67,7 +78,7 @@ import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
-import { resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
+import { resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { writeContext } from "./context.js";
@@ -107,6 +118,8 @@ export interface DaemonOptions {
   peopleScanner?: PeopleScanner;
   /** Speaker embeddings for `people.suggest` voice prints. Defaults to CAM++ on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   voiceEmbedder?: VoiceEmbedder;
+  /** Photo segmentation model for `segment.prepare`. Defaults to MobileSAM on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  segmentEngine?: SegmentEngine;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -193,6 +206,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     binaries,
     jobs,
     onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
+  });
+  const segmentModel = options.segmentEngine?.model ?? SEGMENT_MODEL_PIN;
+  const segmentation = new SegmentService({
+    probe: (dir, asset) => media.probe(dir, asset),
+    hash: (dir, asset) => media.hash(dir, asset),
+    ffmpeg: async (dir, onProgress) => binaries.ensure("ffmpeg", await projectBinaries(dir), { onProgress }),
+    engine: async (dir, onProgress) =>
+      options.segmentEngine ??
+      workerSegmentEngine({
+        runtime: await binaries.ensure(ONNX_RUNTIME_WEB, await projectBinaries(dir), { onProgress }),
+        encoder: await binaries.ensureModel(PHOTO_SEGMENTATION_ENCODER_MODEL, { onProgress }),
+        decoder: await binaries.ensureModel(PHOTO_SEGMENTATION_DECODER_MODEL, { onProgress }),
+      }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
   const projects = new ProjectRegistry({
@@ -353,7 +379,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const inspector = new InspectService({
     timeline: async (dir, id) => {
       const { timeline, fps } = await timelines.load(dir, id);
-      return { timeline: await resolveNested(dir, timeline), fps };
+      return { timeline: await resolveNested(dir, timeline, undefined, fps), fps };
     },
     resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
     pictureSize: async (dir, asset) => {
@@ -362,6 +388,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     live: (dir, timeline, clip) => clips.live(clipRoot(dir), timeline, clip),
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
+    imageProject: async (dir) => (await readEnclosingProject(dir))?.config.kind === "image",
+    segment: async (dir, asset, point, onProgress) => ({ ...(await segmentation.segment(dir, asset, point, onProgress)), model: segmentModel }),
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
@@ -687,11 +715,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
-    "inspect.point": async ({ cwd, timeline, at, x, y, unit, view }, caller) => {
+    "inspect.point": async ({ cwd, timeline, at, x, y, unit, segment, view }, caller, request) => {
       const dir = await root(cwd);
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
-      const loaded = { timeline: await resolveNested(dir, shown.timeline), fps: shown.fps };
-      return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit }, loaded)) };
+      const loaded = { timeline: await resolveNested(dir, shown.timeline, undefined, shown.fps), fps: shown.fps };
+      const onProgress = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit, segment }, loaded, onProgress)) };
     },
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
@@ -790,6 +825,92 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "multicam.reframe": (params, caller) => operate("multicam.reframe", params, caller),
     "multicam.paint": (params, caller) => operate("multicam.paint", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
+    "segment.prepare": async ({ cwd, asset }, _caller, request) => {
+      const dir = await root(cwd);
+      // The model download is for image projects only (ADR 0022 §4).
+      if ((await readEnclosingProject(dir))?.config.kind !== "image") {
+        throw new RpcError(ErrorCode.InvalidOperation, "segment.prepare: only photos of image projects are segmented.", { op: "segment.prepare", reason: "not an image project", field: "cwd" });
+      }
+      const { rel } = await resolveAsset(dir, resolve(cwd, asset));
+      const prepared = await segmentation.prepare(dir, rel, (update) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      });
+      return { asset: prepared.asset, size: { width: prepared.width, height: prepared.height }, hash: prepared.hash, model: segmentModel, cached: prepared.cached };
+    },
+    "image.cutout": async ({ cwd, timeline, clip: clipId, mask }, caller) => {
+      const dir = await root(cwd);
+      const project = (await readEnclosingProject(dir))?.config;
+      if (project?.kind !== "image") {
+        throw new RpcError(ErrorCode.InvalidOperation, "image.cutout: only image projects have photos to cut out of (File > New Image from Frame makes one from a video).", {
+          op: "image.cutout",
+          reason: "not an image project",
+          field: "clip",
+        });
+      }
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const place = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find(({ clip }) => clip.id === clipId);
+      if (!place) {
+        throw new RpcError(ErrorCode.ClipNotFound, `image.cutout: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      const { track, clip: photo } = place;
+      if (!isMediaClip(photo)) {
+        throw new RpcError(ErrorCode.InvalidOperation, `image.cutout: clip ${clipId} is not a still media clip.`, { op: "image.cutout", reason: "not a still image", field: "clip" });
+      }
+      const picture = (await media.probe(dir, photo.asset)).video;
+      if (!picture?.still) {
+        throw new RpcError(ErrorCode.InvalidOperation, `image.cutout: ${photo.asset} is not a still image.`, { op: "image.cutout", reason: "not a still image", field: "clip" });
+      }
+      const maskFile = await resolveMask(dir, mask);
+      const ffmpeg = await projectFfmpeg(dir);
+      const box = await checkMask(ffmpeg, maskFile, picture);
+      const stem = basename(photo.asset, extname(photo.asset));
+      const rendered = await renderCutout(ffmpeg, join(dir, ...photo.asset.split("/")), maskFile, box, await freeCutoutName(dir, stem));
+      let asset: string;
+      try {
+        asset = (await media.import(dir, [rendered.file], "copy")).imported[0]!.asset;
+      } finally {
+        await rendered.cleanup();
+      }
+      // Both operations share one transaction, so one revert undoes the cut-out even from a sessionless client:
+      // the caller's explicit one when open, else a labelled one of their own (never an automatic group).
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Cut out ${stem}` };
+      const author = journalAuthorOf(caller);
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        return result;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        const index = loaded.tracks.indexOf(track) + 1;
+        const added = await apply({ op: "track.add", args: { kind: "video", name: basename(asset, extname(asset)), index } } as OperationRequest);
+        const newTrack = added.changes.added[0]!;
+        const duration = (photo.out - photo.in) / (photo.speed ?? 1);
+        const transform = cutoutTransform(picture, box, project.resolution, photo.transform);
+        let result: Awaited<ReturnType<typeof apply>>;
+        try {
+          result = await apply({ op: "clip.add", args: { track: newTrack, type: "media", asset, start: photo.start, duration, transform } } as OperationRequest);
+        } catch (error) {
+          // All or nothing: take the new track off again, in the same transaction.
+          await timelines.revert({ root: dir, cwd, timeline, author, tx, target: added.operation.id }).catch(() => undefined);
+          throw error;
+        }
+        const dropped = [photo.keys ? "keyframes" : null, photo.fadeIn !== undefined || photo.fadeOut !== undefined ? "fades" : null, photo.dissolve !== undefined ? "dissolve" : null].filter(
+          (name) => name !== null,
+        );
+        const warnings =
+          dropped.length > 0 ? [`image.cutout: the photo's ${dropped.join(", ")} were not copied; the cut-out lies over the photo as its static transform places it.`] : [];
+        return { ...result, asset, track: newTrack, clip: result.changes.added[0]!, warnings: [...result.warnings, ...warnings] };
+      } finally {
+        await settle(key, tx);
+      }
+    },
     "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
@@ -987,9 +1108,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A proposal still building holds what the file never got (ADR 0019 §3).
       await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
-      const reverted = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
+      // In review mode an undo of what reached the file waits as a proposal of its own.
+      const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
       await transactions.end(author);
-      return { tx: tx.id, label: tx.label, author, reverted };
+      return { tx: tx.id, label: tx.label, author, reverted, proposal };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
@@ -1213,6 +1335,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       // Canceled jobs are found again from disk when the project next opens.
       await media.close();
+      await segmentation.close();
       await timelineWatcher.close();
       await clips.close();
       await clipJobs.close();

@@ -37,7 +37,8 @@ mutations print the new revision):
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
-           [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
+           [--opacity 0-1] [--props json] [--elements json | --clear-elements]
+           [--script-ref ref | --clear-script-ref]
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -101,6 +102,12 @@ mutations print the new revision):
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap), or from transcript speakers for angles sharing a file or naming a speaker.
                                Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings, speakers}
+  image cutout <clip> --mask <png>
+                               Image projects: cut a part of a photo out as a new layer right above it, exactly over
+                               it. <clip> is the photo's clip; --mask a grayscale PNG at the photo's pixel size, white
+                               = keep (the mask of an inspect --segment point, or your own). Writes
+                               assets/<photo>-cutout-<n>.png (the photo is not changed), one transaction; revert
+                               removes the layer. Background removal: image cutout, then clip set <photo> --opacity 0
   direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from s] [--to s] [--replace-human]
                                Shots from who speaks, by rules (director.json at the project root on top of the
                                template, or --rules): written on the program track in one operation, each with a
@@ -137,7 +144,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -171,6 +178,8 @@ export const TIMELINE_OPTIONS = {
   scale: { type: "string" },
   opacity: { type: "string" },
   props: { type: "string" },
+  elements: { type: "string" },
+  "clear-elements": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -210,6 +219,7 @@ export const TIMELINE_OPTIONS = {
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
+  mask: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -241,7 +251,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
-  "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
+  "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
   "transition set": ["at", "kind", "duration", "track"],
   "transition remove": ["at", "track"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
@@ -253,6 +263,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam faces": ["replace"],
   "multicam paint": ["from", "to", "speaking", "silent", "measured", "alone"],
   "shot set": ["layout", "angles", "corner"],
+  "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
@@ -288,6 +299,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam faces": [1, Number.POSITIVE_INFINITY],
   "multicam paint": [1, 2],
   "shot set": [1, 1],
+  "image cutout": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
@@ -493,6 +505,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("script-ref") !== undefined && values["clear-script-ref"] === true) {
         throw new UsageError("Pass --script-ref or --clear-script-ref, not both.");
       }
+      if (str("elements") !== undefined && values["clear-elements"] === true) {
+        throw new UsageError("Pass --elements or --clear-elements, not both.");
+      }
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -500,6 +515,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         transform: transform(),
         props: json("props"),
+        elements: values["clear-elements"] === true ? null : json("elements"),
         scriptRef: values["clear-script-ref"] === true ? null : str("script-ref"),
       });
       break;
@@ -622,6 +638,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
+    case "image cutout":
+      method = "image.cutout";
+      if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
+      Object.assign(params, { clip: args[0], mask: str("mask") });
+      break;
     case "multicam turns":
       method = "multicam.turns";
       params["group"] = args[0];
@@ -684,15 +705,24 @@ export async function executeTimeline(
     return `Committed ${tx} "${label}" (${operations} operation${operations === 1 ? "" : "s"})\n`;
   }
   if (inv.method === "tx.abort") {
-    const { tx, label, reverted } = result as MethodResult<"tx.abort">;
+    const { tx, label, reverted, proposal } = result as MethodResult<"tx.abort">;
     const lines = reverted.map((r) => `  ${r.timeline}: revision ${r.revision} · op ${r.operation.id}`);
-    return `Aborted ${tx} "${label}"${reverted.length === 0 ? " (nothing to undo)" : ", changes undone:"}\n${lines.map((l) => `${l}\n`).join("")}`;
+    const outcome = proposal
+      ? `: the undo waits for review as proposal ${proposal.tx}; run \`frameshell proposal wait\`${reverted.length === 0 ? "" : ". Undone at once:"}`
+      : reverted.length === 0
+        ? " (nothing to undo)"
+        : ", changes undone:";
+    return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "image.cutout") {
+    const { asset, track, clip } = result as MethodResult<"image.cutout">;
+    return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
+  }
   return formatOperation(result as OperationResult);
 }
 

@@ -1,7 +1,8 @@
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { join, posix, resolve, win32 } from "node:path";
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
+import { patchedBundle } from "./elements.js";
 import { type Bundle, BundleCache } from "./bundles.js";
 import { checkLiveInternals, liveHead } from "./live.js";
 import { type RemotionComposition, type RemotionLoader, type RemotionRenderer, findRemotionRoot, loadProjectRemotion } from "./remotion.js";
@@ -88,6 +89,7 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
   return {
     type: CLIP_TYPE,
     propsSchema,
+    elementStyles: true,
     async inputs(clip) {
       const entry = await entryOf(projectDir, clip as RemotionClip);
       return [(await bundles.get(entry)).marker];
@@ -111,10 +113,13 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       if (ctx.signal.aborted) cancel();
       ctx.signal.addEventListener("abort", cancel, { once: true });
       const output = join(ctx.outDir, "render.webm");
+      // Element adjustments (ADR 0021): render from a patched copy; without them, the bundle itself.
+      const patched = ctx.elementCss ? join(ctx.outDir, "bundle-elements") : null;
       try {
+        if (patched) await patchedBundle(bundle.dir, patched, ctx.elementCss!);
         await renderer.renderMedia({
           composition,
-          serveUrl: bundle.dir,
+          serveUrl: patched ?? bundle.dir,
           codec: "vp9",
           imageFormat: "png",
           pixelFormat: "yuva420p",
@@ -130,6 +135,7 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
         });
       } finally {
         ctx.signal.removeEventListener("abort", cancel);
+        if (patched) await rm(patched, { recursive: true, force: true });
       }
       ctx.progress({ fraction: 1, message: "Done" });
       return { file: output, hasAlpha: true };

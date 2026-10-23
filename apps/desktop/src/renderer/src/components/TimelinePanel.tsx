@@ -25,7 +25,7 @@ import { showSide } from "../review/store.js";
 import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
-import { useAssets, useProjectKind } from "../preview/useProgram.js";
+import { useAssets, useNestedViews, useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
 import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
@@ -175,7 +175,9 @@ export function TimelinePanel({
   const measured = useGroupsTurns(wanted, true);
   const turnLanes = useMemo(() => ({ open: lanesOpen, turns: new Map([...measured].map(([group, found]) => [group, found.turns])) }), [lanesOpen, measured]);
   const assets = useAssets(view?.revision ?? null);
-  const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets) : undefined) }), [assets]);
+  // A nested clip's handles are its timeline's seconds outside the window (ADR 0018 decision 5).
+  const nested = useNestedViews(view ?? null);
+  const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets, nested) : undefined) }), [assets, nested]);
   const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes, transitions) : null), [view, scenes, turnLanes, transitions]);
   const empty = layout !== null && layout.clipCount === 0;
   const toggleLanes = useCallback(

@@ -2,6 +2,7 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track } from "@frameshell/schema";
 import {
+  type HostFade,
   type LayerRect,
   type NestedTimelines,
   type Placement,
@@ -9,16 +10,20 @@ import {
   dissolveProgress,
   dissolveWeights,
   fadeWeight,
+  fixedPlacement,
   flattenTimeline,
+  hasPictureKeys,
+  hostFades,
+  isKeyed,
   isProgramSound,
   movedProgramGroups,
   placementAt,
-  placementOf,
   programGroup,
   shotGroupTime,
   shotLayers,
   shotSound,
   soundSamples,
+  staticGain,
 } from "@frameshell/schema/composite";
 import { type ClipEdges, type TransitionContext, clipLength, edgeTransitions } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
@@ -163,6 +168,8 @@ export interface EdgeWeights {
   dissolveIn?: SpanDissolve;
   /** The dissolve the next clip on the track comes in by: this clip goes out, played on past its end. */
   dissolveOut?: SpanDissolve;
+  /** Fades of the nested clips the clip plays inside (`hostFades`), each over its own window. */
+  hosts?: HostFade[];
 }
 
 /** What changes a picture span from frame to frame (ADR 0018); absent: `placement` holds. See {@link spanPlacement}. */
@@ -199,6 +206,7 @@ export function edgeWeight(edges: EdgeWeights, t: number, kind: "bottom" | "uppe
   let weight = fadeWeight(edges, edges.start, edges.end, t, kind === "sound");
   if (edges.dissolveIn) weight *= dissolveWeights(dissolveProgress(edges.dissolveIn.at, edges.dissolveIn.half, t), kind).incoming;
   if (edges.dissolveOut) weight *= dissolveWeights(dissolveProgress(edges.dissolveOut.at, edges.dissolveOut.half, t), kind).outgoing;
+  for (const host of edges.hosts ?? []) weight *= fadeWeight(host, host.start, host.end, t, kind === "sound");
   return weight;
 }
 
@@ -282,9 +290,9 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const resolution = options.resolution ?? DEFAULT_RESOLUTION;
   const resolve = nestedResolver(options.nested);
   const root = asTimeline(view, true);
-  const flat = flattenTimeline(root, resolve);
+  const flat = flattenTimeline(root, resolve, fps);
   const moved = movedProgramGroups(root, resolve);
-  const context: TransitionContext = { fps, sourceDuration: (clip) => sourceSeconds(clip, assets) };
+  const context: TransitionContext = { fps, sourceDuration: (clip) => sourceSeconds(clip, assets, options.nested) };
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
@@ -733,21 +741,21 @@ function shifted(span: PlacedSpan, head: number): PlacedSpan {
 
 /** `picture` with the {@link SpanMotion} of `clip`'s picture keys and edge transitions; as is without either. */
 function withMotion(picture: PlacedSpan, clip: Clip, weights: EdgeWeights, track: SpanMotion["track"]): PlacedSpan {
-  const keys = clip.keys;
-  const keyed = keys !== undefined && (keys.x ?? keys.y ?? keys.scale ?? keys.opacity) !== undefined;
+  const keyed = hasPictureKeys(clip);
   if (!keyed && !hasEdges(weights)) return picture;
   return { ...picture, motion: { ...weights, track, ...(keyed ? { keyed: clip } : {}) } };
 }
 
 /** The {@link AudioEnvelope} of `clip`'s sound: its `gain` keys and edge transitions; null without either. */
 function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number): AudioEnvelope | null {
-  const keyed = clip.keys?.gain !== undefined;
+  const keyed = isKeyed(clip, "gain");
   if (!keyed && !hasEdges(weights)) return null;
   return { ...weights, ...(keyed ? { keyed: clip } : {}), rate };
 }
 
 /** The {@link EdgeWeights} of `clip` from its effective edges, the dissolve it comes in by and the one it goes out by. */
 function edgeWeightsOf(clip: Clip, own: ClipEdges | undefined, inHalf: number, out: SpanDissolve | undefined, context: TransitionContext): EdgeWeights {
+  const hosts = hostFades(clip);
   return {
     start: clip.start,
     end: clip.start + clipLength(clip, context),
@@ -755,24 +763,29 @@ function edgeWeightsOf(clip: Clip, own: ClipEdges | undefined, inHalf: number, o
     fadeOut: own?.fadeOut ?? 0,
     ...(inHalf > 0 ? { dissolveIn: { at: clip.start, half: inHalf } } : {}),
     ...(out ? { dissolveOut: out } : {}),
+    ...(hosts.length > 0 ? { hosts } : {}),
   };
 }
 
 function hasEdges(weights: EdgeWeights): boolean {
-  return weights.fadeIn > 0 || weights.fadeOut > 0 || weights.dissolveIn !== undefined || weights.dissolveOut !== undefined;
+  return weights.fadeIn > 0 || weights.fadeOut > 0 || weights.dissolveIn !== undefined || weights.dissolveOut !== undefined || weights.hosts !== undefined;
 }
 
-/** Seconds of material `clip` draws from, for its handles: the asset's duration, unlimited for a still; unknown otherwise. */
-export function sourceSeconds(clip: Clip, assets: ReadonlyMap<string, AssetInfo>): number | undefined {
+/**
+ * Seconds of material `clip` draws from, for its handles: the asset's duration, unlimited for a still, a nested
+ * timeline's duration (from `nested`, views by `source`); unknown otherwise.
+ */
+export function sourceSeconds(clip: Clip, assets: ReadonlyMap<string, AssetInfo>, nested?: ReadonlyMap<string, TimelineView>): number | undefined {
+  if (clip.type === "timeline") return "source" in clip && clip.source ? (nested?.get(clip.source)?.duration ?? undefined) : undefined;
   if (!("asset" in clip)) return undefined;
   const media = assets.get(clip.asset)?.media;
   if (media?.video?.still) return Number.POSITIVE_INFINITY;
   return media?.duration ?? undefined;
 }
 
-/** Linear gain of the clip's `audio.gain` dB. */
+/** Linear gain of the clip's `audio.gain` dB, plus the nested clips' it plays inside (`staticGain`). */
 function gainOf(clip: Clip): number {
-  return 10 ** ((clip.audio?.gain ?? 0) / 20);
+  return 10 ** (staticGain(clip) / 20);
 }
 
 /**
@@ -825,7 +838,7 @@ function pictureOf(
   if (!("asset" in clip)) return placeholder("timeline");
   if (!info) return placeholder("unavailable");
   const video = info.media?.video;
-  const placement = placementOf(clip.transform);
+  const placement = fixedPlacement(clip);
   const size = video ? { width: video.width, height: video.height } : null;
   if (video?.still && size) return { kind: "still", clip: clip.id, start, end, image: clip.asset, version: info.hash ?? "", size, placement };
   if (info.proxy) {
@@ -845,5 +858,5 @@ function generatedOf(clip: Clip, start: number, end: number, fps: number, info: 
       : null;
   const size = ready && ready.width && ready.height ? { width: ready.width, height: ready.height } : null;
   const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;
-  return { kind: "generated", clip: clip.id, type: clip.type, start, end, in: Math.round(clipIn * fps), render, size, placement: placementOf(clip.transform) };
+  return { kind: "generated", clip: clip.id, type: clip.type, start, end, in: Math.round(clipIn * fps), render, size, placement: fixedPlacement(clip) };
 }

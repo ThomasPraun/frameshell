@@ -1,9 +1,19 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import { gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
+import type { Clip } from "@frameshell/schema";
+import { composePlacement, fadeWeight, gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
 import { describe, expect, it } from "vitest";
 import { envelopeGain, renderRead } from "../src/renderer/src/preview/audio-plan.js";
 import { decodeSteps, syncTable } from "../src/renderer/src/preview/decode-plan.js";
-import { type AudioSpan, type PlacedSpan, type VideoSpan, compileProgram, firstAudioDifference, programAt, spanPlacement } from "../src/renderer/src/preview/program.js";
+import {
+  type AudioSpan,
+  type PlacedSpan,
+  type VideoSpan,
+  compileProgram,
+  firstAudioDifference,
+  programAt,
+  sourceSeconds,
+  spanPlacement,
+} from "../src/renderer/src/preview/program.js";
 
 // Seam under test: transitions and keys in the preview program (ADR 0018 decisions 9 and 10), against the shared evaluator.
 
@@ -203,5 +213,78 @@ describe("audio envelopes", () => {
     const after = compileProgram(view([video("v1", [clip("c1", 0, 0, 4, { fadeIn: 2 })])]), A);
     expect(firstAudioDifference(before, after, 0)).toBe(0);
     expect(firstAudioDifference(before, before, 0)).toBe(Infinity);
+  });
+});
+
+describe("nested clips with keys and edges (ADR 0018 decision 9)", () => {
+  // Scene, 8 s: footage on V1, sound on A1. The host plays scene seconds 0.5 to 3.5 at 1 s, keyed and faded.
+  const scene: TimelineView = {
+    ...view([video("v1", [clip("c", 0, 10, 18)]), { id: "a1", kind: "audio", name: null, follows: null, clips: [clip("m", 0, 30, 38, { audio: { gain: -3 } })] }]),
+    timeline: "scene",
+    path: "timelines/scene.json",
+    duration: 8,
+  };
+  const nested = new Map([["timelines/scene.json", scene]]);
+  const host = {
+    id: "n",
+    type: "timeline",
+    source: "timelines/scene.json",
+    start: 1,
+    in: 0.5,
+    duration: 3,
+    end: 4,
+    transform: { x: 50 },
+    audio: { gain: -6 },
+    fadeIn: 0.5,
+    fadeOut: 1,
+    keys: {
+      scale: [
+        { at: 0.5, value: 1, ease: "in-out" },
+        { at: 3.5, value: 0.5 },
+      ],
+      opacity: [
+        { at: 1, value: 1 },
+        { at: 3, value: 0.4 },
+      ],
+      gain: [
+        { at: 1, value: 0 },
+        { at: 3, value: -12 },
+      ],
+    },
+  };
+  const program = compileProgram(view([video("v1", [host])]), A, { nested });
+  /** Scene second at program second `t`. */
+  const sceneTime = (t: number) => t - 1 + 0.5;
+  const inner = (scene.tracks[0]!.clips[0] as unknown) as Clip;
+  const sound = (scene.tracks[1]!.clips[0] as unknown) as Clip;
+
+  it("draws each frame at the host's keyed placement composed with the clip's, times the host's fades", () => {
+    for (let frame = 30; frame < 120; frame += 7) {
+      const t = frame / 30;
+      const span = programAt(program, frame, 0) as PlacedSpan;
+      expect(span.clip).toBe("n/c");
+      const composed = composePlacement(placementAt(host as never, t), placementAt(inner, sceneTime(t)));
+      const expected = { ...composed, opacity: composed.opacity * fadeWeight({ fadeIn: 0.5, fadeOut: 1 }, 1, 4, t) };
+      const actual = spanPlacement(span, frame, 30);
+      for (const prop of ["x", "y", "scale", "opacity"] as const) expect(actual[prop], `${prop} at frame ${frame}`).toBeCloseTo(expected[prop], 9);
+    }
+  });
+
+  it("plays the host's gain keys and fades on its clips' sound, its own track's and its extra tracks'", () => {
+    const spans = program.audio.filter((span) => span.clip.startsWith("n/"));
+    expect(spans.map((span) => span.clip).sort()).toEqual(["n/c", "n/m"]);
+    for (const span of spans) {
+      const own = span.clip === "n/m" ? sound : inner;
+      for (let sample = span.start; sample < span.end; sample += 4999) {
+        const t = sample / 48_000;
+        const expected = 10 ** ((gainAt(host as never, t) + gainAt(own, sceneTime(t))) / 20) * fadeWeight({ fadeIn: 0.5, fadeOut: 1 }, 1, 4, t, true);
+        expect(envelopeGain(span, sample), `${span.clip} at ${sample}`).toBeCloseTo(expected, 9);
+      }
+    }
+  });
+
+  it("sizes a nested clip's handles by its timeline's duration", () => {
+    expect(sourceSeconds(host as never, A, nested)).toBe(8);
+    expect(sourceSeconds(host as never, A)).toBeUndefined();
   });
 });

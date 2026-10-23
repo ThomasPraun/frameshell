@@ -20,6 +20,8 @@ const en = {
   exportImageHint: "Save the picture as PNG, JPEG or WebP",
   exported: (file: string) => `Saved ${file}`,
   imageFromFrame: "New image from this frame…",
+  /** Context menu over a picked photo part (ADR 0022): the part becomes its own layer. */
+  cutOut: "Cut out as layer",
   /** Slots: `{type}`, `{clip}`. */
   clipOf: "{type} clip {clip}",
   hiddenLayers: "Layers not shown",
@@ -53,6 +55,19 @@ const en = {
   liveLabelHint: (type: string, clip: string) => `Live preview of ${type} clip ${clip}: export uses the render`,
   liveFrame: (clip: string) => `Live preview of clip ${clip}`,
   noLivePage: "no live page",
+  elementMode: (clip: string) => `Elements of ${clip} (Esc to leave)`,
+  elementModeHint: "Drag an element to move it, a corner to scale it; Esc goes back to the whole clip",
+  elementModeCovered: (clip: string) => `Elements of ${clip}, outline only (Esc to leave)`,
+  elementModeCoveredHint: "Another picture covers this clip, so only the outline moves until the new render is ready",
+  elementsUnavailable: (reason: string) => `Elements cannot be edited here: ${reason}`,
+  noRenderState: "the clip's render state is not known yet",
+  /** Pick in a photo: status line while photos get ready (the first time downloads the model; `null` percent = unknown). */
+  segmentPreparing: "Preparing photos…",
+  segmentDownloading: (percent: number | null) => (percent === null ? "Downloading the photo model (once)…" : `Downloading the photo model (once) ${percent}%`),
+  segmentFinding: "Finding the part…",
+  segmentFailed: (reason: string) => `Could not prepare photos: ${reason}`,
+  /** Label of the outlined part: size `n` of `of`, `percent` of the photo. */
+  segmentSize: (n: number, of: number, percent: number) => `size ${n}/${of} · ${percent}% (↑ larger, ↓ smaller)`,
 };
 
 const es: typeof en = {
@@ -73,6 +88,7 @@ const es: typeof en = {
   exportImageHint: "Guarda la imagen como PNG, JPEG o WebP",
   exported: (file) => `Guardada: ${file}`,
   imageFromFrame: "Nueva imagen desde este fotograma…",
+  cutOut: "Recortar como capa",
   clipOf: "clip {type} {clip}",
   hiddenLayers: "Capas no mostradas",
   layerNote: (layer, reason, type, clip) => `V${layer}: ${reason} (clip ${type} ${clip})`,
@@ -104,6 +120,17 @@ const es: typeof en = {
   liveLabelHint: (type, clip) => `Vista previa en vivo del clip ${type} ${clip}: la exportación usa el render`,
   liveFrame: (clip) => `Vista previa en vivo del clip ${clip}`,
   noLivePage: "sin página en vivo",
+  elementMode: (clip) => `Elementos de ${clip} (Esc para salir)`,
+  elementModeHint: "Arrastra un elemento para moverlo, o una esquina para escalarlo; Esc vuelve al clip completo",
+  elementModeCovered: (clip) => `Elementos de ${clip}, solo contorno (Esc para salir)`,
+  elementModeCoveredHint: "Otra imagen tapa este clip, así que solo se mueve el contorno hasta que el nuevo render esté listo",
+  elementsUnavailable: (reason) => `Aquí no se pueden editar los elementos: ${reason}`,
+  noRenderState: "aún no se conoce el estado del render del clip",
+  segmentPreparing: "Preparando las fotos…",
+  segmentDownloading: (percent) => (percent === null ? "Descargando el modelo de fotos (una vez)…" : `Descargando el modelo de fotos (una vez) ${percent}%`),
+  segmentFinding: "Buscando la parte…",
+  segmentFailed: (reason) => `No se pudieron preparar las fotos: ${reason}`,
+  segmentSize: (n, of, percent) => `tamaño ${n}/${of} · ${percent}% (↑ más grande, ↓ más pequeño)`,
 };
 
 export const preview = { en, es };

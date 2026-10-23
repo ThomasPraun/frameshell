@@ -811,7 +811,8 @@ export const methods = {
       "to find what to edit (\"the box at the top right at 12 s\") or to check an edit landed. Works with the app closed: " +
       "generated clips are loaded in headless Chrome (a second or two each). Elements need a trusted project with the " +
       "clip's plugin; otherwise `unavailable` says why and only the clips are reported. Footage counts as painting its " +
-      "whole box (alpha of footage is not read). Fails with InvalidOperation (`at` or the point outside the timeline or " +
+      "whole box (alpha of footage is not read). With `segment` on a photo in an image project it also names the part of the " +
+      "photo under the point as three masks (ADR 0022). Fails with InvalidOperation (`at` or the point outside the timeline or " +
       "frame), TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -820,6 +821,14 @@ export const methods = {
       x: z.number().nonnegative().describe("Horizontal position, 0 = left edge: a fraction of the frame width (e.g. `0.71`), or project pixels with `unit: \"pixel\"`."),
       y: z.number().nonnegative().describe("Vertical position, 0 = top edge: a fraction of the frame height (e.g. `0.14`), or project pixels with `unit: \"pixel\"`."),
       unit: z.enum(["fraction", "pixel"]).default("fraction").describe("What `x` and `y` are. Default `fraction`."),
+      segment: z
+        .boolean()
+        .default(false)
+        .describe(
+          "In an image project, when the clip seen is a still photo: also segment the part of the photo under the point (ADR 0022). Writes three " +
+            "mask PNGs under `.frameshell/context/` and returns them as `segment` (smallest first, `chosen` = best score). The first use downloads " +
+            "the model (about 45 MB) and takes seconds; later points on a photo take about 0.2 s. Elsewhere `segmentUnavailable` says why. Default false.",
+        ),
       view: ViewParam,
     }),
     result: InspectedPointSchema.extend({
@@ -941,6 +950,10 @@ export const methods = {
       entry: z.string().describe("Project-relative, `/`-separated HTML file inside `root`."),
       head: z.string().describe("Script to insert at the start of the entry's `<head>`; defines `window.frameshellLive`."),
       key: z.string().describe("The clip's render cache key now: when `clip.renders` reports another, ask again."),
+      elementCss: z
+        .string()
+        .optional()
+        .describe("Sheet of the clip's `elements` (ADR 0021), which the page's bridge applies; absent when the clip has none."),
     }),
   },
   "context.write": {
@@ -1143,7 +1156,9 @@ export const methods = {
       "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json` and `people.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
-      "journaled as a `timeline.patch` operation by author `file` with the revision bumped. " +
+      "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
+      "timeline write by anyone but the app joins a proposal instead; a new timeline file, or one replacing an unreadable " +
+      "file, is kept with the proposal, not in `timelines/`, until the person accepts it. " +
       "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
@@ -1437,6 +1452,52 @@ export const methods = {
     }),
     result: MulticamFacesResultSchema,
   },
+  "segment.prepare": {
+    description:
+      "Get a still image ready to be pointed into (ADR 0022, photo segmentation): encodes it once with MobileSAM and keeps the " +
+      "result in memory by content hash (the last 8 photos), so the first click costs about 0.2 s instead of 3 s. Called by the " +
+      "app when Pick turns on in an image project; `inspect.point` prepares on demand, so agents never call it. The first run " +
+      "downloads the model (two files, about 45 MB) and ONNX Runtime Web (33 MB, if face detection never ran). " +
+      "Fails with AssetNotFound, OutsideProject, InvalidOperation (not an image project, not a still image), or the Binary* errors.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Still image, absolute or relative to `cwd`."),
+    }),
+    result: z.object({
+      asset: z.string().describe("Project-relative asset path."),
+      size: z.object({ width: z.int(), height: z.int() }).describe("The image's pixels, rotation applied."),
+      hash: z.string().describe("`sha256:<hex>` of the asset's content, the key of the cached embedding."),
+      model: z.string().describe("Pinned model, `mobilesam@<revision>`."),
+      cached: z.boolean().describe("True when the image was prepared already."),
+    }),
+  },
+  "image.cutout": {
+    mutating: true,
+    description:
+      "Cut a part out of a photo as a new layer (ADR 0022). `clip` is a still media clip of an image project; `mask` is a " +
+      "project-relative 8-bit grayscale PNG at the photo's own pixel size, white (255) where the part is: the `mask` of a point's " +
+      "`segment.masks` from `inspect.point`, or one you made. The photo with the mask as its transparency, cropped to the mask's " +
+      "box, is written as a new file `assets/<photo name>-cutout-<n>.png` (the photo itself is never changed) and placed on a new " +
+      "video track right above the photo's: same start, length and opacity, position and scale set so the part covers its own " +
+      "pixels of the photo. One transaction labelled `Cut out <photo name>` (yours when one is open): reverting removes the " +
+      "layer; the PNG stays in `assets/`. Background removal is this followed by `clip.set` `opacity: 0` on the photo (or " +
+      "`clip.remove`). Keyframes and fades of the photo are not copied (a warning says so). " +
+      "Example: `{ clip: \"c_0003\", mask: \".frameshell/context/m_0_1210_1530_3.png\" }`. Fails with InvalidOperation (video " +
+      "project, not a still media clip, mask not a grayscale PNG of the photo's size, empty mask), ClipNotFound, AssetNotFound, " +
+      "OutsideProject, or the Binary* errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Id of the photo's clip, from `timeline.show`."),
+      mask: z.string().min(1).describe("Grayscale PNG at the photo's size, project-relative or absolute inside the project; white = keep."),
+    }),
+    result: OperationResultSchema.extend({
+      asset: z.string().describe("Project-relative path of the new PNG with transparency."),
+      track: z.string().describe("Id of the new track, right above the photo's."),
+      clip: z.string().describe("Id of the new clip on it."),
+    }),
+  },
   "multicam.paint": {
     mutating: true,
     description:
@@ -1568,7 +1629,9 @@ export const methods = {
     mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
-      "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
+      "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
+      "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
+      "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
       "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
@@ -1679,11 +1742,17 @@ export const methods = {
       "inverses are applied newest first as one `revert` operation inside the transaction. All or nothing: every " +
       "timeline is checked first, and when someone else changed the same tracks or clips since on any of them, nothing " +
       "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
-      "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. " +
-      "Fails with TransactionState when none is open.",
+      "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. Operations " +
+      "that did reach the file (applied before review mode was turned on) are not undone at once: the undo waits for " +
+      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Fails with " +
+      "TransactionState when none is open, ProposalPending when another proposal waits (transaction stays open).",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
-      reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed."),
+      reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed and this undid."),
+      proposal: z
+        .object({ tx: z.string(), state: ProposalStateSchema })
+        .nullable()
+        .describe("Review mode (ADR 0019): the `ready` proposal holding the undo; null when it was applied or nothing reached the file."),
     }),
   },
   history: {

@@ -148,6 +148,52 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_REMOTION"] === "1")("real Remot
   );
 
   it(
+    "moves and scales an element in the render when the host passes elementCss, and renders as before without it (ADR 0021)",
+    async () => {
+      const project = tempDir();
+      writeFileSync(join(project, "frameshell.json"), JSON.stringify({ fps: 30, resolution: { width: 320, height: 180 } }));
+      await newComposition.run({ args: ["swatch", "--duration", "0.2"], cwd: project, project: { dir: project } });
+      const root = join(project, "compositions", "remotion");
+      symlinkSync(pluginModules, join(root, "node_modules"), "junction");
+      writeFileSync(join(root, "src", "Swatch.tsx"), 'export const Swatch = () => <div id="box" style={{ position: "absolute", left: 0, top: 0, width: 80, height: 45, background: "rgb(255,0,0)" }} />;\n');
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const adapter = createRemotionAdapter({ projectDir: project });
+      try {
+        const clip = { id: "c_swatch", source: "compositions/remotion/src/index.ts", props: { composition: "swatch" } };
+        const render = (elementCss?: string) =>
+          adapter.render(clip, {
+            projectDir: project,
+            outDir: tempDir(),
+            fps: 30,
+            width: 320,
+            height: 180,
+            signal: new AbortController().signal,
+            ensureBinary: (name) => manager.ensure(name),
+            progress: () => {},
+            ...(elementCss ? { elementCss } : {}),
+          });
+        const alpha = async (file: string, x: number, y: number) => {
+          const { stdout: raw } = await execFileAsync(
+            ffmpeg,
+            ["-v", "error", "-c:v", "libvpx-vp9", "-i", file, "-frames:v", "1", "-vf", `format=rgba,crop=1:1:${x}:${y}`, "-f", "rawvideo", "-"],
+            { encoding: "buffer" },
+          );
+          return raw[3]!;
+        };
+        const plain = await render();
+        expect({ origin: await alpha(plain.file, 10, 20), moved: await alpha(plain.file, 150, 20) }).toEqual({ origin: 255, moved: 0 });
+        // Moved 80 px right, then scaled 2 about its centre: the box covers x 40..200, y -22..68.
+        const adjusted = await render("#box { translate: 80px 0 !important; scale: 2 !important; }");
+        expect({ origin: await alpha(adjusted.file, 10, 20), moved: await alpha(adjusted.file, 150, 20) }).toEqual({ origin: 0, moved: 255 });
+      } finally {
+        adapter.close();
+      }
+    },
+    600_000,
+  );
+
+  it(
     "applies the project's remotion.config.ts: Tailwind v4 through its webpack override, and its OpenGL renderer",
     async () => {
       const project = tempDir();

@@ -765,6 +765,40 @@ export const FACE_RECOGNITION_MODELS: readonly ManagedModel[] = [
   },
 ];
 
+/** Model ids of the photo segmenter (`segment.prepare`): MobileSAM's image encoder and mask decoder. */
+export const PHOTO_SEGMENTATION_ENCODER_MODEL = "mobilesam-encoder";
+export const PHOTO_SEGMENTATION_DECODER_MODEL = "mobilesam-decoder";
+
+const MOBILESAM_REVISION = "0d3b403339b4674a82493d5e97964dd78089ddc8";
+const MOBILESAM_BASE = `https://huggingface.co/Acly/MobileSAM/resolve/${MOBILESAM_REVISION}`;
+
+/**
+ * MobileSAM (Apache-2.0) as exported to ONNX by Acly: the TinyViT image encoder and
+ * SAM's multi-mask decoder, pinned by Hugging Face revision. No mirror.
+ */
+export const PHOTO_SEGMENTATION_MODELS: readonly ManagedModel[] = [
+  {
+    id: PHOTO_SEGMENTATION_ENCODER_MODEL,
+    version: MOBILESAM_REVISION.slice(0, 12),
+    origin: "https://huggingface.co/Acly/MobileSAM",
+    license: "Apache-2.0",
+    urls: [`${MOBILESAM_BASE}/mobile_sam_image_encoder.onnx`],
+    sha256: "580f5fb648ea1062c0aabc26217aed56921985f03f0cbbd852bba81d760cc749",
+    size: 28_157_093,
+    file: "mobile_sam_image_encoder.onnx",
+  },
+  {
+    id: PHOTO_SEGMENTATION_DECODER_MODEL,
+    version: MOBILESAM_REVISION.slice(0, 12),
+    origin: "https://huggingface.co/Acly/MobileSAM",
+    license: "Apache-2.0",
+    urls: [`${MOBILESAM_BASE}/sam_mask_decoder_multi.onnx`],
+    sha256: "8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe",
+    size: 16_496_559,
+    file: "sam_mask_decoder_multi.onnx",
+  },
+];
+
 /** Every package the daemon manages. */
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   FFMPEG_PACKAGE,
@@ -775,4 +809,4 @@ export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
 ];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS];
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS, ...PHOTO_SEGMENTATION_MODELS];
