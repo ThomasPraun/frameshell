@@ -229,16 +229,20 @@ export class ExportService {
     };
   }
 
-  /** Capture one composited frame as an image, written atomically to `out`; the format defaults from its extension. */
+  /**
+   * Capture one composited frame as an image, written atomically to `out`; the format defaults from its extension.
+   * `loaded`: the timeline to capture instead of the file (a review-mode proposal's version).
+   */
   async frame(
     root: string,
     params: { timeline: string; at: number; out: string; preset?: string | undefined; format?: FrameFormat | undefined; quality?: number | undefined },
-  ): Promise<FrameResult> {
+    loaded?: { timeline: Timeline; fps: number },
+  ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
     const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
     const size = params.preset ? (await this.#preset(root, params.preset)).video : resolution;
-    const { timeline, fps } = await this.#resolved(root, params.timeline);
+    const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
     const generated =
       generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline) : new Map();
@@ -302,8 +306,8 @@ export class ExportService {
    * Unreadable nested files stay as `timeline` clips; the compiler refuses
    * them by name.
    */
-  async #resolved(root: string, id: string): Promise<{ timeline: Timeline; fps: number }> {
-    const { timeline, fps } = await this.#options.loadTimeline(root, id);
+  async #resolved(root: string, id: string, loaded?: { timeline: Timeline; fps: number }): Promise<{ timeline: Timeline; fps: number }> {
+    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, id));
     const read = this.#options.readNested ?? readNestedFile;
     const seen = new Map<string, Timeline | null>();
     const flat = await resolveNested(root, timeline, async (at, source) => {

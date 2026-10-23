@@ -11,12 +11,20 @@ import {
   type MediaProbe,
   type OperationRecord,
   type OperationResult,
+  type GcEntry,
+  type Proposal,
+  type ProposalDecision,
+  type ProposalOutcome,
+  type ProposalState,
+  type ProposalWaitResult,
   type RejectionRecord,
+  type ReviewState,
   type TimelinePatch,
   RpcError,
   type TimelineProblem,
   type TimelineRejection as RejectionInfo,
   type TimelineView,
+  type TimelineViewName,
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
@@ -25,9 +33,27 @@ import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
-import { type PlacedClip, planDiff } from "../history/diff.js";
+import { type ClipChange, type PlacedClip, planDiff } from "../history/diff.js";
 import { appendJournal, readHead, readJournal, writeHead } from "../history/journal.js";
-import { type TimelineRevertFailure, abortConflictError, historyView, planRevert } from "../history/revert.js";
+import {
+  type TimelineRevertFailure,
+  abortConflictError,
+  historyView,
+  overlappingIds,
+  planRevert,
+  touchedIds,
+} from "../history/revert.js";
+import {
+  type OpenProposal,
+  type ProposalPart,
+  type ProposedOp,
+  appendDecision,
+  loadOpenProposals,
+  readDecisions,
+  removeProposal,
+  saveProposal,
+  sweepProposals,
+} from "../proposals/store.js";
 import { checkScriptRef } from "../scripts/outline.js";
 import {
   type AppliedOperation,
@@ -38,7 +64,7 @@ import {
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
-import { diffTimelines, isEmptyPatch } from "./patch.js";
+import { applyPatch, diffTimelines, isEmptyPatch } from "./patch.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -65,7 +91,75 @@ export interface TimelineServiceOptions {
   onRejected?: (rejection: TimelineRejection) => void;
   /** Transaction of each accepted direct edit (author `file`). Default: a new one per edit. */
   fileTx?: () => TxRef;
+  /** Review mode switch of a canonical project root (ADR 0019). Default: off everywhere. */
+  reviewEnabled?: (root: string) => Promise<boolean>;
+  /** Whether transaction `tx` is still open, so a proposal restored after a restart knows it is still building. Default: closed. */
+  txOpen?: (tx: string) => boolean;
+  /** Called on every step of a review-mode proposal; see {@link ProposalChange}. */
+  onProposal?: (change: ProposalChange) => void;
 }
+
+/** One step of a proposal (ADR 0019), as reported to {@link TimelineServiceOptions.onProposal}. */
+export interface ProposalChange {
+  /** Project root, canonical (`canonicalPath`). */
+  root: string;
+  tx: string;
+  label: string | null;
+  author: string;
+  state: ProposalState;
+  operations: number;
+  timelines: string[];
+  conflicts: string[];
+  /** It closed unapplied while its transaction was still open: the caller ends that transaction. */
+  endsTx: boolean;
+}
+
+/** Review mode state of one project; see {@link TimelineService.#book}. */
+interface Book {
+  /** Project root, canonical. */
+  root: string;
+  proposal: OpenProposal | null;
+  /** Set while a new proposal's first operation runs: other authors wait for it before deciding. */
+  creating: Promise<void> | null;
+  /** Per journal author whose building proposal closed unapplied: told once, on their next change. */
+  notices: Map<string, { tx: string; reason: "stale" | "rejected"; conflicts: string[] }>;
+  /** `proposal.wait` calls, resolved when the open proposal closes. */
+  waiters: Set<(decision: ProposalDecision) => void>;
+  /** Proposal file writes, one at a time, each writing the state current when it starts. */
+  saving: Promise<void>;
+  /** Set while a closed proposal's decision is being logged. */
+  closing: Promise<void> | null;
+}
+
+/** Where a change by a non-`ui` author goes while review mode applies; see {@link TimelineService.#route}. */
+interface Route {
+  book: Book;
+  proposal: OpenProposal;
+  /** `proposal` is new: it joins the book once its first operation succeeds. */
+  created: boolean;
+  /** Let other authors decide again; call once the operation settled. */
+  release(): void;
+}
+
+/** What a proposed change computed on the proposal's version of a timeline. */
+interface Proposed {
+  applied: AppliedOperation;
+  op: string;
+  args: Record<string, unknown>;
+  warnings?: string[];
+}
+
+/** A timeline as a read with `view` shows it; see {@link TimelineService.viewTimeline}. */
+export interface Viewed {
+  timeline: Timeline;
+  fps: number;
+  view: TimelineViewName;
+  /** The project's open proposal; null when none. */
+  proposal: { tx: string; state: "building" | "ready" } | null;
+}
+
+/** Decisions `status` and `proposal.status` list. */
+const MAX_DECISIONS = 10;
 
 /** A refused direct edit, as reported to {@link TimelineServiceOptions.onRejected} and {@link TimelineService.rejections}. */
 export interface TimelineRejection extends RejectionInfo {
@@ -176,6 +270,10 @@ export class TimelineService {
   readonly #known = new Map<string, Known>();
   /** Real path of each project root seen. */
   readonly #realRoots = new Map<string, Promise<string>>();
+  /** Review mode state by canonical root, loaded on first use. */
+  readonly #books = new Map<string, Promise<Book>>();
+  /** {@link TimelineService.#books} already loaded. */
+  readonly #loaded = new Map<string, Book>();
 
   constructor(options: TimelineServiceOptions) {
     this.#options = options;
@@ -183,7 +281,9 @@ export class TimelineService {
 
   /**
    * Apply one operation, write the file, then append it to the journal
-   * (SPEC §6.1). Throws the engine's errors, TimelineNotFound or InvalidProjectFile.
+   * (SPEC §6.1). In review mode (ADR 0019) a non-`ui` author's operation
+   * joins the open proposal instead. Throws the engine's errors,
+   * TimelineNotFound, InvalidProjectFile, ProposalPending or ProposalState.
    */
   async apply(call: TimelineCall): Promise<OperationResult> {
     const { root, timeline: id, request: raw } = call;
@@ -193,6 +293,20 @@ export class TimelineService {
     const problem = typeof scriptRef === "string" ? await checkScriptRef(root, scriptRef) : null;
     const warnings = problem ? [problem] : [];
     return this.#turn(root, id, async () => {
+      const route = await this.#route(root, call.author, call.tx);
+      if (route) {
+        try {
+          const result = await this.#propose(root, id, route, call, async (base, _current, fps, settings) => {
+            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call);
+            const applied = await applyOperation(base, request, this.#context(root, id, fps, request.op, settings));
+            return { applied, op: request.op, args: request.args as Record<string, unknown>, warnings };
+          });
+          call.onApplied?.(result!.shadow);
+          return result!.result;
+        } finally {
+          route.release();
+        }
+      }
       const { timeline, fps, ...settings } = await this.#current(root, id);
       const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call);
       const context = this.#context(root, id, fps, request.op, settings);
@@ -211,6 +325,20 @@ export class TimelineService {
   revert(call: RevertCall): Promise<OperationResult> {
     const { root, timeline: id, target } = call;
     return this.#turn(root, id, async () => {
+      const route = await this.#route(root, call.author, call.tx);
+      if (route) {
+        try {
+          // Undo is planned on the file's journal; the proposal holds its effect.
+          const proposed = await this.#propose(root, id, route, call, async (base, current, fps) => {
+            const restored = planRevert(current, await readJournal(root, id), target, id);
+            const patch = { op: "timeline.patch" as const, args: diffTimelines(current, restored) };
+            return { applied: await applyOperation(base, patch, this.#context(root, id, fps, "revert")), op: "revert", args: { target } };
+          });
+          return proposed!.result;
+        } finally {
+          route.release();
+        }
+      }
       const { timeline, fps } = await this.#current(root, id);
       const restored = planRevert(timeline, await readJournal(root, id), target, id);
       const patch = { op: "timeline.patch" as const, args: diffTimelines(timeline, restored) };
@@ -293,7 +421,25 @@ export class TimelineService {
         const code = error instanceof RpcError ? error.code : undefined;
         if (code !== ErrorCode.TimelineNotFound && code !== ErrorCode.InvalidProjectFile) throw error;
       }
-      if (base) return (await this.#acceptEdit(root, id, content, base, await projectFps(root), saver)).result;
+      if (base) {
+        const who = saver ?? this.#fileSaver();
+        const route = await this.#route(root, who.author, who.tx);
+        if (route) {
+          try {
+            const proposed = await this.#propose(root, id, route, who, async (shadow, _current, fps) => {
+              const incoming = checkRevision(id, path, parseIncoming(path, content), shadow);
+              const patch = diffTimelines(shadow, incoming);
+              if (isEmptyPatch(patch)) return null;
+              const applied = await applyOperation(shadow, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch"));
+              return { applied, op: "timeline.patch", args: patch as Record<string, unknown> };
+            });
+            return proposed?.result ?? null;
+          } finally {
+            route.release();
+          }
+        }
+        return (await this.#acceptEdit(root, id, content, base, await projectFps(root), who)).result;
+      }
       const parsed = parseText(content);
       if (!parsed.ok) throw invalidFile(path, parsed.error);
       const journaled = await this.#journaledBase(root, id, content, parsed.value);
@@ -321,36 +467,539 @@ export class TimelineService {
     return listRejections(root, MAX_REJECTIONS);
   }
 
-  /** Journaled operations grouped by transaction; see `historyView`. Throws HistoryNotFound for an unknown `since`. */
+  /**
+   * Journaled operations grouped by transaction (see `historyView`), plus the
+   * decided proposals of this timeline (ADR 0019). `since` may also name a
+   * proposal that never reached the journal (rejected, stale): then what was
+   * journaled after its decision. Throws HistoryNotFound for an unknown `since`.
+   */
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
     await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
-    return historyView(await readJournal(root, id), id, options.since);
+    const entries = await readJournal(root, id);
+    const decisions = (await readDecisions(await this.#realRoot(root))).filter((decision) => decision.timelines.includes(id));
+    const { since } = options;
+    if (since !== undefined && !entries.some((entry) => entry.tx === since)) {
+      const decided = decisions.findLastIndex((decision) => decision.tx === since);
+      if (decided !== -1) {
+        const after = decisions[decided]!.at;
+        const view = historyView(entries.filter((entry) => entry.at > after), id);
+        return { ...view, since, proposals: decisions.slice(decided) };
+      }
+    }
+    const view = historyView(entries, id, since);
+    if (since === undefined) return { ...view, proposals: decisions };
+    const from = entries.findLast((entry) => entry.tx === since)!.at;
+    return { ...view, proposals: decisions.filter((decision) => decision.tx === since || decision.at >= from) };
   }
 
   /** What a transaction or operation did to clips (`history.diff`); see `planDiff`. Ends are derived like `show`'s. */
   diff(root: string, id: string, target: string): Promise<HistoryDiffResult> {
     return this.#turn(root, id, async () => {
       const { timeline, fps } = await this.#current(root, id);
-      const changes = planDiff(timeline, await readJournal(root, id), target, id);
-      const grid = new FrameGrid(fps);
-      const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
-      const place = async (placed: PlacedClip | null): Promise<ClipPlace | null> => {
-        if (!placed) return null;
-        let end: number | null;
-        try {
-          end = await clipEnd(placed.clip, grid, nested);
-        } catch (error) {
-          if (!(error instanceof NestedTimelineError)) throw error;
-          end = null;
-        }
-        return { track: placed.track, start: placed.clip.start, end };
-      };
-      const clips = [];
-      for (const change of changes) {
-        clips.push({ clip: change.clip, change: change.change, before: await place(change.before), after: await place(change.after) });
-      }
-      return { timeline: id, target, clips };
+      return this.#placeDiff(root, id, fps, target, planDiff(timeline, await readJournal(root, id), target, id));
     });
+  }
+
+  /**
+   * What the open proposal (or `tx`, when it is the open one) changes on each
+   * timeline, from the file to the proposal's version (`proposal.diff`), in
+   * the shape of `history.diff`: the proposal's operations are diffed like a
+   * journaled transaction. Empty without an open proposal and `tx`; throws
+   * ProposalState (`decided`, `unknown`) for a `tx` that is not open.
+   */
+  async proposalDiff(root: string, tx?: string): Promise<{ tx: string | null; timelines: HistoryDiffResult[] }> {
+    const book = await this.#book(root);
+    const proposal = tx === undefined ? book.proposal : await this.#decidable(book.root, book, tx);
+    if (!proposal) return { tx: null, timelines: [] };
+    const timelines: HistoryDiffResult[] = [];
+    for (const id of proposal.parts.map((part) => part.timeline)) {
+      const diff = await this.#turn(root, id, async () => {
+        const { timeline: current, fps } = await this.#current(root, id);
+        if (!(await this.#sync(root, id, book, current, fps))) return null;
+        const part = proposal.parts.find((candidate) => candidate.timeline === id)!;
+        const { state, entries } = proposedEntries(part, proposal);
+        return this.#placeDiff(root, id, fps, proposal.tx, planDiff(state, entries, proposal.tx, id));
+      });
+      if (!diff) return this.proposalDiff(root, tx); // Went stale meanwhile: now `decided`, or nothing open.
+      timelines.push(diff);
+    }
+    return { tx: proposal.tx, timelines };
+  }
+
+  /** `history.diff` result of `changes`; ends are derived like `show`'s. */
+  async #placeDiff(root: string, id: string, fps: number, target: string, changes: ClipChange[]): Promise<HistoryDiffResult> {
+    const grid = new FrameGrid(fps);
+    const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
+    const place = async (placed: PlacedClip | null): Promise<ClipPlace | null> => {
+      if (!placed) return null;
+      let end: number | null;
+      try {
+        end = await clipEnd(placed.clip, grid, nested);
+      } catch (error) {
+        if (!(error instanceof NestedTimelineError)) throw error;
+        end = null;
+      }
+      return { track: placed.track, start: placed.clip.start, end };
+    };
+    const clips = [];
+    for (const change of changes) {
+      clips.push({ clip: change.clip, change: change.change, before: await place(change.before), after: await place(change.after) });
+    }
+    return { timeline: id, target, clips };
+  }
+
+  /**
+   * Timeline `id` as a read with `view` shows it (ADR 0019 §5): the file, or
+   * the open proposal's version of it (the file when the proposal does not
+   * change it), with the open proposal's id and state.
+   */
+  viewTimeline(root: string, id: string, view: TimelineViewName): Promise<Viewed> {
+    return this.#turn(root, id, async () => {
+      const { timeline, fps } = await this.#current(root, id);
+      const book = await this.#book(root);
+      let shown = timeline;
+      if (view === "proposal" && book.proposal && (await this.#sync(root, id, book, timeline, fps))) {
+        const part = book.proposal?.parts.find((candidate) => candidate.timeline === id);
+        if (part) shown = structuredClone(part.shadow);
+      }
+      const open = book.proposal;
+      return { timeline: shown, fps, view, proposal: open ? { tx: open.tx, state: open.state } : null };
+    });
+  }
+
+  /** The open proposal of `root` (ADR 0019); null when none. */
+  async proposal(root: string): Promise<Proposal | null> {
+    const open = (await this.#book(root)).proposal;
+    return open ? summary(open) : null;
+  }
+
+  /** Review mode of `root` for `status` and `proposal.status`: the switch, the open proposal, the last decisions. */
+  async review(root: string): Promise<ReviewState> {
+    const real = await this.#realRoot(root);
+    const open = (await this.#book(root)).proposal;
+    return {
+      enabled: await this.#reviewEnabled(root),
+      proposal: open ? summary(open) : null,
+      decisions: (await readDecisions(real)).slice(-MAX_DECISIONS).reverse(),
+    };
+  }
+
+  /**
+   * Transaction `tx` closed: its proposal, if building, waits for review now.
+   * Returns the proposal's id and state while it is open; null when `tx`
+   * holds none. Idempotent.
+   */
+  async ready(tx: string): Promise<{ tx: string; state: "building" | "ready" } | null> {
+    for (const book of this.#loaded.values()) {
+      const open = book.proposal;
+      if (open?.tx !== tx) continue;
+      if (open.state === "building") {
+        open.state = "ready";
+        await this.#persist(book);
+        this.#emit(book, open, "ready");
+      }
+      return { tx, state: open.state };
+    }
+    return null;
+  }
+
+  /** `tx abort` of `tx`: drop its proposal while building (nothing reached the file). True when one was dropped. */
+  async abortProposal(tx: string): Promise<boolean> {
+    for (const book of this.#loaded.values()) {
+      const open = book.proposal;
+      if (open?.tx === tx && open.state === "building") {
+        await this.#close(book, open, "aborted", []);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * ProposalPending when `author` (not `ui`) may not open a transaction now (ADR 0019 §6): a proposal is open in
+   * project `root`, or, without `root`, in any loaded project.
+   */
+  async assertCanBegin(author: string, root?: string): Promise<void> {
+    if (author === "ui") return;
+    if (root !== undefined) {
+      const open = (await this.#book(root)).proposal;
+      if (open) throw proposalPending(open);
+      return;
+    }
+    for (const book of this.#loaded.values()) if (book.proposal) throw proposalPending(book.proposal);
+  }
+
+  /**
+   * Apply ready proposal `tx` (ADR 0019 §8): rebase check again, then journal
+   * its operations in order under their author, transaction and label, each
+   * marked `proposal: <tx>`, on every timeline or none. Throws ProposalState
+   * (`building`, `decided`, `unknown`, `stale`) or the engine's errors.
+   */
+  async acceptProposal(root: string, tx: string): Promise<{ tx: string; operations: OperationResult[] }> {
+    const real = await this.#realRoot(root);
+    const book = await this.#book(root);
+    const proposal = await this.#decidable(real, book, tx);
+    if (proposal.state !== "ready") throw proposalState(tx, "building", `Proposal ${tx} is still building: its transaction is open. Accept it once it is ready.`);
+    const keys = await Promise.all(proposal.parts.map((part) => this.#key(root, part.timeline)));
+    return this.#exclusive(keys, async () => {
+      if (book.proposal !== proposal) await this.#decidable(real, book, tx);
+      const planned: { part: ProposalPart; steps: { before: Timeline; applied: AppliedOperation; op: ProposedOp }[] }[] = [];
+      for (const part of proposal.parts) {
+        const { timeline: current, fps } = await this.#current(root, part.timeline);
+        if (!(await this.#sync(root, part.timeline, book, current, fps))) {
+          const decision = (await readDecisions(real)).findLast((candidate) => candidate.tx === tx);
+          const conflicts = decision?.conflicts ?? [];
+          throw proposalState(tx, "stale", `Proposal ${tx} is out of date: you changed ${conflicts.join(", ") || "the same timeline"} too. It was closed unapplied.`, conflicts);
+        }
+        const steps = [];
+        let state = current;
+        for (const op of part.ops) {
+          const applied = await applyOperation(state, { op: "timeline.patch", args: op.patch }, this.#context(root, part.timeline, fps, op.op));
+          steps.push({ before: state, applied, op });
+          state = applied.timeline;
+        }
+        planned.push({ part, steps });
+      }
+      const operations: OperationResult[] = [];
+      const txRef = { id: proposal.tx, label: proposal.label };
+      for (const { part, steps } of planned) {
+        const context = { root, cwd: root, timeline: part.timeline, author: proposal.author, tx: txRef };
+        for (const { before, applied, op } of steps) {
+          operations.push(await this.#record(context, before, applied, op.op, op.args, [], { id: op.id, proposal: proposal.tx }));
+        }
+      }
+      await this.#close(book, proposal, "accepted", []);
+      return { tx, operations };
+    });
+  }
+
+  /** Refuse open proposal `tx`, ready or building (ADR 0019 §8): nothing is journaled. Throws ProposalState (`decided`, `unknown`). */
+  async rejectProposal(root: string, tx: string): Promise<{ tx: string }> {
+    const real = await this.#realRoot(root);
+    const book = await this.#book(root);
+    const proposal = await this.#decidable(real, book, tx);
+    // Under the timelines' locks: an accept already writing them finishes first, then this finds it decided.
+    const keys = await Promise.all(proposal.parts.map((part) => this.#key(root, part.timeline)));
+    await this.#exclusive(keys, async () => this.#close(book, await this.#decidable(real, book, tx), "rejected", []));
+    return { tx };
+  }
+
+  /**
+   * `proposal.wait`: resolves when the open proposal closes, or with
+   * `pending` after `timeoutMs`. Without one, the last decision or `none`.
+   * `reader` (journal author) is told about its own closed proposal here, not again on its next change.
+   */
+  async waitProposal(root: string, timeoutMs: number, reader: string): Promise<ProposalWaitResult> {
+    const real = await this.#realRoot(root);
+    const book = await this.#book(root);
+    const told = (result: ProposalWaitResult): ProposalWaitResult => {
+      if (result.tx !== null && book.notices.get(reader)?.tx === result.tx) book.notices.delete(reader);
+      return result;
+    };
+    const open = book.proposal;
+    if (!open) {
+      // A proposal closing right now is not logged yet.
+      await book.closing;
+      const last = (await readDecisions(real)).at(-1);
+      return told(last ? waitOutcome(last) : { outcome: "none", tx: null, label: null, author: null, conflicts: [], proposal: null });
+    }
+    return new Promise((resolve) => {
+      const done = (decision: ProposalDecision) => {
+        clearTimeout(timer);
+        resolve(told(waitOutcome(decision)));
+      };
+      const timer = setTimeout(() => {
+        book.waiters.delete(done);
+        const still = book.proposal ?? open;
+        resolve({ outcome: "pending", tx: still.tx, label: still.label, author: still.author, conflicts: [], proposal: summary(still) });
+      }, timeoutMs);
+      // A daemon shutting down must not wait for it.
+      timer.unref?.();
+      book.waiters.add(done);
+    });
+  }
+
+  /** `gc` of closed proposal files older than 7 days (ADR 0019 §8); the open one stays. */
+  async gcProposals(root: string, dryRun: boolean): Promise<GcEntry[]> {
+    const open = (await this.#book(root)).proposal;
+    return sweepProposals(root, { dryRun, open: open?.tx ?? null });
+  }
+
+  /** The open proposal when it is `tx`; else ProposalState `decided` (a logged decision) or `unknown`. */
+  async #decidable(real: string, book: Book, tx: string): Promise<OpenProposal> {
+    if (book.proposal?.tx === tx) return book.proposal;
+    await book.closing;
+    const decided =(await readDecisions(real)).findLast((decision) => decision.tx === tx);
+    if (decided) throw proposalState(tx, "decided", `Proposal ${tx} was already decided: ${decided.outcome}.`, decided.conflicts);
+    throw proposalState(tx, "unknown", `No open proposal ${tx}. See \`frameshell proposal status\`.`);
+  }
+
+  /**
+   * Where a change by `author` in `tx` goes (ADR 0019 §1, §6): null = the
+   * file, as without review mode; else the proposal it joins (a new one when
+   * review mode is on and none is open). Throws ProposalPending when another
+   * proposal is open (or the author's own is ready), and ProposalState once
+   * after the author's building proposal closed unapplied.
+   */
+  async #route(root: string, author: string, tx: TxRef): Promise<Route | null> {
+    if (author === "ui") return null;
+    const book = await this.#book(root);
+    const notice = book.notices.get(author);
+    if (notice) {
+      book.notices.delete(author);
+      throw closedError(notice);
+    }
+    for (;;) {
+      while (book.creating) await book.creating;
+      const open = book.proposal;
+      if (open) {
+        if (open.tx === tx.id && open.state === "building") return { book, proposal: open, created: false, release: () => {} };
+        throw proposalPending(open);
+      }
+      if (!(await this.#reviewEnabled(root))) return null;
+      if (book.creating || book.proposal) continue;
+      let release!: () => void;
+      book.creating = new Promise<void>((resolve) => (release = resolve));
+      const proposal: OpenProposal = { tx: tx.id, label: tx.label, author, state: "building", openedAt: new Date().toISOString(), parts: [] };
+      return {
+        book,
+        proposal,
+        created: true,
+        release: () => {
+          book.creating = null;
+          release();
+        },
+      };
+    }
+  }
+
+  /**
+   * Run `make` on the proposal's version of timeline `id` and add what it
+   * applied to the proposal as one operation, saved before this returns.
+   * Caller holds the turn. Null when `make` changed nothing.
+   */
+  async #propose(
+    root: string,
+    id: string,
+    route: Route,
+    who: { author: string; tx: TxRef },
+    make: (base: Timeline, current: Timeline, fps: number, settings: EditSettings) => Promise<Proposed | null>,
+  ): Promise<{ result: OperationResult; shadow: Timeline } | null> {
+    const { book, proposal } = route;
+    const { timeline: current, fps, ...settings } = await this.#current(root, id);
+    if (!route.created && !(await this.#sync(root, id, book, current, fps))) {
+      const notice = book.notices.get(who.author) ?? { tx: proposal.tx, reason: "stale" as const, conflicts: [] };
+      book.notices.delete(who.author);
+      throw closedError(notice);
+    }
+    let part = proposal.parts.find((candidate) => candidate.timeline === id);
+    const base = part ? part.shadow : current;
+    const made = await make(base, current, fps, settings);
+    if (!made) return null;
+    const { applied } = made;
+    const op: ProposedOp = {
+      id: newOpId(),
+      op: made.op,
+      args: made.args,
+      patch: diffTimelines(base, applied.timeline),
+      inverse: applied.inverse,
+      at: new Date().toISOString(),
+    };
+    const added = !part;
+    if (!part) proposal.parts.push((part = { timeline: id, base: current, shadow: current, ops: [] }));
+    const previous = part.shadow;
+    part.ops.push(op);
+    part.shadow = applied.timeline;
+    if (route.created) book.proposal = proposal;
+    try {
+      await this.#persist(book);
+    } catch (error) {
+      part.ops.pop();
+      part.shadow = previous;
+      if (added) proposal.parts.pop();
+      if (route.created) book.proposal = null;
+      throw error;
+    }
+    this.#emit(book, proposal, "building");
+    const operation: OperationRecord = { id: op.id, op: op.op, args: op.args, inverse: op.inverse, author: who.author, tx: who.tx.id, revisionBefore: base.revision };
+    return {
+      result: {
+        timeline: id,
+        revision: applied.timeline.revision,
+        operation,
+        changes: applied.changes,
+        snaps: applied.snaps,
+        warnings: [...(made.warnings ?? []), ...applied.warnings],
+      },
+      shadow: applied.timeline,
+    };
+  }
+
+  /**
+   * Bring the open proposal's part for timeline `id` up to `current` (ADR
+   * 0019 §7): replay it there when the person's changes since its base touch
+   * none of its keys, else close it as stale. Caller holds the turn. False
+   * when it went stale.
+   */
+  async #sync(root: string, id: string, book: Book, current: Timeline, fps: number): Promise<boolean> {
+    const proposal = book.proposal;
+    const part = proposal?.parts.find((candidate) => candidate.timeline === id);
+    if (!proposal || !part || timelineHash(part.base) === timelineHash(current)) return true;
+    const rebased = await this.#rebase(root, id, fps, part, current);
+    if (book.proposal !== proposal) return false;
+    if (!rebased.ok) {
+      await this.#close(book, proposal, "stale", rebased.conflicts);
+      return false;
+    }
+    Object.assign(part, { base: current, ops: rebased.ops, shadow: rebased.shadow });
+    await this.#persist(book);
+    this.#emit(book, proposal, proposal.state);
+    return true;
+  }
+
+  /** `part` replayed on `current`, or the ids that make it stale: keys shared with the person's changes, or a replay breaking a rule. */
+  async #rebase(
+    root: string,
+    id: string,
+    fps: number,
+    part: Omit<ProposalPart, "shadow"> & { shadow?: Timeline },
+    current: Timeline,
+  ): Promise<{ ok: true; ops: ProposedOp[]; shadow: Timeline } | { ok: false; conflicts: string[] }> {
+    if (timelineHash(part.base) !== timelineHash(current)) {
+      const person = [diffTimelines(part.base, current), diffTimelines(current, part.base)];
+      const ours = part.ops.flatMap((op) => [op.patch, op.inverse.args]);
+      const conflicts = overlappingIds(ours, person, [part.base, current, ...(part.shadow ? [part.shadow] : [])]);
+      if (conflicts.length > 0) return { ok: false, conflicts };
+    }
+    let state = current;
+    const ops: ProposedOp[] = [];
+    for (const op of part.ops) {
+      try {
+        const applied = await applyOperation(state, { op: "timeline.patch", args: op.patch }, this.#context(root, id, fps, op.op));
+        ops.push({ ...op, inverse: applied.inverse });
+        state = applied.timeline;
+      } catch {
+        // A replay breaking a rule (overlap, removed track) makes it stale, naming what that operation touches.
+        return { ok: false, conflicts: touchedIds(op.patch) };
+      }
+    }
+    return { ok: true, ops, shadow: state };
+  }
+
+  /**
+   * Close the open `proposal` (ADR 0019 §8): `accepted` drops its file (its
+   * operations are journaled), other outcomes keep it for recovery. Logs the
+   * decision, wakes `proposal.wait` and reports it.
+   */
+  async #close(book: Book, proposal: OpenProposal, outcome: ProposalOutcome, conflicts: string[]): Promise<void> {
+    const real = book.root;
+    if (book.proposal !== proposal) return;
+    book.proposal = null;
+    const at = new Date().toISOString();
+    const building = proposal.state === "building";
+    const write = book.saving.then(() =>
+      outcome === "accepted" ? removeProposal(real, proposal.tx) : saveProposal(real, proposal, { state: outcome, at, conflicts }),
+    );
+    book.saving = write.catch(() => {});
+    const decision: ProposalDecision = {
+      tx: proposal.tx,
+      label: proposal.label,
+      author: proposal.author,
+      outcome,
+      timelines: proposal.parts.map((part) => part.timeline),
+      conflicts,
+      at,
+    };
+    if (building && (outcome === "stale" || outcome === "rejected")) {
+      book.notices.set(proposal.author, { tx: proposal.tx, reason: outcome, conflicts });
+    }
+    const logged = write.then(() => appendDecision(real, decision));
+    book.closing = logged.catch(() => {});
+    try {
+      await logged;
+    } finally {
+      book.closing = null;
+      for (const waiter of book.waiters) waiter(decision);
+      book.waiters.clear();
+      this.#emit(book, proposal, outcome, conflicts, building && (outcome === "stale" || outcome === "rejected"));
+    }
+  }
+
+  /** Save the open proposal of `book` (whatever it is when the write starts), after earlier writes. */
+  #persist(book: Book): Promise<void> {
+    const write = book.saving.then(async () => {
+      if (book.proposal) await saveProposal(book.root, book.proposal);
+    });
+    book.saving = write.catch(() => {});
+    return write;
+  }
+
+  #emit(book: Book, proposal: OpenProposal, state: ProposalState, conflicts: string[] = [], endsTx = false): void {
+    this.#options.onProposal?.({
+      root: book.root,
+      tx: proposal.tx,
+      label: proposal.label,
+      author: proposal.author,
+      state,
+      operations: operationCount(proposal),
+      timelines: proposal.parts.map((part) => part.timeline),
+      conflicts,
+      endsTx,
+    });
+  }
+
+  #reviewEnabled(root: string): Promise<boolean> {
+    const enabled = this.#options.reviewEnabled;
+    return enabled ? this.#realRoot(root).then(enabled) : Promise.resolve(false);
+  }
+
+  /** Review mode state of `root`, loaded once: an open proposal on disk is rebuilt on the current files and checked (ADR 0019 §4). */
+  #book(root: string): Promise<Book> {
+    return this.#realRoot(root).then((real) => {
+      let book = this.#books.get(real);
+      if (!book) {
+        book = this.#loadBook(real);
+        this.#books.set(real, book);
+        book.then(
+          (loaded) => this.#loaded.set(real, loaded),
+          () => this.#books.delete(real),
+        );
+      }
+      return book;
+    });
+  }
+
+  async #loadBook(real: string): Promise<Book> {
+    const book: Book = { root: real, proposal: null, creating: null, notices: new Map(), waiters: new Set(), saving: Promise.resolve(), closing: null };
+    const stored = await loadOpenProposals(real);
+    const latest = stored.pop();
+    // Only one can be open; older leftovers of a crash are closed.
+    for (const old of stored) {
+      book.proposal = { ...old, parts: old.parts.map((part) => ({ ...part, shadow: part.base })) };
+      await this.#close(book, book.proposal, "stale", []);
+    }
+    if (!latest) return book;
+    const fps = await projectFps(real);
+    const proposal: OpenProposal = { ...latest, parts: latest.parts.map((part) => ({ ...part, shadow: part.base })) };
+    book.proposal = proposal;
+    for (const part of proposal.parts) {
+      let current: Timeline;
+      try {
+        current = await readTimelineFile(real, timelineRel(part.timeline));
+      } catch {
+        await this.#close(book, proposal, "stale", [part.timeline]);
+        return book;
+      }
+      const rebased = await this.#rebase(real, part.timeline, fps, part, current);
+      if (!rebased.ok) {
+        await this.#close(book, proposal, "stale", rebased.conflicts);
+        return book;
+      }
+      Object.assign(part, { base: current, ops: rebased.ops, shadow: rebased.shadow });
+    }
+    if (proposal.state === "building" && !this.#options.txOpen?.(proposal.tx)) proposal.state = "ready";
+    await this.#persist(book);
+    return book;
   }
 
   /**
@@ -365,6 +1014,7 @@ export class TimelineService {
     op: string,
     args: unknown,
     warnings: string[] = [],
+    accepted?: { id: string; proposal: string },
   ): Promise<OperationResult> {
     const { root, timeline: id } = call;
     const path = timelinePath(root, id);
@@ -372,7 +1022,7 @@ export class TimelineService {
     await writeTextAtomic(path, text);
     this.#known.set(await this.#key(root, id), { text, timeline: applied.timeline });
     const operation: OperationRecord = {
-      id: `op_${randomBytes(4).toString("hex")}`,
+      id: accepted?.id ?? newOpId(),
       op,
       args: args as Record<string, unknown>,
       inverse: applied.inverse,
@@ -387,6 +1037,7 @@ export class TimelineService {
       revision: applied.timeline.revision,
       hashBefore: timelineHash(before),
       hash: timelineHash(applied.timeline),
+      ...(accepted ? { proposal: accepted.proposal } : {}),
     };
     await appendJournal(root, id, entry);
     // Only catch-up of edits made while no daemon runs needs it; a lost snapshot must not fail an applied operation.
@@ -398,6 +1049,11 @@ export class TimelineService {
       author: call.author,
       changes: applied.changes,
     });
+    // ADR 0019 §7: the person's edit rebases the open proposal, or makes it stale.
+    if (call.author === "ui") {
+      const book = await this.#book(root);
+      if (book.proposal) await this.#sync(root, id, book, applied.timeline, await projectFps(root));
+    }
     return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings: [...warnings, ...applied.warnings] };
   }
 
@@ -405,9 +1061,14 @@ export class TimelineService {
    * Compact dump for agents (`timeline.show`). A clip whose nested timeline
    * is missing, invalid or cyclic does not fail the dump: its `end` is null,
    * the track end and duration are null, and `problems` says how to fix it.
+   * `view` picks the file or the open proposal's version (ADR 0019).
    */
-  async show(root: string, id: string): Promise<TimelineView> {
-    const { timeline, fps } = await this.load(root, id);
+  async show(
+    root: string,
+    id: string,
+    view: TimelineViewName = "current",
+  ): Promise<TimelineView & Pick<Viewed, "view" | "proposal">> {
+    const { timeline, fps, proposal } = await this.viewTimeline(root, id, view);
     const grid = new FrameGrid(fps);
     const resolve = this.#nestedDurations(root, [timelineRel(id)], grid);
     const durations = new Map<string, Promise<number>>();
@@ -447,6 +1108,8 @@ export class TimelineService {
       });
     }
     return {
+      view,
+      proposal,
       timeline: id,
       path: timelineRel(id),
       revision: timeline.revision,
@@ -458,13 +1121,18 @@ export class TimelineService {
     };
   }
 
-  /** Track summaries in stacking order (`track.list`). */
+  /** Track summaries in stacking order (`track.list`); `view` as for {@link TimelineService.show}. */
   async tracks(
     root: string,
     id: string,
-  ): Promise<{ timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }> {
-    const view = await this.show(root, id);
+    shown: TimelineViewName = "current",
+  ): Promise<
+    Pick<Viewed, "view" | "proposal"> & { timeline: string; revision: number; tracks: TrackSummary[]; problems: TimelineProblem[] }
+  > {
+    const view = await this.show(root, id, shown);
     return {
+      view: view.view,
+      proposal: view.proposal,
       timeline: id,
       revision: view.revision,
       tracks: view.tracks.map((track) => ({
@@ -601,6 +1269,24 @@ export class TimelineService {
     // Edited while no daemon watched: journal it now, so `revert` sees it (no revision check: nothing to be stale against).
     let timeline: Timeline;
     let result: OperationResult | null = null;
+    const book = await this.#book(root);
+    if (book.proposal || (await this.#reviewEnabled(root))) {
+      // Review mode (ADR 0019 §9): the catch-up becomes a proposal like any direct edit.
+      let planned: { patch: TimelinePatch; applied: AppliedOperation } | null = null;
+      let rejected = false;
+      try {
+        planned = await this.#plan(root, id, journaled, diffTimelines(journaled, parsed.value), fps);
+      } catch (error) {
+        if (!(error instanceof RpcError)) throw error;
+        await this.#reject(root, id, text, journaled, "invalid", error.message);
+        rejected = true;
+      }
+      if (planned) await this.#proposeEdit(root, id, book, text, journaled, planned);
+      // Nothing to review: written back as `#extend` does with an empty patch.
+      else if (!rejected) await this.#restore(root, id, journaled);
+      if (known) await this.#announce(root, id, journaled);
+      return { timeline: structuredClone(journaled), fps, ...snap };
+    }
     try {
       ({ timeline, result } = await this.#extend(root, id, journaled, diffTimelines(journaled, parsed.value), fps, this.#fileSaver()));
     } catch (error) {
@@ -657,8 +1343,28 @@ export class TimelineService {
     return { timeline: applied.timeline, result };
   }
 
-  /** A direct edit on disk: journal it, or restore `base` and keep the edit. Returns the timeline now on disk. */
+  /**
+   * A direct edit on disk: journal it, or restore `base` and keep the edit.
+   * In review mode (ADR 0019 §9) a valid edit becomes a ready proposal
+   * instead, and `base` goes back on disk. Returns the timeline now on disk.
+   */
   async #absorb(root: string, id: string, text: string, base: Timeline, fps: number): Promise<Timeline> {
+    const book = await this.#book(root);
+    if (book.proposal || (await this.#reviewEnabled(root))) {
+      let planned: { patch: TimelinePatch; applied: AppliedOperation } | null;
+      try {
+        const path = timelinePath(root, id);
+        planned = await this.#plan(root, id, base, diffTimelines(base, checkRevision(id, path, parseIncoming(path, text), base)), fps);
+      } catch (error) {
+        if (!(error instanceof RpcError)) throw error;
+        await this.#reject(root, id, text, base, error.code === ErrorCode.StaleRevision ? "stale" : "invalid", error.message);
+        return structuredClone(base);
+      }
+      // Same groups, tracks and clips (formatting, key order): nothing to review.
+      if (!planned) return (await this.#acceptEdit(root, id, text, base, fps)).timeline;
+      await this.#proposeEdit(root, id, book, text, base, planned);
+      return structuredClone(base);
+    }
     try {
       return (await this.#acceptEdit(root, id, text, base, fps)).timeline;
     } catch (error) {
@@ -667,6 +1373,55 @@ export class TimelineService {
       await this.#reject(root, id, text, base, reason, error.message);
       return structuredClone(base);
     }
+  }
+
+  /** `patch` applied to `base` by the engine without writing; null when it changes nothing. Throws the engine's errors. */
+  async #plan(root: string, id: string, base: Timeline, patch: TimelinePatch, fps: number): Promise<{ patch: TimelinePatch; applied: AppliedOperation } | null> {
+    if (isEmptyPatch(patch)) return null;
+    return { patch, applied: await applyOperation(base, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch")) };
+  }
+
+  /**
+   * A valid direct edit `text` of timeline `id` while review mode applies:
+   * a ready proposal by author `file`, or a rejection with reason
+   * `proposal-pending` when another proposal is open. Either way `base` is
+   * back on disk. Caller holds the turn.
+   */
+  async #proposeEdit(
+    root: string,
+    id: string,
+    book: Book,
+    text: string,
+    base: Timeline,
+    planned: { patch: TimelinePatch; applied: AppliedOperation },
+  ): Promise<void> {
+    while (book.creating) await book.creating;
+    if (book.proposal) {
+      const { message } = proposalPending(book.proposal);
+      await this.#reject(root, id, text, base, "proposal-pending", `${message} The edit was not applied; reapply it once the proposal is decided.`);
+      return;
+    }
+    const at = new Date().toISOString();
+    const { tx } = this.#fileSaver();
+    const op: ProposedOp = { id: newOpId(), op: "timeline.patch", args: planned.patch, patch: planned.patch, inverse: planned.applied.inverse, at };
+    const proposal: OpenProposal = {
+      tx: tx.id,
+      label: `Edit ${timelineRel(id)}`,
+      author: "file",
+      state: "ready",
+      openedAt: at,
+      parts: [{ timeline: id, base, shadow: planned.applied.timeline, ops: [op] }],
+      edit: { timeline: id, text },
+    };
+    book.proposal = proposal;
+    try {
+      await this.#persist(book);
+    } catch (error) {
+      book.proposal = null;
+      throw error;
+    }
+    await this.#restore(root, id, base);
+    this.#emit(book, proposal, "ready");
   }
 
   /**
@@ -684,18 +1439,7 @@ export class TimelineService {
     saver?: Saver,
   ): Promise<{ timeline: Timeline; result: OperationResult | null }> {
     const path = timelinePath(root, id);
-    const parsed = parseText(text);
-    if (!parsed.ok) throw invalidFile(path, parsed.error);
-    const incoming = parsed.value;
-    if (incoming.revision !== base.revision) {
-      throw new RpcError(
-        ErrorCode.StaleRevision,
-        `${timelineRel(id)} was edited at revision ${incoming.revision}, but timeline ${id} is at revision ${base.revision}` +
-          `${incoming.revision < base.revision ? " (it changed since that copy was read)" : ""}. ` +
-          "Re-read the file, reapply the edit keeping its `revision`, and save again.",
-        { path, timeline: id, revision: incoming.revision, current: base.revision },
-      );
-    }
+    const incoming = checkRevision(id, path, parseIncoming(path, text), base);
     const patch = diffTimelines(base, incoming);
     if (isEmptyPatch(patch)) {
       // Same groups, tracks and clips (formatting, key order): nothing to journal.
@@ -712,19 +1456,20 @@ export class TimelineService {
   }
 
   /** Restore `base` on disk, keep `text` under `.frameshell/rejected/`, report it (SPEC §6.4). */
-  async #reject(root: string, id: string, text: string, base: Timeline, reason: "stale" | "invalid", message: string): Promise<void> {
+  async #reject(
+    root: string,
+    id: string,
+    text: string,
+    base: Timeline,
+    reason: RejectionInfo["reason"],
+    message: string,
+  ): Promise<void> {
     const at = new Date().toISOString();
     const stamp = at.replace(/[:.]/g, "-"); // `:` is not allowed in Windows file names.
     let preserved = `.frameshell/rejected/${stamp}-${id}.json`;
     for (let n = 2; await exists(join(root, preserved)); n++) preserved = `.frameshell/rejected/${stamp}-${n}-${id}.json`;
     await writeTextAtomic(join(root, preserved), text);
-    const path = timelinePath(root, id);
-    const key = await this.#key(root, id);
-    // Known text only when it is `base`'s: a broken file's text is no version to restore.
-    const known = this.#known.get(key);
-    const restored = known?.timeline === base ? known.text : `${JSON.stringify(base, null, 2)}\n`;
-    await writeTextAtomic(path, restored);
-    this.#known.set(key, { text: restored, timeline: base });
+    await this.#restore(root, id, base);
     const real = await this.#realRoot(root);
     const rejection: TimelineRejection = {
       root: real,
@@ -739,6 +1484,16 @@ export class TimelineService {
     const { root: _root, ...record } = rejection;
     await recordRejection(root, record);
     this.#options.onRejected?.(rejection);
+  }
+
+  /** Put `base` back on disk as the known version of timeline `id`. */
+  async #restore(root: string, id: string, base: Timeline): Promise<void> {
+    const key = await this.#key(root, id);
+    // Known text only when it is `base`'s: a broken file's text is no version to restore.
+    const known = this.#known.get(key);
+    const restored = known?.timeline === base ? known.text : `${JSON.stringify(base, null, 2)}\n`;
+    await writeTextAtomic(timelinePath(root, id), restored);
+    this.#known.set(key, { text: restored, timeline: base });
   }
 
   /** A timeline that became readable without an operation (new or repaired file): re-read all of it. */
@@ -787,6 +1542,10 @@ export class TimelineService {
   }
 }
 
+function newOpId(): string {
+  return `op_${randomBytes(4).toString("hex")}`;
+}
+
 /** `timelines/<id>.json`. */
 function timelineRel(id: string): string {
   return `timelines/${id}.json`;
@@ -812,6 +1571,111 @@ function parseText(text: string): ParseResult<Timeline> {
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
+}
+
+/** Timeline file content `text` of `path`, parsed; InvalidProjectFile otherwise. */
+function parseIncoming(path: string, text: string): Timeline {
+  const parsed = parseText(text);
+  if (!parsed.ok) throw invalidFile(path, parsed.error);
+  return parsed.value;
+}
+
+/** `incoming` when it carries `base`'s revision; StaleRevision otherwise. */
+function checkRevision(id: string, path: string, incoming: Timeline, base: Timeline): Timeline {
+  if (incoming.revision === base.revision) return incoming;
+  throw new RpcError(
+    ErrorCode.StaleRevision,
+    `${timelineRel(id)} was edited at revision ${incoming.revision}, but timeline ${id} is at revision ${base.revision}` +
+      `${incoming.revision < base.revision ? " (it changed since that copy was read)" : ""}. ` +
+      "Re-read the file, reapply the edit keeping its `revision`, and save again.",
+    { path, timeline: id, revision: incoming.revision, current: base.revision },
+  );
+}
+
+/** ProposalPending for a change refused because `proposal` is open (ADR 0019). */
+function proposalPending(proposal: OpenProposal): RpcError {
+  const what = proposal.label ? `${proposal.tx}, "${proposal.label}"` : proposal.tx;
+  return new RpcError(ErrorCode.ProposalPending, `A proposal is waiting for review (${what}). Run \`frameshell proposal wait\`, then continue.`, {
+    tx: proposal.tx,
+    label: proposal.label,
+    author: proposal.author,
+    state: proposal.state,
+    hint: "`frameshell proposal wait` (MCP: `proposal_wait`), then retry.",
+  });
+}
+
+/** ProposalState for proposal `tx`; see `ErrorCode.ProposalState` for the reasons. */
+function proposalState(tx: string, reason: string, message: string, conflicts: string[] = []): RpcError {
+  const hints: Record<string, string> = {
+    forbidden: "Only the person decides, in the Frameshell app.",
+    building: "Wait until its transaction closes (`tx commit`).",
+    stale: "Re-read the timeline and redo the change.",
+    rejected: "Ask the person what to change.",
+  };
+  return new RpcError(ErrorCode.ProposalState, message, { tx, reason, conflicts, hint: hints[reason] ?? "`frameshell proposal status`." });
+}
+
+/** ProposalState telling an author its building proposal closed unapplied. */
+function closedError(notice: { tx: string; reason: "stale" | "rejected"; conflicts: string[] }): RpcError {
+  const { tx, reason, conflicts } = notice;
+  if (reason === "rejected") {
+    return proposalState(tx, "rejected", `Your proposal ${tx} was rejected in the app while you were building it. Nothing of it was applied. Ask the person what to change.`);
+  }
+  const ids = conflicts.join(", ") || "the same timeline";
+  return proposalState(tx, "stale", `Your proposal ${tx} went stale: the person changed ${ids} meanwhile. Nothing of it was applied. Re-read the timeline and redo the change.`, conflicts);
+}
+
+/**
+ * `part`'s operations as journal entries of `proposal`'s transaction, chained
+ * from its base, and the timeline they end at: what `planDiff` rewinds.
+ */
+function proposedEntries(part: ProposalPart, proposal: OpenProposal): { state: Timeline; entries: JournalEntry[] } {
+  let state = part.base;
+  const entries: JournalEntry[] = [];
+  for (const op of part.ops) {
+    const next = { ...applyPatch(state, op.patch), revision: state.revision + 1 };
+    entries.push({
+      id: op.id,
+      op: op.op,
+      args: op.args,
+      inverse: op.inverse,
+      author: proposal.author,
+      tx: proposal.tx,
+      revisionBefore: state.revision,
+      txLabel: proposal.label,
+      at: op.at,
+      revision: next.revision,
+      hashBefore: timelineHash(state),
+      hash: timelineHash(next),
+    });
+    state = next;
+  }
+  return { state, entries };
+}
+
+/** Operations of `proposal`, every timeline. */
+function operationCount(proposal: OpenProposal): number {
+  return proposal.parts.reduce((sum, part) => sum + part.ops.length, 0);
+}
+
+/** `proposal` as `status` and `proposal.status` list it. */
+function summary(proposal: OpenProposal): Proposal {
+  return {
+    tx: proposal.tx,
+    label: proposal.label,
+    author: proposal.author,
+    state: proposal.state,
+    operations: operationCount(proposal),
+    timelines: proposal.parts.map((part) => part.timeline),
+    openedAt: proposal.openedAt,
+    ageMs: Math.max(0, Date.now() - Date.parse(proposal.openedAt)),
+  };
+}
+
+/** `proposal.wait` result for a closed proposal. */
+function waitOutcome(decision: ProposalDecision): ProposalWaitResult {
+  const { outcome, tx, label, author, conflicts } = decision;
+  return { outcome, tx, label, author, conflicts, proposal: null };
 }
 
 function invalidFile(path: string, details: string): RpcError {

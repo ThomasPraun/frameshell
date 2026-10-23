@@ -22,6 +22,7 @@ let group: string;
 beforeAll(async () => {
   daemon = await startDaemon({
     socketPath: uniqueSocketPath(),
+    dirs: { dataDir: tempDir(), configDir: tempDir() },
     binaries: testBinaryManager(),
     idleTimeoutMs: Infinity,
     faceScanner: (request) => angleFaceKeys({ ...request, detect: markerDetector }),
@@ -105,6 +106,26 @@ describe("multicam.faces", () => {
       const ben = (await angle("ben")).reframe!;
       expect(ben).toHaveLength(1);
       expect(ben[0]!.x).toBeCloseTo(0.8125, 2);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "in review mode, one proposal that is ready once the run ends, also without a terminal session",
+    async () => {
+      const app = await connectToDaemon(daemon.socketPath, { client: "desktop/test" });
+      try {
+        await app.request("review.set", { cwd: project, enabled: true });
+        const before = await angle("ana");
+        const result = await solo.request("multicam.faces", { cwd: project, group, angles: ["ana"], replace: true });
+        expect(await angle("ana")).toEqual(before);
+        const { proposal } = await solo.request("proposal.status", { cwd: project });
+        expect(proposal).toMatchObject({ tx: result.tx, state: "ready", operations: 1 });
+        await app.request("proposal.reject", { cwd: project, tx: result.tx! });
+      } finally {
+        await app.request("review.set", { cwd: project, enabled: false });
+        app.close();
+      }
     },
     MEDIA_TIMEOUT,
   );

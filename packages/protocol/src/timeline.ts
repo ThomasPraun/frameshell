@@ -830,10 +830,11 @@ export type TimelineProblem = z.output<typeof TimelineProblemSchema>;
 export const TimelineRejectionSchema = z.object({
   timeline: z.string().describe("Timeline id; the file is `timelines/<id>.json`."),
   reason: z
-    .enum(["stale", "invalid"])
+    .enum(["stale", "invalid", "proposal-pending"])
     .describe(
       "`stale`: the edited file's `revision` was not the current one (edited from an old copy, or the revision was changed). " +
-        "`invalid`: not JSON, fails the timeline schema, or breaks a timeline rule (e.g. overlapping clips).",
+        "`invalid`: not JSON, fails the timeline schema, or breaks a timeline rule (e.g. overlapping clips). " +
+        "`proposal-pending`: review mode (ADR 0019) and another proposal waits for review; reapply the edit once it is decided.",
     ),
   message: z.string().describe("What was wrong, precise enough to fix the edit (schema path, clip ids, revisions)."),
   preserved: z
@@ -854,10 +855,11 @@ export type TimelineRejection = z.output<typeof TimelineRejectionSchema>;
  */
 export const RejectionRecordSchema = TimelineRejectionSchema.extend({
   reason: z
-    .enum(["stale", "invalid", "unknown"])
+    .enum(["stale", "invalid", "proposal-pending", "unknown"])
     .describe(
       "`stale`: the edit's `revision` was not the current one. `invalid`: not JSON, fails the schema, or breaks a " +
-        "timeline rule. `unknown`: the copy is on disk but no reason was recorded; compare it with the timeline file.",
+        "timeline rule. `proposal-pending`: another proposal waited for review (ADR 0019). `unknown`: the copy is on " +
+        "disk but no reason was recorded; compare it with the timeline file.",
     ),
   current: z.int().nullable().describe("Revision of the daemon's version, restored on disk; null when not recorded."),
 });

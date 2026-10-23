@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProposalDecisionSchema } from "./proposals.js";
 import { AuthorSchema, OpIdSchema, OperationRecordSchema, TxIdSchema } from "./timeline.js";
 
 /**
@@ -19,6 +20,7 @@ export const JournalEntrySchema = OperationRecordSchema.extend({
     .string()
     .describe("Content hash of the timeline the operation was applied to; must equal the previous entry's `hash`, else the file changed outside the journal."),
   hash: z.string().describe("Content hash of the timeline the operation wrote. `revert` compares it to the file."),
+  proposal: TxIdSchema.optional().describe("Set when the operation was accepted from a proposal (ADR 0019): the proposal's id, its `tx`."),
 });
 
 /** See {@link JournalEntrySchema}. */
@@ -51,6 +53,12 @@ export const HistoryResultSchema = z.object({
   revision: z.int().nullable().describe("Revision after the last journaled operation; null when the journal is empty."),
   since: TxIdSchema.nullable().describe("The `since` transaction; only operations journaled after its last one are listed."),
   transactions: z.array(HistoryTransactionSchema).describe("Oldest first."),
+  proposals: z
+    .array(ProposalDecisionSchema)
+    .describe(
+      "Review mode (ADR 0019): proposals that changed this timeline and were decided, oldest first; with `since`, the " +
+        "decision of that transaction and later ones. Tells an agent what became of its last proposal. Empty when none.",
+    ),
 });
 
 /** See {@link HistoryResultSchema}. */

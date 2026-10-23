@@ -97,7 +97,7 @@ export function touchedIds(patch: TimelinePatch): string[] {
  * With `since`, only entries after that transaction's last entry. Throws
  * HistoryNotFound when `since` is not in the journal.
  */
-export function historyView(entries: JournalEntry[], timeline: string, since?: string): HistoryResult {
+export function historyView(entries: JournalEntry[], timeline: string, since?: string): Omit<HistoryResult, "proposals"> {
   let shown = entries;
   if (since !== undefined) {
     const last = entries.findLastIndex((entry) => entry.tx === since);
@@ -210,13 +210,35 @@ function snapshot(timeline: Timeline, keys: Set<string>): Map<string, unknown> {
 
 /** Whether foreign `entry` could have changed `key`: directly, or by rewriting the track holding it. */
 function relates(entry: JournalEntry, key: string, ...states: Timeline[]): boolean {
-  const patch = entry.inverse.args;
+  return patchRelates(entry.inverse.args, key, states);
+}
+
+/** Whether `patch` could change entity `key`: directly, or by rewriting the track holding it. */
+function patchRelates(patch: TimelinePatch, key: string, states: Timeline[]): boolean {
   if (patchKeys(patch).includes(key)) return true;
   if (key === "order") return (patch.tracks ?? []).length > 0;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
   if (key.startsWith("group:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);
   return holders.some((track) => (patch.tracks ?? []).some((entry) => entry.id === track));
+}
+
+/**
+ * Ids two sets of changes both touch, as `planRevert` decides it (review mode
+ * rebase, ADR 0019): an entity key of one side that a patch of the other
+ * side could change. `states` are the timelines holding the clips, to find
+ * a clip's track. Sorted; `order` stands for the track order.
+ */
+export function overlappingIds(ours: TimelinePatch[], theirs: TimelinePatch[], states: Timeline[]): string[] {
+  const hits = new Set<string>();
+  const check = (side: TimelinePatch[], other: TimelinePatch[]) => {
+    for (const key of new Set(side.flatMap(patchKeys))) {
+      if (other.some((patch) => patchRelates(patch, key, states))) hits.add(key.replace(/^(clip|track|group):/, ""));
+    }
+  };
+  check(ours, theirs);
+  check(theirs, ours);
+  return [...hits].sort();
 }
 
 /** `found` oldest first. */

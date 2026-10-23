@@ -114,7 +114,7 @@ describe("operation journal", () => {
 
   it("returns an empty history for a timeline that has no journal yet", async () => {
     const { root, timelines } = setup();
-    expect(await timelines.history(root, "main", {})).toEqual({ timeline: "main", revision: null, since: null, transactions: [] });
+    expect(await timelines.history(root, "main", {})).toEqual({ timeline: "main", revision: null, since: null, transactions: [], proposals: [] });
   });
 });
 

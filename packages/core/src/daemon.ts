@@ -17,6 +17,8 @@ import {
   RpcError,
   type ValidatedParams,
   type AppDirs,
+  PROPOSAL_WAIT_DEFAULT_S,
+  type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
   parseRequest,
@@ -50,10 +52,11 @@ import { PluginHost } from "./plugins/host.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
+import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
-import { TimelineService } from "./timeline/service.js";
+import { TimelineService, type TxRef } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -197,6 +200,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const tx = transactions.next(key);
       await transactions.touching(key, tx, { root: dir, timeline: id });
       if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(key, tx);
+      await settle(key, tx);
     },
   });
   const plugins = new PluginHost({
@@ -224,8 +228,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     idleGapMs: options.txIdleGapMs,
     ...(options.txNow ? { now: options.txNow } : {}),
     store: new FileTransactionStore(dirs.dataDir, socketPath),
+    // Review mode (ADR 0019 §3): a closed transaction's proposal waits for review.
+    onClosed: (_author, tx) => void timelines.ready(tx.id).catch(() => {}),
   });
   await transactions.restore();
+  const review = new ReviewSwitch(dirs);
+  /** After an operation of `key` in `tx`: a proposal whose transaction is already over (no grouping) is ready. */
+  const settle = async (key: string, tx: TxRef) => {
+    if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
+  };
   const replays = new IdempotencyCache();
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
@@ -245,6 +256,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     onRejected: ({ root, ...rejection }) => events.publish("timeline.rejected", root, { project: root, ...rejection }),
     fileTx: () => transactions.next("file"),
+    reviewEnabled: (dir) => review.enabled(dir),
+    txOpen: (tx) => transactions.isOpenTx(tx),
+    onProposal: ({ root, endsTx, ...change }) => {
+      events.publish("proposal.changed", root, { project: root, ...change });
+      // A building proposal closed unapplied ends its transaction (ADR 0019 §7).
+      if (endsTx) void transactions.drop(transactionKey(change.author), change.tx).catch(() => {});
+    },
   });
   const exports = new ExportService({
     jobs,
@@ -340,6 +358,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       ...(prepare ? { prepare: (current: Timeline) => prepare(current, request) } : {}),
     });
     await transactions.applied(key, tx);
+    await settle(key, tx);
     return result;
   };
   /** Results of jobs queued by {@link inJob}, by job id: a request that finds one running for its input waits it out. */
@@ -409,6 +428,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     await transactions.touching(key, tx, { root: dir, timeline });
     const result = await timelines.revert({ root: dir, cwd, timeline, author: journalAuthorOf(caller), tx, target });
     await transactions.applied(key, tx);
+    await settle(key, tx);
     return result;
   };
   /** Agent tags the app set per terminal session (`session.tag`), each with the connection that set it. */
@@ -425,6 +445,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return agent ? agentAuthor(agent, caller.session) : key;
   };
   const root = async (cwd: string) => (await projects.requireEnclosing(cwd)).dir;
+  /** Which timeline a read by `caller` shows (ADR 0019 §5): as asked, else the proposal's for its author's terminal, else the file. */
+  const viewOf = async (dir: string, caller: Caller, view: TimelineViewName | undefined): Promise<TimelineViewName> => {
+    if (view) return view;
+    const open = await timelines.proposal(dir);
+    return open && transactionKey(open.author) === authorOf(caller) ? "proposal" : "current";
+  };
+  /** Timeline `id` as `caller` sees it by default: its own proposal's version while it builds one. */
+  const loadFor = async (dir: string, id: string, caller: Caller) => timelines.viewTimeline(dir, id, await viewOf(dir, caller, undefined));
+  /** ProposalState `forbidden` unless `caller` is the app (ADR 0019 §2, §8). */
+  const onlyUi = (caller: Caller, what: string, tx: string | null = null) => {
+    if (authorOf(caller) === "ui") return;
+    throw new RpcError(ErrorCode.ProposalState, `Only the person, in the Frameshell app, can ${what}.`, {
+      tx,
+      reason: "forbidden",
+      conflicts: [],
+      hint: "Only the person decides, in the Frameshell app.",
+    });
+  };
   /** Open explicit transactions that changed project `dir` (however its root was spelled) or nothing yet. */
   const openTransactions = async (dir: string): Promise<OpenTransaction[]> => {
     const real = await canonicalPath(dir);
@@ -484,6 +522,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         rejections: project ? await timelines.rejections(project.dir) : [],
         jobs: project ? listJobs({ project: project.dir }) : [],
         transactions: project ? await openTransactions(project.dir) : [],
+        review: project ? await timelines.review(project.dir) : null,
         caller: { client: caller.client, session: caller.session, agent: agentOf(caller) },
       };
     },
@@ -514,8 +553,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
     render: async ({ cwd, timeline, preset, out }) => exports.render(await root(cwd), { timeline, preset, out }),
-    frame: async ({ cwd, timeline, at, out, preset, format, quality }) =>
-      exports.frame(await root(cwd), { timeline, at, out, preset, format, quality }),
+    frame: async ({ cwd, timeline, at, out, preset, format, quality, view }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, format, quality }, loaded)) };
+    },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;
@@ -592,7 +634,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const busy = active.some((job) => job.kind === "clip" || job.kind === "render");
       const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
-      const removed = [...derived.removed, ...cache.removed].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      const proposals = await timelines.gcProposals(dir, dryRun);
+      const removed = [...derived.removed, ...cache.removed, ...proposals].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       const skipped = [...derived.skipped, ...cache.skipped];
       if (!temps) skipped.push({ area: "temp", reason: "jobs of this project are running; temp files may be theirs." });
       const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -601,7 +644,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
-    "inspect.point": async ({ cwd, timeline, at, x, y, unit }) => inspector.point(await root(cwd), { timeline, at, x, y, unit }),
+    "inspect.point": async ({ cwd, timeline, at, x, y, unit, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const loaded = { timeline: await resolveNested(dir, shown.timeline), fps: shown.fps };
+      return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit }, loaded)) };
+    },
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);
       return { dir, jobs: listJobs({ project: dir, active }) };
@@ -615,8 +663,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
-    "timeline.show": async ({ cwd, timeline }) => timelines.show(await root(cwd), timeline),
-    "track.list": async ({ cwd, timeline }) => timelines.tracks(await root(cwd), timeline),
+    "timeline.show": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      return timelines.show(dir, timeline, await viewOf(dir, caller, view));
+    },
+    "track.list": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      return timelines.tracks(dir, timeline, await viewOf(dir, caller, view));
+    },
     "track.add": (params, caller) => operate("track.add", params, caller),
     "track.remove": (params, caller) => operate("track.remove", params, caller),
     "track.set": (params, caller) => operate("track.set", params, caller),
@@ -695,7 +749,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "shot.set": (params, caller) => operate("shot.set", params, caller),
     "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {
       const dir = await root(cwd);
-      const { timeline: loaded } = await timelines.load(dir, timeline);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
       const found = groupOf(loaded, group, "multicam.faces");
       const chosen = (named ?? found.angles.filter((angle) => angle.screen !== true).map((angle) => angle.id)).map((id) => {
         const angle = found.angles.find((candidate) => candidate.id === id);
@@ -801,19 +855,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           revision = result.revision;
           wrote = true;
         }
+        if (wrote) await settle(author, tx);
         return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
       });
     },
-    "multicam.turns": async ({ cwd, timeline, group }) => {
+    "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);
-      const { timeline: loaded } = await timelines.load(dir, timeline);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
       const found = groupOf(loaded, group, "multicam.turns");
       const result = await groupTurns(turnsSource, dir, found);
       return { timeline, revision: loaded.revision, group, ...result };
     },
     "multicam.direct": async ({ cwd, timeline, group, template, rules, from, to, replaceHuman }, caller) => {
       const dir = await root(cwd);
-      const { timeline: loaded, fps } = await timelines.load(dir, timeline);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const found = groupOf(loaded, group, "multicam.direct");
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
       const measured = await groupTurns(turnsSource, dir, found);
@@ -869,8 +924,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         warnings,
       };
     },
-    "tx.begin": async ({ label, autoCommitAfter }, caller) => {
+    "tx.begin": async ({ label, autoCommitAfter, cwd }, caller) => {
       const author = authorOf(caller);
+      const project = cwd === undefined ? undefined : ((await readEnclosingProject(cwd))?.dir ?? null);
+      // A directory in no project has no proposal to wait for.
+      if (project !== null) await timelines.assertCanBegin(author, project);
       const autoCommitMs = autoCommitAfter === undefined ? undefined : autoCommitAfter * 1000;
       const tx = await transactions.begin(author, label, { autoCommitMs });
       return { tx: tx.id, label, author };
@@ -878,11 +936,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "tx.commit": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, operations } = await transactions.end(author);
-      return { tx: tx.id, label: tx.label, author, operations };
+      return { tx: tx.id, label: tx.label, author, operations, proposal: await timelines.ready(tx.id) };
     },
     "tx.abort": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
+      // A proposal still building holds what the file never got (ADR 0019 §3).
+      await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
       const reverted = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
       await transactions.end(author);
@@ -891,6 +951,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
     revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, caller),
+    "review.set": async ({ cwd, enabled }, caller) => {
+      onlyUi(caller, "turn review mode on or off");
+      const dir = await root(cwd);
+      await review.set(await canonicalPath(dir), enabled);
+      return { dir, enabled };
+    },
+    "proposal.diff": async ({ cwd, tx }) => timelines.proposalDiff(await root(cwd), tx),
+    "proposal.status": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, ...(await timelines.review(dir)) };
+    },
+    "proposal.wait": async ({ cwd, timeout }, caller) =>
+      timelines.waitProposal(await root(cwd), (timeout ?? PROPOSAL_WAIT_DEFAULT_S) * 1000, journalAuthorOf(caller)),
+    "proposal.accept": async ({ cwd, tx }, caller) => {
+      onlyUi(caller, "accept a proposal", tx);
+      return timelines.acceptProposal(await root(cwd), tx);
+    },
+    "proposal.reject": async ({ cwd, tx }, caller) => {
+      onlyUi(caller, "reject a proposal", tx);
+      return timelines.rejectProposal(await root(cwd), tx);
+    },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),

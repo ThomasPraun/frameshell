@@ -92,7 +92,7 @@ describe("transactions", () => {
     await sleep(GAP_MS * 1.5);
     const second = await addTrack(agent, "A2");
     expect(second.operation.tx).toBe(begun.tx);
-    expect(await agent.request("tx.commit", {})).toEqual({ ...begun, operations: 2 });
+    expect(await agent.request("tx.commit", {})).toEqual({ ...begun, operations: 2, proposal: null });
 
     const after = await addTrack(agent, "A3");
     expect(after.operation.tx).not.toBe(begun.tx);

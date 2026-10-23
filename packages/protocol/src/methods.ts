@@ -2,6 +2,14 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { AgentLabelSchema } from "./agents.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
+import {
+  ProposalOutcomeSchema,
+  ProposalSchema,
+  ProposalStateSchema,
+  ReviewStateSchema,
+  TimelineViewNameSchema,
+  ViewedShape,
+} from "./proposals.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
@@ -34,7 +42,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 52;
+export const PROTOCOL_VERSION = 53;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -150,12 +158,13 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "proposal", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
-        "`.frameshell/context/`, older than 7 days. `temp`: leftover of an interrupted job or transcription.",
+        "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
+        "`.frameshell/proposals/`, decided more than 7 days ago. `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
@@ -170,6 +179,14 @@ const GcSkipSchema = z.object({
 const CwdParam = AbsolutePath.describe(
   "Absolute directory inside the project, e.g. `/home/ana/videos/launch`. The project is found searching upwards.",
 );
+
+/** `view` of the reads review mode (ADR 0019) affects. */
+const ViewParam = TimelineViewNameSchema.optional();
+
+/** Default and longest `proposal.wait` in seconds. */
+export const PROPOSAL_WAIT_DEFAULT_S = 300;
+/** See {@link PROPOSAL_WAIT_DEFAULT_S}. */
+export const PROPOSAL_WAIT_MAX_S = 3600;
 
 const PluginInfoSchema = z.object({
   name: z.string().describe("npm package name."),
@@ -338,10 +355,11 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
+      "`proposal.changed`: the project's review-mode proposal opened, grew, became ready, was rebased or closed. " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -475,8 +493,8 @@ export const methods = {
   status: {
     description:
       "Report daemon state and the Frameshell project enclosing a directory, searching upwards from it: its jobs, " +
-      "refused direct edits and open transactions. Opens that project in the daemon. `project` is null when the " +
-      "directory is in no project.",
+      "refused direct edits, open transactions and review mode (ADR 0019). Opens that project in the daemon. `project` " +
+      "is null when the directory is in no project.",
     params: z.strictObject({
       cwd: AbsolutePath.describe("Absolute directory to resolve the project from, e.g. `/home/ana/videos/launch/assets`."),
     }),
@@ -520,6 +538,9 @@ export const methods = {
             "One left by a closed shell keeps grouping that session's operations: commit or abort it from that " +
             "session. Empty when none or no project.",
         ),
+      review: ReviewStateSchema.nullable().describe(
+        "Review mode of `project` (ADR 0019), as `proposal.status` reports it; null when there is no project.",
+      ),
       caller: z
         .object({
           client: z.string().describe("Client id the caller sent in its handshake."),
@@ -761,8 +782,10 @@ export const methods = {
         .max(100)
         .optional()
         .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
+      view: ViewParam,
     }),
     result: z.object({
+      ...ViewedShape,
       path: z.string().describe("Absolute image path written."),
       format: FrameFormatSchema.describe("Format written."),
       timeline: z.string(),
@@ -790,8 +813,10 @@ export const methods = {
       x: z.number().nonnegative().describe("Horizontal position, 0 = left edge: a fraction of the frame width (e.g. `0.71`), or project pixels with `unit: \"pixel\"`."),
       y: z.number().nonnegative().describe("Vertical position, 0 = top edge: a fraction of the frame height (e.g. `0.14`), or project pixels with `unit: \"pixel\"`."),
       unit: z.enum(["fraction", "pixel"]).default("fraction").describe("What `x` and `y` are. Default `fraction`."),
+      view: ViewParam,
     }),
     result: InspectedPointSchema.extend({
+      ...ViewedShape,
       timeline: z.string(),
       frame: z.int().describe("Timeline frame index (0-based, project fps)."),
       pixel: z.object({ x: z.int(), y: z.int() }).describe("The point in project pixels."),
@@ -1193,17 +1218,19 @@ export const methods = {
       "Compact dump of a timeline for agents: revision, project fps, derived duration, and every track with its clips " +
       "(ids, type, asset/source, `start`/`end` in timeline seconds, `in`/`out` in source seconds, speed, audio, transform). " +
       "Read this before editing and use the returned ids. A clip whose nested timeline file is missing or invalid has " +
-      "`end: null` and is listed in `problems` with the fix. Fails with TimelineNotFound or InvalidProjectFile.",
-    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
-    result: TimelineViewSchema,
+      "`end: null` and is listed in `problems` with the fix. In review mode, `view` picks the file or the open " +
+      "proposal's version (default: yours when the proposal is yours). Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: TimelineViewSchema.extend(ViewedShape),
   },
   "track.list": {
     description:
       "List a timeline's tracks in stacking order (first video track = bottom layer): id, kind, name, followed track, " +
       "clip count and end time (null while a clip's nested timeline is missing or invalid; see `problems`). " +
-      "Fails with TimelineNotFound or InvalidProjectFile.",
-    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
+      "In review mode, `view` picks the file or the open proposal's version. Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
     result: z.object({
+      ...ViewedShape,
       timeline: z.string(),
       revision: z.int(),
       tracks: z.array(TrackSummarySchema),
@@ -1601,8 +1628,15 @@ export const methods = {
       "survives a daemon restart. Needs a session: app terminals set `FRAMESHELL_SESSION`, elsewhere the CLI generates " +
       "one per shell. Example: `{ label: \"remove silences\" }`. Pass `autoCommitAfter` when a crash of the caller must " +
       "not leave the transaction open: it is then committed automatically once that many seconds pass without an " +
-      "operation of this author. Fails with TransactionState when one is already open.",
+      "operation of this author. Fails with TransactionState when one is already open, and with ProposalPending while " +
+      "a review-mode proposal waits (ADR 0019) in the project enclosing `cwd` (without `cwd`: in any open project): run " +
+      "`proposal.wait`, then begin. With review mode on, the label is what the person reads when reviewing: give one " +
+      "intent one transaction.",
     params: z.strictObject({
+      cwd: CwdParam.optional().describe(
+        "Absolute directory inside the project the transaction works on, e.g. `/home/ana/videos/launch`; only that " +
+          "project's review-mode proposal refuses it. Omitted: a proposal in any open project does.",
+      ),
       label: z.string().min(1).describe("What the transaction does, shown in the History panel, e.g. `remove silences`."),
       autoCommitAfter: z
         .number()
@@ -1620,10 +1654,15 @@ export const methods = {
     mutating: true,
     description:
       "Close this session's explicit transaction, keeping its changes. `operations` counts them across timelines. " +
+      "In review mode its operations now wait for review as one proposal (`proposal`): call `proposal.wait`. " +
       "Fails with TransactionState when none is open.",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
       operations: z.int().describe("Operations applied in the transaction."),
+      proposal: z
+        .object({ tx: z.string(), state: ProposalStateSchema })
+        .nullable()
+        .describe("Review mode (ADR 0019): the proposal holding the transaction's operations, now `ready`; null when they were applied."),
     }),
   },
   "tx.abort": {
@@ -1633,7 +1672,8 @@ export const methods = {
       "inverses are applied newest first as one `revert` operation inside the transaction. All or nothing: every " +
       "timeline is checked first, and when someone else changed the same tracks or clips since on any of them, nothing " +
       "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
-      "open). Fails with TransactionState when none is open.",
+      "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. " +
+      "Fails with TransactionState when none is open.",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
       reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed."),
@@ -1681,6 +1721,95 @@ export const methods = {
       target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to undo."),
     }),
     result: OperationResultSchema,
+  },
+  "review.set": {
+    mutating: true,
+    internal: true,
+    description:
+      "Turn review mode (ADR 0019) on or off for the project enclosing `cwd`, stored per user in `<configDir>/review.json`. " +
+      "Only the app (author `ui`) may; anyone else gets ProposalState (reason `forbidden`). Turning it off leaves an " +
+      "open proposal to be decided.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      enabled: z.boolean().describe("True: changes not made in the app wait as proposals."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      enabled: z.boolean(),
+    }),
+  },
+  "proposal.status": {
+    description:
+      "Review mode (ADR 0019) of the project: whether the person turned it on, the open proposal (author, label, state, " +
+      "operations, timelines, age) and the last decisions. While review mode is on, your timeline changes do not touch " +
+      "the file: they wait as one proposal per transaction until the person accepts or rejects it in the app. Your own " +
+      "reads show the proposal's version (`view: \"proposal\"`).",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: ReviewStateSchema.extend({ dir: z.string().describe("Project root.") }),
+  },
+  "proposal.wait": {
+    description:
+      "Block until the project's open review-mode proposal (ADR 0019) is decided, then say how: `accepted` (applied, " +
+      "continue), `rejected` (ask the person what to change), `stale` (the person changed the same clips: re-read the " +
+      "timeline and redo; `conflicts` names the ids) or `aborted`. After `timeout` seconds it returns `pending`: call " +
+      "it again. With no open proposal it returns the last decision at once, or `none`. Call it after a change fails " +
+      "with ProposalPending, or after your transaction closes in review mode.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeout: z
+        .number()
+        .positive()
+        .max(PROPOSAL_WAIT_MAX_S)
+        .optional()
+        .describe(`Seconds to wait at most, e.g. \`120\`. Default ${PROPOSAL_WAIT_DEFAULT_S}, max ${PROPOSAL_WAIT_MAX_S}.`),
+    }),
+    result: z.object({
+      outcome: z
+        .enum([...ProposalOutcomeSchema.options, "pending", "none"])
+        .describe("How the proposal ended; `pending`: still open after `timeout`; `none`: no proposal now or before."),
+      tx: z.string().nullable().describe("The proposal's id; null for `none`."),
+      label: z.string().nullable(),
+      author: z.string().nullable(),
+      conflicts: z.array(z.string()).describe("`stale`: ids both you and the person changed. Empty otherwise."),
+      proposal: ProposalSchema.nullable().describe("`pending`: the proposal still open. Null otherwise."),
+    }),
+  },
+  "proposal.diff": {
+    description:
+      "What the open review-mode proposal (ADR 0019) changes, per timeline, from the file to the proposal's version: " +
+      "each clip it adds, removes, moves (other track or start, same length) or otherwise changes, with its track, " +
+      "start and end before and after, in the shape of `history.diff` (the marks the app shows on the timeline). " +
+      "Without `tx` the open proposal; `timelines` is empty and `tx` null when none is open. Fails with ProposalState " +
+      "(`decided` or `unknown`) when `tx` is not the open proposal.",
+    params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.optional().describe("The proposal's id. Default: the open proposal.") }),
+    result: z.object({
+      tx: z.string().nullable().describe("The proposal diffed; null when none is open."),
+      timelines: z.array(HistoryDiffResultSchema).describe("One per timeline the proposal changes, `target` = its id; in the order it first changed them."),
+    }),
+  },
+  "proposal.accept": {
+    mutating: true,
+    internal: true,
+    description:
+      "Apply the ready proposal `tx` (ADR 0019): its operations are journaled in order under their author, transaction " +
+      "and label, each marked `proposal: <tx>`, on every timeline or none. Only the app (author `ui`) may. Fails with " +
+      "ProposalState: `forbidden` (not `ui`), `building` (not ready), `decided`/`unknown` (not the open proposal), or " +
+      "`stale` (the person's edit overlaps it; it is closed as stale).",
+    params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
+    result: z.object({
+      tx: z.string(),
+      operations: z.array(OperationResultSchema).describe("The journaled operations, in order."),
+    }),
+  },
+  "proposal.reject": {
+    mutating: true,
+    internal: true,
+    description:
+      "Refuse the open proposal `tx` (ADR 0019), ready or still building: nothing is journaled; its file stays in " +
+      "`.frameshell/proposals/` for 7 days. Only the app (author `ui`) may. Fails with ProposalState: `forbidden`, " +
+      "`decided` or `unknown`.",
+    params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
+    result: z.object({ tx: z.string() }),
   },
   "ui.state": {
     description:
@@ -1922,6 +2051,22 @@ export const notifications = {
       project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
     }),
   },
+  "proposal.changed": {
+    description:
+      "The project's review-mode proposal (ADR 0019) changed: opened or grew (`building`), became `ready`, was rebased " +
+      "on the person's edit (same state), or closed (`accepted`, `rejected`, `stale`, `aborted`). `timeline.changed` " +
+      "stays about files only: an accepted proposal's operations send it as they are written.",
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      tx: z.string().describe("The proposal's id."),
+      label: z.string().nullable(),
+      author: z.string(),
+      state: ProposalStateSchema,
+      operations: z.int().describe("Operations it holds, every timeline."),
+      timelines: z.array(z.string()).describe("Ids of the timelines it changes."),
+      conflicts: z.array(z.string()).describe("`stale`: ids both the person and the proposal changed. Empty otherwise."),
+    }),
+  },
   "ui.command": {
     description:
       "Navigation command for one app window (`view`, as it registered with `ui.publish`). Not subscribable: sent to " +
@@ -1969,6 +2114,11 @@ export type TranscribeSpeakersResult = MethodResult<"transcribe.speakers">;
 export type LostWord = z.output<typeof LostWordSchema>;
 /** One word of `transcribe.verify` `uncertain`. */
 export type UncertainWord = z.output<typeof UncertainWordSchema>;
+
+/** Result of `proposal.status`. */
+export type ProposalStatusResult = MethodResult<"proposal.status">;
+/** Result of `proposal.wait`. */
+export type ProposalWaitResult = MethodResult<"proposal.wait">;
 
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
@@ -2222,6 +2372,16 @@ export const ErrorCode = {
   LiveUnavailable: -32039,
   /** data: `{ op, feature, hint }`: valid request this version cannot carry out yet, e.g. `clip.add` on a program track. */
   Unsupported: -32040,
+  /**
+   * data: `{ tx, label, author, state, hint }`: review mode (ADR 0019) holds a proposal of another author, or yours is
+   * ready: run `proposal.wait`, then continue.
+   */
+  ProposalPending: -32041,
+  /**
+   * data: `{ tx, reason, conflicts, hint }`; reason `forbidden` (only `ui` decides proposals or sets review mode),
+   * `building`, `decided`, `unknown` (no such open proposal), `stale` or `rejected` (your proposal closed unapplied).
+   */
+  ProposalState: -32042,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

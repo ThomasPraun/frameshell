@@ -5,6 +5,7 @@ import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { ReviewSwitch } from "./ReviewSwitch.js";
 
 /** The sidebar's views, in tab order, with their names. */
 export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
@@ -121,7 +122,14 @@ function SidebarViewBody({
   mediaUrl: string;
 }) {
   if (view === "explorer") return <Explorer onOpenFile={onOpenFile} activeFile={activeFile} />;
-  if (view === "history") return <HistoryPanel />;
+  if (view === "history") {
+    return (
+      <>
+        <ReviewSwitch />
+        <HistoryPanel />
+      </>
+    );
+  }
   if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
   return (
     <p className="empty">

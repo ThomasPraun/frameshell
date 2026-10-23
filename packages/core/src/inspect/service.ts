@@ -38,8 +38,8 @@ export interface InspectOptions {
   chrome(root: string): Promise<string>;
 }
 
-/** Result of `inspect.point`. */
-export type InspectResult = MethodResult<"inspect.point">;
+/** Result of `inspect.point` before the daemon adds which view it shows. */
+export type InspectResult = Omit<MethodResult<"inspect.point">, "view" | "proposal">;
 
 interface Hit {
   clip: AnyClip;
@@ -58,9 +58,16 @@ export class InspectService {
     this.#options = options;
   }
 
-  /** What point (`x`, `y`, fractions of the frame) of timeline `id` shows at `at` seconds. */
-  async point(root: string, request: { timeline: string; at: number; x: number; y: number; unit?: "fraction" | "pixel" }): Promise<InspectResult> {
-    const { timeline, fps } = await this.#options.timeline(root, request.timeline);
+  /**
+   * What point (`x`, `y`, fractions of the frame) of timeline `id` shows at `at` seconds.
+   * `loaded`: the flattened timeline to inspect instead of the file's (a review-mode proposal's version).
+   */
+  async point(
+    root: string,
+    request: { timeline: string; at: number; x: number; y: number; unit?: "fraction" | "pixel" },
+    loaded?: { timeline: Timeline; fps: number },
+  ): Promise<InspectResult> {
+    const { timeline, fps } = loaded ?? (await this.#options.timeline(root, request.timeline));
     const resolution = await this.#options.resolution(root);
     const pixels = request.unit === "pixel";
     const params = { ...request, x: pixels ? request.x / resolution.width : request.x, y: pixels ? request.y / resolution.height : request.y };

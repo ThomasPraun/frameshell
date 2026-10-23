@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   type DaemonConnection,
   ErrorCode,
+  type EventName,
   type EventParams,
   type FrameResult,
   type Progress,
@@ -22,7 +23,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { contactSheet, decodePng, encodePng, fitWithin } from "./png.js";
 import { ProjectResolver, type ResolvedProject, appProjectNote } from "./project.js";
-import { ProjectResources, historyUri, timelineUri, transcriptUri } from "./resources.js";
+import { ProjectResources, STATUS_URI, historyUri, timelineUri, transcriptUri } from "./resources.js";
 import { CAPTURE_MAX_SIDE, FramesStripParams, STRIP_MAX_WIDTH, type ToolSpec, buildTools } from "./tools.js";
 
 /** Options for {@link createMcpServer}. */
@@ -82,6 +83,8 @@ export function createMcpServer(options: McpServerOptions): Server {
       known.add(timeline);
       notify([timelineUri(timeline), historyUri(timeline)], isNew);
     },
+    // Review mode (ADR 0019): status carries the open proposal.
+    onProposalChanged: () => notify([STATUS_URI], false),
     // Events may have been missed while disconnected.
     onResync: () => notify([...subscribed], true),
   });
@@ -127,7 +130,9 @@ export function createMcpServer(options: McpServerOptions): Server {
     try {
       let note: string | null = null;
       if (tool.takesCwd && args["cwd"] === undefined) {
-        const project = await resolve();
+        // `tx_begin` works outside any project too: without one it simply goes without `cwd`.
+        const project = tool.method === "tx.begin" ? await resolve().catch(() => null) : await resolve();
+        if (!project) return await run(tool, args, onProgress);
         args["cwd"] = project.cwd;
         if (project.source === "app") note = appProjectNote(project.root);
       }
@@ -280,6 +285,9 @@ async function strip(conn: DaemonConnection, args: Record<string, unknown>): Pro
   }
 }
 
+/** Events a {@link DaemonLink} follows for the watched project. */
+const WATCHED: EventName[] = ["timeline.changed", "proposal.changed"];
+
 /** The daemon could not be reached or started; the next call retries. */
 class DaemonUnreachable extends Error {
   override readonly name = "DaemonUnreachable";
@@ -288,6 +296,7 @@ class DaemonUnreachable extends Error {
 /** What a {@link DaemonLink} tells its owner. */
 interface LinkEvents {
   onTimelineChanged(params: EventParams<"timeline.changed">): void;
+  onProposalChanged(params: EventParams<"proposal.changed">): void;
   /** A new connection replaced a lost one while watching: events in between were missed. */
   onResync(): void;
 }
@@ -329,7 +338,7 @@ class DaemonLink {
     const conn = await this.get();
     await this.#subscribe(conn, root);
     // Its events are filtered out anyway; dropping the subscription spares the daemon the sends.
-    if (previous) await conn.request("events.unsubscribe", { cwd: previous, events: ["timeline.changed"] }).catch(() => {});
+    if (previous) await conn.request("events.unsubscribe", { cwd: previous, events: WATCHED }).catch(() => {});
   }
 
   close(): void {
@@ -351,6 +360,9 @@ class DaemonLink {
     conn.on("timeline.changed", (params) => {
       if (params.project === this.#watched) this.#events.onTimelineChanged(params);
     });
+    conn.on("proposal.changed", (params) => {
+      if (params.project === this.#watched) this.#events.onProposalChanged(params);
+    });
     void conn.closed.then(() => {
       if (this.#current !== null) this.#lost = true;
       this.#current = null;
@@ -362,7 +374,7 @@ class DaemonLink {
   }
 
   async #subscribe(conn: DaemonConnection, root: string): Promise<void> {
-    await conn.request("events.subscribe", { cwd: root, events: ["timeline.changed"] });
+    await conn.request("events.subscribe", { cwd: root, events: WATCHED });
   }
 }
 

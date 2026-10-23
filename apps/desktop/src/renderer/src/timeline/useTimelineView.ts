@@ -1,6 +1,7 @@
 import type { TimelineRejection, TimelineView } from "@frameshell/protocol";
 import { useCallback, useSyncExternalStore } from "react";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
+import { reviewState, reviewView, watchReview } from "../review/store.js";
 import { placeWord } from "../transcript/model.js";
 
 /** What the panel shows: the latest `timeline.show`, or why there is none. */
@@ -30,7 +31,8 @@ const feeds = new Map<string, Feed>();
  * `timeline.changed` (any client: CLI, agent, app, and direct edits of the
  * file, which the daemon journals as author `file`); direct edits it refuses
  * arrive as rejections. Reads never overlap: changes landing during a read
- * cause exactly one more read.
+ * cause exactly one more read. While a review-mode proposal is shown (After, ADR 0019) the feed reads the
+ * proposal's version, and reads again whenever the side or the proposal changes.
  */
 function follow(timeline: string, feed: Feed): () => void {
   let disposed = false;
@@ -52,7 +54,7 @@ function follow(timeline: string, feed: Feed): () => void {
     do {
       again = false;
       try {
-        const view = await window.frameshell.timeline.show(timeline);
+        const view = await window.frameshell.timeline.show(timeline, reviewView());
         revision = view.revision;
         if (disposed) continue;
         // Before publishing: no render may see a selected clip or word the new revision removed, nor a stale word range.
@@ -71,7 +73,15 @@ function follow(timeline: string, feed: Feed): () => void {
 
   const offEvents = window.frameshell.timeline.onChanged((change) => {
     // A revision we already show (our own read raced ahead of the event) needs no read.
-    if (change.timeline === null || (change.timeline === timeline && change.revision > revision)) void read();
+    // The proposal's version has revisions of its own: when it is shown, every change reads again.
+    if (change.timeline === null || (change.timeline === timeline && (change.revision > revision || reviewView() === "proposal"))) void read();
+  });
+  let shown = { view: reviewView(), version: reviewState().version };
+  const offReview = watchReview(() => {
+    const now = { view: reviewView(), version: reviewState().version };
+    const changed = now.view !== shown.view || (now.view === "proposal" && now.version !== shown.version);
+    shown = now;
+    if (changed) void read();
   });
   const offRejected = window.frameshell.timeline.onRejected((refused) => {
     if (refused.timeline === timeline && !disposed) publish({ ...feed.state, rejection: refused });
@@ -81,6 +91,7 @@ function follow(timeline: string, feed: Feed): () => void {
     disposed = true;
     offEvents();
     offRejected();
+    offReview();
   };
 }
 

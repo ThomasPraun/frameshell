@@ -38,6 +38,14 @@ When the user says they changed something, or just "continue":
 
 Lost the resume point? `frameshell history --json`: your transactions carry your author (`agent:<label>:<session>` or `cli:<session>`); the last one is it.
 
+## Review mode
+
+The person can turn on review mode (`frameshell status` prints `Review mode: on`). Your changes then do not touch the timeline: each transaction waits as one **proposal** the person accepts or rejects in the app. You cannot decide it. Your own `timeline show` shows your proposal's version.
+
+- Close the transaction (`tx commit`), tell the person it waits for their review, then `frameshell proposal wait` (MCP `proposal_wait`). Exit 0 `accepted`: continue. 3 `rejected`: nothing applied; ask what to change. 4 `stale`: they changed the same clips (`conflicts` lists the ids); `timeline show` again and redo the change. 5 `aborted`. 6 `pending`: still waiting; run it again.
+- A change refused with `ProposalPending` means a proposal is already open (yours or another session's): run `proposal wait`, then retry.
+- `frameshell proposal status` shows the open proposal; `proposal diff` lists the clips it adds, removes or moves. `history --since <tx>` shows later what was accepted.
+
 ## In the app: what the human sees
 
 When you guide the human through the app, name only these places; do not invent controls.
