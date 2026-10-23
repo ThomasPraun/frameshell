@@ -280,6 +280,25 @@ describe("accept, reject, wait (#316)", () => {
     expect((await rejection(agent.request("tx.commit", {}))).code).toBe(ErrorCode.TransactionState);
   });
 
+  it("a reject arriving while accept writes waits for it and finds the proposal decided", async () => {
+    const { dir, connect, ui, read } = await setup({ review: true });
+    const agent = await connect("cli/test", "term-1");
+    await agent.request("tx.begin", { label: "Many tracks" });
+    for (let n = 0; n < 20; n++) await agent.request("track.add", { cwd: dir, kind: "video", name: `V${n}` });
+    const { tx } = await agent.request("tx.commit", {});
+    const other = await connect("desktop/other");
+    let rejected: Promise<RpcError | { tx: string }> | null = null;
+    ui().on("timeline.changed", () => {
+      rejected ??= other.request("proposal.reject", { cwd: dir, tx }).catch((error: RpcError) => error);
+    });
+    await ui().request("proposal.accept", { cwd: dir, tx });
+    await until(() => rejected !== null, "the reject");
+    expect(await rejected).toMatchObject({ code: ErrorCode.ProposalState, data: { reason: "decided" } });
+    expect(JSON.parse(read()).tracks).toHaveLength(22);
+    const decisions = readFileSync(join(dir, ".frameshell", "proposals", "decisions.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(decisions).toMatchObject([{ tx, outcome: "accepted" }]);
+  });
+
   it("wait returns pending after its timeout", async () => {
     const { dir, connect, t1 } = await setup({ review: true });
     const agent = await connect("cli/test");

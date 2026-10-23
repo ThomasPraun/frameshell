@@ -669,7 +669,10 @@ export class TimelineService {
   async rejectProposal(root: string, tx: string): Promise<{ tx: string }> {
     const real = await this.#realRoot(root);
     const book = await this.#book(root);
-    await this.#close(book, await this.#decidable(real, book, tx), "rejected", []);
+    const proposal = await this.#decidable(real, book, tx);
+    // Under the timelines' locks: an accept already writing them finishes first, then this finds it decided.
+    const keys = await Promise.all(proposal.parts.map((part) => this.#key(root, part.timeline)));
+    await this.#exclusive(keys, async () => this.#close(book, await this.#decidable(real, book, tx), "rejected", []));
     return { tx };
   }
 

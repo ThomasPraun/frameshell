@@ -855,6 +855,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           revision = result.revision;
           wrote = true;
         }
+        if (wrote) await settle(author, tx);
         return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
       });
     },
