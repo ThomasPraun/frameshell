@@ -67,6 +67,7 @@ export {
   type FaceSuggestInput,
   faceSuggestions,
 } from "./people/face-suggest.js";
+export { ANGLE_SPEAKER_SHARE, type AngleSuggestInput, angleSuggestions } from "./people/angle-suggest.js";
 export { type ScanProjectDeps, readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 export { FBANK_BINS, FBANK_SAMPLE_RATE, type Fbank, fbank, subtractMean } from "./people/fbank.js";
 export {

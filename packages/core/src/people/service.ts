@@ -23,6 +23,7 @@ import {
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { readPrevious } from "../transcripts/transcriber.js";
 import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFaces, facesOfPeople, presence } from "./face-clusters.js";
+import { angleSuggestions } from "./angle-suggest.js";
 import { faceSuggestions } from "./face-suggest.js";
 import { type PersonRanges, type RangeKind, type RangesSource, type Span, personRanges } from "./ranges.js";
 import { type PersonVoice, type SpeakerVoice, speakerSuggestions } from "./suggest.js";
@@ -221,7 +222,7 @@ export class PeopleService {
       );
     }
     const chosen = [...new Set(ids)].map((id) => known.get(id)!);
-    const nameless = chosen.filter((suggestion) => !suggestion.person);
+    const nameless = chosen.filter((suggestion) => !suggestion.person && suggestion.kind !== "angle");
     if (!options.reject && nameless.length > 0 && options.person === undefined) {
       throw refused(
         "people.confirm",
@@ -246,19 +247,26 @@ export class PeopleService {
       let person = suggestion.person;
       let added = false;
       if (!person) {
-        const existing = findPerson(await readPeople(root), options.person!);
+        const wanted = options.person ?? suggestion.angle!.name;
+        const existing = findPerson(await readPeople(root), wanted);
         if (existing) person = { id: existing.id, name: existing.name };
         else {
-          const created = await this.add(root, options.person!);
+          const created = await this.add(root, wanted);
           person = { id: created.id, name: created.name };
           added = true;
         }
       }
       const entry: MethodResult<"people.confirm">["confirmed"][number] = { id: suggestion.id, person, added, linked: false, transcripts: [] };
+      if (suggestion.links.includes("angle") && suggestion.angle) {
+        const { timeline, group, angle } = suggestion.angle;
+        const result = await this.link(root, person.id, { angle: { timeline, group, angle } }, options.by);
+        entry.angle = { timeline, group, angle };
+        entry.linked ||= result.linked;
+      }
       if (suggestion.links.includes("speaker") && suggestion.speaker) {
         const { transcript, speaker } = suggestion.speaker;
         const result = await this.link(root, person.id, { speaker: { transcript, speaker } }, options.by);
-        entry.speaker = { transcript, speaker };
+        entry.speaker = { transcript, ...(speaker !== undefined ? { speaker } : {}) };
         entry.linked ||= result.linked;
         entry.transcripts.push(...result.transcripts);
       }
@@ -298,7 +306,7 @@ export interface SuggestSources {
 
 /**
  * Every suggestion for the project, dismissed ones included: `speaker`
- * first, then `face-speaker` and `face`; and hints, each once.
+ * first, then `angle`, `face-speaker` and `face`; and hints, each once.
  */
 async function suggestAll(root: string, file: PeopleFile, sources: SuggestSources): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
   const hints: string[] = [];
@@ -317,7 +325,8 @@ async function suggestAll(root: string, file: PeopleFile, sources: SuggestSource
   for (const { person, anchor, reason } of state.owners.unresolved) {
     hints.push(`${person.name}'s face anchor ${anchor.asset}@${anchor.at} names no face (${reason}), so it is not used.`);
   }
-  return { suggestions: [...voice.suggestions, ...faces.suggestions], hints: [...new Set([...hints, ...voice.hints, ...faces.hints])] };
+  const angles = angleSuggestions({ ...state, timelines: await readAllTimelines(root), people: file.people, transcripts });
+  return { suggestions: [...voice.suggestions, ...angles, ...faces.suggestions], hints: [...new Set([...hints, ...voice.hints, ...faces.hints])] };
 }
 
 /** Faces of the project and whose they are. */
@@ -404,6 +413,17 @@ async function readAllTranscripts(root: string, hints: string[]): Promise<Map<st
     } catch {
       hints.push(`${rel} is not a valid transcript, so its voices are not compared.`);
     }
+  }
+  return found;
+}
+
+/** Valid timelines under `timelines/` by id, sorted; invalid ones are skipped. */
+async function readAllTimelines(root: string): Promise<Map<string, Timeline>> {
+  const entries = await readdir(join(root, "timelines")).catch(() => [] as string[]);
+  const found = new Map<string, Timeline>();
+  for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
+    const parsed = parseTimeline(await readJsonIfExists(join(root, "timelines", entry)).catch(() => undefined));
+    if (parsed?.ok) found.set(entry.slice(0, -".json".length), parsed.value);
   }
   return found;
 }

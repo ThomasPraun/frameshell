@@ -74,11 +74,12 @@ export const SuggestedFaceSchema = z.object({
 export const PeopleSuggestionSchema = z.object({
   id: z.string().describe("`sg_` + 8 hex, the same for the same kind and targets on every run: pass it to `people.confirm`."),
   kind: z
-    .enum(["speaker", "face", "face-speaker"])
+    .enum(["speaker", "face", "face-speaker", "angle"])
     .describe(
       "`speaker`: a transcript speaker linked to nobody sounds like a person's linked voices. `face`: a face on screen for " +
         "10 s or more that nobody has: who it looks like, or nobody yet (\"Who is this?\"). `face-speaker`: in one video, " +
-        "the face on screen for most of a speaker's time: the voice and the face are one person.",
+        "the face on screen for most of a speaker's time: the voice and the face are one person. `angle`: a multicam angle " +
+        "linked to nobody: the person named like it (or a new one with its name), plus its mic's voice and the face most on its screen.",
     ),
   person: z
     .object({ id: PersonIdSchema, name: z.string() })
@@ -87,15 +88,24 @@ export const PeopleSuggestionSchema = z.object({
   speaker: z
     .object({
       transcript: z.string().describe("Project-relative transcript file."),
-      speaker: SpeakerIdSchema,
-      name: z.string().describe("Its name in the transcript now."),
+      speaker: SpeakerIdSchema.optional().describe("Absent (`angle` only): the whole transcript, a mic of that person alone."),
+      name: z.string().optional().describe("Its name in the transcript now; absent with the whole transcript."),
     })
     .optional()
-    .describe("The transcript speaker to link (`speaker`, `face-speaker`)."),
-  face: SuggestedFaceSchema.optional().describe("The face to link (`face`, `face-speaker`)."),
+    .describe("The transcript speaker to link (`speaker`, `face-speaker`, `angle`)."),
+  angle: z
+    .object({
+      timeline: z.string(),
+      group: z.string(),
+      angle: z.string(),
+      name: z.string().describe("The angle's name: the new person's name when `person` is absent."),
+    })
+    .optional()
+    .describe("The multicam angle to link (`angle`)."),
+  face: SuggestedFaceSchema.optional().describe("The face to link (`face`, `face-speaker`, `angle`)."),
   links: z
-    .array(z.enum(["speaker", "face"]))
-    .describe("What confirming links: `speaker`, `face` or both (`face-speaker` with a new person); the other side is linked already."),
+    .array(z.enum(["speaker", "face", "angle"]))
+    .describe("What confirming links: `speaker`, `face`, `angle`, or several (all at once); anything else is linked already."),
   score: z
     .number()
     .optional()
