@@ -235,6 +235,27 @@ Verified when pinning (2026-10-22): the tarball's SHA-1 and SHA-512 matched the 
 
 Re-pin: `npm view onnxruntime-web@<version> dist` gives the tarball URL, `shasum` and `integrity`; download it, check both, record size and SHA-256, list it (`tar -tzf`) and check the four members still exist (a renamed WebAssembly file changes the `support` names), then run the opt-in test above. For the model, take the file's large-file oid at a newer commit and check that its outputs are still `cls_8`…`kps_32` (`decodeYunet`).
 
+## Photo segmentation (MobileSAM)
+
+Used by `segment.prepare` and, from the next part, `inspect.point` with `segment` (ADR 0022: point at parts inside a photo). On demand: the first segmentation installs the models, and the ONNX Runtime Web pin above when face detection never did. Nothing is downloaded before someone points inside a photo.
+
+Models, [`Acly/MobileSAM`](https://huggingface.co/Acly/MobileSAM) on Hugging Face (MobileSAM's TinyViT image encoder and SAM's multi-mask decoder, exported to ONNX), pinned by revision `0d3b403339b4674a82493d5e97964dd78089ddc8`:
+
+| Id | File | Size | SHA-256 | Licence |
+|---|---|---|---|---|
+| `mobilesam-encoder` | `mobile_sam_image_encoder.onnx` | 28.2 MB (28,157,093) | `580f5fb648ea1062c0aabc26217aed56921985f03f0cbbd852bba81d760cc749` | Apache-2.0 |
+| `mobilesam-decoder` | `sam_mask_decoder_multi.onnx` | 16.5 MB (16,496,559) | `8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe` | Apache-2.0 |
+
+URL form: `https://huggingface.co/Acly/MobileSAM/resolve/<revision>/<file>`. No mirror. Licence: MobileSAM's code and weights are Apache-2.0, and the decoder is SAM's, also Apache-2.0 (the repository's model card says MIT; both are permissive). Frameshell never redistributes the files: the user's machine downloads them.
+
+A daemon worker thread (`packages/core/src/segment/segment-worker.ts`) loads both on the ONNX Runtime Web pin, single-threaded (`numThreads = 1`: the threaded build cannot start its workers under Node). About 2.6 s encode a photo once, 0.17 s per click, on an Apple M3 (`docs/research/photo-segmentation.md`).
+
+I/O the code depends on: encoder `input_image` float32 `[H, W, 3]` (RGB 0..255, long side 1024) gives `image_embeddings` `[1, 256, 64, 64]`; decoder takes `image_embeddings`, `point_coords`, `point_labels`, `mask_input`, `has_mask_input`, `orig_im_size` and gives `masks` `[1, 4, H, W]` (logits) and `iou_predictions` `[1, 4]`.
+
+Verified when pinning (2026-10-23): both files hashed to their Hugging Face large-file oid at that revision; `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the runtime and both models and segments a drawn disc from one click (mask overlap with the disc above 0.9), on every platform of the Real binaries workflow.
+
+Re-pin: take both files' large-file SHA-256 (the Hugging Face file page, or `curl -sI` on the `resolve` URL, `x-linked-etag`) at the new revision, download and compare, update `PHOTO_SEGMENTATION_MODELS` (`packages/core/src/binaries/manifest.ts`), and run the opt-in test above: it fails when the input or output names change.
+
 ## Re-pinning ffmpeg
 
 1. Pick a release build: for Martin Riedl, the "Release Build" section; for BtbN, the last autobuild of a month and the `n<major>.<minor>` `gpl` (not `gpl-shared`) assets.

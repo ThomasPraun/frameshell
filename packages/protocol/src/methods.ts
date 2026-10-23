@@ -42,7 +42,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 53;
+export const PROTOCOL_VERSION = 54;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1429,6 +1429,26 @@ export const methods = {
       replace: z.boolean().optional().describe("Also redo angles that already have reframe keys, replacing them. Default false."),
     }),
     result: MulticamFacesResultSchema,
+  },
+  "segment.prepare": {
+    description:
+      "Get a still image ready to be pointed into (ADR 0022, photo segmentation): encodes it once with MobileSAM and keeps the " +
+      "result in memory by content hash (the last 8 photos), so the first click costs about 0.2 s instead of 3 s. Called by the " +
+      "app when Pick turns on in an image project; `inspect.point` prepares on demand, so agents never call it. The first run " +
+      "downloads the model (two files, about 45 MB) and ONNX Runtime Web (33 MB, if face detection never ran). " +
+      "Fails with AssetNotFound, OutsideProject, InvalidOperation (not a still image), or the Binary* errors.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Still image, absolute or relative to `cwd`."),
+    }),
+    result: z.object({
+      asset: z.string().describe("Project-relative asset path."),
+      size: z.object({ width: z.int(), height: z.int() }).describe("The image's pixels, rotation applied."),
+      hash: z.string().describe("`sha256:<hex>` of the asset's content, the key of the cached embedding."),
+      model: z.string().describe("Pinned model, `mobilesam@<revision>`."),
+      cached: z.boolean().describe("True when the image was prepared already."),
+    }),
   },
   "multicam.paint": {
     mutating: true,

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Photo segmenter in core (ADR 0022, #360), the first part of pointing inside a photo. MobileSAM (Apache-2.0, `Acly/MobileSAM`, two ONNX files, 44.7 MB) is pinned by Hugging Face revision and SHA-256 in the manifest and `docs/binaries.md`; it runs in a daemon worker thread on the existing ONNX Runtime Web pin, single-threaded, and downloads only when a photo is first segmented. The encoder runs once per photo and its embedding is cached in memory by asset content hash (last 8, least recently used dropped); a click is decoded into three masks (smallest first, with box, share of the photo, score and the best one) upscaled to the photo's own pixels. Internal daemon method `segment.prepare { cwd, asset }` (no CLI command or MCP tool). Protocol v54.
+
 ## [0.14.0] - 2026-10-23
 
 ### Added

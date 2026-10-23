@@ -44,7 +44,15 @@ import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
-import { FACE_DETECTION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
+import {
+  FACE_DETECTION_MODEL,
+  ONNX_RUNTIME_WEB,
+  PHOTO_SEGMENTATION_DECODER_MODEL,
+  PHOTO_SEGMENTATION_ENCODER_MODEL,
+} from "./binaries/manifest.js";
+import { workerSegmentEngine } from "./segment/engine.js";
+import type { SegmentEngine } from "./segment/segmenter.js";
+import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
@@ -62,7 +70,7 @@ import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import type { AudioExtractor } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
-import { resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
+import { resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { writeContext } from "./context.js";
@@ -98,6 +106,8 @@ export interface DaemonOptions {
   diarize?: Diarizer;
   /** Face scan of one angle for `multicam.faces`. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   faceScanner?: FaceScanner;
+  /** Photo segmentation model for `segment.prepare`. Defaults to MobileSAM on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  segmentEngine?: SegmentEngine;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -184,6 +194,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     binaries,
     jobs,
     onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
+  });
+  const segmentation = new SegmentService({
+    probe: (dir, asset) => media.probe(dir, asset),
+    hash: (dir, asset) => media.hash(dir, asset),
+    ffmpeg: async (dir, onProgress) => binaries.ensure("ffmpeg", await projectBinaries(dir), { onProgress }),
+    engine: async (dir, onProgress) =>
+      options.segmentEngine ??
+      workerSegmentEngine({
+        runtime: await binaries.ensure(ONNX_RUNTIME_WEB, await projectBinaries(dir), { onProgress }),
+        encoder: await binaries.ensureModel(PHOTO_SEGMENTATION_ENCODER_MODEL, { onProgress }),
+        decoder: await binaries.ensureModel(PHOTO_SEGMENTATION_DECODER_MODEL, { onProgress }),
+      }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
   const projects = new ProjectRegistry({
@@ -747,6 +769,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "multicam.reframe": (params, caller) => operate("multicam.reframe", params, caller),
     "multicam.paint": (params, caller) => operate("multicam.paint", params, caller),
     "shot.set": (params, caller) => operate("shot.set", params, caller),
+    "segment.prepare": async ({ cwd, asset }, _caller, request) => {
+      const dir = await root(cwd);
+      const { rel } = await resolveAsset(dir, resolve(cwd, asset));
+      const prepared = await segmentation.prepare(dir, rel, (update) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      });
+      return { asset: prepared.asset, size: { width: prepared.width, height: prepared.height }, hash: prepared.hash, model: SEGMENT_MODEL_PIN, cached: prepared.cached };
+    },
     "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
@@ -1093,6 +1127,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       // Canceled jobs are found again from disk when the project next opens.
       await media.close();
+      await segmentation.close();
       await timelineWatcher.close();
       await clips.close();
       await clipJobs.close();
