@@ -171,3 +171,58 @@ describe("subtitle tracks of a timeline", () => {
     ]);
   });
 });
+
+describe("subtitle speaker names (ADR 0020)", () => {
+  const speakers: Transcript = {
+    ...talk,
+    speakers: [
+      { id: "s1", name: "Juan" },
+      { id: "s2", name: "Ana {x}" },
+    ],
+    words: talk.words.map((word, i) => ({ ...word, ...(i < 2 ? { speaker: "s1" } : i < 6 ? { speaker: "s2" } : {}) })),
+    edits: { w_000002: { speaker: "s2" } },
+  };
+  const spoken = subtitleWords(timeline([media("c1", 0, 1, 6)]), "s1", () => speakers, 30);
+  const plain = resolveSubtitleStyle({ preset: "plain" }).style;
+  const text = (cue: { label?: string; words: { text: string }[] }) => [cue.label, cue.words.map((w) => w.text).join(" ")];
+
+  it("carry the speaker's name, an edit's speaker winning", () => {
+    expect(spoken.map((w) => w.speaker)).toEqual(["s1", "s2", "s2", "s2", "s2", "s2", undefined, undefined, undefined, undefined]);
+    expect(spoken[1]!.speakerName).toBe("Ana x");
+  });
+
+  it("are off by default: cues are the same with or without speakers", () => {
+    expect(plain.speakerNames).toBe(false);
+    const cues = subtitleCues(spoken, plain, 30);
+    expect(cues.every((cue) => cue.label === undefined)).toBe(true);
+    const shape = (list: typeof cues) => list.map((cue) => [cue.start, cue.end, cue.words.map((word) => word.text)]);
+    expect(shape(subtitleCues(spoken.map(({ speaker: _speaker, speakerName: _name, ...rest }) => rest), plain, 30))).toEqual(shape(cues));
+  });
+
+  it("split cues at a speaker change and label the first cue of each turn; unspoken words get none", () => {
+    const style = resolveSubtitleStyle({ preset: "plain", speakerNames: true }).style;
+    expect(subtitleCues(spoken, style, 30).map(text)).toEqual([
+      ["Juan:", "uno"],
+      ["Ana x:", "dos tres cuatro cinco seis"],
+      [undefined, "siete ocho nueve diez"],
+    ]);
+  });
+
+  it("continue a turn across a cue break without repeating the name, and count the name in maxChars", () => {
+    const style = { ...resolveSubtitleStyle({ preset: "plain", speakerNames: true }).style, maxWords: 2 };
+    expect(subtitleCues(spoken, style, 30).map(text).slice(1, 4)).toEqual([
+      ["Ana x:", "dos tres"],
+      [undefined, "cuatro cinco"],
+      [undefined, "seis"],
+    ]);
+    const tight = { ...style, maxWords: 9, maxChars: 15 };
+    expect(subtitleCues(spoken, tight, 30).map(text)[1]).toEqual(["Ana x:", "dos tres"]);
+  });
+
+  it("apply the preset's case to the label and keep highlight indexes on words", () => {
+    const style = resolveSubtitleStyle({ preset: "big-keyword", speakerNames: true }).style;
+    const cues = subtitleCues(spoken, style, 30);
+    expect(cues[0]!.label).toBe("JUAN:");
+    expect(subtitleAt(cues, 1)).toEqual({ cue: cues[0], active: 0 });
+  });
+});

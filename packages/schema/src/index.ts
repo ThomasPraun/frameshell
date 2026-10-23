@@ -210,6 +210,7 @@ export {
   resolveSubtitleStyle,
   subtitleWords,
   subtitleCues,
+  cueTokens,
   subtitleAt,
   subtitleLayout,
   subtitleTracks,

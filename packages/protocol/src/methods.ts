@@ -43,7 +43,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 56;
+export const PROTOCOL_VERSION = 57;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1254,8 +1254,8 @@ export const methods = {
     mutating: true,
     description:
       "Change a track: `name` (any track; null clears it), and for subtitle tracks the followed track (`follows`) and " +
-      "`style` (`preset`: `big-keyword` or `plain`; `position`: `top`, `center` or `bottom`; given fields change, others " +
-      "stay). Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" } }`. Preview and export use the same style. " +
+      "`style` (`preset`: `big-keyword` or `plain`; `position`: `top`, `center` or `bottom`; `speakerNames`: true shows the " +
+      "speaker's name at each turn; given fields change, others stay). Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" } }`. Preview and export use the same style. " +
       "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, nothing to change).",
     params: operationArgs["track.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

@@ -97,3 +97,32 @@ describe("subtitle lane cues", () => {
     expect(cueSelection(boxes[0]!.cue, 30, () => null).words).toEqual([]);
   });
 });
+
+describe("preview speaker names (ADR 0020)", () => {
+  const named: Transcript = {
+    ...transcript,
+    speakers: [{ id: "s1", name: "Juan" }],
+    words: transcript.words.map((word) => ({ ...word, speaker: "s1" })),
+  };
+  const withNames = (speakerNames: boolean) =>
+    subtitleTracks(
+      { ...timeline({ preset: "big-keyword" }), tracks: timeline({ preset: "big-keyword" }).tracks.map((track) => (track.kind === "subtitles" ? { ...track, style: { preset: "big-keyword", speakerNames } } : track)) },
+      () => named,
+      30,
+    );
+
+  it("draw the name before the words, uncoloured, with the spoken word still highlighted", () => {
+    const [line] = subtitleLines(withNames(true), 65, SIZE, measure);
+    expect(line).toMatchObject({ text: "JUAN: HOLA MUNDO", active: "HOLA" });
+    expect(line!.runs.map((run) => [run.text, run.color])).toEqual([
+      ["JUAN:", "#ffffff"],
+      ["HOLA", "#ffd426"],
+      ["MUNDO", "#ffffff"],
+    ]);
+    expect(cueBoxes(withNames(true)[0]!, 30)[0]!.text).toBe("JUAN: HOLA MUNDO");
+  });
+
+  it("draw exactly what they drew before when off", () => {
+    expect(subtitleLines(withNames(false), 65, SIZE, measure)).toEqual(subtitleLines(tracks(), 65, SIZE, measure));
+  });
+});
