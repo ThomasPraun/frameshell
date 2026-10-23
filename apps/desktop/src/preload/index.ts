@@ -64,7 +64,7 @@ const api: FrameshellApi = {
     detached: () => ipcRenderer.invoke(Channel.panelsDetached),
   },
   timeline: {
-    show: (timeline) => invokeOutcome(Channel.timelineShow, timeline),
+    show: (timeline, view) => invokeOutcome(Channel.timelineShow, timeline, view),
     onChanged: (listener) => subscribe(Channel.timelineChanged, listener),
     onRejected: (listener) => subscribe(Channel.timelineRejected, listener),
     edit: (timeline, edits, options) => invokeOutcome(Channel.timelineEdit, timeline, edits, options),
@@ -80,6 +80,14 @@ const api: FrameshellApi = {
     list: (timeline) => invokeOutcome(Channel.historyList, timeline),
     diff: (timeline, target) => invokeOutcome(Channel.historyDiff, timeline, target),
     revert: (timeline, target) => invokeOutcome(Channel.historyRevert, timeline, target),
+  },
+  review: {
+    status: () => invokeOutcome(Channel.reviewStatus),
+    setEnabled: (enabled) => invokeOutcome(Channel.reviewSet, enabled),
+    accept: (tx) => invokeOutcome(Channel.reviewAccept, tx),
+    reject: (tx) => invokeOutcome(Channel.reviewReject, tx),
+    diff: () => invokeOutcome(Channel.reviewDiff),
+    onChanged: (listener) => subscribe(Channel.reviewChanged, listener),
   },
   agents: {
     detect: () => ipcRenderer.invoke(Channel.agentsDetect),
