@@ -7,6 +7,9 @@ export interface PersonTotals {
   onscreen: number | null;
 }
 
+/** A burst of edits (a drag, an agent's transaction) reads the totals once: two `people.ranges` calls per person. */
+const TOTALS_SETTLE_MS = 400;
+
 /**
  * Each person's seconds speaking and on screen in the main timeline (the `total` of `people.ranges`), read again
  * when the timeline `revision`, the transcripts (`sources`, by identity) or someone's links change. A slower answer
@@ -23,13 +26,16 @@ export function usePersonTotals(people: readonly PersonInfo[], revision: number 
         (result) => result.total,
         () => null,
       );
-    void Promise.all(
-      people.map(async (person) => [person.id, { speaks: await total(person.id, "speaks"), onscreen: await total(person.id, "onscreen") }] as const),
-    ).then((entries) => {
-      if (live) setTotals(new Map(entries));
-    });
+    const timer = setTimeout(() => {
+      void Promise.all(
+        people.map(async (person) => [person.id, { speaks: await total(person.id, "speaks"), onscreen: await total(person.id, "onscreen") }] as const),
+      ).then((entries) => {
+        if (live) setTotals(new Map(entries));
+      });
+    }, TOTALS_SETTLE_MS);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
     // `links` stands for `people`: a new array with the same links reads nothing new.
   }, [links, revision, sources]);
