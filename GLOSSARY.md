@@ -2,6 +2,32 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Transitions and keyframes (ADR 0018)
+
+**Transition**:
+A dissolve or a fade at a clip edge, stored on the clip (`dissolve`, `fadeIn`, `fadeOut`) and centered on the cut; the timeline length never changes.
+_Avoid_: effect, wipe (a shaped transition, not supported)
+
+**Dissolve**:
+A mix from the clip that ends at a clip's start into that clip, over the handles of both; for sound, an equal-power crossfade.
+_Avoid_: cross dissolve, mix, blend
+
+**Fade**:
+A ramp from or to nothing inside one clip: black under the bottom track, transparent on upper tracks, silence for sound. A fade at a cut between two clips is a dip (fade out, then fade in).
+_Avoid_: dip to black (that is two fades), fade transition
+
+**Handle**:
+Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip, never an error.
+_Avoid_: tail, overlap, pre-roll
+
+**Keyframe**:
+A value of one clip property (`x`, `y`, `scale`, `opacity`, `gain`) at a time on the clip's own clock (the seconds `in` counts), stored in the clip's `keys`; between keyframes the value follows the ease, outside them it holds. "Key" for short.
+_Avoid_: automation point, marker
+
+**Ease**:
+How a value moves from one keyframe to the next: `linear`, `in`, `out` or `in-out`.
+_Avoid_: curve, interpolation, Bézier
+
 ## Image projects (ADR 0017)
 
 **Image project**:

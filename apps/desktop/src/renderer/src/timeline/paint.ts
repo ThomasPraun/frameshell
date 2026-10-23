@@ -12,6 +12,7 @@ import {
   rulerTicks,
   visibleClips,
 } from "./layout.js";
+import { keyTimes } from "./transitions.js";
 import type { PaintMode, Span } from "./turn-lanes.js";
 
 /**
@@ -195,6 +196,13 @@ const RANGE_BAR = 3;
 const DRAGGED_ALPHA = 0.35;
 /** Stand-in length of a diff place whose end is unknown, s (as `layout.ts` does for clips). */
 const DIFF_UNKNOWN_LENGTH_S = 2;
+/** Half the width of a key diamond, px. */
+const KEY_RADIUS = 4;
+/** Shade over the part of a clip a fade darkens. */
+const FADE_SHADE = "rgba(0, 0, 0, 0.45)";
+/** Opacity of the band over a dissolve, and of the lines drawn on transition marks. */
+const DISSOLVE_ALPHA = 0.22;
+const MARK_LINE_ALPHA = 0.85;
 /** Side of the corner flag on a doubtful shot, px. */
 const DOUBT_MARK = 8;
 /** Tag drawn in a diff mark's corner, so marks read without relying on color. */
@@ -242,6 +250,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       if (dragged) ctx.globalAlpha = 1;
       clipsDrawn++;
     }
+    paintTransitions(ctx, input, row, top, t0, t1);
     if (row.lanes.length > 0) paintTurnLanes(ctx, input, row, scrollTop, t0, t1, colors);
   });
   if (input.diff) paintDiff(ctx, input, input.diff);
@@ -423,7 +432,70 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   }
 
   if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
+  paintKeys(ctx, input, clip, left, right, y + h - KEY_RADIUS - 3);
   return media;
+}
+
+/** Diamonds at the times a clip's properties have keys, along its bottom edge. */
+function paintKeys<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, clip: ClipBox, left: number, right: number, cy: number): void {
+  const { pxPerSecond, scrollLeft } = input.viewport;
+  for (const time of keyTimes(clip)) {
+    const cx = time * pxPerSecond - scrollLeft;
+    if (cx < left - KEY_RADIUS || cx > right + KEY_RADIUS) continue;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - KEY_RADIUS);
+    ctx.lineTo(cx + KEY_RADIUS, cy);
+    ctx.lineTo(cx, cy + KEY_RADIUS);
+    ctx.lineTo(cx - KEY_RADIUS, cy);
+    ctx.closePath();
+    ctx.fillStyle = input.theme.text;
+    ctx.fill();
+    ctx.strokeStyle = input.theme.lane;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/**
+ * The transitions of a row's clips at their effective lengths, over the clips: a dissolve as a crossed band
+ * straddling the cut, a fade as a shaded wedge inside its clip (dark at the edge, clear toward the middle).
+ */
+function paintTransitions<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, top: number, t0: number, t1: number): void {
+  const { pxPerSecond, scrollLeft, width } = input.viewport;
+  const y = top + CLIP_INSET_Y;
+  const h = row.height - 2 * CLIP_INSET_Y;
+  for (const clip of visibleClips(row.clips, t0, t1)) {
+    for (const mark of clip.marks) {
+      const x0 = mark.from * pxPerSecond - scrollLeft;
+      const x1 = Math.max(mark.to * pxPerSecond - scrollLeft, x0 + 2);
+      if (x1 < 0 || x0 > width) continue;
+      ctx.beginPath();
+      if (mark.kind === "dissolve") {
+        ctx.rect(x0, y, x1 - x0, h);
+        ctx.fillStyle = withAlpha(input.theme.text, DISSOLVE_ALPHA);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x0, y + h);
+        ctx.lineTo(x1, y);
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y + h);
+      } else {
+        const fadeIn = mark.side === "in";
+        ctx.moveTo(fadeIn ? x0 : x1, y);
+        ctx.lineTo(fadeIn ? x0 : x1, y + h);
+        ctx.lineTo(fadeIn ? x1 : x0, y);
+        ctx.closePath();
+        ctx.fillStyle = FADE_SHADE;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x0, fadeIn ? y + h : y);
+        ctx.lineTo(x1, fadeIn ? y : y + h);
+      }
+      ctx.strokeStyle = withAlpha(input.theme.text, MARK_LINE_ALPHA);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
 }
 
 /**

@@ -6,9 +6,13 @@ import {
   type NestedTimelines,
   type Placement,
   type Size,
+  dissolveProgress,
+  dissolveWeights,
+  fadeWeight,
   flattenTimeline,
   isProgramSound,
   movedProgramGroups,
+  placementAt,
   placementOf,
   programGroup,
   shotGroupTime,
@@ -16,6 +20,7 @@ import {
   shotSound,
   soundSamples,
 } from "@frameshell/schema/composite";
+import { type ClipEdges, type TransitionContext, clipLength, edgeTransitions } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -51,6 +56,8 @@ export type VideoSpan =
       /** Source picture size as probed (placement uses it, as export does); null when unknown. */
       size: Size | null;
       placement: Placement;
+      /** Keys and edge transitions (ADR 0018); absent: `placement` holds for every frame. */
+      motion?: SpanMotion;
     }
   | {
       kind: "still";
@@ -63,6 +70,8 @@ export type VideoSpan =
       version: string;
       size: Size;
       placement: Placement;
+      /** Keys and edge transitions (ADR 0018); absent: `placement` holds for every frame. */
+      motion?: SpanMotion;
     }
   | {
       /**
@@ -82,6 +91,10 @@ export type VideoSpan =
       /** Rendered size once ready (placement uses it, as export does); null before. */
       size: Size | null;
       placement: Placement;
+      /** Keys and edge transitions (ADR 0018); absent: `placement` holds for every frame. */
+      motion?: SpanMotion;
+      /** True: render frame `in` shows throughout, a dissolve handle held past the clip's first or last frame (ADR 0018). */
+      hold?: true;
     }
   | {
       /** One angle of a multicam shot (ADR 0016): its proxy, cut into the shot's tile ({@link angleLayer}). */
@@ -129,6 +142,66 @@ export interface AngleLayer {
   backdrop: boolean;
 }
 
+/** A dissolve a span takes part in (ADR 0018): `half` timeline seconds each side of `at`, the incoming clip's start. */
+export interface SpanDissolve {
+  /** Timeline second of the cut. */
+  at: number;
+  /** Timeline seconds on each side of it. */
+  half: number;
+}
+
+/** Effective edge transitions of a clip as its spans play them (ADR 0018, `edgeTransitions`), timeline seconds. */
+export interface EdgeWeights {
+  /** The clip's first frame and just after its last: fades are measured from them. */
+  start: number;
+  end: number;
+  /** Seconds of ramp from black (transparent, silence) after `start`, effective; 0 none. */
+  fadeIn: number;
+  /** Seconds of ramp to black before `end`, effective; 0 none. */
+  fadeOut: number;
+  /** The dissolve this clip comes in by. */
+  dissolveIn?: SpanDissolve;
+  /** The dissolve the next clip on the track comes in by: this clip goes out, played on past its end. */
+  dissolveOut?: SpanDissolve;
+}
+
+/** What changes a picture span from frame to frame (ADR 0018); absent: `placement` holds. See {@link spanPlacement}. */
+export interface SpanMotion extends EdgeWeights {
+  /** The clip when it has picture keys: `placementAt` reads its timing, `transform` and `keys`. */
+  keyed?: Clip;
+  /** `bottom`: the outgoing clip of a dissolve stays opaque under the incoming one; `upper`: it fades out. */
+  track: "bottom" | "upper";
+}
+
+/** What changes a sound span's gain from sample to sample (ADR 0018); absent: `gain` holds. See `envelopeGain`. */
+export interface AudioEnvelope extends EdgeWeights {
+  /** The clip when it has `gain` keys (`gainAt`). */
+  keyed?: Clip;
+  /** Program samples per second. */
+  rate: number;
+}
+
+/** A span drawn with a placement: footage, a still or a clip render. */
+export type PlacedSpan = Extract<VideoSpan, { kind: "media" | "still" | "generated" }>;
+
+/** Placement of `span` at program frame `frame`: its keys and edge transitions evaluated as export does (`placementAt`). */
+export function spanPlacement(span: PlacedSpan, frame: number, fps: number): Placement {
+  const { motion } = span;
+  if (!motion) return span.placement;
+  const t = frame / fps;
+  const base = motion.keyed ? placementAt(motion.keyed, t) : span.placement;
+  const weight = edgeWeight(motion, t, motion.track);
+  return weight === 1 ? base : { ...base, opacity: base.opacity * weight };
+}
+
+/** Factor 0 to 1 of the fades and dissolves of `edges` at timeline second `t`: a picture's opacity, a sound's gain. */
+export function edgeWeight(edges: EdgeWeights, t: number, kind: "bottom" | "upper" | "sound"): number {
+  let weight = fadeWeight(edges, edges.start, edges.end, t, kind === "sound");
+  if (edges.dissolveIn) weight *= dissolveWeights(dissolveProgress(edges.dissolveIn.at, edges.dissolveIn.half, t), kind).incoming;
+  if (edges.dissolveOut) weight *= dissolveWeights(dissolveProgress(edges.dissolveOut.at, edges.dissolveOut.half, t), kind).outgoing;
+  return weight;
+}
+
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
 export type LayerRender =
   | { state: "ready"; file: string }
@@ -154,6 +227,8 @@ export interface AudioSpan {
   speed: number;
   /** Linear gain from the clip's `audio.gain` dB. */
   gain: number;
+  /** Gain keys and edge transitions (ADR 0018); absent: `gain` holds for every sample. */
+  envelope?: AudioEnvelope;
 }
 
 /**
@@ -174,8 +249,8 @@ export interface Program {
   /** Length in frames: end of the last span. */
   frames: number;
   /**
-   * One per video track and per angle slot of a program track, bottom first
-   * (layer 0 is the bottom picture track).
+   * One per video track, plus one above a track with a dissolve, and one per
+   * angle slot of a program track, bottom first (layer 0 is the bottom picture track).
    * Each sorted, never overlapping; frames outside every span of every
    * layer are black.
    */
@@ -209,6 +284,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const root = asTimeline(view, true);
   const flat = flattenTimeline(root, resolve);
   const moved = movedProgramGroups(root, resolve);
+  const context: TransitionContext = { fps, sourceDuration: (clip) => sourceSeconds(clip, assets) };
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
@@ -235,17 +311,26 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     // A hand-edited file may overlap clips: the later clip wins from its start.
     for (let i = 1; i < placed.length; i++) placed[i - 1]!.end = Math.min(placed[i - 1]!.end, placed[i]!.start);
     const kept = placed.filter((p) => p.end > p.start);
+    const edges = edgeTransitions(
+      kept.map((p) => p.clip),
+      context,
+    );
+    /** Each half of the dissolve clip `index` comes in by, seconds; 0 without one. */
+    const dissolveHalf = (index: number) => {
+      const own = kept[index] && edges.get(kept[index].clip.id);
+      return own?.mode === "dissolve" ? own.dissolve : 0;
+    };
 
-    const layer: VideoSpan[] = [];
+    if (track.kind === "video") {
+      const pictures = kept.map(({ clip, start, end }) => pictureOf(clip, "asset" in clip ? assets.get(clip.asset) : undefined, start, end, fps, options.renders));
+      layers.push(...pictureLayers(kept, pictures, edges, context, layers.length === 0 ? "bottom" : "upper"));
+    }
+
     /** Last sound span of this track and whether it is program sound, for {@link continuesSpan}. */
     let last: { span: AudioSpan; exact: boolean } | null = null;
     kept.forEach(({ clip, start, end }, index) => {
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
-      if (track.kind === "video") {
-        const span = pictureOf(clip, info, start, end, fps, options.renders);
-        if (span) layer.push(span);
-      }
       if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) return;
       const cursor = last?.span.end ?? 0;
       if (isProgramSound(clip)) {
@@ -262,25 +347,30 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         last = { span, exact: true };
         return;
       }
-      // Never before the track's previous sound ends, as in export.
+      // Never before the track's previous sound ends, as in export, except into the handle of a crossfade (ADR 0018).
       const speed = clip.speed ?? 1;
       const planned = sample(start);
-      const first = Math.max(cursor, planned);
-      if (sample(end) <= first) return;
+      const head = Math.round(dissolveHalf(index) * fps);
+      const next = kept[index + 1];
+      const tail = next ? Math.round(dissolveHalf(index + 1) * fps) : 0;
+      const first = head > 0 ? sample(start - head) : Math.max(cursor, planned);
+      const until = sample(tail > 0 ? next!.start + tail : end);
+      if (until <= first) return;
+      const envelope = envelopeOf(clip, edgeWeightsOf(clip, edges.get(clip.id), dissolveHalf(index), next && tail > 0 ? { at: next.clip.start, half: dissolveHalf(index + 1) } : undefined, context), rate);
       const span: AudioSpan = {
         clip: clip.id,
         start: first,
-        end: sample(end),
+        end: until,
         sidecar: info.sidecar.path,
         channels: info.sidecar.channels,
         in: Math.round((frame(clip.in) / fps) * info.sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * info.sidecar.sampleRate),
         speed,
         gain: gainOf(clip),
+        ...(envelope ? { envelope } : {}),
       };
       audio.push(span);
       last = { span, exact: false };
     });
-    if (track.kind === "video") layers.push(layer);
   }
   audio.sort((a, b) => a.start - b.start);
   return { fps, sampleRate: rate, resolution, frames, layers, audio };
@@ -360,8 +450,9 @@ export function firstVideoDifference(a: Program, b: Program, from: number, layer
  * differs from its fade-out on ({@link EDGE_FADE_SAMPLES}).
  */
 export function firstAudioDifference(a: Program, b: Program, from: number): number {
-  const key = (s: AudioSpan) => `${s.start}|${s.end}|${s.sidecar}|${s.channels}|${s.in}|${s.speed}|${s.gain}`;
-  const head = (s: AudioSpan) => `${s.start}|${s.sidecar}|${s.channels}|${s.in}|${s.speed}|${s.gain}`;
+  const envelope = (s: AudioSpan) => (s.envelope ? JSON.stringify(s.envelope) : "");
+  const key = (s: AudioSpan) => `${s.start}|${s.end}|${s.sidecar}|${s.channels}|${s.in}|${s.speed}|${s.gain}|${envelope(s)}`;
+  const head = (s: AudioSpan) => `${s.start}|${s.sidecar}|${s.channels}|${s.in}|${s.speed}|${s.gain}|${envelope(s)}`;
   const inB = new Set(b.audio.map(key));
   const inA = new Set(a.audio.map(key));
   const onlyA = a.audio.filter((s) => !inB.has(key(s)));
@@ -389,7 +480,10 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (x.kind === "generated" && y.kind === "generated") {
     // Not ready yet: nothing drawn either way. Ready: the same file shows the same frames.
     const file = (s: typeof x) => (s.render?.state === "ready" ? s.render.file : null);
-    return file(x) === file(y) && (file(x) === null ? x.clip === y.clip : x.in - x.start === y.in - y.start);
+    if (file(x) !== file(y)) return false;
+    if (file(x) === null) return x.clip === y.clip;
+    if (x.hold || y.hold) return x.hold === y.hold && x.in === y.in;
+    return x.in - x.start === y.in - y.start;
   }
   return x.kind === "placeholder" && y.kind === "placeholder" && x.reason === y.reason && x.clip === y.clip;
 }
@@ -562,6 +656,120 @@ function shotAudio(shots: readonly PlacedShot[], group: MulticamGroup, assets: R
   return spans;
 }
 
+/** A clip of one track in program frames `[start, end)`. */
+interface PlacedClip {
+  clip: Clip;
+  start: number;
+  end: number;
+}
+
+/**
+ * Picture layers of one video track: its spans, plus a second layer just
+ * above when a clip comes in by a dissolve (ADR 0018 decision 10). The
+ * incoming clip's first half of frames, from its handle before the cut,
+ * plays on that layer (its own decoder, primed by read-ahead) while the
+ * outgoing clip plays on past its end into its handle on the main layer.
+ */
+function pictureLayers(
+  kept: readonly PlacedClip[],
+  pictures: readonly (PlacedSpan | PlaceholderSpan | null)[],
+  edges: ReadonlyMap<string, ClipEdges>,
+  context: TransitionContext,
+  track: SpanMotion["track"],
+): VideoSpan[][] {
+  const { fps } = context;
+  // Only a picture can dissolve in: a clip still ingesting (placeholder) or with no picture cuts.
+  const halves = kept.map(({ clip }, i) => {
+    const own = edges.get(clip.id);
+    const picture = pictures[i];
+    return own?.mode === "dissolve" && picture && picture.kind !== "placeholder" ? own.dissolve : 0;
+  });
+  const main: VideoSpan[] = [];
+  const slot: VideoSpan[] = [];
+  kept.forEach(({ clip }, i) => {
+    const picture = pictures[i];
+    if (!picture) return;
+    const next = kept[i + 1];
+    const outHalf = next ? halves[i + 1]! : 0;
+    const weights = edgeWeightsOf(clip, edges.get(clip.id), halves[i]!, outHalf > 0 ? { at: next!.clip.start, half: outHalf } : undefined, context);
+    let span = picture.kind === "placeholder" ? picture : withMotion(picture, clip, weights, track);
+    const head = Math.round(halves[i]! * fps);
+    if (head > 0 && span.kind !== "placeholder") {
+      slot.push(...headPieces(span, head));
+      span = shifted(span, head);
+    }
+    const tail = outHalf > 0 ? next!.start + Math.round(outHalf * fps) : span.end;
+    if (span.kind === "generated" && tail > span.end) {
+      // The render is clip-length: its last frame holds (ADR 0018 decision 5).
+      if (span.end > span.start) main.push(span);
+      main.push({ ...span, start: span.end, end: tail, in: span.in + (span.end - span.start) - 1, hold: true });
+      return;
+    }
+    if (tail > span.end) span = { ...span, end: tail };
+    if (span.end > span.start) main.push(span);
+  });
+  return slot.length > 0 ? [main, slot] : [main];
+}
+
+/** Spans of the frames `span` plays before its start and first `head` frames: the incoming side of a dissolve. */
+function headPieces(span: PlacedSpan, head: number): VideoSpan[] {
+  const piece = { start: span.start - head, end: span.start + head };
+  if (span.kind === "media") return [{ ...span, ...piece, in: span.in - head * span.speed }];
+  if (span.kind === "still") return [{ ...span, ...piece }];
+  // A render starts at the clip's first frame: that frame holds before it (ADR 0018 decision 5).
+  return [
+    { ...span, start: piece.start, end: span.start, hold: true },
+    { ...span, start: span.start, end: piece.end },
+  ];
+}
+
+/** `span` from `head` frames after its start on. */
+function shifted(span: PlacedSpan, head: number): PlacedSpan {
+  const start = span.start + head;
+  if (span.kind === "media") return { ...span, start, in: span.in + head * span.speed };
+  if (span.kind === "generated") return { ...span, start, in: span.in + head };
+  return { ...span, start };
+}
+
+/** `picture` with the {@link SpanMotion} of `clip`'s picture keys and edge transitions; as is without either. */
+function withMotion(picture: PlacedSpan, clip: Clip, weights: EdgeWeights, track: SpanMotion["track"]): PlacedSpan {
+  const keys = clip.keys;
+  const keyed = keys !== undefined && (keys.x ?? keys.y ?? keys.scale ?? keys.opacity) !== undefined;
+  if (!keyed && !hasEdges(weights)) return picture;
+  return { ...picture, motion: { ...weights, track, ...(keyed ? { keyed: clip } : {}) } };
+}
+
+/** The {@link AudioEnvelope} of `clip`'s sound: its `gain` keys and edge transitions; null without either. */
+function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number): AudioEnvelope | null {
+  const keyed = clip.keys?.gain !== undefined;
+  if (!keyed && !hasEdges(weights)) return null;
+  return { ...weights, ...(keyed ? { keyed: clip } : {}), rate };
+}
+
+/** The {@link EdgeWeights} of `clip` from its effective edges, the dissolve it comes in by and the one it goes out by. */
+function edgeWeightsOf(clip: Clip, own: ClipEdges | undefined, inHalf: number, out: SpanDissolve | undefined, context: TransitionContext): EdgeWeights {
+  return {
+    start: clip.start,
+    end: clip.start + clipLength(clip, context),
+    fadeIn: own?.fadeIn ?? 0,
+    fadeOut: own?.fadeOut ?? 0,
+    ...(inHalf > 0 ? { dissolveIn: { at: clip.start, half: inHalf } } : {}),
+    ...(out ? { dissolveOut: out } : {}),
+  };
+}
+
+function hasEdges(weights: EdgeWeights): boolean {
+  return weights.fadeIn > 0 || weights.fadeOut > 0 || weights.dissolveIn !== undefined || weights.dissolveOut !== undefined;
+}
+
+/** Seconds of material `clip` draws from, for its handles: the asset's duration, unlimited for a still; unknown otherwise. */
+export function sourceSeconds(clip: Clip, assets: ReadonlyMap<string, AssetInfo>): number | undefined {
+  if (!("asset" in clip)) return undefined;
+  const media = assets.get(clip.asset)?.media;
+  if (media?.video?.still) return Number.POSITIVE_INFINITY;
+  return media?.duration ?? undefined;
+}
+
 /** Linear gain of the clip's `audio.gain` dB. */
 function gainOf(clip: Clip): number {
   return 10 ** ((clip.audio?.gain ?? 0) / 20);
@@ -611,8 +819,8 @@ function pictureOf(
   end: number,
   fps: number,
   renders: ReadonlyMap<string, ClipRenderInfo> | undefined,
-): VideoSpan | null {
-  const placeholder = (reason: PlaceholderReason): VideoSpan => ({ kind: "placeholder", clip: clip.id, start, end, reason, type: clip.type });
+): PlacedSpan | PlaceholderSpan | null {
+  const placeholder = (reason: PlaceholderReason): PlaceholderSpan => ({ kind: "placeholder", clip: clip.id, start, end, reason, type: clip.type });
   if (clip.type !== "media" && clip.type !== "timeline") return generatedOf(clip, start, end, fps, renders?.get(clip.id));
   if (!("asset" in clip)) return placeholder("timeline");
   if (!info) return placeholder("unavailable");
@@ -628,7 +836,7 @@ function pictureOf(
   return placeholder("unavailable");
 }
 
-function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): VideoSpan {
+function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): PlacedSpan {
   const ready = info?.state === "ready" && info.file ? info : null;
   const render: LayerRender | null = ready
     ? { state: "ready", file: ready.file! }

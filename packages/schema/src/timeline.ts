@@ -56,6 +56,48 @@ export const ClipAudioSchema = z.strictObject({
   muted: z.boolean().optional().describe("Default false."),
 });
 
+/** Eases between two keys (ADR 0018): the value follows the leaving key's ease. */
+export const KEY_EASES = ["linear", "in", "out", "in-out"] as const;
+
+/** Name of an ease in {@link KEY_EASES}. */
+export type KeyEase = (typeof KEY_EASES)[number];
+
+const keyList = (value: z.ZodNumber, unit: string) =>
+  z
+    .array(
+      z.strictObject({
+        at: Seconds.describe("Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."),
+        value,
+        ease: z
+          .enum(KEY_EASES)
+          .optional()
+          .describe("How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`."),
+      }),
+    )
+    .min(1)
+    .superRefine((keys, ctx) => {
+      keys.forEach((key, k) => {
+        if (k > 0 && key.at <= keys[k - 1]!.at) {
+          ctx.addIssue({ code: "custom", message: "keys must be sorted by `at`, each later than the one before", path: [k, "at"] });
+        }
+      });
+    })
+    .optional()
+    .describe(`Keys of this property (${unit}), sorted by \`at\`; held before the first and after the last. Replaces the static value.`);
+
+/** Keyframes of a clip (ADR 0018): one sorted list per property; audio tracks take only `gain`. */
+export const ClipKeysSchema = z
+  .strictObject({
+    x: keyList(z.number(), "project pixels"),
+    y: keyList(z.number(), "project pixels"),
+    scale: keyList(z.number().positive(), "factor"),
+    opacity: keyList(z.number().min(0).max(1), "0 to 1"),
+    gain: keyList(z.number(), "dB"),
+  })
+  .describe("Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`).");
+
+const TransitionSeconds = z.number().positive();
+
 const ClipIdSchema = Id.describe("Stable, core-generated (`c_…`); reference clips by it.");
 const ClipStartSchema = Seconds.describe("Timeline seconds of the first frame.");
 const ScriptRefSchema = z
@@ -71,6 +113,13 @@ const clipBase = {
   scriptRef: ScriptRefSchema,
   transform: TransformSchema.optional(),
   audio: ClipAudioSchema.optional(),
+  dissolve: TransitionSeconds.optional().describe(
+    "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). " +
+      "Short material shortens it; with no clip butted before, it plays as a fade in.",
+  ),
+  fadeIn: TransitionSeconds.optional().describe("Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start."),
+  fadeOut: TransitionSeconds.optional().describe("Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end."),
+  keys: ClipKeysSchema.optional(),
 };
 
 /** Footage, audio or image file. Duration on the timeline = `(out - in) / speed`. */
@@ -375,6 +424,12 @@ export const TimelineSchema = z
     timeline.tracks.forEach((track, t) => {
       claim(track.id, ["tracks", t, "id"]);
       if (track.kind !== "subtitles") track.clips.forEach((clip, c) => claim(clip.id, ["tracks", t, "clips", c, "id"]));
+      if (track.kind !== "audio") return;
+      track.clips.forEach((clip, c) => {
+        for (const prop of ["x", "y", "scale", "opacity"] as const) {
+          if (clip.keys?.[prop]) ctx.addIssue({ code: "custom", message: `audio tracks take only \`gain\` keys, got \`${prop}\``, path: ["tracks", t, "clips", c, "keys", prop] });
+        }
+      });
     });
     timeline.groups?.forEach((group, g) => claim(group.id, ["groups", g, "id"]));
     const shown = new Set<string>();
@@ -481,6 +536,10 @@ export type AngleCrop = z.infer<typeof AngleCropSchema>;
 export type PaintedTurn = z.infer<typeof PaintedTurnSchema>;
 /** One key of an {@link Angle}'s `reframe`. */
 export type ReframeKey = z.infer<typeof ReframeKeySchema>;
+/** Keyframes of a clip; see {@link ClipKeysSchema}. */
+export type ClipKeys = z.infer<typeof ClipKeysSchema>;
+/** One key of a clip property. */
+export type ClipKey = NonNullable<ClipKeys["x"]>[number];
 /** Clip overlay placement. */
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */

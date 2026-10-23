@@ -356,6 +356,7 @@ export class ExportService {
             ? { codec: probe.video.codec, still: probe.video.still, width: probe.video.width, height: probe.video.height }
             : null,
           audio: probe.audio !== null,
+          ...(probe.duration !== null ? { duration: probe.duration } : {}),
         });
       }
     }

@@ -580,6 +580,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.split": (params, caller) => operate("clip.split", params, caller),
     "clip.remove": (params, caller) => operate("clip.remove", params, caller),
     "clip.set": (params, caller) => operate("clip.set", params, caller),
+    "transition.set": (params, caller) => operate("transition.set", params, caller),
+    "transition.remove": (params, caller) => operate("transition.remove", params, caller),
+    "clip.key": (params, caller) => operate("clip.key", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
     "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name }, caller) => {
       const dir = await root(cwd);

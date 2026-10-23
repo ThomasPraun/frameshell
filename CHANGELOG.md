@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Transitions and keyframes (ADR 0018). Everything is optional: a timeline without them is unchanged, in the file, the export plan and the preview.
+  - Model (schema version 1, optional fields): video and audio clips take `dissolve`, `fadeIn` and `fadeOut` (seconds) and `keys`, one sorted list per property (`x`, `y`, `scale`, `opacity`, `gain`; audio tracks only `gain`), on the clip's own clock, eased `linear`, `in`, `out` or `in-out`. The file stores what was asked; `edgeTransitions` in `@frameshell/schema` (also the `@frameshell/schema/transitions` subpath) gives what plays: whole frames, a dissolve centered on the cut and cut to the source both clips have past it and to half of each clip, a dip through black when there is no spare source, a fade in when nothing is butted. Export, preview, timeline marks and engine warnings all read it, and share the evaluators `placementAt`, `gainAt`, `fadeWeight` and `dissolveWeights` (`composite.ts`).
+  - Operations (protocol v51): `transition.set` (`{ at, kind?, duration?, tracks? }`: with only `at` it dissolves the clip edge there on every video and audio track, 0.5 s; `kind: "fade"` dips through black, its two halves summing to `duration` in whole frames; a clip start or end with nothing butted fades in or out; multicam program tracks are skipped with a warning), `transition.remove` and `clip.key` (`{ clip, prop, time, value?, ease?, remove?, clear? }`: a key at a timeline second, `value` defaulting to what plays there). CLI `frameshell transition set|remove --at s`, `frameshell clip key <clip> --prop p --at s`; MCP `transition_set`, `transition_remove`, `clip_key`; all undoable. `clip.split` and `cut` give the left part the dissolve and fade in, the right part the fade out, the new cut none; both keep the keys. A transition that plays shorter or differently than asked adds a `warnings` entry. Agent skill: `reference/transitions.md`.
+  - Export: dissolves draw the incoming clip from its handle over the outgoing clip's tail (opaque on the bottom track, `1 - w` above); fades go to black on the bottom track and to transparent above; generated clips hold their first or last rendered frame for handles. Keyed position and scale use `overlay` and `scale` expressions, keyed opacity a per-frame alpha through `sendcmd`. Sound crossfades and fades are equal-power (`afade` `qsin`); gain keys use `volume` per 64 samples.
+  - Desktop preview: a dissolve's incoming clip plays on a second layer of its track (one more decoder, only on tracks with a dissolve) while the outgoing clip plays on into its handle, with the same weights as export; each sound sample gets its clip's gain keys and equal-power fades and crossfades. Hit-testing and live pages follow the animated placement.
+  - Desktop timeline and inspector: a clip edge with a transition shows a mark at its effective length (a crossed band for a dissolve, a shaded wedge for a fade), keys show as diamonds. Right-click on a clip edge: Add dissolve, Add fade, Remove transition. The clip inspector has a Start and End transition (none, dissolve, fade, length) and, per property, a diamond that adds or removes a keyframe at the playhead, with its ease; a keyed property shows its value at the playhead and an edit keys it there. Each edit is one labelled `ui` step; the History panel names `transition.set`, `transition.remove` and `clip.key`. Image projects show none of it. English and Spanish.
+
+## [0.12.1] - 2026-10-22
+
 ### Changed
 
 - Desktop: an image project has no transcript view (#289). Mod+Shift+T does nothing there, the editor's tab strip has no Transcript button, and transcript files in the explorer open as JSON. View > Transcript and File > New Image from Frame are disabled while an image project's window is focused.
@@ -281,7 +292,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.1
 [0.12.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.0
 [0.11.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.11.0
 [0.8.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.8.1

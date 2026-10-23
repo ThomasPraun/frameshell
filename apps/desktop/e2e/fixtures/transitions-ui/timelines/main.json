@@ -1,0 +1,17 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/timeline.json",
+  "schemaVersion": 1,
+  "id": "main",
+  "revision": 0,
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "Titles",
+      "clips": [
+        { "id": "c_one", "type": "titles", "start": 0, "duration": 4 },
+        { "id": "c_two", "type": "titles", "start": 4, "duration": 6 }
+      ]
+    }
+  ]
+}
