@@ -9,7 +9,9 @@ import {
   dissolveWeights,
   edgeTransitions,
   fadeWeight,
+  flattenTimeline,
   gainAt,
+  hostFades,
   keyedValueAt,
   layerRect,
   placementAt,
@@ -20,7 +22,7 @@ import { keyExpression } from "../src/export/animation.js";
 // Parity of the export's ffmpeg expressions and ramps with the schema evaluator (ADR 0018 decision 9): every
 // expression the compiler writes is evaluated here numerically and sampled against `composite.ts`.
 
-/** Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, pow. */
+/** Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, pow, sin. */
 function evaluate(expression: string, variables: Record<string, number>): number {
   const tokens = expression.match(/\d+(?:\.\d+)?|[A-Za-z_][A-Za-z_0-9]*|[-+*/(),]/g)!;
   expect(tokens.join("")).toBe(expression.replace(/\s/g, ""));
@@ -37,6 +39,8 @@ function evaluate(expression: string, variables: Record<string, number>): number
     floor: (a) => Math.floor(a!),
     max: (a, b) => Math.max(a!, b!),
     pow: (a, b) => a! ** b!,
+    sin: (a) => Math.sin(a!),
+    min: (a, b) => Math.min(a!, b!),
   };
   const primary = (): number => {
     const token = take();
@@ -309,5 +313,192 @@ describe("export expression parity", () => {
       }
     }
     expect(checked).toBe(60);
+  });
+});
+
+describe("nested clip parity (ADR 0018 decision 9)", () => {
+  const fps = 30;
+  const preset = BUILTIN_PRESETS.find((p) => p.id === "youtube-1080p")!;
+  const resolution = { width: 1280, height: 720 };
+  const sources = new Map<string, ExportSource>([
+    ["assets/talk.mp4", { path: "/p/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true, duration: 30 }],
+    ["assets/logo.png", { path: "/p/logo.png", video: { codec: "png", still: true, width: 500, height: 300 }, audio: false }],
+    ["assets/music.wav", { path: "/p/music.wav", video: null, audio: true, duration: 60 }],
+  ]);
+  // Scene: a badge with opacity keys on V1, a music bed with gain keys from 1 s on A1.
+  const scene: Timeline = {
+    schemaVersion: 1,
+    id: "scene",
+    revision: 1,
+    tracks: [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          {
+            id: "badge",
+            type: "media",
+            asset: "assets/logo.png",
+            start: 0,
+            in: 0,
+            out: 4,
+            transform: { x: 120, scale: 0.4 },
+            keys: {
+              opacity: [
+                { at: 0.5, value: 0.4, ease: "in" },
+                { at: 2.5, value: 1 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: "a1",
+        kind: "audio",
+        clips: [
+          {
+            id: "bed",
+            type: "media",
+            asset: "assets/music.wav",
+            start: 1,
+            in: 5,
+            out: 9,
+            keys: {
+              gain: [
+                { at: 6, value: -18, ease: "in-out" },
+                { at: 8, value: -6 },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  // Scene seconds 0.5 to 3 at 1 s on V2, dissolving from a still, every placement property and gain keyed, faded.
+  const main: Timeline = {
+    schemaVersion: 1,
+    id: "main",
+    revision: 1,
+    tracks: [
+      { id: "v1", kind: "video", clips: [{ id: "bg", type: "media", asset: "assets/talk.mp4", start: 0, in: 3, out: 7 }] },
+      {
+        id: "v2",
+        kind: "video",
+        clips: [
+          { id: "pre", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 1, transform: { scale: 0.3 } },
+          {
+            id: "n",
+            type: "timeline",
+            source: "timelines/scene.json",
+            start: 1,
+            in: 0.5,
+            duration: 2.5,
+            transform: { y: -30 },
+            audio: { gain: -3 },
+            dissolve: 0.6,
+            fadeIn: 0.8,
+            fadeOut: 0.5,
+            keys: {
+              x: [
+                { at: 0.5, value: -200, ease: "in-out" },
+                { at: 2.5, value: 150 },
+              ],
+              scale: [
+                { at: 1, value: 0.8, ease: "out" },
+                { at: 3, value: 1.3 },
+              ],
+              opacity: [
+                { at: 0.5, value: 1 },
+                { at: 3, value: 0.5 },
+              ],
+              gain: [
+                { at: 1, value: 0 },
+                { at: 3, value: -10, ease: "in" },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const flat = flattenTimeline(main, (source) => (source === "timelines/scene.json" ? scene : null), fps);
+  const clipOf = (track: string, id: string) => (flat.tracks.find((candidate) => candidate.id === track) as { clips: Clip[] }).clips.find((clip) => clip.id === id)!;
+  const badge = clipOf("v2", "n/badge");
+  const bed = clipOf("v2/a1", "n/bed");
+  const plan = compileRender({ timeline: flat, fps, preset, loudness: -17, sources, resolution, segmentSeconds: 0.7 });
+  const filters = plan.segments.map((segment) => ({ segment, text: plan.files[segment.args[segment.args.indexOf("-/filter_complex") + 1]!]! }));
+  /** The badge is drawn from 9 frames before 1 s (its dissolve's head) to 3.5 s. */
+  const [first, last] = [21, 105];
+  /** Product of the host fades of `clip` at `t`, as the preview multiplies them in. */
+  const hostWeight = (clip: Clip, t: number, sound = false) => hostFades(clip).reduce((w, fade) => w * fadeWeight(fade, fade.start, fade.end, t, sound), 1);
+
+  it("writes the badge's scale and position as layerRect(placementAt) with the host's keys composed in, on every frame", () => {
+    let checked = 0;
+    for (const { segment, text } of filters) {
+      const scale = /scale=w='([^']+)':h='([^']+)':eval=frame/.exec(text);
+      const overlay = /overlay=x='([^']+)':y='([^']+)':eval=frame/.exec(text);
+      const from = Math.max(first, Math.round(segment.from * fps));
+      const to = Math.min(last, Math.round(segment.to * fps));
+      if (to <= from) continue;
+      expect(scale && overlay, `segment ${segment.file}`).toBeTruthy();
+      for (let frame = from; frame < to; frame++) {
+        const t = frame / fps;
+        const expected = layerRect({ width: 500, height: 300 }, preset.video, resolution, placementAt(badge, t));
+        const width = evaluate(scale![1]!, { t });
+        const height = evaluate(scale![2]!, { t });
+        const vars = { t: t - segment.from, overlay_w: width, overlay_h: height };
+        expect([width, height, evaluate(overlay![1]!, vars), evaluate(overlay![2]!, vars)], `frame ${frame}`).toEqual([
+          expected.width,
+          expected.height,
+          expected.left,
+          expected.top,
+        ]);
+        checked++;
+      }
+    }
+    expect(checked).toBe(last - first);
+  });
+
+  it("multiplies the badge by its dissolve and the host's fades, and sets its opacity to placementAt's", () => {
+    const fade = (type: string, st: number, d: number, t: number) => {
+      const f = Math.min(1, Math.max(0, (t - st) / d));
+      return type === "in" ? f : 1 - f;
+    };
+    let checked = 0;
+    for (const { segment, text } of filters) {
+      const line = text.split(";\n").find((candidate) => candidate.includes("eval=frame,setsar=1"));
+      if (!line) continue;
+      const initial = /colorchannelmixer@o\d+=aa=([\d.]+)/.exec(line)!;
+      const commands = [...line.matchAll(/([\d.]+) \[enter\] colorchannelmixer@o\d+ aa ([\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+      for (let frame = Math.max(first, Math.round(segment.from * fps)); frame < Math.min(last, Math.round(segment.to * fps)); frame++) {
+        const t = frame / fps;
+        const ramps = [...line.matchAll(/fade=t=(in|out):alpha=1:st=([\d.]+):d=([\d.]+)/g)].reduce((p, m) => p * fade(m[1]!, Number(m[2]), Number(m[3]), t), 1);
+        const incoming = dissolveWeights(dissolveProgress(1, 0.3, t), "upper").incoming;
+        expect(ramps, `ramps at frame ${frame}`).toBeCloseTo(incoming * hostWeight(badge, t), 3);
+        const opacity = commands.filter(([at]) => at <= t).at(-1)?.[1] ?? Number(initial[1]);
+        expect(opacity, `opacity at frame ${frame}`).toBeCloseTo(placementAt(badge, t).opacity, 5);
+        checked++;
+      }
+    }
+    expect(checked).toBe(last - first);
+  });
+
+  it("plays the bed at gainAt with the host's keys, times the host's fades, one begun before the bed starts", () => {
+    const item = plan.audio.tracks.flat().find((candidate) => candidate.kind === "clip" && candidate.clip === "n/bed");
+    if (item?.kind !== "clip") throw new Error("no bed item");
+    // The host fades in over 1-1.8 s; the bed starts at 1.5 s, so that ramp is a volume factor, not an afade.
+    expect(item.fade).toBeDefined();
+    const { sampleRate } = plan.audio;
+    const afade = (type: string, ss: number, ns: number, n: number) => {
+      const index = type === "in" ? n - ss : ss + ns - n;
+      return Math.sin((Math.min(1, Math.max(0, index / ns)) * Math.PI) / 2);
+    };
+    for (let n = 0; n < item.samples; n += 97) {
+      const t = n / sampleRate;
+      const at = 1.5 + t;
+      const ramps = (item.ramps ?? []).reduce((p, ramp) => p * afade(ramp.type, ramp.start, ramp.length, n), 1);
+      const volume = 10 ** (evaluate(item.gain!, { t }) / 20) * evaluate(item.fade!, { t });
+      expect(ramps * volume, `sample ${n}`).toBeCloseTo(10 ** (gainAt(bed, at) / 20) * hostWeight(bed, at, true), 4);
+    }
   });
 });

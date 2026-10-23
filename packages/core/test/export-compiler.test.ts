@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import type { Clip, Timeline, Transcript } from "@frameshell/schema";
+import { type Clip, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -487,6 +487,81 @@ describe("export compiler", () => {
       const withoutSizes = compileRender({ ...input, timeline: plain, sources });
       expect(withSizes).toEqual(withoutSizes);
       expect(JSON.stringify(withSizes)).not.toMatch(/qsin|eval=frame|alpha=1|clone/);
+    });
+
+    describe("through a nested timeline (ADR 0018 decision 9)", () => {
+      // Scene: talk on V1, a logo on V2 from 1 s, music on A1; the window cuts talk's fade in and the logo's fade out.
+      const scene: Timeline = {
+        schemaVersion: 1,
+        id: "scene",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [{ id: "c_cam", type: "media", asset: "assets/talk.mp4", start: 0, in: 8, out: 12, fadeIn: 0.5 }] },
+          {
+            id: "v2",
+            kind: "video",
+            clips: [{ id: "c_badge", type: "media", asset: "assets/logo.png", start: 1, in: 0, out: 4, fadeOut: 0.5, transform: { x: 500, scale: 0.3 } }],
+          },
+          { id: "a1", kind: "audio", clips: [{ id: "c_bed", type: "media", asset: "assets/music.wav", start: 0, in: 2, out: 6, audio: { gain: -12 } }] },
+        ],
+      };
+      const resolve = (source: string) => (source === "timelines/scene.json" ? scene : null);
+      // Scene seconds 0.5 to 3.5 at 2 s on the base track, dissolving from c_talk1, zooming in, fading out.
+      const host: Clip = {
+        id: "c_scene",
+        type: "timeline",
+        source: "timelines/scene.json",
+        start: 2,
+        in: 0.5,
+        duration: 3,
+        dissolve: 0.6,
+        fadeOut: 0.4,
+        keys: {
+          scale: [
+            { at: 0.5, value: 1, ease: "in-out" },
+            { at: 3.5, value: 1.25 },
+          ],
+          gain: [
+            { at: 2, value: 0 },
+            { at: 3.5, value: -6 },
+          ],
+        },
+      };
+      const hosted = (nested: Clip): Timeline => ({
+        schemaVersion: 1,
+        id: "main",
+        revision: 4,
+        tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_talk1", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 5.2 }, nested] }],
+      });
+      const flat = flattenTimeline(hosted(host), resolve, 30);
+      const nestedInput = { ...input, timeline: flat, generated: new Map() };
+      const nestedPlan = compileRender(nestedInput);
+
+      it("composes the host's keys and edges into every clip it plays, the window's cuts without fades (golden)", () => {
+        golden("nested-transitions-plan", {
+          segments: nestedPlan.segments,
+          files: nestedPlan.files,
+          audio: nestedPlan.audio,
+          mix: mixStep(nestedPlan),
+          frame: compileFrame({ ...nestedInput, width: 1280, height: 720, at: 2.1, output: "/out/frame.png" }),
+        });
+        const graphs = Object.values(nestedPlan.files).join("\n");
+        // The scene's camera comes in over c_talk1's tail (0.3 s each side of 2 s), keyed: a layer, not concatenated.
+        expect(graphs).toContain("fade=t=in:alpha=1:st=1.7:d=0.6");
+        // Every layer fades out with the host over its last 0.4 s; the window cut off the camera's and logo's own 0.5 s fades.
+        expect(graphs).toContain("fade=t=out:alpha=1:st=4.6:d=0.4");
+        expect(graphs).not.toContain("d=0.5");
+      });
+
+      it("compiles a nested clip without keys or edges exactly as before, handles recorded or not", () => {
+        const plain: Clip = { id: "c_scene", type: "timeline", source: "timelines/scene.json", start: 2, in: 0.5, duration: 3, transform: { scale: 0.5 } };
+        const quiet: Timeline = { ...scene, tracks: scene.tracks.map((track) => (track.kind === "subtitles" || track.kind === "program" ? track : { ...track, clips: track.clips.map(({ fadeIn: _i, fadeOut: _o, ...clip }) => clip as Clip) })) };
+        const both = (source: string) => (source === "timelines/scene.json" ? quiet : null);
+        const playback = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(plain), both, 30) });
+        const loose = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(plain), both) });
+        expect(playback).toEqual(loose);
+        expect(JSON.stringify(playback)).not.toMatch(/qsin|eval=frame|alpha=1/);
+      });
     });
   });
 });

@@ -8,6 +8,8 @@ import {
   dissolveProgress,
   dissolveWeights,
   fadeWeight,
+  flattenTimeline,
+  hostFades,
   layerRect,
   placementAt,
 } from "@frameshell/schema";
@@ -325,6 +327,84 @@ describe("export transitions and keys (real ffmpeg)", () => {
         [2.75, -5],
       ] as const) {
         expect(Math.abs(amplitude(samples, t, 440) / full - 10 ** (db / 20)), `gain at ${t}`).toBeLessThan(0.02);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "plays a keyed nested clip with its clips composed in, fading all its layers and its sound in and out",
+    async () => {
+      // Scene: the patch 8 px right of center on V1, the 440 Hz tone from 0.3 s on A1. The host zooms and slides it,
+      // and fades in over 0.6 s (begun before the tone starts) and out over the last 0.4 s.
+      const scene = timelineOf([
+        { id: "v1", kind: "video", clips: [media("p", "assets/patch.png", 0, 0, 2, { transform: { x: 8 } })] },
+        { id: "a1", kind: "audio", clips: [media("tone", "assets/counter.mp4", 0.3, 1, 3.3)] },
+      ]);
+      const host: Clip = {
+        id: "n",
+        type: "timeline",
+        source: "timelines/scene.json",
+        start: 0,
+        duration: 2,
+        fadeIn: 0.6,
+        fadeOut: 0.4,
+        keys: {
+          x: [
+            { at: 0, value: -16, ease: "in-out" },
+            { at: 2, value: 8 },
+          ],
+          scale: [
+            { at: 0, value: 0.25, ease: "out" },
+            { at: 2, value: 0.75 },
+          ],
+        },
+      };
+      const timeline = flattenTimeline(
+        timelineOf([
+          { id: "v1", kind: "video", clips: [media("bg", "assets/black.png", 0, 0, 2)] },
+          { id: "v2", kind: "video", clips: [host] },
+        ]),
+        (source) => (source === "timelines/scene.json" ? scene : null),
+        30,
+      );
+      const layer = (timeline.tracks[1] as { clips: Clip[] }).clips[0]!;
+      const sources = new Map([
+        ["assets/black.png", blackStill],
+        ["assets/patch.png", patch],
+        ["assets/counter.mp4", counter],
+      ]);
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 0.5 });
+      const output = join(dir, "nested-keys.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-nested"), output });
+
+      const fade = (t: number, sound = false) => hostFades(layer).reduce((w, host) => w * fadeWeight(host, host.start, host.end, t, sound), 1);
+      const decoded = await frames(output);
+      expect(decoded).toHaveLength(60);
+      decoded.forEach((frame, n) => {
+        const t = n / 30;
+        const placement = placementAt(layer, t);
+        const rect = layerRect({ width: 16, height: 16 }, resolution, resolution, placement);
+        const level = 255 * placement.opacity * fade(t);
+        const row = Math.min(63, Math.max(0, rect.top + Math.floor(rect.height / 2)));
+        const center = frame[row * 64 + Math.min(63, Math.max(0, rect.left + Math.floor(rect.width / 2)))]!;
+        expect(Math.abs(center - level), `frame ${n}: ${center} vs ${level}`).toBeLessThan(3);
+        // Where the patch shows enough to find, its edges are where placementAt and layerRect put them.
+        if (level < 64) return;
+        const lit = Array.from({ length: 64 }, (_, x) => frame[row * 64 + x]! > level / 2);
+        const left = lit.indexOf(true);
+        expect([left, lit.lastIndexOf(true) - left + 1], `frame ${n} row ${row}`).toEqual([
+          Math.max(0, rect.left),
+          Math.min(64, rect.left + rect.width) - Math.max(0, rect.left),
+        ]);
+      });
+
+      const samples = await audioSamples(output);
+      const tone = (timeline.tracks.find((track) => track.id === "v2/a1") as { clips: Clip[] }).clips[0]!;
+      const full = amplitude(samples, 1.1, 440);
+      for (const t of [0.4, 0.5, 0.55, 1.7, 1.8, 1.9]) {
+        const weight = hostFades(tone).reduce((w, host) => w * fadeWeight(host, host.start, host.end, t, true), 1);
+        expect(Math.abs(amplitude(samples, t, 440) / full - weight), `440 Hz at ${t}`).toBeLessThan(0.05);
       }
     },
     MEDIA_TIMEOUT,

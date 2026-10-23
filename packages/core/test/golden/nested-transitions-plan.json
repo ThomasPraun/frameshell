@@ -1,0 +1,359 @@
+{
+  "segments": [
+    {
+      "file": "seg-0001.mp4",
+      "from": 0,
+      "to": 2,
+      "frames": 60,
+      "args": [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-y",
+        "-ss",
+        "2.2",
+        "-t",
+        "4",
+        "-i",
+        "/project/assets/talk.mp4",
+        "-ss",
+        "7.2",
+        "-t",
+        "2.3",
+        "-i",
+        "/project/assets/talk.mp4",
+        "-/filter_complex",
+        "seg-0001.filter",
+        "-map",
+        "[v]",
+        "-an",
+        "-frames:v",
+        "60",
+        "-r",
+        "30/1",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
+        "-maxrate",
+        "12000k",
+        "-bufsize",
+        "24000k",
+        "-map_metadata",
+        "-1",
+        "-f",
+        "mp4",
+        "seg-0001.mp4"
+      ]
+    },
+    {
+      "file": "seg-0002.mp4",
+      "from": 2,
+      "to": 4,
+      "frames": 60,
+      "args": [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-y",
+        "-ss",
+        "4.2",
+        "-t",
+        "2.3",
+        "-i",
+        "/project/assets/talk.mp4",
+        "-ss",
+        "7.5",
+        "-t",
+        "4",
+        "-i",
+        "/project/assets/talk.mp4",
+        "-loop",
+        "1",
+        "-framerate",
+        "30/1",
+        "-t",
+        "2.5",
+        "-i",
+        "/project/assets/logo.png",
+        "-/filter_complex",
+        "seg-0002.filter",
+        "-map",
+        "[v]",
+        "-an",
+        "-frames:v",
+        "60",
+        "-r",
+        "30/1",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
+        "-maxrate",
+        "12000k",
+        "-bufsize",
+        "24000k",
+        "-map_metadata",
+        "-1",
+        "-f",
+        "mp4",
+        "seg-0002.mp4"
+      ]
+    },
+    {
+      "file": "seg-0003.mp4",
+      "from": 4,
+      "to": 5,
+      "frames": 30,
+      "args": [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-y",
+        "-ss",
+        "9.5",
+        "-t",
+        "3",
+        "-i",
+        "/project/assets/talk.mp4",
+        "-loop",
+        "1",
+        "-framerate",
+        "30/1",
+        "-t",
+        "2",
+        "-i",
+        "/project/assets/logo.png",
+        "-/filter_complex",
+        "seg-0003.filter",
+        "-map",
+        "[v]",
+        "-an",
+        "-frames:v",
+        "30",
+        "-r",
+        "30/1",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
+        "-maxrate",
+        "12000k",
+        "-bufsize",
+        "24000k",
+        "-map_metadata",
+        "-1",
+        "-f",
+        "mp4",
+        "seg-0003.mp4"
+      ]
+    }
+  ],
+  "files": {
+    "seg-0001.filter": "[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=60,setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[p0];\n[p0]null[base];\n[1:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=9,setpts=PTS-STARTPTS,setpts=PTS+1.7/TB,scale=w='max(1,floor(1920*(1)+0.5))':h='max(1,floor(1080*(1)+0.5))':eval=frame,setsar=1,format=rgba,fade=t=in:alpha=1:st=1.7:d=0.6,setpts=PTS-STARTPTS,tpad=start=51:color=black@0[o0];\n[base][o0]overlay=x='floor(960+(0)*1920/1920-overlay_w/2+0.5)':y='floor(540+(0)*1080/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto,format=yuv420p[v]\n",
+    "seg-0002.filter": "[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,tpad=stop=9:stop_mode=clone,trim=end_frame=9,setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[p0];\ncolor=c=black:s=1920x1080:r=30/1,trim=end_frame=51,setsar=1,format=yuv420p[p1];\n[p0][p1]concat=n=2:v=1:a=0[base];\n[1:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=60,setpts=PTS-STARTPTS,setpts=PTS+2/TB,scale=w='max(1,floor(1920*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':h='max(1,floor(1080*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':eval=frame,setsar=1,format=rgba,fade=t=in:alpha=1:st=1.7:d=0.6,setpts=PTS-STARTPTS[o0];\n[base][o0]overlay=x='floor(960+(0)*1920/1920-overlay_w/2+0.5)':y='floor(540+(0)*1080/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto[b0];\n[2:v:0]setpts=(PTS-0/TB),fps=30/1:start_time=0,trim=end_frame=45,setpts=PTS-STARTPTS,setpts=PTS+2.5/TB,scale=w='max(1,floor(1080*((if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))*(0.3))+0.5))':h='max(1,floor(1080*((if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))*(0.3))+0.5))':eval=frame,setsar=1,format=rgba,setpts=PTS-STARTPTS,tpad=start=15:color=black@0[o1];\n[b0][o1]overlay=x='floor(960+((500)*(if(lt((2+t),2),1,if(lt((2+t),5),1+0.25*((((2+t)-2)/3)*(((2+t)-2)/3)*(3-2*(((2+t)-2)/3))),1.25))))*1920/1920-overlay_w/2+0.5)':y='floor(540+(0)*1080/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto,format=yuv420p[v]\n",
+    "seg-0003.filter": "color=c=black:s=1920x1080:r=30/1,trim=end_frame=30,setsar=1,format=yuv420p[p0];\n[p0]null[base];\n[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=30,setpts=PTS-STARTPTS,setpts=PTS+4/TB,scale=w='max(1,floor(1920*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':h='max(1,floor(1080*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':eval=frame,setsar=1,format=rgba,fade=t=out:alpha=1:st=4.6:d=0.4,setpts=PTS-STARTPTS[o0];\n[base][o0]overlay=x='floor(960+(0)*1920/1920-overlay_w/2+0.5)':y='floor(540+(0)*1080/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto[b0];\n[1:v:0]setpts=(PTS-0/TB),fps=30/1:start_time=0,trim=end_frame=30,setpts=PTS-STARTPTS,setpts=PTS+4/TB,scale=w='max(1,floor(1080*((if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))*(0.3))+0.5))':h='max(1,floor(1080*((if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))*(0.3))+0.5))':eval=frame,setsar=1,format=rgba,fade=t=out:alpha=1:st=4.6:d=0.4,setpts=PTS-STARTPTS[o1];\n[b0][o1]overlay=x='floor(960+((500)*(if(lt((4+t),2),1,if(lt((4+t),5),1+0.25*((((4+t)-2)/3)*(((4+t)-2)/3)*(3-2*(((4+t)-2)/3))),1.25))))*1920/1920-overlay_w/2+0.5)':y='floor(540+(0)*1080/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto,format=yuv420p[v]\n",
+    "segments.txt": "file 'seg-0001.mp4'\nfile 'seg-0002.mp4'\nfile 'seg-0003.mp4'\n"
+  },
+  "audio": {
+    "sampleRate": 48000,
+    "samples": 240000,
+    "inputs": [
+      "/project/assets/talk.mp4",
+      "/project/assets/music.wav"
+    ],
+    "tracks": [
+      [
+        {
+          "kind": "clip",
+          "clip": "c_talk1",
+          "input": 0,
+          "from": 153600,
+          "to": 264000,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 110400,
+          "ramps": [
+            {
+              "type": "out",
+              "start": 81600,
+              "length": 28800
+            }
+          ]
+        },
+        {
+          "kind": "silence",
+          "samples": 129600
+        }
+      ],
+      [
+        {
+          "kind": "silence",
+          "samples": 81600
+        },
+        {
+          "kind": "clip",
+          "clip": "c_scene/c_cam",
+          "input": 0,
+          "from": 393600,
+          "to": 552000,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 158400,
+          "ramps": [
+            {
+              "type": "in",
+              "start": 0,
+              "length": 28800
+            },
+            {
+              "type": "out",
+              "start": 139200,
+              "length": 19200
+            }
+          ],
+          "gain": "if(lt((1.7+t),3.5),0,if(lt((1.7+t),5),0+-4*((1.7+t)-3.5),-6))"
+        }
+      ],
+      [
+        {
+          "kind": "silence",
+          "samples": 96000
+        },
+        {
+          "kind": "clip",
+          "clip": "c_scene/c_bed",
+          "input": 1,
+          "from": 120000,
+          "to": 264000,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 144000,
+          "ramps": [
+            {
+              "type": "in",
+              "start": 0,
+              "length": 14400
+            },
+            {
+              "type": "out",
+              "start": 124800,
+              "length": 19200
+            }
+          ],
+          "gain": "(-12)+(if(lt((2+t),3.5),0,if(lt((2+t),5),0+-4*((2+t)-3.5),-6)))"
+        }
+      ]
+    ],
+    "codec": [
+      "-c:a",
+      "aac",
+      "-b:a",
+      "320k",
+      "-ar",
+      "48000"
+    ]
+  },
+  "mix": {
+    "files": {
+      "mix.filter": "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=2[i0c0][i0c1];\n[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i1c0];\n[i0c0]atrim=start_sample=153600:end_sample=264000,asetpts=PTS-STARTPTS,apad=whole_len=110400,atrim=end_sample=110400,afade=t=out:ss=81600:ns=28800:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=110304:ns=96[t0i0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=129600,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t0i1];\n[t0i0][t0i1]concat=n=2:v=0:a=1[t0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=81600,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t1i0];\n[i0c1]atrim=start_sample=393600:end_sample=552000,asetpts=PTS-STARTPTS,asetnsamples=n=64:p=0,volume='pow(10,(if(lt((1.7+t),3.5),0,if(lt((1.7+t),5),0+-4*((1.7+t)-3.5),-6)))/20)':eval=frame,apad=whole_len=158400,atrim=end_sample=158400,afade=t=in:ss=0:ns=28800:curve=qsin,afade=t=out:ss=139200:ns=19200:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=158304:ns=96[t1i1];\n[t1i0][t1i1]concat=n=2:v=0:a=1[t1];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=96000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t2i0];\n[i1c0]atrim=start_sample=120000:end_sample=264000,asetpts=PTS-STARTPTS,asetnsamples=n=64:p=0,volume='pow(10,((-12)+(if(lt((2+t),3.5),0,if(lt((2+t),5),0+-4*((2+t)-3.5),-6))))/20)':eval=frame,apad=whole_len=144000,atrim=end_sample=144000,afade=t=in:ss=0:ns=14400:curve=qsin,afade=t=out:ss=124800:ns=19200:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=143904:ns=96[t2i1];\n[t2i0][t2i1]concat=n=2:v=0:a=1[t2];\n[t0][t1][t2]amix=inputs=3:duration=longest:normalize=0[mix]\n"
+    },
+    "args": [
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-nostats",
+      "-progress",
+      "pipe:1",
+      "-y",
+      "-vn",
+      "-i",
+      "/project/assets/talk.mp4",
+      "-vn",
+      "-i",
+      "/project/assets/music.wav",
+      "-/filter_complex",
+      "mix.filter",
+      "-map",
+      "[mix]",
+      "-c:a",
+      "wavpack",
+      "-f",
+      "wv",
+      "mix.wv"
+    ]
+  },
+  "frame": {
+    "frame": 63,
+    "at": 2.1,
+    "clip": "c_scene/c_cam",
+    "files": {},
+    "fonts": [],
+    "args": [
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-nostats",
+      "-progress",
+      "pipe:1",
+      "-y",
+      "-ss",
+      "4.3",
+      "-t",
+      "2.033333",
+      "-i",
+      "/project/assets/talk.mp4",
+      "-ss",
+      "7.6",
+      "-t",
+      "2.033333",
+      "-i",
+      "/project/assets/talk.mp4",
+      "-filter_complex",
+      "[0:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,tpad=stop=4:stop_mode=clone,trim=end_frame=1,setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=rgb24[p0];[p0]null[base];[1:v:0]setpts=(PTS-1/TB),fps=30/1:start_time=0,trim=end_frame=1,setpts=PTS-STARTPTS,setpts=PTS+2.1/TB,scale=w='max(1,floor(1280*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':h='max(1,floor(720*(if(lt(t,2),1,if(lt(t,5),1+0.25*(((t-2)/3)*((t-2)/3)*(3-2*((t-2)/3))),1.25)))+0.5))':eval=frame,setsar=1,format=rgba,fade=t=in:alpha=1:st=1.7:d=0.6,setpts=PTS-STARTPTS[o0];[base][o0]overlay=x='floor(640+(0)*1280/1920-overlay_w/2+0.5)':y='floor(360+(0)*720/1080-overlay_h/2+0.5)':eval=frame:eof_action=pass:format=auto,format=rgb24[v]",
+      "-map",
+      "[v]",
+      "-frames:v",
+      "1",
+      "-c:v",
+      "png",
+      "-f",
+      "image2",
+      "-update",
+      "1",
+      "/out/frame.png"
+    ]
+  }
+}
