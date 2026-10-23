@@ -573,7 +573,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "people.remove":
     case "people.link":
     case "people.unlink":
-      return executePeople(conn, inv, cwd, flags.json);
+    case "people.scan":
+      return executePeople(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "proposal.diff": {
       const result = await conn.request("proposal.diff", { cwd, ...(inv.tx ? { tx: inv.tx } : {}) });
       return flags.json ? json(result) : formatProposalDiff(result);

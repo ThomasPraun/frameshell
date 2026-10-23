@@ -82,10 +82,18 @@ describe("frameshell people", () => {
       ["people", "link", "Juan", "--face", "assets/a.mp4@1:2,0.5"],
       ["people", "list", "--speaker", "x"],
       ["people", "frobnicate"],
+      ["people", "scan", "--speaker", "x"],
       ["clip", "remove", "c_1", "--angle", "x"],
     ]) {
       expect(frameshell(args).code, args.join(" ")).toBe(2);
     }
+  });
+
+  it("scans nothing in a project without videos", () => {
+    const done = frameshell(["people", "scan"]);
+    expect(done.code).toBe(0);
+    expect(done.stdout).toContain("No videos to scan");
+    expect(JSON.parse(frameshell(["people", "scan", "--json"]).stdout)).toMatchObject({ assets: [], warnings: [] });
   });
 
   it("starts empty, adds people and lists them", () => {

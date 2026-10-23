@@ -17,6 +17,12 @@ import {
   WHISPER_SOURCE,
   FACE_DETECTION_MODEL,
   FACE_DETECTION_MODELS,
+  FACE_RECOGNITION_MODEL,
+  FACE_RECOGNITION_MODELS,
+  FACE_EMBEDDING_DIMS,
+  cosine,
+  loadYunet,
+  peopleScanWorker,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   yunetWorkerScanner,
@@ -242,6 +248,12 @@ describe("pinned face detection manifest", () => {
     expect(FACE_DETECTION_MODELS[0]!.urls[0]).toMatch(/^https:\/\/media\.githubusercontent\.com\/media\/opencv\/opencv_zoo\/[0-9a-f]{40}\//);
   });
 
+  it("pins the SFace model at the YuNet commit by SHA-256 under Apache-2.0", () => {
+    expect(FACE_RECOGNITION_MODELS.map((model) => [model.id, model.license, model.size])).toEqual([[FACE_RECOGNITION_MODEL, "Apache-2.0", 38_696_353]]);
+    expect(FACE_RECOGNITION_MODELS[0]!.sha256).toBe("0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79");
+    expect(FACE_RECOGNITION_MODELS[0]!.urls[0]).toContain(`/${FACE_DETECTION_MODELS[0]!.urls[0]!.match(/[0-9a-f]{40}/)![0]}/`);
+  });
+
   it("reports an installed module at its pinned version without running it", async () => {
     const dataDir = tempDir();
     const binaries = new BinaryManager({ dataDir, configDir: tempDir() });
@@ -350,5 +362,42 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       expect(found.keys[1]!.x).toBeCloseTo(0.75, 1);
     },
     600_000,
+  );
+
+  it(
+    "installs SFace, verified, and embeds a drawn face that moves: landmarks in place, one print per second, the same face alike",
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const runtime = await binaries.ensure(ONNX_RUNTIME_WEB);
+      const files = { runtime, detector: await binaries.ensureModel(FACE_DETECTION_MODEL), recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL) };
+      const detect = await loadYunet(runtime, files.detector);
+      const [found] = await detect({ width: 512, height: 288, data: drawFace(512, 288, [{ x: 0.3, y: 0.45, size: 0.4 }]) });
+      const [rightEye, leftEye, nose, rightMouth, leftMouth] = found!.landmarks!;
+      // YuNet's order: the eye at image left first, mouth corners last; eyes above the nose above the mouth.
+      expect(rightEye![0]).toBeLessThan(leftEye![0]);
+      expect(Math.max(rightEye![1], leftEye![1])).toBeLessThan(nose![1]);
+      expect(nose![1]).toBeLessThan(Math.min(rightMouth![1], leftMouth![1]));
+      expect(rightMouth![0]).toBeLessThan(leftMouth![0]);
+      expect(Math.abs(nose![0] - found!.x)).toBeLessThan(found!.width / 4);
+
+      const { ffmpeg } = await mediaTools();
+      const path = join(tempDir(), "face.mp4");
+      // 16:9 at 1280×720, 6 s at 10 fps: the same face at x 0.25 for 3 s, then at 0.75.
+      const left = drawFace(1280, 720, [{ x: 0.25, y: 0.45, size: 0.4 }]);
+      const right = drawFace(1280, 720, [{ x: 0.75, y: 0.45, size: 0.4 }]);
+      await encodeFrames(ffmpeg, path, 1280, 720, 10, Array.from({ length: 60 }, (_, i) => (i < 30 ? left : right)));
+      const scan = await peopleScanWorker(files)({ ffmpeg, path, width: 1280, height: 720, duration: 6 });
+      expect(scan).toMatchObject({ width: 1280, height: 720, samples: 12 });
+      expect(scan.tracks.map((track) => [track.start, track.end, track.embeddings.length])).toEqual([
+        [0, 2.5, 3],
+        [3, 5.5, 3],
+      ]);
+      const [first, second] = scan.tracks.map((track) => track.embeddings[0]!.vector);
+      expect(first).toHaveLength(FACE_EMBEDDING_DIMS);
+      expect(cosine(first!, first!)).toBeCloseTo(1, 4);
+      // SFace's own same-person line is 0.363; the very same drawing, moved, is far above it.
+      expect(cosine(first!, second!)).toBeGreaterThan(0.8);
+    },
+    900_000,
   );
 });

@@ -218,7 +218,7 @@ function newLookups(): Lookups {
 }
 
 /** Project-relative `/`-separated path of `input` (absolute, or relative to the project root). Null when it leaves the project or is daemon-owned. */
-async function projectPath(root: string, input: string): Promise<string | null> {
+export async function projectPath(root: string, input: string): Promise<string | null> {
   const absolute = isAbsolute(input) ? resolve(input) : resolve(root, input);
   let rel = relative(root, absolute);
   if (rel.startsWith("..") || isAbsolute(rel)) rel = relative(await canonicalPath(root), await canonicalPath(absolute));

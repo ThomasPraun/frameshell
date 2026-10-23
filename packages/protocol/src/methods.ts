@@ -10,7 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
-import { PeopleChangedSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
+import { PeopleChangedSchema, PeopleScanResultSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
@@ -43,7 +43,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 56;
+export const PROTOCOL_VERSION = 57;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -159,13 +159,14 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "proposal", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "proposal", "people", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
-        "`.frameshell/proposals/`, decided more than 7 days ago. `temp`: leftover of an interrupted job or transcription.",
+        "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
+        "other models) in `.frameshell/people/`. `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
@@ -213,19 +214,21 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces"])
+    .enum(["ingest", "render", "clip", "faces", "people"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`render`: export a timeline to a video file (`render` method). " +
         "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
-        "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`).",
+        "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
+        "`people`: find, follow and embed the faces of video assets (`people.scan`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
     .string()
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
-        "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
+        "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
+        "the scanned videos for `people` (comma-separated).",
     ),
   output: z
     .string()
@@ -238,13 +241,13 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
-        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another).",
+        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1918,6 +1921,30 @@ export const methods = {
       }),
     result: z.object({ dir: z.string().describe("Project root."), person: PersonInfoSchema }),
   },
+  "people.scan": {
+    description:
+      "Find the faces in video assets so people can be recognized (ADR 0020), locally on CPU: 2 frames per second, the YuNet " +
+      "detector then the SFace recognizer (ONNX Runtime; the first run downloads about 39 MB of models from OpenCV's model " +
+      "zoo), the same face joined over time into tracks, one 128-number face print per track per second for faces of at " +
+      "least 32 px. Never run on import: ask for it. Default: every video in `assets/` (still pictures are skipped). " +
+      "The result is cached per file content in `.frameshell/people/` (regenerable, swept by `gc`, never read by " +
+      "`people.json`): a video already scanned is not decoded again unless `force: true`. Nothing is linked to anyone; " +
+      "`people.link` does that. Takes about 5 minutes per hour of footage with one face; progress " +
+      "arrives as `progress` notifications. It runs as a background job of kind `people` (`job.list`), so it goes on if " +
+      "the caller disconnects. Example: `{ assets: [\"assets/ep1.mp4\"] }`. Fails with AssetNotFound, InvalidOperation " +
+      "(reason `bad target`: an asset outside the project), or the Binary* errors when ffmpeg, ONNX Runtime or a model " +
+      "cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      assets: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Videos to scan: project-relative (`assets/ep1.mp4`) or absolute. Default: every video in `assets/`."),
+      force: z.boolean().optional().describe("Scan again even when the content's scan is cached. Default false."),
+    }),
+    result: PeopleScanResultSchema,
+  },
   "ui.state": {
     description:
       "What the user sees in the Frameshell app for this project: the playhead and whether it plays, the selection " +
@@ -2102,7 +2129,7 @@ export const notifications = {
         .describe(
           "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
             "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
-            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`. Codes may be added: treat an unknown one as `message`.",
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`. Codes may be added: treat an unknown one as `message`.",
         ),
       values: z
         .record(z.string(), z.union([z.string(), z.number()]))

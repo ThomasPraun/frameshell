@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { DaemonConnection, MethodParams, MethodResult, PersonInfo } from "@frameshell/protocol";
+import type { DaemonConnection, MethodParams, MethodResult, PersonInfo, Progress } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `people` commands (ADR 0020), in `frameshell --help`. */
@@ -17,6 +17,9 @@ export const PEOPLE_USAGE = `  people list                  The project's people
                                Linking a speaker writes the person's name into that transcript
   people unlink <person> (--speaker … | --angle … | --face …)
                                Remove one link, spelled as when linked
+  people scan [<asset>…]       Find the faces in videos (default: every video in assets/), locally: 2 frames a second,
+                               each face followed and given a face print. Cached in .frameshell/people/ per file
+                               content, so a video already scanned is skipped. First run downloads about 39 MB
 `;
 
 /** Flags each `people` command takes besides the global ones. */
@@ -27,6 +30,7 @@ export const PEOPLE_FLAGS: Record<string, readonly string[]> = {
   "people remove": [],
   "people link": ["speaker", "angle", "face"],
   "people unlink": ["speaker", "angle", "face"],
+  "people scan": [],
 };
 
 /** A parsed `people` command; paths are as typed, resolved against the working directory when run. */
@@ -35,6 +39,7 @@ export type PeopleInvocation =
   | { kind: "people.add"; name: string }
   | { kind: "people.rename"; person: string; name: string }
   | { kind: "people.remove"; person: string }
+  | { kind: "people.scan"; assets: string[] }
   | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput };
 
 /** One target of `people link`, as typed. */
@@ -50,6 +55,7 @@ export function parsePeople(rest: string[], options: { speaker?: string | undefi
   if (sub === "add") return args.length > 0 ? { kind: "people.add", name: args.join(" ") } : null;
   if (sub === "rename") return args.length >= 2 ? { kind: "people.rename", person: args[0]!, name: args.slice(1).join(" ") } : null;
   if (sub === "remove") return args.length === 1 ? { kind: "people.remove", person: args[0]! } : null;
+  if (sub === "scan") return { kind: "people.scan", assets: args };
   if (sub !== "link" && sub !== "unlink") return null;
   if (args.length !== 1) return null;
   const given = [options.speaker, options.angle, options.face].filter((value) => value !== undefined).length;
@@ -89,7 +95,7 @@ function parseTarget(options: { speaker?: string | undefined; angle?: string | u
 }
 
 /** Run a parsed `people` command; returns stdout text. */
-export async function executePeople(conn: DaemonConnection, inv: PeopleInvocation, cwd: string, json: boolean): Promise<string> {
+export async function executePeople(conn: DaemonConnection, inv: PeopleInvocation, cwd: string, json: boolean, onProgress?: (progress: Progress) => void): Promise<string> {
   const print = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
   switch (inv.kind) {
     case "people.list": {
@@ -113,6 +119,11 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
       const result = await conn.request("people.remove", { cwd, person: inv.person });
       return json ? print(result) : `Removed ${result.removed.name} (${result.removed.id}) and ${linkCount(result.removed)}\n`;
     }
+    case "people.scan": {
+      const params = inv.assets.length > 0 ? { assets: inv.assets.map((asset) => resolve(cwd, asset)) } : {};
+      const result = await conn.request("people.scan", { cwd, ...params }, onProgress ? { onProgress } : {});
+      return json ? print(result) : formatScan(result);
+    }
     case "people.link": {
       const result = await conn.request("people.link", { cwd, person: inv.person, ...targetParams(inv.target, cwd) });
       if (json) return print(result);
@@ -126,6 +137,13 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
       return json ? print(result) : `Unlinked ${describeTarget(inv.target)} from ${result.person.name} (${result.person.id})\n`;
     }
   }
+}
+
+/** `people scan`: one line per video, then warnings. */
+function formatScan(result: MethodResult<"people.scan">): string {
+  if (result.assets.length === 0 && result.warnings.length === 0) return "No videos to scan. Import some: frameshell import <file>\n";
+  const lines = result.assets.map((entry) => `${entry.asset}  ${entry.cached ? "cached" : "scanned"} · ${entry.samples} frames · ${entry.tracks} face track${entry.tracks === 1 ? "" : "s"} · ${entry.embeddings} face print${entry.embeddings === 1 ? "" : "s"}`);
+  return `${[...lines, ...result.warnings.map((warning) => `warning: ${warning}`)].join("\n")}\n`;
 }
 
 function targetParams(target: PeopleTargetInput, cwd: string): Pick<MethodParams<"people.link">, "speaker" | "angle" | "face"> {

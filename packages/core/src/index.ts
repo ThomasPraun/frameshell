@@ -7,6 +7,30 @@ export {
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
 export { type NameWrites, type PeopleChange, type PeopleServiceOptions, type PeopleTarget, PeopleService } from "./people/service.js";
+export {
+  FACE_EMBEDDING_DIMS,
+  type FaceEmbedder,
+  type FaceTrack,
+  FaceTracker,
+  type Landmarks,
+  MIN_EMBED_PX,
+  type PeopleScanFiles,
+  type PeopleScanOptions,
+  type PeopleScanRequest,
+  type PeopleScanResult,
+  type PeopleScanner,
+  type Similarity,
+  type TrackBox,
+  alignFace,
+  cosine,
+  loadSface,
+  peopleScanWorker,
+  scanFrameSize,
+  scanPeopleFaces,
+  shrinkFrame,
+  similarityTransform,
+} from "./people/scan.js";
+export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
@@ -36,6 +60,8 @@ export {
   SPEAKER_EMBEDDING_MODEL,
   FACE_DETECTION_MODEL,
   FACE_DETECTION_MODELS,
+  FACE_RECOGNITION_MODEL,
+  FACE_RECOGNITION_MODELS,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   buildCandidates,

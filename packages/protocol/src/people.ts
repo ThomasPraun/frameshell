@@ -64,3 +64,19 @@ export const PeopleChangedSchema = z.object({
   change: z.enum(PEOPLE_CHANGES).describe("What happened: a person was added, renamed or removed, or a link was added or removed."),
   person: PersonIdSchema.describe("Id of the person it happened to."),
 });
+
+/** One video of a `people.scan` result. */
+export const PeopleScanAssetSchema = z.object({
+  asset: z.string().describe("Project-relative, `/`-separated."),
+  cached: z.boolean().describe("True when the scan of this content was already cached and nothing was decoded."),
+  samples: z.int().nonnegative().describe("Frames looked at (2 per second of the video)."),
+  tracks: z.int().nonnegative().describe("Faces followed over time: one track per person per stretch they stay on screen."),
+  embeddings: z.int().nonnegative().describe("Face prints stored, at most one per track per second; faces under 32 px have none."),
+});
+
+/** Result of `people.scan`. */
+export const PeopleScanResultSchema = z.object({
+  dir: z.string().describe("Project root."),
+  assets: z.array(PeopleScanAssetSchema).describe("Every video scanned or found cached, in the order asked (default: name order)."),
+  warnings: z.array(z.string()).describe("Assets left out (no moving picture) and videos where no face was found."),
+});

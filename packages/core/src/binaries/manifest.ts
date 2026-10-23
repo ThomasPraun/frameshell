@@ -725,6 +725,7 @@ export const ONNX_RUNTIME_WEB_PACKAGE: BinaryPackage = {
 /** Model id of the face detector `multicam.faces` runs. */
 export const FACE_DETECTION_MODEL = "yunet-2026may";
 
+/** OpenCV model zoo commit both face models are pinned at. */
 const YUNET_REVISION = "26cc381e4d2594bb9f47a26eb8fd96c94a13660d";
 
 /**
@@ -744,6 +745,26 @@ export const FACE_DETECTION_MODELS: readonly ManagedModel[] = [
   },
 ];
 
+/** Model id of the face recognizer `people.scan` embeds faces with. */
+export const FACE_RECOGNITION_MODEL = "sface-2021dec";
+
+/**
+ * SFace face recognizer (Apache-2.0) from OpenCV's model zoo, pinned at the
+ * commit YuNet is pinned to (ADR 0020): a 112×112 aligned face in, 128 numbers out.
+ */
+export const FACE_RECOGNITION_MODELS: readonly ManagedModel[] = [
+  {
+    id: FACE_RECOGNITION_MODEL,
+    version: YUNET_REVISION.slice(0, 12),
+    origin: "https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface",
+    license: "Apache-2.0",
+    urls: [`https://media.githubusercontent.com/media/opencv/opencv_zoo/${YUNET_REVISION}/models/face_recognition_sface/face_recognition_sface_2021dec.onnx`],
+    sha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    size: 38_696_353,
+    file: "face_recognition_sface_2021dec.onnx",
+  },
+];
+
 /** Every package the daemon manages. */
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   FFMPEG_PACKAGE,
@@ -754,4 +775,4 @@ export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
 ];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS];
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS];

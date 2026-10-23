@@ -44,12 +44,14 @@ import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
-import { FACE_DETECTION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
+import { FACE_DETECTION_MODEL, FACE_RECOGNITION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
 import { PeopleService } from "./people/service.js";
+import { scanProjectFaces } from "./people/scan-run.js";
+import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -99,6 +101,8 @@ export interface DaemonOptions {
   diarize?: Diarizer;
   /** Face scan of one angle for `multicam.faces`. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   faceScanner?: FaceScanner;
+  /** Face scan of one video for `people.scan`. Defaults to YuNet and SFace on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  peopleScanner?: PeopleScanner;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -999,6 +1003,39 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "people.unlink": async ({ cwd, person, speaker, angle, face }) => {
       const dir = await root(cwd);
       return { dir, person: await people.unlink(dir, person, { speaker, angle, face }) };
+    },
+    "people.scan": async ({ cwd, assets, force }, _caller, request) => {
+      const dir = await root(cwd);
+      // The caller may be gone (the job outlives it): its progress is then dropped.
+      const tell = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      const names = assets ?? (await media.list(dir)).map((asset) => asset.path);
+      return inJob({ kind: "people", project: dir, asset: [...names].sort().join(",") }, async (ctx) => {
+        ctx.update({ step: "people", progress: 0 });
+        const project = await projectBinaries(dir);
+        const result = await scanProjectFaces(dir, { assets, force }, {
+          listAssets: async () => names,
+          probe: (d, rel) => media.probe(d, rel),
+          hash: async (d, rel) => (await media.derivedAudio(d, rel)).hash,
+          ffmpeg: () => binaries.ensure("ffmpeg", project, { onProgress: tell }),
+          scanner: async () =>
+            options.peopleScanner ??
+            peopleScanWorker({
+              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: tell }),
+              detector: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
+              recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: tell }),
+            }),
+          onProgress: (progress) => ctx.update({ progress }),
+          report: tell,
+          signal: ctx.signal,
+        });
+        return { dir, ...result };
+      });
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),

@@ -14,6 +14,8 @@ export interface Face {
   width: number;
   height: number;
   score: number;
+  /** YuNet's five landmarks as fractions of the frame: eye at image left, eye at image right, nose tip, mouth corner at image left, mouth corner at image right. */
+  landmarks?: readonly (readonly [number, number])[];
 }
 
 /** A frame as packed 8-bit BGR, rows top to bottom. */
@@ -103,13 +105,14 @@ export async function* sampleFaceFrames(
 }
 
 /** The part of ONNX Runtime Web's API used here; the module is downloaded, so it has no types at build time. */
-interface OrtModule {
+export interface OrtModule {
   env: { wasm: { numThreads: number; wasmPaths: string } };
-  InferenceSession: { create(model: Uint8Array): Promise<OrtSession> };
+  InferenceSession: { create(model: Uint8Array, options?: { logSeverityLevel?: number }): Promise<OrtSession> };
   Tensor: new (type: "float32", data: Float32Array, dims: readonly number[]) => unknown;
 }
 
-interface OrtSession {
+/** One model loaded in an {@link OrtModule}. */
+export interface OrtSession {
   readonly inputNames: readonly string[];
   run(feeds: Record<string, unknown>): Promise<Record<string, { data: unknown }>>;
 }
@@ -120,15 +123,20 @@ const FACE_SCORE = 0.6;
 const FACE_OVERLAP = 0.3;
 
 /**
- * {@link FaceDetector} running the YuNet model at `model` with the ONNX
- * Runtime Web module at `runtime` (its `.wasm` beside it), single-threaded in
- * this process.
+ * The ONNX Runtime Web module at `runtime` (its `.wasm` beside it),
+ * single-threaded in this process, and the model at `model` loaded in it.
  */
-export async function loadYunet(runtime: string, model: string): Promise<FaceDetector> {
+export async function loadOrtSession(runtime: string, model: string): Promise<{ ort: OrtModule; session: OrtSession }> {
   const ort = (await import(/* @vite-ignore */ pathToFileURL(runtime).href)) as OrtModule;
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.wasmPaths = pathToFileURL(join(dirname(runtime), "/")).href;
-  const session = await ort.InferenceSession.create(new Uint8Array(await readFile(model)));
+  // Severity 3 = errors only: models from old converters warn about every weight at load.
+  return { ort, session: await ort.InferenceSession.create(new Uint8Array(await readFile(model)), { logSeverityLevel: 3 }) };
+}
+
+/** {@link FaceDetector} running the YuNet model at `model` with the ONNX Runtime Web module at `runtime`. */
+export async function loadYunet(runtime: string, model: string): Promise<FaceDetector> {
+  const { ort, session } = await loadOrtSession(runtime, model);
   const input = session.inputNames[0] ?? "input";
   return async (frame) => {
     const { width, height, data } = frame;
@@ -150,7 +158,9 @@ export async function loadYunet(runtime: string, model: string): Promise<FaceDet
  * Faces from YuNet's outputs (`cls_<s>`, `obj_<s>`, `bbox_<s>` per stride
  * 8, 16, 32), decoded as OpenCV's `FaceDetectorYN` does: one candidate per
  * grid cell, score `sqrt(cls * obj)`, box center offset from the cell and size
- * `exp` of the output, both in strides; then non-maximum suppression.
+ * `exp` of the output, both in strides; then non-maximum suppression. When
+ * the model gives `kps_<s>` the faces carry their five landmarks, each offset
+ * from the cell in strides.
  */
 export function decodeYunet(output: (name: string) => Float32Array | undefined, width: number, height: number): Face[] {
   const candidates: Face[] = [];
@@ -159,6 +169,7 @@ export function decodeYunet(output: (name: string) => Float32Array | undefined, 
     const obj = output(`obj_${stride}`);
     const bbox = output(`bbox_${stride}`);
     if (!cls || !obj || !bbox) throw new Error(`YuNet gave no outputs for stride ${stride}: not the pinned model?`);
+    const kps = output(`kps_${stride}`);
     const cols = Math.floor(width / stride);
     const rows = Math.floor(height / stride);
     for (let row = 0; row < rows; row++) {
@@ -172,13 +183,16 @@ export function decodeYunet(output: (name: string) => Float32Array | undefined, 
           width: (Math.exp(bbox[i * 4 + 2]!) * stride) / width,
           height: (Math.exp(bbox[i * 4 + 3]!) * stride) / height,
           score,
+          ...(kps
+            ? { landmarks: Array.from({ length: 5 }, (_, n): [number, number] => [((col + kps[i * 10 + 2 * n]!) * stride) / width, ((row + kps[i * 10 + 2 * n + 1]!) * stride) / height]) }
+            : {}),
         });
       }
     }
   }
   candidates.sort((a, b) => b.score - a.score);
   const faces: Face[] = [];
-  for (const candidate of candidates) if (faces.every((face) => overlap(face, candidate) <= FACE_OVERLAP)) faces.push(candidate);
+  for (const candidate of candidates) if (faces.every((face) => faceOverlap(face, candidate) <= FACE_OVERLAP)) faces.push(candidate);
   return faces;
 }
 
@@ -187,7 +201,7 @@ function clamp01(value: number): number {
 }
 
 /** Intersection over union of two boxes. */
-function overlap(a: Face, b: Face): number {
+export function faceOverlap(a: Face, b: Face): number {
   const w = Math.min(a.x + a.width / 2, b.x + b.width / 2) - Math.max(a.x - a.width / 2, b.x - b.width / 2);
   const h = Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2);
   if (w <= 0 || h <= 0) return 0;

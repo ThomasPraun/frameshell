@@ -18,6 +18,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell people remove <person>` | Remove the person and their links (names already written into transcripts stay). |
 | `frameshell people link <person> (--speaker <transcript>[:<speaker>] \| --angle [<timeline>:]<group>:<angle> \| --face <asset>@<seconds>[:x,y])` | Link a transcript speaker (no `:speaker` = the whole transcript), a multicam angle or a face anchor. Linking a speaker writes the person's name into that transcript. One speaker, angle or anchor per person; the target must exist. |
 | `frameshell people unlink <person> (--speaker … \| --angle … \| --face …)` | Remove one link, spelled as when linked; works when the target is gone. |
+| `frameshell people scan [<asset>…]` | Find faces in videos (default: every video in `assets/`; pictures skipped), locally: 2 frames per second, a face detector then a recognizer, each face followed over time with a face print per second. Cached per file content in `.frameshell/people/` (regenerable, `gc` sweeps it): a scanned video is not decoded again. Takes about 5 minutes per hour of footage; runs as a `people` job. First run downloads about 39 MB. It links nothing to anyone. `--json`: `assets: [{asset, cached, samples, tracks, embeddings}]`, `warnings`. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
 ## Timeline

@@ -215,7 +215,7 @@ Re-pin: pick a release (`gh release view v<version> -R k2-fsa/sherpa-onnx --json
 
 ## Face detection (ONNX Runtime Web) and its model
 
-Used by `multicam.faces` (ADR 0016: reframe keys for 9:16 from faces). On demand: the first `frameshell multicam faces` installs it; `doctor` lists it but never reports it missing.
+Used by `multicam.faces` (ADR 0016: reframe keys for 9:16 from faces) and `people.scan` (ADR 0020: who is on screen). On demand: the first `frameshell multicam faces` or `frameshell people scan` installs it; `doctor` lists it but never reports it missing.
 
 Pin: **onnxruntime-web 1.30.0** (2026-09-14), Microsoft's npm tarball [`onnxruntime-web-1.30.0.tgz`](https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.30.0.tgz), 33.1 MB, SHA-256 `d2228df7e4616bc3348bf504ee888f3bec43789a273f0a63f3e68d203ce3bf71`, the same pin for every platform. The manager extracts four of its files: `dist/ort.wasm.min.mjs` (the CPU-only bundle with ONNX Runtime's JS API, installed as `onnxruntime-web.mjs`), the `ort-wasm-simd-threaded.mjs` loader and the `.wasm` it loads (14.2 MB), and the bundle's source map. A worker thread of the daemon imports the module and runs the model single-threaded as WebAssembly, off the daemon's event loop.
 
@@ -228,12 +228,15 @@ Model, from OpenCV's model zoo, pinned by commit:
 | Id | Model | Revision | Size | SHA-256 | Licence |
 |---|---|---|---|---|---|
 | `yunet-2026may` | [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) `face_detection_yunet_2026may.onnx` (the 2023mar model re-exported with dynamic input height and width) | `26cc381e4d25` | 0.2 MB | `ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0` | MIT |
+| `sface-2021dec` | [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) `face_recognition_sface_2021dec.onnx` (`people.scan`: a face aligned to 112×112 in, 128 numbers out) | `26cc381e4d25` | 38.7 MB (38,696,353 bytes) | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` | Apache-2.0 |
 
-The URL is on `media.githubusercontent.com` (the large-file object at that commit), where `github.com/opencv/opencv_zoo/raw/<commit>/…` redirects. The licence is the model directory's `LICENSE` (MIT, Shiqi Yu).
+The URL is on `media.githubusercontent.com` (the large-file object at that commit), where `github.com/opencv/opencv_zoo/raw/<commit>/…` redirects. The licence of each model is its directory's `LICENSE`: YuNet MIT (Shiqi Yu), SFace Apache-2.0 (not MIT). SFace's weights are Apache-2.0; the training sets named in the SFace paper are research face datasets (ADR 0020 decision 14). Everything runs locally; SFace downloads on the first `people scan` and is not mirrored.
 
-Verified when pinning (2026-10-22): the tarball's SHA-1 and SHA-512 matched the registry's `shasum` and `integrity`; it was listed and the four members found; the model hashed to its large-file oid. The manager installed both on darwin-arm64, and YuNet found the faces in OpenCV's `lena.jpg` and `messi5.jpg` samples and the drawn face of `packages/core/test/face-fixture.ts`. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs both and keys a drawn face that moves, on every platform of the Real binaries workflow.
+SFace input, as OpenCV's `FaceRecognizerSF` feeds it: the face warped by the similarity transform that takes YuNet's five landmarks to the ArcFace template (`alignCrop`), bilinear, 112×112, RGB planes in 0..255 with no mean or scale (`blobFromImage` with `swapRB`). Output `fc1` `[1, 128]`, L2-normalized by Frameshell; cosine similarity above 0.363 is OpenCV's same-person line. The int8 export (9.9 MB) is not used: 2.5x slower per face in WebAssembly.
 
-Re-pin: `npm view onnxruntime-web@<version> dist` gives the tarball URL, `shasum` and `integrity`; download it, check both, record size and SHA-256, list it (`tar -tzf`) and check the four members still exist (a renamed WebAssembly file changes the `support` names), then run the opt-in test above. For the model, take the file's large-file oid at a newer commit and check that its outputs are still `cls_8`…`kps_32` (`decodeYunet`).
+Verified when pinning (2026-10-22): the tarball's SHA-1 and SHA-512 matched the registry's `shasum` and `integrity`; it was listed and the four members found; the model hashed to its large-file oid. The manager installed both on darwin-arm64, and YuNet found the faces in OpenCV's `lena.jpg` and `messi5.jpg` samples and the drawn face of `packages/core/test/face-fixture.ts`. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs both and keys a drawn face that moves, on every platform of the Real binaries workflow; it also installs SFace, checks YuNet's landmark order on a drawn face and runs `peopleScanWorker` over a 1280×720 video of that face moving (two tracks, a print per second, the two prints alike). SFace was pinned 2026-10-23: its large-file oid matched the SHA-256 on download.
+
+Re-pin: `npm view onnxruntime-web@<version> dist` gives the tarball URL, `shasum` and `integrity`; download it, check both, record size and SHA-256, list it (`tar -tzf`) and check the four members still exist (a renamed WebAssembly file changes the `support` names), then run the opt-in test above. For the model, take the file's large-file oid at a newer commit and check that its outputs are still `cls_8`…`kps_32` (`decodeYunet`). SFace re-pins with it (same commit): check the input is still `[1, 3, 112, 112]` and the output 128 numbers, and that the landmark template in `people/scan.ts` is still OpenCV's.
 
 ## Re-pinning ffmpeg
 
