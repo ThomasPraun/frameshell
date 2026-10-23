@@ -42,7 +42,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 54;
+export const PROTOCOL_VERSION = 55;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -934,6 +934,10 @@ export const methods = {
       entry: z.string().describe("Project-relative, `/`-separated HTML file inside `root`."),
       head: z.string().describe("Script to insert at the start of the entry's `<head>`; defines `window.frameshellLive`."),
       key: z.string().describe("The clip's render cache key now: when `clip.renders` reports another, ask again."),
+      elementCss: z
+        .string()
+        .optional()
+        .describe("Sheet of the clip's `elements` (ADR 0021), which the page's bridge applies; absent when the clip has none."),
     }),
   },
   "context.write": {

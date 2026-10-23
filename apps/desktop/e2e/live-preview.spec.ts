@@ -196,3 +196,41 @@ test("the Pick tool probes a clip whose render is ready, at the paused time", as
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "false");
 });
+
+test("the bridge applies the clip's element sheet, swaps it without a reload and counts matches (ADR 0021)", async () => {
+  test.setTimeout(120_000);
+  await press("Home");
+  setClips([
+    { id: "c_held", type: "card", source: "compositions/cards/held.json", start: 0, duration: 2, elements: { "#time": { y: 100 }, "#nothing": { x: 5 } } },
+  ]);
+  await expect(live()).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+  const time = page.frameLocator('[data-testid="preview-live"] iframe').locator("#time");
+  const translate = () => time.evaluate((element) => getComputedStyle(element).translate);
+  const top = () => time.evaluate((element) => element.getBoundingClientRect().top);
+  await expect.poll(translate).toBe("0px 100px");
+  const before = await top();
+  await time.evaluate(() => {
+    (window as unknown as { marker: string }).marker = "same page";
+  });
+
+  // Swap from the renderer as the drag will (#334): no reload, and the answer counts each selector.
+  const counts = await page.evaluate(
+    (css) =>
+      new Promise<Record<string, number>>((resolve) => {
+        const frame = document.querySelector<HTMLIFrameElement>('[data-testid="preview-live"] iframe')!;
+        window.addEventListener("message", function onMessage(event) {
+          const data = event.data as { source?: string; elements?: { id: number; counts: Record<string, number> } } | null;
+          if (event.source !== frame.contentWindow || data?.source !== "frameshell-live" || data.elements?.id !== 41) return;
+          window.removeEventListener("message", onMessage);
+          resolve(data.elements.counts);
+        });
+        frame.contentWindow!.postMessage({ source: "frameshell-preview", elements: { id: 41, css, selectors: ["#time", "#nothing"] } }, "*");
+      }),
+    "#time { translate: 0px 200px !important; }",
+  );
+  expect(counts).toEqual({ "#time": 1, "#nothing": 0 });
+  await expect.poll(translate).toBe("0px 200px");
+  expect(await time.evaluate(() => (window as unknown as { marker?: string }).marker)).toBe("same page");
+  // 100 more composition px: rects inside the frame are in the page's own, unscaled pixels.
+  expect((await top()) - before).toBeCloseTo(100, 0);
+});

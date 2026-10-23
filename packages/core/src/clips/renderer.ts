@@ -292,7 +292,6 @@ export class ClipRenderer {
         width: format.width,
         height: format.height,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
-        ...elementCssOf(clip),
       });
     } catch (error) {
       throw unavailable(`${plugin.name}: ${(error as Error)?.message ?? error}`);
@@ -308,7 +307,7 @@ export class ClipRenderer {
     if (!(await stat(join(root, ...entry.split("/"))).then((info) => info.isFile(), () => false))) {
       throw unavailable(`its live page ${entry} does not exist.`);
     }
-    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key };
+    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip) };
   }
 
   /**
