@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type EventName,
@@ -52,6 +52,7 @@ import {
 } from "./binaries/manifest.js";
 import { workerSegmentEngine } from "./segment/engine.js";
 import type { SegmentEngine } from "./segment/segmenter.js";
+import { checkMask, freeCutoutName, isMediaClip, renderCutout, resolveMask } from "./segment/cutout.js";
 import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
@@ -789,6 +790,68 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       });
       return { asset: prepared.asset, size: { width: prepared.width, height: prepared.height }, hash: prepared.hash, model: SEGMENT_MODEL_PIN, cached: prepared.cached };
+    },
+    "image.cutout": async ({ cwd, timeline, clip: clipId, mask }, caller, request) => {
+      const dir = await root(cwd);
+      if ((await readEnclosingProject(dir))?.config.kind !== "image") {
+        throw new RpcError(ErrorCode.InvalidOperation, "image.cutout: only image projects have photos to cut out of (File > New Image from Frame makes one from a video).", {
+          op: "image.cutout",
+          reason: "not an image project",
+          field: "clip",
+        });
+      }
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const place = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find(({ clip }) => clip.id === clipId);
+      if (!place) {
+        throw new RpcError(ErrorCode.ClipNotFound, `image.cutout: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      const { track, clip: photo } = place;
+      if (!isMediaClip(photo)) {
+        throw new RpcError(ErrorCode.InvalidOperation, `image.cutout: clip ${clipId} is not a still media clip.`, { op: "image.cutout", reason: "not a still image", field: "clip" });
+      }
+      const picture = (await media.probe(dir, photo.asset)).video;
+      if (!picture?.still) {
+        throw new RpcError(ErrorCode.InvalidOperation, `image.cutout: ${photo.asset} is not a still image.`, { op: "image.cutout", reason: "not a still image", field: "clip" });
+      }
+      const maskFile = await resolveMask(dir, mask);
+      const ffmpeg = await projectFfmpeg(dir);
+      await checkMask(ffmpeg, maskFile, picture);
+      const stem = basename(photo.asset, extname(photo.asset));
+      const rendered = await renderCutout(ffmpeg, join(dir, ...photo.asset.split("/")), maskFile, await freeCutoutName(dir, stem));
+      let asset: string;
+      try {
+        asset = (await media.import(dir, [rendered.file], "copy")).imported[0]!.asset;
+      } finally {
+        await rendered.cleanup();
+      }
+      // One transaction around both operations; joins the caller's explicit one. A terminal-less CLI cannot open one.
+      const owner = authorOf(caller);
+      let own = false;
+      if (!transactions.list().some((open) => open.author === owner)) {
+        try {
+          await handlers["tx.begin"]({ label: `Cut out ${stem}`, cwd }, caller, request);
+          own = true;
+        } catch (error) {
+          if (!(error instanceof RpcError && error.code === ErrorCode.TransactionState)) throw error;
+        }
+      }
+      try {
+        const added = await operate("track.add", { cwd, timeline, kind: "video", name: basename(asset, extname(asset)), index: loaded.tracks.indexOf(track) + 1 }, caller);
+        const newTrack = added.changes.added[0]!;
+        const duration = (photo.out - photo.in) / (photo.speed ?? 1);
+        const result = await operate(
+          "clip.add",
+          { cwd, timeline, track: newTrack, type: "media", asset, start: photo.start, duration, ...(photo.transform ? { transform: photo.transform } : {}) },
+          caller,
+        );
+        if (own) await handlers["tx.commit"]({}, caller, request);
+        const dropped = [photo.keys ? "keyframes" : null, photo.fadeIn !== undefined || photo.fadeOut !== undefined ? "fades" : null, photo.dissolve !== undefined ? "dissolve" : null].filter((name) => name !== null);
+        const warnings = dropped.length > 0 ? [`image.cutout: the photo's ${dropped.join(", ")} were not copied to the cut-out.`] : [];
+        return { ...result, asset, track: newTrack, clip: result.changes.added[0]!, warnings: [...result.warnings, ...warnings] };
+      } catch (error) {
+        if (own) await handlers["tx.abort"]({}, caller, request).catch(() => undefined);
+        throw error;
+      }
     },
     "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {
       const dir = await root(cwd);

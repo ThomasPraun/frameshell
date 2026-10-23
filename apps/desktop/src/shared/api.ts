@@ -361,6 +361,11 @@ export interface FrameshellApi {
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
     /**
+     * Cut the part of a photo that `mask` (project-relative grayscale PNG, from a Pick) marks out as a new layer
+     * right above it (`image.cutout`, ADR 0022), as one undoable step. Resolves with the new clip id.
+     */
+    cutOut(timeline: string, clip: string, mask: string): Promise<string>;
+    /**
      * Save the first frame of `timeline` as an image where the user picks in the OS dialog (PNG, JPEG or WebP
      * by the extension chosen), through the daemon's `frame`: the export of an image project. Resolves with the
      * absolute path written, or null when cancelled. Rejects with the daemon's message.
@@ -585,6 +590,7 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",

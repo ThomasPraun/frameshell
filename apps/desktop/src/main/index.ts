@@ -1001,6 +1001,13 @@ function registerIpc(): void {
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
     }),
   );
+  ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const cut = await editor.alone(() => daemon.request("image.cutout", { cwd: project.dir, timeline: String(timeline), clip: String(clip), mask: String(mask) }));
+      return cut.clip;
+    }),
+  );
   ipcMain.handle(Channel.timelineExportImage, (event, timeline: string) =>
     outcome(async () => {
       const state = stateOf(event.sender);
