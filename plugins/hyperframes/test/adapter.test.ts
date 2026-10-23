@@ -102,6 +102,51 @@ describe("hyperframes adapter", () => {
     expect(progress.at(-1)).toEqual({ fraction: 1, message: "Done" });
   });
 
+  describe("element adjustments", () => {
+    const entry = join("compositions", "hyperframes", "intro", "index.html");
+    /** Renders SOURCE with `elementCss` and returns the entry as the producer saw it. */
+    async function renderedEntry(html: string, elementCss?: string): Promise<string> {
+      writeFileSync(join(project, entry), html);
+      let seen = "";
+      const producer: Producer = {
+        createRenderJob: (config) => ({ config }),
+        async executeRenderJob(_job, dir, output) {
+          seen = readFileSync(join(dir, "index.html"), "utf8");
+          writeFileSync(output, "webm");
+        },
+      };
+      const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+      const { ctx } = context(tempDir());
+      await adapter.render({ id: "c_1", source: SOURCE }, elementCss ? { ...ctx, elementCss } : ctx);
+      return seen;
+    }
+
+    it("declares support", () => {
+      expect(createHyperframesAdapter({ projectDir: project }).elementStyles).toBe(true);
+    });
+
+    it("without elementCss the copied entry is byte-identical", async () => {
+      const html = "<html><head><title>x</title></head><body>\r\n<p>é</p></body></html>";
+      expect(await renderedEntry(html)).toBe(html);
+    });
+
+    it("inserts the sheet last in the head of the copy and leaves the project file as it was", async () => {
+      const html = "<html><head><style>a{}</style></HEAD ><body></body></html>";
+      const seen = await renderedEntry(html, "#t { translate: 1px 2px !important; }");
+      expect(seen).toBe(
+        "<html><head><style>a{}</style><style data-frameshell-elements>\n#t { translate: 1px 2px !important; }\n</style></HEAD ><body></body></html>",
+      );
+      expect(readFileSync(join(project, entry), "utf8")).toBe(html);
+    });
+
+    it("prepends the sheet when the entry has no head, and cannot close its own style tag", async () => {
+      const seen = await renderedEntry("<div id=t></div>", '#t[x="</style>"] { scale: 2 !important; }');
+      expect(seen.startsWith("<style data-frameshell-elements>\n")).toBe(true);
+      expect(seen).toContain("<\\/style>");
+      expect(seen.endsWith("</style><div id=t></div>")).toBe(true);
+    });
+  });
+
   it("refuses a source outside the project: never lists, copies or renders foreign files", async () => {
     const outside = join(project, "..", `${basename(project)}-secret`);
     mkdirSync(outside);
