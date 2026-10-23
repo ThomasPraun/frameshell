@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-23
+
 ### Added
 
 - Reframe keys from faces (ADR 0016, #277): `frameshell multicam faces <group> [<angle>…] [--replace]` (MCP `multicam_faces`) looks at 2 frames per second of each angle that is not a screen, follows the largest face inside its crop and writes `reframe` keys only where it moves, so a `vertical-1080x1920` export of 16:9 cameras keeps each person in frame. It runs as a background job (kind `faces`, step `faces`) with detection in a worker thread, so the daemon stays responsive and the run finishes if the caller disconnects. One `multicam.reframe` operation per angle in one transaction (one revert undoes the run); angles that already have keys are kept unless `--replace`; the person corrects keys as before. Runs only when asked, locally on CPU: the YuNet face detector (MIT, OpenCV model zoo) on ONNX Runtime Web (MIT, WebAssembly, one pin for every platform), about 33 MB downloaded from the builders on first use and listed by `doctor` (`docs/binaries.md`). `multicam.reframe` takes `keys` to replace every key at once. Protocol v52.
@@ -299,7 +301,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.14.0
 [0.12.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.1
 [0.12.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.0
 [0.11.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.11.0
