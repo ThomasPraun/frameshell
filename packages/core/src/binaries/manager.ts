@@ -110,7 +110,7 @@ interface Install {
 }
 
 /**
- * Native executables the daemon runs (SPEC §9): pinned per-platform downloads
+ * Native executables the daemon runs (SPEC §9), and modules it imports: pinned per-platform downloads
  * verified by SHA-256 and installed atomically, or system binaries named by a
  * `binaries` override (project wins over global config, then managed).
  *
@@ -167,7 +167,7 @@ export class BinaryManager {
       if (path === MANAGED) break;
       return { name: tool, package: pkg.name, source: level.source, path, installed: await isFile(path), pinned };
     }
-    const path = pinned ? join(this.#installDir(pkg, pinned), executable(tool, this.platform)) : null;
+    const path = pinned ? join(this.#installDir(pkg, pinned), toolFile(pkg, tool, this.platform)) : null;
     return { name: tool, package: pkg.name, source: "managed", path, installed: path !== null && (await isFile(path)), pinned };
   }
 
@@ -370,10 +370,10 @@ export class BinaryManager {
           for (const name of await readdir(tree)) await renameRetrying(join(tree, name), join(out, name));
         }
         for (const [tool, member] of Object.entries(archive.files)) {
-          const target = join(out, executable(tool, this.platform));
+          const target = join(out, toolFile(pkg, tool, this.platform));
           const source = archive.tree ? join(out, ...member.slice(archive.tree.length + 1).split("/")) : join(extracted, ...member.split("/"));
           if (source !== target) await renameRetrying(source, target);
-          if (!this.platform.startsWith("win32")) await chmod(target, 0o755);
+          if (!pkg.module && !this.platform.startsWith("win32")) await chmod(target, 0o755);
         }
         for (const [name, member] of Object.entries(support)) {
           await renameRetrying(join(extracted, ...member.split("/")), join(out, name)).catch((error: NodeJS.ErrnoException) => {
@@ -382,7 +382,7 @@ export class BinaryManager {
         }
       }
       const missing = [];
-      for (const tool of pkg.tools) if (!(await isFile(join(out, executable(tool, this.platform))))) missing.push(tool);
+      for (const tool of pkg.tools) if (!(await isFile(join(out, toolFile(pkg, tool, this.platform))))) missing.push(tool);
       if (missing.length > 0) {
         throw installFailed(requestedBy, sources[0]?.url ?? "", `pinned archives provide no ${missing.join(", ")}`);
       }
@@ -414,7 +414,7 @@ export class BinaryManager {
     const args = pkg.versionProbe?.args ?? ["-version"];
     for (const tool of pkg.tools) {
       try {
-        await this.#commandRunner(join(dir, executable(tool, this.platform)), args, { cwd: dir });
+        await this.#commandRunner(join(dir, toolFile(pkg, tool, this.platform)), args, { cwd: dir });
       } catch (error) {
         throw new CandidateFailed(ErrorCode.BinaryInstallFailed, `Could not install ${requestedBy} from ${url}: ${tool} does not start: ${(error as Error).message}`, {
           binary: requestedBy,
@@ -483,7 +483,9 @@ function overridePath(
   return undefined;
 }
 
-function executable(tool: string, platform: PlatformKey): string {
+/** File name of `tool` in its install directory. */
+function toolFile(pkg: BinaryPackage, tool: string, platform: PlatformKey): string {
+  if (pkg.module) return `${tool}.mjs`;
   return platform.startsWith("win32") ? `${tool}.exe` : tool;
 }
 

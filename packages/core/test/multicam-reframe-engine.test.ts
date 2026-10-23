@@ -110,6 +110,24 @@ describe("multicam.reframe", () => {
     expect(angleOf(cleared.timeline, "ana")).not.toHaveProperty("reframe");
   });
 
+  it("replaces every key with `keys`, sorted, rounded, the last of one frame kept, and the inverse restores the old ones", async () => {
+    const one = await applyOperation(podcast(), reframe({ angle: "ana", at: 2, x: 0.1 }), context());
+    const keys = [
+      { at: 8, x: 0.712345, y: 0.5 },
+      { at: 1.0004, x: 0.3, y: 0.4 },
+      { at: 8.01, x: 0.7, y: 0.45 },
+    ];
+    const replaced = await applyOperation(one.timeline, reframe({ angle: "ana", keys }), context());
+    expect(angleOf(replaced.timeline, "ana").reframe).toEqual([
+      { at: 1, x: 0.3, y: 0.4 },
+      { at: 8.01, x: 0.7, y: 0.45 },
+    ]);
+    expect(parseTimeline(replaced.timeline).ok).toBe(true);
+    expect(applyPatch(replaced.timeline, replaced.inverse.args).groups).toEqual(one.timeline.groups);
+    const mixed = await rejection(applyOperation(podcast(), reframe({ angle: "ana", keys, at: 1 }), context()));
+    expect(mixed).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("`keys` replaces every key") });
+  });
+
   it("refuses unclear requests with what to pass", async () => {
     const neither = await rejection(applyOperation(podcast(), reframe({ angle: "ana", x: 0.3 }), context()));
     expect(neither).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("one of them") });

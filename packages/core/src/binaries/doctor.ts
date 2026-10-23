@@ -35,8 +35,8 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
   for (const tool of tools) {
     const location = await binaries.locate(tool, project);
     const pkg = binaries.packageOf(tool);
-    const version = location.installed && location.path ? await probeVersion(location.path, exec, pkg.versionProbe) : null;
     const { pinned } = location;
+    const version = !location.installed || !location.path ? null : pkg.module ? moduleVersion(location.source, pinned) : await probeVersion(location.path, exec, pkg.versionProbe);
     reports.push({
       name: tool,
       package: location.package,
@@ -83,4 +83,9 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
     problems.push(...probe.problems);
   }
   return { platform: binaries.platform, dataDir: binaries.dataDir, binaries: reports, codecs, problems };
+}
+
+/** A module cannot be run to ask: a managed install is its pin (the version is in its path); an override is taken as given. */
+function moduleVersion(source: "managed" | "project" | "global", pinned: { version: string } | null): string {
+  return source === "managed" && pinned ? pinned.version : "unknown";
 }

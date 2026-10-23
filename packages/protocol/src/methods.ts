@@ -6,6 +6,7 @@ import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@fra
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
+  MulticamFacesResultSchema,
   MulticamGalleryResultSchema,
   MulticamTurnsResultSchema,
   OpIdSchema,
@@ -33,7 +34,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 51;
+export const PROTOCOL_VERSION = 52;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -194,18 +195,19 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip"])
+    .enum(["ingest", "render", "clip", "faces"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`render`: export a timeline to a video file (`render` method). " +
-        "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`).",
+        "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
+        "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
     .string()
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
-        "`render` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
+        "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`).",
     ),
   output: z
     .string()
@@ -216,15 +218,15 @@ const JobSchema = z.object({
     ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
-    .describe("`canceled`: the daemon stopped before the job finished; it is queued again when the project reopens."),
+    .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
-        "`clip`: render (the adapter plugin renders the composition).",
+        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1365,13 +1367,41 @@ export const methods = {
       "so every shot of that angle follows them and ripple cuts keep them on the same picture; between keys the point moves in a " +
       "straight line, before the first and after the last it holds. Give the key time as `at` (group seconds) or `time` (timeline " +
       "seconds, mapped through the program track's shot playing then). A key in the same frame is replaced; an omitted `x` or `y` " +
-      "keeps the point there now. `remove: true` deletes the key in that frame, `clear: true` every key. A 16:9 frame of 16:9 " +
+      "keeps the point there now. `remove: true` deletes the key in that frame, `clear: true` every key, `keys` replaces them " +
+      "all at once (`multicam.faces` proposes them from faces). A 16:9 frame of 16:9 " +
       "cameras is not cut, so keys change nothing there; screens are never cut. " +
       "Example: `{ group: \"g_1a2b3c\", angle: \"ana\", time: 12.5, x: 0.32 }`. " +
       "Fails with InvalidOperation when the group or angle does not exist, neither or both of `at` and `time` are given, no shot of " +
       "the group plays at `time`, nothing is given to set, or `remove` finds no key in that frame.",
     params: operationArgs["multicam.reframe"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  "multicam.faces": {
+    mutating: true,
+    description:
+      "Propose `reframe` keys for the angles of a multicam group from the faces in their pictures (ADR 0016), so a 9:16 export " +
+      "(`vertical-1080x1920`) of 16:9 cameras keeps each person in frame. Looks at 2 frames per second of each angle's file " +
+      "(locally, on CPU: the YuNet face detector run by ONNX Runtime; the first run downloads both, about 33 MB, from their " +
+      "builders), follows the largest face inside the angle's crop, and writes keys only where it moves: one key per still " +
+      "stretch, a quick glide between them. One `multicam.reframe` operation per angle (with `keys`), all in one transaction, " +
+      "so one revert undoes the lot; the person corrects keys in the app or with `multicam.reframe` as usual. Angles that " +
+      "already have keys are skipped (`kept`) unless `replace: true`; screens are never looked at. An angle where no face is " +
+      "found is left as it was, with a warning. Takes a while on long recordings (progress arrives as `progress` " +
+      "notifications). It runs as a background job of kind `faces` (`job.list`), so it goes on if the caller disconnects. Example: `{ group: \"g_1a2b3c\", angles: [\"ana\"] }`. Fails with InvalidOperation (group or angle " +
+      "missing, an angle named that is a screen), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg, ONNX " +
+      "Runtime or the model cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      group: z.string().min(1).describe("Group id (`g_…`) from `timeline.show` `groups` or `multicam.create`."),
+      angles: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Angle ids to look at. Default: every angle of the group that is not a screen."),
+      replace: z.boolean().optional().describe("Also redo angles that already have reframe keys, replacing them. Default false."),
+    }),
+    result: MulticamFacesResultSchema,
   },
   "multicam.paint": {
     mutating: true,
@@ -1836,7 +1866,7 @@ export const notifications = {
         .describe(
           "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
             "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
-            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`. Codes may be added: treat an unknown one as `message`.",
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`. Codes may be added: treat an unknown one as `message`.",
         ),
       values: z
         .record(z.string(), z.union([z.string(), z.number()]))

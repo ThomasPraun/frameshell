@@ -33,6 +33,10 @@ export {
   SEGMENTATION_MODEL,
   SHERPA_ONNX_PACKAGE,
   SPEAKER_EMBEDDING_MODEL,
+  FACE_DETECTION_MODEL,
+  FACE_DETECTION_MODELS,
+  ONNX_RUNTIME_WEB,
+  ONNX_RUNTIME_WEB_PACKAGE,
   buildCandidates,
   type SourceArchive,
   currentPlatform,
@@ -190,6 +194,28 @@ export {
   galleryReport,
   planGallery,
 } from "./multicam/gallery-plan.js";
+export {
+  type AngleFaceOptions,
+  type AngleFaces,
+  type BgrFrame,
+  FACE_SAMPLE_HZ,
+  type Face,
+  type FaceDetector,
+  type FacePoint,
+  type FaceSample,
+  type FaceScanRequest,
+  type FaceScanner,
+  type YunetFiles,
+  yunetWorkerScanner,
+  type ReframeKeyOptions,
+  angleFaceKeys,
+  decodeYunet,
+  faceFrameSize,
+  loadYunet,
+  mainFaceTrack,
+  proposeReframeKeys,
+  sampleFaceFrames,
+} from "./multicam/faces.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
 export { BLEED_DB, MERGE_GAP_S, MIN_TURN_S, type SpokenWord, TURN_FRAME_S, type Turn, type TurnInput, speakingTurns, wordTurns } from "./multicam/turns.js";

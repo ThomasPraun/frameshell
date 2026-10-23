@@ -130,6 +130,11 @@ describe("frameshell multicam", () => {
       { at: 1, x: 0.3, y: 0.5 },
       { at: 4, x: 0.7, y: 0.4 },
     ]);
+    // Keys already set are kept, and nothing is downloaded for them.
+    const faces = frameshell(["multicam", "faces", group, "ana"]);
+    expect(faces.code).toBe(0);
+    expect(faces.stdout).toContain("Kept the keys of ana (--replace redoes them)");
+    expect(faces.stdout).toContain("Nothing written");
     expect(frameshell(["multicam", "reframe", group, "ana", "--at", "1", "--remove"]).code).toBe(0);
     angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
     expect(angle.reframe).toEqual([{ at: 4, x: 0.7, y: 0.4 }]);
@@ -290,6 +295,12 @@ describe("parsing multicam commands", () => {
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1" })).toThrow(/--x and\/or --y/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", remove: true, x: "0.2" })).toThrow(/without --x/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true, at: "1" })).toThrow(/without --at/);
+    expect(parseTimelineCommand(["multicam", "faces", "g_1"], {})!.params).toEqual({ group: "g_1" });
+    expect(parseTimelineCommand(["multicam", "faces", "g_1", "ana", "ben"], { replace: true })).toMatchObject({
+      method: "multicam.faces",
+      params: { group: "g_1", angles: ["ana", "ben"], replace: true },
+    });
+    expect(() => parseTimelineCommand(["multicam", "faces"], {})).toThrow(/takes 1\+ argument/);
     expect(parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4.5", speaking: true, alone: true })).toMatchObject({
       method: "multicam.paint",
       params: { group: "g_1", angle: "ana", start: 2, end: 4.5, speaking: true, alone: true },

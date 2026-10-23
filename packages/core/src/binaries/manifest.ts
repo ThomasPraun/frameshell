@@ -111,6 +111,11 @@ export interface BinaryPackage {
   readonly onDemand?: boolean;
   /** Arguments that print the version, and a pattern capturing it. Default: ffmpeg's `-version`. */
   readonly versionProbe?: { readonly args: readonly string[]; readonly pattern: RegExp };
+  /**
+   * The tools are ES modules the daemon imports, installed as `<tool>.mjs`,
+   * not executables: no version probe, no exec bit, no `.exe`.
+   */
+  readonly module?: boolean;
   /** Fallback copy of every archive. Each archive then lists its mirror URL after the canonical one. */
   readonly mirror?: BinaryMirror;
 }
@@ -675,8 +680,78 @@ export const DIARIZATION_MODELS: readonly ManagedModel[] = [
   },
 ];
 
+const ONNX_RUNTIME_WEB_VERSION = "1.30.0";
+/** Module of {@link ONNX_RUNTIME_WEB_PACKAGE}: ONNX Runtime's WebAssembly build, imported by the daemon. */
+export const ONNX_RUNTIME_WEB = "onnxruntime-web";
+
+/** Every platform with a Node the daemon runs on: a WebAssembly build is the same bytes for all of them. */
+const ANY_PLATFORM: readonly PlatformKey[] = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64", "win32-arm64"];
+
+const ONNX_RUNTIME_WEB_BUILD: PinnedBuild = {
+  version: ONNX_RUNTIME_WEB_VERSION,
+  origin: "https://github.com/microsoft/onnxruntime",
+  license: "MIT",
+  archives: [
+    {
+      urls: [`https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-${ONNX_RUNTIME_WEB_VERSION}.tgz`],
+      sha256: "d2228df7e4616bc3348bf504ee888f3bec43789a273f0a63f3e68d203ce3bf71",
+      size: 33_106_585,
+      // The CPU-only bundle (ONNX Runtime's JS API included) and the WebAssembly it loads, of a tarball of every variant.
+      files: { [ONNX_RUNTIME_WEB]: "package/dist/ort.wasm.min.mjs" },
+      support: {
+        "ort-wasm-simd-threaded.mjs": "package/dist/ort-wasm-simd-threaded.mjs",
+        "ort-wasm-simd-threaded.wasm": "package/dist/ort-wasm-simd-threaded.wasm",
+        // Named by the bundle's `sourceMappingURL`: stack traces through it stay readable.
+        "ort.wasm.min.mjs.map": "package/dist/ort.wasm.min.mjs.map",
+      },
+    },
+  ],
+};
+
+/**
+ * ONNX Runtime Web: runs ONNX models (face detection for `multicam.faces`)
+ * as WebAssembly inside the daemon, so one pinned npm tarball from
+ * Microsoft serves every platform with no native code. Downloaded on first
+ * use, never mirrored. It is not a dependency of any Frameshell package.
+ */
+export const ONNX_RUNTIME_WEB_PACKAGE: BinaryPackage = {
+  name: "onnxruntime-web",
+  tools: [ONNX_RUNTIME_WEB],
+  onDemand: true,
+  module: true,
+  builds: Object.fromEntries(ANY_PLATFORM.map((platform) => [platform, ONNX_RUNTIME_WEB_BUILD])),
+};
+
+/** Model id of the face detector `multicam.faces` runs. */
+export const FACE_DETECTION_MODEL = "yunet-2026may";
+
+const YUNET_REVISION = "26cc381e4d2594bb9f47a26eb8fd96c94a13660d";
+
+/**
+ * YuNet face detector (MIT) from OpenCV's model zoo, the export with
+ * dynamic input height and width, pinned by commit.
+ */
+export const FACE_DETECTION_MODELS: readonly ManagedModel[] = [
+  {
+    id: FACE_DETECTION_MODEL,
+    version: YUNET_REVISION.slice(0, 12),
+    origin: "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet",
+    license: "MIT",
+    urls: [`https://media.githubusercontent.com/media/opencv/opencv_zoo/${YUNET_REVISION}/models/face_detection_yunet/face_detection_yunet_2026may.onnx`],
+    sha256: "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+    size: 229_738,
+    file: "face_detection_yunet_2026may.onnx",
+  },
+];
+
 /** Every package the daemon manages. */
-export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [FFMPEG_PACKAGE, WHISPER_PACKAGE, CHROME_HEADLESS_SHELL_PACKAGE, SHERPA_ONNX_PACKAGE];
+export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
+  FFMPEG_PACKAGE,
+  WHISPER_PACKAGE,
+  CHROME_HEADLESS_SHELL_PACKAGE,
+  SHERPA_ONNX_PACKAGE,
+  ONNX_RUNTIME_WEB_PACKAGE,
+];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS];
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS];

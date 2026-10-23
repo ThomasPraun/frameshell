@@ -5,6 +5,7 @@ import {
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
+  ReframeKeySchema,
   SHOT_CORNERS,
   SHOT_LAYOUTS,
   SUBTITLE_POSITIONS,
@@ -385,6 +386,12 @@ export const operationArgs = {
       .describe("Point to center on down the picture, fraction of the source height (0 top, 1 bottom). Default: the point there now."),
     remove: z.boolean().optional().describe("True removes the key at `at` or `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key: the picture is cut centered again. Takes no other field."),
+    keys: z
+      .array(ReframeKeySchema)
+      .min(1)
+      .max(10_000)
+      .optional()
+      .describe("Replace every key with these (group seconds, any order; one per frame, the last wins). Takes no other field."),
   }),
   "multicam.paint": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
@@ -711,6 +718,31 @@ export const MulticamDirectResultSchema = OperationResultSchema.extend({
 
 /** See {@link MulticamDirectResultSchema}. */
 export type MulticamDirectResult = z.output<typeof MulticamDirectResultSchema>;
+
+/** Result of `multicam.faces`: what was found per angle and the operations that wrote the keys. */
+export const MulticamFacesResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
+  group: z.string(),
+  angles: z
+    .array(
+      z.object({
+        angle: z.string(),
+        name: z.string(),
+        samples: z.int().describe("Frames looked at (2 per second of the angle's file)."),
+        faces: z.int().describe("Of those, frames where a face was found inside the angle's crop."),
+        keys: z.int().describe("Reframe keys written; 0 when no face was found, which leaves the angle as it was."),
+        operation: z.string().nullable().describe("Id of the `multicam.reframe` operation that wrote them; null when none did."),
+      }),
+    )
+    .describe("Angles looked at, in group order."),
+  kept: z.array(z.string()).describe("Angles skipped because they already had reframe keys (pass `replace: true` to redo them)."),
+  tx: z.string().nullable().describe("Transaction of the writes, revertible as one; null when nothing was written."),
+  warnings: z.array(z.string()).describe("Angles with few or no faces found. Empty when none."),
+});
+
+/** See {@link MulticamFacesResultSchema}. */
+export type MulticamFacesResult = z.output<typeof MulticamFacesResultSchema>;
 
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z
