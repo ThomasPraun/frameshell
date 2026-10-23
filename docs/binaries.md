@@ -237,7 +237,7 @@ Re-pin: `npm view onnxruntime-web@<version> dist` gives the tarball URL, `shasum
 
 ## Photo segmentation (MobileSAM)
 
-Used by `segment.prepare` and, from the next part, `inspect.point` with `segment` (ADR 0022: point at parts inside a photo). On demand: the first segmentation installs the models, and the ONNX Runtime Web pin above when face detection never did. Nothing is downloaded before someone points inside a photo.
+Used by `segment.prepare` and `inspect.point` with `segment` (ADR 0022: point at parts inside a photo). On demand: the first segmentation installs the models, and the ONNX Runtime Web pin above when face detection never did. Nothing is downloaded before someone points inside a photo.
 
 Models, [`Acly/MobileSAM`](https://huggingface.co/Acly/MobileSAM) on Hugging Face (MobileSAM's TinyViT image encoder and SAM's multi-mask decoder, exported to ONNX), pinned by revision `0d3b403339b4674a82493d5e97964dd78089ddc8`:
 

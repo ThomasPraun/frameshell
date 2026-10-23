@@ -88,10 +88,12 @@ Commands:
                                Write the frame showing at <s> seconds as an image, format from the
                                extension of <file> unless --format (project resolution,
                                or the preset's)
-  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id]
+  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
-                               takes fractions of the frame (0.71,0.14), --px project pixels (1363,151)
+                               takes fractions of the frame (0.71,0.14), --px project pixels (1363,151). --segment: on a photo
+                               of an image project, also write three mask PNGs of the part under the point
+                               (smallest first) to .frameshell/context/ (first use downloads a ~45 MB model)
   proposal status              Review mode (the person's switch) and the open proposal waiting for their review
   proposal wait [--timeout s]  Block until the open proposal is decided (default 300 s, max 3600). Exit code:
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
@@ -117,7 +119,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "segment"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -132,7 +134,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
   render: ["preset", "out", "timeline"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
-  inspect: ["at", "point", "px", "timeline"],
+  inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "proposal status": [],
   "proposal wait": ["timeout"],
@@ -177,7 +179,7 @@ type Invocation =
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
-  | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string }
+  | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
   | { kind: "proposal.status" }
   | { kind: "proposal.wait"; timeout?: number }
@@ -239,6 +241,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           preset: { type: "string" },
           point: { type: "string" },
           px: { type: "string" },
+          segment: { type: "boolean", default: false },
           timeout: { type: "string" },
           tx: { type: "string" },
           help: { type: "boolean", default: false },
@@ -348,6 +351,7 @@ function parseBuiltin(
     px?: string | undefined;
     timeout?: string | undefined;
     tx?: string | undefined;
+    segment?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -373,6 +377,7 @@ function parseBuiltin(
       point: options.point !== undefined ? pair("point", options.point) : null,
       px: options.px !== undefined ? pair("px", options.px) : null,
       ...(options.timeline ? { timeline: options.timeline } : {}),
+      segment: options.segment === true,
     };
   }
   if (command === "render" || command === "frame") {
@@ -618,7 +623,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "inspect": {
       const where = inv.point ? { ...inv.point, unit: "fraction" as const } : { ...inv.px!, unit: "pixel" as const };
-      const result = await conn.request("inspect.point", { cwd, ...(inv.timeline ? { timeline: inv.timeline } : {}), at: inv.at, ...where });
+      const result = await conn.request(
+        "inspect.point",
+        { cwd, ...(inv.timeline ? { timeline: inv.timeline } : {}), at: inv.at, ...where, ...(inv.segment ? { segment: true } : {}) },
+        flags.json || !inv.segment ? {} : { onProgress: progressPrinter(io) },
+      );
       return flags.json ? json(result) : describePoint(result);
     }
     case "plugin.run": {
@@ -652,6 +661,16 @@ function describePoint(result: MethodResult<"inspect.point">): string {
     if (parents.length > 0) lines.push(`  inside ${parents.map((parent) => parent.selector.split(" > ").at(-1)).join(" < ")}`);
   } else if (result.unavailable) {
     lines.push(`No element: ${result.unavailable}`);
+  }
+  if (result.segment) {
+    const { asset, size, model, chosen, masks } = result.segment;
+    lines.push(`Segments of ${asset} (${size.width}x${size.height} px, ${model}), smallest first:`);
+    for (const [index, mask] of masks.entries()) {
+      const [x, y, w, h] = mask.bbox;
+      lines.push(`  ${mask.mask} bbox ${x},${y} ${w}x${h} px (${Math.round(mask.area * 100)} %) score ${mask.score.toFixed(2)}${index === chosen ? " (chosen)" : ""}`);
+    }
+  } else if (result.segmentUnavailable) {
+    lines.push(`Not segmented: ${result.segmentUnavailable}`);
   }
   return `${lines.join("\n")}\n`;
 }

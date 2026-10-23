@@ -6,7 +6,8 @@ import type { GcClass } from "./gc.js";
 
 /**
  * Project-relative directory of "Ask agent" captures (SPEC §10, ADR 0011):
- * frame captures `f_<frame>.png` and pick details `e_<frame>_<n>.json`.
+ * frame captures `f_<frame>.png`, pick details `e_<frame>_<n>.json` and photo
+ * masks `m_<frame>_<x>_<y>_<k>.png` (ADR 0022: asset pixels, `k` = 1 to 3).
  * Regenerable, gitignored with the rest of `.frameshell/`.
  */
 export const CONTEXT_DIR = ".frameshell/context";
@@ -14,7 +15,7 @@ export const CONTEXT_DIR = ".frameshell/context";
 /** Captures older than this are swept by `gc` and on open: a reference is read soon after it is typed. */
 export const CONTEXT_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
-const CONTEXT_ENTRY = /^(?:f_\d+\.png|e_\d+_\d+\.json)$/;
+const CONTEXT_ENTRY = /^(?:f_\d+\.png|e_\d+_\d+\.json|m_\d+_\d+_\d+_[1-3]\.png)$/;
 
 /** What an entry of {@link CONTEXT_DIR} is, for `gc`: a capture (its own key), or null (kept). */
 export function classifyContext(name: string, isDirectory: boolean): GcClass {
@@ -22,12 +23,12 @@ export function classifyContext(name: string, isDirectory: boolean): GcClass {
 }
 
 /**
- * Write details file `name` (`e_<frame>_<n>.json`, checked by the method's
- * params) into {@link CONTEXT_DIR} of `root`, atomically. Throws
+ * Write file `name` (`e_<frame>_<n>.json` as the method's params check it, or a
+ * mask PNG) into {@link CONTEXT_DIR} of `root`, atomically. Throws
  * `OutsideProject` when the folder resolves outside the project (a symlinked
  * `.frameshell`). Resolves with the project-relative path.
  */
-export async function writeContext(root: string, name: string, content: string): Promise<{ path: string }> {
+export async function writeContext(root: string, name: string, content: string | Uint8Array): Promise<{ path: string }> {
   const dir = join(root, ...CONTEXT_DIR.split("/"));
   await mkdir(dir, { recursive: true });
   const inside = relative(await realpath(root), await realpath(dir));

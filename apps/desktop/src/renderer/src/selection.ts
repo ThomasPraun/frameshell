@@ -1,4 +1,4 @@
-import type { ProbedElement } from "@frameshell/protocol";
+import type { ProbedElement, SegmentedPoint } from "@frameshell/protocol";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -113,6 +113,8 @@ export interface SelectedPoint {
   readonly elements: readonly ProbedElement[];
   /** Why the target's elements are unknown (no live page: untrusted project, no adapter); null otherwise. */
   readonly unavailable: string | null;
+  /** The masks of the photo part under the point (`inspect.point` with `segment`, ADR 0022); absent otherwise. */
+  readonly segment?: SegmentedPoint | undefined;
 }
 
 /** A clip under a preview region. */

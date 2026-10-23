@@ -341,6 +341,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     live: (dir, timeline, clip) => clips.live(clipRoot(dir), timeline, clip),
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
+    imageProject: async (dir) => (await readEnclosingProject(dir))?.config.kind === "image",
+    segment: async (dir, asset, point, onProgress) => ({ ...(await segmentation.segment(dir, asset, point, onProgress)), model: SEGMENT_MODEL_PIN }),
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
@@ -666,11 +668,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
-    "inspect.point": async ({ cwd, timeline, at, x, y, unit, view }, caller) => {
+    "inspect.point": async ({ cwd, timeline, at, x, y, unit, segment, view }, caller, request) => {
       const dir = await root(cwd);
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       const loaded = { timeline: await resolveNested(dir, shown.timeline), fps: shown.fps };
-      return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit }, loaded)) };
+      const onProgress = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit, segment }, loaded, onProgress)) };
     },
     "job.list": async ({ cwd, active }) => {
       const dir = await root(cwd);

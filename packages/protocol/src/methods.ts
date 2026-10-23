@@ -804,7 +804,8 @@ export const methods = {
       "to find what to edit (\"the box at the top right at 12 s\") or to check an edit landed. Works with the app closed: " +
       "generated clips are loaded in headless Chrome (a second or two each). Elements need a trusted project with the " +
       "clip's plugin; otherwise `unavailable` says why and only the clips are reported. Footage counts as painting its " +
-      "whole box (alpha of footage is not read). Fails with InvalidOperation (`at` or the point outside the timeline or " +
+      "whole box (alpha of footage is not read). With `segment` on a photo in an image project it also names the part of the " +
+      "photo under the point as three masks (ADR 0022). Fails with InvalidOperation (`at` or the point outside the timeline or " +
       "frame), TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -813,6 +814,14 @@ export const methods = {
       x: z.number().nonnegative().describe("Horizontal position, 0 = left edge: a fraction of the frame width (e.g. `0.71`), or project pixels with `unit: \"pixel\"`."),
       y: z.number().nonnegative().describe("Vertical position, 0 = top edge: a fraction of the frame height (e.g. `0.14`), or project pixels with `unit: \"pixel\"`."),
       unit: z.enum(["fraction", "pixel"]).default("fraction").describe("What `x` and `y` are. Default `fraction`."),
+      segment: z
+        .boolean()
+        .default(false)
+        .describe(
+          "In an image project, when the clip seen is a still photo: also segment the part of the photo under the point (ADR 0022). Writes three " +
+            "mask PNGs under `.frameshell/context/` and returns them as `segment` (smallest first, `chosen` = best score). The first use downloads " +
+            "the model (about 45 MB) and takes seconds; later points on a photo take about 0.2 s. Elsewhere `segmentUnavailable` says why. Default false.",
+        ),
       view: ViewParam,
     }),
     result: InspectedPointSchema.extend({
