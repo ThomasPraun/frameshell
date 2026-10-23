@@ -5,6 +5,7 @@ import type { Person } from "@frameshell/schema";
 import type { FaceTrack, TrackBox } from "./scan.js";
 import type { StoredFaceScan } from "./scan-cache.js";
 import { type Span, mergeSpans } from "./ranges.js";
+import { runWorkerTask } from "../worker-task.js";
 import { cosine, meanDirection } from "./vector.js";
 
 /**
@@ -81,15 +82,67 @@ export interface FaceModel {
  * {@link FACE_CLUSTER_MATCH}. Tracks without prints stay out of clusters.
  */
 export function clusterFaces(assets: readonly ScannedAsset[]): FaceModel {
+  const prepared = prepareClusters(assets);
+  return assembleClusters(prepared, averageLinkage(prepared.printed.map((track) => track.mean), FACE_CLUSTER_MATCH));
+}
+
+/**
+ * {@link clusterFaces} with the O(n²) linkage in a worker thread, so a long
+ * recording never blocks the daemon. The model of a set of scans is kept: the
+ * same scans give it again without clustering.
+ */
+export async function clusterFacesOffThread(assets: readonly ScannedAsset[], options: { signal?: AbortSignal | undefined } = {}): Promise<FaceModel> {
+  const key = modelKey(assets);
+  const kept = modelCache.get(key);
+  if (kept) return kept;
+  const prepared = prepareClusters(assets);
+  const request: ClusterRequest = { vectors: prepared.printed.map((track) => track.mean), threshold: FACE_CLUSTER_MATCH };
+  const groups = prepared.printed.length < 2 ? averageLinkage(request.vectors, request.threshold) : await runWorkerTask<number[][]>(CLUSTER_WORKER, request, "face clustering", options);
+  const model = assembleClusters(prepared, groups);
+  modelCache.set(key, model);
+  if (modelCache.size > MODEL_CACHE_SIZE) modelCache.delete(modelCache.keys().next().value!);
+  return model;
+}
+
+/** What the clustering worker reads (`cluster-worker.ts`). */
+export interface ClusterRequest {
+  vectors: Float32Array[];
+  threshold: number;
+}
+
+const MODEL_CACHE_SIZE = 4;
+/** Models by {@link modelKey}, oldest first; a model is never mutated after it is built. */
+const modelCache = new Map<string, FaceModel>();
+
+/** Same scans (assets, content, tracks) and threshold: same model. */
+function modelKey(assets: readonly ScannedAsset[]): string {
+  const parts = [...assets].sort((a, b) => a.asset.localeCompare(b.asset)).map(({ asset, scan }) => `${asset}\0${scan.hash}\0${scan.tracks.length}\0${scan.tracks.reduce((sum, track) => sum + track.embeddings.length, 0)}`);
+  return createHash("sha256").update(`${FACE_CLUSTER_MATCH}\n${parts.join("\n")}`).digest("hex");
+}
+
+/**
+ * Worker script beside this module. Under the test runner this module is the
+ * TypeScript source, so the worker runs from the build (`pnpm test` builds first).
+ */
+const CLUSTER_WORKER = import.meta.url.endsWith(".ts") ? new URL("../../dist/people/cluster-worker.js", import.meta.url) : new URL("./cluster-worker.js", import.meta.url);
+
+interface PreparedClusters {
+  sorted: ScannedAsset[];
+  tracks: ClusterTrack[];
+  printed: (ClusterTrack & { mean: Float32Array })[];
+}
+
+function prepareClusters(assets: readonly ScannedAsset[]): PreparedClusters {
   const sorted = [...assets].sort((a, b) => a.asset.localeCompare(b.asset));
   const tracks: ClusterTrack[] = sorted.flatMap(({ asset, scan }) =>
     scan.tracks.map((track) => ({ asset, track, key: `${asset}#${track.id}`, mean: meanOf(track.embeddings.map((entry) => entry.vector)), cluster: null })),
   );
   const printed = tracks.filter((track): track is ClusterTrack & { mean: Float32Array } => track.mean !== null);
-  const groups = averageLinkage(
-    printed.map((track) => track.mean),
-    FACE_CLUSTER_MATCH,
-  );
+  return { sorted, tracks, printed };
+}
+
+/** The model of `prepared` once its printed tracks are grouped (`groups` = indexes into `printed`). */
+function assembleClusters({ sorted, tracks, printed }: PreparedClusters, groups: readonly (readonly number[])[]): FaceModel {
   const clusters = groups.map((members) => {
     const own = members.map((index) => printed[index]!);
     const id = `fc_${createHash("sha256").update(own.map((track) => track.key).join("\0")).digest("hex").slice(0, 6)}`;
@@ -247,7 +300,7 @@ function centralSample(tracks: readonly ClusterTrack[], mean: Float32Array): Fac
  * is reducible, so cutting the tree means keeping merges at or above the line.
  * Returns groups of indexes, each sorted, in order of their first index.
  */
-function averageLinkage(vectors: readonly Float32Array[], threshold: number): number[][] {
+export function averageLinkage(vectors: readonly Float32Array[], threshold: number): number[][] {
   const n = vectors.length;
   if (n === 0) return [];
   const sim = new Float32Array(n * n);

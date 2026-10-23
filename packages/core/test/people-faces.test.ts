@@ -6,6 +6,7 @@ import {
   type FaceTrack,
   type ScannedAsset,
   clusterFaces,
+  clusterFacesOffThread,
   faceSpans,
   faceSuggestions,
   facesOfPeople,
@@ -71,6 +72,20 @@ describe("clusterFaces", () => {
     const model = clusterFaces([scanned("assets/a.mp4", [track("t1", 0, 1, 0.2, a), track("t2", 2, 3, 0.2, b), track("t3", 4, 5, 0.2, c)])]);
     expect(model.clusters.map((cluster) => cluster.tracks.map((entry) => entry.track.id).sort())).toEqual(expect.arrayContaining([["t1", "t2"], ["t3"]]));
     expect(model.clusters).toHaveLength(2);
+  });
+});
+
+describe("clusterFacesOffThread", () => {
+  const scans = [
+    scanned("assets/a.mp4", [track("t1", 0, 20, 0.3, print(0)), track("t2", 0, 20, 0.7, print(1)), track("t3", 2, 3, 0.5, null)]),
+    scanned("assets/b.mp4", [track("t1", 0, 5, 0.5, print(2, 0, 0.8)), track("t2", 6, 9, 0.5, print(3))]),
+  ];
+
+  it("gives the model clusterFaces gives, and the same one again for the same scans", async () => {
+    const off = await clusterFacesOffThread(scans);
+    expect(off).toEqual(clusterFaces(scans));
+    expect(await clusterFacesOffThread([...scans].reverse())).toBe(off);
+    expect((await clusterFacesOffThread([scans[0]!])).clusters).toHaveLength(2);
   });
 });
 

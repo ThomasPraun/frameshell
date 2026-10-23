@@ -51,6 +51,7 @@ export {
   type FaceAnchorPoint,
   type ScannedAsset,
   clusterFaces,
+  clusterFacesOffThread,
   facesOfPeople,
   overlapSeconds,
   personFacePrint,

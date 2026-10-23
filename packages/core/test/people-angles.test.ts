@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AppDirs, type DaemonConnection, connectToDaemon, methods } from "@frameshell/protocol";
 import { type MulticamGroup, type Person, SCHEMA_VERSION, type Timeline, type Transcript } from "@frameshell/schema";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Daemon, FACE_EMBEDDING_DIMS, type FaceTrack, type ScannedAsset, angleSuggestions, clusterFaces, facesOfPeople, startDaemon } from "../src/index.js";
+import { type Daemon, FACE_EMBEDDING_DIMS, type FaceTrack, type ScannedAsset, PeopleService, angleSuggestions, clusterFaces, facesOfPeople, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
 // `angle` suggestions (ADR 0020 decision 5): a multicam group with two angles, names and mic transcripts, written by hand.
@@ -188,5 +188,33 @@ describe("angle suggestions over the daemon", () => {
     const result = await cli.request("people.confirm", { cwd: dir, suggestions: [ana!.id] });
     expect(result.confirmed[0]!.speaker).toBeUndefined();
     expect(result.confirmed[0]!.angle).toEqual({ timeline: "talk", group: "g_talk", angle: "ana" });
+  });
+});
+
+describe("confirming an angle suggestion is all or nothing", () => {
+  it("leaves people.json as it was when a later link fails", async () => {
+    const root = tempDir();
+    mkdirSync(join(root, "timelines"));
+    mkdirSync(join(root, "transcripts"));
+    writeFileSync(join(root, "timelines/talk.json"), JSON.stringify(timeline));
+    for (const [rel, value] of transcripts) writeFileSync(join(root, rel), JSON.stringify(value));
+    const service = new PeopleService();
+    await service.add(root, "Existing");
+    const before = readFileSync(join(root, "people.json"), "utf8");
+    // Suggestions are made from the transcripts read first; the mic transcript is gone by the time its link is checked.
+    const sources = {
+      voices: async () => {
+        throw new Error("no voices expected");
+      },
+      faces: async () => {
+        rmSync(join(root, "transcripts/alav.words.json"));
+        return [];
+      },
+    };
+    const [ana] = (await service.suggest(root, sources)).suggestions;
+    expect(ana).toMatchObject({ kind: "angle", links: ["angle", "speaker"] });
+    writeFileSync(join(root, "transcripts/alav.words.json"), JSON.stringify(transcripts.get("transcripts/alav.words.json")));
+    await expect(service.confirm(root, [ana!.id], { ...sources, reject: false })).rejects.toMatchObject({ data: { reason: "target missing" } });
+    expect(readFileSync(join(root, "people.json"), "utf8")).toBe(before);
   });
 });
