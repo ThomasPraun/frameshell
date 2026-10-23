@@ -40,6 +40,15 @@ describe("serveLive", () => {
     expect(html.indexOf(HEAD)).toBeLessThan(html.indexOf("<title>"));
   });
 
+  it("carries the clip's element sheet on the bridge script, escaped for an attribute", async () => {
+    const css = `#a > b[x="1"] { translate: 0px 1px !important } /* & */`;
+    expect(injectHead(ENTRY_HTML, HEAD, css)).toContain(`<script data-frameshell-elements="#a &gt; b[x=&quot;1&quot;] { translate: 0px 1px !important } /* &amp; */">${LIVE_BRIDGE}</script>`);
+    expect(injectHead(ENTRY_HTML, HEAD, "")).toBe(injectHead(ENTRY_HTML, HEAD));
+    const { root, pages } = project();
+    const url = pages.issue({ project: root, root: "compositions/hyperframes/card", entry: "compositions/hyperframes/card/index.html", head: HEAD, elementCss: "#a { scale: 2 !important }" });
+    expect(await (await serveLive(get(url), pages)).text()).toContain(`<script data-frameshell-elements="#a { scale: 2 !important }">`);
+  });
+
   it("serves the page's other files as they are, with byte ranges, and encoded names", async () => {
     const { pages, base } = project();
     const script = await serveLive(get(`${base}app.js`), pages);
@@ -99,16 +108,35 @@ describe("injectHead", () => {
 
 describe("live page bridge", () => {
   /** Runs the bridge in a page whose `frameshellLive` is `live`; returns what it posts and a way to message it. */
-  function bridge(live: unknown, opener: unknown = null) {
+  /** A minimal `document`: one head that keeps its appended children, elements as plain records, `matching` selectors with counts. */
+  function fakeDocument(initial: string | null, matching: Record<string, number>) {
+    const head = { children: [] as Record<string, unknown>[], appendChild(node: Record<string, unknown>) { this.children = this.children.filter((child) => child !== node); this.children.push(node); } };
+    const attributes = new Map<string, string>();
+    const listeners: Record<string, (() => void)[]> = {};
+    return {
+      head,
+      listeners,
+      currentScript: { getAttribute: (name: string) => (name === "data-frameshell-elements" ? initial : null) },
+      createElement: (tag: string) => ({ tag, textContent: "", setAttribute: (name: string, value: string) => void attributes.set(name, value) }),
+      addEventListener: (type: string, listener: () => void) => (listeners[type] ??= []).push(listener),
+      querySelectorAll: (selector: string) => {
+        if (selector === "!!") throw new Error("invalid selector");
+        return { length: matching[selector] ?? 0 };
+      },
+    };
+  }
+
+  function bridge(live: unknown, opener: unknown = null, document: unknown = fakeDocument(null, {})) {
     const posted: Record<string, unknown>[] = [];
     const listeners: ((event: { source: unknown; data: unknown }) => void)[] = [];
     const parent = { opener, postMessage: (message: Record<string, unknown>) => posted.push({ ...message }) };
     const window = { parent, frameshellLive: live, addEventListener: (_type: string, listener: (typeof listeners)[number]) => listeners.push(listener) };
-    runInNewContext(LIVE_BRIDGE, { window, Promise, String, setTimeout });
+    runInNewContext(LIVE_BRIDGE, { window, document, Promise, String, setTimeout });
     const send = (data: unknown, source: unknown = parent) => listeners.forEach((listener) => listener({ source, data }));
     return { posted, send, window };
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+  const settleAll = () => new Promise((resolve) => setTimeout(resolve, 80));
 
   it("says ready, seeks on the parent's messages and reports each time shown", async () => {
     const seeks: number[] = [];
@@ -140,13 +168,63 @@ describe("live page bridge", () => {
     ]);
   });
 
+  describe("element sheet (ADR 0021)", () => {
+    const sheetOf = (document: ReturnType<typeof fakeDocument>) => document.head.children.filter((node) => node["tag"] === "style");
+
+    it("applies the first sheet from the script's attribute, last in <head> again once the document is parsed", () => {
+      const document = fakeDocument("#title { translate: 0px 5px !important }", {});
+      bridge({ ready: Promise.resolve(), seek() {} }, null, document);
+      expect(sheetOf(document).map((node) => node["textContent"])).toEqual(["#title { translate: 0px 5px !important }"]);
+      document.head.appendChild({ tag: "style", textContent: "composition" });
+      document.listeners["DOMContentLoaded"]!.forEach((listener) => listener());
+      expect(document.head.children.map((node) => node["textContent"])).toEqual(["composition", "#title { translate: 0px 5px !important }"]);
+    });
+
+    it("adds no sheet when the clip has no elements", () => {
+      const document = fakeDocument(null, {});
+      bridge({ ready: Promise.resolve(), seek() {} }, null, document);
+      expect(document.head.children).toEqual([]);
+    });
+
+    it("swaps the sheet without a reload and answers the match count of each selector after the pending seek", async () => {
+      const order: string[] = [];
+      const document = fakeDocument("#a { translate: 1px 0px !important }", { "#a": 1, ".many": 3 });
+      const { posted, send } = bridge({ ready: Promise.resolve(), seek: (t: number) => void order.push(`seek ${t}`) }, null, document);
+      send({ source: "frameshell-preview", seek: 2 });
+      send({ source: "frameshell-preview", elements: { id: 1, css: "#a { translate: 9px 0px !important }", selectors: ["#a", ".many", "#gone", "!!"] } });
+      expect(sheetOf(document)).toHaveLength(1);
+      expect(sheetOf(document)[0]!["textContent"]).toBe("#a { translate: 9px 0px !important }");
+      await settleAll();
+      expect(posted.filter((message) => "elements" in message)).toEqual([
+        { source: "frameshell-live", elements: { id: 1, counts: { "#a": 1, ".many": 3, "#gone": 0, "!!": 0 } } },
+      ]);
+      expect(posted.indexOf(posted.find((m) => "shown" in m)!)).toBeLessThan(posted.findIndex((m) => "elements" in m));
+      expect(order).toEqual(["seek 2"]);
+    });
+
+    it("keeps the sheet when css is absent, clears it with an empty string, and ignores a message without an id", async () => {
+      const document = fakeDocument(null, {});
+      const { posted, send } = bridge({ ready: Promise.resolve(), seek() {} }, null, document);
+      send({ source: "frameshell-preview", elements: { id: 1, css: "#a { scale: 2 !important }" } });
+      send({ source: "frameshell-preview", elements: { id: 2, selectors: ["#a"] } });
+      expect(sheetOf(document)[0]!["textContent"]).toBe("#a { scale: 2 !important }");
+      send({ source: "frameshell-preview", elements: { id: 3, css: "" } });
+      expect(sheetOf(document)[0]!["textContent"]).toBe("");
+      send({ source: "frameshell-preview", elements: { css: "x" } }, {});
+      send({ source: "frameshell-preview", elements: { css: "x" } });
+      expect(sheetOf(document)[0]!["textContent"]).toBe("");
+      await settleAll();
+      expect(posted.filter((message) => "elements" in message).map((message) => (message["elements"] as { id: number }).id)).toEqual([1, 2, 3]);
+    });
+  });
+
   it("ignores messages from anything but the parent, and malformed ones", async () => {
     const seeks: number[] = [];
     const { send } = bridge({ ready: Promise.resolve(), seek: (t: number) => void seeks.push(t) });
     send({ source: "frameshell-preview", seek: 1 }, {});
     send({ source: "other", seek: 1 });
     send({ source: "frameshell-preview", seek: "1" });
-    await settle();
+    await settleAll();
     expect(seeks).toEqual([]);
   });
 
@@ -155,9 +233,9 @@ describe("live page bridge", () => {
     const opener = {};
     const { send } = bridge({ ready: Promise.resolve(), seek: (t: number) => void seeks.push(t) }, opener);
     send({ source: "frameshell-preview", seek: 2 }, opener);
-    await settle();
+    await settleAll();
     send({ source: "frameshell-preview", seek: 3 }, {});
-    await settle();
+    await settleAll();
     expect(seeks).toEqual([2]);
   });
 
@@ -172,23 +250,23 @@ describe("live page bridge", () => {
       },
     });
     send({ source: "frameshell-preview", seek: 1 });
-    await settle();
+    await settleAll();
     for (const t of [2, 3, 4]) send({ source: "frameshell-preview", seek: t });
     finish();
-    await settle();
+    await settleAll();
     finish();
-    await settle();
+    await settleAll();
     expect(seeks).toEqual([1, 4]);
   });
 
   it("reports a page without frameshellLive, a failed ready and a failed seek as errors", async () => {
     expect(bridge(undefined).posted).toEqual([{ source: "frameshell-live", error: expect.stringContaining("frameshellLive") }]);
     const late = bridge({ ready: Promise.reject(new Error("runtime never loaded")), seek: () => {} });
-    await settle();
+    await settleAll();
     expect(late.posted).toEqual([{ source: "frameshell-live", error: "runtime never loaded" }]);
     const broken = bridge({ ready: Promise.resolve(), seek: () => { throw new Error("no timeline"); } });
     broken.send({ source: "frameshell-preview", seek: 1 });
-    await settle();
+    await settleAll();
     expect(broken.posted.at(-1)).toEqual({ source: "frameshell-live", error: "no timeline" });
   });
 });

@@ -128,8 +128,6 @@ export interface LiveContext {
   readonly height: number;
   /** See {@link RenderContext.ensureBinary}. */
   ensureBinary(name: string): Promise<string>;
-  /** See {@link RenderContext.elementCss}. */
-  readonly elementCss?: string;
 }
 
 /**
