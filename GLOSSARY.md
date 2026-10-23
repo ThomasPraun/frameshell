@@ -38,6 +38,20 @@ _Avoid_: still project, photo project
 A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
 _Avoid_: level, sheet
 
+## Review mode (ADR 0019)
+
+**Review mode**:
+A per-project choice of the person in the app, off by default, under which every timeline change not made in the app waits as a proposal instead of applying.
+_Avoid_: proposal mode, approval mode, review switch (the control that turns it on)
+
+**Proposal**:
+One transaction by an agent (or another author outside the app) held back for review: shown before and after, then accepted or rejected whole. At most one per project at a time.
+_Avoid_: suggestion, draft, pending change, changeset
+
+**Stale proposal**:
+A proposal the person's own edit made out of date by changing a clip, track or group it also changes; it closes without applying, and its author redoes it.
+_Avoid_: conflicted proposal, expired proposal
+
 ## Video from audio (ADR 0015)
 
 **Scene plan**:
