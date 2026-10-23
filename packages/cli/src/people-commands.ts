@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { DaemonConnection, MethodParams, MethodResult, PersonInfo } from "@frameshell/protocol";
+import type { DaemonConnection, MethodParams, MethodResult, PersonInfo, Progress } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `people` commands (ADR 0020), in `frameshell --help`. */
@@ -17,6 +17,10 @@ export const PEOPLE_USAGE = `  people list                  The project's people
                                Linking a speaker writes the person's name into that transcript
   people unlink <person> (--speaker … | --angle … | --face …)
                                Remove one link, spelled as when linked
+  people suggest               Links Frameshell suggests (a speaker that sounds like a person's linked voices),
+                               each with an id sg_…, a score and why; hints say what kept voices apart
+  people confirm <suggestion>… [--reject]
+                               Apply suggested links (yes), or with --reject dismiss them for good
 `;
 
 /** Flags each `people` command takes besides the global ones. */
@@ -27,6 +31,8 @@ export const PEOPLE_FLAGS: Record<string, readonly string[]> = {
   "people remove": [],
   "people link": ["speaker", "angle", "face"],
   "people unlink": ["speaker", "angle", "face"],
+  "people suggest": [],
+  "people confirm": ["reject"],
 };
 
 /** A parsed `people` command; paths are as typed, resolved against the working directory when run. */
@@ -35,7 +41,9 @@ export type PeopleInvocation =
   | { kind: "people.add"; name: string }
   | { kind: "people.rename"; person: string; name: string }
   | { kind: "people.remove"; person: string }
-  | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput };
+  | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput }
+  | { kind: "people.suggest" }
+  | { kind: "people.confirm"; suggestions: string[]; reject: boolean };
 
 /** One target of `people link`, as typed. */
 export type PeopleTargetInput =
@@ -44,9 +52,19 @@ export type PeopleTargetInput =
   | { face: { asset: string; at: number; x?: number; y?: number } };
 
 /** Parse `people <sub> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
-export function parsePeople(rest: string[], options: { speaker?: string | undefined; angle?: string | undefined; face?: string | undefined }): PeopleInvocation | null {
+export function parsePeople(
+  rest: string[],
+  options: { speaker?: string | undefined; angle?: string | undefined; face?: string | undefined; reject?: boolean | undefined },
+): PeopleInvocation | null {
   const [sub, ...args] = rest;
   if (sub === "list") return args.length === 0 ? { kind: "people.list" } : null;
+  if (sub === "suggest") return args.length === 0 ? { kind: "people.suggest" } : null;
+  if (sub === "confirm") {
+    if (args.length === 0) return null;
+    const bad = args.find((id) => !/^sg_[0-9a-f]{8}$/.test(id));
+    if (bad) throw new UsageError(`\`frameshell people confirm\` takes suggestion ids like sg_9c04e1d2 (from \`people suggest\`), got "${bad}".`);
+    return { kind: "people.confirm", suggestions: args, reject: options.reject === true };
+  }
   if (sub === "add") return args.length > 0 ? { kind: "people.add", name: args.join(" ") } : null;
   if (sub === "rename") return args.length >= 2 ? { kind: "people.rename", person: args[0]!, name: args.slice(1).join(" ") } : null;
   if (sub === "remove") return args.length === 1 ? { kind: "people.remove", person: args[0]! } : null;
@@ -88,8 +106,8 @@ function parseTarget(options: { speaker?: string | undefined; angle?: string | u
   return { face: { asset: spelled.slice(0, at), at: time, x: xy[0]!, y: xy[1]! } };
 }
 
-/** Run a parsed `people` command; returns stdout text. */
-export async function executePeople(conn: DaemonConnection, inv: PeopleInvocation, cwd: string, json: boolean): Promise<string> {
+/** Run a parsed `people` command; returns stdout text. `onProgress` follows `suggest` and `confirm` (voice prints, model download). */
+export async function executePeople(conn: DaemonConnection, inv: PeopleInvocation, cwd: string, json: boolean, onProgress?: (progress: Progress) => void): Promise<string> {
   const print = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
   switch (inv.kind) {
     case "people.list": {
@@ -125,6 +143,22 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
       const result = await conn.request("people.unlink", { cwd, person: inv.person, ...targetParams(inv.target, cwd) });
       return json ? print(result) : `Unlinked ${describeTarget(inv.target)} from ${result.person.name} (${result.person.id})\n`;
     }
+    case "people.suggest": {
+      const result = await conn.request("people.suggest", { cwd }, onProgress ? { onProgress } : {});
+      return json ? print(result) : formatSuggestions(result);
+    }
+    case "people.confirm": {
+      const result = await conn.request("people.confirm", { cwd, suggestions: inv.suggestions, reject: inv.reject }, onProgress ? { onProgress } : {});
+      if (json) return print(result);
+      if (inv.reject) return `Dismissed ${result.dismissed.length} suggestion${result.dismissed.length === 1 ? "" : "s"}${result.dismissed.length < inv.suggestions.length ? " (the others were already dismissed)" : ""}\n`;
+      return result.confirmed
+        .map(
+          (entry) =>
+            `${entry.linked ? "Linked" : "Already linked:"} speaker ${entry.speaker.speaker} of ${entry.speaker.transcript} to ${entry.person.name} (${entry.person.id})\n` +
+            entry.transcripts.map((file) => `  speaker name written in ${file}\n`).join(""),
+        )
+        .join("");
+    }
   }
 }
 
@@ -143,6 +177,14 @@ function describeTarget(target: PeopleTargetInput): string {
 function linkCount(person: PersonInfo): string {
   const count = person.speakers.length + person.angles.length + person.faces.length;
   return `${count} link${count === 1 ? "" : "s"}`;
+}
+
+/** `people suggest` for people: one line per suggestion with its id, then the hints. */
+function formatSuggestions(result: MethodResult<"people.suggest">): string {
+  const lines = result.suggestions.length === 0 ? ["No suggestions."] : result.suggestions.map((suggestion) => `${suggestion.id}  ${suggestion.reason}`);
+  if (result.suggestions.length > 0) lines.push("", "Yes: frameshell people confirm <id>…   No: frameshell people confirm <id>… --reject");
+  if (result.hints.length > 0) lines.push("", ...result.hints.map((hint) => `hint: ${hint}`));
+  return `${lines.join("\n")}\n`;
 }
 
 /** `people list` for people: each person with their links, missing ones marked with why. */

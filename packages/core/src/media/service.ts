@@ -24,6 +24,7 @@ import { renameRetrying } from "../fs-util.js";
 import { CONTEXT_DIR, CONTEXT_MAX_AGE_MS, classifyContext } from "../context.js";
 import { sweep } from "../gc.js";
 import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcripts/transcriber.js";
+import { VOICES_DIR, classifyVoiceCache } from "../people/voices.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
 import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
 
@@ -325,6 +326,7 @@ export class MediaService {
       const audioKeys = new Set([...hashes].map(audioCacheKey));
       removed.push(
         ...(await sweep({ ...common, dir: AUDIO_CACHE_DIR, classify: classifyAudioCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
+        ...(await sweep({ ...common, dir: VOICES_DIR, classify: classifyVoiceCache, keep: (key) => unknown > 0 || audioKeys.has(key) })),
         ...(await sweep({ ...common, dir: VERIFY_CACHE_DIR, classify: classifyVerifyCache, keep: () => true })),
         ...(await sweep({ ...common, dir: TRANSCRIBE_WINDOW_DIR, classify: classifyWindowWav, keep: () => true })),
       );

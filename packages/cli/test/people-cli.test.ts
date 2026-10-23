@@ -82,6 +82,10 @@ describe("frameshell people", () => {
       ["people", "link", "Juan", "--face", "assets/a.mp4@1:2,0.5"],
       ["people", "list", "--speaker", "x"],
       ["people", "frobnicate"],
+      ["people", "suggest", "extra"],
+      ["people", "confirm"],
+      ["people", "confirm", "nope"],
+      ["people", "list", "--reject"],
       ["clip", "remove", "c_1", "--angle", "x"],
     ]) {
       expect(frameshell(args).code, args.join(" ")).toBe(2);
@@ -137,5 +141,14 @@ describe("frameshell people", () => {
     expect(frameshell(["people", "remove", "Juan Pérez"]).stdout).toMatch(/^Removed Juan Pérez \(p_[0-9a-f]{6}\) and 1 link\n$/);
     expect(frameshell(["people", "list"]).stdout).toContain("No people yet");
     expect(frameshell(["people", "remove", "Juan Pérez"]).code).toBe(1);
+  });
+
+  it("suggests nothing while no person has a voice, says why, and refuses an unknown suggestion", () => {
+    const suggest = frameshell(["people", "suggest"]);
+    expect(suggest.code).toBe(0);
+    expect(suggest.stdout).toMatch(/^No suggestions\.\n\nhint: No person has a linked transcript speaker yet/);
+    const confirm = frameshell(["people", "confirm", "sg_00000000", "--reject"]);
+    expect(confirm.code).toBe(1);
+    expect(confirm.stderr).toContain("no current suggestion sg_00000000");
   });
 });

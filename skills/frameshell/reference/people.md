@@ -10,14 +10,17 @@ frameshell people link Juan --angle main:g_talk:juan                     # [time
 frameshell people link Juan --face assets/ep1.mp4@12.5:0.41,0.33         # a face sample: second, point x,y
 frameshell people rename Juan "Juan Pérez"
 frameshell people list                                                   # links; MISSING ones say why
+frameshell people suggest                                                # sg_… ids: "s2 in … sounds like Juan (0.82)"
+frameshell people confirm sg_9c04e1d2                                    # yes: link it   (--reject: no, never ask again)
 ```
 
-MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call).
+MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call), `people_suggest`, `people_confirm`.
 
 - A person is an id (`p_3fa2c1`) or the exact name (ignoring case); names are unique ignoring case.
 - A transcript speaker, an angle or a face anchor belongs to one person; a link to a whole transcript excludes other people's speakers of it.
 - **Linking a transcript speaker, and renaming its person, writes the name into that transcript's `speakers`**, so subtitles, export and the words file show it. Angle names are not rewritten: use `multicam angle --name`.
 - Link only what the person confirmed or what is certain. A link by an agent is recorded in `by` and shown as "confirmed by agent" in the app.
+- **Suggestions match voices across files**: link one diarized speaker to a person (`transcribe --speakers` first), then `people suggest` names other files' speakers that sound like them. Show them to the person and confirm what they agree to; never confirm all blindly. Act on `hints` (a transcript without speakers, a stale one).
 - A link whose transcript, speaker, timeline, group, angle or video is gone is `missing`: listed, ignored, never deleted (a re-run may bring it back). `unlink` still removes it.
 - Edit the file by hand if you like (hand-written ids such as `p_juan` are fine); an invalid file fails the people commands only.
 - People changes are not timeline operations: they apply at once, are not in `history` and review mode does not hold them. Undo with the inverse command (`unlink`, `rename`, `remove`).

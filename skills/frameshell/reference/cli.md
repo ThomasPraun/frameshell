@@ -18,6 +18,8 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell people remove <person>` | Remove the person and their links (names already written into transcripts stay). |
 | `frameshell people link <person> (--speaker <transcript>[:<speaker>] \| --angle [<timeline>:]<group>:<angle> \| --face <asset>@<seconds>[:x,y])` | Link a transcript speaker (no `:speaker` = the whole transcript), a multicam angle or a face anchor. Linking a speaker writes the person's name into that transcript. One speaker, angle or anchor per person; the target must exist. |
 | `frameshell people unlink <person> (--speaker … \| --angle … \| --face …)` | Remove one link, spelled as when linked; works when the target is gone. |
+| `frameshell people suggest` | Suggested links, each `sg_…` id with a score and why: a speaker linked to nobody who sounds like a person's linked speakers. `hints`: what kept voices from being compared, with the fixing command. First run downloads the speaker model (about 60 MB with its runtime) and takes a few seconds per transcript; later runs are cached. `--json`: `suggestions`, `hints`. |
+| `frameshell people confirm <suggestion>… [--reject]` | Apply suggested links (the name goes into the transcript), or `--reject` dismisses them for good. Ids must be current suggestions. |
 | `frameshell mcp` | Serve the MCP tools on stdio (see [mcp.md](mcp.md)). |
 
 ## Timeline
