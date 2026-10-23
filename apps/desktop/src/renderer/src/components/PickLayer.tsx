@@ -2,9 +2,11 @@ import { PROBE_MAX_ELEMENTS, type ProbedElement, markGenerated } from "@frameshe
 import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { type PickResult, elementBox, pagePoint, pickTarget, resolvePick } from "../preview/pick.js";
 import { PickPages } from "../preview/pick-pages.js";
+import { isPhotoAt, photoAssets, steppedPoints } from "../preview/segment-pick.js";
 import type { Program } from "../preview/program.js";
 import { type FrameBox, layersIn, pictureBox } from "../preview/transform-edit.js";
 import { transport } from "../preview/transport.js";
+import type { SegmentProgress } from "../../../shared/api.js";
 import { type SelectedPoint, type SelectedRegion, selection, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { t } from "../i18n.js";
@@ -31,6 +33,11 @@ interface Hover {
  * points (each keeps its time), and a drag selects a region naming the clips
  * and elements in it. Picked points and the selected region stay drawn
  * whether or not the tool is on; with it off, presses fall through.
+ *
+ * In an image project (`photos`) turning the tool on prepares the photos
+ * for segmentation, a click on a photo also asks for the masks of the part
+ * under it (ADR 0022) and outlines the chosen one, and ↑/↓ then step its
+ * size instead of walking elements.
  */
 export function PickLayer({
   active,
@@ -39,6 +46,7 @@ export function PickLayer({
   program,
   timeline,
   alphaAt,
+  photos = false,
 }: {
   active: boolean;
   fps: number;
@@ -46,6 +54,8 @@ export function PickLayer({
   program: Program | null;
   timeline: string | null;
   alphaAt: AlphaAt;
+  /** An image project: photos can be segmented. */
+  photos?: boolean;
 }) {
   const { region, points } = useSelection();
   const layer = useRef<HTMLDivElement>(null);
@@ -53,6 +63,9 @@ export function PickLayer({
   const [hover, setHover] = useState<Hover | null>(null);
   const [draft, setDraft] = useState<{ pointer: number; x: number; y: number; rect: SelectedRegion | null } | null>(null);
   const asked = useRef(0);
+  const [segmenting, setSegmenting] = useState<SegmentStatus | null>(null);
+  const progress = useRef<SegmentProgress | null>(null);
+  const busy = useRef(0);
   /** One hover probe at a time; the latest pointer position waits for it. */
   const hovering = useRef<{ busy: boolean; next: { x: number; y: number } | null }>({ busy: false, next: null });
   const resolution = program?.resolution ?? null;
@@ -69,6 +82,33 @@ export function PickLayer({
       setHover(null);
     };
   }, [active, timeline, resolution]);
+
+  // Photos are prepared while the tool is on: the encoder takes seconds, so it runs while the person aims.
+  const assets = program && photos ? photoAssets(program).join("\n") : "";
+  useEffect(() => {
+    if (!active || assets === "") return;
+    let current = true;
+    const stop = window.frameshell.segment.onProgress((update) => {
+      progress.current = update;
+      if (current) setSegmenting((now) => (now ? { ...now, ...update } : now));
+    });
+    busy.current++;
+    setSegmenting({ kind: "preparing", download: false, fraction: null });
+    window.frameshell.segment.prepare(assets.split("\n")).then(
+      () => settle(),
+      (error: Error) => settle(error.message),
+    );
+    function settle(failed?: string) {
+      busy.current--;
+      if (!current || busy.current > 0) return;
+      setSegmenting(failed ? { kind: "failed", message: failed } : null);
+    }
+    return () => {
+      current = false;
+      stop();
+      setSegmenting(null);
+    };
+  }, [active, assets]);
 
   // A hover belongs to one frame.
   useEffect(() => setHover((current) => (current && current.frame !== frame ? null : current)), [frame]);
@@ -126,6 +166,23 @@ export function PickLayer({
     };
     if (add) selection.addPoint(picked, "preview");
     else selection.selectPoints([picked], "preview");
+    if (photos && program && result.target && isPhotoAt(program, frame, result.target)) void segmentPoint(picked);
+  };
+
+  /** Ask the daemon for the masks under `picked` and put them on that point, wherever it is in the selection by now. */
+  const segmentPoint = async (picked: SelectedPoint) => {
+    busy.current++;
+    setSegmenting({ kind: "finding", download: false, fraction: null });
+    try {
+      const { segment } = await window.frameshell.segment.point(picked.at, picked.x, picked.y);
+      const { points: now } = selection.get();
+      if (segment && now.includes(picked)) selection.replacePoints(now.map((candidate) => (candidate === picked ? { ...picked, segment } : candidate)), "preview");
+      busy.current--;
+      if (busy.current === 0) setSegmenting(null);
+    } catch (error) {
+      busy.current--;
+      setSegmenting({ kind: "failed", message: (error as Error).message });
+    }
   };
 
   /** Elements of the generated clips in a region, topmost clip first, up to the probe's limit in all. */
@@ -155,11 +212,18 @@ export function PickLayer({
     return { ...rect, at: transport.get().time, clips, elements: [] };
   };
 
-  // ↑ / ↓ walk the hovered element's ancestors.
+  // ↑ / ↓ step the size of a picked photo part (larger, smaller), else walk the hovered element's ancestors.
   useEffect(() => {
     if (!active) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+      const { points: picked } = selection.get();
+      if (picked.some((point) => point.segment)) {
+        const stepped = steppedPoints(picked, event.key === "ArrowUp" ? 1 : -1);
+        if (stepped) selection.replacePoints(stepped, "preview");
+        event.preventDefault();
+        return;
+      }
       setHover((current) => {
         if (!current || current.result.elements.length === 0) return current;
         const depth = Math.max(0, Math.min(current.result.elements.length - 1, current.depth + (event.key === "ArrowUp" ? 1 : -1)));
@@ -232,6 +296,23 @@ export function PickLayer({
           <span className="preview-pick-label">{outline.label}</span>
         </div>
       )}
+      {here.map((picked, index) => {
+        const mask = picked.segment?.masks[picked.segment.chosen];
+        if (!mask) return null;
+        const [x0, y0, x1, y1] = mask.frameBox;
+        return (
+          <div
+            key={`mask-${index}`}
+            className="preview-pick-mask"
+            data-testid="preview-pick-mask"
+            data-size={picked.segment!.chosen + 1}
+            data-box={mask.frameBox.map((n) => n.toFixed(3)).join(",")}
+            style={{ left: percent(x0), top: percent(y0), width: percent(x1 - x0), height: percent(y1 - y0) }}
+          >
+            <span className="preview-pick-label">{t.preview.segmentSize(picked.segment!.chosen + 1, picked.segment!.masks.length, Math.round(mask.area * 100))}</span>
+          </div>
+        );
+      })}
       {here.map((picked, index) => (
         <span
           key={index}
@@ -242,6 +323,11 @@ export function PickLayer({
           style={{ left: percent(picked.x), top: percent(picked.y) }}
         />
       ))}
+      {segmenting && (
+        <span className="preview-pick-status" data-testid="preview-pick-status" data-state={segmenting.kind} role="status">
+          {segmentStatusText(segmenting)}
+        </span>
+      )}
       {shownRegion && (
         <div
           className={`preview-region${draft ? " is-drawing" : ""}`}
@@ -260,6 +346,16 @@ export function PickLayer({
       )}
     </div>
   );
+}
+
+/** What the segmentation of photos is doing, for the status line. */
+type SegmentStatus = (SegmentProgress & { kind: "preparing" | "finding" }) | { kind: "failed"; message: string };
+
+function segmentStatusText(status: SegmentStatus): string {
+  if (status.kind === "failed") return t.preview.segmentFailed(status.message);
+  const percent = status.fraction === null ? null : Math.round(status.fraction * 100);
+  if (status.download) return t.preview.segmentDownloading(percent);
+  return status.kind === "finding" ? t.preview.segmentFinding : t.preview.segmentPreparing;
 }
 
 /** A project file's text, for {@link markGenerated}. */

@@ -294,4 +294,15 @@ test("element mode: a double-click enters the clip's elements, a drag saves one 
   await press("Escape");
   await expect(layer).toHaveCount(0);
   await expect(page.getByTestId("layer-handles")).toHaveAttribute("data-clip", "c_slow");
+
+  // Turning Pick on leaves element mode, so ↑/↓ reach only the Pick layer (ancestors, or photo part sizes).
+  const again = await pointAt(90, 70);
+  await page.mouse.dblclick(again.x, again.y);
+  await expect(layer).toHaveAttribute("data-clip", "c_slow", { timeout: 30_000 });
+  await press("i");
+  await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "true");
+  await expect(layer).toHaveCount(0);
+  await press("i");
+  await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "false");
+  await expect(layer).toHaveCount(0);
 });

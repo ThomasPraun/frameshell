@@ -203,6 +203,11 @@ export class MediaService {
     return assets;
   }
 
+  /** `sha256:<hex>` of `rel` (project-relative), reusing the index while size and mtime match. */
+  async hash(root: string, rel: string): Promise<string> {
+    return this.#attached(root).store.hash(rel);
+  }
+
   /**
    * Content hash of `rel` (reusing the index while size and mtime match) and
    * the PCM sidecar of a complete ingest of that content at the project fps.

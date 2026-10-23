@@ -160,6 +160,21 @@ describe("reference lines", () => {
     expect(referenceLines({ ...blank, points: [hf], origin: "preview" }, view, { sources: new Map([["c_0100", "comp/index.html"]]) })).toEqual([
       "[frameshell] point (0.71,0.14) @ 00:01:05.20 · clip c_0100 hyperframes comp/index.html · element #outro > span in comp/scenes/outro.html (created by a script)",
     ]);
+    // A segmented photo names the chosen mask (ADR 0022).
+    const mask = (k: number, area: number) => ({ mask: `.frameshell/context/m_0090_1210_1530_${k}.png`, bbox: [880, 610, 920, 2414] as [number, number, number, number], frameBox: [0.1, 0.2, 0.3, 0.9] as [number, number, number, number], area, score: 0.9 });
+    const photo = {
+      x: 0.21,
+      y: 0.48,
+      at: 3,
+      layers: [layers[1]!],
+      target: "c_0002",
+      elements: [],
+      unavailable: null,
+      segment: { asset: "assets/team.jpg", size: { width: 3000, height: 4000 }, model: "mobilesam@abcdef12", chosen: 2, masks: [mask(1, 0.01), mask(2, 0.07), mask(3, 0.18)] },
+    };
+    expect(referenceLines({ ...blank, points: [photo], origin: "preview" }, view, { details: [".frameshell/context/e_0090_1.json"] })).toEqual([
+      "[frameshell] point (0.21,0.48) @ 00:00:03.00 · clip c_0002 media · segment .frameshell/context/m_0090_1210_1530_3.png bbox 880,610 920x2414 px (18 %) · details .frameshell/context/e_0090_1.json",
+    ]);
     const dark = { x: 0.5, y: 0.5, at: 1, layers: [], target: null, elements: [], unavailable: null };
     expect(referenceLines({ ...blank, points: [dark], origin: "preview" }, view)).toEqual(["[frameshell] point (0.50,0.50) @ 00:00:01.00 · black"]);
   });

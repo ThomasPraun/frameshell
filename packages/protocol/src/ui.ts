@@ -44,6 +44,24 @@ export const PointLayerSchema = z.object({
   paints: z.boolean().describe("Its picture shows at the point (not transparent there)."),
 });
 
+/** One mask of a segmented point (ADR 0022). */
+export const SegmentMaskSchema = z.object({
+  mask: z.string().describe("Project-relative PNG under `.frameshell/context/`: 8-bit grayscale at the asset's size, 255 inside the part, 0 outside."),
+  bbox: z.tuple([z.int(), z.int(), z.int(), z.int()]).describe("`[x, y, w, h]` of the mask in the asset's pixels."),
+  frameBox: z.tuple([z.number(), z.number(), z.number(), z.number()]).describe("`[x0, y0, x1, y1]` of the mask as fractions of the project frame (the asset's placement applied)."),
+  area: z.number().min(0).max(1).describe("Share of the asset's pixels inside the mask."),
+  score: z.number().describe("The model's own estimate of the mask's quality, 0 to 1."),
+});
+
+/** What segmenting a point of a photo found (ADR 0022). */
+export const SegmentedPointSchema = z.object({
+  asset: z.string().describe("Project-relative asset of the clip that was segmented."),
+  size: z.object({ width: z.int(), height: z.int() }).describe("The asset's pixels, rotation applied: the unit of `mask` and `bbox`."),
+  model: z.string().describe("Pinned model, `mobilesam@<revision>`."),
+  chosen: z.int().describe("Index in `masks` of the one with the best score."),
+  masks: z.array(SegmentMaskSchema).describe("Three answers to the point, smallest first: part of a part, a part, the whole."),
+});
+
 /** What a point of the frame shows (ADR 0011): the layers under it and the composition element there. */
 export const InspectedPointSchema = z.object({
   x: z.number().min(0).max(1).describe("Fraction of the frame width, 0 = left."),
@@ -58,6 +76,8 @@ export const InspectedPointSchema = z.object({
     .string()
     .nullable()
     .describe("Why the target's elements are unknown (untrusted project, no adapter, no live page); null otherwise."),
+  segment: SegmentedPointSchema.optional().describe("Masks of the part of the photo under the point; only when segmenting was asked and possible."),
+  segmentUnavailable: z.string().optional().describe("Why nothing was segmented although it was asked: `not an image project`, `not a still image` or `black`."),
 });
 
 /** The user's selection in the app: one store, every kind at once. */
@@ -167,3 +187,5 @@ export type WordRef = z.output<typeof WordRefSchema>;
 export type ProbedElementInfo = z.output<typeof ProbedElementSchema>;
 /** What a point of the frame shows. */
 export type InspectedPoint = z.output<typeof InspectedPointSchema>;
+/** What segmenting a point of a photo found (ADR 0022). */
+export type SegmentedPoint = z.output<typeof SegmentedPointSchema>;

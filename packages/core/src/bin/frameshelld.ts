@@ -2,9 +2,11 @@
 // frameshelld entry. Usually spawned detached by the CLI or app, not by hand.
 // Env: FRAMESHELL_SOCKET (endpoint), FRAMESHELL_IDLE_TIMEOUT_MS (ms, "Infinity" disables),
 // FRAMESHELL_TX_IDLE_MS (ms of session inactivity that ends an automatic transaction).
+// FRAMESHELL_SEGMENT_STAND_IN=1 (e2e only): photo segmentation answers with squares instead of downloading MobileSAM.
 // Startup errors go to stderr: the spawning CLI relays them to the user.
 import { resolveSocketPath } from "@frameshell/protocol";
 import { DEFAULT_IDLE_TIMEOUT_MS, startDaemon } from "../daemon.js";
+import { standInSegmentEngine } from "../segment/stand-in.js";
 import { DEFAULT_TX_IDLE_GAP_MS } from "../history/transactions.js";
 
 // The spawning CLI closes its end of the stderr pipe once connected; later writes must not crash us.
@@ -14,7 +16,8 @@ try {
   const socketPath = resolveSocketPath();
   const idleTimeoutMs = parseMs("FRAMESHELL_IDLE_TIMEOUT_MS", DEFAULT_IDLE_TIMEOUT_MS);
   const txIdleGapMs = parseMs("FRAMESHELL_TX_IDLE_MS", DEFAULT_TX_IDLE_GAP_MS);
-  const daemon = await startDaemon({ socketPath, idleTimeoutMs, txIdleGapMs });
+  const segmentEngine = process.env["FRAMESHELL_SEGMENT_STAND_IN"] === "1" ? standInSegmentEngine() : undefined;
+  const daemon = await startDaemon({ socketPath, idleTimeoutMs, txIdleGapMs, ...(segmentEngine ? { segmentEngine } : {}) });
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => void daemon.close());
   await daemon.closed;
   process.exit(0);

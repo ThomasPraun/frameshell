@@ -17,6 +17,11 @@ import {
   WHISPER_SOURCE,
   FACE_DETECTION_MODEL,
   FACE_DETECTION_MODELS,
+  PHOTO_SEGMENTATION_DECODER_MODEL,
+  PHOTO_SEGMENTATION_ENCODER_MODEL,
+  PHOTO_SEGMENTATION_MODELS,
+  SegmentService,
+  workerSegmentEngine,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   yunetWorkerScanner,
@@ -28,6 +33,7 @@ import {
   sherpaDiarizer,
 } from "../src/index.js";
 import { tempDir } from "./helpers.js";
+import { makeDiscPhoto, overlapWithDisc } from "./segment-fixture.js";
 import { toneWav } from "./whisper-fixture.js";
 import { drawFace, encodeFrames } from "./face-fixture.js";
 import { mediaTools } from "./media-tools.js";
@@ -242,6 +248,18 @@ describe("pinned face detection manifest", () => {
     expect(FACE_DETECTION_MODELS[0]!.urls[0]).toMatch(/^https:\/\/media\.githubusercontent\.com\/media\/opencv\/opencv_zoo\/[0-9a-f]{40}\//);
   });
 
+  it("pins both MobileSAM files by Hugging Face revision and SHA-256 under Apache-2.0", () => {
+    expect(PHOTO_SEGMENTATION_MODELS.map((model) => [model.id, model.license, model.size])).toEqual([
+      [PHOTO_SEGMENTATION_ENCODER_MODEL, "Apache-2.0", 28_157_093],
+      [PHOTO_SEGMENTATION_DECODER_MODEL, "Apache-2.0", 16_496_559],
+    ]);
+    for (const model of PHOTO_SEGMENTATION_MODELS) {
+      expect(model.urls).toEqual([expect.stringMatching(/^https:\/\/huggingface\.co\/Acly\/MobileSAM\/resolve\/0d3b403339b4674a82493d5e97964dd78089ddc8\/[\w.]+\.onnx$/)]);
+      expect(model.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(model.version).toBe("0d3b403339b4");
+    }
+  });
+
   it("reports an installed module at its pinned version without running it", async () => {
     const dataDir = tempDir();
     const binaries = new BinaryManager({ dataDir, configDir: tempDir() });
@@ -348,6 +366,42 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       expect(found.keys.map((key) => key.time)).toEqual([2.5, 3]);
       expect(found.keys[0]!.x).toBeCloseTo(0.25, 1);
       expect(found.keys[1]!.x).toBeCloseTo(0.75, 1);
+    },
+    600_000,
+  );
+
+  it(
+    "installs ONNX Runtime Web and MobileSAM, verified, and segments a drawn disc from one click, in a worker thread",
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const engine = workerSegmentEngine({
+        runtime: await binaries.ensure(ONNX_RUNTIME_WEB),
+        encoder: await binaries.ensureModel(PHOTO_SEGMENTATION_ENCODER_MODEL),
+        decoder: await binaries.ensureModel(PHOTO_SEGMENTATION_DECODER_MODEL),
+      });
+      try {
+        const { ffmpeg } = await mediaTools();
+        const dir = tempDir();
+        const [width, height] = [640, 480];
+        const disc = { cx: 400, cy: 220, r: 110 };
+        await makeDiscPhoto(ffmpeg, join(dir, "disc.png"), width, height, disc);
+        const service = new SegmentService({
+          probe: async () => ({ video: { width, height, still: true } }),
+          hash: async () => "sha256:disc",
+          ffmpeg: async () => ffmpeg,
+          engine: async () => engine,
+        });
+        const result = await service.segment(dir, "disc.png", { x: disc.cx, y: disc.cy });
+        expect(result).toMatchObject({ width, height });
+        expect(result.masks).toHaveLength(3);
+        const best = result.masks[result.chosen]!;
+        expect(overlapWithDisc(best, width, height, disc)).toBeGreaterThan(0.9);
+        expect(best.bbox[0]).toBeGreaterThan(disc.cx - disc.r - 10);
+        expect(best.score).toBeGreaterThan(0.5);
+        expect((await service.segment(dir, "disc.png", { x: disc.cx + 20, y: disc.cy })).cached).toBe(true);
+      } finally {
+        await engine.close();
+      }
     },
     600_000,
   );

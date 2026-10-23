@@ -135,6 +135,11 @@ function pointLine(point: SelectedPoint, view: TimelineView | null, extras: Refe
   }
   const under = point.layers.slice(targetAt + 1);
   if (target && under.length > 0) parts.push(`under ${under.map((layer) => `${layer.clip} ${layer.type}`).join(", ")}`);
+  const mask = point.segment?.masks[point.segment.chosen];
+  if (mask) {
+    const [x, y, w, h] = mask.bbox;
+    parts.push(`segment ${mask.mask} bbox ${x},${y} ${w}x${h} px (${Math.round(mask.area * 100)} %)`);
+  }
   const details = extras.details?.[index];
   if (details) parts.push(`details ${details}`);
   const frame = extras.frames?.get(point.at) ?? extras.frame;

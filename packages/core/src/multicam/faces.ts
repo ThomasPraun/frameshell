@@ -103,15 +103,26 @@ export async function* sampleFaceFrames(
 }
 
 /** The part of ONNX Runtime Web's API used here; the module is downloaded, so it has no types at build time. */
-interface OrtModule {
+export interface OrtModule {
   env: { wasm: { numThreads: number; wasmPaths: string } };
   InferenceSession: { create(model: Uint8Array): Promise<OrtSession> };
   Tensor: new (type: "float32", data: Float32Array, dims: readonly number[]) => unknown;
 }
 
-interface OrtSession {
+export interface OrtSession {
   readonly inputNames: readonly string[];
   run(feeds: Record<string, unknown>): Promise<Record<string, { data: unknown }>>;
+}
+
+/**
+ * The ONNX Runtime Web module at `runtime` (its `.wasm` beside it), set to run
+ * single-threaded: the threaded build cannot start its workers under Node.
+ */
+export async function importOrt(runtime: string): Promise<OrtModule> {
+  const ort = (await import(/* @vite-ignore */ pathToFileURL(runtime).href)) as OrtModule;
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.wasmPaths = pathToFileURL(join(dirname(runtime), "/")).href;
+  return ort;
 }
 
 /** Below this score a YuNet candidate is not a face (OpenCV's demo uses 0.9; lower keeps turned heads). */
@@ -125,9 +136,7 @@ const FACE_OVERLAP = 0.3;
  * this process.
  */
 export async function loadYunet(runtime: string, model: string): Promise<FaceDetector> {
-  const ort = (await import(/* @vite-ignore */ pathToFileURL(runtime).href)) as OrtModule;
-  ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmPaths = pathToFileURL(join(dirname(runtime), "/")).href;
+  const ort = await importOrt(runtime);
   const session = await ort.InferenceSession.create(new Uint8Array(await readFile(model)));
   const input = session.inputNames[0] ?? "input";
   return async (frame) => {

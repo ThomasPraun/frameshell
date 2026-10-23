@@ -12,9 +12,14 @@ import {
   PROBE_SCRIPT,
   type ProbedElement,
   RpcError,
+  type SegmentedPoint,
   markGenerated,
 } from "@frameshell/protocol";
 import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementAt, programGroup, shotLayers } from "@frameshell/schema";
+import type { InstallProgress } from "../binaries/manager.js";
+import { writeContext } from "../context.js";
+import { encodeGrayPng } from "../segment/png.js";
+import type { PhotoPoint, SegmentResult } from "../segment/segmenter.js";
 import { Chrome } from "./chrome.js";
 
 /** Alpha × opacity below this does not count as painting, as in the app (`PAINT_MIN`). */
@@ -36,6 +41,13 @@ export interface InspectOptions {
   live(root: string, timeline: string, clip: string): Promise<ClipLiveResult>;
   /** Path of managed `chrome-headless-shell` for the project. */
   chrome(root: string): Promise<string>;
+  /** True when the project is an image project (ADR 0017); photos are segmented only there. */
+  imageProject(root: string): Promise<boolean>;
+  /**
+   * The three masks of the part of still image `asset` under `point` (asset pixels) and the pinned model;
+   * rejects with `InvalidOperation` when the asset is not a still image.
+   */
+  segment(root: string, asset: string, point: PhotoPoint, onProgress?: (progress: InstallProgress) => void): Promise<SegmentResult & { model: string }>;
 }
 
 /** Result of `inspect.point` before the daemon adds which view it shows. */
@@ -64,13 +76,15 @@ export class InspectService {
    */
   async point(
     root: string,
-    request: { timeline: string; at: number; x: number; y: number; unit?: "fraction" | "pixel" },
+    request: { timeline: string; at: number; x: number; y: number; unit?: "fraction" | "pixel"; segment?: boolean },
     loaded?: { timeline: Timeline; fps: number },
+    onProgress?: (progress: InstallProgress) => void,
   ): Promise<InspectResult> {
     const { timeline, fps } = loaded ?? (await this.#options.timeline(root, request.timeline));
     const resolution = await this.#options.resolution(root);
     const pixels = request.unit === "pixel";
-    const params = { ...request, x: pixels ? request.x / resolution.width : request.x, y: pixels ? request.y / resolution.height : request.y };
+    const { segment: wantSegment = false, ...where } = request;
+    const params = { ...where, x: pixels ? request.x / resolution.width : request.x, y: pixels ? request.y / resolution.height : request.y };
     if (params.x > 1 || params.y > 1) {
       const where = pixels ? `${request.x},${request.y} px is outside the ${resolution.width}x${resolution.height} frame` : `${request.x},${request.y} is not a fraction of the frame (0 to 1)`;
       throw new RpcError(ErrorCode.InvalidOperation, `The point ${where}.`, { op: "inspect.point", reason: "out of range", field: pixels ? "x/y (pixels)" : "x/y" });
@@ -130,8 +144,58 @@ export class InspectService {
     } finally {
       await chrome?.close();
     }
+    if (wantSegment) {
+      const seen = hits.find((hit) => hit.clip.id === result.target);
+      const photo = await this.#segment(root, seen, resolution, pixel, frame, onProgress);
+      if (typeof photo === "string") result.segmentUnavailable = photo;
+      else result.segment = photo;
+    }
     result.layers = hits.map((hit) => ({ clip: hit.clip.id, type: hit.type, paints: hit.paints }));
     return { ...result, timeline: timeline.id, frame, pixel: { x: Math.round(pixel.x), y: Math.round(pixel.y) } };
+  }
+
+  /**
+   * The photo seen at `pixel` segmented: the point maps through the inverse of the clip's placement into the
+   * asset's own pixels. A string is why nothing was segmented.
+   */
+  async #segment(
+    root: string,
+    seen: Hit | undefined,
+    resolution: Size,
+    pixel: { x: number; y: number },
+    frame: number,
+    onProgress?: (progress: InstallProgress) => void,
+  ): Promise<SegmentedPoint | string> {
+    if (!(await this.#options.imageProject(root))) return "not an image project";
+    if (!seen) return "black";
+    if (seen.generated || seen.type !== "media") return "not a still image";
+    const asset = (seen.clip as { asset: string }).asset;
+    const size = await this.#options.pictureSize(root, asset);
+    if (!size) return "not a still image";
+    const { rect } = seen;
+    const at = {
+      x: Math.min(size.width - 1, Math.max(0, ((pixel.x - rect.left) / rect.width) * size.width)),
+      y: Math.min(size.height - 1, Math.max(0, ((pixel.y - rect.top) / rect.height) * size.height)),
+    };
+    let found: SegmentResult & { model: string };
+    try {
+      found = await this.#options.segment(root, asset, at, onProgress);
+    } catch (error) {
+      if (error instanceof RpcError && error.code === ErrorCode.InvalidOperation) return "not a still image";
+      throw error;
+    }
+    const prefix = `m_${String(frame).padStart(4, "0")}_${Math.round(at.x)}_${Math.round(at.y)}`;
+    const toFrame = (x: number, y: number): [number, number] => [(rect.left + (x / found.width) * rect.width) / resolution.width, (rect.top + (y / found.height) * rect.height) / resolution.height];
+    const round = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 1e4) / 1e4;
+    const masks: SegmentedPoint["masks"] = [];
+    for (const [index, mask] of found.masks.entries()) {
+      const { path } = await writeContext(root, `${prefix}_${index + 1}.png`, encodeGrayPng(mask.mask, found.width, found.height));
+      const [x, y, w, h] = mask.bbox;
+      const [x0, y0] = toFrame(x, y);
+      const [x1, y1] = toFrame(x + w, y + h);
+      masks.push({ mask: path, bbox: mask.bbox, frameBox: [round(x0), round(y0), round(x1), round(y1)], area: round(mask.area), score: round(mask.score) });
+    }
+    return { asset, size: { width: found.width, height: found.height }, model: found.model, chosen: found.chosen, masks };
   }
 
   /** Every clip whose picture's box holds `pixel` at `frame`, topmost first; `paints` from opacity alone. */

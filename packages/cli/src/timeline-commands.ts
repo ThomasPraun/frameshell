@@ -102,6 +102,12 @@ mutations print the new revision):
                                mic (a voice heard in another person's mic does not count; people talking at once
                                overlap), or from transcript speakers for angles sharing a file or naming a speaker.
                                Read-only; --json gives {turns: [{angle, name, start, end}], duration, warnings, speakers}
+  image cutout <clip> --mask <png>
+                               Image projects: cut a part of a photo out as a new layer right above it, exactly over
+                               it. <clip> is the photo's clip; --mask a grayscale PNG at the photo's pixel size, white
+                               = keep (the mask of an inspect --segment point, or your own). Writes
+                               assets/<photo>-cutout-<n>.png (the photo is not changed), one transaction; revert
+                               removes the layer. Background removal: image cutout, then clip set <photo> --opacity 0
   direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from s] [--to s] [--replace-human]
                                Shots from who speaks, by rules (director.json at the project root on top of the
                                template, or --rules): written on the program track in one operation, each with a
@@ -138,7 +144,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -213,6 +219,7 @@ export const TIMELINE_OPTIONS = {
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
+  mask: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -256,6 +263,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam faces": ["replace"],
   "multicam paint": ["from", "to", "speaking", "silent", "measured", "alone"],
   "shot set": ["layout", "angles", "corner"],
+  "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
@@ -291,6 +299,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam faces": [1, Number.POSITIVE_INFINITY],
   "multicam paint": [1, 2],
   "shot set": [1, 1],
+  "image cutout": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
@@ -629,6 +638,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
+    case "image cutout":
+      method = "image.cutout";
+      if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
+      Object.assign(params, { clip: args[0], mask: str("mask") });
+      break;
     case "multicam turns":
       method = "multicam.turns";
       params["group"] = args[0];
@@ -705,6 +719,10 @@ export async function executeTimeline(
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "image.cutout") {
+    const { asset, track, clip } = result as MethodResult<"image.cutout">;
+    return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
+  }
   return formatOperation(result as OperationResult);
 }
 

@@ -2966,6 +2966,29 @@ button.track-head:focus-visible {
   pointer-events: none;
 }
 
+.preview-pick-mask {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  background: rgba(227, 165, 60, 0.18);
+  pointer-events: none;
+}
+
+.preview-pick-status {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  font: 11px/16px var(--font-ui, system-ui);
+  color: #1a1b1d;
+  background: var(--accent);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.preview-pick-status[data-state="failed"] {
+  background: #e5705f;
+}
+
 .preview-pick-label {
   position: absolute;
   left: -1px;

@@ -42,7 +42,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 55;
+export const PROTOCOL_VERSION = 56;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -804,7 +804,8 @@ export const methods = {
       "to find what to edit (\"the box at the top right at 12 s\") or to check an edit landed. Works with the app closed: " +
       "generated clips are loaded in headless Chrome (a second or two each). Elements need a trusted project with the " +
       "clip's plugin; otherwise `unavailable` says why and only the clips are reported. Footage counts as painting its " +
-      "whole box (alpha of footage is not read). Fails with InvalidOperation (`at` or the point outside the timeline or " +
+      "whole box (alpha of footage is not read). With `segment` on a photo in an image project it also names the part of the " +
+      "photo under the point as three masks (ADR 0022). Fails with InvalidOperation (`at` or the point outside the timeline or " +
       "frame), TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -813,6 +814,14 @@ export const methods = {
       x: z.number().nonnegative().describe("Horizontal position, 0 = left edge: a fraction of the frame width (e.g. `0.71`), or project pixels with `unit: \"pixel\"`."),
       y: z.number().nonnegative().describe("Vertical position, 0 = top edge: a fraction of the frame height (e.g. `0.14`), or project pixels with `unit: \"pixel\"`."),
       unit: z.enum(["fraction", "pixel"]).default("fraction").describe("What `x` and `y` are. Default `fraction`."),
+      segment: z
+        .boolean()
+        .default(false)
+        .describe(
+          "In an image project, when the clip seen is a still photo: also segment the part of the photo under the point (ADR 0022). Writes three " +
+            "mask PNGs under `.frameshell/context/` and returns them as `segment` (smallest first, `chosen` = best score). The first use downloads " +
+            "the model (about 45 MB) and takes seconds; later points on a photo take about 0.2 s. Elsewhere `segmentUnavailable` says why. Default false.",
+        ),
       view: ViewParam,
     }),
     result: InspectedPointSchema.extend({
@@ -1435,6 +1444,52 @@ export const methods = {
       replace: z.boolean().optional().describe("Also redo angles that already have reframe keys, replacing them. Default false."),
     }),
     result: MulticamFacesResultSchema,
+  },
+  "segment.prepare": {
+    description:
+      "Get a still image ready to be pointed into (ADR 0022, photo segmentation): encodes it once with MobileSAM and keeps the " +
+      "result in memory by content hash (the last 8 photos), so the first click costs about 0.2 s instead of 3 s. Called by the " +
+      "app when Pick turns on in an image project; `inspect.point` prepares on demand, so agents never call it. The first run " +
+      "downloads the model (two files, about 45 MB) and ONNX Runtime Web (33 MB, if face detection never ran). " +
+      "Fails with AssetNotFound, OutsideProject, InvalidOperation (not an image project, not a still image), or the Binary* errors.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Still image, absolute or relative to `cwd`."),
+    }),
+    result: z.object({
+      asset: z.string().describe("Project-relative asset path."),
+      size: z.object({ width: z.int(), height: z.int() }).describe("The image's pixels, rotation applied."),
+      hash: z.string().describe("`sha256:<hex>` of the asset's content, the key of the cached embedding."),
+      model: z.string().describe("Pinned model, `mobilesam@<revision>`."),
+      cached: z.boolean().describe("True when the image was prepared already."),
+    }),
+  },
+  "image.cutout": {
+    mutating: true,
+    description:
+      "Cut a part out of a photo as a new layer (ADR 0022). `clip` is a still media clip of an image project; `mask` is a " +
+      "project-relative 8-bit grayscale PNG at the photo's own pixel size, white (255) where the part is: the `mask` of a point's " +
+      "`segment.masks` from `inspect.point`, or one you made. The photo with the mask as its transparency, cropped to the mask's " +
+      "box, is written as a new file `assets/<photo name>-cutout-<n>.png` (the photo itself is never changed) and placed on a new " +
+      "video track right above the photo's: same start, length and opacity, position and scale set so the part covers its own " +
+      "pixels of the photo. One transaction labelled `Cut out <photo name>` (yours when one is open): reverting removes the " +
+      "layer; the PNG stays in `assets/`. Background removal is this followed by `clip.set` `opacity: 0` on the photo (or " +
+      "`clip.remove`). Keyframes and fades of the photo are not copied (a warning says so). " +
+      "Example: `{ clip: \"c_0003\", mask: \".frameshell/context/m_0_1210_1530_3.png\" }`. Fails with InvalidOperation (video " +
+      "project, not a still media clip, mask not a grayscale PNG of the photo's size, empty mask), ClipNotFound, AssetNotFound, " +
+      "OutsideProject, or the Binary* errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Id of the photo's clip, from `timeline.show`."),
+      mask: z.string().min(1).describe("Grayscale PNG at the photo's size, project-relative or absolute inside the project; white = keep."),
+    }),
+    result: OperationResultSchema.extend({
+      asset: z.string().describe("Project-relative path of the new PNG with transparency."),
+      track: z.string().describe("Id of the new track, right above the photo's."),
+      clip: z.string().describe("Id of the new clip on it."),
+    }),
   },
   "multicam.paint": {
     mutating: true,

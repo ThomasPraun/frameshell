@@ -4,6 +4,7 @@ import { type CSSProperties, type MouseEvent, type PointerEvent, type RefObject,
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { FRAME_IMAGE_SHORTCUT, imageFromFrame } from "../frame-image.js";
+import { cutOut, pickedCutout } from "../preview/cut-out.js";
 import { holdSettled } from "../preview/element-edit.js";
 import { elementMode, useElementMode } from "../preview/element-mode.js";
 import { liveTarget } from "../preview/live.js";
@@ -253,14 +254,17 @@ export function PreviewPanel({
           data-vertical={vertical || undefined}
           role="img"
           aria-label={empty ? t.preview.emptyMonitor : still ? t.preview.pictureMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
-          onContextMenu={(event) =>
+          onContextMenu={(event) => {
+            const picked = still ? pickedCutout(selection.get()) : null;
             openAskMenu(
               event,
-              still || empty
-                ? []
-                : [{ label: t.preview.imageFromFrame, shortcut: FRAME_IMAGE_SHORTCUT, run: () => void imageFromFrame().catch((error: Error) => setNotice(error.message)) }],
-            )
-          }
+              picked
+                ? [{ label: t.preview.cutOut, run: () => void cutOut(picked).catch((error: Error) => setNotice(error.message)) }]
+                : still || empty
+                  ? []
+                  : [{ label: t.preview.imageFromFrame, shortcut: FRAME_IMAGE_SHORTCUT, run: () => void imageFromFrame().catch((error: Error) => setNotice(error.message)) }],
+            );
+          }}
         >
           <div className="safe-area action" />
           <div className="safe-area title" />
@@ -283,7 +287,7 @@ export function PreviewPanel({
           {program && editing && view && !playing && !vertical && !pickTool && (
             <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
           )}
-          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} />
+          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
         </div>
       </div>
       <Inspector />
