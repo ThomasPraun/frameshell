@@ -106,6 +106,13 @@ export const SubtitleStyleArgSchema = z
       .enum(SUBTITLE_POSITIONS as [SubtitlePosition, ...SubtitlePosition[]])
       .optional()
       .describe("`top`, `center` or `bottom`. Default: the preset's (`bottom`)."),
+    speakerNames: z
+      .boolean()
+      .optional()
+      .describe(
+        "`true`: the first cue of each speaker turn starts with the speaker's transcript name (\"Juan: …\") and a cue never spans " +
+          "two speakers; words with no speaker get no name. Default `false`.",
+      ),
   })
   .describe("Subtitle tracks only. Preview and export render the same style.");
 
@@ -767,7 +774,7 @@ export const TimelineProblemSchema = z.object({
 
 /** A subtitle track's stored `style`, as `timeline.show` and `track.list` report it. */
 const StoredStyleSchema = z
-  .looseObject({ preset: z.string().optional(), position: z.enum(["top", "center", "bottom"]).optional() })
+  .looseObject({ preset: z.string().optional(), position: z.enum(["top", "center", "bottom"]).optional(), speakerNames: z.boolean().optional() })
   .optional()
   .describe("Subtitle tracks: `style` as stored (unset fields use the preset's; no preset = `big-keyword`); absent for clip tracks and when unset.");
 

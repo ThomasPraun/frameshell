@@ -1,7 +1,7 @@
 // Subtitle tracks in the app (SPEC §3.4, §10): cue boxes for the timeline lanes, selections from them, and the lines
 // the preview draws. Cues come from `@frameshell/schema/subtitles`, the definition export burns.
 import type { Size } from "@frameshell/schema/composite";
-import { type ResolvedSubtitleTrack, SUBTITLE_FONT, type SubtitleCue, subtitleAt, subtitleLayout } from "@frameshell/schema/subtitles";
+import { type ResolvedSubtitleTrack, SUBTITLE_FONT, type SubtitleCue, cueTokens, subtitleAt, subtitleLayout } from "@frameshell/schema/subtitles";
 import type { SelectedWord, TimeRange } from "../selection.js";
 
 /** One cue on a subtitle lane, timeline seconds. */
@@ -15,7 +15,7 @@ export interface CueBox {
 
 /** Cue boxes of a track, sorted by start. */
 export function cueBoxes(track: ResolvedSubtitleTrack, fps: number): CueBox[] {
-  return track.cues.map((cue) => ({ start: cue.start / fps, end: cue.end / fps, text: cue.words.map((word) => word.text).join(" "), cue }));
+  return track.cues.map((cue) => ({ start: cue.start / fps, end: cue.end / fps, text: cueTokens(cue).join(" "), cue }));
 }
 
 /** Cue box under timeline second `time`; null between cues. */
@@ -80,12 +80,13 @@ export function subtitleLines(
     const { style } = track;
     const layout = subtitleLayout(style, size);
     const font = `${layout.fontSize}px "${SUBTITLE_FONT.family}"`;
-    const texts = shown.cue.words.map((word) => word.text);
+    const texts = cueTokens(shown.cue);
+    const lead = texts.length - shown.cue.words.length;
     const text = texts.join(" ");
     const left = layout.centerX - measure(text, font) / 2;
     const runs = texts.map((word, i) => ({
       text: word,
-      color: i === shown.active && style.highlight ? style.highlight : style.color,
+      color: i === shown.active + lead && style.highlight ? style.highlight : style.color,
       x: left + (i === 0 ? 0 : measure(`${texts.slice(0, i).join(" ")} `, font)),
     }));
     lines.push({
@@ -97,7 +98,7 @@ export function subtitleLines(
       outline: layout.outline,
       outlineColor: style.outlineColor,
       runs,
-      active: shown.active >= 0 && style.highlight ? texts[shown.active]! : null,
+      active: shown.active >= 0 && style.highlight ? texts[shown.active + lead]! : null,
     });
   }
   return lines;

@@ -1,4 +1,4 @@
-import { type ResolvedSubtitleTrack, SUBTITLE_FONT, type Size, subtitleLayout } from "@frameshell/schema";
+import { type ResolvedSubtitleTrack, SUBTITLE_FONT, type Size, cueTokens, subtitleLayout } from "@frameshell/schema";
 
 /**
  * ASS script burning subtitle cues into export (SPEC §3.5 step 3), laid out
@@ -38,7 +38,8 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
     // \an2: the point is the bottom of the line box, i.e. baseline + descent.
     const anchor = `{\\an2\\pos(${num(layout.centerX)},${num(layout.baseline + layout.fontSize * SUBTITLE_FONT.descent)})}`;
     for (const cue of track.cues) {
-      const texts = cue.words.map((word) => word.text);
+      const texts = cueTokens(cue);
+      const lead = texts.length - cue.words.length;
       if (!cue.highlight || style.highlight === null) {
         events.push(dialogue(layer, cue.start, cue.end, name, anchor + texts.join(" "), fps));
         continue;
@@ -47,7 +48,7 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
         const from = i === 0 ? cue.start : Math.max(cue.start, word.start);
         const to = i + 1 < cue.words.length ? Math.min(cue.end, cue.words[i + 1]!.start) : cue.end;
         if (to <= from) return;
-        const line = texts.map((text, j) => (j === i ? `{\\c${color(style.highlight!)}}${text}{\\c${color(style.color)}}` : text));
+        const line = texts.map((text, j) => (j === i + lead ? `{\\c${color(style.highlight!)}}${text}{\\c${color(style.color)}}` : text));
         events.push(dialogue(layer, from, to, name, anchor + line.join(" "), fps));
       });
     }
