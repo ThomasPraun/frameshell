@@ -196,3 +196,102 @@ test("the Pick tool probes a clip whose render is ready, at the paused time", as
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Pick" })).toHaveAttribute("aria-pressed", "false");
 });
+
+test("the bridge applies the clip's element sheet, swaps it without a reload and counts matches (ADR 0021)", async () => {
+  test.setTimeout(120_000);
+  await press("Home");
+  setClips([
+    { id: "c_held", type: "card", source: "compositions/cards/held.json", start: 0, duration: 2, elements: { "#time": { y: 100 }, "#nothing": { x: 5 } } },
+  ]);
+  await expect(live()).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+  const time = page.frameLocator('[data-testid="preview-live"] iframe').locator("#time");
+  const translate = () => time.evaluate((element) => getComputedStyle(element).translate);
+  const top = () => time.evaluate((element) => element.getBoundingClientRect().top);
+  await expect.poll(translate).toBe("0px 100px");
+  const before = await top();
+  await time.evaluate(() => {
+    (window as unknown as { marker: string }).marker = "same page";
+  });
+
+  // Swap from the renderer as the drag will (#334): no reload, and the answer counts each selector.
+  const counts = await page.evaluate(
+    (css) =>
+      new Promise<Record<string, number>>((resolve) => {
+        const frame = document.querySelector<HTMLIFrameElement>('[data-testid="preview-live"] iframe')!;
+        window.addEventListener("message", function onMessage(event) {
+          const data = event.data as { source?: string; elements?: { id: number; counts: Record<string, number> } } | null;
+          if (event.source !== frame.contentWindow || data?.source !== "frameshell-live" || data.elements?.id !== 41) return;
+          window.removeEventListener("message", onMessage);
+          resolve(data.elements.counts);
+        });
+        frame.contentWindow!.postMessage({ source: "frameshell-preview", elements: { id: 41, css, selectors: ["#time", "#nothing"] } }, "*");
+      }),
+    "#time { translate: 0px 200px !important; }",
+  );
+  expect(counts).toEqual({ "#time": 1, "#nothing": 0 });
+  await expect.poll(translate).toBe("0px 200px");
+  expect(await time.evaluate(() => (window as unknown as { marker?: string }).marker)).toBe("same page");
+  // 100 more composition px: rects inside the frame are in the page's own, unscaled pixels.
+  expect((await top()) - before).toBeCloseTo(100, 0);
+});
+
+test("element mode: a double-click enters the clip's elements, a drag saves one adjustment, undo removes it (ADR 0021)", async () => {
+  test.setTimeout(150_000);
+  await press("Home");
+  // c_slow's render is ready (first test): the engine draws it; element mode loads its page to probe and drag.
+  setClips([{ id: "c_slow", type: "card", source: "compositions/cards/slow.json", start: 0, in: 0.5, duration: 2 }]);
+  await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
+  await expect(live()).toHaveCount(0);
+  const elementsOf = () => JSON.parse(readFileSync(mainFile, "utf8")).tracks[0].clips[0].elements;
+
+  const at = await pointAt(90, 70);
+  await page.mouse.dblclick(at.x, at.y);
+  const layer = page.getByTestId("preview-element-layer");
+  await expect(layer).toHaveAttribute("data-clip", "c_slow", { timeout: 30_000 });
+  await expect(layer).toHaveAttribute("data-live", "true");
+  // The whole clip's handles give way to the element's.
+  await expect(page.getByTestId("layer-handles")).toHaveCount(0);
+  // The inspector grew an Elements group, so the frame may have moved: points are measured again.
+  const from = await pointAt(92, 72);
+  await expect(page.getByTestId("preview-element-hover")).toHaveAttribute("data-selector", "#time", { timeout: 30_000 });
+
+  // Drag #time by 100 × 50 composition px: the page is laid out at the 960×540 project format, unit 1.
+  const frame = await laidOutBox(page.getByTestId("preview-frame"));
+  const scale = frame.width / SIZE.width;
+  await page.mouse.down();
+  await page.mouse.move(from.x + 50 * scale, from.y + 25 * scale, { steps: 4 });
+  await page.mouse.move(from.x + 100 * scale, from.y + 50 * scale, { steps: 4 });
+  // While dragging, the clip's live page shows with the new sheet in place of its render.
+  await expect(page.locator('[data-testid="preview-pick-page"].is-shown')).toHaveCount(1);
+  const dragged = page.frameLocator('[data-testid="preview-pick-page"].is-shown iframe').locator("#time");
+  const translate = () => dragged.evaluate((element) => getComputedStyle(element).translate);
+  await expect.poll(translate).not.toBe("none");
+  const shown = await translate();
+  await page.mouse.up();
+
+  await expect.poll(() => elementsOf(), { timeout: 30_000 }).toBeTruthy();
+  const saved = elementsOf()["#time"];
+  // Within a screen px or two of the frame, which may be small on a busy desktop.
+  const slack = Math.ceil(2 / scale);
+  expect(Math.abs(saved.x - 100)).toBeLessThanOrEqual(slack);
+  expect(Math.abs(saved.y - 50)).toBeLessThanOrEqual(slack);
+  expect(Object.keys(saved).sort()).toEqual(["x", "y"]);
+  // The drag showed what was saved.
+  expect(shown).toBe(`${saved.x}px ${saved.y}px`);
+  const row = page.getByTestId("element-adjustment");
+  await expect(row).toHaveAttribute("data-selector", "#time");
+  // An id-anchored selector is not fragile, and it matches at the shown frame.
+  await expect(row).not.toContainText("May not follow code edits");
+  await expect(row).not.toHaveAttribute("data-unmatched", "true");
+  await expect(page.getByTestId("element-handles")).toHaveAttribute("data-selector", "#time");
+
+  // One undo step: the entry goes.
+  await page.keyboard.press(`${MOD}+z`);
+  await expect.poll(() => elementsOf(), { timeout: 30_000 }).toBeUndefined();
+  await expect(row).toHaveCount(0);
+
+  // Escape leaves element mode: the clip's own handles return.
+  await press("Escape");
+  await expect(layer).toHaveCount(0);
+  await expect(page.getByTestId("layer-handles")).toHaveAttribute("data-clip", "c_slow");
+});

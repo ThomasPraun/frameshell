@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LiveContext, PluginApi, RenderContext, RenderProgress } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
+import { patchedBundle, withSheet } from "../src/elements.js";
 import {
   BUNDLE_DIR,
   NO_CONFIG,
@@ -55,7 +56,7 @@ function fakeRemotion(
   compositions: RemotionComposition[] = [{ id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 240 }],
   config: (root: string) => RemotionProjectConfig = () => NO_CONFIG,
 ) {
-  const calls = { bundle: 0, roots: [] as string[], select: [] as unknown[], render: [] as Record<string, unknown>[], canceled: 0, webpack: [] as WebpackConfig[] };
+  const calls = { bundle: 0, roots: [] as string[], select: [] as unknown[], render: [] as Record<string, unknown>[], served: [] as string[], canceled: 0, webpack: [] as WebpackConfig[] };
   const renderer: RemotionRenderer = {
     async selectComposition(options) {
       calls.select.push(options);
@@ -66,6 +67,7 @@ function fakeRemotion(
     getCompositions: async () => compositions,
     async renderMedia(options) {
       calls.render.push(options as unknown as Record<string, unknown>);
+      calls.served.push(readFileSync(join(options.serveUrl, "index.html"), "utf8"));
       options.onProgress({ progress: 0.5 });
       writeFileSync(options.outputLocation, "webm-bytes");
       options.onProgress({ progress: 1 });
@@ -285,6 +287,65 @@ describe("remotion.config of the Remotion project", () => {
 });
 
 describe("remotion adapter render", () => {
+  it("serves the bundle itself, untouched, without elementCss", async () => {
+    const { load, calls } = fakeRemotion();
+    const remotion = adapter(load);
+    expect(remotion.elementStyles).toBe(true);
+    const outDir = tempDir();
+    await remotion.render({ id: "c_1", source: SOURCE, props: { composition: "Intro" } }, context(outDir).ctx);
+    expect(calls.render[0]!["serveUrl"]).toContain(join(project, BUNDLE_DIR));
+    expect(calls.served).toEqual(["<html></html>"]);
+    expect(readdirSync(outDir)).toEqual(["render.webm"]);
+  });
+
+  it("serves a copy whose index.html carries the sheet, then removes it and leaves the bundle as it was", async () => {
+    const { load, calls } = fakeRemotion();
+    const remotion = adapter(load);
+    const outDir = tempDir();
+    const { ctx } = context(outDir);
+    const clip = { id: "c_1", source: SOURCE, props: { composition: "Intro" } };
+    await remotion.render(clip, { ...ctx, elementCss: "#a { translate: 5px 0 !important; }" });
+    await remotion.render(clip, ctx);
+    expect(calls.render[0]!["serveUrl"]).toBe(join(outDir, "bundle-elements"));
+    expect(calls.served[0]).toBe("<html></html><style data-frameshell-elements>#a { translate: 5px 0 !important; }</style>");
+    expect(calls.served[1]).toBe("<html></html>");
+    expect(existsSync(join(outDir, "bundle-elements"))).toBe(false);
+    expect(calls.bundle).toBe(1);
+  });
+
+  it("patches only the top index.html of the copy and hard-links the rest", async () => {
+    const source = tempDir();
+    mkdirSync(join(source, "public", "site"), { recursive: true });
+    writeFileSync(join(source, "index.html"), "<html><head></head></html>");
+    writeFileSync(join(source, "bundle.js"), "js");
+    writeFileSync(join(source, "public", "site", "index.html"), "<html><head></head></html>");
+    const dest = join(tempDir(), "copy");
+    await patchedBundle(source, dest, "#a { scale: 2 !important; }");
+    expect(readFileSync(join(dest, "index.html"), "utf8")).toContain("data-frameshell-elements");
+    expect(readFileSync(join(dest, "public", "site", "index.html"), "utf8")).toBe("<html><head></head></html>");
+    expect(statSync(join(dest, "bundle.js")).ino).toBe(statSync(join(source, "bundle.js")).ino);
+    expect(readFileSync(join(source, "index.html"), "utf8")).toBe("<html><head></head></html>");
+  });
+
+  it("removes the copy when the render fails", async () => {
+    const { load } = fakeRemotion();
+    const failing = async (root: string): Promise<RemotionModules> => {
+      const modules = await load(root);
+      return { ...modules, renderer: { ...modules.renderer, renderMedia: async () => Promise.reject(new Error("Chrome crashed")) } };
+    };
+    const outDir = tempDir();
+    const { ctx } = context(outDir);
+    const clip = { id: "c_1", source: SOURCE, props: { composition: "Intro" } };
+    await expect(adapter(failing).render(clip, { ...ctx, elementCss: "#a { scale: 2 !important; }" })).rejects.toThrow(/Chrome crashed/);
+    expect(existsSync(join(outDir, "bundle-elements"))).toBe(false);
+  });
+
+  it("puts the sheet last in the head and cannot close its own style", () => {
+    expect(withSheet("<html><head><style>a{}</style></head><body></body></html>", "b{}</style>")).toBe(
+      "<html><head><style>a{}</style><style data-frameshell-elements>b{}<\\/style></style></head><body></body></html>",
+    );
+  });
+
   it("renders the named composition with the managed Chrome, scaled to the project, to VP9 WebM with alpha", async () => {
     const { load, calls } = fakeRemotion();
     const remotion = adapter(load);

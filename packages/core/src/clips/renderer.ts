@@ -13,7 +13,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
-import type { AdapterClip, Timeline } from "@frameshell/schema";
+import { type AdapterClip, type Timeline, elementStyles } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
@@ -307,7 +307,7 @@ export class ClipRenderer {
     if (!(await stat(join(root, ...entry.split("/"))).then((info) => info.isFile(), () => false))) {
       throw unavailable(`its live page ${entry} does not exist.`);
     }
-    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key };
+    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip) };
   }
 
   /**
@@ -561,6 +561,7 @@ export class ClipRenderer {
         ...format,
         signal: ctx.signal,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
+        ...elementCssOf(clip),
         progress: ({ fraction }) => {
           if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
         },
@@ -674,4 +675,10 @@ export async function listTimelineIds(root: string): Promise<string[]> {
     const id = /^([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/.exec(name)?.[1];
     return id ? [id] : [];
   });
+}
+
+/** `{ elementCss }` for a clip with adjustments, else nothing: the context stays as before (ADR 0021). */
+function elementCssOf(clip: AdapterClip): { elementCss?: string } {
+  const css = elementStyles(clip.elements);
+  return css === "" ? {} : { elementCss: css };
 }

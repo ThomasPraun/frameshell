@@ -1,6 +1,6 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
-import { type Clip, SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
+import { type Clip, type ElementAdjust, SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -73,6 +73,8 @@ export interface ClipBox {
   marks: TransitionMark[];
   /** Stored `keys` per property, on the clip's own clock; absent properties have none. */
   keys: Partial<Record<KeyProp, KeyBox[]>>;
+  /** Stored `elements` of a generated clip (ADR 0021), by CSS selector; empty without any. */
+  elements: Readonly<Record<string, ElementAdjust>>;
 }
 
 /** One angle a shot shows. */
@@ -315,7 +317,13 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     fadeOut: stored("fadeOut"),
     marks,
     keys: keyBoxes(fields["keys"]),
+    elements: elementsOf(fields["elements"]),
   };
+}
+
+/** A stored `elements` map as the daemon sent it (already validated); empty when absent. */
+function elementsOf(value: unknown): Readonly<Record<string, ElementAdjust>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, ElementAdjust>) : {};
 }
 
 function baseName(path: string): string {

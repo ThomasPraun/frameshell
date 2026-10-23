@@ -884,3 +884,55 @@ describe("operation properties", () => {
     expect(applied.size).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe("clip.set elements (ADR 0021)", () => {
+  const supported = () =>
+    context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null, elementStyles: true }]]) });
+  async function withTitle(ctx = supported()) {
+    return (
+      await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", source: "c/index.html", start: 0, duration: 5 }, ctx)
+    ).timeline;
+  }
+  const elementsOf = (timeline: Timeline) => (clipsOf(timeline, "t_v")[0] as { elements?: unknown }).elements;
+
+  it("merges per selector, removes with null and clears with null; an empty map is absent", async () => {
+    const ctx = supported();
+    let t = await withTitle(ctx);
+    t = (await apply(t, "clip.set", { clip: "c_0001", elements: { "#title": { y: -40, scale: 1.2 }, "#logo": { x: 10 } } }, ctx)).timeline;
+    expect(elementsOf(t)).toEqual({ "#title": { y: -40, scale: 1.2 }, "#logo": { x: 10 } });
+    t = (await apply(t, "clip.set", { clip: "c_0001", elements: { "#title": { x: 5 } } }, ctx)).timeline;
+    expect(elementsOf(t)).toEqual({ "#title": { x: 5 }, "#logo": { x: 10 } });
+    t = (await apply(t, "clip.set", { clip: "c_0001", elements: { "#title": null } }, ctx)).timeline;
+    expect(elementsOf(t)).toEqual({ "#logo": { x: 10 } });
+    const cleared = (await apply(t, "clip.set", { clip: "c_0001", elements: null }, ctx)).timeline;
+    expect(clipsOf(cleared, "t_v")[0]).not.toHaveProperty("elements");
+    const emptied = (await apply(t, "clip.set", { clip: "c_0001", elements: { "#logo": null } }, ctx)).timeline;
+    expect(clipsOf(emptied, "t_v")[0]).not.toHaveProperty("elements");
+  });
+
+  it("inverse restores the previous elements, or their absence", async () => {
+    const ctx = supported();
+    const t0 = await withTitle(ctx);
+    const set = await apply(t0, "clip.set", { clip: "c_0001", elements: { "#title": { y: 8 } } }, ctx);
+    expect(clipsOf((await apply(set.timeline, "timeline.patch", set.inverse.args, ctx)).timeline, "t_v")).toEqual(clipsOf(t0, "t_v"));
+    const clear = await apply(set.timeline, "clip.set", { clip: "c_0001", elements: null }, ctx);
+    const undone = (await apply(clear.timeline, "timeline.patch", clear.inverse.args, ctx)).timeline;
+    expect(elementsOf(undone)).toEqual({ "#title": { y: 8 } });
+  });
+
+  it("refuses an adapter without support, unsafe selectors, media clips and bad numbers", async () => {
+    const plain = context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null }]]) });
+    const unsupported = await withTitle(plain);
+    expect((await rejection(apply(unsupported, "clip.set", { clip: "c_0001", elements: { "#a": { x: 1 } } }, plain))).message).toMatch(
+      /does not support `elements`/,
+    );
+    const ctx = supported();
+    const t = await withTitle(ctx);
+    expect((await rejection(apply(t, "clip.set", { clip: "c_0001", elements: { "a { color: red }": { x: 1 } } }, ctx))).data).toMatchObject({
+      field: "elements",
+    });
+    const media = (await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    expect((await rejection(apply(media, "clip.set", { clip: "c_0001", elements: { "#a": { x: 1 } } }))).message).toMatch(/only adapter clips/);
+    expect(() => op("clip.set", { clip: "c_0001", elements: { "#a": { scale: 0 } } })).toThrow();
+  });
+});

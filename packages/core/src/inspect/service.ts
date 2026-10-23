@@ -241,16 +241,20 @@ async function serve(project: string, live: ClipLiveResult, url: string): Promis
     if (!(await stat(target)).isFile()) return { status: 404 };
     const rel = [...rootParts, ...parts].join("/");
     const contentType = TYPES[rel.slice(rel.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream";
-    if (rel === live.entry) return { status: 200, contentType, body: Buffer.from(injectHead(await readFile(target, "utf8"), live.head), "utf8") };
+    if (rel === live.entry) return { status: 200, contentType, body: Buffer.from(injectHead(await readFile(target, "utf8"), live.head, live.elementCss), "utf8") };
     return { status: 200, contentType, body: await readFile(target) };
   } catch {
     return { status: 404 };
   }
 }
 
-/** The adapter's `head` and the probe script at the start of `<head>` (else after `<html>`, the doctype, or first). */
-function injectHead(html: string, head: string): string {
-  const scripts = `<script>${head}</script><script>${PROBE_SCRIPT}</script>`;
+/**
+ * The adapter's `head` and the probe script at the start of `<head>` (else after `<html>`, the doctype, or first),
+ * with the clip's element sheet so boxes are those of the adjusted page (ADR 0021).
+ */
+function injectHead(html: string, head: string, elementCss = ""): string {
+  const sheet = elementCss === "" ? "" : `<style data-frameshell-elements>${elementCss}</style>`;
+  const scripts = `<script>${head}</script><script>${PROBE_SCRIPT}</script>${sheet}`;
   for (const tag of [/<head(?:\s[^>]*)?>/i, /<html(?:\s[^>]*)?>/i, /<!doctype[^>]*>/i]) {
     if (tag.test(html)) return html.replace(tag, (open) => open + scripts);
   }

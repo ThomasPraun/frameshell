@@ -215,3 +215,5 @@ export {
   type NestedFades,
   nestedFades,
 } from "./transitions.js";
+
+export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";

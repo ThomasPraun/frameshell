@@ -2,6 +2,16 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Element adjustments (ADR 0021)
+
+**Element adjustment**:
+A move (`x`, `y`, composition CSS pixels) and uniform `scale` of one element inside a generated clip, stored in the clip's `elements` under the element's CSS selector and applied over the composition; the source file stays untouched.
+_Avoid_: override, patch, element transform (a clip's `transform` places the whole clip)
+
+**Element mode**:
+The preview state entered by double-clicking a generated clip, where handles move and scale the element under the cursor instead of the clip; Escape leaves it.
+_Avoid_: edit mode, isolation mode
+
 ## Transitions and keyframes (ADR 0018)
 
 **Transition**:

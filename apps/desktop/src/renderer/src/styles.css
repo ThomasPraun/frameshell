@@ -3010,6 +3010,114 @@ button.track-head:focus-visible {
   color-scheme: light;
 }
 
+/* Element mode (ADR 0021): the clip's elements take the pointer, above the picture and its overlays. */
+/* Sized outright: the frame's grid centres its items, which would shrink this one to its label. */
+.preview-element-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  cursor: default;
+  touch-action: none;
+}
+
+.preview-element-hover {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  pointer-events: none;
+}
+
+/* Same handles as a layer's; the selector rides above the box, as the Pick outline names its element. */
+.preview-element-name {
+  position: absolute;
+  left: -1px;
+  bottom: calc(100% + 3px);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+  font: 10.5px/15px var(--font-mono);
+  color: #1a1b1d;
+  background: var(--accent);
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.preview-element-hover .preview-element-name {
+  color: var(--accent);
+  background: rgba(29, 30, 32, 0.88);
+}
+
+/* Top left: the live label takes the top right corner. */
+.preview-element-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  background: rgba(29, 30, 32, 0.88);
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Element adjustments of a generated clip, one row per selector. */
+.element-adjustments {
+  flex: 1 0 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.element-adjustments-head,
+.element-adjustment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.element-adjustments-head .clip-inspector-hint {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.element-selector {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.element-values {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.element-note {
+  padding-left: 5px;
+  border-left: 2px solid var(--line);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.element-note.is-warning {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .status-notice {
   color: var(--accent);
   overflow: hidden;
