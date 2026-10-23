@@ -6,7 +6,7 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
-export { type NameWrites, type PeopleChange, type PeopleServiceOptions, type PeopleTarget, PeopleService } from "./people/service.js";
+export { type NameWrites, type PeopleChange, type PeopleServiceOptions, type PeopleTarget, PeopleService, type VoicePrinter } from "./people/service.js";
 export {
   FACE_EMBEDDING_DIMS,
   type FaceEmbedder,
@@ -22,7 +22,6 @@ export {
   type Similarity,
   type TrackBox,
   alignFace,
-  cosine,
   loadSface,
   peopleScanWorker,
   scanFrameSize,
@@ -32,6 +31,29 @@ export {
 } from "./people/scan.js";
 export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
 export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, mergeSpans, personRanges } from "./people/ranges.js";
+export { FBANK_BINS, FBANK_SAMPLE_RATE, type Fbank, fbank, subtractMean } from "./people/fbank.js";
+export {
+  type CampplusFiles,
+  type Stretch,
+  type VoiceEmbedRequest,
+  type VoiceEmbedder,
+  campplusWorkerEmbedder,
+  embedStretches,
+} from "./people/voice-embed.js";
+export {
+  VOICES_DIR,
+  type VoiceOutcome,
+  type VoicePrint,
+  type VoicePrintOptions,
+  type VoiceWanted,
+  classifyVoiceCache,
+  computeVoicePrints,
+  meanPrint,
+  voiceKey,
+  voiceStretches,
+} from "./people/voices.js";
+export { type PersonVoice, SPEAKER_MARGIN, SPEAKER_MATCH, type SpeakerVoice, speakerSuggestions, suggestionId } from "./people/suggest.js";
+export { cosine } from "./people/vector.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {

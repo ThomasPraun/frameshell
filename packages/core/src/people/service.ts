@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { ErrorCode, type PEOPLE_CHANGES, type PersonInfo, RpcError } from "@frameshell/protocol";
+import { ErrorCode, type MethodResult, type PEOPLE_CHANGES, type PeopleSuggestion, type PersonInfo, RpcError } from "@frameshell/protocol";
 import {
   PEOPLE_FILE,
   type PeopleFile,
@@ -22,6 +23,11 @@ import {
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { readPrevious } from "../transcripts/transcriber.js";
 import { type PersonRanges, type RangeKind, type RangesSource, personRanges } from "./ranges.js";
+import { type PersonVoice, type SpeakerVoice, speakerSuggestions } from "./suggest.js";
+import { type VoiceOutcome, type VoiceWanted, meanPrint, voiceKey } from "./voices.js";
+
+/** Voice prints of transcript speakers, by {@link voiceKey}; the daemon backs it with `computeVoicePrints`. */
+export type VoicePrinter = (wanted: VoiceWanted[]) => Promise<Map<string, VoiceOutcome>>;
 
 /** What happened, as `people.changed` names it. */
 export type PeopleChange = (typeof PEOPLE_CHANGES)[number];
@@ -169,6 +175,52 @@ export class PeopleService {
     });
   }
 
+  /**
+   * Suggested links nobody answered yet (ADR 0020 decision 5), with hints on
+   * what kept voices from being compared. Kind `speaker` only: prints are
+   * computed only when some person has a linked speaker.
+   */
+  async suggest(root: string, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+    const file = await readPeople(root);
+    const dismissed = new Set(file.dismissed);
+    const { suggestions, hints } = await suggestAll(root, file, voices);
+    return { suggestions: suggestions.filter((suggestion) => !dismissed.has(suggestion.id)), hints };
+  }
+
+  /**
+   * Answer suggestions by id: link each (`by` recorded, as `link`), or with
+   * `reject` add the ids to `dismissed`. Every id must be among the current
+   * suggestions (dismissed ones included), else nothing changes. Throws
+   * `InvalidOperation` (`unknown suggestion`, or a `link` reason).
+   */
+  async confirm(root: string, ids: readonly string[], options: { reject: boolean; by?: string | undefined; voices: VoicePrinter }): Promise<Omit<MethodResult<"people.confirm">, "dir">> {
+    const { suggestions } = await suggestAll(root, await readPeople(root), options.voices);
+    const known = new Map(suggestions.map((suggestion) => [suggestion.id, suggestion]));
+    const unknown = ids.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw refused("people.confirm", `no current suggestion ${unknown.join(", ")}: the voices or links changed since, or the id is mistyped.`, "unknown suggestion", "frameshell people suggest");
+    }
+    const chosen = [...new Set(ids)].map((id) => known.get(id)!);
+    if (options.reject) {
+      const dismissed = await this.#change(root, async () => {
+        const file = await readPeople(root);
+        const added = chosen.filter((suggestion) => !file.dismissed.includes(suggestion.id));
+        if (added.length === 0) return [];
+        await writeJsonAtomic(join(root, PEOPLE_FILE), { ...file, dismissed: [...file.dismissed, ...added.map((suggestion) => suggestion.id)] });
+        for (const suggestion of added) this.#onChanged(root, "dismiss", suggestion.person.id);
+        return added.map((suggestion) => suggestion.id);
+      });
+      return { confirmed: [], dismissed };
+    }
+    const confirmed = [];
+    for (const suggestion of chosen) {
+      const { transcript, speaker } = suggestion.speaker;
+      const result = await this.link(root, suggestion.person.id, { speaker: { transcript, speaker } }, options.by);
+      confirmed.push({ id: suggestion.id, person: suggestion.person, speaker: { transcript, speaker }, linked: result.linked, transcripts: result.transcripts });
+    }
+    return { confirmed, dismissed: [] };
+  }
+
   async #save(root: string, file: PeopleFile, change: PeopleChange, person: string): Promise<void> {
     await writeJsonAtomic(join(root, PEOPLE_FILE), file);
     this.#onChanged(root, change, person);
@@ -185,6 +237,80 @@ export class PeopleService {
     });
     return run;
   }
+}
+
+/**
+ * Every `speaker` suggestion for the project, dismissed ones included, and
+ * hints. A person's voice is the mean of their linked speakers' prints
+ * (weighted by seconds of speech); candidates are the speakers of transcripts
+ * linked to nobody.
+ */
+async function suggestAll(root: string, file: PeopleFile, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+  const hints: string[] = [];
+  const transcripts = await readAllTranscripts(root, hints);
+  const claimed = new Set(file.people.flatMap((person) => person.speakers.map(speakerLinkKey)));
+  const owned: { person: Person; wanted: VoiceWanted[] }[] = [];
+  for (const person of file.people) {
+    const wanted = person.speakers.filter((link) => {
+      const transcript = transcripts.get(link.transcript);
+      return transcript && (link.speaker === undefined || transcript.speakers?.some((speaker) => speaker.id === link.speaker));
+    });
+    if (wanted.length > 0) owned.push({ person, wanted: wanted.map(({ transcript, speaker }) => ({ transcript, speaker })) });
+  }
+  if (owned.length === 0) {
+    hints.push("No person has a linked transcript speaker yet, so there is no voice to compare with: frameshell people link <person> --speaker <transcript>:<speaker>");
+    return { suggestions: [], hints };
+  }
+  const candidates: { transcript: string; speaker: string; name: string }[] = [];
+  for (const [rel, transcript] of transcripts) {
+    if (claimed.has(speakerLinkKey({ transcript: rel }))) continue;
+    if (!transcript.speakers?.length) {
+      hints.push(`${rel} has no speakers, so its voices are not compared: frameshell transcribe --speakers ${transcript.asset}`);
+      continue;
+    }
+    for (const speaker of transcript.speakers) {
+      if (!claimed.has(speakerLinkKey({ transcript: rel, speaker: speaker.id }))) candidates.push({ transcript: rel, speaker: speaker.id, name: speaker.name });
+    }
+  }
+  if (candidates.length === 0) return { suggestions: [], hints };
+
+  const outcomes = await voices([...owned.flatMap((entry) => entry.wanted), ...candidates.map(({ transcript, speaker }) => ({ transcript, speaker }))]);
+  const reasons = new Set<string>();
+  const printOf = (wanted: VoiceWanted) => {
+    const outcome = outcomes.get(voiceKey(wanted));
+    if (outcome?.ok) return outcome.value;
+    if (outcome) reasons.add(outcome.reason);
+    return null;
+  };
+  const people: PersonVoice[] = [];
+  for (const { person, wanted } of owned) {
+    const prints = wanted.map(printOf).filter((print) => print !== null);
+    const print = meanPrint(prints.map((entry) => entry.print), prints.map((entry) => entry.seconds));
+    if (print) people.push({ id: person.id, name: person.name, print });
+  }
+  const speakers: SpeakerVoice[] = [];
+  for (const candidate of candidates) {
+    const print = printOf(candidate);
+    if (print) speakers.push({ ...candidate, print: print.print });
+  }
+  hints.push(...[...reasons].map((reason) => `${reason}: its voice is not compared.`));
+  return { suggestions: speakerSuggestions(people, speakers), hints };
+}
+
+/** Valid transcripts under `transcripts/` by project-relative path, sorted; invalid ones are reported in `hints`. */
+async function readAllTranscripts(root: string, hints: string[]): Promise<Map<string, Transcript>> {
+  const entries = await readdir(join(root, "transcripts"), { recursive: true }).catch(() => [] as string[]);
+  const found = new Map<string, Transcript>();
+  for (const entry of entries.filter((name) => name.endsWith(".words.json")).sort()) {
+    const rel = `transcripts/${entry.split(sep).join("/")}`;
+    try {
+      const transcript = await readPrevious(join(root, ...rel.split("/")));
+      if (transcript) found.set(rel, transcript);
+    } catch {
+      hints.push(`${rel} is not a valid transcript, so its voices are not compared.`);
+    }
+  }
+  return found;
 }
 
 /** `people.json` of the project, or an empty file when there is none. Throws `InvalidProjectFile`. */

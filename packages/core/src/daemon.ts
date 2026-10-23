@@ -44,14 +44,16 @@ import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
-import { FACE_DETECTION_MODEL, FACE_RECOGNITION_MODEL, ONNX_RUNTIME_WEB } from "./binaries/manifest.js";
+import { FACE_DETECTION_MODEL, FACE_RECOGNITION_MODEL, ONNX_RUNTIME_WEB, SPEAKER_EMBEDDING_MODEL } from "./binaries/manifest.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { PluginHost } from "./plugins/host.js";
-import { PeopleService } from "./people/service.js";
+import { PeopleService, type VoicePrinter } from "./people/service.js";
 import { scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
+import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
+import { computeVoicePrints } from "./people/voices.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -63,7 +65,7 @@ import { TimelineService, type TxRef } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
-import type { AudioExtractor } from "./transcripts/audio.js";
+import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
@@ -103,6 +105,8 @@ export interface DaemonOptions {
   faceScanner?: FaceScanner;
   /** Face scan of one video for `people.scan`. Defaults to YuNet and SFace on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   peopleScanner?: PeopleScanner;
+  /** Speaker embeddings for `people.suggest` voice prints. Defaults to CAM++ on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
+  voiceEmbedder?: VoiceEmbedder;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -239,6 +243,28 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   await transactions.restore();
   const review = new ReviewSwitch(dirs);
   const people = new PeopleService({ onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, person }) });
+  /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
+  const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
+    const embed: VoiceEmbedder =
+      options.voiceEmbedder ??
+      (async (request) => {
+        const project = await projectBinaries(dir);
+        return campplusWorkerEmbedder({
+          runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: progress }),
+          model: await binaries.ensureModel(SPEAKER_EMBEDDING_MODEL, { onProgress: progress }),
+        })(request);
+      });
+    return (wanted) =>
+      computeVoicePrints({
+        root: dir,
+        wanted,
+        embed,
+        tools: { ensureBinary: async (name, onProgress) => binaries.ensure(name, await projectBinaries(dir), { onProgress }) },
+        media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
+        extractAudio: options.extractAudio ?? extractAudioWithFfmpeg,
+        progress,
+      });
+  };
   /** After an operation of `key` in `tx`: a proposal whose transaction is already over (no grouping) is ready. */
   const settle = async (key: string, tx: TxRef) => {
     if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
@@ -1043,6 +1069,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const flat = await resolveNested(dir, loaded);
       const found = await people.ranges(dir, person, kind, flat, (group) => groupTurns(turnsSource, dir, group));
       return { dir, person: { id: found.person.id, name: found.person.name }, kind, timeline, spans: found.spans, total: found.total, warnings: found.warnings };
+    },
+    // Both read transcription WAVs: `transcribing` keeps `gc` off them meanwhile.
+    "people.suggest": async ({ cwd }, _caller, request) => {
+      const dir = await root(cwd);
+      return { dir, ...(await transcribing(dir, () => people.suggest(dir, voicePrinter(dir, request.progress)))) };
+    },
+    "people.confirm": async ({ cwd, suggestions, reject }, caller, request) => {
+      const dir = await root(cwd);
+      const author = journalAuthorOf(caller);
+      const by = author.startsWith("agent:") ? author : undefined;
+      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, voices: voicePrinter(dir, request.progress) }))) };
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),

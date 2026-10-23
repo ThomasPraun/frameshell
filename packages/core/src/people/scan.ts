@@ -7,10 +7,11 @@ import {
   type FaceDetector,
   faceFrameSize,
   faceOverlap,
-  loadOrtSession,
   loadYunet,
   sampleFaceFrames,
 } from "../multicam/faces.js";
+import { loadOnnxModel } from "../onnx-web.js";
+import { cosine } from "./vector.js";
 
 /** Numbers SFace gives per face. */
 export const FACE_EMBEDDING_DIMS = 128;
@@ -110,7 +111,7 @@ export type FaceEmbedder = (aligned: Float32Array) => Promise<Float32Array>;
 
 /** {@link FaceEmbedder} running the SFace model at `model` with the ONNX Runtime Web module at `runtime`. */
 export async function loadSface(runtime: string, model: string): Promise<FaceEmbedder> {
-  const { ort, session } = await loadOrtSession(runtime, model);
+  const { ort, session } = await loadOnnxModel(runtime, model);
   const input = session.inputNames[0] ?? "data";
   return async (aligned) => {
     const outputs = await session.run({ [input]: new ort.Tensor("float32", aligned, [1, 3, ALIGNED_SIZE, ALIGNED_SIZE]) });
@@ -125,19 +126,6 @@ function normalized(vector: ArrayLike<number>): Float32Array {
   for (let i = 0; i < vector.length; i++) sum += vector[i]! * vector[i]!;
   const length = Math.sqrt(sum) || 1;
   return Float32Array.from(vector as ArrayLike<number> & Iterable<number>, (value) => value / length);
-}
-
-/** Cosine similarity of two vectors. */
-export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i]! * b[i]!;
-    na += a[i]! * a[i]!;
-    nb += b[i]! * b[i]!;
-  }
-  return na === 0 || nb === 0 ? 0 : dot / Math.sqrt(na * nb);
 }
 
 /**

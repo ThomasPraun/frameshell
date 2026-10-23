@@ -10,7 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
-import { PeopleChangedSchema, PeopleScanResultSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
+import { PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
@@ -159,10 +159,11 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "clip", "context", "proposal", "people", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `clip`: " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
+        "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
@@ -364,7 +365,8 @@ const EventNameSchema = z
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
       "`proposal.changed`: the project's review-mode proposal opened, grew, became ready, was rebased or closed. " +
-      "`people.changed`: a person was added, renamed or removed, or a link was added or removed (`people.json`). " +
+      "`people.changed`: a person was added, renamed or removed, a link was added or removed, or a suggestion " +
+      "was dismissed (`people.json`). " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -872,7 +874,7 @@ export const methods = {
     mutating: true,
     description:
       "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
-      "thumbnails, energy envelopes and transcription WAVs of assets deleted or changed since (or built for an older " +
+      "thumbnails, energy envelopes, transcription WAVs and voice prints of assets deleted or changed since (or built for an older " +
       "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
       "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
       "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
@@ -1969,6 +1971,56 @@ export const methods = {
       spans: z.array(z.object({ start: z.number(), end: z.number() })).describe("Timeline seconds, sorted, disjoint."),
       total: z.number().describe("Seconds covered by `spans`."),
       warnings: z.array(z.string()),
+    }),
+  },
+  "people.suggest": {
+    description:
+      "Links Frameshell suggests and nobody confirmed yet (ADR 0020); nothing is linked until `people.confirm`. Kind " +
+      "`speaker`: a transcript speaker linked to nobody whose voice sounds like one person's linked speakers (voice " +
+      "prints: CAM++ embeddings of each speaker's longest stretches alone, computed locally on first use, a few " +
+      "seconds per transcript, then cached in `.frameshell/people/voices/`; the speaker model is downloaded once). " +
+      "At most one suggestion per speaker, best score first; suggestions answered \"no\" (`dismissed`) are left out. " +
+      "`hints` say what keeps voices from being matched: no person has a linked speaker yet, a transcript has no " +
+      "speakers (run `transcribe.speakers`), is stale, or a speaker says too little. Confirm only what the person " +
+      "agreed to or what is certain.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      suggestions: z.array(PeopleSuggestionSchema),
+      hints: z.array(z.string()).describe("Why some voices could not be compared, with the command that fixes it. Empty when none."),
+    }),
+  },
+  "people.confirm": {
+    mutating: true,
+    description:
+      "Answer suggestions from `people.suggest` by id: yes applies each one's link (as `people.link`: the person's " +
+      "name is written into the transcript; called by an agent, the link records it in `by`), `reject: true` adds " +
+      "the ids to `dismissed` in `people.json` so they are not suggested again. Ids are checked against the current " +
+      "suggestions first: one no longer suggested fails the call before anything changes. Undo a yes with " +
+      "`people.unlink`. Example: `{ suggestions: [\"sg_9c04e1d2\"] }`. Fails with InvalidOperation (reason `unknown " +
+      "suggestion`, or a `people.link` reason) or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      suggestions: z
+        .array(z.string().regex(/^sg_[0-9a-f]{8}$/, "must look like `sg_9c04e1d2`"))
+        .min(1)
+        .describe("Suggestion ids from `people.suggest`."),
+      reject: z.boolean().default(false).describe("True dismisses them instead of linking. Default false."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      confirmed: z
+        .array(
+          z.object({
+            id: z.string(),
+            person: z.object({ id: z.string(), name: z.string() }),
+            speaker: z.object({ transcript: z.string(), speaker: z.string() }),
+            linked: z.boolean().describe("False when the link already existed."),
+            transcripts: z.array(z.string()).describe("Transcript files whose speaker name was set to the person's name."),
+          }),
+        )
+        .describe("Links applied, in request order. Empty with `reject`."),
+      dismissed: z.array(z.string()).describe("Ids added to `dismissed`. Empty without `reject`."),
     }),
   },
   "ui.state": {

@@ -56,13 +56,34 @@ export const PersonTargetParams = {
 };
 
 /** Notification `people.changed` payload kinds. */
-export const PEOPLE_CHANGES = ["add", "rename", "remove", "link", "unlink"] as const;
+export const PEOPLE_CHANGES = ["add", "rename", "remove", "link", "unlink", "dismiss"] as const;
+
+/** One suggested link (ADR 0020 decision 5); applied only by `people.confirm`. */
+export const PeopleSuggestionSchema = z.object({
+  id: z.string().describe("`sg_` + 8 hex, the same for the same kind and targets on every run: pass it to `people.confirm`."),
+  kind: z.literal("speaker").describe("`speaker`: a transcript speaker linked to nobody sounds like a person's linked voices."),
+  person: z.object({ id: PersonIdSchema, name: z.string() }).describe("The person to link to."),
+  speaker: z
+    .object({
+      transcript: z.string().describe("Project-relative transcript file."),
+      speaker: SpeakerIdSchema,
+      name: z.string().describe("Its name in the transcript now."),
+    })
+    .describe("The transcript speaker to link."),
+  score: z.number().describe("Voice similarity, cosine of the voice prints (about 0.7 and up is suggested), 2 decimals."),
+  reason: z.string().describe("One line for a person, e.g. `s2 (Speaker 2) in transcripts/ep2.words.json sounds like Juan (0.78).`"),
+});
+
+/** See {@link PeopleSuggestionSchema}. */
+export type PeopleSuggestion = z.output<typeof PeopleSuggestionSchema>;
 
 /** Params of `people.changed`. */
 export const PeopleChangedSchema = z.object({
   project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
-  change: z.enum(PEOPLE_CHANGES).describe("What happened: a person was added, renamed or removed, or a link was added or removed."),
-  person: PersonIdSchema.describe("Id of the person it happened to."),
+  change: z
+    .enum(PEOPLE_CHANGES)
+    .describe("What happened: a person was added, renamed or removed, a link was added or removed, or a suggestion was dismissed."),
+  person: PersonIdSchema.describe("Id of the person it happened to (`dismiss`: the person the suggestion named)."),
 });
 
 /** One video of a `people.scan` result. */
