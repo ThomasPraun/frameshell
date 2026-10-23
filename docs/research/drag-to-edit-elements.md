@@ -31,7 +31,7 @@ The prototype (below) shows that this works for HyperFrames, in a render and on 
 | Agent readability | Best: it is in the source | A short, flat field in the timeline JSON. `timeline.show`, the MCP tools and history show it | Mixed into composition variables (`window.__hfVariables`) |
 | Undo, history, review mode | Composition files are outside the journal (SPEC §6.2: journal per timeline), so a drag would not be one journaled `ui` step, and review mode (ADR 0019) would not see it | `clip.set` patch, inverse for free (ADR 0004), one `ui` step per drag like `placementEdit` (`renderer/src/preview/transform-edit.ts`); diff in the History panel | as (b) |
 | Cache key | Changes through `inputs()` (file hash) | Add `elements` to `clipCacheKey`. When absent it drops out of the canonical form, so **existing keys do not change** | `props` are already in the key |
-| Plugin API | New write hook per adapter | Additive: optional `elementCss` on `RenderContext`/`LiveContext`, plus a capability flag | none, but every adapter must know a reserved key |
+| Plugin API | New write hook per adapter | Additive: optional `elementCss` on `RenderContext`, plus a capability flag | none, but every adapter must know a reserved key |
 
 **Rejected:**
 - **(a)** fails for script-made elements and for Remotion, falls outside the journal, and fights animations.
@@ -39,7 +39,7 @@ The prototype (below) shows that this works for HyperFrames, in a render and on 
 
 ### The host makes the CSS, adapters only insert it
 
-Plugins ship as tarballs whose runtime dependencies are only their engines (`plugins/hyperframes/package.json`: `@frameshell/plugin-api` is a devDependency, ADR 0008). A shared runtime helper in `plugin-api` would therefore not reach an installed plugin. Instead, core builds the CSS once (`elementStyles(elements)`) and passes it to the adapter as `context.elementCss`. The adapter only places the string last in its page, so every adapter applies the same rules. Selectors carrying `{ } < > ;` or `/*` are refused, so a selector cannot end the rule or the `<style>` element.
+Plugins ship as tarballs whose runtime dependencies are only their engines (`plugins/hyperframes/package.json`: `@frameshell/plugin-api` is a devDependency, ADR 0008). A shared runtime helper in `plugin-api` would therefore not reach an installed plugin. Instead, core builds the CSS once (`elementStyles(elements)`) and passes it to the adapter as `context.elementCss`. The adapter only places the string last in its page, so every adapter applies the same rules. Selectors carrying `<`, an unescaped `{ } ;` or `/*` are refused, so a selector cannot end the rule or the `<style>` element.
 
 ### What the adapter declares
 

@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LiveContext, PluginApi, RenderContext, RenderProgress } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
-import { withSheet } from "../src/elements.js";
+import { patchedBundle, withSheet } from "../src/elements.js";
 import {
   BUNDLE_DIR,
   NO_CONFIG,
@@ -311,6 +311,33 @@ describe("remotion adapter render", () => {
     expect(calls.served[1]).toBe("<html></html>");
     expect(existsSync(join(outDir, "bundle-elements"))).toBe(false);
     expect(calls.bundle).toBe(1);
+  });
+
+  it("patches only the top index.html of the copy and hard-links the rest", async () => {
+    const source = tempDir();
+    mkdirSync(join(source, "public", "site"), { recursive: true });
+    writeFileSync(join(source, "index.html"), "<html><head></head></html>");
+    writeFileSync(join(source, "bundle.js"), "js");
+    writeFileSync(join(source, "public", "site", "index.html"), "<html><head></head></html>");
+    const dest = join(tempDir(), "copy");
+    await patchedBundle(source, dest, "#a { scale: 2 !important; }");
+    expect(readFileSync(join(dest, "index.html"), "utf8")).toContain("data-frameshell-elements");
+    expect(readFileSync(join(dest, "public", "site", "index.html"), "utf8")).toBe("<html><head></head></html>");
+    expect(statSync(join(dest, "bundle.js")).ino).toBe(statSync(join(source, "bundle.js")).ino);
+    expect(readFileSync(join(source, "index.html"), "utf8")).toBe("<html><head></head></html>");
+  });
+
+  it("removes the copy when the render fails", async () => {
+    const { load } = fakeRemotion();
+    const failing = async (root: string): Promise<RemotionModules> => {
+      const modules = await load(root);
+      return { ...modules, renderer: { ...modules.renderer, renderMedia: async () => Promise.reject(new Error("Chrome crashed")) } };
+    };
+    const outDir = tempDir();
+    const { ctx } = context(outDir);
+    const clip = { id: "c_1", source: SOURCE, props: { composition: "Intro" } };
+    await expect(adapter(failing).render(clip, { ...ctx, elementCss: "#a { scale: 2 !important; }" })).rejects.toThrow(/Chrome crashed/);
+    expect(existsSync(join(outDir, "bundle-elements"))).toBe(false);
   });
 
   it("puts the sheet last in the head and cannot close its own style", () => {

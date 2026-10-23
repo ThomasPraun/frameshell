@@ -18,8 +18,19 @@ describe("elementStyles", () => {
     );
   });
 
-  it.each(["a { color: red }", "a;b", "a</style>", "a /* x */", "  "])("refuses selector %j", (selector) => {
-    expect(() => elementStyles({ [selector]: { x: 1 } })).toThrow(/selector/);
+  it.each(["a { color: red }", "a;b", "a</style>", "a /* x */", "  ", "@import url(x.css)", "a[", "a:not(.b", 'a[title="x]', "a\\"])(
+    "refuses selector %j",
+    (selector) => {
+      expect(() => elementStyles({ [selector]: { x: 1 } })).toThrow(/selector/);
+    },
+  );
+
+  it("accepts quotes, brackets and escapes that close", () => {
+    expect(() => elementStyles({ 'a[title="x]"]': { x: 1 }, ".a\\:b:not(.c)": { x: 1 }, "a[title='(']": { x: 1 }, "#a\\{b": { x: 1 } })).not.toThrow();
+  });
+
+  it("accepts the child combinator Pick writes", () => {
+    expect(elementStyles({ "#card > div.title:nth-child(2)": { x: 3 } })).toBe("#card > div.title:nth-child(2) { translate: 3px 0px !important; }");
   });
 
   it("refuses non-finite numbers and a non-positive scale", () => {

@@ -211,8 +211,9 @@ export function PreviewPanel({
   }, [mode.held, program, frame, liveClip]);
   useEffect(() => {
     if (!mode.held) return;
-    const timer = setTimeout(() => elementMode.release(), HOLD_MAX_MS);
-    return () => clearTimeout(timer);
+    const view = windowOf(body.current);
+    const timer = view.setTimeout(() => elementMode.release(), HOLD_MAX_MS);
+    return () => view.clearTimeout(timer);
   }, [mode.held]);
   const elements = useMemo(() => {
     const stored = view?.tracks.flatMap((track) => track.clips).find((clip) => clip.id === mode.clip)?.["elements"];

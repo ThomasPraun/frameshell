@@ -50,6 +50,16 @@ describe("dragAdjust", () => {
     expect(dragAdjust({ ...drag, unit: 0.5, kind: "move", from: { x: 0, y: 0 }, to: { x: 10, y: 0 } })).toMatchObject({ x: 40 });
   });
 
+  it("keeps across and down apart in a portrait project whose composition is scaled to fit, and the box follows", () => {
+    // A 2160×3840 composition in a 1080×1920 project shown at 270×480: one screen px is 4 page px, 8 composition px.
+    const portrait = { ...drag, frame: { width: 270, height: 480 }, resolution: { width: 1080, height: 1920 }, unit: 0.5 };
+    const after = dragAdjust({ ...portrait, kind: "move", from: { x: 0, y: 0 }, to: { x: 10, y: -5 } });
+    expect(after).toEqual({ x: 80, y: -40, scale: 1 });
+    const box = adjustedBox(BOX, portrait.start, after, portrait);
+    expect(box.left * 270).toBeCloseTo(BOX.left * 270 + 10);
+    expect(box.top * 480).toBeCloseTo(BOX.top * 480 - 5);
+  });
+
   it("follows a page placed smaller in the frame, adding to the stored move", () => {
     const half = { left: 0.25, top: 0.25, width: 0.5, height: 0.5 };
     expect(dragAdjust({ ...drag, start: { x: 5, y: 0, scale: 1.5 }, page: half, kind: "move", from: { x: 0, y: 0 }, to: { x: 10, y: 10 } })).toEqual({

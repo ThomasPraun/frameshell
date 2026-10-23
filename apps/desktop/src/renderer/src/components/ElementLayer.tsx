@@ -8,6 +8,7 @@ import { PickPages, type PickTarget } from "../preview/pick-pages.js";
 import { type Program, programAt, spanPlacement } from "../preview/program.js";
 import type { FrameBox } from "../preview/transform-edit.js";
 import { t } from "../i18n.js";
+import { elementOf, isTag } from "../windows.js";
 import { sendClipEdit } from "./clip-edits.js";
 
 /** An element found on the clip's page: what moves, where it shows (fractions of the frame), and how it was reached. */
@@ -257,7 +258,7 @@ export function ElementLayer({
     const view = layer.current?.ownerDocument.defaultView ?? window;
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
-      if (!picked?.point || drag.current) return;
+      if (!picked?.point || drag.current || isTag(event.target, "INPUT") || isTag(event.target, "TEXTAREA") || elementOf(event.target)?.isContentEditable) return;
       event.preventDefault();
       const depth = Math.max(0, picked.depth + (event.key === "ArrowUp" ? 1 : -1));
       if (depth === picked.depth) return;

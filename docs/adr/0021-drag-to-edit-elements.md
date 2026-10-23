@@ -27,9 +27,9 @@ Adds v0.16 and closes the "direct drag-to-edit of composition elements" gap list
    - The source file stays as it is. The agent never moves adjustments into the source by itself. The skill explains the field, and says that an agent rewriting a composition anyway may move a value into the code and clear its entry.
 2. **One CSS sheet, made by the host.** Core turns `elements` into CSS (`elementStyles` in `@frameshell/schema`). Each element gets `translate: Xpx Ypx !important` and `scale: S !important`, rules sorted by selector.
    - These separate transform properties add to whatever `transform` the composition animates (GSAP, inline styles), so an animated title keeps its animation, offset by the adjustment.
-   - A selector containing `{ } < > ;` or `/*` is refused.
+   - A selector is refused when it contains `<`, an unescaped `{ } ;` or `/*`, starts with `@`, or leaves a quote, `(` or `[` open (it would swallow the rules after it). The child combinator `>` that Pick writes is fine.
 3. **Adapters insert it last.** Plugin API, additive, `apiVersion` stays `"1"`:
-   - `RenderContext.elementCss?: string` and `LiveContext.elementCss?: string` carry the sheet.
+   - `RenderContext.elementCss?: string` carries the sheet. Live pages need nothing from the adapter: `clip.live` returns the sheet and the app's live bridge applies it.
    - An adapter that applies the sheet declares `elementStyles: true` on `ClipAdapter`.
    - `clip.set` with `elements` fails with a clear message when the clip's adapter does not declare it. Otherwise the preview would show what the render ignores.
    - **HyperFrames:** adds `<style data-frameshell-elements>` before `</head>` of the copied entry.

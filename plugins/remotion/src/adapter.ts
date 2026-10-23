@@ -115,8 +115,8 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       const output = join(ctx.outDir, "render.webm");
       // Element adjustments (ADR 0021): render from a patched copy; without them, the bundle itself.
       const patched = ctx.elementCss ? join(ctx.outDir, "bundle-elements") : null;
-      if (patched) await patchedBundle(bundle.dir, patched, ctx.elementCss!);
       try {
+        if (patched) await patchedBundle(bundle.dir, patched, ctx.elementCss!);
         await renderer.renderMedia({
           composition,
           serveUrl: patched ?? bundle.dir,
