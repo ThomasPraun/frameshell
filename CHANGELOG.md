@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- People (#374): face clustering runs in a worker thread, so a long recording no longer blocks the daemon, and the model of a set of cached scans is kept between `people suggest` calls (same clusters and suggestion ids). Confirming suggestions is all or nothing: people and links are checked together and `people.json` is written once, so a link that fails leaves it as it was.
+
 ## [0.15.0] - 2026-10-23
 
 ### Added
