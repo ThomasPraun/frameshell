@@ -11,6 +11,7 @@ import {
   personColour,
   personWords,
   toRanges,
+  voiceStretch,
 } from "../src/renderer/src/people/model.js";
 import { buildTranscriptModel } from "../src/renderer/src/transcript/model.js";
 
@@ -199,5 +200,22 @@ describe("helpers", () => {
   it("writes seconds as minutes and seconds", () => {
     expect(clock(0)).toBe("0:00");
     expect(clock(200)).toBe("3:20");
+  });
+});
+
+describe("voiceStretch", () => {
+  const word = (id: number, start: number, end: number, speaker?: string) => ({ id: `w_${String(id).padStart(6, "0")}`, text: "w", start, end, ...(speaker ? { speaker } : {}) });
+
+  it("plays the longest run of one speaker, broken by another voice or a long pause", () => {
+    const words = [word(1, 0, 1, "s1"), word(2, 1.1, 2, "s2"), word(3, 2.1, 3, "s1"), word(4, 3.2, 5, "s1"), word(5, 7, 7.5, "s1")];
+    expect(voiceStretch({ words, edits: {} }, "s1")).toEqual({ start: 2.1, end: 5 });
+    expect(voiceStretch({ words, edits: {} }, "s2")).toEqual({ start: 1.1, end: 2 });
+    expect(voiceStretch({ words, edits: {} }, "s3")).toBeNull();
+  });
+
+  it("follows speaker corrections, takes every word without a speaker, and stops after 8 s", () => {
+    const words = [word(1, 0, 4, "s1"), word(2, 4.2, 9, "s1"), word(3, 9.1, 12, "s1")];
+    expect(voiceStretch({ words, edits: { w_000002: { speaker: "s2" } } }, "s1")).toEqual({ start: 0, end: 4 });
+    expect(voiceStretch({ words, edits: {} }, undefined)).toEqual({ start: 0, end: 8 });
   });
 });

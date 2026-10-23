@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- People in the app, the rest of ADR 0020 decision 11 (#374, protocol v58):
+  - The transcript view's speaker-label menu has "Link to person…" (type a name: an existing person, or a new one added on the spot) and, for a linked speaker, "Unlink from <name>".
+  - The People panel shows each person's seconds speaking and on screen in the main timeline, and a play button beside each linked voice (and each suggestion naming a voice) that plays up to 8 s of that speaker's longest stretch from the preview audio; nothing is written.
+  - `ui_select` takes `person: { id, what? }` (id or exact name; `speaks` or `onscreen`): the app selects that person's spans and words as a click in the People panel does. An unknown person fails with `InvalidOperation` before the app is asked.
+
+### Changed
+
+- The People panel no longer downloads the voice model (CAM++ and ONNX Runtime Web, ~60 MB) on its own when it opens: it shows the size and a "Find voice matches (downloads ~60 MB once)" button, then the download's progress. With the model installed it matches voices as before. `people.suggest` takes `download` (default true, so the CLI and agents are unchanged); with `download: false` voices that need the missing model are left out and `voiceDownload.bytes` says what it would fetch.
+
 ## [0.15.0] - 2026-10-23
 
 ### Added

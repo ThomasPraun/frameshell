@@ -26,7 +26,7 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, findPerson, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -64,7 +64,7 @@ import { type FaceScans, PeopleService, type VoicePrinter } from "./people/servi
 import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
-import { computeVoicePrints } from "./people/voices.js";
+import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -301,6 +301,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         extractAudio: options.extractAudio ?? extractAudioWithFfmpeg,
         progress,
       });
+  };
+  /** Bytes the voice model (ONNX Runtime Web and CAM++) still has to download; 0 when installed or a test embedder stands in. */
+  const voiceDownloadBytes = async (dir: string): Promise<number> => {
+    if (options.voiceEmbedder) return 0;
+    const runtime = await binaries.locate(ONNX_RUNTIME_WEB, await projectBinaries(dir));
+    const model = await binaries.locateModel(SPEAKER_EMBEDDING_MODEL);
+    const runtimeBytes = runtime.installed ? 0 : (runtime.pinned?.archives.reduce((sum, archive) => sum + archive.size, 0) ?? 0);
+    return runtimeBytes + (model.installed ? 0 : model.pinned.size);
   };
   /** After an operation of `key` in `tx`: a proposal whose transaction is already over (no grouping) is ready. */
   const settle = async (key: string, tx: TxRef) => {
@@ -1204,9 +1212,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, person: { id: found.person.id, name: found.person.name }, kind, timeline, spans: found.spans, total: found.total, warnings: found.warnings };
     },
     // Both read transcription WAVs: `transcribing` keeps `gc` off them meanwhile.
-    "people.suggest": async ({ cwd }, _caller, request) => {
+    "people.suggest": async ({ cwd, download }, _caller, request) => {
       const dir = await root(cwd);
-      return { dir, ...(await transcribing(dir, () => people.suggest(dir, { voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
+      const missing = download ? 0 : await voiceDownloadBytes(dir);
+      let held = false;
+      // Without the download, voices that would need the model are reported as not compared.
+      const voices: VoicePrinter =
+        missing === 0
+          ? voicePrinter(dir, request.progress)
+          : async (wanted) => {
+              if (wanted.length > 0) held = true;
+              return new Map(wanted.map((entry) => [voiceKey(entry), { ok: false, reason: "the voice model is not downloaded yet" }]));
+            };
+      const found = await transcribing(dir, () => people.suggest(dir, { voices, faces: faceScans(dir) }));
+      return { dir, ...found, ...(held ? { voiceDownload: { bytes: missing } } : {}) };
     },
     "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
       const dir = await root(cwd);
@@ -1218,7 +1237,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
     "ui.pause": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "pause" }),
-    "ui.select": async ({ cwd, clips, words, range, reveal, points }) => {
+    "ui.select": async ({ cwd, clips, words, range, reveal, points, person }) => {
+      // A name is resolved here, so an unknown person fails with the people list, as `people.ranges` would.
+      let picked: { id: string; what: "speaks" | "onscreen" } | null = null;
+      if (person) {
+        const known = await people.list(await root(cwd));
+        const found = findPerson(known, person.id);
+        if (!found) {
+          const names = known.people.map((candidate) => `${candidate.name} (${candidate.id})`).join(", ");
+          throw new RpcError(ErrorCode.InvalidOperation, `ui.select: no person "${person.id}"${names ? ` (people: ${names})` : ", the project has no people yet"}.`, {
+            op: "ui.select",
+            reason: "unknown person",
+            field: "person",
+          });
+        }
+        picked = { id: found.id, what: person.what };
+      }
       // Points are inspected here, so the app shows exactly what `inspect.point` reports.
       const dir = points.length > 0 ? await root(cwd) : null;
       const inspected = [];
@@ -1226,7 +1260,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         const { timeline: _timeline, frame: _frame, pixel: _pixel, ...picked } = await inspector.point(dir!, { timeline: "main", ...point });
         inspected.push(picked);
       }
-      return ui.command(await projectKey(cwd), { kind: "select", clips, words, range, reveal, points: inspected });
+      return ui.command(await projectKey(cwd), { kind: "select", clips, words, range, reveal, points: inspected, person: picked });
     },
     "ui.openFile": async ({ cwd, file }) => {
       const dir = await root(cwd);

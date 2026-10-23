@@ -6,7 +6,7 @@ import { isPhotoAt, photoAssets, steppedPoints } from "../preview/segment-pick.j
 import type { Program } from "../preview/program.js";
 import { type FrameBox, layersIn, pictureBox } from "../preview/transform-edit.js";
 import { transport } from "../preview/transport.js";
-import type { SegmentProgress } from "../../../shared/api.js";
+import type { ModelProgress } from "../../../shared/api.js";
 import { type SelectedPoint, type SelectedRegion, selection, useSelection } from "../selection.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { t } from "../i18n.js";
@@ -64,7 +64,7 @@ export function PickLayer({
   const [draft, setDraft] = useState<{ pointer: number; x: number; y: number; rect: SelectedRegion | null } | null>(null);
   const asked = useRef(0);
   const [segmenting, setSegmenting] = useState<SegmentStatus | null>(null);
-  const progress = useRef<SegmentProgress | null>(null);
+  const progress = useRef<ModelProgress | null>(null);
   const busy = useRef(0);
   /** One hover probe at a time; the latest pointer position waits for it. */
   const hovering = useRef<{ busy: boolean; next: { x: number; y: number } | null }>({ busy: false, next: null });
@@ -349,7 +349,7 @@ export function PickLayer({
 }
 
 /** What the segmentation of photos is doing, for the status line. */
-type SegmentStatus = (SegmentProgress & { kind: "preparing" | "finding" }) | { kind: "failed"; message: string };
+type SegmentStatus = (ModelProgress & { kind: "preparing" | "finding" }) | { kind: "failed"; message: string };
 
 function segmentStatusText(status: SegmentStatus): string {
   if (status.kind === "failed") return t.preview.segmentFailed(status.message);

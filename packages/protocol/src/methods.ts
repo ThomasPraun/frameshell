@@ -43,7 +43,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 57;
+export const PROTOCOL_VERSION = 58;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2062,11 +2062,24 @@ export const methods = {
       "keeps voices or faces from being matched: no person has a linked speaker yet, a transcript has no speakers (run " +
       "`transcribe.speakers`), is stale, a speaker says too little, a video has no face scan (run `people.scan`), or a " +
       "face anchor names no face. Confirm only what the person agreed to or what is certain.",
-    params: z.strictObject({ cwd: CwdParam }),
+    params: z.strictObject({
+      cwd: CwdParam,
+      download: z
+        .boolean()
+        .default(true)
+        .describe(
+          "Download the voice model (CAM++ and ONNX Runtime Web, about 60 MB, once) when voices must be compared and it " +
+            "is missing. Default true. False: voices are left out instead and `voiceDownload` says what it would fetch.",
+        ),
+    }),
     result: z.object({
       dir: z.string().describe("Project root."),
       suggestions: z.array(PeopleSuggestionSchema),
       hints: z.array(z.string()).describe("Why some voices or faces could not be compared, with the command that fixes it. Empty when none."),
+      voiceDownload: z
+        .object({ bytes: z.int().nonnegative().describe("Bytes still to download.") })
+        .optional()
+        .describe("Only with `download: false`: voices were left out because the voice model is not downloaded yet."),
     }),
   },
   "people.confirm": {
@@ -2156,10 +2169,11 @@ export const methods = {
   "ui.select": {
     description:
       "Replace the user's selection in the app, to point at what you mean: clips (ids of the timeline `ui.state` " +
-      "names, from `timeline.show`), transcript words, and/or a time range. Omitted parts are cleared; nothing given " +
-      "clears the selection. With `reveal` (default true) the timeline scrolls to the first clip and, unless playing, " +
-      "the playhead moves to its start. Examples: `{ clips: [\"c_1a2b3c\"] }`, `{ range: { from: 12.4, to: 13.1 } }`. " +
-      "Returns `ui.state`. Fails with UiCommandFailed naming clip ids the timeline does not have, UiNotConnected.",
+      "names, from `timeline.show`), transcript words, and/or a time range; or a person with their spans and words. " +
+      "Omitted parts are cleared; nothing given clears the selection. With `reveal` (default true) the timeline scrolls " +
+      "to the first clip (or span) and, unless playing, the playhead moves to its start. Examples: `{ clips: [\"c_1a2b3c\"] }`, `{ range: { from: 12.4, to: 13.1 } }`, " +
+      "`{ person: { id: \"Juan\" } }`. Returns `ui.state`. Fails with UiCommandFailed naming clip ids the timeline does " +
+      "not have, InvalidOperation for an unknown person, UiNotConnected.",
     params: z.strictObject({
       cwd: CwdParam,
       clips: z.array(z.string().min(1)).default([]).describe("Clip ids to select, e.g. `[\"c_1a2b3c\"]`. Default none."),
@@ -2183,6 +2197,17 @@ export const methods = {
         .describe(
           "Points of the preview to show as picks (ADR 0011), e.g. `[{ at: 12.4, x: 0.71, y: 0.14 }]`, each inspected as " +
             "`inspect.point` does, so the user sees the element you mean outlined. Replaces clips, words and range. Default none.",
+        ),
+      person: z
+        .object({
+          id: z.string().min(1).describe("Person id `p_…` or the exact name, as `people.list` reports them."),
+          what: z.enum(["speaks", "onscreen"]).default("speaks").describe("Their time to select: when they speak (default) or when they are on screen."),
+        })
+        .nullable()
+        .default(null)
+        .describe(
+          "A person to select as the People panel does (ADR 0020): their spans of the main timeline (`people.ranges`) and, " +
+            "with `speaks`, the words of their linked voices; `ui.state` then reports `person`. Replaces clips, words and range. Default none.",
         ),
     }),
     result: UiStateSchema,

@@ -56,7 +56,7 @@ function transcript(asset: string, hash: string, speakers = true) {
 /** WAVs are written as text: the stand-in embedder never reads them. */
 const extractAudio: AudioExtractor = async (_input, output) => writeFileSync(output, "wav");
 
-async function setup() {
+async function setup(options: { embedder?: boolean } = {}) {
   const dirs: AppDirs = { dataDir: tempDir(), configDir: tempDir() };
   // Attaching the project ingests its assets; with ffmpeg at hand the text "videos" fail at once instead of installing it.
   const { ffmpeg, ffprobe } = await mediaTools();
@@ -69,7 +69,7 @@ async function setup() {
     const key = /([0-9a-f]{16})-(asset|sidecar)\.wav$/.exec(request.audio)![1]!;
     return request.stretches.map((stretch) => voices.get(key)![stretch.start < 5 ? 0 : 1]);
   };
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs, extractAudio, voiceEmbedder, idleTimeoutMs: Infinity });
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs, extractAudio, ...(options.embedder === false ? {} : { voiceEmbedder }), idleTimeoutMs: Infinity });
   const connect = async (client: string, options: { session?: string; agent?: string | null } = {}) => {
     const conn = await connectToDaemon(daemon!.socketPath, { client, agent: null, ...options });
     connections.push(conn);
@@ -93,7 +93,7 @@ async function setup() {
   await cli.request("people.add", { cwd: dir, name: "Juan" });
   await cli.request("people.link", { cwd: dir, person: "Juan", speaker: { transcript: EP1, speaker: "s1" } });
   const read = (rel: string) => JSON.parse(readFileSync(join(dir, rel), "utf8"));
-  return { dir, cli, connect, asked, read, ep1, ep2 };
+  return { dir, dirs, cli, connect, asked, read, ep1, ep2 };
 }
 
 async function failure(call: Promise<unknown>): Promise<RpcError> {
@@ -106,6 +106,16 @@ async function failure(call: Promise<unknown>): Promise<RpcError> {
 }
 
 describe("people.suggest", () => {
+  it("with download: false never fetches the voice model: voices are left out and the size is reported", async () => {
+    const { dir, dirs, cli } = await setup({ embedder: false });
+    const result = await cli.request("people.suggest", { cwd: dir, download: false });
+    expect(result.suggestions.filter((suggestion) => suggestion.kind === "speaker")).toEqual([]);
+    // ONNX Runtime Web's tarball and CAM++, as pinned in the binary manifest.
+    expect(result.voiceDownload).toEqual({ bytes: 33_106_585 + 29_596_978 });
+    expect(result.hints).toContain("the voice model is not downloaded yet: its voice is not compared.");
+    expect(existsSync(join(dirs.dataDir, "models"))).toBe(false);
+  });
+
   it("suggests the same voice in another file and not the different voices, with hints for undiarized transcripts", async () => {
     const { dir, cli } = await setup();
     const result = await cli.request("people.suggest", { cwd: dir });
@@ -120,6 +130,8 @@ describe("people.suggest", () => {
       }),
     ]);
     expect(result.hints).toEqual([`${EP3} has no speakers, so its voices are not compared: frameshell transcribe --speakers assets/ep3.mp4`]);
+    // A model at hand (here the stand-in) compares voices with or without `download`.
+    expect(await cli.request("people.suggest", { cwd: dir, download: false })).toEqual(result);
   });
 
   it("computes each print once, caches it per asset content, and recomputes when the speaker's words change", async () => {
