@@ -1,5 +1,6 @@
-import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { TimelineView } from "@frameshell/protocol";
+import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { PersonInfo, TimelineView } from "@frameshell/protocol";
+import { findPerson } from "@frameshell/schema";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { rich, t } from "../i18n.js";
 import { linkedPerson } from "../people/model.js";
@@ -79,7 +80,8 @@ interface Marked {
  *   selected words (marked here, or selected anywhere in the shared selection,
  *   e.g. a timeline range or a subtitle cue; also a new speaker): a speaker
  *   correction in `edits`, which wins over diarization. Double-clicking a
- *   speaker's name, or its context menu, renames it in the file's `speakers`.
+ *   speaker's name, or its context menu, renames it in the file's `speakers`;
+ *   the menu also links the speaker to a person, or unlinks it (ADR 0020).
  * - Right-click opens "Ask agent" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
  */
@@ -95,6 +97,8 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   const [editing, setEditing] = useState<string | null>(null);
   /** Paragraph (first word's key) whose speaker name is being edited. */
   const [renaming, setRenaming] = useState<string | null>(null);
+  /** Paragraph whose speaker is being linked to a person, with the names to offer. */
+  const [linking, setLinking] = useState<{ paragraph: string; names: string[] } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   const lastUserScroll = useRef(0);
@@ -246,6 +250,30 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     }
   };
 
+  /** Link speaker `speaker` of transcript `path` to the person named `name` (ADR 0020), added when new (null: cancelled). */
+  const saveSpeakerLink = async (path: string, speaker: { id: string; name: string }, name: string | null) => {
+    setLinking(null);
+    const wanted = name?.trim();
+    if (!wanted) return;
+    try {
+      const { people } = await window.frameshell.people.list();
+      const person = findPerson({ people }, wanted) ?? (await window.frameshell.people.add(wanted)).person;
+      await window.frameshell.people.link(person.id, { speaker: { transcript: path, speaker: speaker.id } });
+      setStatus({ tone: "info", text: t.people.personLinked(speaker.name, person.name) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.people.personNotLinked((failure as Error).message) });
+    }
+  };
+
+  const unlinkSpeaker = async (path: string, speaker: { id: string; name: string }, person: PersonInfo) => {
+    try {
+      await window.frameshell.people.unlink(person.id, { speaker: { transcript: path, speaker: speaker.id } });
+      setStatus({ tone: "info", text: t.people.personUnlinked(speaker.name, person.name) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.people.personNotLinked((failure as Error).message) });
+    }
+  };
+
   /**
    * Words of `asset` a speaker change applies to: the drag range marked here (struck words too) and the words of the
    * shared selection (set from the timeline, a subtitle cue or this view), each once.
@@ -301,11 +329,17 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     openAskMenu(event, items);
   };
 
-  /** Right-click on a speaker's name: rename it. */
-  const onSpeakerMenu = (event: MouseEvent, paragraph: string) => {
+  /** Right-click on a speaker's name: rename it, and link it to a person or unlink it (ADR 0020). */
+  const onSpeakerMenu = async (event: MouseEvent, path: string, paragraph: string, speaker: { id: string; name: string }) => {
     event.preventDefault();
     event.stopPropagation();
-    openAskMenu(event, [{ label: t.transcript.renameSpeaker, run: () => setRenaming(paragraph) }]);
+    // Read on demand: the transcript view does not follow people (and their suggestions) while the menu is closed.
+    const snapshot = await window.frameshell.people.list().catch(() => null);
+    const person = linkedPerson(snapshot, path, speaker.id);
+    const items: MenuItem[] = [{ label: t.transcript.renameSpeaker, run: () => setRenaming(paragraph) }];
+    if (person) items.push({ label: t.people.unlinkFromPerson(person.name), run: () => void unlinkSpeaker(path, speaker, person) });
+    else items.push({ label: t.people.linkToPerson, run: () => setLinking({ paragraph, names: snapshot?.people.map((candidate) => candidate.name) ?? [] }) });
+    openAskMenu(event, items);
   };
 
   const fps = view?.fps ?? 30;
@@ -334,8 +368,10 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             editing={editing}
             renaming={renaming}
             onRename={setRenaming}
-            onSpeakerMenu={onSpeakerMenu}
+            linking={linking}
+            onSpeakerMenu={(event, paragraph, speaker) => void onSpeakerMenu(event, asset.path, paragraph, speaker)}
             onSaveSpeakerName={(speaker, name) => void saveSpeakerName(asset.path, speaker, name)}
+            onSaveSpeakerLink={(speaker, name) => void saveSpeakerLink(asset.path, speaker, name)}
             onOpenFile={onOpenFile}
             onPointerDown={onPointerDown}
             onPointerEnter={onPointerEnter}
@@ -429,8 +465,10 @@ function AssetSection({
   editing,
   renaming,
   onRename,
+  linking,
   onSpeakerMenu,
   onSaveSpeakerName,
+  onSaveSpeakerLink,
   onOpenFile,
   onPointerDown,
   onPointerEnter,
@@ -449,8 +487,11 @@ function AssetSection({
   /** Paragraph whose speaker name is being edited. */
   renaming: string | null;
   onRename: (paragraph: string) => void;
-  onSpeakerMenu: (event: MouseEvent, paragraph: string) => void;
+  /** Paragraph whose speaker is being linked to a person, with the names to offer. */
+  linking: { paragraph: string; names: string[] } | null;
+  onSpeakerMenu: (event: MouseEvent, paragraph: string, speaker: { id: string; name: string }) => void;
   onSaveSpeakerName: (speaker: { id: string; name: string }, name: string | null) => void;
+  onSaveSpeakerLink: (speaker: { id: string; name: string }, name: string | null) => void;
   onOpenFile: (path: string) => void;
   onPointerDown: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
   onPointerEnter: (event: PointerEvent, asset: AssetTranscript, index: number) => void;
@@ -494,13 +535,23 @@ function AssetSection({
                       onDone={(text) => onSaveSpeakerName({ id: speaker, name }, text)}
                     />
                   </span>
+                ) : linking?.paragraph === words[0]!.key && speaker ? (
+                  <span className="transcript-speaker" data-speaker={speaker}>
+                    <WordEditor
+                      text=""
+                      label={t.people.linkPersonLabel(name)}
+                      placeholder={t.people.whoNamePlaceholder}
+                      options={linking.names}
+                      onDone={(text) => onSaveSpeakerLink({ id: speaker, name }, text)}
+                    />
+                  </span>
                 ) : (
                   <span
                     className="transcript-speaker"
                     data-speaker={speaker ?? ""}
                     title={speaker ? t.transcript.speakerTitleRename(name) : t.transcript.speakerTitle(name)}
                     onDoubleClick={speaker ? () => onRename(words[0]!.key) : undefined}
-                    onContextMenu={speaker ? (event) => onSpeakerMenu(event, words[0]!.key) : undefined}
+                    onContextMenu={speaker ? (event) => onSpeakerMenu(event, words[0]!.key, { id: speaker, name }) : undefined}
                   >
                     {name}
                   </span>
@@ -565,8 +616,22 @@ function AssetSection({
   );
 }
 
-/** Inline text field for one word: Enter or leaving it saves, Escape cancels. Reports once. */
-function WordEditor({ text, label, onDone }: { text: string; label?: string; onDone: (text: string | null) => void }) {
+/** Inline text field for one word or name: Enter or leaving it saves (with `options`, leaving cancels), Escape cancels. Reports once. */
+function WordEditor({
+  text,
+  label,
+  placeholder,
+  options,
+  onDone,
+}: {
+  text: string;
+  label?: string;
+  placeholder?: string;
+  /** Values offered while typing (a datalist), e.g. the names of people. */
+  options?: readonly string[];
+  onDone: (text: string | null) => void;
+}) {
+  const listId = useId();
   const input = useRef<HTMLInputElement>(null);
   const done = useRef(false);
   const finish = (value: string | null) => {
@@ -578,13 +643,15 @@ function WordEditor({ text, label, onDone }: { text: string; label?: string; onD
     input.current?.focus();
     input.current?.select();
   }, []);
-  return (
+  const field = (
     <input
       ref={input}
       className="tw-edit"
       aria-label={label ?? t.transcript.wordLabel(text)}
       defaultValue={text}
-      size={Math.max(text.length + 2, 6)}
+      placeholder={placeholder}
+      list={options ? listId : undefined}
+      size={Math.max(text.length + 2, placeholder ? placeholder.length : 6)}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === "Enter") finish(event.currentTarget.value);
@@ -593,8 +660,20 @@ function WordEditor({ text, label, onDone }: { text: string; label?: string; onD
         event.preventDefault();
         event.stopPropagation();
       }}
-      onBlur={(event) => finish(event.currentTarget.value)}
+      // With options, leaving the field cancels: a half-typed name must not become a new person.
+      onBlur={(event) => finish(options ? null : event.currentTarget.value)}
     />
+  );
+  if (!options) return field;
+  return (
+    <>
+      {field}
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={option} value={option} />
+        ))}
+      </datalist>
+    </>
   );
 }
 

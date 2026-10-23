@@ -487,7 +487,7 @@ export interface FrameshellApi {
      */
     point(at: number, x: number, y: number): Promise<{ segment: SegmentedPoint | null; unavailable: string | null }>;
     /** Called with the progress of a running {@link prepare} or {@link point}. Returns an unsubscribe function. */
-    onProgress(listener: (progress: SegmentProgress) => void): () => void;
+    onProgress(listener: (progress: ModelProgress) => void): () => void;
   };
   clips: {
     /** `clip.renders` of a timeline of the window's project: render cache state per generated clip. Rejects with the daemon's message. */
@@ -528,8 +528,11 @@ export interface FrameshellApi {
     unlink(person: string, target: PersonTarget): Promise<MethodResult<"people.unlink">>;
     /** `people.scan` of every video: resolves when the scan job ends; progress comes through {@link people.onScan}. */
     scan(): Promise<MethodResult<"people.scan">>;
-    /** `people.suggest`: computes voice prints on first use, so it can take seconds. */
-    suggest(): Promise<MethodResult<"people.suggest">>;
+    /**
+     * `people.suggest`: computes voice prints on first use, so it can take seconds. Without `download` the voice model
+     * is never fetched and `voiceDownload` says what it would take; with it, progress comes through {@link people.onSuggestProgress}.
+     */
+    suggest(download?: boolean): Promise<MethodResult<"people.suggest">>;
     /** `people.confirm`; `reject` dismisses instead. `person` names who a suggestion without a person is. */
     confirm(suggestions: string[], options?: { reject?: boolean; person?: string }): Promise<MethodResult<"people.confirm">>;
     /** `people.ranges` of the main timeline: merged spans where `person` speaks or is on screen. */
@@ -541,6 +544,8 @@ export interface FrameshellApi {
     onChanged(listener: (change: PeopleChange | null) => void): () => void;
     /** Called on every change of a `people` scan job of the project; `null` after a daemon reconnect. Returns an unsubscribe function. */
     onScan(listener: (job: JobInfo | null) => void): () => void;
+    /** Called with the progress of a {@link people.suggest} with `download`. Returns an unsubscribe function. */
+    onSuggestProgress(listener: (progress: ModelProgress) => void): () => void;
   };
   scripts: {
     /**
@@ -568,8 +573,11 @@ export interface FrameshellApi {
  */
 export type UpdateStatus = { state: "available"; version: string; url: string } | { state: "ready"; version: string };
 
-/** Progress of preparing photos for Pick: `download` while the model or its runtime is fetched (first use only). */
-export interface SegmentProgress {
+/**
+ * Progress of a call that may first fetch a model (preparing photos for Pick, finding voice matches): `download`
+ * while the model or its runtime is fetched (first use only).
+ */
+export interface ModelProgress {
   download: boolean;
   /** 0..1 of the current step; null when unknown. */
   fraction: number | null;
@@ -697,6 +705,7 @@ export const Channel = {
   peopleRanges: "people:ranges",
   peopleChanged: "people:changed",
   peopleScanJob: "people:scan-job",
+  peopleSuggestProgress: "people:suggest-progress",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",

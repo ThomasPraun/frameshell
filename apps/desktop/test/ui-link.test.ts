@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 // The renderer modules under test name `window.frameshell` (never called here): its declaration.
 import type {} from "../src/renderer/src/env.js";
-import type { TimelineView, UiView } from "@frameshell/protocol";
+import type { TimelineView, UiCommand, UiView } from "@frameshell/protocol";
 import { createTransport } from "../src/renderer/src/preview/transport.js";
 import { selection } from "../src/renderer/src/selection.js";
 import { type CommandTargets, type UiHost, createPublisher, runUiCommand, uiView } from "../src/renderer/src/ui-link.js";
@@ -56,6 +56,10 @@ function targets(overrides: Partial<CommandTargets> = {}) {
       return JSON.stringify(TRANSCRIPT);
     },
     selectHistory: async (_timeline, target) => void asked.push(`select ${target}`),
+    selectPerson: async (person, reveal) => {
+      asked.push(`person ${person.id} ${person.what}${reveal ? " reveal" : ""}`);
+      return "Juan";
+    },
     ...overrides,
   };
   return { ...all, asked };
@@ -161,7 +165,7 @@ describe("runUiCommand", () => {
   it("selects clips, words and a range as the agent, revealing the first clip", async () => {
     const words = [{ transcript: "transcripts/raw.words.json", word: "w_000004" }];
     await expect(
-      runUiCommand({ kind: "select", clips: ["c_b"], words, range: { from: 1, to: 2 }, reveal: true, points: [] }, targets()),
+      runUiCommand({ kind: "select", clips: ["c_b"], words, range: { from: 1, to: 2 }, reveal: true, points: [], person: null }, targets()),
     ).resolves.toBe("Agent selected 1 clip, 1 word and a time range");
     expect(selection.get()).toMatchObject({
       clips: ["c_b"],
@@ -172,7 +176,7 @@ describe("runUiCommand", () => {
       reveal: { clip: "c_b" },
     });
     await expect(
-      runUiCommand({ kind: "select", clips: [], words: [{ transcript: "transcripts/raw.words.json", word: "w_000009" }], range: null, reveal: true, points: [] }, targets()),
+      runUiCommand({ kind: "select", clips: [], words: [{ transcript: "transcripts/raw.words.json", word: "w_000009" }], range: null, reveal: true, points: [], person: null }, targets()),
     ).rejects.toThrow("No word w_000009 in transcripts/raw.words.json");
   });
 
@@ -180,7 +184,7 @@ describe("runUiCommand", () => {
     const t = targets();
     const element = { selector: "#title", tag: "h1", id: "title", classes: [], text: "Launch", box: { x: 0, y: 0, width: 1, height: 1 }, styles: {}, html: "", data: {}, adapter: null };
     const point = { x: 0.71, y: 0.14, at: 2.5, layers: [{ clip: "c_b", type: "hyperframes", paints: true }], target: "c_b", elements: [element], unavailable: null };
-    await expect(runUiCommand({ kind: "select", clips: [], words: [], range: null, reveal: true, points: [point] }, t)).resolves.toBe(
+    await expect(runUiCommand({ kind: "select", clips: [], words: [], range: null, reveal: true, points: [point], person: null }, t)).resolves.toBe(
       "Agent picked 1 point in the preview",
     );
     expect(selection.get()).toMatchObject({ points: [point], origin: "agent" });
@@ -190,10 +194,19 @@ describe("runUiCommand", () => {
     selection.clear();
   });
 
+  it("picks a person the daemon resolved as the People panel does (ADR 0020)", async () => {
+    const t = targets();
+    const command: UiCommand = { kind: "select", clips: [], words: [], range: null, reveal: true, points: [], person: { id: "p_3fa2c1", what: "onscreen" } };
+    await expect(runUiCommand(command, t)).resolves.toBe("Agent selected where Juan is on screen");
+    expect(t.asked).toEqual(["person p_3fa2c1 onscreen reveal"]);
+    const failing = targets({ selectPerson: async () => Promise.reject(new Error("Cannot place Juan on the timeline: gone")) });
+    await expect(runUiCommand(command, failing)).rejects.toThrow("Cannot place Juan");
+  });
+
   it("refuses clip ids the timeline does not have, naming them, and keeps the selection", async () => {
     selection.selectClips(["c_a"], "timeline");
     await expect(
-      runUiCommand({ kind: "select", clips: ["c_a", "c_zz"], words: [], range: null, reveal: true, points: [] }, targets()),
+      runUiCommand({ kind: "select", clips: ["c_a", "c_zz"], words: [], range: null, reveal: true, points: [], person: null }, targets()),
     ).rejects.toThrow(/No clip c_zz on timeline main \(revision 3\)/);
     expect(selection.get().clips).toEqual(["c_a"]);
   });

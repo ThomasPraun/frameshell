@@ -61,7 +61,7 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 |---|---|
 | `ui_state` | Playhead, playing, duration, selection (`clips`, `words`, time `range`, History entry marked, preview `region` with the clips under it, topmost first, picked `points` with the clip and element at each, the `person` picked in the People panel with their `spans`), editor tabs, timeline seconds `visible` in the timeline panel. `{ connected: false }` when no app window shows the project. |
 | `ui_seek(at)` / `ui_play` / `ui_pause` | Drive the preview's transport. |
-| `ui_select(clips?, words?, range?, reveal?, points?)` | Replace the selection; unknown clip ids fail. `reveal` scrolls to the first clip. `points` (`{ at, x, y }`, fractions of the frame) are inspected by the daemon (`inspect.point`) and shown as picks, the playhead at the first (ADR 0011). |
+| `ui_select(clips?, words?, range?, reveal?, points?, person?)` | Replace the selection; unknown clip ids fail. `reveal` scrolls to the first clip. `points` (`{ at, x, y }`, fractions of the frame) are inspected by the daemon (`inspect.point`) and shown as picks, the playhead at the first (ADR 0011). `person` (`{ id, what? }`, id or exact name, `speaks` or `onscreen`) picks them as the People panel does: their spans of the main timeline and the words of their linked voices (ADR 0020); the daemon resolves the name, an unknown person fails with `InvalidOperation`. |
 | `ui_open_file(file)` | Open a project file in an active editor tab. |
 | `ui_show_tx_diff(target)` | History panel on a `tx_…`/`op_…`, its changes marked on the timeline. |
 
@@ -89,7 +89,7 @@ Optional `people.json`: who is who across transcripts, multicam angles and faces
 |---|---|
 | `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` | Edit people and their links (`speaker`, `angle` or `face`, one per call). Linking a speaker or renaming its person writes the name into the transcript. Links whose target is gone are `missing`, never removed. |
 | `people_scan(assets?, force?)` | Face scan job (kind `people`): YuNet + SFace, locally, cached in `.frameshell/people/`. The only tool that downloads the face models. |
-| `people_suggest` | Suggested links with `sg_…` ids (`speaker`, `face-speaker`, `face`, `angle`) and `hints`. Computes voice prints (CAM++, local) only when a person already has a linked speaker; faces come from cached scans only. |
+| `people_suggest(download?)` | Suggested links with `sg_…` ids (`speaker`, `face-speaker`, `face`, `angle`) and `hints`. Computes voice prints (CAM++, local) only when a person already has a linked speaker, downloading CAM++ and ONNX Runtime Web (~60 MB) once; faces come from cached scans only. `download: false` (what the app sends until the person asks) leaves voices out instead and returns `voiceDownload.bytes`. |
 | `people_confirm(suggestions, reject?, person?)` | Apply or dismiss suggestions. Confirm only what the person agreed to or what is certain. |
 | `people_ranges(person, kind?, timeline?)` | Timeline spans where the person speaks or is on screen; cut from the last span to the first. |
 

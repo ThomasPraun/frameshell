@@ -1,6 +1,6 @@
 // The People panel's model (ADR 0020): what a person's links say, how a change is undone, and what picking a person selects.
 import type { PersonInfo, TimelineView } from "@frameshell/protocol";
-import { angleLinkKey, faceAnchorKey, speakerLinkKey } from "@frameshell/schema";
+import { type Transcript, angleLinkKey, faceAnchorKey, speakerLinkKey, wordSpeaker } from "@frameshell/schema";
 import type { PersonTarget } from "../../../shared/api.js";
 import type { SelectedWord, TimeRange } from "../selection.js";
 import type { TranscriptModel, TranscriptSource } from "../transcript/model.js";
@@ -221,6 +221,33 @@ export function faceViewBox(point: { x: number; y: number }, aspect: number): st
   const top = Math.min(Math.max(point.y - height / 2, 0), 1 - height);
   const pct = (fraction: number) => `${Math.round(fraction * 1000) / 10}%`;
   return `inset(${pct(top)} ${pct(1 - left - width)} ${pct(1 - top - height)} ${pct(left)})`;
+}
+
+/** Longest a voice stretch plays, seconds: enough to recognize someone. */
+const STRETCH_MAX_S = 8;
+/** A pause this long ends a stretch, seconds. */
+const STRETCH_PAUSE_S = 1;
+
+/**
+ * The source span to play so a person hears a voice: the longest run of words of `speaker` (every word without
+ * one) with no other speaker's word and no pause of {@link STRETCH_PAUSE_S} between them, cut to its first
+ * {@link STRETCH_MAX_S} seconds. Null when the voice says nothing. Unlike the daemon's voice-print stretches, it is
+ * one stretch, for listening, with no minimum length.
+ */
+export function voiceStretch(transcript: Pick<Transcript, "words" | "edits">, speaker: string | undefined): { start: number; end: number } | null {
+  const words = [...transcript.words].sort((a, b) => a.start - b.start);
+  let best: { start: number; end: number } | null = null;
+  let run: { start: number; end: number } | null = null;
+  for (const word of words) {
+    const own = speaker === undefined || wordSpeaker(transcript, word) === speaker;
+    if (!own) {
+      run = null;
+      continue;
+    }
+    run = run && word.start - run.end < STRETCH_PAUSE_S ? { start: run.start, end: Math.max(run.end, word.end) } : { start: word.start, end: word.end };
+    if (!best || run.end - run.start > best.end - best.start) best = run;
+  }
+  return best && best.end > best.start ? { start: best.start, end: Math.min(best.end, best.start + STRETCH_MAX_S) } : null;
 }
 
 /** Seconds as `M:SS` for a face sample's time or a total. */

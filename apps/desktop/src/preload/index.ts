@@ -136,11 +136,12 @@ const api: FrameshellApi = {
     link: (person, target) => invokeOutcome(Channel.peopleLink, person, target),
     unlink: (person, target) => invokeOutcome(Channel.peopleUnlink, person, target),
     scan: () => invokeOutcome(Channel.peopleScan),
-    suggest: () => invokeOutcome(Channel.peopleSuggest),
+    suggest: (download) => invokeOutcome(Channel.peopleSuggest, download === true),
     confirm: (suggestions, options) => invokeOutcome(Channel.peopleConfirm, suggestions, options ?? {}),
     ranges: (person, kind) => invokeOutcome(Channel.peopleRanges, person, kind),
     onChanged: (listener) => subscribe(Channel.peopleChanged, listener),
     onScan: (listener) => subscribe(Channel.peopleScanJob, listener),
+    onSuggestProgress: (listener) => subscribe(Channel.peopleSuggestProgress, listener),
   },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),
