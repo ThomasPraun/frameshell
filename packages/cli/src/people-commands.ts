@@ -24,7 +24,8 @@ export const PEOPLE_USAGE = `  people list                  The project's people
                                Timeline spans where the person speaks (default) or is on screen, pauses under
                                0.5 s bridged. Cut several from the last span to the first
   people suggest               Links Frameshell suggests (a speaker that sounds like a person's linked voices,
-                               the face on screen while a speaker talks, a face nobody has), each with an id
+                               the face on screen while a speaker talks, a face nobody has,
+                               a multicam angle's person), each with an id
                                sg_…, a score and why; hints say what kept voices or faces apart
   people confirm <suggestion>… [--reject] [--person <person>]
                                Apply suggested links (yes), or with --reject dismiss them for good. A suggestion
@@ -242,7 +243,7 @@ function linkCount(person: PersonInfo): string {
 function formatSuggestions(result: MethodResult<"people.suggest">): string {
   const lines = result.suggestions.length === 0 ? ["No suggestions."] : result.suggestions.map((suggestion) => `${suggestion.id}  ${suggestion.reason}`);
   if (result.suggestions.length > 0) lines.push("", "Yes: frameshell people confirm <id>…   No: frameshell people confirm <id>… --reject");
-  if (result.suggestions.some((suggestion) => !suggestion.person)) lines.push("Naming nobody: frameshell people confirm <id> --person <name>");
+  if (result.suggestions.some((suggestion) => !suggestion.person && suggestion.kind !== "angle")) lines.push("Naming nobody: frameshell people confirm <id> --person <name>");
   if (result.hints.length > 0) lines.push("", ...result.hints.map((hint) => `hint: ${hint}`));
   return `${lines.join("\n")}\n`;
 }

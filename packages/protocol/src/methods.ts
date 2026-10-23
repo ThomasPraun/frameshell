@@ -1986,7 +1986,10 @@ export const methods = {
       "screen for 10 s or more that nobody has, with the person it looks like or none (ask \"Who is this?\" and show " +
       "the frame at `face.anchor`). Kind `face-speaker`: in a video with a diarized transcript, the face on screen for " +
       "60% or more of a speaker's time (and the only one): the voice and the face are one person, joined to the person " +
-      "either side already has, or a new one. Suggestions answered \"no\" (`dismissed`) are left out. `hints` say what " +
+      "either side already has, or a new one. Kind `angle`: a multicam angle (not a screen) linked to nobody: the person " +
+      "named like it ignoring case, or a new person with its name, plus the angle's voice (its `speaker`, else the " +
+      "speaker holding 80% of its sound's words, else the whole transcript of a mic of its own) and, when videos were " +
+      "scanned, the face most on screen in that angle; one confirmation links all of it. Suggestions answered \"no\" (`dismissed`) are left out. `hints` say what " +
       "keeps voices or faces from being matched: no person has a linked speaker yet, a transcript has no speakers (run " +
       "`transcribe.speakers`), is stale, a speaker says too little, a video has no face scan (run `people.scan`), or a " +
       "face anchor names no face. Confirm only what the person agreed to or what is certain.",
@@ -2004,7 +2007,7 @@ export const methods = {
       "person's name is written into the transcript, a face is linked as a face anchor at `face.anchor`; called by an " +
       "agent, the link records it in `by`), `reject: true` adds the ids to `dismissed` in `people.json` so they are not " +
       "suggested again. A suggestion without `person` (a new face, or a voice and face nobody has) needs `person`: an " +
-      "existing person, or a new name, which adds that person. Ids are checked against the current suggestions first: " +
+      "existing person, or a new name, which adds that person (an `angle` suggestion without `person` adds a person named like the angle). Ids are checked against the current suggestions first: " +
       "one no longer suggested, or one needing `person` without it, fails the call before anything changes. Undo a yes " +
       "with `people.unlink` (and `people.remove` for a person it added). Example: `{ suggestions: [\"sg_9c04e1d2\"] }`, " +
       "`{ suggestions: [\"sg_51aa07c3\"], person: \"Ana\" }`. Fails with InvalidOperation (reason `unknown suggestion`, " +
@@ -2031,7 +2034,8 @@ export const methods = {
             id: z.string(),
             person: z.object({ id: z.string(), name: z.string() }),
             added: z.boolean().describe("True when the person was added by this confirmation (`person` named nobody)."),
-            speaker: z.object({ transcript: z.string(), speaker: z.string() }).optional().describe("The speaker linked, when the suggestion linked one."),
+            speaker: z.object({ transcript: z.string(), speaker: z.string().optional() }).optional().describe("The speaker linked, when the suggestion linked one (no `speaker`: the whole transcript)."),
+            angle: z.object({ timeline: z.string(), group: z.string(), angle: z.string() }).optional().describe("The angle linked, when the suggestion linked one."),
             face: FacePointSchema.optional().describe("The face anchor linked, when the suggestion linked one."),
             linked: z.boolean().describe("False when every link already existed."),
             transcripts: z.array(z.string()).describe("Transcript files whose speaker name was set to the person's name."),
