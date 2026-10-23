@@ -841,7 +841,10 @@ export const TimelineRejectionSchema = z.object({
     .string()
     .describe("Project-relative copy of the rejected content, `.frameshell/rejected/<timestamp>-<timeline>.json`."),
   revision: z.int().nullable().describe("`revision` the edit carried; null when unreadable."),
-  current: z.int().describe("Revision of the daemon's version, restored on disk."),
+  current: z
+    .int()
+    .nullable()
+    .describe("Revision of the daemon's version, restored on disk; null when it has none (a new or unreadable file, put back as it was)."),
   at: z.string().describe("ISO 8601 time of the rejection."),
 });
 

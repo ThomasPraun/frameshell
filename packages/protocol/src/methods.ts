@@ -1136,7 +1136,9 @@ export const methods = {
       "Missing parent directories are created. `frameshell.json`, `timelines/*.json` and `transcripts/**/*.words.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
-      "journaled as a `timeline.patch` operation by author `file` with the revision bumped. " +
+      "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
+      "timeline write by anyone but the app joins a proposal instead; a new timeline file, or one replacing an unreadable " +
+      "file, is kept with the proposal, not in `timelines/`, until the person accepts it. " +
       "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
@@ -1672,11 +1674,17 @@ export const methods = {
       "inverses are applied newest first as one `revert` operation inside the transaction. All or nothing: every " +
       "timeline is checked first, and when someone else changed the same tracks or clips since on any of them, nothing " +
       "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
-      "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. " +
-      "Fails with TransactionState when none is open.",
+      "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. Operations " +
+      "that did reach the file (applied before review mode was turned on) are not undone at once: the undo waits for " +
+      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Fails with " +
+      "TransactionState when none is open, ProposalPending when another proposal waits (transaction stays open).",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
-      reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed."),
+      reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed and this undid."),
+      proposal: z
+        .object({ tx: z.string(), state: ProposalStateSchema })
+        .nullable()
+        .describe("Review mode (ADR 0019): the `ready` proposal holding the undo; null when it was applied or nothing reached the file."),
     }),
   },
   history: {

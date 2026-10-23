@@ -944,9 +944,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A proposal still building holds what the file never got (ADR 0019 §3).
       await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
-      const reverted = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
+      // In review mode an undo of what reached the file waits as a proposal of its own.
+      const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
       await transactions.end(author);
-      return { tx: tx.id, label: tx.label, author, reverted };
+      return { tx: tx.id, label: tx.label, author, reverted, proposal };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
