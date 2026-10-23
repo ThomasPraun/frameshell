@@ -17,19 +17,25 @@ import {
   type Timeline,
   type Transcript,
   edgeTransitions,
+  fixedPlacement,
+  hasPictureKeys,
+  hostFades,
+  isKeyed,
   isIdentityPlacement,
   isProgramSound,
   layerRect,
+  nestingOf,
   placementOf,
   programGroup,
   programSound,
   shotLayers,
   soundSamples,
+  staticGain,
   subtitleTracks,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainVolume, keyExpression, keyedOpacity, num } from "./animation.js";
+import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
 import { assSubtitles } from "./ass.js";
 
 /**
@@ -114,6 +120,8 @@ export type AudioItem =
       samples: number;
       ramps?: Ramp[];
       gain?: string;
+      /** Factor (expression of `t`, seconds from the item's start) of the nested clips' fades that began before the item. */
+      fade?: string;
     }
   | { kind: "silence"; samples: number };
 
@@ -566,7 +574,7 @@ function layoutTimeline(
         end,
         in: Math.round(clip.in * fps),
         speed,
-        placement: placementOf(clip.transform),
+        placement: fixedPlacement(clip),
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
@@ -629,10 +637,10 @@ function layoutTimeline(
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
-  const visible = ({ placed }: Span) => placed.source.video !== null && (placed.clip.keys?.opacity !== undefined || placed.placement.opacity > 0);
+  const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
-  const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !isKeyed(placed.clip);
+  const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !hasPictureKeys(placed.clip);
   const baseLayers = baseLayer.flatMap((placed): Span[] => {
     if (!fills(placed)) return [whole(placed)];
     const lead = placed.lead ?? 0;
@@ -756,7 +764,10 @@ function asFootage(clip: Clip, generated: ReadonlyMap<string, GeneratedSource>):
     in: clipIn,
     out: clipIn + adapter.duration,
     ...(adapter.transform ? { transform: adapter.transform } : {}),
-  };
+    // Same clock as the render (from `in`, speed 1), so keys and nested hosts carry over as they are.
+    ...(adapter.keys ? { keys: adapter.keys } : {}),
+    ...(nestingOf(adapter) ? { nesting: nestingOf(adapter) } : {}),
+  } as MediaClip;
 }
 
 function generatedSource(render: GeneratedSource): ExportSource {
@@ -854,17 +865,17 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const crop = placed.tile?.crop;
     const move = placed.tile?.move;
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
-    const opacityKeys = placed.tile ? undefined : placed.clip.keys?.opacity;
+    const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");
     const fades = placed.tile ? [] : fadeFilters(pictureRamps(placed, start, end, fps, true), true);
     // Ramps, keyed scale and keyed opacity read timeline seconds: the piece's timestamps move there and back.
-    const timed = motion?.scale !== undefined || opacityKeys !== undefined || fades.length > 0;
+    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
-      ...(opacityKeys ? [keyedOpacity(placed.clip, opacityKeys, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+      ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...fades,
       ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
@@ -876,12 +887,6 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
-}
-
-/** True when `clip` animates its placement (keys on `x`, `y`, `scale` or `opacity`). */
-function isKeyed(clip: Clip): boolean {
-  const keys = clip.keys;
-  return keys !== undefined && (keys.x !== undefined || keys.y !== undefined || keys.scale !== undefined || keys.opacity !== undefined);
 }
 
 /**
@@ -903,8 +908,9 @@ function trackTransitions(track: ClipTrack, fps: number, sources: ReadonlyMap<st
 /**
  * Linear ramps (timeline seconds) multiplying `placed`'s picture on timeline frames [start, end): its fades
  * (`fadeWeight`) and, drawn as a layer (`layer`), its dissolve weights (`dissolveWeights`): the incoming clip rises
- * over its dissolve, the outgoing one falls unless it is on the bottom track. A ramp that leaves those frames as
- * they are is left out. Ramps sit on the frame grid, as the clip does.
+ * over its dissolve, the outgoing one falls unless it is on the bottom track; then the fades of the nested clips
+ * it plays inside (`hostFades`). A ramp that leaves those frames as they are is left out. Ramps sit on the frame
+ * grid, as the clip does.
  */
 function pictureRamps(placed: Placed, start: number, end: number, fps: number, layer: boolean): Ramp[] {
   const ramps: Ramp[] = [];
@@ -920,31 +926,34 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   add("in", placed.start, fadeIn);
   add("out", placed.end - fadeOut, fadeOut);
   add("out", placed.end - trail, 2 * trail);
+  for (const host of hostFades(placed.clip)) {
+    const hostOut = Math.round(host.fadeOut * fps);
+    add("in", Math.round(host.start * fps), Math.round(host.fadeIn * fps));
+    add("out", Math.round(host.end * fps) - hostOut, hostOut);
+  }
   return ramps;
 }
 
 /**
  * Keyed placement of a layer piece on timeline frames [start, end) of a graph starting at frame `from`
- * (`placementAt` and `layerRect` as expressions): `scale` with `eval=frame` reading the piece's timeline
- * seconds, `overlay` x/y reading the graph's. Null when the clip has no `x`, `y` or `scale` keys.
+ * (`placementAt` and `layerRect` as expressions, hosts composed): `scale` with `eval=frame` reading the piece's
+ * timeline seconds, `overlay` x/y reading the graph's. Null when no `x`, `y` or `scale` keys move the clip.
  */
 function layerMotion(placed: Placed, start: number, end: number, from: number, out: GraphTarget): { scale?: string; x: string; y: string } | null {
-  const keys = placed.clip.keys;
-  if (!keys || (keys.x === undefined && keys.y === undefined && keys.scale === undefined)) return null;
+  const { clip } = placed;
+  if (!isKeyed(clip, "x") && !isKeyed(clip, "y") && !isKeyed(clip, "scale")) return null;
   const { fps, width, height, project } = out;
   const video = placed.source.video!;
   const first = start / fps;
   const last = (end - 1) / fps;
   const fit = Math.min(width / video.width, height / video.height);
   const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
-  const axis = (axisKeys: typeof keys.x, value: number, size: number, projectSize: number, own: string) => {
-    const at = axisKeys ? keyExpression(placed.clip, axisKeys, time, first, last) : num(value);
-    return `'floor(${num(size / 2)}+(${at})*${size}/${projectSize}-${own}/2+0.5)'`;
-  };
-  const x = axis(keys.x, placed.placement.x, width, project.width, "overlay_w");
-  const y = axis(keys.y, placed.placement.y, height, project.height, "overlay_h");
-  if (keys.scale === undefined) return { x, y };
-  const factor = keyExpression(placed.clip, keys.scale, "t", first, last);
+  const at = placementExpressions(clip, time, first, last);
+  const axis = (value: string, size: number, projectSize: number, own: string) => `'floor(${num(size / 2)}+(${value})*${size}/${projectSize}-${own}/2+0.5)'`;
+  const x = axis(at.x, width, project.width, "overlay_w");
+  const y = axis(at.y, height, project.height, "overlay_h");
+  if (!isKeyed(clip, "scale")) return { x, y };
+  const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
 }
@@ -1087,7 +1096,7 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         previous &&
         start - cursor <= 1 &&
         previous.item.input === input &&
-        previous.item.gainDb === (placed.clip.audio?.gain ?? 0) &&
+        previous.item.gainDb === staticGain(placed.clip) &&
         Math.abs(from - previous.item.to) <= 1
       ) {
         previous.item.samples = end - previous.start;
@@ -1096,8 +1105,8 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         continue;
       }
       if (start > cursor) lane.items.push({ kind: "silence", samples: start - cursor });
-      const ramps = soundRamps(placed, start, fps, at);
-      const gainKeys = exact ? undefined : placed.clip.keys?.gain;
+      const { ramps, fade } = soundRamps(placed, start, fps, at, sampleRate);
+      const gainKeys = !exact && isKeyed(placed.clip, "gain");
       const item: Extract<AudioItem, { kind: "clip" }> = {
         kind: "clip",
         clip: placed.clip.id,
@@ -1105,10 +1114,11 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         from,
         to: from + sourceSamples,
         speed: placed.speed,
-        gainDb: gainKeys ? 0 : (placed.clip.audio?.gain ?? 0),
+        gainDb: gainKeys ? 0 : staticGain(placed.clip),
         samples: end - start,
         ...(ramps.length > 0 ? { ramps } : {}),
-        ...(gainKeys ? { gain: keyExpression(placed.clip, gainKeys, `(${num(start / sampleRate)}+t)`, start / sampleRate, end / sampleRate) } : {}),
+        ...(gainKeys ? { gain: gainExpression(placed.clip, `(${num(start / sampleRate)}+t)`, start / sampleRate, end / sampleRate) } : {}),
+        ...(fade ? { fade } : {}),
       };
       lane.items.push(item);
       lane.joinable = exact ? { item, start } : null;
@@ -1121,11 +1131,14 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
 
 /**
  * Equal-power ramps of `placed`'s sound, in samples from its item's first sample `first` (`fadeWeight` and
- * `dissolveWeights` with `sound`): the incoming crossfade over its dissolve, its fades, and the outgoing
- * crossfade under the next clip's dissolve. `at` puts a timeline frame on the sample grid.
+ * `dissolveWeights` with `sound`): the incoming crossfade over its dissolve, its fades, the outgoing
+ * crossfade under the next clip's dissolve, and the fades of the nested clips it plays inside (`hostFades`); those
+ * that began before the item come back as `fade` instead. `at` puts a timeline frame on the sample grid.
  */
-function soundRamps(placed: Placed, first: number, fps: number, at: (frame: number) => number): Ramp[] {
+function soundRamps(placed: Placed, first: number, fps: number, at: (frame: number) => number, rate: number): { ramps: Ramp[]; fade?: string } {
   const ramps: Ramp[] = [];
+  // Host fades that began before the item: `afade` cannot start before its input, so they become a `volume` factor of `t`.
+  const factors: string[] = [];
   const add = (type: Ramp["type"], from: number, to: number) => {
     // An item clamped later by the one before it (hand-edited overlap) starts its ramp where it starts.
     const start = Math.max(first, at(from));
@@ -1137,7 +1150,24 @@ function soundRamps(placed: Placed, first: number, fps: number, at: (frame: numb
   add("in", placed.start, placed.start + Math.round((placed.edges?.fadeIn ?? 0) * fps));
   add("out", placed.end - Math.round((placed.edges?.fadeOut ?? 0) * fps), placed.end);
   add("out", placed.end - trail, placed.end + trail);
-  return ramps;
+  const quarter = num(Math.PI / 2);
+  const addHost = (type: Ramp["type"], from: number, to: number) => {
+    if (at(to) <= at(from) || at(from) >= first) return add(type, from, to);
+    if (at(to) <= first) return;
+    const length = num((at(to) - at(from)) / rate);
+    factors.push(
+      type === "in"
+        ? `sin(${quarter}*min(1,(t+${num((first - at(from)) / rate)})/${length}))`
+        : `sin(${quarter}*max(0,(${num((at(to) - first) / rate)}-t)/${length}))`,
+    );
+  };
+  for (const host of hostFades(placed.clip)) {
+    const hostStart = Math.round(host.start * fps);
+    const hostEnd = Math.round(host.end * fps);
+    addHost("in", hostStart, hostStart + Math.round(host.fadeIn * fps));
+    addHost("out", hostEnd - Math.round(host.fadeOut * fps), hostEnd);
+  }
+  return factors.length > 0 ? { ramps, fade: factors.join("*") } : { ramps };
 }
 
 /**
@@ -1171,8 +1201,8 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
         `atrim=start_sample=${item.from}:end_sample=${item.to + tail}`,
         "asetpts=PTS-STARTPTS",
         ...tempo(item.speed),
-        ...(item.gain !== undefined
-          ? [`asetnsamples=n=${GAIN_FRAME_SAMPLES}:p=0`, gainVolume(item.gain)]
+        ...(item.gain !== undefined || item.fade !== undefined
+          ? [`asetnsamples=n=${GAIN_FRAME_SAMPLES}:p=0`, gainVolume(item.gain ?? num(item.gainDb), item.fade)]
           : item.gainDb === 0
             ? []
             : [`volume=${num(item.gainDb)}dB`]),

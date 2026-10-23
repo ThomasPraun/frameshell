@@ -310,7 +310,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const inspector = new InspectService({
     timeline: async (dir, id) => {
       const { timeline, fps } = await timelines.load(dir, id);
-      return { timeline: await resolveNested(dir, timeline), fps };
+      return { timeline: await resolveNested(dir, timeline, undefined, fps), fps };
     },
     resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
     pictureSize: async (dir, asset) => {
@@ -647,7 +647,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "inspect.point": async ({ cwd, timeline, at, x, y, unit, view }, caller) => {
       const dir = await root(cwd);
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
-      const loaded = { timeline: await resolveNested(dir, shown.timeline), fps: shown.fps };
+      const loaded = { timeline: await resolveNested(dir, shown.timeline, undefined, shown.fps), fps: shown.fps };
       return { view: shown.view, proposal: shown.proposal, ...(await inspector.point(dir, { timeline, at, x, y, unit }, loaded)) };
     },
     "job.list": async ({ cwd, active }) => {
