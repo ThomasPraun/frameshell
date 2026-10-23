@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-23
+
 ### Added
 
 - People in the project (ADR 0020, SPEC decision 27, protocol v57). Everything is optional: without `people.json` nothing changes, nothing is downloaded, no job runs and no transcript is touched.
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Render: `elementStyles` (`@frameshell/schema`) makes one sheet of `translate` and `scale` rules with `!important`, which add to the composition's own animation. The render cache key includes `elements` only when present. Plugin API (additive, `apiVersion` stays `"1"`): `ClipAdapter.elementStyles`, `RenderContext.elementCss`. HyperFrames inserts the sheet last in the copied entry's `<head>`; Remotion serves a hard-linked copy of the bundle whose `index.html` carries it, removed after the render (also when it fails).
   - Live pages: `clip.live` returns `elementCss`, and the app's bridge owns one `<style data-frameshell-elements>` that it swaps without a reload, answering how many elements each selector matches. Adapters need nothing for live. The bridge also answers `probeMovable` and `probeSelector`: the element an adjustment moves and its `unit` (page px per composition px), so a composition sized unlike the project drags 1:1.
   - Desktop: in the paused preview of a trusted project, double-click a generated clip to enter element mode. Hovering outlines the element under the pointer; a press selects it (an inline element moves its nearest block ancestor; ↑/↓ select the parent or back); its body drags it and its corners scale it about its centre. Escape, playing or selecting another clip goes back to the whole clip. A drop saves one `clip.set` by `ui` ("Move element", "Scale element"), one undo step. While dragging, a topmost clip shows its live page with the new sheet in place of its render until the new render or live page is ready; a covered clip moves only the outline. The clip inspector lists the adjustments with a reset each and Reset all, marks selectors that match nothing at the shown frame, and marks fragile ones (no `id`, `:nth-child`) with an Ask agent button that asks for an `id`. English and Spanish.
+- `@frameshell/hyperframes` 0.4.0 and `@frameshell/remotion` 0.4.0 apply element adjustments at render (`elementStyles`). The new versions are part of the render cache key, so their clips render once more.
 
 ### Fixed
 
@@ -332,7 +335,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.15.0
 [0.14.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.14.0
 [0.12.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.1
 [0.12.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.0
