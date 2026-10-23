@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Review mode no longer lets two agent changes past review (#328, ADR 0019). A new timeline file, or one written over an unreadable file, by `file.write` (anyone but the app) or created on disk, now waits in a proposal instead of landing in `timelines/`: it is not a timeline until the person accepts it, and reject discards it (one created on disk while another proposal is open is rejected with reason `proposal-pending`, `current` null, and removed). `tx abort` of operations applied before review mode was turned on no longer undoes them at once: the undo waits as a ready proposal labelled `Abort "<label>"`, named in the new `proposal` field of the `tx.abort` result; with another proposal open it fails with `ProposalPending` and the transaction stays open. With review mode off nothing changes. Protocol v54.
+
 ## [0.14.0] - 2026-10-23
 
 ### Added
@@ -24,10 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Decisions: the person accepts (the operations are journaled under their author, marked `proposal: <tx>`, on every timeline or none) or rejects (nothing is journaled), only in the app: internal `proposal.accept` and `proposal.reject` are refused for any other caller. The person's own edits rebase the proposal, or make it stale when they touch the same clips, tracks or groups (the keys `revert` uses). A direct edit of a timeline file becomes a ready proposal and the file is restored; one arriving while another proposal is open is rejected with reason `proposal-pending`. Outcomes go to `.frameshell/proposals/decisions.jsonl`; `status`, `history` (`proposals`) and `tx.commit` report them; event `proposal.changed`; `gc` sweeps closed proposals after 7 days.
   - Agents: `proposal.status`, `proposal.wait` (`accepted`, `rejected`, `stale`, `aborted`, or `pending` after `timeout`) and `proposal.diff` (per timeline, in `history.diff` shape). CLI `frameshell proposal status`, `proposal wait [--timeout s]` (exit 0 accepted or none, 3 rejected, 4 stale, 5 aborted, 6 still pending) and `proposal diff [--tx id]`; `status` prints a review mode line while it is on. MCP `proposal_status`, `proposal_wait`, `proposal_diff` only (`docs/mcp.md`). The agent skill has a Review mode section.
   - Desktop: while a proposal exists, a bar in every window of the project (detached panels, editor and terminal windows too) names it (label, the agent's own label, operations). Building shows "claude is working…"; ready offers Accept and Reject; a proposal made stale by the person's edits says which clips both changed until dismissed. A Before / After toggle, shared by the window and its detached panels, switches the preview and the timeline between the file and the proposal, with the History diff marks of what the proposal changes; it starts on After when a proposal becomes ready. Editing while on After applies to the file and returns the view to Before. Ask agent frames read the file. English and Spanish.
-
-### Fixed
-
-- Review mode no longer lets two agent changes past review (#328, ADR 0019). A new timeline file, or one written over an unreadable file, by `file.write` (anyone but the app) or created on disk, now waits in a proposal instead of landing in `timelines/`: it is not a timeline until the person accepts it, and reject discards it (one created on disk while another proposal is open is rejected with reason `proposal-pending`, `current` null, and removed). `tx abort` of operations applied before review mode was turned on no longer undoes them at once: the undo waits as a ready proposal labelled `Abort "<label>"`, named in the new `proposal` field of the `tx.abort` result; with another proposal open it fails with `ProposalPending` and the transaction stays open. With review mode off nothing changes.
 
 ## [0.12.1] - 2026-10-22
 
