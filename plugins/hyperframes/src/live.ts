@@ -62,11 +62,21 @@ const GLUE = `(function () {
  * project-relative (`.` for the project), for `describe`. The host wraps the
  * text in a `<script>` element, so nothing in it may close one.
  */
-export function liveHead(variables: Record<string, unknown>, runtime: string, root = "."): string {
+export function liveHead(variables: Record<string, unknown>, runtime: string, root = ".", elementCss = ""): string {
   if (/<\/script/i.test(runtime)) throw new Error("The HyperFrames runtime script contains `</script`, so it cannot be inlined into a live page.");
   const parts: string[] = [];
   if (Object.keys(variables).length > 0) parts.push(`window.__hfVariables = ${scriptJson(variables)};`);
   parts.push(GLUE.replace("(function () {", `(function () {\n  var ROOT = ${scriptJson(root)};`), runtime);
+  // SPIKE (#291): the element sheet goes last in <head> once parsed, so it follows the composition's own styles.
+  // `frameshellElements(css)` swaps it without a reload (what a drag would post through the host bridge).
+  if (elementCss !== "") parts.push(`(function () {
+  var sheet = document.createElement("style");
+  sheet.setAttribute("data-frameshell-elements", "");
+  sheet.textContent = ${scriptJson(elementCss)};
+  window.frameshellElements = function (css) { sheet.textContent = String(css); };
+  var place = function () { document.head.appendChild(sheet); };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", place); else place();
+})();`);
   return parts.join("\n");
 }
 

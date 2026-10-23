@@ -1,4 +1,4 @@
-import { cp, readFile, readdir, realpath } from "node:fs/promises";
+import { cp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
 import { liveHead } from "./live.js";
@@ -102,6 +102,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       // Render a copy: the producer may write scratch files next to the entry, which would count as composition edits.
       const composition = join(ctx.outDir, "composition");
       await cp(dir.path, composition, { recursive: true });
+      if (ctx.elementCss) await addElementStyles(join(composition, basename(source)), ctx.elementCss);
       const output = join(ctx.outDir, "render.webm");
       const producer = await loadProducer();
       ctx.progress({ fraction: 0, message: "Starting headless Chrome" });
@@ -123,7 +124,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       return { file: output, hasAlpha: true };
     },
     // The page is the composition directory as it is: the runtime loads sub-compositions and assets by relative URL.
-    async livePreview(clip, _ctx: LiveContext): Promise<LivePage> {
+    async livePreview(clip, ctx: LiveContext): Promise<LivePage> {
       const { id, source, props } = clip as HyperframesClip;
       requireEntry(id, source);
       const dir = await compositionDir(projectDir, { id, source });
@@ -133,10 +134,18 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       return {
         root,
         entry: dir.rel === "" ? name : `${dir.rel}/${name}`,
-        head: liveHead(props ?? {}, await loadRuntime(), root),
+        head: liveHead(props ?? {}, await loadRuntime(), root, ctx.elementCss ?? ""),
       };
     },
   };
+}
+
+/** SPIKE (#291): adds the clip's element CSS as the last stylesheet of the copied entry HTML. */
+async function addElementStyles(entry: string, css: string): Promise<void> {
+  const html = await readFile(entry, "utf8");
+  const tag = `<style data-frameshell-elements>\n${css.replace(/<\//g, "<\\/")}\n</style>`;
+  const at = html.search(/<\/head\s*>/i);
+  await writeFile(entry, at >= 0 ? html.slice(0, at) + tag + html.slice(at) : tag + html);
 }
 
 /** Throws unless `source` names the composition's HTML entry. */

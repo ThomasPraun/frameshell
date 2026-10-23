@@ -162,6 +162,14 @@ export const AdapterClipSchema = z.strictObject({
   in: Seconds.optional().describe("Composition seconds of the first frame. Default 0."),
   duration: z.number().positive().describe("Seconds on the timeline."),
   props: z.record(z.string(), z.unknown()).optional().describe("Adapter-specific properties, validated by the adapter."),
+  // SPIKE (#291)
+  elements: z
+    .record(
+      z.string().min(1),
+      z.strictObject({ x: z.number().optional(), y: z.number().optional(), scale: z.number().positive().optional() }),
+    )
+    .optional()
+    .describe("Moves and scales of composition elements, by CSS selector, in composition CSS px; applied over the source."),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */

@@ -9,7 +9,7 @@ export interface ClipKeyInput {
   /** Plugin providing the adapter, as installed. */
   plugin: { name: string; version: string };
   /** The timeline clip. Only `type`, `source` and `props` count: placement never re-renders. */
-  clip: Pick<AdapterClip, "type" | "source" | "props">;
+  clip: Pick<AdapterClip, "type" | "source" | "props" | "elements">;
   /** Files the adapter declared (`inputs`), with content hash; null = missing. Order does not matter. */
   inputs: readonly { path: string; hash: string | null }[];
   /** Project frame rate and resolution. */
@@ -29,6 +29,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     type: input.clip.type,
     source: input.clip.source ?? null,
     props: input.clip.props ?? {},
+    // SPIKE (#291): absent drops out of the canonical form, so existing keys stay the same.
+    elements: input.clip.elements,
     inputs,
     format: input.format,
   });

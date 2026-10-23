@@ -13,7 +13,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
-import type { AdapterClip, Timeline } from "@frameshell/schema";
+import { type AdapterClip, type Timeline, elementStyles } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
@@ -292,6 +292,7 @@ export class ClipRenderer {
         width: format.width,
         height: format.height,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
+        elementCss: elementStyles((clip as AdapterClip).elements),
       });
     } catch (error) {
       throw unavailable(`${plugin.name}: ${(error as Error)?.message ?? error}`);
@@ -561,6 +562,7 @@ export class ClipRenderer {
         ...format,
         signal: ctx.signal,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
+        elementCss: elementStyles((clip as AdapterClip).elements),
         progress: ({ fraction }) => {
           if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
         },

@@ -122,6 +122,8 @@ export interface LiveContext {
   readonly height: number;
   /** See {@link RenderContext.ensureBinary}. */
   ensureBinary(name: string): Promise<string>;
+  /** SPIKE (#291): see {@link RenderContext.elementCss}. */
+  readonly elementCss?: string;
 }
 
 /**
@@ -189,6 +191,11 @@ export interface RenderContext {
   ensureBinary(name: string): Promise<string>;
   /** Report progress to the app and CLI (the job's `progress`). Cheap; call freely. */
   progress(update: RenderProgress): void;
+  /**
+   * SPIKE (#291): CSS from the clip's `elements` (moves and scales by selector). The page must apply it after
+   * its own styles; empty or absent when the clip has none.
+   */
+  readonly elementCss?: string;
 }
 
 /** One render progress report. */
