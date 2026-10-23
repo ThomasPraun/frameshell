@@ -1,6 +1,6 @@
 # `frameshell` CLI
 
-Thin client of the daemon: it starts `frameshelld` when none runs, acts on the project enclosing the current directory, and exits 0 (ok), 1 (command failed) or 2 (usage error). Add `--json` to parse the output. Timeline commands take `--timeline <id>` (default `main`). `frameshell --help` lists every flag; this page says what each command is for and what to watch.
+Thin client of the daemon: it starts `frameshelld` when none runs, acts on the project enclosing the current directory, and exits 0 (ok), 1 (command failed) or 2 (usage error); `proposal wait` also uses 3 to 6. Add `--json` to parse the output. Timeline commands take `--timeline <id>` (default `main`). `frameshell --help` lists every flag; this page says what each command is for and what to watch.
 
 ## Project
 
@@ -56,6 +56,11 @@ Mutations print `revision · op <id> · tx <id>`, plus a `snapped … -> …` li
 | `frameshell tx abort` | Undo them all, or nothing when someone changed the same clips since (the error lists the conflicts). |
 | `frameshell history [--since <tx>]` | Operations by transaction with author and touched ids; `--since` shows only what came after `<tx>`. |
 | `frameshell revert <tx\|op>` | Undo a transaction or one operation as a new operation. Refused with the conflicting later operations when they touched the same clips: revert those first, newest first. |
+| `frameshell proposal status` | Review mode (ADR 0019): the person's switch, the open proposal (author, label, `building` or `ready`, operations, age) and the last decisions. `--json`: `enabled`, `proposal`, `decisions`. |
+| `frameshell proposal wait [--timeout s]` | Block until the open proposal is decided (default 300 s, max 3600). Exit 0 `accepted` (or `none`: nothing to wait for), 3 `rejected`, 4 `stale` (`conflicts`: ids both of you changed), 5 `aborted`, 6 `pending` after the timeout. `--json`: `outcome`, `tx`, `label`, `author`, `conflicts`, `proposal`. |
+| `frameshell proposal diff [--tx id]` | Per timeline, the clips the open proposal adds, removes, moves or changes, with track and times before and after. `--json`: `tx`, `timelines` (`history.diff` shape). |
+
+Accepting and rejecting a proposal is the person's, in the app: there is no command for it.
 
 `status` lists open transactions; one left open by a closed shell is ended with `FRAMESHELL_SESSION=<its session> frameshell tx commit` (or `tx abort`).
 

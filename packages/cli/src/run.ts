@@ -11,8 +11,11 @@ import {
   type GcResult,
   type JobInfo,
   type MethodResult,
+  PROPOSAL_WAIT_MAX_S,
   type PluginInfo,
+  type Proposal,
   type Progress,
+  type ReviewState,
   RpcError,
   type ScriptOutlineResult,
   type StatusResult,
@@ -89,6 +92,11 @@ Commands:
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
                                takes fractions of the frame (0.71,0.14), --px project pixels (1363,151)
+  proposal status              Review mode (the person's switch) and the open proposal waiting for their review
+  proposal wait [--timeout s]  Block until the open proposal is decided (default 300 s, max 3600). Exit code:
+                               0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
+                               pending after the timeout (run it again)
+  proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
   script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
@@ -103,13 +111,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -126,6 +134,9 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline"],
   "script outline": [],
+  "proposal status": [],
+  "proposal wait": ["timeout"],
+  "proposal diff": ["tx"],
   mcp: [],
 };
 
@@ -168,6 +179,9 @@ type Invocation =
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string }
   | { kind: "script.outline"; file: string }
+  | { kind: "proposal.status" }
+  | { kind: "proposal.wait"; timeout?: number }
+  | { kind: "proposal.diff"; tx?: string }
   | TimelineInvocation;
 
 interface Flags {
@@ -225,6 +239,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           preset: { type: "string" },
           point: { type: "string" },
           px: { type: "string" },
+          timeout: { type: "string" },
+          tx: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -291,7 +307,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -330,6 +346,8 @@ function parseBuiltin(
     at?: string | undefined;
     point?: string | undefined;
     px?: string | undefined;
+    timeout?: string | undefined;
+    tx?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -410,6 +428,18 @@ function parseBuiltin(
       ...(model ? { model } : {}),
       ...(language ? { language } : {}),
     };
+  }
+  if (command === "proposal") {
+    if (rest.length !== 1) return null;
+    if (rest[0] === "status") return { kind: "proposal.status" };
+    if (rest[0] === "diff") return { kind: "proposal.diff", ...(options.tx ? { tx: options.tx } : {}) };
+    if (rest[0] !== "wait") return null;
+    if (options.timeout === undefined) return { kind: "proposal.wait" };
+    const timeout = Number(options.timeout);
+    if (options.timeout.trim() === "" || !Number.isFinite(timeout) || timeout <= 0 || timeout > PROPOSAL_WAIT_MAX_S) {
+      throw new UsageError(`--timeout takes seconds from above 0 to ${PROPOSAL_WAIT_MAX_S}, e.g. --timeout 120.`);
+    }
+    return { kind: "proposal.wait", timeout };
   }
   if (command === "script") return rest.length === 2 && rest[0] === "outline" ? { kind: "script.outline", file: rest[1]! } : null;
   if (command === "init" && rest.length <= 1) {
@@ -518,6 +548,19 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });
       return flags.json ? json(result) : formatOutline(result);
+    }
+    case "proposal.status": {
+      const result = await conn.request("proposal.status", { cwd });
+      return flags.json ? json(result) : formatProposalStatus(result);
+    }
+    case "proposal.wait": {
+      const result = await conn.request("proposal.wait", { cwd, ...(inv.timeout !== undefined ? { timeout: inv.timeout } : {}) });
+      outcome.code = PROPOSAL_EXIT_CODES[result.outcome];
+      return flags.json ? json(result) : formatProposalWait(result);
+    }
+    case "proposal.diff": {
+      const result = await conn.request("proposal.diff", { cwd, ...(inv.tx ? { tx: inv.tx } : {}) });
+      return flags.json ? json(result) : formatProposalDiff(result);
     }
     case "transcribe.speakers": {
       const result = await conn.request(
@@ -832,6 +875,74 @@ function formatVerify(result: TranscribeVerifyResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** Exit code of `frameshell proposal wait` per outcome; 1 and 2 stay failure and usage error. */
+const PROPOSAL_EXIT_CODES: Record<MethodResult<"proposal.wait">["outcome"], number> = {
+  accepted: 0,
+  none: 0,
+  rejected: 3,
+  stale: 4,
+  aborted: 5,
+  pending: 6,
+};
+
+/** `1 operation` / `3 operations`. */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function formatProposal(proposal: Proposal): string {
+  const label = proposal.label ? ` "${proposal.label}"` : "";
+  const what = proposal.state === "building" ? "building (its transaction is open)" : "ready, waiting for the person's review";
+  return `${proposal.tx}${label} by ${proposal.author} · ${what} · ${plural(proposal.operations, "operation")} on ${proposal.timelines.join(", ")} · open ${duration(proposal.ageMs)}`;
+}
+
+/** Review mode line of `status` and `proposal status`. */
+function reviewLine(review: ReviewState): string {
+  if (review.proposal) return `Review mode: ${review.enabled ? "on" : "off"} · proposal ${formatProposal(review.proposal)}`;
+  return `Review mode: ${review.enabled ? "on: your changes wait as proposals for the person to accept" : "off: your changes apply at once"}`;
+}
+
+function formatProposalStatus(result: MethodResult<"proposal.status">): string {
+  const lines = [reviewLine(result)];
+  if (result.decisions.length > 0) {
+    lines.push("Last decisions:");
+    for (const d of result.decisions) {
+      const conflicts = d.conflicts.length > 0 ? ` (conflicts: ${d.conflicts.join(", ")})` : "";
+      lines.push(`  ${d.at}  ${d.tx}${d.label ? ` "${d.label}"` : ""} by ${d.author}: ${d.outcome}${conflicts}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+const WAIT_NEXT: Record<MethodResult<"proposal.wait">["outcome"], string> = {
+  accepted: "The person accepted it: its changes are in the timeline. Continue.",
+  rejected: "The person rejected it: nothing was applied. Ask what to change, or adjust.",
+  stale: "The person changed the same clips meanwhile: nothing was applied. Read the timeline again and redo the change.",
+  aborted: "Its transaction was aborted: nothing was applied.",
+  pending: "Still waiting for the person. Run `frameshell proposal wait` again.",
+  none: "No proposal is open and none was decided yet. Nothing to wait for.",
+};
+
+function formatProposalWait(result: MethodResult<"proposal.wait">): string {
+  const head = result.tx === null ? "No proposal" : `Proposal ${result.tx}${result.label ? ` "${result.label}"` : ""}`;
+  const conflicts = result.conflicts.length > 0 ? ` (conflicts: ${result.conflicts.join(", ")})` : "";
+  return `${head}: ${result.outcome}${conflicts}\n${WAIT_NEXT[result.outcome]}\n`;
+}
+
+function formatProposalDiff(result: MethodResult<"proposal.diff">): string {
+  if (result.tx === null || result.timelines.length === 0) return "No proposal is open.\n";
+  const place = (at: { track: string; start: number; end: number | null } | null) => (at ? `${at.track} ${at.start}–${at.end ?? "?"} s` : "");
+  const lines = [`Proposal ${result.tx}:`];
+  for (const timeline of result.timelines) {
+    lines.push(`Timeline ${timeline.timeline} · ${plural(timeline.clips.length, "clip")}`);
+    for (const clip of timeline.clips) {
+      const move = clip.before && clip.after ? `${place(clip.before)} -> ${place(clip.after)}` : place(clip.before ?? clip.after);
+      lines.push(`  ${clip.change.padEnd(7)} ${clip.clip}  ${move}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function formatStatus(status: StatusResult, cwd: string): string {
   const { daemon, project, trust } = status;
   const lines = [
@@ -848,6 +959,7 @@ function formatStatus(status: StatusResult, cwd: string): string {
         "Move the project out of that folder.",
     );
   }
+  if (status.review?.enabled || status.review?.proposal) lines.push(reviewLine(status.review));
   if (trust && trust.state !== "not-required") {
     const count = Object.keys(trust.plugins).length;
     lines.push(`Plugins: ${count} declared, ${trustLabel(trust.state)}`);
