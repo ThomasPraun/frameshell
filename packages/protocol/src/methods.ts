@@ -1459,6 +1459,31 @@ export const methods = {
       cached: z.boolean().describe("True when the image was prepared already."),
     }),
   },
+  "image.cutout": {
+    mutating: true,
+    description:
+      "Cut a part out of a photo as a new layer (ADR 0022). `clip` is a still media clip of an image project; `mask` is a " +
+      "project-relative 8-bit grayscale PNG at the photo's own pixel size, white (255) where the part is: the `mask` of a point's " +
+      "`segment.masks` from `inspect.point`, or one you made. The photo with the mask as its transparency is written as a new " +
+      "file `assets/<photo name>-cutout-<n>.png` (the photo itself is never changed) and placed on a new video track right above " +
+      "the photo's, over it exactly: same start, length, position, scale and opacity, so the part covers its own pixels. One " +
+      "transaction labelled `Cut out <photo name>`: reverting removes the layer; the PNG stays in `assets/`. Background removal " +
+      "is this followed by `clip.set` `opacity: 0` on the photo (or `clip.remove`). Keyframes and fades of the photo are not copied. " +
+      "Example: `{ clip: \"c_0003\", mask: \".frameshell/context/m_0_1210_1530_3.png\" }`. Fails with InvalidOperation (video " +
+      "project, not a still media clip, mask not a grayscale PNG of the photo's size, empty mask), ClipNotFound, AssetNotFound, " +
+      "OutsideProject, or the Binary* errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Id of the photo's clip, from `timeline.show`."),
+      mask: z.string().min(1).describe("Grayscale PNG at the photo's size, project-relative or absolute inside the project; white = keep."),
+    }),
+    result: OperationResultSchema.extend({
+      asset: z.string().describe("Project-relative path of the new PNG with transparency."),
+      track: z.string().describe("Id of the new track, right above the photo's."),
+      clip: z.string().describe("Id of the new clip on it."),
+    }),
+  },
   "multicam.paint": {
     mutating: true,
     description:

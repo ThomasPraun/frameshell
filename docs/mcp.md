@@ -48,6 +48,7 @@ Observe tools return images:
 
 | Tool | Returns |
 |---|---|
+| `image_cutout(timeline, clip, mask)` | Image projects: the photo clip with a grayscale mask PNG as alpha, written as `assets/<photo>-cutout-<n>.png` and added as a layer right above the photo, exactly over it, in one transaction (ADR 0022). Same as `frameshell image cutout`. |
 | `inspect_point(timeline, at, x, y, unit?, segment?)` | What a point of the frame shows (ADR 0011): clips under it topmost first, the one seen there, and in a generated clip the DOM element painting it, probed in its live page in managed headless Chrome with the app's Pick script. Elements need a trusted project; footage paints its whole box. `segment`: on a photo in an image project, three mask PNGs under `.frameshell/context/` and their boxes (ADR 0022). Same as `frameshell inspect`. |
 | `frame_capture(timeline, at, preset?, out?)` | The composited frame at `at` seconds, rendered by the daemon with the export compiler (single-frame plan, same as `frameshell frame`), as a PNG image scaled to fit 1280x1280, plus frame index and clip. `out` also keeps the full-size image, as PNG, JPEG or WebP by its extension or `format` (`quality` 1-100); how an image project exports (ADR 0017). |
 | `frames_strip(timeline, from, to, count?, preset?)` | `count` (2 to 16, default 6) evenly spaced frames from `from` to `to`, tiled into one contact sheet at most 1280 px wide, plus the time, frame and clip of each tile. |

@@ -20,6 +20,8 @@ const en = {
   exportImageHint: "Save the picture as PNG, JPEG or WebP",
   exported: (file: string) => `Saved ${file}`,
   imageFromFrame: "New image from this frame…",
+  /** Context menu over a picked photo part (ADR 0022): the part becomes its own layer. */
+  cutOut: "Cut out as layer",
   /** Slots: `{type}`, `{clip}`. */
   clipOf: "{type} clip {clip}",
   hiddenLayers: "Layers not shown",
@@ -80,6 +82,7 @@ const es: typeof en = {
   exportImageHint: "Guarda la imagen como PNG, JPEG o WebP",
   exported: (file) => `Guardada: ${file}`,
   imageFromFrame: "Nueva imagen desde este fotograma…",
+  cutOut: "Recortar como capa",
   clipOf: "clip {type} {clip}",
   hiddenLayers: "Capas no mostradas",
   layerNote: (layer, reason, type, clip) => `V${layer}: ${reason} (clip ${type} ${clip})`,
