@@ -1,6 +1,6 @@
 // Live preview of generated clips (ADR 0010): which clip plays its composition in a frame, and at what time. Pure.
 import { type FrameBox, frameBox } from "./transform-edit.js";
-import { type Program, type VideoSpan, programAt } from "./program.js";
+import { type Program, type VideoSpan, programAt, spanPlacement } from "./program.js";
 
 type GeneratedSpan = Extract<VideoSpan, { kind: "generated" }>;
 
@@ -33,8 +33,9 @@ export function liveTarget(program: Program, frame: number): LiveTarget | null {
     const { render } = span;
     if ((render.state !== "queued" && render.state !== "rendering") || !render.key) return null;
     // Renders are made at the project format, so the page is laid out at it too.
-    const box = frameBox(program.resolution, program.resolution, span.placement);
-    return { clip: span.clip, layer, key: render.key, span, box, opacity: span.placement.opacity };
+    const placement = spanPlacement(span, frame, program.fps);
+    const box = frameBox(program.resolution, program.resolution, placement);
+    return { clip: span.clip, layer, key: render.key, span, box, opacity: placement.opacity };
   }
   return null;
 }
@@ -43,7 +44,9 @@ export function liveTarget(program: Program, frame: number): LiveTarget | null {
  * Composition seconds the live page shows at program time `time` (seconds):
  * render time `in + (t − start)`, as the engine maps a render's frames.
  * Paused, `time` is a frame boundary, so this is that frame's time exactly.
+ * A held handle of a dissolve shows its one frame.
  */
 export function liveSeconds(span: GeneratedSpan, time: number, fps: number): number {
+  if (span.hold) return span.in / fps;
   return Math.max(0, (span.in - span.start) / fps + time);
 }

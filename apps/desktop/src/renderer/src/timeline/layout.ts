@@ -1,7 +1,9 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
-import { SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
+import { type Clip, SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
+import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
+import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
 import { type GroupTurn, type LaneMarks, type PaintedMark, TURN_LANE_HEIGHT, laneMarks, shotSpans } from "./turn-lanes.js";
 
 /** Height of the time ruler above the lanes, px. */
@@ -61,6 +63,16 @@ export interface ClipBox {
   transform: { x: number; y: number; scale: number; opacity: number } | null;
   /** Shots: what they show; null for other clips. */
   shot: ShotBox | null;
+  /** Stored `dissolve`, seconds; null when unset. */
+  dissolve: number | null;
+  /** Stored `fadeIn`, seconds; null when unset. */
+  fadeIn: number | null;
+  /** Stored `fadeOut`, seconds; null when unset. */
+  fadeOut: number | null;
+  /** What the clip's transitions play as, at their effective lengths; empty without any. */
+  marks: TransitionMark[];
+  /** Stored `keys` per property, on the clip's own clock; absent properties have none. */
+  keys: Partial<Record<KeyProp, KeyBox[]>>;
 }
 
 /** One angle a shot shows. */
@@ -168,9 +180,15 @@ export interface TimelineLayout {
  * Lay out a timeline the way editors read it: the top picture layer first
  * (the file lists the bottom layer first; program tracks stack among video
  * tracks), then audio, then subtitles. `scenes` add the band under the ruler
- * and push the lanes down; `lanes` open a program track's turn lanes under its shots.
+ * and push the lanes down; `lanes` open a program track's turn lanes under its shots; `transitions` sizes the
+ * marks of transitions (without it, material past a clip's edges is unknown, so dissolves read as dips).
  */
-export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] = [], lanes?: TurnLaneInput): TimelineLayout {
+export function layoutTimeline(
+  view: TimelineView,
+  scenes: readonly SceneBox[] = [],
+  lanes?: TurnLaneInput,
+  transitions?: Pick<TransitionContext, "sourceDuration">,
+): TimelineLayout {
   const problems = new Map(view.problems.map((problem) => [problem.clip, problem.message]));
   const labels = new Map<string, string>();
   const counts: Record<TrackKind, number> = { video: 0, program: 0, audio: 0, subtitles: 0 };
@@ -187,8 +205,10 @@ export function layoutTimeline(view: TimelineView, scenes: readonly SceneBox[] =
   let clipCount = 0;
   const rows = ordered.map((track): TrackRow => {
     const group = track.kind === "program" ? view.groups?.find((candidate) => candidate.id === track.group) : undefined;
+    const pictured = track.kind === "video" || track.kind === "audio";
+    const marks = pictured ? transitionMarks(track.clips as unknown as Clip[], { fps: view.fps, ...transitions }) : new Map<string, TransitionMark[]>();
     const clips = track.clips.map((clip, index) => {
-      const box = clipBox(clip, track.clips[index + 1]?.start, problems.get(clip.id) ?? null, group);
+      const box = clipBox(clip, track.clips[index + 1]?.start, problems.get(clip.id) ?? null, group, marks.get(clip.id) ?? []);
       duration = Math.max(duration, box.end);
       return box;
     });
@@ -256,10 +276,11 @@ function shotBox(fields: Record<string, unknown>, group: GroupView | undefined):
   };
 }
 
-function clipBox(clip: ClipView, nextStart: number | undefined, problem: string | null, group?: GroupView): ClipBox {
+function clipBox(clip: ClipView, nextStart: number | undefined, problem: string | null, group: GroupView | undefined, marks: TransitionMark[]): ClipBox {
   const fields = clip as Record<string, unknown>;
   const text = (key: string) => (typeof fields[key] === "string" ? (fields[key] as string) : null);
   const num = (key: string, fallback: number) => (typeof fields[key] === "number" ? (fields[key] as number) : fallback);
+  const stored = (key: string) => (typeof fields[key] === "number" ? (fields[key] as number) : null);
   const kind: ClipKind = clip.type === "media" ? "media" : clip.type === "timeline" ? "timeline" : clip.type === "shot" ? "shot" : "generated";
   const asset = kind === "media" ? text("asset") : null;
   const source = text("source");
@@ -289,6 +310,11 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     muted: audio.muted === true,
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
     shot,
+    dissolve: stored("dissolve"),
+    fadeIn: stored("fadeIn"),
+    fadeOut: stored("fadeOut"),
+    marks,
+    keys: keyBoxes(fields["keys"]),
   };
 }
 

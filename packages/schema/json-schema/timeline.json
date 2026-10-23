@@ -103,6 +103,196 @@
                           },
                           "additionalProperties": false
                         },
+                        "dissolve": {
+                          "description": "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). Short material shortens it; with no clip butted before, it plays as a fade in.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeIn": {
+                          "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeOut": {
+                          "description": "Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "keys": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "y": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "scale": {
+                              "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "opacity": {
+                              "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gain": {
+                              "description": "Keys of this property (dB), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
+                        },
                         "type": {
                           "type": "string",
                           "const": "media"
@@ -196,6 +386,196 @@
                           },
                           "additionalProperties": false
                         },
+                        "dissolve": {
+                          "description": "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). Short material shortens it; with no clip butted before, it plays as a fade in.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeIn": {
+                          "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeOut": {
+                          "description": "Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "keys": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "y": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "scale": {
+                              "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "opacity": {
+                              "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gain": {
+                              "description": "Keys of this property (dB), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
+                        },
                         "type": {
                           "type": "string",
                           "const": "timeline"
@@ -281,6 +661,196 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        "dissolve": {
+                          "description": "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). Short material shortens it; with no clip butted before, it plays as a fade in.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeIn": {
+                          "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "fadeOut": {
+                          "description": "Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "keys": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "y": {
+                              "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "scale": {
+                              "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "opacity": {
+                              "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gain": {
+                              "description": "Keys of this property (dB), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "at": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  },
+                                  "ease": {
+                                    "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                    "type": "string",
+                                    "enum": [
+                                      "linear",
+                                      "in",
+                                      "out",
+                                      "in-out"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "at",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
                         },
                         "type": {
                           "type": "string",

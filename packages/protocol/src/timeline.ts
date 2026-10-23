@@ -12,6 +12,7 @@ import {
   SUBTITLE_PRESET_IDS,
   type SubtitlePosition,
   type SubtitlePresetId,
+  KEY_EASES,
   TrackSchema,
   TransformSchema,
 } from "@frameshell/schema";
@@ -241,6 +242,37 @@ export const operationArgs = {
       .optional()
       .describe("Tracks to cut. Default: every video, audio and program track, which keeps them in sync."),
     ...snapArgs,
+  }),
+  "transition.set": z.strictObject({
+    at: Seconds("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
+    kind: z
+      .enum(["dissolve", "fade"])
+      .default("dissolve")
+      .describe(
+        "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
+          "A clip edge with nothing butted fades in or out for either kind.",
+      ),
+    duration: z.number().positive().default(0.5).describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so)."),
+    tracks: z
+      .array(TrackRef)
+      .min(1)
+      .optional()
+      .describe("Tracks to change. Default: every video and audio track that has an edge at `at`, like `cut`."),
+  }),
+  "transition.remove": z.strictObject({
+    at: Seconds("Timeline time of the clip edge to clear."),
+    tracks: z.array(TrackRef).min(1).optional().describe("Tracks to change. Default: every video and audio track that has an edge at `at`."),
+  }),
+  "clip.key": z.strictObject({
+    clip: ClipRef,
+    prop: z
+      .enum(["x", "y", "scale", "opacity", "gain"])
+      .describe("Property to animate: `x`, `y` (project pixels), `scale` (factor), `opacity` (0 to 1) or `gain` (dB). Audio tracks take only `gain`."),
+    time: Seconds("Timeline time of the key, inside the clip. Give it unless `clear`.").optional(),
+    value: z.number().optional().describe("Value at `time`. Default: the value playing there now."),
+    ease: z.enum(KEY_EASES).optional().describe("How the value moves from this key to the next: `linear` (default), `in`, `out` or `in-out`."),
+    remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
+    clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
   }),
   "multicam.create": z.strictObject({
     angles: z

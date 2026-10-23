@@ -4,7 +4,7 @@ import { PROBE_MAX_DEPTH, type ProbedElement } from "@frameshell/protocol/probe"
 import type { Size } from "@frameshell/schema/composite";
 import { liveSeconds } from "./live.js";
 import type { PickTarget } from "./pick-pages.js";
-import { type Program, programAt } from "./program.js";
+import { type Program, programAt, spanPlacement } from "./program.js";
 import { type FrameBox, frameBox, layersAt } from "./transform-edit.js";
 
 /** One layer under a picked point. */
@@ -42,7 +42,7 @@ export function pickTarget(program: Program, frame: number, layer: number): Pick
   const identity = span.render.state === "ready" ? span.render.file : span.render.key;
   if (!identity) return null;
   // Renders are made at the project format, so the page is laid out at it too.
-  const box = frameBox(program.resolution, program.resolution, span.placement);
+  const box = frameBox(program.resolution, program.resolution, spanPlacement(span, frame, program.fps));
   return { clip: span.clip, identity, box, seconds: liveSeconds(span, frame / program.fps, program.fps) };
 }
 

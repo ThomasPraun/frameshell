@@ -108,6 +108,9 @@ const en = {
   backToMeasured: "Back to measured here",
   clearAnglePainted: (name: string) => `Clear everything painted for ${name}`,
   clearAllPainted: "Clear every painted turn",
+  addDissolve: "Add dissolve",
+  addFade: "Add fade",
+  removeTransition: "Remove transition",
 };
 
 const es: typeof en = {
@@ -213,6 +216,9 @@ const es: typeof en = {
   backToMeasured: "Volver a lo medido aquí",
   clearAnglePainted: (name) => `Borrar todo lo pintado para ${name}`,
   clearAllPainted: "Borrar todos los turnos pintados",
+  addDissolve: "Añadir disolvencia",
+  addFade: "Añadir fundido",
+  removeTransition: "Quitar transición",
 };
 
 export const timeline = { en, es };

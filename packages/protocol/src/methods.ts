@@ -34,7 +34,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 51;
+export const PROTOCOL_VERSION = 52;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1520,7 +1520,7 @@ export const methods = {
     mutating: true,
     description:
       "Split a clip in two at timeline time `at`. The left part keeps the id; the right part's new id is in " +
-      "`changes.added`. Example: `{ clip: \"c_1a2b3c\", at: 7.5 }`.",
+      "`changes.added`. The left part keeps the clip's dissolve and fade in, the right part its fade out, the new cut has none; both keep every keyframe. Example: `{ clip: \"c_1a2b3c\", at: 7.5 }`.",
     params: operationArgs["clip.split"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -1539,6 +1539,44 @@ export const methods = {
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "transition.set": {
+    mutating: true,
+    description:
+      "Put a transition on a clip edge (ADR 0018). Only `at` is needed: `{ at: 12.5 }` dissolves into the clip starting at 12.5 s on " +
+      "every video and audio track that has an edge there (sound crossfades), 0.5 s long. `kind: \"fade\"` dips through black instead " +
+      "(transparent on upper tracks, silence for sound); `duration` is the total seconds; `tracks` limits it. The clips stay where they " +
+      "are and the timeline length never changes: a dissolve is centered on the cut and borrows source from before the incoming clip's " +
+      "`in` and after the outgoing clip's `out`. An edge with no clip butted to it (a clip's start or end) fades in or out for either kind: " +
+      "`{ at: 58, kind: \"fade\", duration: 1 }` fades the last clip out. Replaces any transition already on that edge. Multicam program " +
+      "tracks are skipped with a warning (hard cuts). Short material never fails: it shortens the transition, or plays a dissolve with no " +
+      "spare source as a dip, and a `warnings` entry says so. Fails with InvalidOperation when no targeted track has a clip edge at `at` " +
+      "(the message lists the edges), TrackNotFound.",
+    params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "transition.remove": {
+    mutating: true,
+    description:
+      "Clear the transition on the clip edge at `at` (dissolve, fade in, fade out) on every video and audio track that has one, or only " +
+      "`tracks`. Example: `{ at: 12.5 }`. The clips stay where they are. Fails with InvalidOperation when no targeted track has a " +
+      "clip edge at `at`; an edge without a transition adds a warning.",
+    params: operationArgs["transition.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "clip.key": {
+    mutating: true,
+    description:
+      "Animate a clip property over time with keyframes (ADR 0018). `prop`: `x`, `y` (project pixels), `scale`, `opacity` (0 to 1) or " +
+      "`gain` (dB; the only one audio tracks take). `time` is timeline seconds inside the clip, snapped to the frame; the key is added " +
+      "or replaced there, `value` defaults to what plays there now. Between keys the value moves linearly or by the leaving key's " +
+      "`ease` (`in`, `out`, `in-out`); before the first key and after the last it holds. A keyed property ignores its static " +
+      "value (`clip.set`). `remove: true` deletes the key at `time`; `clear: true` deletes every key of `prop`. Keys stay on the same " +
+      "frames of the clip's picture through trim, split and cut. Example, a slow zoom over a clip at 10 to 20 s: " +
+      "`{ clip, prop: \"scale\", time: 10, value: 1 }` then `{ clip, prop: \"scale\", time: 20, value: 1.2 }`. Fails with " +
+      "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots).",
+    params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   cut: {

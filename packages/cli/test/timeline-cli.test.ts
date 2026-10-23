@@ -352,3 +352,36 @@ describe("subtitle tracks", () => {
     expect(frameshell(["track", "set", track, "--name", "x", "--clear-name", "--timeline", "subs"]).code).toBe(2);
   });
 });
+
+describe("transitions and keyframes", () => {
+  it("transition set with only --at dissolves the edge, clip key animates, and bad flags exit 2", () => {
+    const track = json<{ changes: { added: string[] } }>(["track", "add", "video", "--name", "Transitions"]).changes.added[0]!;
+    const first = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "20", "--in", "0.5", "--out", "1"]).changes.added[0]!;
+    const second = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "20.5", "--in", "1", "--out", "1.5"]).changes.added[0]!;
+    const clips = () => onDisk().tracks.find((t: { id: string }) => t.id === track).clips;
+
+    const dissolved = frameshell(["transition", "set", "--at", "20.5", "--track", track]);
+    expect(dissolved.code).toBe(0);
+    expect(dissolved.stdout).toContain("transition.set: updated");
+    expect(clips()[1]).toMatchObject({ id: second, dissolve: 0.5 });
+
+    expect(frameshell(["transition", "remove", "--at", "20.5", "--track", track]).code).toBe(0);
+    expect(clips()[1]).not.toHaveProperty("dissolve");
+
+    expect(frameshell(["transition", "set", "--at", "21", "--kind", "fade", "--duration", "0.4", "--track", track]).code).toBe(0);
+    expect(clips()[1]).toMatchObject({ fadeOut: 0.4 });
+
+    expect(frameshell(["clip", "key", first, "--prop", "scale", "--at", "20", "--value", "1"]).code).toBe(0);
+    const keyed = frameshell(["clip", "key", first, "--prop", "scale", "--at", "20.4", "--value", "1.2", "--ease", "in-out"]);
+    expect(keyed.code).toBe(0);
+    expect(clips()[0].keys).toEqual({ scale: [{ at: 0.5, value: 1 }, { at: 0.9, value: 1.2, ease: "in-out" }] });
+    expect(frameshell(["clip", "key", first, "--prop", "scale", "--clear"]).code).toBe(0);
+    expect(clips()[0]).not.toHaveProperty("keys");
+
+    expect(frameshell(["transition", "set"]).stderr).toMatch(/needs --at/);
+    expect(frameshell(["clip", "key", first, "--prop", "x"]).code).toBe(2);
+    expect(frameshell(["clip", "key", first, "--prop", "x", "--clear", "--at", "1"]).stderr).toMatch(/--clear removes every key/);
+    expect(frameshell(["transition", "set", "--at", "1", "--prop", "x"]).code).toBe(2);
+    expect(frameshell(["transition", "set", "--at", "20.7"]).stderr).toMatch(/no clip edge at 20.7 s/);
+  });
+});

@@ -6,7 +6,7 @@ Website: [frameshell.dev](https://frameshell.dev)
 
 Your AI agent (Claude Code, Codex, Gemini CLI…) runs in Frameshell's integrated terminal and edits the project. You watch every change live in the preview and the multitrack timeline, fix what you don't like by hand, and the agent picks up from your changes.
 
-> **Status: alpha.** Latest release: [v0.12.0](https://github.com/ThomasPraun/frameshell/releases/latest). Expect rough edges, and file an [issue](https://github.com/ThomasPraun/frameshell/issues) when you hit one.
+> **Status: alpha.** Latest release: [v0.12.1](https://github.com/ThomasPraun/frameshell/releases/latest). Expect rough edges, and file an [issue](https://github.com/ThomasPraun/frameshell/issues) when you hit one.
 
 ## Install
 

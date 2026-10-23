@@ -16,6 +16,8 @@ import {
   CORE_CLIP_TYPES,
   RESERVED_MIC_IDS,
   type Clip,
+  type ClipKey,
+  type ClipKeys,
   type ClipTrack,
   type MediaClip,
   type Mic,
@@ -26,10 +28,15 @@ import {
   type ShotClip,
   type ShotLayout,
   type TimelineClip,
+  type TransitionContext,
   type Timeline,
   type Track,
+  clipTime,
+  edgeTransitions,
+  gainAt,
   isShotClip,
   paintStretches,
+  placementAt,
   parseTimeline,
   programGroup,
   reframePointAt,
@@ -215,6 +222,12 @@ class Edit {
         return this.clipSet(request.args);
       case "cut":
         return this.cut(request.args);
+      case "transition.set":
+        return this.transitionSet(request.args);
+      case "transition.remove":
+        return this.transitionRemove(request.args);
+      case "clip.key":
+        return this.clipKey(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
       case "multicam.gallery":
@@ -665,6 +678,8 @@ class Edit {
     right.id = this.newId("c");
     this.trimTail(clip, at);
     this.trimHead(right, at);
+    this.dropCutEdgeFields(clip, "tail");
+    this.dropCutEdgeFields(right, "head");
     if (!this.isEmpty(clip) && !this.isEmpty(right)) {
       clipsOf(track).push(right);
       return;
@@ -768,21 +783,241 @@ class Edit {
           right.id = this.newId("c");
           this.trimTail(clip, from);
           this.trimHead(right, to);
+          this.dropCutEdgeFields(clip, "tail");
+          this.dropCutEdgeFields(right, "head");
           right.start = from;
           for (const part of [clip, right]) if (!this.isEmpty(part)) kept.push(part);
         } else if (S < F) {
           this.warnInsideGenerated(clip);
           this.trimTail(clip, from);
+          this.dropCutEdgeFields(clip, "tail");
           if (!this.isEmpty(clip)) kept.push(clip);
         } else {
           this.warnInsideGenerated(clip);
           this.trimHead(clip, to);
+          this.dropCutEdgeFields(clip, "head");
           clip.start = from;
           if (!this.isEmpty(clip)) kept.push(clip);
         }
       }
       clipsOf(track).splice(0, track.clips.length, ...kept);
     }
+  }
+
+  /** A split or cut makes a new edge: a clip's new tail loses its `fadeOut`, its new head its `dissolve` and `fadeIn`. Keys stay. */
+  dropCutEdgeFields(clip: AnyClip, edge: "head" | "tail"): void {
+    if (isShotClip(clip)) return;
+    if (edge === "tail") delete clip.fadeOut;
+    else {
+      delete clip.dissolve;
+      delete clip.fadeIn;
+    }
+  }
+
+  // Transitions and keyframes (ADR 0018)
+
+  /** Clips `transition.set` changed; their transition warnings are given even when the issue was already there. */
+  readonly #touched = new Set<string>();
+
+  /** Video and audio tracks a transition op targets: `names`, else every one. Program tracks are skipped with a warning. */
+  transitionTargets(names: readonly string[] | undefined): ClipTrack[] {
+    const tracks = names ? names.map((id) => this.clipTrack(id)) : this.clipTracks();
+    const skipped = tracks.filter((track) => track.kind === "program");
+    if (skipped.length > 0) {
+      this.warnings.push(
+        `skipped multicam program track${skipped.length === 1 ? "" : "s"} ${skipped.map((t) => t.id).join(", ")}: shots take no transitions yet, they cut hard.`,
+      );
+    }
+    return tracks.filter((track): track is ClipTrack => track.kind !== "program");
+  }
+
+  /** The clip starting at timeline second `at` and the clip ending there, on `track`; either may be missing. */
+  async edgeAt(track: ClipTrack, at: number): Promise<{ incoming?: Clip; outgoing?: Clip }> {
+    const g = this.grid;
+    const found: { incoming?: Clip; outgoing?: Clip } = {};
+    for (const clip of track.clips) {
+      if (g.frame(clip.start) === g.frame(at)) found.incoming = clip;
+      else if (g.frame(clip.start) < g.frame(at)) {
+        const end = await this.end(clip);
+        if (end !== null && g.frame(end) === g.frame(at)) found.outgoing = clip;
+      }
+    }
+    return found;
+  }
+
+  /** Edge times of `tracks`, for the error of an `at` that is none. */
+  async edgeTimes(tracks: readonly ClipTrack[]): Promise<string> {
+    const times = new Set<number>();
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        times.add(clip.start);
+        const end = await this.end(clip);
+        if (end !== null) times.add(end);
+      }
+    }
+    const sorted = [...times].sort((a, b) => a - b);
+    return sorted.length === 0 ? "The targeted tracks have no clips." : `Clip edges: ${sorted.join(", ")}.`;
+  }
+
+  /** Visit the edge at `at` of every targeted track that has one; throws when none has. */
+  async eachEdge(at: number, names: readonly string[] | undefined, visit: (edge: { incoming?: Clip; outgoing?: Clip }) => void): Promise<void> {
+    const tracks = this.transitionTargets(names);
+    let found = false;
+    for (const track of tracks) {
+      const edge = await this.edgeAt(track, at);
+      if (!edge.incoming && !edge.outgoing) continue;
+      found = true;
+      visit(edge);
+    }
+    if (!found) {
+      throw this.invalid(`no clip edge at ${at} s on ${tracks.length === 0 ? "any video or audio track" : tracks.map((t) => t.id).join(", ")}.`, {
+        field: "at",
+        hint: await this.edgeTimes(tracks),
+      });
+    }
+  }
+
+  async transitionSet(args: OperationArgs<"transition.set">): Promise<void> {
+    const g = this.grid;
+    const frame = g.seconds(1);
+    const length = Math.max(g.snap(args.duration), frame);
+    // A fade at a cut is two halves that sum to `length` in whole frames; the incoming one takes an odd frame.
+    const frames = g.frame(length);
+    const outgoingHalf = Math.floor(frames / 2);
+    await this.eachEdge(g.snap(args.at), args.tracks, ({ incoming, outgoing }) => {
+      for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
+      if (incoming) {
+        delete incoming.dissolve;
+        delete incoming.fadeIn;
+      }
+      if (outgoing) delete outgoing.fadeOut;
+      if (incoming && outgoing) {
+        if (args.kind === "dissolve") incoming.dissolve = length;
+        else {
+          if (outgoingHalf > 0) outgoing.fadeOut = g.seconds(outgoingHalf);
+          incoming.fadeIn = g.seconds(frames - outgoingHalf);
+        }
+      } else if (incoming) incoming.fadeIn = length;
+      else outgoing!.fadeOut = length;
+    });
+  }
+
+  async transitionRemove(args: OperationArgs<"transition.remove">): Promise<void> {
+    const at = this.grid.snap(args.at);
+    let cleared = false;
+    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }) => {
+      if (incoming && (incoming.dissolve !== undefined || incoming.fadeIn !== undefined)) cleared = true;
+      if (outgoing && outgoing.fadeOut !== undefined) cleared = true;
+      if (incoming) {
+        delete incoming.dissolve;
+        delete incoming.fadeIn;
+      }
+      if (outgoing) delete outgoing.fadeOut;
+    });
+    if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
+  }
+
+  async clipKey(args: OperationArgs<"clip.key">): Promise<void> {
+    const { clip: id, prop, time, value, ease, remove, clear } = args;
+    const { track, clip } = this.clip(id);
+    if (isShotClip(clip)) {
+      throw this.invalid(`${clip.id} is a shot; shots take no keyframes yet.`, { field: "clip", hint: "Key a clip on a video or audio track." });
+    }
+    if (track.kind === "audio" && prop !== "gain") {
+      throw this.invalid(`audio tracks take only \`gain\` keys, not \`${prop}\`.`, { field: "prop" });
+    }
+    if (clear === true) {
+      if ([time, value, ease, remove].some((given) => given !== undefined)) {
+        throw this.invalid("`clear` removes every key of the property and takes no other field.", { field: "clear" });
+      }
+      if (clip.keys) {
+        delete clip.keys[prop];
+        if (Object.keys(clip.keys).length === 0) delete clip.keys;
+      }
+      return;
+    }
+    if (time === undefined) throw this.invalid("give the key `time` (timeline seconds), or `clear: true`.", { field: "time" });
+    const g = this.grid;
+    const t = g.snap(time);
+    const end = (await this.span(clip)).end;
+    if (g.frame(t) < g.frame(clip.start) || g.frame(t) > g.frame(end)) {
+      throw this.invalid(`time ${t} is outside ${clip.id} (${clip.start}–${end}).`, { field: "time", valid: { min: clip.start, max: end } });
+    }
+    const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
+    const at = Math.round(clipTime(clip, t) * 1000) / 1000;
+    const keys: ClipKey[] = [...(clip.keys?.[prop] ?? [])];
+    // Half a frame of timeline time, on the clip's own clock.
+    const half = (0.5 / this.context.fps) * speed;
+    const found = keys.findIndex((key) => Math.abs(key.at - at) < half);
+    if (remove === true) {
+      if (value !== undefined || ease !== undefined) throw this.invalid("`remove` takes no `value` or `ease`.", { field: "remove" });
+      if (found < 0) {
+        const where = keys.map((key) => g.snap(clip.start + (key.at - (clip.in ?? 0)) / speed));
+        throw this.invalid(`${clip.id} has no \`${prop}\` key at ${t} s.`, {
+          field: "time",
+          hint: where.length > 0 ? `Keys at: ${where.join(", ")}.` : "It has none.",
+        });
+      }
+      keys.splice(found, 1);
+    } else {
+      const now = prop === "gain" ? gainAt(clip, t) : placementAt(clip, t)[prop];
+      const next = Math.round((value ?? now) * 10000) / 10000;
+      if (prop === "scale" && next <= 0) throw this.invalid("`scale` must be above 0.", { field: "value" });
+      if (prop === "opacity" && (next < 0 || next > 1)) throw this.invalid("`opacity` is 0 to 1.", { field: "value" });
+      const kept = ease ?? keys[found]?.ease;
+      const key: ClipKey = { at: found >= 0 ? keys[found]!.at : at, value: next, ...(kept && kept !== "linear" ? { ease: kept } : {}) };
+      if (found >= 0) keys[found] = key;
+      else keys.splice(keys.filter((other) => other.at < at).length, 0, key);
+    }
+    const all: ClipKeys = { ...clip.keys };
+    if (keys.length === 0) delete all[prop];
+    else all[prop] = keys as [ClipKey, ...ClipKey[]];
+    if (Object.keys(all).length === 0) delete clip.keys;
+    else clip.keys = all;
+  }
+
+  /**
+   * Warn when a transition plays shorter or differently than requested (ADR 0018 decision 4): for clips of `tracks`
+   * whose issue is new in this operation, and for clips `transition.set` touched.
+   */
+  async warnTransitions(tracks: readonly AnyClipTrack[]): Promise<void> {
+    const hasTransition = (clip: Clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined;
+    const given = new Set(this.warnings);
+    for (const track of tracks) {
+      if (track.kind === "program") continue;
+      const old = this.before.tracks.find((candidate) => candidate.id === track.id);
+      const oldClips = old && (old.kind === "video" || old.kind === "audio") ? old.clips : [];
+      if (![...track.clips, ...oldClips].some(hasTransition)) continue;
+      const context = await this.transitionContext([...track.clips, ...oldClips]);
+      const now = transitionIssues(track.clips, context);
+      const was = transitionIssues(oldClips, context);
+      for (const [clipId, issues] of now) {
+        for (const issue of issues) {
+          if (given.has(issue) || (!this.#touched.has(clipId) && was.get(clipId)?.includes(issue))) continue;
+          given.add(issue);
+          this.warnings.push(issue);
+        }
+      }
+    }
+  }
+
+  /** What {@link edgeTransitions} needs: project fps and the length of each clip's material (asset or nested timeline). */
+  async transitionContext(clips: readonly Clip[]): Promise<TransitionContext> {
+    const durations = new Map<string, number | undefined>();
+    for (const clip of clips) {
+      if (durations.has(clip.id)) continue;
+      try {
+        if (isMedia(clip)) {
+          const info = await this.context.source(clip.asset);
+          durations.set(clip.id, info.duration ?? Number.POSITIVE_INFINITY);
+        } else if (isNested(clip)) {
+          durations.set(clip.id, await this.nestedOf(clip));
+        }
+      } catch {
+        durations.set(clip.id, undefined);
+      }
+    }
+    return { fps: this.context.fps, sourceDuration: (clip) => durations.get(clip.id) };
   }
 
   /**
@@ -1388,6 +1623,7 @@ class Edit {
     if (!parsed.ok) throw this.invalid(`the result would not be a valid timeline:\n${parsed.error}`);
     // After the schema: shots name angles of their group.
     for (const track of checked) if (track.kind === "program") await this.checkShots(track);
+    await this.warnTransitions(checked);
 
     const inverse = diffTimelines(this.draft, this.before);
     const changes = await this.changes(forward);
@@ -1841,6 +2077,37 @@ class Edit {
       ...extra,
     });
   }
+}
+
+/** Why each clip's requested `dissolve`, `fadeIn` and `fadeOut` play shorter or differently, by clip id; texts hold no positions. */
+function transitionIssues(clips: readonly Clip[], context: TransitionContext): Map<string, string[]> {
+  const edges = edgeTransitions(clips, context);
+  const frame = 1 / context.fps;
+  const asRequested = (seconds: number) => Math.round(seconds * context.fps) * frame;
+  const round3 = (seconds: number) => Math.round(seconds * 1000) / 1000;
+  const issues = new Map<string, string[]>();
+  for (const clip of clips) {
+    const edge = edges.get(clip.id);
+    if (!edge) continue;
+    const found: string[] = [];
+    if (clip.dissolve !== undefined) {
+      if (edge.mode === "dip") {
+        found.push(`${clip.id}: dissolve of ${clip.dissolve} s plays as a dip through black: no spare source around the cut, or a clip too short. Trim the neighbours less, or shorten it.`);
+      } else if (edge.mode === "fade-in") {
+        found.push(`${clip.id}: dissolve plays as a fade in: no clip ends where it starts. Butt the clips again to restore it.`);
+      } else if (edge.dissolveLength < asRequested(clip.dissolve) - frame / 2) {
+        found.push(`${clip.id}: dissolve shortened from ${clip.dissolve} s to ${round3(edge.dissolveLength)} s: not enough source around the cut, or a clip too short.`);
+      }
+    }
+    if (clip.fadeIn !== undefined && edge.fadeIn < asRequested(clip.fadeIn) - frame / 2) {
+      found.push(`${clip.id}: fade in shortened from ${clip.fadeIn} s to ${round3(edge.fadeIn)} s: a fade takes at most half its clip.`);
+    }
+    if (clip.fadeOut !== undefined && edge.fadeOut < asRequested(clip.fadeOut) - frame / 2) {
+      found.push(`${clip.id}: fade out shortened from ${clip.fadeOut} s to ${round3(edge.fadeOut)} s: a fade takes at most half its clip.`);
+    }
+    if (found.length > 0) issues.set(clip.id, found);
+  }
+  return issues;
 }
 
 /** Adapter `type` is any string, so `clip.type === "media"` alone does not narrow. */

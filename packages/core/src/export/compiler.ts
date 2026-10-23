@@ -2,6 +2,7 @@ import { DEFAULT_FRAME_QUALITY, ErrorCode, type FrameFormat, RpcError } from "@f
 import {
   type AdapterClip,
   type Clip,
+  type ClipEdges,
   type ClipTrack,
   type CropPath,
   type ExportPreset,
@@ -15,6 +16,7 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  edgeTransitions,
   isIdentityPlacement,
   isProgramSound,
   layerRect,
@@ -27,6 +29,7 @@ import {
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
+import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainVolume, keyExpression, keyedOpacity, num } from "./animation.js";
 import { assSubtitles } from "./ass.js";
 
 /**
@@ -44,6 +47,8 @@ export interface ExportSource {
   video: { codec: string; still: boolean; width: number; height: number } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
+  /** Seconds of material (probed); absent when unknown, then a clip has no handle after its `out` (ADR 0018). */
+  duration?: number;
 }
 
 /** Cached render of a generated (adapter) clip, from the clip render cache (SPEC §6.5). */
@@ -92,9 +97,24 @@ export interface RenderSegment {
   args: string[];
 }
 
-/** One item of an audio track, in output samples. */
+/**
+ * One item of an audio track, in output samples. A clip item may carry equal-power (`qsin`) `ramps` (fades and
+ * crossfades, `start` in samples from the item's start) and `gain`, its gain keys in dB as an expression of `t`
+ * (seconds from the item's start), which replaces `gainDb` (ADR 0018).
+ */
 export type AudioItem =
-  | { kind: "clip"; clip: string; input: number; from: number; to: number; speed: number; gainDb: number; samples: number }
+  | {
+      kind: "clip";
+      clip: string;
+      input: number;
+      from: number;
+      to: number;
+      speed: number;
+      gainDb: number;
+      samples: number;
+      ramps?: Ramp[];
+      gain?: string;
+    }
   | { kind: "silence"; samples: number };
 
 /** Timeline compiled for export. JSON-serializable. */
@@ -130,7 +150,10 @@ export interface RenderPlan {
     samples: number;
     /** Absolute paths of the audio inputs; items refer to them by index. */
     inputs: string[];
-    /** One sequence per audible track, each exactly `samples` long. Empty = silent export. */
+    /**
+     * One sequence per audible track, each exactly `samples` long; a track whose clips crossfade takes one more
+     * sequence for the overlapping ones (mixed like tracks). Empty = silent export.
+     */
     tracks: AudioItem[][];
     /** Encoder args of the final audio stream. */
     codec: string[];
@@ -239,6 +262,23 @@ interface Placed {
    * reframe, so its still crop keeps odd edges like the moving one.
    */
   tile?: { crop: LayerRect; rect: LayerRect; backdrop: boolean; exact?: boolean; move?: { path: CropPath; clock: number } };
+  /** Effective fades and dissolve of the clip (`edgeTransitions`), when it has any. */
+  edges?: ClipEdges;
+  /** Frames drawn before `start`: the incoming half of this clip's dissolve, from its handle (ADR 0018 decision 3). */
+  lead?: number;
+  /** Frames drawn after `end`: the outgoing half of the next clip's dissolve. */
+  trail?: number;
+  /** On the base track: stays opaque under the next clip's dissolve, which is drawn over it (ADR 0018 decision 9). */
+  bottom?: true;
+  /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
+  hold?: true;
+}
+
+/** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
+interface Span {
+  placed: Placed;
+  from: number;
+  to: number;
 }
 
 /** What export v1 renders of a timeline. */
@@ -246,14 +286,15 @@ interface Layout {
   frames: number;
   /** Every clip of the base (first) video track, sorted. */
   base: Placed[];
-  /** Untransformed clips of the base track: they fill the frame, black elsewhere. */
-  video: Placed[];
+  /** Untransformed, unkeyed clips of the base track with their tails: they fill the frame, black elsewhere. */
+  video: Span[];
   /**
    * Layers composited over the base, bottom first (SPEC §5.3: track order is
-   * stacking order): transformed clips of the base track, then every upper
-   * video track. Only clips with a picture that is not fully transparent.
+   * stacking order): transformed or keyed clips of the base track and the
+   * dissolving heads of the others, then every upper video track. Only clips
+   * with a picture that is not fully transparent.
    */
-  overlays: Placed[][];
+  overlays: Span[][];
   /** Clips carrying sound, one list per track (base video track first). */
   audio: Placed[][];
   /** Frames where a multicam shot starts or ends: segments prefer to split there. */
@@ -287,7 +328,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
-  const edges = [...layout.video.flatMap((placed) => [placed.start, placed.end]), ...layout.shotEdges];
+  const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const bounds = segmentBounds(layout.frames, edges, segmentFrames);
   const ext = preset.container;
@@ -490,6 +531,7 @@ function layoutTimeline(
   /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
   const placeTrack = (track: ClipTrack): Placed[] => {
     const placed: Placed[] = [];
+    const transitions = trackTransitions(track, fps, sources);
     for (const listed of track.clips) {
       const clip = track.kind === "video" ? asFootage(listed, generated) : listed;
       if (clip.type === "timeline" && "source" in clip) {
@@ -516,7 +558,19 @@ function layoutTimeline(
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
-      placed.push({ clip, source, start, end, in: Math.round(clip.in * fps), speed, placement: placementOf(clip.transform), ...exact });
+      const edges = transitions?.get(clip.id);
+      placed.push({
+        clip,
+        source,
+        start,
+        end,
+        in: Math.round(clip.in * fps),
+        speed,
+        placement: placementOf(clip.transform),
+        ...exact,
+        ...(edges ? { edges } : {}),
+        ...(render ? { hold: true as const } : {}),
+      });
       frames = Math.max(frames, end);
     }
     placed.sort((a, b) => a.start - b.start);
@@ -525,6 +579,12 @@ function layoutTimeline(
       const before = placed[i - 1]!;
       before.next = placed[i]!;
       if (before.end > placed[i]!.start) before.end = Math.max(before.start, placed[i]!.start);
+      // Each half of a dissolve is whole frames: the outgoing clip plays it past the cut, the incoming one before.
+      const half = placed[i]!.edges?.mode === "dissolve" ? Math.round(placed[i]!.edges!.dissolve * fps) : 0;
+      if (half > 0 && before.end === placed[i]!.start) {
+        before.trail = half;
+        placed[i]!.lead = half;
+      }
     }
     return placed.filter((p) => p.end > p.start);
   };
@@ -567,18 +627,25 @@ function layoutTimeline(
   }
   // The first picture layer is the base when it is a video track; a program track first leaves the base black.
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
+  for (const placed of baseLayer) placed.bottom = true;
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
-  const visible = (placed: Placed) => placed.source.video !== null && placed.placement.opacity > 0;
-  const overlays = [baseLayer.filter((p) => !isIdentityPlacement(p.placement)), ...upper]
-    .map((layer) => layer.filter(visible))
-    .filter((layer) => layer.length > 0);
+  const visible = ({ placed }: Span) => placed.source.video !== null && (placed.clip.keys?.opacity !== undefined || placed.placement.opacity > 0);
+  const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
+  // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
+  const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !isKeyed(placed.clip);
+  const baseLayers = baseLayer.flatMap((placed): Span[] => {
+    if (!fills(placed)) return [whole(placed)];
+    const lead = placed.lead ?? 0;
+    return lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : [];
+  });
+  const overlays = [baseLayers, ...upper.map((layer) => layer.map(whole))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
   for (const angle of pictureless) {
     warnings.push(`Multicam angle ${angle} has no picture; its tile stays black.`);
   }
   return {
     frames,
     base: baseLayer,
-    video: baseLayer.filter((p) => isIdentityPlacement(p.placement)),
+    video: baseLayer.filter(fills).map((placed) => ({ placed, from: placed.start + (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) })),
     overlays,
     audio: audio.filter((track) => track.length > 0),
     shotEdges,
@@ -747,9 +814,10 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     labels.push(label);
   };
   let cursor = from;
-  for (const placed of layout.video) {
-    const start = Math.max(placed.start, from);
-    const end = Math.min(placed.end, to);
+  for (const span of layout.video) {
+    const { placed } = span;
+    const start = Math.max(span.from, from);
+    const end = Math.min(span.to, to);
     if (end <= start) continue;
     if (start > cursor) black(start - cursor);
     cursor = end;
@@ -758,17 +826,20 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
       continue;
     }
     const label = `p${labels.length}`;
-    lines.push(`${pieceChain(placed, start, end, fps, inputs)},${fit}[${label}]`);
+    // Fades of the bottom track go to black: nothing is under it.
+    const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
+    const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
+    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fit, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
   const joined = labels.length === 1 ? `[${labels[0]}]null` : `${labels.map((l) => `[${l}]`).join("")}concat=n=${labels.length}:v=1:a=0`;
 
   const pieces = layout.overlays.flatMap((layer) =>
-    layer.flatMap((placed) => {
-      const start = Math.max(placed.start, from);
-      const end = Math.min(placed.end, to);
-      return end > start ? [{ placed, start, end }] : [];
+    layer.flatMap((span) => {
+      const start = Math.max(span.from, from);
+      const end = Math.min(span.to, to);
+      return end > start ? [{ placed: span.placed, start, end }] : [];
     }),
   );
   if (pieces.length === 0) {
@@ -782,20 +853,100 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const { opacity } = placed.placement;
     const crop = placed.tile?.crop;
     const move = placed.tile?.move;
+    const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
+    const opacityKeys = placed.tile ? undefined : placed.clip.keys?.opacity;
+    const fades = placed.tile ? [] : fadeFilters(pictureRamps(placed, start, end, fps, true), true);
+    // Ramps, keyed scale and keyed opacity read timeline seconds: the piece's timestamps move there and back.
+    const timed = motion?.scale !== undefined || opacityKeys !== undefined || fades.length > 0;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
-      `scale=${rect.width}:${rect.height},setsar=1,format=rgba`,
+      ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
+      `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
-      ...(opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+      ...(opacityKeys ? [keyedOpacity(placed.clip, opacityKeys, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+      ...fades,
+      ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
     lines.push(`${chain.join(",")}[o${n}]`);
-    const overlay = `[${below}][o${n}]overlay=x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}:eof_action=pass:format=auto`;
+    const position = motion?.x !== undefined ? `x=${motion.x}:y=${motion.y}:eval=frame` : `x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}`;
+    const overlay = `[${below}][o${n}]overlay=${position}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
+}
+
+/** True when `clip` animates its placement (keys on `x`, `y`, `scale` or `opacity`). */
+function isKeyed(clip: Clip): boolean {
+  const keys = clip.keys;
+  return keys !== undefined && (keys.x !== undefined || keys.y !== undefined || keys.scale !== undefined || keys.opacity !== undefined);
+}
+
+/**
+ * Effective fades and dissolves of a track's clips that have any (`edgeTransitions`, ADR 0018 decision 4); null when
+ * no clip asks for one, so timelines without transitions compile as before.
+ */
+function trackTransitions(track: ClipTrack, fps: number, sources: ReadonlyMap<string, ExportSource>): Map<string, ClipEdges> | null {
+  if (!track.clips.some((clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined)) return null;
+  const sourceDuration = (clip: Clip) => {
+    if (!("asset" in clip)) return undefined;
+    const source = sources.get(clip.asset);
+    return source?.video?.still ? Number.POSITIVE_INFINITY : source?.duration;
+  };
+  const edges = edgeTransitions(track.clips, { fps, sourceDuration });
+  for (const [id, edge] of edges) if (edge.fadeIn === 0 && edge.fadeOut === 0 && edge.dissolve === 0) edges.delete(id);
+  return edges;
+}
+
+/**
+ * Linear ramps (timeline seconds) multiplying `placed`'s picture on timeline frames [start, end): its fades
+ * (`fadeWeight`) and, drawn as a layer (`layer`), its dissolve weights (`dissolveWeights`): the incoming clip rises
+ * over its dissolve, the outgoing one falls unless it is on the bottom track. A ramp that leaves those frames as
+ * they are is left out. Ramps sit on the frame grid, as the clip does.
+ */
+function pictureRamps(placed: Placed, start: number, end: number, fps: number, layer: boolean): Ramp[] {
+  const ramps: Ramp[] = [];
+  const add = (type: Ramp["type"], first: number, frames: number) => {
+    const touched = type === "in" ? start < first + frames : end - 1 > first;
+    if (frames > 0 && touched) ramps.push({ type, start: first / fps, length: frames / fps });
+  };
+  const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
+  const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
+  const lead = layer ? (placed.lead ?? 0) : 0;
+  const trail = layer && !placed.bottom ? (placed.trail ?? 0) : 0;
+  add("in", placed.start - lead, 2 * lead);
+  add("in", placed.start, fadeIn);
+  add("out", placed.end - fadeOut, fadeOut);
+  add("out", placed.end - trail, 2 * trail);
+  return ramps;
+}
+
+/**
+ * Keyed placement of a layer piece on timeline frames [start, end) of a graph starting at frame `from`
+ * (`placementAt` and `layerRect` as expressions): `scale` with `eval=frame` reading the piece's timeline
+ * seconds, `overlay` x/y reading the graph's. Null when the clip has no `x`, `y` or `scale` keys.
+ */
+function layerMotion(placed: Placed, start: number, end: number, from: number, out: GraphTarget): { scale?: string; x: string; y: string } | null {
+  const keys = placed.clip.keys;
+  if (!keys || (keys.x === undefined && keys.y === undefined && keys.scale === undefined)) return null;
+  const { fps, width, height, project } = out;
+  const video = placed.source.video!;
+  const first = start / fps;
+  const last = (end - 1) / fps;
+  const fit = Math.min(width / video.width, height / video.height);
+  const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
+  const axis = (axisKeys: typeof keys.x, value: number, size: number, projectSize: number, own: string) => {
+    const at = axisKeys ? keyExpression(placed.clip, axisKeys, time, first, last) : num(value);
+    return `'floor(${num(size / 2)}+(${at})*${size}/${projectSize}-${own}/2+0.5)'`;
+  };
+  const x = axis(keys.x, placed.placement.x, width, project.width, "overlay_w");
+  const y = axis(keys.y, placed.placement.y, height, project.height, "overlay_h");
+  if (keys.scale === undefined) return { x, y };
+  const factor = keyExpression(placed.clip, keys.scale, "t", first, last);
+  const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
+  return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
 }
 
 /**
@@ -847,6 +998,19 @@ function movingCrop(path: CropPath, from: number, length: number): string {
  * SPEC §6.3) and `trim` keeps exactly the piece's frames.
  */
 function pieceChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
+  if (!placed.hold || (start >= placed.start && end <= placed.end)) return sourceChain(placed, start, end, fps, inputs);
+  // A render holds its first and last frame for the handles: draw what it has (one edge frame at least), clone the rest.
+  const frames = end - start;
+  if (end <= placed.start) return `${sourceChain(placed, placed.start, placed.start + 1, fps, inputs)},tpad=start=${frames - 1}:start_mode=clone`;
+  if (start >= placed.end) return `${sourceChain(placed, placed.end - 1, placed.end, fps, inputs)},tpad=stop=${frames - 1}:stop_mode=clone`;
+  const first = Math.max(start, placed.start);
+  const last = Math.min(end, placed.end);
+  const pad = [...(first > start ? [`start=${first - start}:start_mode=clone`] : []), ...(end > last ? [`stop=${end - last}:stop_mode=clone`] : [])];
+  return `${sourceChain(placed, first, last, fps, inputs)},tpad=${pad.join(":")}`;
+}
+
+/** {@link pieceChain} reading only the source: frames past the source's end repeat its last one. */
+function sourceChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
   const rate = fpsRational(fps);
   const frames = end - start;
   const video = placed.source.video!;
@@ -866,38 +1030,57 @@ function pieceChain(placed: Placed, start: number, end: number, fps: number, inp
     inputs.push(...decoder, "-ss", num(seekFrame / fps), "-t", num(length), "-i", placed.source.path);
   }
   const speed = placed.speed === 1 ? "" : `/${num(placed.speed)}`;
-  return `[${index}:v:0]setpts=(PTS-${num(shift)}/TB)${speed},fps=${rate}:start_time=0,trim=end_frame=${frames},setpts=PTS-STARTPTS`;
+  // A tail handle may reach the last frame of a stream a little shorter than the probed duration.
+  const tail = end > placed.end && !video.still ? `,tpad=stop=${end - placed.end}:stop_mode=clone` : "";
+  return `[${index}:v:0]setpts=(PTS-${num(shift)}/TB)${speed},fps=${rate}:start_time=0${tail},trim=end_frame=${frames},setpts=PTS-STARTPTS`;
 }
 
 /**
  * Audio items per track in output samples. Boundaries are rounded from
- * frame times once, so every track sums to exactly the video length.
+ * frame times once, so every track sums to exactly the video length. A clip
+ * whose dissolve overlaps the clip before it (ADR 0018 decision 3) goes to
+ * another sequence of its track, so both play through the crossfade.
  */
 function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<RenderPlan["audio"], "codec"> {
   const at = (frame: number) => Math.round((frame / fps) * sampleRate);
   const samples = at(layout.frames);
   const inputs: string[] = [];
-  const tracks = layout.audio.map((track) => {
-    const items: AudioItem[] = [];
-    let cursor = 0;
-    /** Last item when it is a program sound and its start sample, for joining the next shot to it. */
-    let joinable: { item: Extract<AudioItem, { kind: "clip" }>; start: number } | null = null;
+  /** One sequence of a track; `joinable` is its last item when that is a program sound, with its start sample, for joining the next shot to it. */
+  interface Lane {
+    items: AudioItem[];
+    cursor: number;
+    joinable: { item: Extract<AudioItem, { kind: "clip" }>; start: number } | null;
+  }
+  const tracks = layout.audio.flatMap((track) => {
+    const lanes: Lane[] = [{ items: [], cursor: 0, joinable: null }];
     /** First sample of `placed`, as this plan places it. */
     const startOf = (placed: Placed) => (placed.exact ? soundSamples(placed.clip, sampleRate).start : at(placed.start));
     for (const placed of track) {
+      const lead = placed.lead ?? 0;
+      const trail = placed.trail ?? 0;
       const exact = placed.exact ? soundSamples(placed.clip, sampleRate) : null;
       // Program sound: exact samples of the clip's seconds, clamped to the video's length, the previous item and the next clip.
       // Any other clip: frame samples, never before the previous item ends, so a track never outlasts the video.
-      const planned = exact ? exact.start : at(placed.start);
+      const planned = exact ? exact.start : at(placed.start - lead);
+      let lane = lanes[0]!;
+      if (lead > 0) {
+        lane = lanes.find((candidate) => candidate.cursor <= planned) ?? { items: [], cursor: 0, joinable: null };
+        if (!lanes.includes(lane)) lanes.push(lane);
+      }
+      const { cursor } = lane;
       const start = Math.min(samples, Math.max(cursor, planned));
-      const end = exact ? Math.min(samples, exact.end, placed.next ? startOf(placed.next) : samples) : at(placed.end);
+      const end = exact ? Math.min(samples, exact.end, placed.next ? startOf(placed.next) : samples) : at(placed.end + trail);
       if (end <= start) continue;
       const skipped = start - planned;
-      const from = exact ? exact.in + skipped : Math.round((placed.in / fps) * sampleRate) + Math.round(skipped * placed.speed);
-      const sourceSamples = exact ? end - start : Math.round(((placed.end - placed.start) / fps) * placed.speed * sampleRate) - Math.round(skipped * placed.speed);
+      // Source samples the head handle reads before the clip's `in`.
+      const head = Math.round((at(placed.start) - planned) * placed.speed);
+      const from = exact ? exact.in + skipped : Math.round((placed.in / fps) * sampleRate) - head + Math.round(skipped * placed.speed);
+      const sourceSamples = exact
+        ? end - start
+        : Math.round(((placed.end + trail - placed.start) / fps) * placed.speed * sampleRate) + head - Math.round(skipped * placed.speed);
       let input = inputs.indexOf(placed.source.path);
       if (input === -1) input = inputs.push(placed.source.path) - 1;
-      const previous = joinable;
+      const previous = lane.joinable;
       // A sound running on across a shot change stays one item: shots switch pictures, the edge fade belongs to real cuts (as in the preview).
       if (
         exact &&
@@ -909,10 +1092,12 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
       ) {
         previous.item.samples = end - previous.start;
         previous.item.to = previous.item.from + previous.item.samples;
-        cursor = end;
+        lane.cursor = end;
         continue;
       }
-      if (start > cursor) items.push({ kind: "silence", samples: start - cursor });
+      if (start > cursor) lane.items.push({ kind: "silence", samples: start - cursor });
+      const ramps = soundRamps(placed, start, fps, at);
+      const gainKeys = exact ? undefined : placed.clip.keys?.gain;
       const item: Extract<AudioItem, { kind: "clip" }> = {
         kind: "clip",
         clip: placed.clip.id,
@@ -920,17 +1105,39 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
         from,
         to: from + sourceSamples,
         speed: placed.speed,
-        gainDb: placed.clip.audio?.gain ?? 0,
+        gainDb: gainKeys ? 0 : (placed.clip.audio?.gain ?? 0),
         samples: end - start,
+        ...(ramps.length > 0 ? { ramps } : {}),
+        ...(gainKeys ? { gain: keyExpression(placed.clip, gainKeys, `(${num(start / sampleRate)}+t)`, start / sampleRate, end / sampleRate) } : {}),
       };
-      items.push(item);
-      joinable = exact ? { item, start } : null;
-      cursor = end;
+      lane.items.push(item);
+      lane.joinable = exact ? { item, start } : null;
+      lane.cursor = end;
     }
-    if (samples > cursor) items.push({ kind: "silence", samples: samples - cursor });
-    return items;
+    return lanes.map((lane) => (samples > lane.cursor ? [...lane.items, { kind: "silence" as const, samples: samples - lane.cursor }] : lane.items));
   });
   return { sampleRate, samples, inputs, tracks };
+}
+
+/**
+ * Equal-power ramps of `placed`'s sound, in samples from its item's first sample `first` (`fadeWeight` and
+ * `dissolveWeights` with `sound`): the incoming crossfade over its dissolve, its fades, and the outgoing
+ * crossfade under the next clip's dissolve. `at` puts a timeline frame on the sample grid.
+ */
+function soundRamps(placed: Placed, first: number, fps: number, at: (frame: number) => number): Ramp[] {
+  const ramps: Ramp[] = [];
+  const add = (type: Ramp["type"], from: number, to: number) => {
+    // An item clamped later by the one before it (hand-edited overlap) starts its ramp where it starts.
+    const start = Math.max(first, at(from));
+    if (at(to) > start) ramps.push({ type, start: start - first, length: at(to) - start });
+  };
+  const lead = placed.lead ?? 0;
+  const trail = placed.trail ?? 0;
+  add("in", placed.start - lead, placed.start + lead);
+  add("in", placed.start, placed.start + Math.round((placed.edges?.fadeIn ?? 0) * fps));
+  add("out", placed.end - Math.round((placed.edges?.fadeOut ?? 0) * fps), placed.end);
+  add("out", placed.end - trail, placed.end + trail);
+  return ramps;
 }
 
 /**
@@ -964,9 +1171,14 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
         `atrim=start_sample=${item.from}:end_sample=${item.to + tail}`,
         "asetpts=PTS-STARTPTS",
         ...tempo(item.speed),
-        ...(item.gainDb === 0 ? [] : [`volume=${num(item.gainDb)}dB`]),
+        ...(item.gain !== undefined
+          ? [`asetnsamples=n=${GAIN_FRAME_SAMPLES}:p=0`, gainVolume(item.gain)]
+          : item.gainDb === 0
+            ? []
+            : [`volume=${num(item.gainDb)}dB`]),
         `apad=whole_len=${item.samples}`,
         `atrim=end_sample=${item.samples}`,
+        ...(item.ramps ?? []).map((ramp) => `afade=t=${ramp.type}:ss=${ramp.start}:ns=${ramp.length}:curve=qsin`),
         `afade=t=in:ss=0:ns=${fade}`,
         `afade=t=out:ss=${item.samples - fade}:ns=${fade}`,
       ];
@@ -1044,7 +1256,3 @@ function seconds(frame: number, fps: number): number {
   return Math.round((frame / fps) * 1000) / 1000;
 }
 
-/** Stable decimal text for args: at most 6 decimals, no trailing zeros. */
-function num(value: number): string {
-  return String(Number(value.toFixed(6)));
-}

@@ -3,7 +3,7 @@
 // export place layers.
 import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import type { TimelineEdit } from "../../../shared/api.js";
-import { type Program, type VideoSpan, angleLayer, programAt } from "./program.js";
+import { type Program, type VideoSpan, angleLayer, programAt, spanPlacement } from "./program.js";
 
 /** A point or box in fractions of the frame: 0 = left/top edge, 1 = right/bottom edge. */
 export interface FrameBox {
@@ -18,8 +18,9 @@ export interface LayerBox {
   /** Layer index, 0 = base. */
   layer: number;
   size: Size;
+  /** The clip's own placement, what its handles edit (keys, ADR 0018, may move it elsewhere at this frame). */
   placement: Placement;
-  /** In fractions of the frame; may reach outside [0, 1]. */
+  /** Where it shows at the frame, in fractions of the frame; may reach outside [0, 1]. */
   box: FrameBox;
 }
 
@@ -34,7 +35,7 @@ export function layerBox(program: Program, frame: number, clip: string): LayerBo
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.clip !== clip || span.kind === "angle") continue;
-    const found = spanBox(program, span, layer);
+    const found = spanBox(program, span, layer, frame);
     if (found) return found;
   }
   return null;
@@ -51,7 +52,7 @@ export function pictureBox(program: Program, frame: number, clip: string, point:
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.clip !== clip) continue;
-    const found = spanBox(program, span, layer);
+    const found = spanBox(program, span, layer, frame);
     if (!found) continue;
     const { left, top, width, height } = found.box;
     if (point.x >= left && point.x < left + width && point.y >= top && point.y < top + height) return found;
@@ -61,7 +62,7 @@ export function pictureBox(program: Program, frame: number, clip: string, point:
 }
 
 /** Where `span` (on `layer`) shows; null for a placeholder or media of unknown size. A shot's angle shows in its tile. */
-function spanBox(program: Program, span: VideoSpan, layer: number): LayerBox | null {
+function spanBox(program: Program, span: VideoSpan, layer: number, frame: number): LayerBox | null {
   if (span.kind === "placeholder") return null;
   const { resolution } = program;
   if (span.kind === "angle") {
@@ -73,7 +74,12 @@ function spanBox(program: Program, span: VideoSpan, layer: number): LayerBox | n
   }
   const size = span.size ?? (span.kind === "generated" ? resolution : null);
   if (!size) return null;
-  return { layer, size, placement: span.placement, box: frameBox(resolution, size, span.placement) };
+  return { layer, size, placement: span.placement, box: frameBox(resolution, size, spanPlacement(span, frame, program.fps)) };
+}
+
+/** Opacity `span` shows with at `frame`: its keys and transitions applied (ADR 0018); a shot's angle is opaque. */
+function shownOpacity(program: Program, span: Exclude<VideoSpan, { kind: "placeholder" }>, frame: number): number {
+  return span.kind === "angle" ? 1 : spanPlacement(span, frame, program.fps).opacity;
 }
 
 /** Hit kind and clip type of a picture span: a shot's angle is footage of a `shot` clip. */
@@ -133,11 +139,11 @@ export function layersAt(
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder") continue;
-    const found = spanBox(program, span, layer);
+    const found = spanBox(program, span, layer, frame);
     if (!found) continue;
     const { left, top, width, height } = found.box;
     if (point.x < left || point.x >= left + width || point.y < top || point.y >= top + height) continue;
-    const strength = found.placement.opacity * (alphaOf(layer) ?? 1);
+    const strength = shownOpacity(program, span, frame) * (alphaOf(layer) ?? 1);
     hits.push({ clip: span.clip, layer, ...hitKind(span), paints: strength >= PAINT_MIN });
   }
   return hits;
@@ -163,8 +169,8 @@ export function layersIn(program: Program, frame: number, rect: { x0: number; y0
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder" || hits.some((hit) => hit.clip === span.clip)) continue;
-    const found = spanBox(program, span, layer);
-    if (!found || found.placement.opacity < PAINT_MIN) continue;
+    const found = spanBox(program, span, layer, frame);
+    if (!found || shownOpacity(program, span, frame) < PAINT_MIN) continue;
     const { left, top, width, height } = found.box;
     if (rect.x1 <= left || rect.x0 >= left + width || rect.y1 <= top || rect.y0 >= top + height) continue;
     hits.push({ clip: span.clip, layer, ...hitKind(span), paints: true });
