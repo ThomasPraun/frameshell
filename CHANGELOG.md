@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-23
+
 ### Added
 
 - People panel (ADR 0020, #344; `ui_state` gains `person`, so the wire change shares the people protocol bump set at merge). A **People** sidebar view, detachable like the others and left out of image projects: suggestions on top (a face suggestion shows the frame of the video cropped to the face, drawn from the proxy, nothing stored; Confirm or Dismiss, with a name field when it names nobody), "Scan faces" with the job's progress, then each person with the voices, angles and faces linked to them, `missing` marks for links whose target is gone, a "Confirmed by agent" mark from `by`, rename, remove, unlink and a picker to link a voice or angle. Picking a person selects their words in the transcript view and their spans on the timeline (a Speaks / On screen switch, from `people.ranges`; the timeline draws each span). The selection store gains `person` and `spans`; Ask agent quotes `[frameshell] person p_3fa2c1 "Juan" · speaks · 14 spans, 03:20 total`; `ui_state` reports the picked person with their spans. Cmd/Ctrl+Z in the panel undoes the last change to people, an agent's included, by applying its inverse through the same methods (one step, no history; a dismissed suggestion has no inverse; a removed person comes back with a new id). English and Spanish.
@@ -307,7 +309,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.14.0
 [0.12.1]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.1
 [0.12.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.12.0
 [0.11.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.11.0
