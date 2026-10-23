@@ -464,6 +464,8 @@ class Engine implements LayerHost {
   #pausedFrame = 0;
   /** What the canvas holds: a key of the composited pictures, `black`, or `` (must redraw). */
   #drawn = "";
+  /** Generated clip left out of the picture while its live page shows instead; null for none. */
+  #hidden: string | null = null;
   #shown = Number.NaN;
   /** What the canvas shows, for `alphaAt`: alpha planes and still images only (decoded frames are closed after use). */
   #shownAlpha: { layer: number; size: Size; placement: Placement; alpha: AlphaPlane | null; bitmap: ImageBitmap | null }[] = [];
@@ -523,6 +525,13 @@ class Engine implements LayerHost {
         break;
       case "seek":
         this.#moveTo(message.frame);
+        break;
+      case "hide":
+        if (this.#hidden !== message.clip) {
+          this.#hidden = message.clip;
+          this.#drawn = "";
+          this.queueTick();
+        }
         break;
       case "alphaAt":
         scope.postMessage({ type: "alpha", id: message.id, frame: this.#shown, layers: this.#alphaAt(message.x, message.y) });
@@ -657,12 +666,12 @@ class Engine implements LayerHost {
   #show(want: number, playing: boolean): void {
     const program = this.#program!;
     const parts: Part[] = [];
-    let key = `v${this.#programVersion}`;
+    let key = `v${this.#programVersion}|h${this.#hidden ?? ""}`;
     let complete = true;
     for (const pipeline of this.#layers) {
       pipeline.dropBefore(want);
       const span = programAt(program, want, pipeline.layer);
-      if (!span || span.kind === "placeholder") continue;
+      if (!span || span.kind === "placeholder" || (span.kind === "generated" && span.clip === this.#hidden)) continue;
       // Keys and transitions (ADR 0018) move or fade a picture from frame to frame, even one that holds.
       const placement = span.kind === "angle" ? IDENTITY_PLACEMENT : spanPlacement(span, want, program.fps);
       if (span.kind !== "angle" && span.motion) key += `|m${pipeline.layer}@${want}`;

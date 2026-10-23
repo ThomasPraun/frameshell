@@ -29,14 +29,17 @@ export const LIVE_MESSAGE = {
   /**
    * `source` of what the preview posts: `{ source, seek: seconds }`, and the
    * element probes of ADR 0011, `{ source, probe: { id, x, y, depth } }` and
-   * `{ source, probeRect: { id, x0, y0, x1, y1, max } }` (page pixels), and the
-   * element sheet of ADR 0021, `{ source, elements: { id, css?, selectors? } }`.
+   * `{ source, probeRect: { id, x0, y0, x1, y1, max } }` (page pixels), and for
+   * ADR 0021 the element sheet, `{ source, elements: { id, css?, selectors? } }`,
+   * and the element an adjustment moves, `{ source, probeMovable: { id, x, y, depth } }`
+   * or `{ source, probeSelector: { id, selector } }`.
    */
   toPage: "frameshell-preview",
   /**
    * `source` of what the bridge posts: `{ source, ready: true }`,
    * `{ source, shown: seconds }`, `{ source, error }`, and the answer to a
-   * probe, `{ source, probe: { id, elements } }` (`ProbedElement`s), and the
+   * probe, `{ source, probe: { id, elements } }` (`ProbedElement`s; for
+   * `probeMovable` and `probeSelector` at most one, with its `unit`), and the
    * answer to `elements`, `{ source, elements: { id, counts } }`.
    */
   fromPage: "frameshell-live",
@@ -92,7 +95,10 @@ export const LIVE_BRIDGE = `${PROBE_SCRIPT}
     ready
       .then(settled)
       .then(run)
-      .then(function (elements) { post({ probe: { id: id, elements: elements } }); }, function (error) { post({ probe: { id: id, elements: [], error: String((error && error.message) || error) } }); });
+      .then(function (found) {
+        var answer = Array.isArray(found) ? { id: id, elements: found } : { id: id, elements: found ? [found.element] : [], unit: found ? found.unit : 1 };
+        post({ probe: answer });
+      }, function (error) { post({ probe: { id: id, elements: [], error: String((error && error.message) || error) } }); });
   };
   var sheet = null;
   var applySheet = function (css) {
@@ -139,6 +145,17 @@ export const LIVE_BRIDGE = `${PROBE_SCRIPT}
     if (rect && num(rect.id) && num(rect.x0) && num(rect.y0) && num(rect.x1) && num(rect.y1)) {
       var max = num(rect.max) ? Math.max(0, Math.min(${PROBE_MAX_ELEMENTS}, rect.max)) : ${PROBE_MAX_ELEMENTS};
       probe(rect.id, function () { return window.__frameshellProbe.within(rect.x0, rect.y0, rect.x1, rect.y1, max); });
+      return;
+    }
+    var move = data.probeMovable;
+    if (move && num(move.id) && num(move.x) && num(move.y)) {
+      var up = num(move.depth) ? Math.max(0, Math.min(${PROBE_MAX_DEPTH}, move.depth)) : 0;
+      probe(move.id, function () { return window.__frameshellProbe.movable(move.x, move.y, up); });
+      return;
+    }
+    var named = data.probeSelector;
+    if (named && num(named.id) && typeof named.selector === "string") {
+      probe(named.id, function () { return window.__frameshellProbe.element(named.selector); });
     }
   });
   ready.then(function () { post({ ready: true }); }, fail);

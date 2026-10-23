@@ -1,7 +1,10 @@
-import type { ClipKey } from "@frameshell/schema";
+import type { ClipKey, ElementAdjust } from "@frameshell/schema";
 import { keyedValueAt } from "@frameshell/schema/composite";
 import { useEffect, useMemo, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
+import { askAgent } from "../ask/ask-agent.js";
+import { filled, fragileSelector, idRequest } from "../preview/element-edit.js";
+import { useElementMode } from "../preview/element-mode.js";
 import { useTransport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
@@ -21,12 +24,15 @@ import { ShotInspector } from "./ShotInspector.js";
  * timeline; values shown are the saved ones, from the shared timeline feed.
  * Video projects add the clip's edge transitions and keyframes (ADR 0018):
  * a keyed property shows its value at the playhead, and editing it keys it there.
+ * A generated clip lists its element adjustments (ADR 0021) while it has any
+ * or the preview edits its elements.
  */
 export function ClipInspector() {
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const { clips } = useSelection();
   const { time: playhead, fps } = useTransport();
   const image = useProjectKind() === "image";
+  const mode = useElementMode();
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const [error, setError] = useState<string | null>(null);
   const target = clips.length === 1 && layout ? find(layout.rows, clips[0]!) : null;
@@ -128,6 +134,15 @@ export function ClipInspector() {
             />
           ))}
         </div>
+      )}
+      {clip.kind === "generated" && (mode.clip === clip.id || Object.keys(clip.elements).length > 0) && (
+        <ElementAdjustments
+          clip={clip.id}
+          elements={clip.elements}
+          editing={mode.clip === clip.id}
+          counts={mode.clip === clip.id ? mode.counts : null}
+          onSend={send}
+        />
       )}
       {!placed && !audible && <span className="clip-inspector-hint">{t.inspector.nothingToAdjust}</span>}
       {error && (
@@ -242,5 +257,80 @@ function KeyControl({
         </select>
       )}
     </span>
+  );
+}
+
+/**
+ * A generated clip's element adjustments (ADR 0021), one row each: selector,
+ * move and scale, a reset, and notes for a selector that may not follow code
+ * edits (with Ask agent for an id) or that matches nothing at the shown frame
+ * (`counts`, from the clip's live page while its elements are edited).
+ */
+function ElementAdjustments({
+  clip,
+  elements,
+  editing,
+  counts,
+  onSend,
+}: {
+  clip: string;
+  elements: Readonly<Record<string, ElementAdjust>>;
+  editing: boolean;
+  counts: Readonly<Record<string, number>> | null;
+  onSend: (edit: TimelineEdit, options?: EditOptions) => void;
+}) {
+  const entries = Object.entries(elements).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return (
+    <div className="clip-inspector-group element-adjustments" role="group" aria-label={t.inspector.elements}>
+      <span className="element-adjustments-head">
+        <span className="key-control-label">{t.inspector.elements}</span>
+        {editing && <span className="clip-inspector-hint">{t.inspector.elementsEditing}</span>}
+        {!editing && <span className="clip-inspector-hint">{t.inspector.elementsHint}</span>}
+        {entries.length > 1 && (
+          <button
+            className="clip-inspector-button"
+            title={t.inspector.elementsResetAllTitle}
+            onClick={() => onSend({ op: "clip.set", args: { clip, elements: null } }, { label: "Reset elements" })}
+          >
+            {t.inspector.elementsResetAll}
+          </button>
+        )}
+      </span>
+      {entries.map(([selector, stored]) => {
+        const { x, y, scale } = filled(stored);
+        const unmatched = counts?.[selector] === 0;
+        return (
+          <span key={selector} className="element-adjustment" data-testid="element-adjustment" data-selector={selector} data-unmatched={unmatched || undefined}>
+            <code className="element-selector" title={selector}>
+              {selector}
+            </code>
+            <span className="element-values">{t.inspector.elementValues(x, y, scale)}</span>
+            {unmatched && (
+              <span className="element-note is-warning" title={t.inspector.elementUnmatchedTitle}>
+                {t.inspector.elementUnmatched}
+              </span>
+            )}
+            {fragileSelector(selector) && (
+              <>
+                <span className="element-note" title={t.inspector.elementFragileTitle}>
+                  {t.inspector.elementFragile}
+                </span>
+                <button className="clip-inspector-button" title={t.inspector.elementAskIdTitle} onClick={() => askAgent.run([idRequest(clip, selector)])}>
+                  {t.inspector.elementAskId}
+                </button>
+              </>
+            )}
+            <button
+              className="clip-inspector-button"
+              title={t.inspector.elementResetTitle(selector)}
+              aria-label={t.inspector.elementResetTitle(selector)}
+              onClick={() => onSend({ op: "clip.set", args: { clip, elements: { [selector]: null } } }, { label: "Reset element" })}
+            >
+              {t.inspector.reset}
+            </button>
+          </span>
+        );
+      })}
+    </div>
   );
 }

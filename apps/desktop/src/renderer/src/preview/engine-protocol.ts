@@ -58,6 +58,8 @@ export type ToEngine =
   | { type: "play"; anchor: Anchor; clock: ClockSample }
   | { type: "pause"; frame: number }
   | { type: "seek"; frame: number }
+  /** Draw nothing for generated clip `clip` (flattened id), whose live page shows instead (ADR 0021 element drags); null draws every clip. */
+  | { type: "hide"; clip: string | null }
   /** Alpha of every picture with alpha at a point of the frame on the canvas (fractions of the frame); answered by `alpha`. */
   | { type: "alphaAt"; id: number; x: number; y: number };
 

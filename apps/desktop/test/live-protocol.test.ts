@@ -168,6 +168,27 @@ describe("live page bridge", () => {
     ]);
   });
 
+  it("answers the element an adjustment moves, at a point or by selector, with its unit (ADR 0021)", async () => {
+    const { posted, send, window } = bridge({ ready: Promise.resolve(), seek() {} });
+    const found = { element: { selector: "#card" }, unit: 0.5 };
+    const calls: string[] = [];
+    (window as Record<string, unknown>)["__frameshellProbe"] = {
+      movable: (x: number, y: number, depth: number) => (calls.push(`movable ${x},${y},${depth}`), x > 0 ? found : null),
+      element: (selector: string) => (calls.push(`element ${selector}`), null),
+    };
+    send({ source: "frameshell-preview", probeMovable: { id: 1, x: 10, y: 20, depth: 99 } });
+    send({ source: "frameshell-preview", probeMovable: { id: 2, x: 0, y: 0 } });
+    send({ source: "frameshell-preview", probeSelector: { id: 3, selector: "#gone" } });
+    send({ source: "frameshell-preview", probeSelector: { id: 4, selector: 5 } });
+    await settleAll();
+    expect(calls).toEqual(["movable 10,20,8", "movable 0,0,0", "element #gone"]);
+    expect(posted.filter((message) => "probe" in message)).toEqual([
+      { source: "frameshell-live", probe: { id: 1, elements: [{ selector: "#card" }], unit: 0.5 } },
+      { source: "frameshell-live", probe: { id: 2, elements: [], unit: 1 } },
+      { source: "frameshell-live", probe: { id: 3, elements: [], unit: 1 } },
+    ]);
+  });
+
   describe("element sheet (ADR 0021)", () => {
     const sheetOf = (document: ReturnType<typeof fakeDocument>) => document.head.children.filter((node) => node["tag"] === "style");
 
