@@ -44,6 +44,7 @@ The person can turn on review mode (`frameshell status` prints `Review mode: on`
 
 - Close the transaction (`tx commit`), tell the person it waits for their review, then `frameshell proposal wait` (MCP `proposal_wait`). Exit 0 `accepted`: continue. 3 `rejected`: nothing applied; ask what to change. 4 `stale`: they changed the same clips (`conflicts` lists the ids); `timeline show` again and redo the change. 5 `aborted`. 6 `pending`: still waiting; run it again.
 - A change refused with `ProposalPending` means a proposal is already open (yours or another session's): run `proposal wait`, then retry.
+- A new timeline file you write waits in the proposal too: it is not in `timelines/` until accepted, so put its whole content in one write. `tx abort` of changes made before review mode was on proposes the undo: wait for it like any proposal.
 - `frameshell proposal status` shows the open proposal; `proposal diff` lists the clips it adds, removes or moves. `history --since <tx>` shows later what was accepted.
 
 ## In the app: what the human sees

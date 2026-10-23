@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Review mode no longer lets two agent changes past review (#328, ADR 0019). A new timeline file, or one written over an unreadable file, by `file.write` (anyone but the app) or created on disk, now waits in a proposal instead of landing in `timelines/`: it is not a timeline until the person accepts it, and reject discards it (one created on disk while another proposal is open is rejected with reason `proposal-pending`, `current` null, and removed). `tx abort` of operations applied before review mode was turned on no longer undoes them at once: the undo waits as a ready proposal labelled `Abort "<label>"`, named in the new `proposal` field of the `tx.abort` result; with another proposal open it fails with `ProposalPending` and the transaction stays open. With review mode off nothing changes. Protocol v54.
+
 ## [0.14.0] - 2026-10-23
 
 ### Added
