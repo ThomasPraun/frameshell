@@ -22,7 +22,7 @@ import {
 } from "@frameshell/schema";
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { readPrevious } from "../transcripts/transcriber.js";
-import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFaces, facesOfPeople, presence } from "./face-clusters.js";
+import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFacesOffThread, facesOfPeople, presence } from "./face-clusters.js";
 import { angleSuggestions } from "./angle-suggest.js";
 import { faceSuggestions } from "./face-suggest.js";
 import { type PersonRanges, type RangeKind, type RangesSource, type Span, personRanges } from "./ranges.js";
@@ -202,7 +202,8 @@ export class PeopleService {
    * `link`), or with `reject` add the ids to `dismissed`. A suggestion naming
    * nobody is linked to `person` (id or name; a new name adds the person).
    * Every id must be among the current suggestions (dismissed ones included)
-   * and have a person, else nothing changes. Throws `InvalidOperation`
+   * and have a person, else nothing changes. All people and links are applied
+   * together: if one fails, `people.json` is left as it was. Throws `InvalidOperation`
    * (`unknown suggestion`, `needs person`, or an `add` or `link` reason).
    */
   async confirm(
@@ -242,42 +243,69 @@ export class PeopleService {
       });
       return { confirmed: [], dismissed };
     }
-    const confirmed: MethodResult<"people.confirm">["confirmed"] = [];
-    for (const suggestion of chosen) {
-      let person = suggestion.person;
-      let added = false;
-      if (!person) {
-        const wanted = options.person ?? suggestion.angle!.name;
-        const existing = findPerson(await readPeople(root), wanted);
-        if (existing) person = { id: existing.id, name: existing.name };
-        else {
-          const created = await this.add(root, wanted);
-          person = { id: created.id, name: created.name };
-          added = true;
+    // One change for the whole answer: every person and link is checked in memory, then `people.json` is written once.
+    return this.#change(root, async () => {
+      let file = await readPeople(root);
+      const lookups = newLookups();
+      const confirmed: MethodResult<"people.confirm">["confirmed"] = [];
+      const events: { change: PeopleChange; person: string }[] = [];
+      const speakerLinks: { entry: (typeof confirmed)[number]; links: PersonSpeakerLink[] }[] = [];
+      for (const suggestion of chosen) {
+        let person = suggestion.person;
+        let added = false;
+        if (!person) {
+          const wanted = options.person ?? suggestion.angle!.name;
+          const existing = findPerson(file, wanted);
+          if (existing) person = { id: existing.id, name: existing.name };
+          else {
+            const taken = nameOwner(file, wanted);
+            if (taken) throw nameTaken("people.add", wanted, taken);
+            const created: Person = { id: newId(file), name: wanted.trim(), speakers: [], angles: [], faces: [] };
+            file = { ...file, people: [...file.people, created] };
+            events.push({ change: "add", person: created.id });
+            person = { id: created.id, name: created.name };
+            added = true;
+          }
         }
+        const entry: MethodResult<"people.confirm">["confirmed"][number] = { id: suggestion.id, person, added, linked: false, transcripts: [] };
+        const targets: PeopleTarget[] = [];
+        if (suggestion.links.includes("angle") && suggestion.angle) {
+          const { timeline, group, angle } = suggestion.angle;
+          targets.push({ angle: { timeline, group, angle } });
+          entry.angle = { timeline, group, angle };
+        }
+        if (suggestion.links.includes("speaker") && suggestion.speaker) {
+          const { transcript, speaker } = suggestion.speaker;
+          targets.push({ speaker: { transcript, speaker } });
+          entry.speaker = { transcript, ...(speaker !== undefined ? { speaker } : {}) };
+        }
+        if (suggestion.links.includes("face") && suggestion.face) {
+          targets.push({ face: suggestion.face.anchor });
+          entry.face = suggestion.face.anchor;
+        }
+        for (const target of targets) {
+          const current = file.people.find((candidate) => candidate.id === person.id)!;
+          const normalized = await normalizeTarget(root, "people.link", target);
+          const next = await withLink(root, current, normalized, options.by, lookups);
+          if (next === current) continue;
+          const updated = { ...file, people: file.people.map((candidate) => (candidate === current ? next : candidate)) };
+          const checked = parsePeopleFile(updated);
+          if (!checked.ok) throw refused("people.link", checked.error.split("\n").map((line) => line.replace(/^[\w.]+: /, "")).join("; "), "already linked");
+          file = checked.value;
+          entry.linked = true;
+          events.push({ change: "link", person: next.id });
+          if (normalized.speaker?.speaker !== undefined) speakerLinks.push({ entry, links: next.speakers.filter((link) => speakerLinkKey(link) === speakerLinkKey(normalized.speaker!)) });
+        }
+        confirmed.push(entry);
       }
-      const entry: MethodResult<"people.confirm">["confirmed"][number] = { id: suggestion.id, person, added, linked: false, transcripts: [] };
-      if (suggestion.links.includes("angle") && suggestion.angle) {
-        const { timeline, group, angle } = suggestion.angle;
-        const result = await this.link(root, person.id, { angle: { timeline, group, angle } }, options.by);
-        entry.angle = { timeline, group, angle };
-        entry.linked ||= result.linked;
+      if (events.length > 0) await writeJsonAtomic(join(root, PEOPLE_FILE), file);
+      for (const { change, person } of events) this.#onChanged(root, change, person);
+      for (const { entry, links } of speakerLinks) {
+        const written = await writeSpeakerNames(root, file.people.find((candidate) => candidate.id === entry.person.id)!, links);
+        entry.transcripts.push(...written.transcripts);
       }
-      if (suggestion.links.includes("speaker") && suggestion.speaker) {
-        const { transcript, speaker } = suggestion.speaker;
-        const result = await this.link(root, person.id, { speaker: { transcript, speaker } }, options.by);
-        entry.speaker = { transcript, ...(speaker !== undefined ? { speaker } : {}) };
-        entry.linked ||= result.linked;
-        entry.transcripts.push(...result.transcripts);
-      }
-      if (suggestion.links.includes("face") && suggestion.face) {
-        const result = await this.link(root, person.id, { face: suggestion.face.anchor }, options.by);
-        entry.face = suggestion.face.anchor;
-        entry.linked ||= result.linked;
-      }
-      confirmed.push(entry);
-    }
-    return { confirmed, dismissed: [] };
+      return { confirmed, dismissed: [] };
+    });
   }
 
   async #save(root: string, file: PeopleFile, change: PeopleChange, person: string): Promise<void> {
@@ -331,7 +359,7 @@ async function suggestAll(root: string, file: PeopleFile, sources: SuggestSource
 
 /** Faces of the project and whose they are. */
 async function faceState(file: PeopleFile, faces: FaceScans): Promise<{ model: FaceModel; owners: FaceOwners }> {
-  const model = clusterFaces(await faces());
+  const model = await clusterFacesOffThread(await faces());
   return { model, owners: facesOfPeople(model, file.people) };
 }
 
