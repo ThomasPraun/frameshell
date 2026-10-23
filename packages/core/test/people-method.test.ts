@@ -319,6 +319,25 @@ describe("missing links", () => {
   });
 });
 
+describe("people.ranges", () => {
+  it("returns the person's speaking spans on a timeline, and refuses an unknown person", async () => {
+    const { dir, app, write } = await setup();
+    await write("timelines/talk.json", {
+      schemaVersion: SCHEMA_VERSION,
+      id: "talk",
+      revision: 0,
+      tracks: [{ id: "t_v", kind: "video", clips: [{ id: "c1", type: "media", asset: "assets/ep1.mp4", start: 10, in: 0, out: 2 }] }],
+    });
+    await app.request("people.add", { cwd: dir, name: "Juan" });
+    await app.request("people.link", { cwd: dir, person: "Juan", speaker: { transcript: EP1, speaker: "s1" } });
+    const found = await app.request("people.ranges", { cwd: dir, person: "Juan", timeline: "talk" });
+    expect(found).toMatchObject({ kind: "speaks", timeline: "talk", spans: [{ start: 10, end: 10.5 }], total: 0.5, person: { name: "Juan" } });
+    expect((await app.request("people.ranges", { cwd: dir, person: "Juan", kind: "onscreen", timeline: "talk" })).spans).toEqual([]);
+    const error = await failure(app.request("people.ranges", { cwd: dir, person: "Ana", timeline: "talk" }));
+    expect(error.data).toMatchObject({ reason: "unknown person" });
+  });
+});
+
 describe("replays and notifications", () => {
   it("applies a replayed people.add once", async () => {
     const { dir, app } = await setup();

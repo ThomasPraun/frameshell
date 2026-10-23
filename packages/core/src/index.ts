@@ -31,6 +31,7 @@ export {
   similarityTransform,
 } from "./people/scan.js";
 export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
+export { type PersonRanges, type RangeKind, type RangesSource, type Span, RANGE_BRIDGE_S, mergeSpans, personRanges } from "./people/ranges.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {

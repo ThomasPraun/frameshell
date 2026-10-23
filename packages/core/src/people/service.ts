@@ -21,6 +21,7 @@ import {
 } from "@frameshell/schema";
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { readPrevious } from "../transcripts/transcriber.js";
+import { type PersonRanges, type RangeKind, type RangesSource, personRanges } from "./ranges.js";
 
 /** What happened, as `people.changed` names it. */
 export type PeopleChange = (typeof PEOPLE_CHANGES)[number];
@@ -78,6 +79,21 @@ export class PeopleService {
     const people = [];
     for (const person of file.people) people.push(await describe(root, person, lookups));
     return { people, dismissed: file.dismissed };
+  }
+
+  /**
+   * When a person (id or exact name) speaks or is on screen on `timeline`, which has its nested timelines
+   * flattened (see `personRanges`). Throws `InvalidOperation` (`unknown person`) or `InvalidProjectFile`.
+   */
+  async ranges(root: string, ref: string, kind: RangeKind, timeline: Timeline, turns: RangesSource["turns"]): Promise<{ person: Person } & PersonRanges> {
+    const person = requirePerson("people.ranges", await readPeople(root), ref);
+    const lookups = newLookups();
+    const transcripts = new Map<string, Transcript>();
+    for (const link of person.speakers) {
+      const found = await readTranscript(root, link.transcript, lookups);
+      if (typeof found !== "string") transcripts.set(link.transcript, found);
+    }
+    return { person, ...(await personRanges(person, kind, timeline, { transcript: (file) => transcripts.get(file) ?? null, turns })) };
   }
 
   /** Add a person with no links. Throws `InvalidOperation` (`name taken`) or `InvalidProjectFile`. */

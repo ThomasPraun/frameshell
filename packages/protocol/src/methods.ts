@@ -1945,6 +1945,32 @@ export const methods = {
     }),
     result: PeopleScanResultSchema,
   },
+  "people.ranges": {
+    description:
+      "When a person speaks or is on screen on a timeline (ADR 0020): merged `spans` `{ start, end }` in timeline seconds, " +
+      "sorted, pauses under 0.5 s bridged, with their `total`. `kind` `speaks` (default): the words of the person's linked " +
+      "transcript speakers placed by the clips that play their video or audio (in, out, speed and cuts honoured; nested " +
+      "timelines flattened; a mic's words through the shots) plus the speaking turns of their linked multicam angles inside " +
+      "the program track's shots. `onscreen`: the shots that show one of their angles. Clips covered by a layer above are not " +
+      "subtracted, and faces are not used yet. Spans are timeline seconds NOW: to cut several out with `ripple`, go from the " +
+      "last span to the first so earlier spans keep their times. Links whose target is gone are skipped with a `warnings` " +
+      "line. Read-only. Fails with InvalidOperation (reason `unknown person`), InvalidProjectFile or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      person: z.string().min(1).describe("Person id or exact name."),
+      kind: z.enum(["speaks", "onscreen"]).default("speaks").describe("`speaks` (default) or `onscreen`."),
+      timeline: TimelineIdSchema,
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      person: z.object({ id: z.string(), name: z.string() }),
+      kind: z.enum(["speaks", "onscreen"]),
+      timeline: z.string(),
+      spans: z.array(z.object({ start: z.number(), end: z.number() })).describe("Timeline seconds, sorted, disjoint."),
+      total: z.number().describe("Seconds covered by `spans`."),
+      warnings: z.array(z.string()),
+    }),
+  },
   "ui.state": {
     description:
       "What the user sees in the Frameshell app for this project: the playhead and whether it plays, the selection " +

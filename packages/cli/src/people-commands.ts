@@ -20,6 +20,9 @@ export const PEOPLE_USAGE = `  people list                  The project's people
   people scan [<asset>…]       Find the faces in videos (default: every video in assets/), locally: 2 frames a second,
                                each face followed and given a face print. Cached in .frameshell/people/ per file
                                content, so a video already scanned is skipped. First run downloads about 39 MB
+  people ranges <person> [--on-screen] [--timeline id]
+                               Timeline spans where the person speaks (default) or is on screen, pauses under
+                               0.5 s bridged. Cut several from the last span to the first
 `;
 
 /** Flags each `people` command takes besides the global ones. */
@@ -31,6 +34,7 @@ export const PEOPLE_FLAGS: Record<string, readonly string[]> = {
   "people link": ["speaker", "angle", "face"],
   "people unlink": ["speaker", "angle", "face"],
   "people scan": [],
+  "people ranges": ["on-screen", "onscreen", "timeline"],
 };
 
 /** A parsed `people` command; paths are as typed, resolved against the working directory when run. */
@@ -40,7 +44,8 @@ export type PeopleInvocation =
   | { kind: "people.rename"; person: string; name: string }
   | { kind: "people.remove"; person: string }
   | { kind: "people.scan"; assets: string[] }
-  | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput };
+  | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput }
+  | { kind: "people.ranges"; person: string; onScreen: boolean; timeline?: string };
 
 /** One target of `people link`, as typed. */
 export type PeopleTargetInput =
@@ -49,13 +54,26 @@ export type PeopleTargetInput =
   | { face: { asset: string; at: number; x?: number; y?: number } };
 
 /** Parse `people <sub> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
-export function parsePeople(rest: string[], options: { speaker?: string | undefined; angle?: string | undefined; face?: string | undefined }): PeopleInvocation | null {
+export function parsePeople(
+  rest: string[],
+  options: {
+    speaker?: string | undefined;
+    angle?: string | undefined;
+    face?: string | undefined;
+    "on-screen"?: boolean | undefined;
+    onscreen?: boolean | undefined;
+    timeline?: string | undefined;
+  },
+): PeopleInvocation | null {
   const [sub, ...args] = rest;
   if (sub === "list") return args.length === 0 ? { kind: "people.list" } : null;
   if (sub === "add") return args.length > 0 ? { kind: "people.add", name: args.join(" ") } : null;
   if (sub === "rename") return args.length >= 2 ? { kind: "people.rename", person: args[0]!, name: args.slice(1).join(" ") } : null;
   if (sub === "remove") return args.length === 1 ? { kind: "people.remove", person: args[0]! } : null;
   if (sub === "scan") return { kind: "people.scan", assets: args };
+  if (sub === "ranges") {
+    return args.length === 1 ? { kind: "people.ranges", person: args[0]!, onScreen: options["on-screen"] === true || options.onscreen === true, ...(options.timeline ? { timeline: options.timeline } : {}) } : null;
+  }
   if (sub !== "link" && sub !== "unlink") return null;
   if (args.length !== 1) return null;
   const given = [options.speaker, options.angle, options.face].filter((value) => value !== undefined).length;
@@ -135,6 +153,18 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
     case "people.unlink": {
       const result = await conn.request("people.unlink", { cwd, person: inv.person, ...targetParams(inv.target, cwd) });
       return json ? print(result) : `Unlinked ${describeTarget(inv.target)} from ${result.person.name} (${result.person.id})\n`;
+    }
+    case "people.ranges": {
+      const result = await conn.request("people.ranges", { cwd, person: inv.person, kind: inv.onScreen ? "onscreen" : "speaks", ...(inv.timeline ? { timeline: inv.timeline } : {}) });
+      if (json) return print(result);
+      const verb = result.kind === "speaks" ? "speaks" : "is on screen";
+      const lines = result.spans.map((span) => `  ${span.start.toFixed(2)} - ${span.end.toFixed(2)} s`);
+      return (
+        `${result.person.name} ${verb} in ${result.timeline}: ${result.spans.length} span${result.spans.length === 1 ? "" : "s"}, ${result.total.toFixed(2)} s\n` +
+        lines.map((line) => `${line}\n`).join("") +
+        result.warnings.map((warning) => `  warning: ${warning}\n`).join("") +
+        (result.spans.length > 1 ? "Times are timeline seconds now: ripple-cut from the last span to the first.\n" : "")
+      );
     }
   }
 }
