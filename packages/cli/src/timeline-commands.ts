@@ -37,7 +37,8 @@ mutations print the new revision):
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
-           [--opacity 0-1] [--props json] [--script-ref ref | --clear-script-ref]
+           [--opacity 0-1] [--props json] [--elements json | --clear-elements]
+           [--script-ref ref | --clear-script-ref]
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -171,6 +172,8 @@ export const TIMELINE_OPTIONS = {
   scale: { type: "string" },
   opacity: { type: "string" },
   props: { type: "string" },
+  elements: { type: "string" },
+  "clear-elements": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -241,7 +244,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
-  "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "script-ref", "clear-script-ref"],
+  "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
   "transition set": ["at", "kind", "duration", "track"],
   "transition remove": ["at", "track"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
@@ -493,6 +496,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("script-ref") !== undefined && values["clear-script-ref"] === true) {
         throw new UsageError("Pass --script-ref or --clear-script-ref, not both.");
       }
+      if (str("elements") !== undefined && values["clear-elements"] === true) {
+        throw new UsageError("Pass --elements or --clear-elements, not both.");
+      }
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -500,6 +506,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         transform: transform(),
         props: json("props"),
+        elements: values["clear-elements"] === true ? null : json("elements"),
         scriptRef: values["clear-script-ref"] === true ? null : str("script-ref"),
       });
       break;

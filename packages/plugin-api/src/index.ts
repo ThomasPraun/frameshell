@@ -110,6 +110,12 @@ export interface ClipAdapter {
    * live; the message reaches the user and the preview keeps its slate.
    */
   livePreview?(clip: unknown, context: LiveContext): Promise<LivePage>;
+  /**
+   * Optional. `true` when `render` applies {@link RenderContext.elementCss}
+   * (ADR 0021). The host refuses `elements` on clips of an adapter without it,
+   * so the preview never shows what the render ignores.
+   */
+  readonly elementStyles?: boolean;
 }
 
 /** What {@link ClipAdapter.livePreview} receives: the project facts of {@link RenderContext}, without output or progress. */
@@ -122,6 +128,8 @@ export interface LiveContext {
   readonly height: number;
   /** See {@link RenderContext.ensureBinary}. */
   ensureBinary(name: string): Promise<string>;
+  /** See {@link RenderContext.elementCss}. */
+  readonly elementCss?: string;
 }
 
 /**
@@ -189,6 +197,13 @@ export interface RenderContext {
   ensureBinary(name: string): Promise<string>;
   /** Report progress to the app and CLI (the job's `progress`). Cheap; call freely. */
   progress(update: RenderProgress): void;
+  /**
+   * Style sheet made by the host from the clip's `elements` (moves and scales by
+   * CSS selector, ADR 0021); absent when the clip has none. An adapter that sets
+   * {@link ClipAdapter.elementStyles} inserts it last in the page's `<head>`,
+   * after the composition's own styles.
+   */
+  readonly elementCss?: string;
 }
 
 /** One render progress report. */

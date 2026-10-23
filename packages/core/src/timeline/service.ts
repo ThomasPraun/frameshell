@@ -1751,6 +1751,7 @@ function isFile(path: string): boolean {
 /** Engine view of an adapter: Standard Schema props validation, or accept-all. */
 function clipTypeInfo(adapter: ClipAdapter): ClipTypeInfo {
   return {
+    elementStyles: adapter.elementStyles === true,
     validateProps: async (props) => {
       const schema = adapter.propsSchema;
       if (!schema) return null;

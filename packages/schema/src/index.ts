@@ -201,3 +201,5 @@ export {
   clipHandles,
   edgeTransitions,
 } from "./transitions.js";
+
+export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";

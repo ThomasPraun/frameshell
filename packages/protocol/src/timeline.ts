@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AnyClipSchema,
   DirectorRulesSchema,
+  ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
@@ -231,6 +232,14 @@ export const operationArgs = {
     muted: z.boolean().optional(),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
+    elements: z
+      .record(z.string().min(1), ElementAdjustSchema.nullable())
+      .nullable()
+      .optional()
+      .describe(
+        "Adapter types whose plugin applies element styles only (ADR 0021). Merged per CSS selector: an object sets or replaces that selector's " +
+          "`{ x, y, scale }` (composition CSS px, scale about the centre); `null` removes it. `null` instead of the map clears every adjustment.",
+      ),
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
   }),
   cut: z.strictObject({

@@ -8,8 +8,8 @@ const CACHE_LAYOUT_VERSION = 1;
 export interface ClipKeyInput {
   /** Plugin providing the adapter, as installed. */
   plugin: { name: string; version: string };
-  /** The timeline clip. Only `type`, `source` and `props` count: placement never re-renders. */
-  clip: Pick<AdapterClip, "type" | "source" | "props">;
+  /** The timeline clip. Only `type`, `source`, `props` and `elements` count: placement never re-renders. */
+  clip: Pick<AdapterClip, "type" | "source" | "props" | "elements">;
   /** Files the adapter declared (`inputs`), with content hash; null = missing. Order does not matter. */
   inputs: readonly { path: string; hash: string | null }[];
   /** Project frame rate and resolution. */
@@ -29,6 +29,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     type: input.clip.type,
     source: input.clip.source ?? null,
     props: input.clip.props ?? {},
+    // Absent or empty drops out, so clips without adjustments keep their old keys (ADR 0021).
+    elements: Object.keys(input.clip.elements ?? {}).length > 0 ? input.clip.elements : undefined,
     inputs,
     format: input.format,
   });

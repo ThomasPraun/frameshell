@@ -42,7 +42,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 53;
+export const PROTOCOL_VERSION = 54;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1561,7 +1561,9 @@ export const methods = {
     mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
-      "`props` (adapter clips; replaced), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
+      "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
+      "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
+      "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
       "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
