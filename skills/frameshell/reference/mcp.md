@@ -36,6 +36,7 @@ Navigation only; each returns `ui_state` after the move.
 | `ui_seek { at }` | Put the playhead on a moment you want them to watch. |
 | `ui_play` / `ui_pause` | Play from the playhead / stop. |
 | `ui_select { clips?, words?, range? }` | Point at what you mean; replaces their selection. |
+| `ui_select { person: { id, what? } }` | Show the user where someone speaks (`what: "onscreen"`: is on screen): their spans and words selected, as a click in the People panel does. `id` is the person id or exact name. |
 | `ui_select { points: [{ at, x, y }] }` | Show the user the element you mean: each point is inspected as `inspect_point` does and outlined as a pick in their preview ("is this the box?"). |
 | `ui_open_file { file }` | Open a script, composition or timeline in an editor tab. |
 | `ui_show_tx_diff { target }` | Open History on your `tx_…`/`op_…` with its changes marked on the timeline: the way to walk them through an edit. |

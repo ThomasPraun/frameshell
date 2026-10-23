@@ -1,8 +1,11 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, panelWindow, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
@@ -11,15 +14,18 @@ import { waitForIngest } from "./preview-probe.js";
 // People panel (#344, ADR 0020) in the built app: a real daemon, a synthetic 8 s take with a diarized transcript
 // (Ana says words 1-5, Ben the rest). The person is added, a voice linked, picked (words and spans selected),
 // renamed (the transcript follows, and a rename in the transcript renames the person), every change undone with
-// Cmd/Ctrl+Z; a multicam angle is suggested as a person.
+// Cmd/Ctrl+Z; a multicam angle is suggested as a person. The voice model is offered, never fetched; a voice plays,
+// seconds per person show, the transcript's speaker menu links and unlinks, and an agent picks a person over MCP.
 const box = sandbox("transcript");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const ASSET = "assets/talk.mp4";
 const TRANSCRIPT = "transcripts/talk.words.json";
 const WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight"];
+const cliBin = join(import.meta.dirname, "..", "..", "..", "packages", "cli", "dist", "bin", "frameshell.js");
 
 let app: ElectronApplication;
 let page: Page;
+let mcp: Client | undefined;
 
 const speakers = () => JSON.parse(readFileSync(join(box.projectDir, TRANSCRIPT), "utf8")).speakers as { id: string; name: string }[];
 const panel = () => page.getByTestId("people-panel");
@@ -81,6 +87,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  await mcp?.close();
   await app?.close();
 });
 
@@ -94,6 +101,25 @@ test("an angle suggestion adds the person behind the angle with its voice in one
   await expect(person("Ben").locator('[data-testid="person-link"][data-kind="angle"]')).toHaveCount(1);
   await expect(person("Ben").locator('[data-testid="person-link"][data-kind="voice"]')).toHaveCount(1);
   await expect(row).toHaveCount(0);
+});
+
+test("with a voice linked, the panel offers the voice model with its size instead of downloading it", async () => {
+  // Ben's voice is linked and Ana's is not: comparing them needs the model, which this fresh data dir lacks.
+  const note = page.getByTestId("people-voice-model");
+  await expect(note).toContainText("Matching voices needs a voice model (~63 MB)");
+  await expect(page.getByTestId("people-voice-download")).toHaveText("Find voice matches (downloads ~63 MB once)");
+  expect(existsSync(join(box.dataDir, "models"))).toBe(false);
+});
+
+test("each person shows their seconds, and a linked voice plays a stretch of that speaker", async () => {
+  await expect(person("Ben").getByTestId("person-totals")).toHaveText(/^Speaks 0:0[1-9] · on screen /);
+  const play = person("Ben").getByTestId("voice-play");
+  await expect(play).toBeEnabled();
+  await expect(play).toHaveAttribute("aria-label", "Play Ben in talk.words.json");
+  await play.click();
+  await expect(play).toHaveAttribute("data-playing", "true");
+  await play.click();
+  await expect(play).toHaveAttribute("data-playing", "false");
 });
 
 test("a person is added and a transcript speaker linked: the transcript takes the person's name", async () => {
@@ -167,6 +193,50 @@ test("renaming a linked speaker in the transcript renames the person", async () 
   await field.press("Enter");
   await expect(person("Juanito")).toBeVisible();
   await expect.poll(() => speakers()[0]!.name).toBe("Juanito");
+});
+
+test("the transcript's speaker menu unlinks a speaker from its person and links it again by name", async () => {
+  const voices = () => person("Juanito").locator('[data-testid="person-link"][data-kind="voice"]');
+  await label("s1").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Unlink from Juanito" }).click();
+  await expect(voices()).toHaveCount(0);
+  await label("s1").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Link to person…" }).click();
+  const field = page.getByRole("combobox", { name: "Person who is Juanito" });
+  await field.fill("juanito");
+  await field.press("Enter");
+  await expect(voices()).toHaveCount(1);
+});
+
+test("an agent selects a person with ui_select: their words and spans, reported by ui_state", async () => {
+  mcp = new Client({ name: "e2e", version: "0.0.0" });
+  await mcp.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [cliBin, "mcp"],
+      cwd: box.projectDir,
+      env: {
+        ...(process.env as Record<string, string>),
+        FRAMESHELL_SOCKET: box.socketPath,
+        FRAMESHELL_DATA_DIR: box.dataDir,
+        FRAMESHELL_CONFIG_DIR: box.configDir,
+      },
+      stderr: "inherit",
+    }),
+  );
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = (await mcp!.callTool({ name, arguments: args })) as CallToolResult;
+    const text = (result.content.find((part) => part.type === "text") as { text: string } | undefined)?.text ?? "";
+    return { error: result.isError === true, text };
+  };
+  await page.locator(".transcript-scroll").press("Escape");
+  const picked = await call("ui_select", { person: { id: "Juanito" } });
+  expect(picked.error, picked.text).toBe(false);
+  await expect(page.locator(".tw.is-selected")).toHaveCount(5);
+  await expect(person("Juanito")).toHaveAttribute("data-selected", "true");
+  expect(JSON.parse(picked.text).selection.person).toMatchObject({ name: "Juanito", what: "speaks" });
+  const unknown = await call("ui_select", { person: { id: "Nobody" } });
+  expect(unknown).toMatchObject({ error: true, text: expect.stringContaining('no person "Nobody"') });
 });
 
 test("the panel opens in its own window with the same people", async () => {

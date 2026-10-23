@@ -172,6 +172,8 @@ export const UiCommandSchema = z.discriminatedUnion("kind", [
     reveal: z.boolean(),
     /** Points the daemon already inspected (`inspect.point`): the app shows them as picks. */
     points: z.array(InspectedPointSchema).default([]),
+    /** A person the daemon found in `people.json` (`id` resolved from a name): the app picks them as the People panel does. */
+    person: z.object({ id: z.string(), what: z.enum(["speaks", "onscreen"]) }).nullable().default(null),
   }),
   z.object({ kind: z.literal("openFile"), path: z.string().min(1).describe("Project-relative, `/`-separated.") }),
   z.object({ kind: z.literal("showTxDiff"), timeline: z.string(), target: z.union([TxIdSchema, OpIdSchema]) }),

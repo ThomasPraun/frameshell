@@ -23,6 +23,7 @@ import {
   type OpenOutcome,
   type Outcome,
   type ProjectView,
+  type ModelProgress,
   type PeopleChange,
   type PersonTarget,
   type ProposalChange,
@@ -381,10 +382,10 @@ function send(contents: WebContents, channel: string, ...args: unknown[]): void 
   if (!contents.isDestroyed()) contents.send(channel, ...args);
 }
 
-/** Forward the daemon's progress of a segmentation call to the window that asked. */
-function segmentProgressTo(contents: WebContents): (progress: Progress) => void {
+/** Forward the daemon's progress of a call that may first download a model (segmentation, voices) to the window that asked. */
+function modelProgressTo(contents: WebContents, channel: string): (progress: Progress) => void {
   return ({ stage, fraction }) =>
-    send(contents, Channel.segmentProgress, { download: stage === "binary-download" || stage === "model-download", fraction: fraction ?? null });
+    send(contents, channel, { download: stage === "binary-download" || stage === "model-download", fraction: fraction ?? null } satisfies ModelProgress);
 }
 
 /** Resolve `dir` to its project through the daemon and attach it to the window. */
@@ -874,7 +875,16 @@ function registerPeopleIpc(): void {
     outcome(async () => daemon.request("people.unlink", { cwd: await dirOf(event.sender), person, ...target })),
   );
   ipcMain.handle(Channel.peopleScan, (event) => outcome(async () => daemon.request("people.scan", { cwd: await dirOf(event.sender) })));
-  ipcMain.handle(Channel.peopleSuggest, (event) => outcome(async () => daemon.request("people.suggest", { cwd: await dirOf(event.sender) })));
+  // The app downloads the voice model only when the person asks for it (`download`), with progress.
+  ipcMain.handle(Channel.peopleSuggest, (event, download: boolean) =>
+    outcome(async () =>
+      daemon.request(
+        "people.suggest",
+        { cwd: await dirOf(event.sender), download },
+        download ? { onProgress: modelProgressTo(event.sender, Channel.peopleSuggestProgress) } : {},
+      ),
+    ),
+  );
   ipcMain.handle(Channel.peopleConfirm, (event, suggestions: string[], options: { reject?: boolean; person?: string }) =>
     outcome(async () =>
       daemon.request("people.confirm", {
@@ -1164,7 +1174,7 @@ function registerIpc(): void {
   ipcMain.handle(Channel.segmentPrepare, (event, assets: string[]) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
-      const onProgress = segmentProgressTo(event.sender);
+      const onProgress = modelProgressTo(event.sender, Channel.segmentProgress);
       for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
     }),
   );
@@ -1174,7 +1184,7 @@ function registerIpc(): void {
       const result = await daemon.request(
         "inspect.point",
         { cwd: project.dir, timeline: "main", at, x, y, unit: "fraction", segment: true },
-        { onProgress: segmentProgressTo(event.sender) },
+        { onProgress: modelProgressTo(event.sender, Channel.segmentProgress) },
       );
       return { segment: result.segment ?? null, unavailable: result.segmentUnavailable ?? null };
     }),

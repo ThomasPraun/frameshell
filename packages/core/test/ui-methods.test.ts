@@ -82,6 +82,29 @@ describe("ui.* methods", () => {
     await expect.poll(() => mcp.request("ui.state", { cwd: dir })).toEqual({ connected: false });
   });
 
+  it("ui.select resolves a person by name for the app, and refuses an unknown one before asking it (ADR 0020)", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const mcp = await connect("mcp/test");
+    const app = await connect("desktop/test");
+    const dir = join(tempDir(), "talk");
+    await mcp.request("project.init", { dir });
+    const { person } = await mcp.request("people.add", { cwd: dir, name: "Juan" });
+    const commands: unknown[] = [];
+    app.on("ui.command", ({ view, id, command }) => {
+      commands.push(command);
+      void app.request("ui.reply", { view, id, error: null, state: idle });
+    });
+    await app.request("ui.publish", { cwd: dir, view: "w1", state: idle });
+
+    await mcp.request("ui.select", { cwd: dir, person: { id: "juan" } });
+    expect(commands).toEqual([expect.objectContaining({ kind: "select", person: { id: person.id, what: "speaks" }, clips: [], words: [] })]);
+    await expect(mcp.request("ui.select", { cwd: dir, person: { id: "Ana", what: "onscreen" } })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining(`no person "Ana" (people: Juan (${person.id}))`),
+    });
+    expect(commands).toHaveLength(1);
+  });
+
   it("forgets a detached window at once", async () => {
     daemon = await startDaemon({ socketPath: uniqueSocketPath() });
     const app = await connect("desktop/test");

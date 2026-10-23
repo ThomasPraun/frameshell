@@ -5,6 +5,7 @@ import { parseTranscript } from "@frameshell/schema";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { selectHistoryEntry } from "./history/useHistory.js";
 import { t } from "./i18n.js";
+import { pickPersonById } from "./people/pick.js";
 import { type TransportState, createTransport, transport } from "./preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, type Selection, selection, unionRange } from "./selection.js";
 import { formatTimecode } from "./timeline/layout.js";
@@ -123,6 +124,8 @@ export interface CommandTargets {
   readFile(path: string): Promise<string>;
   /** Select a History entry as the History panel does; rejects with the daemon's message. */
   selectHistory(timeline: string, target: string): Promise<void>;
+  /** Pick person `id` as the People panel does (spans and words); resolves with their name, rejects with why not. */
+  selectPerson(person: { id: string; what: "speaks" | "onscreen" }, reveal: boolean): Promise<string>;
 }
 
 /**
@@ -155,6 +158,10 @@ export async function runUiCommand(command: UiCommand, targets: CommandTargets):
         selection.selectPoints(points, "agent");
         if (command.reveal && !targets.transport.get().playing) targets.transport.seek(command.points[0]!.at);
         return t.workspace.agentPicked(command.points.length);
+      }
+      if (command.person) {
+        const name = await targets.selectPerson(command.person, command.reveal);
+        return t.workspace.agentSelectedPerson(name, command.person.what === "onscreen");
       }
       if (command.clips.length > 0) {
         const view = targets.timelineView(SELECTION_TIMELINE);
@@ -303,6 +310,8 @@ export function useUiLink(host: UiHost): void {
       timelineView: (timeline) => timelineState(timeline).view,
       readFile: (path) => window.frameshell.files.read(path),
       selectHistory: (timeline, target) => selectHistoryEntry(timeline, target, "agent"),
+      selectPerson: (person, reveal) =>
+        pickPersonById(person, timelineState(SELECTION_TIMELINE).view, (path) => window.frameshell.files.read(path), { reveal }),
     };
     const offCommands = window.frameshell.ui.onCommand((id, command) => {
       runUiCommand(command, targets).then(

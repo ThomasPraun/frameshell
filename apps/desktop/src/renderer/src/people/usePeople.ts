@@ -12,6 +12,20 @@ export interface ScanState {
   error: string | null;
 }
 
+/**
+ * The voice model `people.suggest` compares voices with, as the panel offers it: `ready` (installed, or no voice to
+ * compare), `needed` (voices were left out; a download of `bytes` would compare them), `downloading` while asked for.
+ */
+export interface VoiceModelState {
+  state: "ready" | "needed" | "downloading";
+  /** Bytes the download fetches; 0 unless `needed` or `downloading`. */
+  bytes: number;
+  /** 0..1 of the download while it runs; null when unknown, or while voices are compared after it. */
+  progress: number | null;
+  /** Why the last download failed; null otherwise. */
+  error: string | null;
+}
+
 /** Everything the People panel reads. */
 export interface PeopleState {
   /** `loading` until the first `people.list`; `error` while it fails (e.g. an invalid `people.json`). */
@@ -21,6 +35,8 @@ export interface PeopleState {
   suggestions: readonly PeopleSuggestion[];
   /** `people.suggest` is running (voice prints are computed on first use: seconds). */
   suggesting: boolean;
+  /** The voice model: never downloaded without {@link peopleActions.findVoiceMatches}. */
+  voices: VoiceModelState;
   scan: ScanState;
   /** What Cmd/Ctrl+Z puts back: the last change by anyone; null when none, or after an undo. */
   undo: UndoEntry | null;
@@ -35,6 +51,7 @@ const INITIAL: PeopleState = {
   snapshot: { people: [], dismissed: [] },
   suggestions: [],
   suggesting: false,
+  voices: { state: "ready", bytes: 0, progress: null, error: null },
   scan: { running: false, progress: 0, error: null },
   undo: null,
 };
@@ -45,6 +62,8 @@ let stop: (() => void) | null = null;
 let settleNow: (() => Promise<void>) | null = null;
 let beginUndo: (() => Promise<void>) | null = null;
 let suggestNow: (() => Promise<void>) | null = null;
+/** The next `people.suggest` may download the voice model: the person asked for it. */
+let downloadAsked = false;
 /** Suggestions answered here that a `people.suggest` in flight may still list. */
 const answeredIds = new Set<string>();
 
@@ -74,14 +93,26 @@ function follow(): () => void {
     publish({ suggesting: true });
     do {
       suggestingAgain = false;
+      const download = downloadAsked;
+      downloadAsked = false;
       try {
-        const { suggestions } = await window.frameshell.people.suggest();
+        const { suggestions, voiceDownload } = await window.frameshell.people.suggest(download);
         // A run that started before an answer still lists it; once a run leaves it out the daemon has caught up.
         for (const id of answeredIds) if (!suggestions.some((suggestion) => suggestion.id === id)) answeredIds.delete(id);
-        if (live) publish({ suggestions: suggestions.filter((suggestion) => !answeredIds.has(suggestion.id)) });
-      } catch {
+        if (live) {
+          publish({
+            suggestions: suggestions.filter((suggestion) => !answeredIds.has(suggestion.id)),
+            // A download asked for meanwhile runs next: its state stays on screen until then.
+            voices: !voiceDownload
+              ? { state: "ready", bytes: 0, progress: null, error: null }
+              : downloadAsked
+                ? state.voices
+                : { state: "needed", bytes: voiceDownload.bytes, progress: null, error: null },
+          });
+        }
+      } catch (error) {
         // Suggestions are a convenience: a model that cannot be fetched must not block the list.
-        if (live) publish({ suggestions: [] });
+        if (live) publish({ suggestions: [], ...(download ? { voices: { ...state.voices, state: "needed", progress: null, error: (error as Error).message } } : {}) });
       }
     } while (suggestingAgain && live);
     if (live) publish({ suggesting: false });
@@ -142,12 +173,16 @@ function follow(): () => void {
     publish({ scan: { running, progress: job.progress, error: job.state === "failed" ? (job.error ?? "failed") : null } });
     if (wasRunning && job.state === "done") void suggest();
   });
+  const offSuggestProgress = window.frameshell.people.onSuggestProgress(({ download, fraction }) => {
+    if (state.voices.state === "downloading") publish({ voices: { ...state.voices, progress: download ? fraction : null } });
+  });
   void settle();
   return () => {
     live = false;
     clearTimeout(timer);
     offChanged();
     offScan();
+    offSuggestProgress();
   };
 }
 
@@ -193,6 +228,7 @@ function subscribe(listener: () => void): () => void {
     settleNow = null;
     beginUndo = null;
     suggestNow = null;
+    downloadAsked = false;
     state = INITIAL;
   };
 }
@@ -248,6 +284,12 @@ export const peopleActions = {
       publish({ scan: { running: false, progress: 0, error: (error as Error).message } });
     }
     await settleNow?.();
+  },
+  /** Download the voice model (the person agreed to, see {@link PeopleState.voices}) and compare voices with it. */
+  async findVoiceMatches(): Promise<void> {
+    downloadAsked = true;
+    publish({ voices: { ...state.voices, state: "downloading", progress: 0, error: null } });
+    await suggestNow?.();
   },
   /** Ask for suggestions again: transcripts or multicam groups changed, which no `people.changed` reports. */
   async refreshSuggestions(): Promise<void> {

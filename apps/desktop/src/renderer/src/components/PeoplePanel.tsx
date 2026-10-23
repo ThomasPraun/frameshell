@@ -1,5 +1,5 @@
 import type { AssetInfo, PeopleSuggestion, PersonInfo } from "@frameshell/protocol";
-import { type CSSProperties, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { t } from "../i18n.js";
 import { editsText } from "../history-commands.js";
@@ -12,13 +12,17 @@ import {
   linkChoices,
   personColour,
   speakerName,
+  voiceStretch,
 } from "../people/model.js";
 import { type PersonTime, pickPerson } from "../people/pick.js";
-import { peopleActions, usePeople } from "../people/usePeople.js";
+import { usePersonTotals } from "../people/totals.js";
+import { type VoiceModelState, peopleActions, usePeople } from "../people/usePeople.js";
+import { mediaSrc, playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
 import { useAssets } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { historyShortcut } from "../timeline/edit.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import type { TranscriptSource } from "../transcript/model.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -44,6 +48,8 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
   const [name, setName] = useState("");
   const list = people.snapshot.people;
   const choices = useMemo(() => linkChoices(sources, view, list), [sources, view, list]);
+  const totals = usePersonTotals(list, view?.revision ?? null, sources);
+  useEffect(() => stopVoice, []);
 
   const fail = (error: unknown) => setNotice({ tone: "error", text: t.people.failed((error as Error).message) });
   const run = (work: Promise<unknown>) => {
@@ -145,6 +151,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
           </span>
         )}
       </div>
+      <VoiceModelNote voices={people.voices} />
       {notice && (
         <p className={`people-notice${notice.tone === "error" ? " people-error" : ""}`} role={notice.tone === "error" ? "alert" : "status"} data-testid="people-notice">
           {notice.text}
@@ -163,7 +170,9 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                 suggestion={suggestion}
                 people={list}
                 assets={assets}
+                sources={sources}
                 mediaUrl={mediaUrl}
+                onPlayFailed={fail}
                 onConfirm={(who) => run(peopleActions.confirm(suggestion.id, who))}
                 onDismiss={() => run(peopleActions.dismiss(suggestion.id))}
               />
@@ -177,6 +186,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
         {list.map((person) => {
           const isPicked = selected?.id === person.id;
           const agent = confirmedBy(person);
+          const total = totals.get(person.id);
           return (
             <li
               key={person.id}
@@ -238,6 +248,11 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                   </svg>
                 </button>
               </div>
+              {total && (total.speaks !== null || total.onscreen !== null) && (
+                <p className="person-totals" data-testid="person-totals" data-speaks={total.speaks ?? undefined} data-onscreen={total.onscreen ?? undefined}>
+                  {t.people.totals(total.speaks === null ? "–" : clock(total.speaks), total.onscreen === null ? "–" : clock(total.onscreen))}
+                </p>
+              )}
               {isPicked && selected && (
                 <div className="person-pick" data-testid="person-pick">
                   <div className="person-toggle" role="group" aria-label={t.people.show}>
@@ -255,15 +270,19 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                 </div>
               )}
               <ul className="person-links">
-                {person.speakers.map((link) => (
-                  <LinkChip
-                    key={`${link.transcript}:${link.speaker ?? "*"}`}
-                    label={link.speaker ? t.people.voice(speakerName(sources, link.transcript, link.speaker), fileName(link.transcript)) : t.people.voiceWhole(fileName(link.transcript))}
-                    link={link}
-                    kind="voice"
-                    onUnlink={() => run(peopleActions.unlink(person.id, { speaker: { transcript: link.transcript, ...(link.speaker ? { speaker: link.speaker } : {}) } }))}
-                  />
-                ))}
+                {person.speakers.map((link) => {
+                  const label = link.speaker ? t.people.voice(speakerName(sources, link.transcript, link.speaker), fileName(link.transcript)) : t.people.voiceWhole(fileName(link.transcript));
+                  return (
+                    <LinkChip
+                      key={`${link.transcript}:${link.speaker ?? "*"}`}
+                      label={label}
+                      link={link}
+                      kind="voice"
+                      extra={<VoicePlay transcript={link.transcript} speaker={link.speaker} label={label} sources={sources} assets={assets} mediaUrl={mediaUrl} onFailed={fail} />}
+                      onUnlink={() => run(peopleActions.unlink(person.id, { speaker: { transcript: link.transcript, ...(link.speaker ? { speaker: link.speaker } : {}) } }))}
+                    />
+                  );
+                })}
                 {person.angles.map((link) => (
                   <LinkChip
                     key={`${link.timeline}:${link.group}:${link.angle}`}
@@ -320,6 +339,85 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
   );
 }
 
+/**
+ * Before voices are matched with a model that is not downloaded: what it takes and a button that fetches it, then
+ * the download's progress. Nothing shows while the model is there or no voice needs it.
+ */
+function VoiceModelNote({ voices }: { voices: VoiceModelState }) {
+  if (voices.state === "ready") return null;
+  const size = t.people.size(`${Math.max(1, Math.round(voices.bytes / 1_000_000))}`);
+  if (voices.state === "downloading") {
+    return (
+      <p className="people-notice" role="status" data-testid="people-voice-progress">
+        {voices.progress === null ? t.people.voiceListening : t.people.voiceDownloading(`${Math.round(voices.progress * 100)}`)}
+      </p>
+    );
+  }
+  return (
+    <div className="people-voice-model" data-testid="people-voice-model">
+      <p className="people-notice">{t.people.voiceModelNote(size)}</p>
+      {voices.error && (
+        <p className="people-notice people-error" role="alert">
+          {t.people.voiceDownloadFailed(voices.error)}
+        </p>
+      )}
+      <button className="button" data-testid="people-voice-download" onClick={() => void peopleActions.findVoiceMatches()}>
+        {t.people.findVoiceMatches(size)}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Plays a short stretch of one voice (`speaker` of `transcript`; every word of it without `speaker`) from the
+ * preview audio of its file; a second press stops it. Disabled until the file has audio and the voice says something.
+ */
+function VoicePlay({
+  transcript,
+  speaker,
+  label,
+  sources,
+  assets,
+  mediaUrl,
+  onFailed,
+}: {
+  transcript: string;
+  speaker: string | undefined;
+  label: string;
+  sources: readonly TranscriptSource[];
+  assets: ReadonlyMap<string, AssetInfo> | null;
+  mediaUrl: string;
+  onFailed: (error: unknown) => void;
+}) {
+  const key = `${transcript}:${speaker ?? "*"}`;
+  const playing = usePlayingVoice() === key;
+  const source = sources.find((candidate) => candidate.path === transcript);
+  const asset = source ? assets?.get(source.transcript.asset) : undefined;
+  const stretch = useMemo(() => (source ? voiceStretch(source.transcript, speaker) : null), [source, speaker]);
+  const ready = asset?.sidecar && stretch;
+  const name = playing ? t.people.stopVoice(label) : t.people.playVoice(label);
+  return (
+    <button
+      className="icon-button voice-play"
+      data-testid="voice-play"
+      data-playing={playing}
+      disabled={!ready}
+      aria-label={name}
+      title={ready ? name : t.people.noVoiceAudio}
+      onClick={(event) => {
+        if (playing) return stopVoice();
+        if (!asset || !stretch) return;
+        const view = event.currentTarget.ownerDocument.defaultView ?? window;
+        playVoice(key, asset, stretch, mediaUrl, view).catch((error: Error) => onFailed(new Error(t.people.voiceNotPlayed(error.message))));
+      }}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        {playing ? <rect x="4.5" y="4.5" width="7" height="7" fill="currentColor" /> : <path d="M5 3.5V12.5L12.5 8Z" fill="currentColor" />}
+      </svg>
+    </button>
+  );
+}
+
 /** What an undone change was, for the status line. */
 function describe(change: { kind: "add" | "rename" | "remove" | "link" | "unlink"; name: string; from?: string }): string {
   switch (change.kind) {
@@ -341,11 +439,14 @@ function LinkChip({
   label,
   link,
   kind,
+  extra,
   onUnlink,
 }: {
   label: string;
   link: { missing: boolean; reason?: string | undefined; by?: string | undefined };
   kind: "voice" | "angle" | "face";
+  /** Shown before the unlink button, e.g. a voice's play button. */
+  extra?: ReactNode;
   onUnlink: () => void;
 }) {
   const agent = agentOf(link.by);
@@ -358,6 +459,7 @@ function LinkChip({
         </span>
       )}
       {agent && <span className="person-link-agent" title={t.people.byAgentTitle(agent)} aria-label={t.people.byAgentTitle(agent)} />}
+      {extra}
       <button className="icon-button" aria-label={t.people.unlink(label)} title={t.people.unlink(label)} onClick={onUnlink} data-testid="person-unlink">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
@@ -399,14 +501,18 @@ function SuggestionRow({
   suggestion,
   people,
   assets,
+  sources,
   mediaUrl,
+  onPlayFailed,
   onConfirm,
   onDismiss,
 }: {
   suggestion: PeopleSuggestion;
   people: readonly PersonInfo[];
   assets: ReadonlyMap<string, AssetInfo> | null;
+  sources: readonly TranscriptSource[];
   mediaUrl: string;
+  onPlayFailed: (error: unknown) => void;
   onConfirm: (person: string | undefined) => void;
   onDismiss: () => void;
 }) {
@@ -420,7 +526,24 @@ function SuggestionRow({
     <li className="suggestion" data-testid="suggestion" data-kind={suggestion.kind} data-suggestion={suggestion.id}>
       {suggestion.face && <FaceThumb face={suggestion.face} asset={assets?.get(suggestion.face.anchor.asset)} mediaUrl={mediaUrl} />}
       <div className="suggestion-body">
-        <p className="suggestion-text">{suggestionText(suggestion)}</p>
+        <p className="suggestion-text">
+          {suggestionText(suggestion)}
+          {suggestion.speaker && (
+            <VoicePlay
+              transcript={suggestion.speaker.transcript}
+              speaker={suggestion.speaker.speaker}
+              label={
+                suggestion.speaker.speaker
+                  ? t.people.voice(suggestion.speaker.name ?? suggestion.speaker.speaker, fileName(suggestion.speaker.transcript))
+                  : t.people.voiceWhole(fileName(suggestion.speaker.transcript))
+              }
+              sources={sources}
+              assets={assets}
+              mediaUrl={mediaUrl}
+              onFailed={onPlayFailed}
+            />
+          )}
+        </p>
         {extras && (
           <p className="suggestion-meta" data-testid="suggestion-also">
             {extras}
@@ -476,7 +599,7 @@ function FaceThumb({
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const proxy = asset?.proxy ?? null;
-  const src = proxy ? mediaUrl + proxy.split("/").map(encodeURIComponent).join("/") : null;
+  const src = proxy ? mediaSrc(mediaUrl, proxy) : null;
   const size = asset?.media?.video;
   const viewBox = faceViewBox(face.anchor, size ? size.width / size.height : 16 / 9);
   useEffect(() => {

@@ -17,7 +17,7 @@ frameshell people confirm sg_51aa07c3 --person Ana                       # a sug
 frameshell people ranges Juan                                            # spans where he speaks; --on-screen: where he shows
 ```
 
-MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call), `people_scan`, `people_suggest`, `people_confirm`, `people_ranges` (`person`, `kind` `speaks` or `onscreen`, `timeline`).
+MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call), `people_scan`, `people_suggest`, `people_confirm`, `people_ranges` (`person`, `kind` `speaks` or `onscreen`, `timeline`). `ui_select { person: { id } }` shows the user that person's spans and words in the app.
 
 - A person is an id (`p_3fa2c1`) or the exact name (ignoring case); names are unique ignoring case.
 - A transcript speaker, an angle or a face anchor belongs to one person; a link to a whole transcript excludes other people's speakers of it.
