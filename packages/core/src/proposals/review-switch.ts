@@ -11,6 +11,16 @@ const ReviewFileSchema = z.object({
 type ReviewFile = z.output<typeof ReviewFileSchema>;
 
 /**
+ * Key of canonical project root `root` in `review.json`. Windows paths compare case-insensitively and take
+ * either separator, so there they are lower-cased with backslash separators and no trailing one; elsewhere `root` as is.
+ */
+export function reviewKey(root: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return root;
+  const key = root.replace(/\//g, "\\").toLowerCase();
+  return /^[a-z]:\\$/.test(key) ? key : key.replace(/\\+$/, "");
+}
+
+/**
  * Review mode switch per project (ADR 0019), in `<configDir>/review.json`,
  * keyed by canonical project root; only projects with review on are listed.
  * Outside the project on purpose: an agent edits project files, and the
@@ -27,15 +37,16 @@ export class ReviewSwitch {
 
   /** Whether review mode is on for canonical project root `root`. A missing or corrupt file means off everywhere. */
   async enabled(root: string): Promise<boolean> {
-    return Object.hasOwn((await this.#read()).projects, root);
+    return Object.hasOwn((await this.#read()).projects, reviewKey(root));
   }
 
   /** Turn review mode on or off for canonical project root `root`. */
   async set(root: string, enabled: boolean): Promise<void> {
     const file = structuredClone(await this.#read());
-    if (enabled === Object.hasOwn(file.projects, root)) return;
-    if (enabled) file.projects[root] = { enabled: true, since: new Date().toISOString() };
-    else delete file.projects[root];
+    const key = reviewKey(root);
+    if (enabled === Object.hasOwn(file.projects, key)) return;
+    if (enabled) file.projects[key] = { enabled: true, since: new Date().toISOString() };
+    else delete file.projects[key];
     await writeJsonAtomic(this.#file, file);
     this.#state = Promise.resolve(file);
   }
@@ -44,7 +55,10 @@ export class ReviewSwitch {
     this.#state ??= readJsonIfExists(this.#file).then(
       (value) => {
         const parsed = ReviewFileSchema.safeParse(value);
-        return parsed.success ? parsed.data : { version: 1 as const, projects: {} };
+        if (!parsed.success) return { version: 1 as const, projects: {} };
+        // Keys written by hand or by an older spelling still match.
+        const projects = Object.fromEntries(Object.entries(parsed.data.projects).map(([root, entry]) => [reviewKey(root), entry]));
+        return { version: 1 as const, projects };
       },
       () => ({ version: 1 as const, projects: {} }),
     );

@@ -35,7 +35,8 @@ function frameshell(args: string[], session = "agent-a", cwd = project) {
 }
 
 beforeAll(() => {
-  const parent = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-proposal-")));
+  // Native: on Windows the JS realpath keeps 8.3 short names (RUNNER~1), the daemon's does not.
+  const parent = realpathSync.native(mkdtempSync(join(tmpdir(), "frameshell-proposal-")));
   userDirs = join(parent, "user");
   project = join(parent, "promo");
   mkdirSync(userDirs, { recursive: true });
