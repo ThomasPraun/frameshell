@@ -44,8 +44,9 @@ Moves "opt-in proposal mode per transaction" from v0.2 to v0.14 and amends decis
 ## Consequences
 
 - Protocol bump: `proposal.status`, `proposal.wait`, `proposal.diff` (the History diff marks of the open proposal), internal `proposal.accept`, `proposal.reject`, `review.set`; `view` on the reads in 5; `proposal` on `status`, `history` and `tx.commit` results; `proposal` on journal entries; notification `proposal.changed`; error codes `ProposalPending`, `ProposalState`; rejection reason `proposal-pending`.
-- CLI: `frameshell proposal status|wait`. Skill updated (`pnpm gen:skill`).
+- CLI: `frameshell proposal status|wait|diff`. Skill updated (`pnpm gen:skill`).
 - `.frameshell/proposals/` joins the project layout; nothing in it is needed to open a project.
 - With review on, a person running `frameshell` by hand in a terminal reviews their own commands too: authors say who connected, not who typed.
 - Turning review mode off leaves an open proposal open until the person accepts or rejects it; only new proposals stop.
+- The app's Ask agent context frames and its `frame` calls read the current timeline even while After is shown.
 - Not covered: changes outside timelines (compositions, scripts, transcripts, assets, `frameshell.json`, plugin installs). A changed composition re-renders a clip already on the timeline without review.

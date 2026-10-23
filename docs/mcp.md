@@ -66,19 +66,33 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 
 Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one focused last (else the one that reported last) gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach`, `ui.active` and the `ui.command` notification carry it.
 
+## Review mode (ADR 0019)
+
+The person may turn on review mode for a project in the app (off by default). While it is on, every timeline change an MCP client makes waits as one **proposal** per transaction until the person accepts or rejects it in the app; nothing reaches the timeline file before. With it off, tools behave as without it.
+
+| Tool | Does |
+|---|---|
+| `proposal_status` | The switch, the open proposal (author, label, state `building` or `ready`, operations, timelines, age) and the last decisions. |
+| `proposal_wait(timeout?)` | Blocks until the open proposal is decided: `accepted`, `rejected`, `stale` (the person changed the same clips; `conflicts` names them) or `aborted`; `pending` after `timeout` seconds (default 300, max 3600), so call it again when the MCP client's own tool timeout is shorter. |
+| `proposal_diff(tx?)` | What the open proposal adds, removes, moves or changes per timeline, in the shape of `history_diff`. |
+
+While a proposal is open, another author's change, a new `tx_begin`, and its author's change once it is ready fail with `ProposalPending`; the error says to call `proposal_wait`. The author's own reads (`timeline_show`, `track_list`, `frame_capture`, `inspect_point`, and the timeline resource) show the proposal's version; `view: "current" | "proposal"` picks one. `render` always exports the file.
+
+There is no accept, reject or switch tool: `proposal.accept`, `proposal.reject` and `review.set` are internal registry methods (skipped like `handshake`), and the daemon refuses them with `ProposalState` (reason `forbidden`) for any caller but the app (author `ui`). Review exists so the person decides; an agent that could accept its own proposal would make it pointless.
+
 ## Resources
 
 Compact JSON, the same as the matching `--json` CLI output:
 
 | URI | Content |
 |---|---|
-| `frameshell://status` | `status`: daemon, project, plugin trust, jobs, rejected edits, open transactions |
+| `frameshell://status` | `status`: daemon, project, plugin trust, jobs, rejected edits, open transactions, review mode and the open proposal |
 | `frameshell://timelines/{timeline}` | `timeline.show` |
 | `frameshell://timelines/{timeline}/history` | `history` |
 | `frameshell://transcripts/{file}` | `transcripts/{file}` as written, e.g. `raw-01.words.json` |
 | `frameshell://scripts/{file}/outline` | `script.outline` (one resource per `scripts/**/*.md`); the stdio contract test reads it |
 
-Subscribed timeline and history resources get `notifications/resources/updated` on the daemon's `timeline.changed` event, from any client (CLI, app, file edit). A timeline not listed before, and a transcript written by this server's `transcribe`, send `notifications/resources/list_changed`. A transcript this server's `transcribe_speakers` rewrote gets `notifications/resources/updated` when subscribed. After a lost daemon connection the server reconnects on the next request, renews its event subscription and marks every subscribed resource updated.
+Subscribed timeline and history resources get `notifications/resources/updated` on the daemon's `timeline.changed` event, from any client (CLI, app, file edit). A timeline not listed before, and a transcript written by this server's `transcribe`, send `notifications/resources/list_changed`. A subscribed `frameshell://status` gets it on every `proposal.changed`. A transcript this server's `transcribe_speakers` rewrote gets `notifications/resources/updated` when subscribed. After a lost daemon connection the server reconnects on the next request, renews its event subscription and marks every subscribed resource updated.
 
 ## Not yet
 
