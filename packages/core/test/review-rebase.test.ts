@@ -95,6 +95,34 @@ describe("review mode rebase on clips", () => {
   });
 });
 
+describe("proposal diff", () => {
+  it("marks what the proposal changes from the file, in history.diff's shape", async () => {
+    const { root, timelines, add, apply, turnOn } = setup();
+    await add("ui", "tx_00000001", 0); // c_1
+    turnOn();
+    await apply("cli:a", "tx_000000a1", { op: "clip.move", args: { clip: "c_1", start: 1 } });
+    await add("cli:a", "tx_000000a1", 4); // c_2
+    expect(await timelines.proposalDiff(root)).toEqual({
+      tx: "tx_000000a1",
+      timelines: [
+        {
+          timeline: "main",
+          target: "tx_000000a1",
+          clips: [
+            { clip: "c_1", change: "moved", before: { track: "t_v", start: 0, end: 2 }, after: { track: "t_v", start: 1, end: 3 } },
+            { clip: "c_2", change: "added", before: null, after: { track: "t_v", start: 4, end: 6 } },
+          ],
+        },
+      ],
+    });
+    expect(await timelines.proposalDiff(root, "tx_000000a1")).toMatchObject({ tx: "tx_000000a1" });
+    await expect(timelines.proposalDiff(root, "tx_000000ff")).rejects.toMatchObject({ data: { reason: "unknown" } });
+    await timelines.rejectProposal(root, "tx_000000a1");
+    expect(await timelines.proposalDiff(root)).toEqual({ tx: null, timelines: [] });
+    await expect(timelines.proposalDiff(root, "tx_000000a1")).rejects.toMatchObject({ data: { reason: "decided" } });
+  });
+});
+
 describe("overlappingIds", () => {
   const clip = (id: string, start: number) => ({ id, type: "media", asset: "assets/a.mp4", start, in: 0, out: 1 });
   const state = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video", clips: [clip("c_1", 0), clip("c_2", 2)] }] } as Timeline;

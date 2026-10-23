@@ -1769,6 +1769,19 @@ export const methods = {
       proposal: ProposalSchema.nullable().describe("`pending`: the proposal still open. Null otherwise."),
     }),
   },
+  "proposal.diff": {
+    description:
+      "What the open review-mode proposal (ADR 0019) changes, per timeline, from the file to the proposal's version: " +
+      "each clip it adds, removes, moves (other track or start, same length) or otherwise changes, with its track, " +
+      "start and end before and after, in the shape of `history.diff` (the marks the app shows on the timeline). " +
+      "Without `tx` the open proposal; `timelines` is empty and `tx` null when none is open. Fails with ProposalState " +
+      "(`decided` or `unknown`) when `tx` is not the open proposal.",
+    params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.optional().describe("The proposal's id. Default: the open proposal.") }),
+    result: z.object({
+      tx: z.string().nullable().describe("The proposal diffed; null when none is open."),
+      timelines: z.array(HistoryDiffResultSchema).describe("One per timeline the proposal changes, `target` = its id; in the order it first changed them."),
+    }),
+  },
   "proposal.accept": {
     mutating: true,
     internal: true,

@@ -33,7 +33,7 @@ import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
-import { type PlacedClip, planDiff } from "../history/diff.js";
+import { type ClipChange, type PlacedClip, planDiff } from "../history/diff.js";
 import { appendJournal, readHead, readJournal, writeHead } from "../history/journal.js";
 import {
   type TimelineRevertFailure,
@@ -64,7 +64,7 @@ import {
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
-import { diffTimelines, isEmptyPatch } from "./patch.js";
+import { applyPatch, diffTimelines, isEmptyPatch } from "./patch.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -127,6 +127,8 @@ interface Book {
   waiters: Set<(decision: ProposalDecision) => void>;
   /** Proposal file writes, one at a time, each writing the state current when it starts. */
   saving: Promise<void>;
+  /** Set while a closed proposal's decision is being logged. */
+  closing: Promise<void> | null;
 }
 
 /** Where a change by a non-`ui` author goes while review mode applies; see {@link TimelineService.#route}. */
@@ -494,26 +496,56 @@ export class TimelineService {
   diff(root: string, id: string, target: string): Promise<HistoryDiffResult> {
     return this.#turn(root, id, async () => {
       const { timeline, fps } = await this.#current(root, id);
-      const changes = planDiff(timeline, await readJournal(root, id), target, id);
-      const grid = new FrameGrid(fps);
-      const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
-      const place = async (placed: PlacedClip | null): Promise<ClipPlace | null> => {
-        if (!placed) return null;
-        let end: number | null;
-        try {
-          end = await clipEnd(placed.clip, grid, nested);
-        } catch (error) {
-          if (!(error instanceof NestedTimelineError)) throw error;
-          end = null;
-        }
-        return { track: placed.track, start: placed.clip.start, end };
-      };
-      const clips = [];
-      for (const change of changes) {
-        clips.push({ clip: change.clip, change: change.change, before: await place(change.before), after: await place(change.after) });
-      }
-      return { timeline: id, target, clips };
+      return this.#placeDiff(root, id, fps, target, planDiff(timeline, await readJournal(root, id), target, id));
     });
+  }
+
+  /**
+   * What the open proposal (or `tx`, when it is the open one) changes on each
+   * timeline, from the file to the proposal's version (`proposal.diff`), in
+   * the shape of `history.diff`: the proposal's operations are diffed like a
+   * journaled transaction. Empty without an open proposal and `tx`; throws
+   * ProposalState (`decided`, `unknown`) for a `tx` that is not open.
+   */
+  async proposalDiff(root: string, tx?: string): Promise<{ tx: string | null; timelines: HistoryDiffResult[] }> {
+    const book = await this.#book(root);
+    const proposal = tx === undefined ? book.proposal : await this.#decidable(book.root, book, tx);
+    if (!proposal) return { tx: null, timelines: [] };
+    const timelines: HistoryDiffResult[] = [];
+    for (const id of proposal.parts.map((part) => part.timeline)) {
+      const diff = await this.#turn(root, id, async () => {
+        const { timeline: current, fps } = await this.#current(root, id);
+        if (!(await this.#sync(root, id, book, current, fps))) return null;
+        const part = proposal.parts.find((candidate) => candidate.timeline === id)!;
+        const { state, entries } = proposedEntries(part, proposal);
+        return this.#placeDiff(root, id, fps, proposal.tx, planDiff(state, entries, proposal.tx, id));
+      });
+      if (!diff) return this.proposalDiff(root, tx); // Went stale meanwhile: now `decided`, or nothing open.
+      timelines.push(diff);
+    }
+    return { tx: proposal.tx, timelines };
+  }
+
+  /** `history.diff` result of `changes`; ends are derived like `show`'s. */
+  async #placeDiff(root: string, id: string, fps: number, target: string, changes: ClipChange[]): Promise<HistoryDiffResult> {
+    const grid = new FrameGrid(fps);
+    const nested = this.#nestedDurations(root, [timelineRel(id)], grid);
+    const place = async (placed: PlacedClip | null): Promise<ClipPlace | null> => {
+      if (!placed) return null;
+      let end: number | null;
+      try {
+        end = await clipEnd(placed.clip, grid, nested);
+      } catch (error) {
+        if (!(error instanceof NestedTimelineError)) throw error;
+        end = null;
+      }
+      return { track: placed.track, start: placed.clip.start, end };
+    };
+    const clips = [];
+    for (const change of changes) {
+      clips.push({ clip: change.clip, change: change.change, before: await place(change.before), after: await place(change.after) });
+    }
+    return { timeline: id, target, clips };
   }
 
   /**
@@ -655,6 +687,8 @@ export class TimelineService {
     };
     const open = book.proposal;
     if (!open) {
+      // A proposal closing right now is not logged yet.
+      await book.closing;
       const last = (await readDecisions(real)).at(-1);
       return told(last ? waitOutcome(last) : { outcome: "none", tx: null, label: null, author: null, conflicts: [], proposal: null });
     }
@@ -683,7 +717,8 @@ export class TimelineService {
   /** The open proposal when it is `tx`; else ProposalState `decided` (a logged decision) or `unknown`. */
   async #decidable(real: string, book: Book, tx: string): Promise<OpenProposal> {
     if (book.proposal?.tx === tx) return book.proposal;
-    const decided = (await readDecisions(real)).findLast((decision) => decision.tx === tx);
+    await book.closing;
+    const decided =(await readDecisions(real)).findLast((decision) => decision.tx === tx);
     if (decided) throw proposalState(tx, "decided", `Proposal ${tx} was already decided: ${decided.outcome}.`, decided.conflicts);
     throw proposalState(tx, "unknown", `No open proposal ${tx}. See \`frameshell proposal status\`.`);
   }
@@ -867,10 +902,12 @@ export class TimelineService {
     if (building && (outcome === "stale" || outcome === "rejected")) {
       book.notices.set(proposal.author, { tx: proposal.tx, reason: outcome, conflicts });
     }
+    const logged = write.then(() => appendDecision(real, decision));
+    book.closing = logged.catch(() => {});
     try {
-      await write;
-      await appendDecision(real, decision);
+      await logged;
     } finally {
+      book.closing = null;
       for (const waiter of book.waiters) waiter(decision);
       book.waiters.clear();
       this.#emit(book, proposal, outcome, conflicts, building && (outcome === "stale" || outcome === "rejected"));
@@ -922,7 +959,7 @@ export class TimelineService {
   }
 
   async #loadBook(real: string): Promise<Book> {
-    const book: Book = { root: real, proposal: null, creating: null, notices: new Map(), waiters: new Set(), saving: Promise.resolve() };
+    const book: Book = { root: real, proposal: null, creating: null, notices: new Map(), waiters: new Set(), saving: Promise.resolve(), closing: null };
     const stored = await loadOpenProposals(real);
     const latest = stored.pop();
     // Only one can be open; older leftovers of a crash are closed.
@@ -1575,6 +1612,34 @@ function closedError(notice: { tx: string; reason: "stale" | "rejected"; conflic
   }
   const ids = conflicts.join(", ") || "the same timeline";
   return proposalState(tx, "stale", `Your proposal ${tx} went stale: the person changed ${ids} meanwhile. Nothing of it was applied. Re-read the timeline and redo the change.`, conflicts);
+}
+
+/**
+ * `part`'s operations as journal entries of `proposal`'s transaction, chained
+ * from its base, and the timeline they end at: what `planDiff` rewinds.
+ */
+function proposedEntries(part: ProposalPart, proposal: OpenProposal): { state: Timeline; entries: JournalEntry[] } {
+  let state = part.base;
+  const entries: JournalEntry[] = [];
+  for (const op of part.ops) {
+    const next = { ...applyPatch(state, op.patch), revision: state.revision + 1 };
+    entries.push({
+      id: op.id,
+      op: op.op,
+      args: op.args,
+      inverse: op.inverse,
+      author: proposal.author,
+      tx: proposal.tx,
+      revisionBefore: state.revision,
+      txLabel: proposal.label,
+      at: op.at,
+      revision: next.revision,
+      hashBefore: timelineHash(state),
+      hash: timelineHash(next),
+    });
+    state = next;
+  }
+  return { state, entries };
 }
 
 /** Operations of `proposal`, every timeline. */

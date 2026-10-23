@@ -51,6 +51,7 @@ describe("MCP tool catalog", () => {
     const names = new Set(tools.map((tool) => tool.name));
     expect(names.has("proposal_status")).toBe(true);
     expect(names.has("proposal_wait")).toBe(true);
+    expect(names.has("proposal_diff")).toBe(true);
     for (const name of ["proposal_accept", "proposal_reject", "review_set"]) expect(names.has(name), name).toBe(false);
   });
 

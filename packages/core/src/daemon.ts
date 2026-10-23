@@ -954,6 +954,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await review.set(await canonicalPath(dir), enabled);
       return { dir, enabled };
     },
+    "proposal.diff": async ({ cwd, tx }) => timelines.proposalDiff(await root(cwd), tx),
     "proposal.status": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, ...(await timelines.review(dir)) };
