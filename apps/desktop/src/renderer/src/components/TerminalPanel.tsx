@@ -12,6 +12,7 @@ import { usePanelWindow } from "../panel-window.js";
 import { AgentGuide } from "./AgentGuide.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { ProposalBar } from "./ProposalBar.js";
 
 /** A tab before its pty exists has no `info` yet. A detached tab shows in a window of its own (ADR 0012). */
 interface Tab {
@@ -377,6 +378,7 @@ function TerminalWindow({
   if (!host) return null;
   return createPortal(
     <div className="panel terminal-window">
+      <ProposalBar />
       <PanelHeader actions={<DetachButton name={t.terminal.terminalName} detached onClick={onDock} testId="terminal-detach" />}>
         <span className={`panel-title terminal-window-title${flashing ? " is-flashing" : ""}`} data-flashing={flashing || undefined}>
           {label}

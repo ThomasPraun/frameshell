@@ -9,6 +9,7 @@ import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { windowOf } from "../windows.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
+import { ProposalBar } from "./ProposalBar.js";
 import { TRANSCRIPT_SHORTCUT, TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
 
 /** One open file. `savedVersion` is Monaco's alternative version id at last load or save: differs = dirty. */
@@ -370,7 +371,14 @@ export function EditorArea({
   return (
     <>
       <DockedElsewhere title={t.workspace.editor} onBringBack={() => onDetach(false)} />
-      {target && createPortal(<div className="panel editor">{body}</div>, target)}
+      {target &&
+        createPortal(
+          <div className="panel editor">
+            <ProposalBar />
+            {body}
+          </div>,
+          target,
+        )}
     </>
   );
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { laidOutBox, launch, sandbox } from "./harness.js";
+import { laidOutBox, launch, panelWindow, sandbox } from "./harness.js";
 
 // Review mode (ADR 0019, #320, #321) in the built app: the switch in the History view, an agent's transaction
 // waiting as a proposal behind the bar, Before / After on preview and timeline, Accept applying it, Reject
@@ -122,4 +122,28 @@ test("Reject discards the next proposal; the file and the timeline stay as they 
   const card = JSON.parse(readFileSync(mainFile, "utf8")).tracks.flatMap((track: { clips: { id: string; start: number }[] }) => track.clips).find((entry: { id: string }) => entry.id === "c_card");
   expect(card.start).toBe(20);
   await expect(page.locator('li[data-clip="c_card"]')).toHaveText(/00:00:20:00 to 00:00:22:00/);
+});
+
+test("the bar shows in detached editor and terminal windows too; Reject there settles it everywhere", async () => {
+  const editorOpened = panelWindow(app, "editor");
+  await page.getByTestId("editor-detach").click();
+  const editor = await editorOpened;
+  const terminalOpened = panelWindow(app, "terminal");
+  await page.getByTestId("terminal-detach").click();
+  const terminal = await terminalOpened;
+
+  await agent("tx", "begin", "Move the card later");
+  await agent("clip", "move", "c_card", "--start", "30");
+  await agent("tx", "commit");
+  const bars = [page, editor, terminal].map((window) => window.getByRole("region", { name: "Agent proposal" }));
+  for (const each of bars) await expect(each).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  await expect(bars[1]!).toContainText("Move the card later");
+  await expect(bars[2]!).toContainText("claude proposes changes");
+
+  await bars[2]!.getByRole("button", { name: "Reject" }).click();
+  for (const each of bars) await expect(each).toHaveCount(0);
+
+  await editor.close();
+  await terminal.close();
+  await expect(page.getByTestId("panel-docked-elsewhere")).toHaveCount(0);
 });
