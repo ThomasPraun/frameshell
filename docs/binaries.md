@@ -14,6 +14,7 @@ frameshelld downloads native tools on first use instead of bundling them (SPEC �
 - `support` members (shared libraries, licences) are placed next to the tools under the name the pin gives them, so shared libraries sit under their SONAME and no symlinks are needed.
 - Every pin is a prebuilt download (SPEC §9). Nothing is compiled on the user's machine.
 - Models (`<dataDir>/models/<id>/<revision>/<file>`) are single files pinned by URL, revision and SHA-256, downloaded on first use the same way.
+- A `module` package installs ES modules the daemon imports instead of executables (ONNX Runtime Web): each tool lands as `<tool>.mjs`, with no exec bit and no version probe; `doctor` reports a managed install at its pinned version.
 - Long installs report progress (download percent). `frameshell transcribe` prints it on stderr.
 - On-demand packages (whisper.cpp) are listed by `doctor` but never reported missing and never installed by `doctor --install`: the first transcription installs them.
 - `frameshell doctor` only reports. It downloads only with `--install`. Other features call `BinaryManager.ensure()`, which downloads on first use.
@@ -211,6 +212,28 @@ The embedding model also lists sherpa-onnx's `speaker-recongition-models` releas
 Verified when pinning (2026-10-19): each archive was downloaded and its SHA-256 matched GitHub's published digest; each archive was listed and the members above found; the libraries each executable loads were read from it (only ONNX Runtime besides the system's); both model files hashed the same from Hugging Face (matching its LFS oid) and, for the embedding model, from the release asset (matching sherpa-onnx's `checksum.txt`). The darwin-arm64 pin was installed by the manager and diarized sherpa-onnx's `0-four-speakers-zh.wav` sample (57 s) in 2.3 s on an Apple M3 with 4 threads. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the pin and both models and runs them on every platform of the Real binaries workflow.
 
 Re-pin: pick a release (`gh release view v<version> -R k2-fsa/sherpa-onnx --json assets` gives sizes and digests), download each asset and check its digest, list it (`tar -tjf`) and update the member paths, read each executable's library list again (`otool -L`, `readelf -d`, the PE imports), then run the opt-in test above.
+
+## Face detection (ONNX Runtime Web) and its model
+
+Used by `multicam.faces` (ADR 0016: reframe keys for 9:16 from faces). On demand: the first `frameshell multicam faces` installs it; `doctor` lists it but never reports it missing.
+
+Pin: **onnxruntime-web 1.30.0** (2026-09-14), Microsoft's npm tarball [`onnxruntime-web-1.30.0.tgz`](https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.30.0.tgz), 33.1 MB, SHA-256 `d2228df7e4616bc3348bf504ee888f3bec43789a273f0a63f3e68d203ce3bf71`, the same pin for every platform. The manager extracts four of its files: `dist/ort.wasm.min.mjs` (the CPU-only bundle with ONNX Runtime's JS API, installed as `onnxruntime-web.mjs`), the `ort-wasm-simd-threaded.mjs` loader and the `.wasm` it loads (14.2 MB), and the bundle's source map. A worker thread of the daemon imports the module and runs the model single-threaded as WebAssembly, off the daemon's event loop.
+
+- **Why WebAssembly:** ONNX Runtime's GitHub releases ship libraries, not a program, and sherpa-onnx (the speaker diarization pin) has no tool that runs an arbitrary model. OpenCV publishes no macOS or Linux binaries, and the pinned ffmpeg builds have no `dnn` filters. A native loader for ONNX Runtime would be native code Frameshell compiles and signs, and `onnxruntime-node` is the same runtime as native addons for every platform, about 300 MB unpacked. The WebAssembly build needs nothing native: one tarball for every platform with Node, and YuNet takes about 20 ms per 512×288 frame on an Apple M3.
+- **Licence:** MIT (ONNX Runtime; stated in the bundle's header and `package.json`, the tarball has no `LICENSE` file). Frameshell never redistributes it: the user's machine downloads it from the npm registry, where Microsoft publishes it. It is not a dependency of any Frameshell package. No mirror.
+- **Extraction:** the system `tar` reads `.tgz` (GNU tar detects gzip itself).
+
+Model, from OpenCV's model zoo, pinned by commit:
+
+| Id | Model | Revision | Size | SHA-256 | Licence |
+|---|---|---|---|---|---|
+| `yunet-2026may` | [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) `face_detection_yunet_2026may.onnx` (the 2023mar model re-exported with dynamic input height and width) | `26cc381e4d25` | 0.2 MB | `ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0` | MIT |
+
+The URL is on `media.githubusercontent.com` (the large-file object at that commit), where `github.com/opencv/opencv_zoo/raw/<commit>/…` redirects. The licence is the model directory's `LICENSE` (MIT, Shiqi Yu).
+
+Verified when pinning (2026-10-22): the tarball's SHA-1 and SHA-512 matched the registry's `shasum` and `integrity`; it was listed and the four members found; the model hashed to its large-file oid. The manager installed both on darwin-arm64, and YuNet found the faces in OpenCV's `lena.jpg` and `messi5.jpg` samples and the drawn face of `packages/core/test/face-fixture.ts`. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs both and keys a drawn face that moves, on every platform of the Real binaries workflow.
+
+Re-pin: `npm view onnxruntime-web@<version> dist` gives the tarball URL, `shasum` and `integrity`; download it, check both, record size and SHA-256, list it (`tar -tzf`) and check the four members still exist (a renamed WebAssembly file changes the `support` names), then run the opt-in test above. For the model, take the file's large-file oid at a newer commit and check that its outputs are still `cls_8`…`kps_32` (`decodeYunet`).
 
 ## Re-pinning ffmpeg
 

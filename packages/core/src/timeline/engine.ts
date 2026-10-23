@@ -1417,12 +1417,19 @@ class Edit {
 
   /**
    * Set, replace or remove one key of an angle's `reframe` (see the
-   * `multicam.reframe` method), or clear them all. A key in the same frame of
+   * `multicam.reframe` method), clear them all, or replace them all with `keys`. A key in the same frame of
    * the group clock as the one given is the one replaced or removed.
    */
   multicamReframe(args: OperationArgs<"multicam.reframe">): void {
     const { group, angle } = this.angle(args.group, args.angle);
-    const { at, time, x, y, remove, clear } = args;
+    const { at, time, x, y, remove, clear, keys: given } = args;
+    if (given !== undefined) {
+      if ([at, time, x, y, remove, clear].some((value) => value !== undefined)) {
+        throw this.invalid("`keys` replaces every key and takes no other field.", { field: "keys" });
+      }
+      angle.reframe = this.frameKeys(given);
+      return;
+    }
     if (clear === true) {
       if ([at, time, x, y, remove].some((value) => value !== undefined)) {
         throw this.invalid("`clear` removes every key and takes no other field.", { field: "clear" });
@@ -1457,6 +1464,19 @@ class Edit {
     }
     if (keys.length === 0) delete angle.reframe;
     else angle.reframe = keys;
+  }
+
+  /** `keys` rounded like single keys and sorted by `at`; of keys in one frame of the group clock, the last given stays. */
+  frameKeys(keys: readonly ReframeKey[]): ReframeKey[] {
+    const half = 0.5 / this.context.fps;
+    const sorted: ReframeKey[] = [];
+    for (const key of keys) {
+      const rounded = { at: Math.round(key.at * 1000) / 1000, x: round4(key.x), y: round4(key.y) };
+      const same = sorted.findIndex((other) => Math.abs(other.at - rounded.at) < half);
+      if (same >= 0) sorted.splice(same, 1);
+      sorted.splice(sorted.filter((other) => other.at < rounded.at).length, 0, rounded);
+    }
+    return sorted;
   }
 
   /**

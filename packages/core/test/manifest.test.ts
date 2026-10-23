@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -15,6 +15,11 @@ import {
   WHISPER_MODELS,
   WHISPER_PACKAGE,
   WHISPER_SOURCE,
+  FACE_DETECTION_MODEL,
+  FACE_DETECTION_MODELS,
+  ONNX_RUNTIME_WEB,
+  ONNX_RUNTIME_WEB_PACKAGE,
+  yunetWorkerScanner,
   buildCandidates,
   frameshellWhisperUrl,
   currentPlatform,
@@ -24,6 +29,8 @@ import {
 } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 import { toneWav } from "./whisper-fixture.js";
+import { drawFace, encodeFrames } from "./face-fixture.js";
+import { mediaTools } from "./media-tools.js";
 
 describe("pinned ffmpeg manifest", () => {
   const platforms = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64"] as const;
@@ -216,6 +223,38 @@ describe("pinned sherpa-onnx diarization manifest", () => {
   });
 });
 
+describe("pinned face detection manifest", () => {
+  it("pins one ONNX Runtime Web tarball from npm for every platform, a module installed on first use, never mirrored", () => {
+    expect(ONNX_RUNTIME_WEB_PACKAGE).toMatchObject({ onDemand: true, module: true, tools: [ONNX_RUNTIME_WEB] });
+    expect(ONNX_RUNTIME_WEB_PACKAGE.mirror).toBeUndefined();
+    const builds = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64", "win32-arm64"].map(
+      (platform) => buildCandidates(ONNX_RUNTIME_WEB_PACKAGE, platform as never),
+    );
+    for (const candidates of builds) expect(candidates).toEqual([builds[0]![0]]);
+    const [build] = builds[0]!;
+    expect(build).toMatchObject({ version: "1.30.0", license: "MIT", origin: "https://github.com/microsoft/onnxruntime" });
+    expect(build!.archives[0]!.urls).toEqual(["https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.30.0.tgz"]);
+    expect(Object.keys(build!.archives[0]!.support!)).toEqual(["ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm", "ort.wasm.min.mjs.map"]);
+  });
+
+  it("pins the YuNet model by commit and SHA-256 under MIT", () => {
+    expect(FACE_DETECTION_MODELS.map((model) => [model.id, model.license])).toEqual([[FACE_DETECTION_MODEL, "MIT"]]);
+    expect(FACE_DETECTION_MODELS[0]!.urls[0]).toMatch(/^https:\/\/media\.githubusercontent\.com\/media\/opencv\/opencv_zoo\/[0-9a-f]{40}\//);
+  });
+
+  it("reports an installed module at its pinned version without running it", async () => {
+    const dataDir = tempDir();
+    const binaries = new BinaryManager({ dataDir, configDir: tempDir() });
+    const location = await binaries.locate(ONNX_RUNTIME_WEB);
+    expect(location.path).toBe(join(dataDir, "binaries", "onnxruntime-web", "1.30.0", currentPlatform(), "onnxruntime-web.mjs"));
+    mkdirSync(join(location.path!, ".."), { recursive: true });
+    writeFileSync(location.path!, "export {};\n");
+    const report = await runDoctor(binaries);
+    expect(report.binaries.find((binary) => binary.name === ONNX_RUNTIME_WEB)).toMatchObject({ installed: true, version: "1.30.0" });
+    expect(report.problems.filter((problem) => problem.includes("onnxruntime"))).toEqual([]);
+  });
+});
+
 // Opt-in: downloads the real pinned build (~60-170 MB) for this platform, then runs it.
 // Run with FRAMESHELL_TEST_REAL_DOWNLOAD=1 pnpm test; CI runs it weekly (.github/workflows/real-binaries.yml).
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinned ffmpeg download", () => {
@@ -289,6 +328,26 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       writeFileSync(audio, toneWav(4, [[0.5, 1.5], [2.5, 3.5]]));
       const segments = await sherpaDiarizer({ binary, segmentation, embedding, audio, onProgress: () => {} });
       expect(Array.isArray(segments)).toBe(true);
+    },
+    600_000,
+  );
+
+  it(
+    "installs ONNX Runtime Web and YuNet, verified, and keys a drawn face that moves, in a worker thread",
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const scan = yunetWorkerScanner({ runtime: await binaries.ensure(ONNX_RUNTIME_WEB), model: await binaries.ensureModel(FACE_DETECTION_MODEL) });
+      const { ffmpeg } = await mediaTools();
+      const path = join(tempDir(), "face.mp4");
+      // 16:9, 6 s at 10 fps: the face sits at x 0.25 for 3 s, then at 0.75.
+      const left = drawFace(512, 288, [{ x: 0.25, y: 0.45, size: 0.4 }]);
+      const right = drawFace(512, 288, [{ x: 0.75, y: 0.45, size: 0.4 }]);
+      await encodeFrames(ffmpeg, path, 512, 288, 10, Array.from({ length: 60 }, (_, i) => (i < 30 ? left : right)));
+      const found = await scan({ ffmpeg, path, width: 512, height: 288, duration: 6 });
+      expect(found).toMatchObject({ samples: 12, faces: 12 });
+      expect(found.keys.map((key) => key.time)).toEqual([2.5, 3]);
+      expect(found.keys[0]!.x).toBeCloseTo(0.25, 1);
+      expect(found.keys[1]!.x).toBeCloseTo(0.75, 1);
     },
     600_000,
   );
