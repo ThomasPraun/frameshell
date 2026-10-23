@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - People (#374): face clustering runs in a worker thread, so a long recording no longer blocks the daemon, and the model of a set of cached scans is kept between `people suggest` calls (same clusters and suggestion ids). Confirming suggestions is all or nothing: people and links are checked together and `people.json` is written once, so a link that fails leaves it as it was.
+- Speaker diarization (`transcribe --speakers`) gave words to the wrong person on most recordings (#359): sherpa-onnx's native ONNX Runtime computes CAM++ voice embeddings that jump with the segment length, so its voice clusters were close to random. sherpa-onnx now only finds the speech segments; each segment is embedded with CAM++ on ONNX Runtime Web (as voice prints are) and the segments are grouped into voices by Frameshell. On synthetic conversations of 2 to 6 voices the diarization error rate fell from 56% to 4% (47% to 4% with `--people`); details in `docs/research/diarization-embeddings.md`. The first run now also installs ONNX Runtime Web (33 MB) when people or face tools have not already done so, and diarizing takes about a third longer. Re-run `transcribe --speakers` on transcripts diarized before: ids and names carry over where voices match, and corrections in `edits` still win.
 
 ## [0.15.0] - 2026-10-23
 

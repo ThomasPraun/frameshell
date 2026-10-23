@@ -356,7 +356,8 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
       // Tones, not speech: the run must succeed; how many segments it finds does not matter.
       const audio = join(tempDir(), "tones.wav");
       writeFileSync(audio, toneWav(4, [[0.5, 1.5], [2.5, 3.5]]));
-      const segments = await sherpaDiarizer({ binary, segmentation, embedding, audio, onProgress: () => {} });
+      const runtime = await binaries.ensure(ONNX_RUNTIME_WEB);
+      const segments = await sherpaDiarizer({ binary, segmentation, embedding, runtime, audio, onProgress: () => {} });
       expect(Array.isArray(segments)).toBe(true);
     },
     600_000,

@@ -1,4 +1,5 @@
 import { type Transcript, type TranscriptFileWord, type TranscriptSpeaker, wordIdNumber } from "@frameshell/schema";
+import { averageLinkage, cosine, meanDirection } from "../people/vector.js";
 
 /**
  * Speakers on transcript words (ADR 0016 decision 3). Pure: diarization gives
@@ -47,6 +48,68 @@ export function wordLabels(words: readonly Pick<TranscriptFileWord, "start" | "e
     }
     return best ?? nearest;
   });
+}
+
+/**
+ * Lowest average cosine similarity of CAM++ segment embeddings (average
+ * linkage) at which two groups of segments are one voice. Measured on
+ * synthetic conversations: 0.5 merged two voices, 0.55 to 0.65 worked, 0.55
+ * found the fewest extra voices (docs/research/diarization-embeddings.md).
+ */
+export const VOICE_CLUSTER_MATCH = 0.55;
+/** Segments shorter than this (seconds) embed noisily: they join the nearest voice instead of shaping the voices. */
+const VOICE_SEED_S = 1;
+/** Segments of one voice this close (seconds) become one, as sherpa-onnx's `--min-duration-off` default does. */
+const VOICE_GAP_S = 0.5;
+
+/**
+ * Voice clusters of speech segments from their speaker embeddings
+ * (`embeddings[i]` of `segments[i]`): segments of at least {@link VOICE_SEED_S}
+ * are clustered (into `speakers` voices when known, else cut at
+ * {@link VOICE_CLUSTER_MATCH}); shorter ones take the voice whose mean is
+ * nearest. Returns segments sorted by start, labelled `speaker_00`, ... in
+ * order of first appearance, one voice's close neighbours merged.
+ */
+export function clusterVoices(
+  segments: readonly { start: number; end: number }[],
+  embeddings: readonly (readonly number[])[],
+  speakers?: number,
+): SpeakerSegment[] {
+  const order = segments.map((_, i) => i).sort((a, b) => segments[a]!.start - segments[b]!.start);
+  const long = order.filter((i) => segments[i]!.end - segments[i]!.start >= VOICE_SEED_S);
+  const seeds = long.length > 0 ? long : order;
+  const groups = averageLinkage(
+    seeds.map((i) => embeddings[i]!),
+    speakers ? { count: speakers } : { threshold: VOICE_CLUSTER_MATCH },
+  ).map((group) => group.map((k) => seeds[k]!));
+  const voice = new Map<number, number>();
+  groups.forEach((group, g) => group.forEach((i) => voice.set(i, g)));
+  const means = groups.map((group) => meanDirection(group.map((i) => embeddings[i]!)));
+  for (const i of order) {
+    if (voice.has(i)) continue;
+    let best = 0;
+    let bestScore = -Infinity;
+    means.forEach((mean, g) => {
+      const score = mean ? cosine(mean, embeddings[i]!) : -Infinity;
+      if (score > bestScore) {
+        best = g;
+        bestScore = score;
+      }
+    });
+    voice.set(i, best);
+  }
+  const labels = new Map<number, string>();
+  const result: SpeakerSegment[] = [];
+  for (const i of order) {
+    const g = voice.get(i)!;
+    if (!labels.has(g)) labels.set(g, `speaker_${String(labels.size).padStart(2, "0")}`);
+    const label = labels.get(g)!;
+    const { start, end } = segments[i]!;
+    const last = result[result.length - 1];
+    if (last?.label === label && start - last.end < VOICE_GAP_S) last.end = Math.max(last.end, end);
+    else result.push({ start, end, label });
+  }
+  return result;
 }
 
 /** Default name of speaker `id` (`s2` → `Speaker 2`); a person renames it in the transcript's `speakers`. */

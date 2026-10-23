@@ -3,9 +3,10 @@ import { availableParallelism } from "node:os";
 import { ErrorCode, type Progress, RpcError, type TranscribeSpeakersResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript, wordSpeaker } from "@frameshell/schema";
 import { writeJsonAtomic } from "../fs-util.js";
-import { DIARIZATION_TOOL, SEGMENTATION_MODEL, SPEAKER_EMBEDDING_MODEL } from "../binaries/manifest.js";
+import { DIARIZATION_TOOL, ONNX_RUNTIME_WEB, SEGMENTATION_MODEL, SPEAKER_EMBEDDING_MODEL } from "../binaries/manifest.js";
+import { campplusWorkerEmbedder } from "../people/voice-embed.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
-import { type SpeakerSegment, labelSpeakers, wordLabels } from "./speaker-labels.js";
+import { type SpeakerSegment, clusterVoices, labelSpeakers, wordLabels } from "./speaker-labels.js";
 import {
   type TranscriberMedia,
   type TranscriberTools,
@@ -23,6 +24,8 @@ export interface DiarizeRequest {
   /** Absolute paths of the segmentation and speaker embedding models. */
   segmentation: string;
   embedding: string;
+  /** Absolute path of the ONNX Runtime Web module the speaker embeddings run on. */
+  runtime: string;
   /** 16 kHz mono WAV. */
   audio: string;
   /** Known number of people; undefined: the clustering decides. */
@@ -54,20 +57,39 @@ export function parseDiarization(stdout: string): SpeakerSegment[] {
   return segments;
 }
 
+/** Share of a diarization's progress that finding the segments takes; embedding them takes the rest. */
+const SEGMENTING_SHARE = 0.7;
+
 /**
- * {@link Diarizer} running sherpa-onnx's offline speaker diarization: pyannote
- * segmentation, then speaker embeddings clustered by distance (or into
- * `speakers` clusters when the count is known). CPU only, up to 4 threads.
+ * {@link Diarizer}: sherpa-onnx's offline speaker diarization finds the speech
+ * segments (pyannote segmentation), then CAM++ embeds each segment on ONNX
+ * Runtime Web and {@link clusterVoices} groups them into voices. sherpa-onnx's
+ * own voice labels are not used: its native ONNX Runtime gives CAM++
+ * embeddings that jump with the segment length (issue #359,
+ * docs/research/diarization-embeddings.md).
  */
-export const sherpaDiarizer: Diarizer = (request) =>
-  new Promise((resolve, reject) => {
+export const sherpaDiarizer: Diarizer = async (request) => {
+  const segments = await sherpaSegments(request, (fraction) => request.onProgress(fraction * SEGMENTING_SHARE));
+  if (segments.length === 0) return [];
+  const embeddings = await campplusWorkerEmbedder({ runtime: request.runtime, model: request.embedding })({
+    audio: request.audio,
+    stretches: segments,
+    onProgress: (fraction) => request.onProgress(SEGMENTING_SHARE + fraction * (1 - SEGMENTING_SHARE)),
+  });
+  return clusterVoices(segments, embeddings, request.speakers);
+};
+
+/** Speech segments of sherpa-onnx's diarization, CPU only, up to 4 threads. Their labels are unreliable (see {@link sherpaDiarizer}). */
+function sherpaSegments(request: DiarizeRequest, onProgress: (fraction: number) => void): Promise<SpeakerSegment[]> {
+  return new Promise((resolve, reject) => {
     const threads = String(Math.max(1, Math.min(4, availableParallelism())));
     const args = [
       `--segmentation.pyannote-model=${request.segmentation}`,
       `--embedding.model=${request.embedding}`,
       `--segmentation.num-threads=${threads}`,
       `--embedding.num-threads=${threads}`,
-      ...(request.speakers ? [`--clustering.num-clusters=${request.speakers}`] : []),
+      // No merging across short pauses: two voices it wrongly labels as one must stay separate segments.
+      "--min-duration-off=0",
       request.audio,
     ];
     const child = spawn(request.binary, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -80,7 +102,7 @@ export const sherpaDiarizer: Diarizer = (request) =>
       partial = lines.pop() ?? "";
       for (const line of lines) {
         const progress = /^progress (\d+(?:\.\d+)?)%/.exec(line);
-        if (progress) request.onProgress(Math.min(1, Number(progress[1]) / 100));
+        if (progress) onProgress(Math.min(1, Number(progress[1]) / 100));
         else if (line.trim() !== "") tail.push(line);
       }
       tail.splice(0, Math.max(0, tail.length - TAIL_LINES));
@@ -92,6 +114,7 @@ export const sherpaDiarizer: Diarizer = (request) =>
       reject(new Error(`${DIARIZATION_TOOL} ${reason}:\n${[...tail, partial].filter(Boolean).join("\n")}`));
     });
   });
+}
 
 /** Input of {@link diarizeAsset}. */
 export interface DiarizeAssetOptions {
@@ -157,12 +180,14 @@ export async function diarizeAsset(options: DiarizeAssetOptions): Promise<Transc
     const binary = await tools.ensureBinary(DIARIZATION_TOOL, progress);
     const segmentation = await tools.ensureModel(SEGMENTATION_MODEL, progress);
     const embedding = await tools.ensureModel(SPEAKER_EMBEDDING_MODEL, progress);
+    const runtime = await tools.ensureBinary(ONNX_RUNTIME_WEB, progress);
     const message = `Finding who speaks in ${assetRel}`;
     progress({ message, stage: "diarize", values: { asset: assetRel } });
     segments = await (options.diarize ?? sherpaDiarizer)({
       binary,
       segmentation,
       embedding,
+      runtime,
       audio,
       speakers: options.speakers,
       onProgress: (fraction) => progress({ message, fraction, stage: "diarize", values: { asset: assetRel } }),

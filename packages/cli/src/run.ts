@@ -80,7 +80,7 @@ Commands:
   transcribe --speakers <asset> [--people n]
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
-                               how many talk, when known. First run downloads the engine (about 60 MB)
+                               how many talk, when known. First run downloads the engine (about 95 MB)
   render [--preset p] [--out file] [--timeline id]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).

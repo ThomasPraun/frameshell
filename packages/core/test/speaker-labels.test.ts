@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Transcript, TranscriptFileWord } from "@frameshell/schema";
-import { carrySpeakers, labelSpeakers, parseDiarization, wordLabels } from "../src/index.js";
+import { averageLinkage, carrySpeakers, clusterVoices, labelSpeakers, parseDiarization, wordLabels } from "../src/index.js";
 
 const word = (n: number, start: number, end: number, speaker?: string): TranscriptFileWord => ({
   id: `w_${String(n).padStart(6, "0")}`,
@@ -24,6 +24,57 @@ describe("parseDiarization", () => {
       { start: 0.318, end: 3.997, label: "speaker_00" },
       { start: 4.402, end: 6.865, label: "speaker_01" },
     ]);
+  });
+});
+
+// Voices as directions: A along x, B along y; small tilts stand for one voice's spread.
+const A = [1, 0, 0];
+const A2 = [0.9, 0.2, 0];
+const B = [0, 1, 0];
+const B2 = [0.1, 0.9, 0.1];
+
+describe("averageLinkage", () => {
+  it("cuts at a similarity threshold or into a count of groups", () => {
+    const vectors = [A, B, A2, B2, [0, 0, 1]];
+    expect(averageLinkage(vectors, { threshold: 0.9 })).toEqual([[0, 2], [1, 3], [4]]);
+    expect(averageLinkage(vectors, { count: 2 })).toHaveLength(2);
+    expect(averageLinkage(vectors, { count: 3 })).toEqual([[0, 2], [1, 3], [4]]);
+    expect(averageLinkage(vectors, { count: 9 })).toEqual([[0], [1], [2], [3], [4]]);
+    expect(averageLinkage([], { count: 2 })).toEqual([]);
+  });
+});
+
+describe("clusterVoices", () => {
+  it("groups segments by voice, labels voices by first appearance and merges a voice's close neighbours", () => {
+    const segments = [
+      { start: 5, end: 7 },
+      { start: 0, end: 2 },
+      { start: 2.2, end: 4 },
+      { start: 7.2, end: 9 },
+      { start: 9.1, end: 11 },
+    ];
+    expect(clusterVoices(segments, [A, A2, B, A, B2])).toEqual([
+      { start: 0, end: 2, label: "speaker_00" },
+      { start: 2.2, end: 4, label: "speaker_01" },
+      { start: 5, end: 9, label: "speaker_00" },
+      { start: 9.1, end: 11, label: "speaker_01" },
+    ]);
+  });
+
+  it("gives a short segment the nearest voice instead of a voice of its own", () => {
+    const segments = [
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+      { start: 8, end: 8.4 },
+    ];
+    const outlier = [0.6, 0.1, 0.8];
+    expect(clusterVoices(segments, [A, B, outlier]).map((segment) => segment.label)).toEqual(["speaker_00", "speaker_01", "speaker_00"]);
+  });
+
+  it("finds as many voices as it is told", () => {
+    const segments = [0, 2, 4, 6].map((start) => ({ start, end: start + 1.5 }));
+    expect(new Set(clusterVoices(segments, [A, A2, B, B2], 2).map((segment) => segment.label)).size).toBe(2);
+    expect(new Set(clusterVoices(segments, [A, A2, B, B2], 1).map((segment) => segment.label)).size).toBe(1);
   });
 });
 

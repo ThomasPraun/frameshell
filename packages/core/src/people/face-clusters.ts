@@ -6,7 +6,7 @@ import type { FaceTrack, TrackBox } from "./scan.js";
 import type { StoredFaceScan } from "./scan-cache.js";
 import { type Span, mergeSpans } from "./ranges.js";
 import { runWorkerTask } from "../worker-task.js";
-import { cosine, meanDirection } from "./vector.js";
+import { averageLinkage, cosine, meanDirection } from "./vector.js";
 
 /**
  * Lowest average similarity (cosine of track mean face prints, average
@@ -83,7 +83,7 @@ export interface FaceModel {
  */
 export function clusterFaces(assets: readonly ScannedAsset[]): FaceModel {
   const prepared = prepareClusters(assets);
-  return assembleClusters(prepared, averageLinkage(prepared.printed.map((track) => track.mean), FACE_CLUSTER_MATCH));
+  return assembleClusters(prepared, averageLinkage(prepared.printed.map((track) => track.mean), { threshold: FACE_CLUSTER_MATCH }));
 }
 
 /**
@@ -97,7 +97,7 @@ export async function clusterFacesOffThread(assets: readonly ScannedAsset[], opt
   if (kept) return kept;
   const prepared = prepareClusters(assets);
   const request: ClusterRequest = { vectors: prepared.printed.map((track) => track.mean), threshold: FACE_CLUSTER_MATCH };
-  const groups = prepared.printed.length < 2 ? averageLinkage(request.vectors, request.threshold) : await runWorkerTask<number[][]>(CLUSTER_WORKER, request, "face clustering", options);
+  const groups = prepared.printed.length < 2 ? averageLinkage(request.vectors, { threshold: request.threshold }) : await runWorkerTask<number[][]>(CLUSTER_WORKER, request, "face clustering", options);
   const model = assembleClusters(prepared, groups);
   modelCache.set(key, model);
   if (modelCache.size > MODEL_CACHE_SIZE) modelCache.delete(modelCache.keys().next().value!);
@@ -293,57 +293,3 @@ function centralSample(tracks: readonly ClusterTrack[], mean: Float32Array): Fac
   return { asset: track.asset, at: round(time, 3), x: round(box.x, 4), y: round(box.y, 4) };
 }
 
-/**
- * Average-linkage (UPGMA) clustering of unit vectors by cosine similarity,
- * keeping merges at `threshold` or above. The nearest-neighbour chain finds
- * the same merges as greedy best-pair merging in O(n²) time; average linkage
- * is reducible, so cutting the tree means keeping merges at or above the line.
- * Returns groups of indexes, each sorted, in order of their first index.
- */
-export function averageLinkage(vectors: readonly Float32Array[], threshold: number): number[][] {
-  const n = vectors.length;
-  if (n === 0) return [];
-  const sim = new Float32Array(n * n);
-  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) sim[i * n + j] = sim[j * n + i] = cosine(vectors[i]!, vectors[j]!);
-  const size = new Array<number>(n).fill(1);
-  const active = new Array<boolean>(n).fill(true);
-  const merges: { a: number; b: number; score: number }[] = [];
-  const chain: number[] = [];
-  let left = n;
-  while (left > 1) {
-    if (chain.length === 0) chain.push(active.indexOf(true));
-    const top = chain[chain.length - 1]!;
-    const previous = chain.length > 1 ? chain[chain.length - 2]! : -1;
-    // Ties prefer the previous link, so the chain always ends at a reciprocal pair.
-    let next = previous;
-    let best = previous >= 0 ? sim[top * n + previous]! : -Infinity;
-    for (let k = 0; k < n; k++) {
-      if (!active[k] || k === top) continue;
-      if (sim[top * n + k]! > best) {
-        best = sim[top * n + k]!;
-        next = k;
-      }
-    }
-    if (next !== previous) {
-      chain.push(next);
-      continue;
-    }
-    chain.length -= 2;
-    merges.push({ a: top, b: previous, score: best });
-    // Lance-Williams update: the merged group lives on in `previous`.
-    for (let k = 0; k < n; k++) {
-      if (!active[k] || k === top || k === previous) continue;
-      const value = (size[top]! * sim[top * n + k]! + size[previous]! * sim[previous * n + k]!) / (size[top]! + size[previous]!);
-      sim[previous * n + k] = sim[k * n + previous] = value;
-    }
-    size[previous]! += size[top]!;
-    active[top] = false;
-    left--;
-  }
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
-  for (const { a, b, score } of merges) if (score >= threshold) parent[find(a)] = find(b);
-  const groups = new Map<number, number[]>();
-  for (let i = 0; i < n; i++) groups.set(find(i), [...(groups.get(find(i)) ?? []), i]);
-  return [...groups.values()].sort((a, b) => a[0]! - b[0]!);
-}
