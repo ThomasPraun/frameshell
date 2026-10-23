@@ -110,7 +110,7 @@ export interface DaemonOptions {
   jobConcurrency?: number;
   /** Audio extraction for `transcribe` and for energy snapping of assets without sidecar. Defaults to ffmpeg from {@link DaemonOptions.binaries}. */
   extractAudio?: AudioExtractor;
-  /** Speaker diarization for `transcribe.speakers`. Defaults to sherpa-onnx from {@link DaemonOptions.binaries}. */
+  /** Speaker diarization for `transcribe.speakers`. Defaults to sherpa-onnx segments and CAM++ on ONNX Runtime Web from {@link DaemonOptions.binaries}. */
   diarize?: Diarizer;
   /** Face scan of one angle for `multicam.faces`. Defaults to YuNet on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   faceScanner?: FaceScanner;

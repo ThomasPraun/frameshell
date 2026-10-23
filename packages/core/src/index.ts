@@ -91,7 +91,7 @@ export {
   voiceStretches,
 } from "./people/voices.js";
 export { type PersonVoice, SPEAKER_MARGIN, SPEAKER_MATCH, type SpeakerVoice, speakerSuggestions, suggestionId } from "./people/suggest.js";
-export { cosine } from "./people/vector.js";
+export { averageLinkage, cosine } from "./people/vector.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
@@ -174,7 +174,17 @@ export {
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
 export { type DiarizeAssetOptions, type DiarizeRequest, type Diarizer, diarizeAsset, parseDiarization, sherpaDiarizer } from "./transcripts/speakers.js";
-export { type LabelledSpeakers, type SpeakerSegment, carrySpeakers, defaultSpeakerName, labelSpeakers, nextSpeakerIdOf, wordLabels } from "./transcripts/speaker-labels.js";
+export {
+  type LabelledSpeakers,
+  type SpeakerSegment,
+  VOICE_CLUSTER_MATCH,
+  carrySpeakers,
+  clusterVoices,
+  defaultSpeakerName,
+  labelSpeakers,
+  nextSpeakerIdOf,
+  wordLabels,
+} from "./transcripts/speaker-labels.js";
 export { type AudioExtractor, type AudioInput, TRANSCRIPTION_SAMPLE_RATE, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 export {
   type AppliedOperation,

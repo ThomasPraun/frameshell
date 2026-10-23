@@ -1122,7 +1122,7 @@ export const methods = {
       "Run `transcribe` first. Re-running keeps each voice's id and name where it matches the last run, and human corrections in " +
       "`edits` (`{ \"w_000042\": { \"speaker\": \"s2\" } }`) always win; rename a speaker by editing its `name` in the file. " +
       "Pass `speakers` when you know how many people talk: it is more reliable than letting the voices decide. The first run " +
-      "downloads sherpa-onnx and two models (about 60 MB). Example: `{ asset: \"assets/podcast.mp4\", speakers: 2 }`. Fails with " +
+      "downloads sherpa-onnx, two models and ONNX Runtime Web (about 95 MB; less when people or face tools installed some). Example: `{ asset: \"assets/podcast.mp4\", speakers: 2 }`. Fails with " +
       "InvalidOperation (no transcript, or a stale one: re-run `transcribe`), AssetNotFound, OutsideProject, InvalidProjectFile, " +
       "TranscriptionFailed, or the Binary* errors.",
     params: z.strictObject({

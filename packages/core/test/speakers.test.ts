@@ -81,6 +81,7 @@ describe("diarizeAsset", () => {
         binary: "/bin/sherpa-onnx-offline-speaker-diarization",
         segmentation: "/models/pyannote-segmentation-3-0",
         embedding: "/models/3dspeaker-campplus-en-voxceleb",
+        runtime: "/bin/onnxruntime-web",
         audio: join(dir, ".frameshell", "cache", "audio", `${HELLO_SHA256.slice(0, 16)}-asset.wav`),
         speakers: 2,
       },
