@@ -8,7 +8,7 @@ export interface Cutout {
 
 /**
  * What "Cut out as layer" would cut: the last picked point that landed on a clip and was segmented
- * (ADR 0022), with the mask the model scored best; null when no such point is selected.
+ * (ADR 0022), with its chosen mask (the best score, or the size ↑/↓ stepped to); null when no such point is selected.
  */
 export function pickedCutout(selected: Pick<Selection, "points">): Cutout | null {
   for (const point of [...selected.points].reverse()) {

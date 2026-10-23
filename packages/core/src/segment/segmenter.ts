@@ -67,6 +67,8 @@ export interface SegmentEngine {
   encode(rgb: Uint8Array, size: PixelSize): Promise<Float32Array>;
   /** Decoder run for one included point in the encoder's pixel space. */
   decode(embedding: Float32Array, point: PhotoPoint, size: PixelSize): Promise<DecoderOutput>;
+  /** Model name results report instead of the MobileSAM pin (the e2e stand-in says so). */
+  readonly model?: string;
 }
 
 /** The part of the photo under a click, as a mask over the whole photo. */

@@ -52,7 +52,7 @@ import {
 } from "./binaries/manifest.js";
 import { workerSegmentEngine } from "./segment/engine.js";
 import type { SegmentEngine } from "./segment/segmenter.js";
-import { checkMask, freeCutoutName, isMediaClip, renderCutout, resolveMask } from "./segment/cutout.js";
+import { checkMask, cutoutTransform, freeCutoutName, isMediaClip, renderCutout, resolveMask } from "./segment/cutout.js";
 import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
@@ -196,6 +196,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     jobs,
     onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
   });
+  const segmentModel = options.segmentEngine?.model ?? SEGMENT_MODEL_PIN;
   const segmentation = new SegmentService({
     probe: (dir, asset) => media.probe(dir, asset),
     hash: (dir, asset) => media.hash(dir, asset),
@@ -343,7 +344,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     live: (dir, timeline, clip) => clips.live(clipRoot(dir), timeline, clip),
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
     imageProject: async (dir) => (await readEnclosingProject(dir))?.config.kind === "image",
-    segment: async (dir, asset, point, onProgress) => ({ ...(await segmentation.segment(dir, asset, point, onProgress)), model: SEGMENT_MODEL_PIN }),
+    segment: async (dir, asset, point, onProgress) => ({ ...(await segmentation.segment(dir, asset, point, onProgress)), model: segmentModel }),
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
@@ -781,6 +782,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "shot.set": (params, caller) => operate("shot.set", params, caller),
     "segment.prepare": async ({ cwd, asset }, _caller, request) => {
       const dir = await root(cwd);
+      // The model download is for image projects only (ADR 0022 §4).
+      if ((await readEnclosingProject(dir))?.config.kind !== "image") {
+        throw new RpcError(ErrorCode.InvalidOperation, "segment.prepare: only photos of image projects are segmented.", { op: "segment.prepare", reason: "not an image project", field: "cwd" });
+      }
       const { rel } = await resolveAsset(dir, resolve(cwd, asset));
       const prepared = await segmentation.prepare(dir, rel, (update) => {
         try {
@@ -789,11 +794,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           // Connection closed.
         }
       });
-      return { asset: prepared.asset, size: { width: prepared.width, height: prepared.height }, hash: prepared.hash, model: SEGMENT_MODEL_PIN, cached: prepared.cached };
+      return { asset: prepared.asset, size: { width: prepared.width, height: prepared.height }, hash: prepared.hash, model: segmentModel, cached: prepared.cached };
     },
-    "image.cutout": async ({ cwd, timeline, clip: clipId, mask }, caller, request) => {
+    "image.cutout": async ({ cwd, timeline, clip: clipId, mask }, caller) => {
       const dir = await root(cwd);
-      if ((await readEnclosingProject(dir))?.config.kind !== "image") {
+      const project = (await readEnclosingProject(dir))?.config;
+      if (project?.kind !== "image") {
         throw new RpcError(ErrorCode.InvalidOperation, "image.cutout: only image projects have photos to cut out of (File > New Image from Frame makes one from a video).", {
           op: "image.cutout",
           reason: "not an image project",
@@ -815,42 +821,49 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const maskFile = await resolveMask(dir, mask);
       const ffmpeg = await projectFfmpeg(dir);
-      await checkMask(ffmpeg, maskFile, picture);
+      const box = await checkMask(ffmpeg, maskFile, picture);
       const stem = basename(photo.asset, extname(photo.asset));
-      const rendered = await renderCutout(ffmpeg, join(dir, ...photo.asset.split("/")), maskFile, await freeCutoutName(dir, stem));
+      const rendered = await renderCutout(ffmpeg, join(dir, ...photo.asset.split("/")), maskFile, box, await freeCutoutName(dir, stem));
       let asset: string;
       try {
         asset = (await media.import(dir, [rendered.file], "copy")).imported[0]!.asset;
       } finally {
         await rendered.cleanup();
       }
-      // One transaction around both operations; joins the caller's explicit one. A terminal-less CLI cannot open one.
-      const owner = authorOf(caller);
-      let own = false;
-      if (!transactions.list().some((open) => open.author === owner)) {
-        try {
-          await handlers["tx.begin"]({ label: `Cut out ${stem}`, cwd }, caller, request);
-          own = true;
-        } catch (error) {
-          if (!(error instanceof RpcError && error.code === ErrorCode.TransactionState)) throw error;
-        }
-      }
+      // Both operations share one transaction, so one revert undoes the cut-out even from a sessionless client:
+      // the caller's explicit one when open, else a labelled one of their own (never an automatic group).
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Cut out ${stem}` };
+      const author = journalAuthorOf(caller);
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        return result;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
       try {
-        const added = await operate("track.add", { cwd, timeline, kind: "video", name: basename(asset, extname(asset)), index: loaded.tracks.indexOf(track) + 1 }, caller);
+        const index = loaded.tracks.indexOf(track) + 1;
+        const added = await apply({ op: "track.add", args: { kind: "video", name: basename(asset, extname(asset)), index } } as OperationRequest);
         const newTrack = added.changes.added[0]!;
         const duration = (photo.out - photo.in) / (photo.speed ?? 1);
-        const result = await operate(
-          "clip.add",
-          { cwd, timeline, track: newTrack, type: "media", asset, start: photo.start, duration, ...(photo.transform ? { transform: photo.transform } : {}) },
-          caller,
+        const transform = cutoutTransform(picture, box, project.resolution, photo.transform);
+        let result: Awaited<ReturnType<typeof apply>>;
+        try {
+          result = await apply({ op: "clip.add", args: { track: newTrack, type: "media", asset, start: photo.start, duration, transform } } as OperationRequest);
+        } catch (error) {
+          // All or nothing: take the new track off again, in the same transaction.
+          await timelines.revert({ root: dir, cwd, timeline, author, tx, target: added.operation.id }).catch(() => undefined);
+          throw error;
+        }
+        const dropped = [photo.keys ? "keyframes" : null, photo.fadeIn !== undefined || photo.fadeOut !== undefined ? "fades" : null, photo.dissolve !== undefined ? "dissolve" : null].filter(
+          (name) => name !== null,
         );
-        if (own) await handlers["tx.commit"]({}, caller, request);
-        const dropped = [photo.keys ? "keyframes" : null, photo.fadeIn !== undefined || photo.fadeOut !== undefined ? "fades" : null, photo.dissolve !== undefined ? "dissolve" : null].filter((name) => name !== null);
-        const warnings = dropped.length > 0 ? [`image.cutout: the photo's ${dropped.join(", ")} were not copied to the cut-out.`] : [];
+        const warnings =
+          dropped.length > 0 ? [`image.cutout: the photo's ${dropped.join(", ")} were not copied; the cut-out lies over the photo as its static transform places it.`] : [];
         return { ...result, asset, track: newTrack, clip: result.changes.added[0]!, warnings: [...result.warnings, ...warnings] };
-      } catch (error) {
-        if (own) await handlers["tx.abort"]({}, caller, request).catch(() => undefined);
-        throw error;
+      } finally {
+        await settle(key, tx);
       }
     },
     "multicam.faces": async ({ cwd, timeline, group, angles: named, replace }, caller, request) => {

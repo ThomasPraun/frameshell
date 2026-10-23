@@ -272,6 +272,32 @@ describe("SegmentService", () => {
     await expect(service.segment("/p", "assets/audio.wav", { x: 1, y: 1 })).rejects.toMatchObject({ message: expect.stringContaining("not a still image") });
   });
 
+  it(
+    "closes an idle engine but keeps the embeddings",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      const dir = tempDir();
+      await makeDiscPhoto(ffmpeg, join(dir, "a.png"), 16, 16, { cx: 8, cy: 8, r: 4 });
+      const { engine, calls } = countingEngine();
+      let closed = 0;
+      const service = new SegmentService({
+        probe: async () => ({ video: { width: 16, height: 16, still: true } }),
+        hash: async () => "sha256:a",
+        ffmpeg: async () => ffmpeg,
+        engine: async () => ({ ...engine, close: async () => void closed++ }),
+        idleMs: 20,
+      });
+      await service.segment(dir, "a.png", { x: 8, y: 8 });
+      expect(closed).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(closed).toBe(1);
+      expect((await service.segment(dir, "a.png", { x: 8, y: 8 })).cached).toBe(true);
+      expect(calls.encode).toHaveLength(1);
+      await service.close();
+    },
+    MEDIA_TIMEOUT,
+  );
+
   it("starts the model once, and again after an install that failed", async () => {
     let starts = 0;
     const service = new SegmentService({

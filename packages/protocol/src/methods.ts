@@ -41,8 +41,9 @@ import {
 /**
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
+ * 54 = #347, 55 = #365 (open PRs); renumber at merge.
  */
-export const PROTOCOL_VERSION = 54;
+export const PROTOCOL_VERSION = 56;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1445,7 +1446,7 @@ export const methods = {
       "result in memory by content hash (the last 8 photos), so the first click costs about 0.2 s instead of 3 s. Called by the " +
       "app when Pick turns on in an image project; `inspect.point` prepares on demand, so agents never call it. The first run " +
       "downloads the model (two files, about 45 MB) and ONNX Runtime Web (33 MB, if face detection never ran). " +
-      "Fails with AssetNotFound, OutsideProject, InvalidOperation (not a still image), or the Binary* errors.",
+      "Fails with AssetNotFound, OutsideProject, InvalidOperation (not an image project, not a still image), or the Binary* errors.",
     internal: true,
     params: z.strictObject({
       cwd: CwdParam,
@@ -1464,11 +1465,12 @@ export const methods = {
     description:
       "Cut a part out of a photo as a new layer (ADR 0022). `clip` is a still media clip of an image project; `mask` is a " +
       "project-relative 8-bit grayscale PNG at the photo's own pixel size, white (255) where the part is: the `mask` of a point's " +
-      "`segment.masks` from `inspect.point`, or one you made. The photo with the mask as its transparency is written as a new " +
-      "file `assets/<photo name>-cutout-<n>.png` (the photo itself is never changed) and placed on a new video track right above " +
-      "the photo's, over it exactly: same start, length, position, scale and opacity, so the part covers its own pixels. One " +
-      "transaction labelled `Cut out <photo name>`: reverting removes the layer; the PNG stays in `assets/`. Background removal " +
-      "is this followed by `clip.set` `opacity: 0` on the photo (or `clip.remove`). Keyframes and fades of the photo are not copied. " +
+      "`segment.masks` from `inspect.point`, or one you made. The photo with the mask as its transparency, cropped to the mask's " +
+      "box, is written as a new file `assets/<photo name>-cutout-<n>.png` (the photo itself is never changed) and placed on a new " +
+      "video track right above the photo's: same start, length and opacity, position and scale set so the part covers its own " +
+      "pixels of the photo. One transaction labelled `Cut out <photo name>` (yours when one is open): reverting removes the " +
+      "layer; the PNG stays in `assets/`. Background removal is this followed by `clip.set` `opacity: 0` on the photo (or " +
+      "`clip.remove`). Keyframes and fades of the photo are not copied (a warning says so). " +
       "Example: `{ clip: \"c_0003\", mask: \".frameshell/context/m_0_1210_1530_3.png\" }`. Fails with InvalidOperation (video " +
       "project, not a still media clip, mask not a grayscale PNG of the photo's size, empty mask), ClipNotFound, AssetNotFound, " +
       "OutsideProject, or the Binary* errors.",

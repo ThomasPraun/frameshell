@@ -46,7 +46,12 @@ export interface SegmentServiceOptions {
   engine(dir: string, onProgress?: SegmentProgress): Promise<SegmentEngine & { close?(): Promise<void> }>;
   /** Photos whose embedding is kept. Default 8. */
   cacheSize?: number;
+  /** Ms without a request after which the engine is closed (its models freed); embeddings stay. Default 5 minutes. */
+  idleMs?: number;
 }
+
+/** About 200 MB of loaded models stay in memory this long after the last click or prepare. */
+const DEFAULT_ENGINE_IDLE_MS = 5 * 60_000;
 
 /** A photo made ready for clicks. */
 export interface PreparedPhoto extends PixelSize {
@@ -66,6 +71,9 @@ export interface PreparedPhoto extends PixelSize {
 export class SegmentService {
   readonly #options: SegmentServiceOptions;
   #segmenter: Promise<{ segmenter: Segmenter; engine: SegmentEngine & { close?(): Promise<void> } }> | undefined;
+  /** Requests running; the idle timer only closes the engine at zero. */
+  #running = 0;
+  #idle: NodeJS.Timeout | undefined;
 
   constructor(options: SegmentServiceOptions) {
     this.#options = options;
@@ -77,11 +85,13 @@ export class SegmentService {
    * the work. Throws `AssetNotFound`, `InvalidOperation` when the asset is not a
    * still image, or the Binary* errors.
    */
-  async prepare(dir: string, asset: string, onProgress?: SegmentProgress): Promise<PreparedPhoto> {
-    const photo = await this.#photo(dir, asset, onProgress);
-    const { segmenter } = await this.#load(dir, onProgress);
-    const { cached } = await segmenter.prepare(photo.input);
-    return { asset, hash: photo.input.key, width: photo.input.width, height: photo.input.height, cached };
+  prepare(dir: string, asset: string, onProgress?: SegmentProgress): Promise<PreparedPhoto> {
+    return this.#busy(async () => {
+      const photo = await this.#photo(dir, asset, onProgress);
+      const { segmenter } = await this.#load(dir, onProgress);
+      const { cached } = await segmenter.prepare(photo.input);
+      return { asset, hash: photo.input.key, width: photo.input.width, height: photo.input.height, cached };
+    });
   }
 
   /**
@@ -95,17 +105,40 @@ export class SegmentService {
     point: PhotoPoint,
     onProgress?: SegmentProgress,
   ): Promise<SegmentResult & { hash: string; cached: boolean }> {
-    const photo = await this.#photo(dir, asset, onProgress);
-    const { segmenter } = await this.#load(dir, onProgress);
-    return { ...(await segmenter.segment(photo.input, point)), hash: photo.input.key };
+    return this.#busy(async () => {
+      const photo = await this.#photo(dir, asset, onProgress);
+      const { segmenter } = await this.#load(dir, onProgress);
+      return { ...(await segmenter.segment(photo.input, point)), hash: photo.input.key };
+    });
   }
 
   /** Stop the worker and drop the embeddings. */
   async close(): Promise<void> {
+    clearTimeout(this.#idle);
     const loaded = await this.#segmenter?.catch(() => undefined);
     this.#segmenter = undefined;
     loaded?.segmenter.clear();
     await loaded?.engine.close?.();
+  }
+
+  /** Run `work` as a request: the idle timer restarts once no request runs. */
+  async #busy<T>(work: () => Promise<T>): Promise<T> {
+    clearTimeout(this.#idle);
+    this.#running++;
+    try {
+      return await work();
+    } finally {
+      if (--this.#running === 0) {
+        this.#idle = setTimeout(() => void this.#release(), this.#options.idleMs ?? DEFAULT_ENGINE_IDLE_MS);
+        this.#idle.unref();
+      }
+    }
+  }
+
+  /** Close the idle engine (a worker engine starts again on its next request); the embeddings stay. */
+  async #release(): Promise<void> {
+    const loaded = await this.#segmenter?.catch(() => undefined);
+    if (this.#running === 0) await loaded?.engine.close?.();
   }
 
   #load(dir: string, onProgress?: SegmentProgress) {

@@ -9,6 +9,7 @@ const HALF_SIDES = [0.05, 0.1, 0.2];
  */
 export function standInSegmentEngine(): SegmentEngine {
   return {
+    model: "stand-in",
     async encode() {
       return new Float32Array(4);
     },

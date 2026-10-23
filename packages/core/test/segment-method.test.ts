@@ -13,6 +13,7 @@ const encoded: number[] = [];
 let daemon: Daemon;
 let conn: DaemonConnection;
 let project: string;
+let videoProject: string;
 
 const engine: SegmentEngine = {
   async encode(rgb) {
@@ -34,12 +35,15 @@ beforeAll(async () => {
   });
   conn = await connectToDaemon(daemon.socketPath, { client: "desktop/test" });
   project = tempDir();
-  await conn.request("project.init", { dir: project });
+  await conn.request("project.init", { dir: project, kind: "image" });
+  videoProject = tempDir();
+  await conn.request("project.init", { dir: videoProject });
   const { ffmpeg } = await mediaTools();
   const files = tempDir();
   await makeDiscPhoto(ffmpeg, join(files, "disc.png"), 640, 320, { cx: 400, cy: 160, r: 80 });
   await makeClip(join(files, "clip.mp4"), { durationS: 1 });
   await conn.request("asset.import", { cwd: project, files: [join(files, "disc.png"), join(files, "clip.mp4")] });
+  await conn.request("asset.import", { cwd: videoProject, files: [join(files, "disc.png")] });
 }, MEDIA_TIMEOUT);
 
 afterAll(async () => {
@@ -70,5 +74,14 @@ describe("segment.prepare", () => {
       message: expect.stringContaining("not a still image"),
     });
     await expect(conn.request("segment.prepare", { cwd: project, asset: "assets/none.png" })).rejects.toMatchObject({ code: ErrorCode.AssetNotFound });
+  });
+
+  it("refuses a video project, so the model never downloads there", async () => {
+    const before = encoded.length;
+    await expect(conn.request("segment.prepare", { cwd: videoProject, asset: "assets/disc.png" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("image projects"),
+    });
+    expect(encoded).toHaveLength(before);
   });
 });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import type { AnyClip, MediaClip } from "@frameshell/schema";
+import { type AnyClip, type MediaClip, type Transform, placementOf } from "@frameshell/schema";
 import { exists } from "../fs-util.js";
 import { runTool } from "../media/ffmpeg.js";
 import type { PixelSize } from "./segmenter.js";
@@ -47,8 +47,14 @@ async function pngHeader(file: string): Promise<{ width: number; height: number;
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), depth: bytes[24]!, colorType: bytes[25]! };
 }
 
-/** Check `mask` is an 8-bit grayscale PNG of `size` with some white in it. Throws InvalidOperation. */
-export async function checkMask(ffmpeg: string, mask: string, size: PixelSize): Promise<void> {
+/** Pixel box `[x, y, width, height]` in a photo. */
+export type PixelBox = [number, number, number, number];
+
+/**
+ * Check `mask` is an 8-bit grayscale PNG of `size` with some white in it and return the box of its non-black
+ * pixels, the part the cut-out keeps. Throws InvalidOperation.
+ */
+export async function checkMask(ffmpeg: string, mask: string, size: PixelSize): Promise<PixelBox> {
   const header = await pngHeader(mask);
   if (!header || header.colorType !== 0 || header.depth !== 8) {
     throw invalid("not a grayscale PNG", "the mask must be an 8-bit grayscale PNG (255 inside the part, 0 outside).", "mask");
@@ -59,7 +65,48 @@ export async function checkMask(ffmpeg: string, mask: string, size: PixelSize): 
   const bytes = size.width * size.height;
   const args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", mask, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"];
   const { stdout } = await execFileAsync(ffmpeg, args, { encoding: "buffer", maxBuffer: bytes + 1024 * 1024, windowsHide: true });
-  if (!stdout.some((value) => value > 0)) throw invalid("empty mask", "the mask is all black: nothing to cut out.", "mask");
+  const box = maskBox(stdout, size);
+  if (!box) throw invalid("empty mask", "the mask is all black: nothing to cut out.", "mask");
+  return box;
+}
+
+/** Box of the non-zero pixels of a row-major 8-bit `mask` of `size`; null when all are zero. */
+export function maskBox(mask: Uint8Array, size: PixelSize): PixelBox | null {
+  let x0 = size.width;
+  let y0 = -1;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < size.height; y++) {
+    const row = y * size.width;
+    for (let x = 0; x < size.width; x++) {
+      if (mask[row + x] === 0) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y0 < 0) y0 = y;
+      y1 = y;
+    }
+  }
+  return x1 < 0 ? null : [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+}
+
+/**
+ * Transform laying the crop `box` of a `photo`-sized picture exactly over that part of the photo placed with
+ * `transform` in a `project`-sized frame. Each layer is first fitted to the frame (`layerRect`, schema
+ * composite.ts), so the smaller crop fits larger: scale shrinks by the ratio of the two fits, and the offset
+ * moves by the distance of the box center from the photo center, fitted and scaled.
+ */
+export function cutoutTransform(photo: PixelSize, box: PixelBox, project: PixelSize, transform: Transform | undefined): Transform {
+  const placed = placementOf(transform);
+  const [x, y, width, height] = box;
+  const photoFit = Math.min(project.width / photo.width, project.height / photo.height);
+  const boxFit = Math.min(project.width / width, project.height / height);
+  const shown = photoFit * placed.scale;
+  return {
+    x: placed.x + (x + width / 2 - photo.width / 2) * shown,
+    y: placed.y + (y + height / 2 - photo.height / 2) * shown,
+    scale: (placed.scale * photoFit) / boxFit,
+    opacity: placed.opacity,
+  };
 }
 
 /** First `<stem>-cutout-<n>.png` (n from 1) that is not in `assets/` of `projectDir`. */
@@ -71,13 +118,20 @@ export async function freeCutoutName(projectDir: string, stem: string): Promise<
 }
 
 /**
- * Render `photo` with `mask` as its alpha into a PNG named `name` in a fresh temp folder. The caller imports
- * the file (a copy into `assets/`), then calls `cleanup`.
+ * Render `photo` with `mask` as its alpha, cropped to `box`, into a PNG named `name` in a fresh temp folder.
+ * The caller imports the file (a copy into `assets/`), then calls `cleanup`.
  */
-export async function renderCutout(ffmpeg: string, photo: string, mask: string, name: string): Promise<{ file: string; cleanup(): Promise<void> }> {
+export async function renderCutout(
+  ffmpeg: string,
+  photo: string,
+  mask: string,
+  box: PixelBox,
+  name: string,
+): Promise<{ file: string; cleanup(): Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "frameshell-cutout-"));
   const file = join(dir, name);
-  const filter = "[0:v]format=rgba[p];[1:v]format=gray[m];[p][m]alphamerge[o]";
+  const [x, y, width, height] = box;
+  const filter = `[0:v]format=rgba[p];[1:v]format=gray[m];[p][m]alphamerge,crop=${width}:${height}:${x}:${y}[o]`;
   try {
     await runTool(ffmpeg, ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", photo, "-i", mask, "-filter_complex", filter, "-map", "[o]", "-frames:v", "1", file]);
   } catch (error) {

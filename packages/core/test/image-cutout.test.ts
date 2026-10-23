@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
@@ -82,22 +82,27 @@ describe("image.cutout", () => {
       expect(methods["image.cutout"].result.parse(result)).toEqual(result);
       expect(result.asset).toBe("assets/disc-cutout-1.png");
 
-      // The PNG: the photo's colours, opaque in the left half, transparent in the right half.
+      // The PNG: the mask's box (the photo's left half), opaque, in the photo's colours.
+      const half = WIDTH / 2;
       const photo = await rgba(join(images, "assets", "disc.png"));
       const cutout = await rgba(join(images, result.asset));
-      expect(cutout).toHaveLength(WIDTH * HEIGHT * 4);
+      expect(cutout).toHaveLength(half * HEIGHT * 4);
       for (const [x, y] of [[2, 2], [30, 20], [10, 33]] as const) {
-        const at = (y * WIDTH + x) * 4;
-        expect(Array.from(cutout.subarray(at, at + 4))).toEqual([...photo.subarray(at, at + 3), 255]);
+        const from = (y * WIDTH + x) * 4;
+        const at = (y * half + x) * 4;
+        expect(Array.from(cutout.subarray(at, at + 4))).toEqual([...photo.subarray(from, from + 3), 255]);
       }
-      for (const [x, y] of [[33, 2], [50, 20], [63, 35]] as const) expect(cutout[(y * WIDTH + x) * 4 + 3]).toBe(0);
 
-      // The layer: directly above the photo's track, same start, length and placement.
+      // The layer: directly above the photo's track, same start and length, over the photo's left half. The
+      // 64x36 photo and its 32x36 half fit the 16:9 frame by the same factor, so only the center moves left.
+      const config = JSON.parse(readFileSync(join(images, "frameshell.json"), "utf8")) as { resolution: { width: number } };
+      const shownPerPixel = (config.resolution.width / WIDTH) * 0.5;
       const shown = await conn.request("timeline.show", { cwd: images, timeline: "main" });
       const tracks = shown.tracks;
       expect(tracks.map((track) => track.id)).toEqual([photoTrack, result.track]);
       const layer = tracks[1]!.clips.find((clip) => clip.id === result.clip)!;
-      expect(layer).toMatchObject({ asset: result.asset, start: 0, in: 0, out: 3, transform: { scale: 0.5, x: 100, y: 50, opacity: 0.8 } });
+      const x = 100 - (WIDTH / 4) * shownPerPixel;
+      expect(layer).toMatchObject({ asset: result.asset, start: 0, in: 0, out: 3, transform: { scale: 0.5, x, y: 50, opacity: 0.8 } });
       expect(tracks[0]!.clips).toHaveLength(1);
 
       // The original photo is untouched and the new asset is read-only like any import.
@@ -116,6 +121,47 @@ describe("image.cutout", () => {
       // A second cut-out takes the next free name.
       const again = await conn.request("image.cutout", { cwd: images, timeline: "main", clip: photoClip, mask: "mask.png" });
       expect(again.asset).toBe("assets/disc-cutout-2.png");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "is one transaction for a client without a terminal session too",
+    async () => {
+      const sessionless = await connectToDaemon(daemon.socketPath, { client: "cli/test" });
+      try {
+        const result = await sessionless.request("image.cutout", { cwd: images, timeline: "main", clip: photoClip, mask: "mask.png" });
+        const history = await conn.request("history", { cwd: images, timeline: "main" });
+        const tx = history.transactions.at(-1)!;
+        expect(tx).toMatchObject({ tx: result.operation.tx, label: "Cut out disc", author: "cli" });
+        expect(tx.operations.map((op) => op.op)).toEqual(["track.add", "clip.add"]);
+        await sessionless.request("revert", { cwd: images, timeline: "main", target: tx.tx });
+        const after = await conn.request("timeline.show", { cwd: images, timeline: "main" });
+        expect(after.tracks.some((track) => track.id === result.track)).toBe(false);
+      } finally {
+        sessionless.close();
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "in review mode an agent's cut-out is one ready proposal: the PNG is written, the timeline waits",
+    async () => {
+      await conn.request("review.set", { cwd: images, enabled: true });
+      const agent = await connectToDaemon(daemon.socketPath, { client: "cli/test", session: "agent-cut" });
+      try {
+        const before = (await conn.request("timeline.show", { cwd: images, timeline: "main" })).tracks.map((track) => track.id);
+        const result = await agent.request("image.cutout", { cwd: images, timeline: "main", clip: photoClip, mask: "mask.png" });
+        expect(existsSync(join(images, result.asset))).toBe(true);
+        expect((await conn.request("timeline.show", { cwd: images, timeline: "main" })).tracks.map((track) => track.id)).toEqual(before);
+        const { proposal } = await conn.request("proposal.status", { cwd: images });
+        expect(proposal).toMatchObject({ tx: result.operation.tx, label: "Cut out disc", state: "ready", operations: 2 });
+        await conn.request("proposal.reject", { cwd: images, tx: proposal!.tx });
+      } finally {
+        agent.close();
+        await conn.request("review.set", { cwd: images, enabled: false });
+      }
     },
     MEDIA_TIMEOUT,
   );
