@@ -113,7 +113,7 @@ The opt-in test `plugins/hyperframes/test/elements-real.test.ts` (`FRAMESHELL_TE
 - **App:** gestures, engine layer skip and `clip.set` params not built.
 - **Units:** not checked when the composition's own size differs from the project's.
 
-## Design questions for the owner
+## Design questions for the owner (all answered as recommended, 2026-10-23: ADR 0021)
 
 1. **Where do the adjustments live?** Recommended: a new optional clip field, `elements`, keyed by selector. Not in `props` and not in the source file.
 2. **How does the user start an element drag?** Recommended: double-click a generated clip in the paused preview to enter its elements. Handles then go round the element under the cursor, as when entering a group in design tools, and Escape goes back to the clip. In the Pick tool, a drag keeps selecting a region.
@@ -123,7 +123,7 @@ The opt-in test `plugins/hyperframes/test/elements-real.test.ts` (`FRAMESHELL_TE
 
 ## Proposed issues if adopted
 
-1. ADR 0020: element adjustments (the decisions above).
+1. ADR 0021: element adjustments (accepted 2026-10-23, `docs/adr/0021-drag-to-edit-elements.md`).
 2. Schema and core:
    - `elements` field and `elementStyles`, cache key (no `CACHE_LAYOUT_VERSION` bump: absent fields keep keys; any later change to the CSS recipe must bump it).
    - Additive plugin API: `elementCss` and the capability flag.
