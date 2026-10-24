@@ -2,7 +2,7 @@
 
 > I open Rodaje, pick my camera, mic and the Zoom window, and turn on system audio: all four meters and previews move. I press Start, talk for a few minutes while the call plays, and press End. The timeline gets one multicam group: the camera and the call window as angles (the window marked as a screen), my mic and the call's audio as mics, all in sync.
 
-Steps 1 to 8 cover the recorder (#390): sources, levels, the continuous session, crash recovery and signing; steps 9 to 14 the takes (#391). The teleprompter and live recognition come with #392 and #393 and extend this doc. The e2e test (`apps/desktop/e2e/shoot.spec.ts`) covers the same flow with Chromium's fake camera and microphone and a stand-in screen; the steps below need real devices and macOS permissions, which no test can grant.
+Steps 1 to 8 cover the recorder (#390): sources, levels, the continuous session, crash recovery and signing; steps 9 to 14 the takes (#391); steps 15 to 21 the teleprompter following a real voice (#393). The e2e test (`apps/desktop/e2e/shoot.spec.ts`) covers the same flow with Chromium's fake camera and microphone and a stand-in screen; the steps below need real devices and macOS permissions, which no test can grant.
 
 Manual run by the owner with real devices, in the **packaged, signed** app (step 7) and in the built app (`pnpm --filter @frameshell/desktop build && pnpm --filter @frameshell/desktop start`). About 30 minutes. Note each friction as an issue; write results to `docs/research/shoot-acceptance-run.md` (date, version, machine, macOS version, numbers asked for below).
 
@@ -33,6 +33,18 @@ Needs a real whisper model (the project's `transcription` settings, `whisper-cpp
 12. **Accept.** On a take with a deviation you keep, press Accept (or Accept the whole take): the scene becomes "Done".
 13. **Next scene and End.** Next scene, T, read it, C, then End shoot. Check: `transcripts/shoot/<id>/mic.words.json` holds the takes' words; the shoot's timeline (`timelines/<script>.json`) has the session's program track with one shot per chosen take, in script order, playing from the first to the last line of each; the preview plays them with the mic's sound. Type a fix into a word of the mic transcript: the take is compared again with it.
 14. **Crash with takes.** Record a take, force-quit, reopen: the session is recovered and its cut takes become shots as at End.
+
+## Live following (#393)
+
+Needs a shoot script (as for the takes) and a network for the first download. The e2e test (`apps/desktop/e2e/teleprompter-follow.spec.ts`) feeds the follower words from a stand-in recognizer (`FRAMESHELL_SHOOT_STAND_IN=1`); only these steps hear a real voice. Write the numbers to `docs/research/shoot-capture.md`, section "Owner runs", as the real-voice follower run (Q6 was synthetic speech only).
+
+15. **Download on consent.** Open the Shoot view on a machine where voice recognition was never installed: it says how much it downloads (~195 MB: `whisper-server` and `small-q5_1`) and downloads nothing until you click. Click: the note shows the progress, then "Getting voice recognition ready…" during the first run (Metal shaders: note how many seconds), then nothing.
+16. **Model choice.** Read `<dataDir>/shoot/live-model.json` (macOS: `~/Library/Application Support/Frameshell/shoot/live-model.json`): the model picked and the measured milliseconds per window. On an M-series Mac expect `ggml-small-q5_1` under 350 ms; note the number.
+17. **Follow.** Open the teleprompter on a second screen ("Open teleprompter"), keep the Shoot view open (it holds the microphone), check that the Follow voice switch shows a green dot. Read the first scene at your normal pace, without Start. Check: the highlight stays on the word you are saying or one behind (note the lag you see, roughly, in words or tenths of a second), never runs ahead, and the text glides.
+18. **Skip and restart.** Skip a whole sentence: after three or four words of the next one the teleprompter jumps there and the skipped sentence is struck through. Restart a sentence from its beginning: it goes back. Say a few unrelated words, or cough: it does not move.
+19. **Free slot.** Reach a `[FREE: …]` slot, talk freely for a while, then pause about two seconds and read on: it stays on the slot while you talk and moves on after the pause.
+20. **Keys and hold.** While it follows, press ← and ↑: it goes where you say and follows on from there. Press Space (held): it stops following; Space again resumes. Turn Follow voice off: it no longer moves by itself.
+21. **While recording.** Start shoot and record a take with T and C while it follows: the recording is unaffected (the meters, the files at End), and no live word ends up in the project (`transcripts/` gets only the take analysis). Note the CPU load in Activity Monitor (whisper-server and Frameshell).
 
 ## Other platforms (not run yet)
 

@@ -2,7 +2,7 @@
 // Env: FRAMESHELL_DATA_DIR / FRAMESHELL_CONFIG_DIR isolate user dirs (tests); FRAMESHELL_SOCKET picks the daemon;
 // FRAMESHELL_PREVIEW_PROBE=1 exposes preview measurement hooks (ADR 0001 harness) and keeps hidden windows at full rate.
 // FRAMESHELL_SHOOT_STAND_IN=1 offers one stand-in screen to the Shoot view that captures the app's own page (e2e: real
-// screen capture needs an OS permission no test can grant).
+// screen capture needs an OS permission no test can grant), and a stand-in live recognizer that hears what a test says.
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -94,6 +94,7 @@ import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { projectBinaries, terminalToolPaths } from "./terminal-tools.js";
 import { contentProtectionSupport, screenSources, systemAudioSupport } from "./shoot-capture.js";
+import { LiveRecognizer, type LiveSource, standInLive } from "./live-recognition.js";
 import {
   ChunkWriter,
   type SessionState,
@@ -1048,6 +1049,67 @@ async function answerDisplayMedia(
 }
 
 /** The Shoot view's calls (ADR 0024): sources, session files appended here, the group made through the daemon. */
+/** Project whose `binaries` overrides and transcription language the live recognizer follows: the last to warm it. */
+let liveProject: string | null = null;
+/** The teleprompter's live recognizer (ADR 0024 decision 5); one whisper-server for the app. */
+const live: LiveSource = SHOOT_STAND_IN
+  ? standInLive()
+  : new LiveRecognizer({
+      server: async (progress) =>
+        binaries.ensure("whisper-server", liveProject ? { dir: liveProject, binaries: await projectBinaries(liveProject) } : undefined, {
+          onProgress: (report) => progress(report.fraction ?? null),
+        }),
+      model: (id, progress) => binaries.ensureModel(id, { onProgress: (report) => progress(report.fraction ?? null) }),
+      missing: async (id) => {
+        const server = await binaries.locate("whisper-server", liveProject ? { dir: liveProject, binaries: await projectBinaries(liveProject) } : undefined);
+        const model = await binaries.locateModel(id);
+        const serverBytes = server.installed ? 0 : (server.pinned?.archives.reduce((total, archive) => total + archive.size, 0) ?? 0);
+        return serverBytes + (model.installed ? 0 : model.pinned.size);
+      },
+      choiceFile: join(resolveAppDirs(process.env).dataDir, "shoot", "live-model.json"),
+    });
+
+function registerLiveIpc(): void {
+  // The windows that warmed it: a project window, whose renderer also draws its detached teleprompter.
+  const watchers = new Set<WebContents>();
+  live.onStatus((status) => {
+    for (const contents of watchers) if (!contents.isDestroyed()) send(contents, Channel.shootLiveStatus, status);
+  });
+  live.onHeard((heard) => {
+    for (const contents of watchers) if (!contents.isDestroyed()) send(contents, Channel.shootLiveHeard, heard);
+  });
+  ipcMain.handle(Channel.shootLiveWarm, async (event, install: unknown) => {
+    if (!watchers.has(event.sender)) {
+      watchers.add(event.sender);
+      event.sender.once("destroyed", () => watchers.delete(event.sender));
+    }
+    try {
+      const { project } = await requireProject(stateOf(event.sender));
+      liveProject = project.dir;
+      return await live.warm(await transcriptionLanguage(project.dir), install === true);
+    } catch (error) {
+      return { state: "unavailable", model: null, detail: (error as Error).message, progress: null };
+    }
+  });
+  ipcMain.on(Channel.shootLiveAudio, (_event, samples: unknown) => {
+    if (!ArrayBuffer.isView(samples)) return;
+    live.audio(new Int16Array(samples.buffer.slice(samples.byteOffset, samples.byteOffset + (samples.byteLength & ~1))));
+  });
+  ipcMain.on(Channel.shootLiveReset, () => live.reset());
+  app.on("will-quit", () => live.dispose());
+}
+
+/** `transcription.language` of the project's `frameshell.json`; `auto` (whisper detects it) without one. */
+async function transcriptionLanguage(dir: string): Promise<string> {
+  try {
+    const config = JSON.parse(await readFile(join(dir, "frameshell.json"), "utf8")) as { transcription?: { language?: unknown } };
+    const language = config.transcription?.language;
+    return typeof language === "string" && /^[a-z]{2,3}$/i.test(language) ? language.toLowerCase() : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
 function registerShootIpc(): void {
   ipcMain.handle(Channel.shootSupport, () =>
     outcome(async () => ({
@@ -1396,6 +1458,7 @@ function registerIpc(): void {
   );
   registerPeopleIpc();
   registerShootIpc();
+  registerLiveIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
   );

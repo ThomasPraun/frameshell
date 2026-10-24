@@ -191,6 +191,12 @@ export function createShootRecorder() {
       if (!session || origin === null || state.phase !== "recording") return null;
       return { session: session.id, seconds: Math.max(0, (performance.now() - origin) / 1000) };
     },
+    /** Audio the teleprompter's live recognition hears: the microphone, and system audio when on. */
+    audioTracks(): MediaStreamTrack[] {
+      const mic = micStream?.getAudioTracks()[0];
+      const system = state.systemAudio ? state.screenStream?.getAudioTracks()[0] : undefined;
+      return [mic, system].filter((track): track is MediaStreamTrack => track !== undefined && track.readyState === "live");
+    },
     /** Run `work` when End is pressed, before the recorders stop (the takes store cuts an open take). */
     setBeforeEnd(work: (() => Promise<void>) | null): void {
       beforeEnd = work;

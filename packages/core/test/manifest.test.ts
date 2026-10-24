@@ -12,6 +12,9 @@ import {
   FFMPEG_PACKAGE,
   WHISPER_FRAMESHELL_BUILDS,
   WHISPER_FRAMESHELL_TAG,
+  WHISPER_SERVER_FRAMESHELL_TAG,
+  WHISPER_SERVER_PACKAGE,
+  LIVE_WHISPER_MODELS,
   WHISPER_MODELS,
   WHISPER_PACKAGE,
   WHISPER_SOURCE,
@@ -115,7 +118,7 @@ describe("pinned whisper.cpp manifest", () => {
       `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/whisper-cli-1.9.4-${platform}-metal.tar`,
     ]);
     expect(archive).toMatchObject({ files: { "whisper-cli": "whisper-cli" }, support: { LICENSE: "LICENSE" } });
-    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform)!;
+    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform && candidate.tool === "whisper-cli")!;
     expect(recipe.configure).toEqual(
       expect.arrayContaining(["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DBUILD_SHARED_LIBS=OFF"]),
     );
@@ -125,9 +128,19 @@ describe("pinned whisper.cpp manifest", () => {
   it("builds every Frameshell asset from the pinned v1.9.4 commit, with no machine-specific tuning", () => {
     expect(WHISPER_SOURCE.url).toContain("927cfce34f31707e17f2bff35c349632fb9e2c3a");
     expect(WHISPER_SOURCE.sha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(WHISPER_FRAMESHELL_BUILDS.map((build) => build.platform).sort()).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
+    for (const tool of ["whisper-cli", "whisper-server"] as const) {
+      const builds = WHISPER_FRAMESHELL_BUILDS.filter((build) => build.tool === tool);
+      expect(builds.map((build) => build.platform).sort()).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
+    }
+    expect(new Set(WHISPER_FRAMESHELL_BUILDS.map((build) => build.asset)).size).toBe(WHISPER_FRAMESHELL_BUILDS.length);
     for (const build of WHISPER_FRAMESHELL_BUILDS) {
-      expect(build.asset).toMatch(/^whisper-cli-1\.9\.4-.+\.tar$/);
+      expect(build.asset).toMatch(new RegExp(`^${build.tool}-1\\.9\\.4-${build.platform}-${build.accelerator}\\.tar$`));
+      // whisper-cli and whisper-server of one platform differ only in the target and the server switch.
+      const twin = WHISPER_FRAMESHELL_BUILDS.find((other) => other.platform === build.platform && other.tool !== build.tool)!;
+      expect(build.configure.filter((flag) => !flag.startsWith("-DWHISPER_BUILD_SERVER")).sort()).toEqual(
+        twin.configure.filter((flag) => !flag.startsWith("-DWHISPER_BUILD_SERVER")).sort(),
+      );
+      expect(build.runner).toBe(twin.runner);
       // Native tuning would make the bytes depend on the CI machine's CPU.
       if (build.platform !== "darwin-arm64") expect(build.configure).toContain("-DGGML_NATIVE=OFF");
       expect(frameshellWhisperUrl(build)).toMatch(/^https:\/\/github\.com\/ThomasPraun\/frameshell\/releases\/download\//);
@@ -159,12 +172,56 @@ describe("pinned whisper.cpp manifest", () => {
     expect(vulkan.archives[0]!.urls[0]).toBe(
       `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/whisper-cli-1.9.4-${platform}-vulkan.tar`,
     );
-    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform)!;
+    const recipe = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform && candidate.tool === "whisper-cli")!;
     expect(recipe.configure).toEqual(expect.arrayContaining(["-DGGML_VULKAN=ON", "-DBUILD_SHARED_LIBS=OFF"]));
   });
 
   it("is installed on demand, not by doctor --install", () => {
     expect(WHISPER_PACKAGE.onDemand).toBe(true);
+  });
+
+  it.each(WHISPER_PLATFORMS)("%s pins whisper-server from the same sources, CPU last, Windows CPU only", (platform) => {
+    const server = buildCandidates(WHISPER_SERVER_PACKAGE, platform);
+    const cli = candidates(platform);
+    expect(server.at(-1)!.requires).toBeUndefined();
+    for (const build of server) {
+      expect(build).toMatchObject({ version: "1.9.4", license: "MIT" });
+      expect(Object.keys(build.archives[0]!.files)).toEqual(["whisper-server"]);
+    }
+    if (platform.startsWith("win32")) {
+      expect(server.map((build) => build.accelerator ?? "cpu")).toEqual(["cpu"]);
+      expect(server[0]!.archives[0]!.urls).toEqual(cpuOf(platform).archives[0]!.urls);
+    } else {
+      expect(server.map((build) => build.accelerator ?? "cpu")).toEqual(cli.map((build) => build.accelerator ?? "cpu"));
+    }
+    for (const [index, build] of server.entries()) {
+      const archive = build.archives[0]!;
+      if (archive.urls[0]!.includes("ggml-org")) {
+        // Upstream's CPU archive: the very bytes and libraries the whisper-cli pin already checks.
+        const twin = (platform.startsWith("win32") ? cpuOf(platform) : cli[index]!).archives[0]!;
+        expect({ ...archive, files: {} }).toEqual({ ...twin, files: {} });
+      } else {
+        expect(archive.urls[0]).toBe(
+          `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_SERVER_FRAMESHELL_TAG}/whisper-server-1.9.4-${platform}-${build.accelerator}.tar`,
+        );
+        expect(build.requires?.map((probe) => probe.command)).toEqual(cli[index]!.requires?.map((probe) => probe.command));
+        expect(archive.sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(archive.sha256).not.toBe("0".repeat(64));
+        expect(archive.size).toBeGreaterThan(1_000_000);
+      }
+    }
+    expect(WHISPER_SERVER_PACKAGE).toMatchObject({ name: "whisper-server", tools: ["whisper-server"], onDemand: true });
+  });
+
+  it("pins the live recognition models small-q5_1 and base-q5_1 at the same revision", () => {
+    expect(LIVE_WHISPER_MODELS.map((model) => [model.id, model.size])).toEqual([
+      ["ggml-small-q5_1", 190_085_487],
+      ["ggml-base-q5_1", 59_707_625],
+    ]);
+    for (const model of LIVE_WHISPER_MODELS) {
+      expect(model.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(model.version).toBe(WHISPER_MODELS[0]!.version);
+    }
   });
 
   it("pins the ADR 0003 default model large-v3-turbo-q5_0 (574 MB) by revision and SHA-256", () => {

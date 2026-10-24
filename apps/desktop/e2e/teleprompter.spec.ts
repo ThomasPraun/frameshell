@@ -116,6 +116,8 @@ test("starts at the shoot's next scene, follows keys in its own window, and keep
 
 test("the Shoot view opens the teleprompter in its own window", async () => {
   await page.getByRole("tab", { name: "Shoot" }).click();
+  // Voice recognition is not installed in this sandbox: it waits for the person's go-ahead before downloading.
+  await expect(page.getByTestId("shoot-live-download")).toContainText(/downloads ~\d+ MB once/);
   const opened = panelWindow(app, "teleprompter");
   await page.getByTestId("shoot-teleprompter").click();
   const child = await opened;

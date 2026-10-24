@@ -599,6 +599,20 @@ export interface FrameshellApi {
     assemble(script: string): Promise<MethodResult<"shoot.assemble">>;
     /** Called on every `shoot.changed` of the project, or with null after a daemon reconnect. Returns an unsubscribe function. */
     onChanged(listener: (change: ShootChange | null) => void): () => void;
+    /**
+     * Live recognition for the teleprompter (ADR 0024 decision 5): start and warm the resident whisper-server in the
+     * project's transcription language (detected without one). Downloads it and its model first only with `install`;
+     * without, stops at `download`. Resolves with the status reached; never rejects.
+     */
+    liveWarm(install?: boolean): Promise<LiveStatus>;
+    /** 16 kHz mono 16-bit samples of the mic (mixed with system audio), in order; heard words come by {@link onLiveHeard}. */
+    liveAudio(samples: Int16Array): void;
+    /** Forget the audio buffered so far, e.g. when listening stops. */
+    liveReset(): void;
+    /** Called on every change of the live recognizer's status. Returns an unsubscribe function. */
+    onLiveStatus(listener: (status: LiveStatus) => void): () => void;
+    /** Called with the words of each recognized window. Returns an unsubscribe function. */
+    onLiveHeard(listener: (heard: LiveHeard) => void): () => void;
   };
   scripts: {
     /**
@@ -642,6 +656,32 @@ export interface ShootSupport {
   systemAudio: "available" | "linux" | "macos-old";
   /** Frameshell's windows can be hidden from screen captures while recording (`setContentProtection`: macOS, Windows). */
   contentProtection: boolean;
+}
+
+/**
+ * The teleprompter's live recognizer: `off`, `download` (whisper-server or its model not installed yet: `bytes` to
+ * fetch, only on the person's say-so), `installing` (downloading, `progress` 0..1 when known), `warming` (first run,
+ * Metal shaders compile), `ready`, or `unavailable` with why in `detail` (no build for this machine, a failed
+ * download, a crash); the teleprompter is then moved by keys only.
+ */
+export interface LiveStatus {
+  state: "off" | "download" | "installing" | "warming" | "ready" | "unavailable";
+  /** Live model in use or being installed, e.g. `ggml-small-q5_1`. */
+  model: string | null;
+  detail: string | null;
+  progress: number | null;
+  /** `download` only: bytes to fetch. */
+  bytes?: number;
+}
+
+/** Words of one recognition window (never written to the project). */
+export interface LiveHeard {
+  /** In order, newest last. */
+  words: string[];
+  /** Seconds at the window's end with no word. */
+  silence: number;
+  /** Language whisper used, e.g. `es`; null when it said none. */
+  language: string | null;
 }
 
 /** A screen or window that can be recorded. */
@@ -824,6 +864,11 @@ export const Channel = {
   shootChoose: "shoot:choose",
   shootAssemble: "shoot:assemble",
   shootChanged: "shoot:changed",
+  shootLiveWarm: "shoot:live-warm",
+  shootLiveAudio: "shoot:live-audio",
+  shootLiveReset: "shoot:live-reset",
+  shootLiveStatus: "shoot:live-status",
+  shootLiveHeard: "shoot:live-heard",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",

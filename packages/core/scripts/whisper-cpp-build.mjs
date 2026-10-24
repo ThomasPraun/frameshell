@@ -3,10 +3,10 @@
 // Run by .github/workflows/whisper-cpp-release.yml. Requires a prior `tsc -b`.
 //
 //   node packages/core/scripts/whisper-cpp-build.mjs matrix
-//       JSON list of { platform, runner } for the CI matrix.
+//       JSON list of { asset, platform, runner } for the CI matrix.
 //   node packages/core/scripts/whisper-cpp-build.mjs release
-//       Release tag, then one "<sha256>  <asset>" line per pinned asset.
-//   node packages/core/scripts/whisper-cpp-build.mjs build <platform> <outDir>
+//       One "<tag> <sha256> <asset>" line per pinned asset (`whisper-cli` and `whisper-server` have a release each).
+//   node packages/core/scripts/whisper-cpp-build.mjs build <asset> <outDir>
 //       Download and verify the pinned source, build, start-check, pack
 //       <outDir>/<asset>, then compare it with the pin: exit 1 on mismatch,
 //       printing the actual SHA-256 and size (that output is how pins are made).
@@ -15,26 +15,27 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { WHISPER_FRAMESHELL_BUILDS, WHISPER_FRAMESHELL_TAG, WHISPER_SOURCE, packTar } from "../dist/index.js";
+import { WHISPER_FRAMESHELL_BUILDS, WHISPER_SOURCE, frameshellWhisperTag, packTar } from "../dist/index.js";
 
-const [command, platform, outDir] = process.argv.slice(2);
+const [command, asset, outDir] = process.argv.slice(2);
 
 if (command === "matrix") {
-  console.log(JSON.stringify(WHISPER_FRAMESHELL_BUILDS.map(({ platform, runner }) => ({ platform, runner }))));
+  console.log(JSON.stringify(WHISPER_FRAMESHELL_BUILDS.map(({ asset, platform, runner }) => ({ asset, platform, runner }))));
 } else if (command === "release") {
-  console.log(WHISPER_FRAMESHELL_TAG);
-  for (const { sha256, asset } of WHISPER_FRAMESHELL_BUILDS) console.log(`${sha256}  ${asset}`);
-} else if (command === "build" && platform && outDir) {
-  build(platform, resolve(outDir));
+  for (const { tool, sha256, asset } of WHISPER_FRAMESHELL_BUILDS) console.log(`${frameshellWhisperTag(tool)} ${sha256} ${asset}`);
+} else if (command === "build" && asset && outDir) {
+  build(asset, resolve(outDir));
 } else {
-  console.error("usage: whisper-cpp-build.mjs matrix | release | build <platform> <outDir>");
+  console.error("usage: whisper-cpp-build.mjs matrix | release | build <asset> <outDir>");
   process.exit(2);
 }
 
-function build(platform, outDir) {
-  const pin = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform);
-  if (!pin) throw new Error(`No Frameshell whisper.cpp build for ${platform}`);
-  // Fixed paths, remapped below: the bytes must not depend on where the build ran.
+function build(asset, outDir) {
+  const pin = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.asset === asset);
+  if (!pin) throw new Error(`No Frameshell whisper.cpp build ${asset}`);
+  const { platform, tool } = pin;
+  // Fixed paths, remapped below: the bytes must not depend on where the build ran. The same for both tools of a
+  // platform, so the whisper-cli bytes did not change when whisper-server joined.
   const work = join(process.env.RUNNER_TEMP ?? tmpdir(), "frameshell-whisper-build", platform);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
@@ -60,15 +61,16 @@ function build(platform, outDir) {
     ],
     env,
   );
-  run("cmake", ["--build", buildDir, "--config", "Release", "--parallel", String(availableParallelism()), "--target", "whisper-cli"], env);
+  run("cmake", ["--build", buildDir, "--config", "Release", "--parallel", String(availableParallelism()), "--target", tool], env);
 
-  const exe = join(buildDir, "bin", "whisper-cli");
-  // Start check: must run on the build machine (darwin-x64 through Rosetta).
-  const version = execFileSync(exe, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  console.log(version.trim());
+  const exe = join(buildDir, "bin", tool);
+  // Start check: must run on the build machine (darwin-x64 through Rosetta). whisper-server has no --version.
+  const probe = tool === "whisper-cli" ? ["--version"] : ["--help"];
+  const version = execFileSync(exe, probe, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  console.log(version.trim().split("\n")[0]);
 
   const archive = packTar([
-    { name: "whisper-cli", data: readFileSync(exe), mode: 0o755 },
+    { name: tool, data: readFileSync(exe), mode: 0o755 },
     { name: "LICENSE", data: readFileSync(join(src, "LICENSE")), mode: 0o644 },
   ]);
   const file = join(outDir, pin.asset);

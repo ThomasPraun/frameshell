@@ -4145,6 +4145,37 @@ button.track-head:focus-visible {
   box-shadow: 0 0 0 0.08em var(--accent);
 }
 
+/* Provisional: live following jumped over it. Never written to the project. */
+.teleprompter-word.is-skipped,
+.teleprompter-free.is-skipped {
+  color: #8a6f6c;
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 0.06em;
+}
+
+.teleprompter-live {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.teleprompter-live.is-ready {
+  background: var(--diff-added);
+}
+
+.teleprompter-live.is-installing,
+.teleprompter-live.is-warming {
+  background: var(--accent);
+}
+
+.teleprompter-live.is-unavailable {
+  background: var(--danger);
+}
+
 .teleprompter-cue {
   margin: 0 0.4em;
   font-size: 0.4em;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { elapsedLabel, meterFill } from "../shoot/model.js";
+import { live, useLiveStatus } from "../shoot/live.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
 import { teleprompter } from "../teleprompter/store.js";
 import { ShootTakes } from "./ShootTakes.js";
@@ -16,6 +17,9 @@ export function ShootPanel() {
   const state = useShoot();
   const [picking, setPicking] = useState(false);
   useEffect(() => shoot.mount(), []);
+  // Live recognition warms up now, so the teleprompter follows from the first word of a take.
+  useEffect(() => live.warm(), []);
+  const liveStatus = useLiveStatus();
   const locked = state.phase !== "idle";
   const recording = state.phase === "recording";
 
@@ -31,6 +35,19 @@ export function ShootPanel() {
   return (
     <div className="shoot-panel" data-testid="shoot-panel" data-phase={state.phase}>
       <p className="shoot-hint">{t.shoot.intro}</p>
+      {liveStatus.state === "unavailable" && (
+        <p className="shoot-note" role="status" data-testid="shoot-live-unavailable">
+          {t.shoot.liveUnavailable(liveStatus.detail ?? "")}
+        </p>
+      )}
+      {(liveStatus.state === "installing" || liveStatus.state === "warming") && <p className="shoot-note">{t.shoot.liveStarting}</p>}
+      {liveStatus.state === "download" && (
+        <div className="shoot-row">
+          <button className="button" data-testid="shoot-live-download" onClick={() => live.warm(true)}>
+            {t.shoot.liveDownload(Math.max(1, Math.round((liveStatus.bytes ?? 0) / 1_000_000)))}
+          </button>
+        </div>
+      )}
       <div className="shoot-row">
         <button className="button" data-testid="shoot-teleprompter" onClick={() => teleprompter.open()}>
           {t.teleprompter.open}
