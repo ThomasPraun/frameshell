@@ -119,7 +119,11 @@ export function ShootPanel() {
         {state.screen && state.screenStream && (
           <StreamVideo stream={state.screenStream} label={t.shoot.preview(state.screen.name)} testId="shoot-screen-preview" />
         )}
-        {state.screen?.kind === "screen" && <p className="shoot-note">{t.shoot.protectHint}</p>}
+        {state.screen?.kind === "screen" && state.protection !== null && (
+          <p className="shoot-note" data-testid="shoot-protect-note">
+            {state.protection ? t.shoot.protectHint : t.shoot.unprotectedHint}
+          </p>
+        )}
       </section>
 
       <section className="shoot-source">

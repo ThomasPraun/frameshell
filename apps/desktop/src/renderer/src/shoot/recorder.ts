@@ -25,6 +25,8 @@ export interface ShootState {
   screen: ShootScreenSource | null;
   systemAudio: boolean;
   support: ShootSupport["systemAudio"] | null;
+  /** Frameshell's windows hide from screen captures while recording; null until known. */
+  protection: boolean | null;
   /** Screens and windows offered; null until asked for. */
   screens: ShootScreenSource[] | null;
   screensError: string | null;
@@ -61,6 +63,7 @@ export function createShootRecorder() {
     screen: null,
     systemAudio: false,
     support: null,
+    protection: null,
     screens: null,
     screensError: null,
     cameraStream: null,
@@ -199,7 +202,10 @@ export function createShootRecorder() {
         void refreshDevices();
         void api()
           .support()
-          .then(({ systemAudio }) => set({ support: systemAudio }), () => set({ support: "linux" }));
+          .then(
+            ({ systemAudio, contentProtection }) => set({ support: systemAudio, protection: contentProtection }),
+            () => set({ support: "linux", protection: false }),
+          );
         void api()
           .recovered()
           .then((list) => list.at(-1) && set({ finished: list.at(-1)! }), () => undefined);

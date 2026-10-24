@@ -620,6 +620,8 @@ export interface ShootSourceSpec {
  */
 export interface ShootSupport {
   systemAudio: "available" | "linux" | "macos-old";
+  /** Frameshell's windows can be hidden from screen captures while recording (`setContentProtection`: macOS, Windows). */
+  contentProtection: boolean;
 }
 
 /** A screen or window that can be recorded. */

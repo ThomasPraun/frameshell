@@ -92,7 +92,7 @@ import { PANEL_WINDOW_MIN, PanelWindowStore, cascade, placeOnDisplays, panelWind
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { projectBinaries, terminalToolPaths } from "./terminal-tools.js";
-import { screenSources, systemAudioSupport } from "./shoot-capture.js";
+import { contentProtectionSupport, screenSources, systemAudioSupport } from "./shoot-capture.js";
 import {
   ChunkWriter,
   type SessionState,
@@ -1041,7 +1041,10 @@ async function answerDisplayMedia(
 /** The Shoot view's calls (ADR 0024): sources, session files appended here, the group made through the daemon. */
 function registerShootIpc(): void {
   ipcMain.handle(Channel.shootSupport, () =>
-    outcome(async () => ({ systemAudio: systemAudioSupport(process.platform, process.getSystemVersion()) })),
+    outcome(async () => ({
+      systemAudio: systemAudioSupport(process.platform, process.getSystemVersion()),
+      contentProtection: contentProtectionSupport(process.platform),
+    })),
   );
   ipcMain.handle(Channel.shootScreens, () =>
     outcome(async () => {

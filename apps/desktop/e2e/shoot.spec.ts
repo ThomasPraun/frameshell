@@ -69,7 +69,10 @@ test("records camera, screen and mic into one session, then makes it a multicam 
   await setUp();
   await page.getByTestId("shoot-start").click();
   await expect(page.getByTestId("shoot-elapsed")).toBeVisible();
-  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isContentProtected())).toBe(true);
+  // Content protection exists on macOS and Windows only; elsewhere the view says the windows may show.
+  const protects = process.platform === "darwin" || process.platform === "win32";
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isContentProtected())).toBe(protects);
+  await expect(page.getByTestId("shoot-protect-note")).toContainText(protects ? "hides its windows" : "cannot hide its windows");
   // While recording the sources are locked.
   await expect(page.getByTestId("shoot-camera")).toBeDisabled();
   await page.waitForTimeout(5000);

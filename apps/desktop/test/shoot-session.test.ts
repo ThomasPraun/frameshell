@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import type { ShootSourceSpec } from "../src/shared/api.js";
-import { screenSources, systemAudioSupport } from "../src/main/shoot-capture.js";
+import { contentProtectionSupport, screenSources, systemAudioSupport } from "../src/main/shoot-capture.js";
 import {
   ChunkWriter,
   type FinishDeps,
@@ -19,6 +19,7 @@ import {
   markStarted,
   offsetsOf,
   readSession,
+  removeFile,
   sessionId,
   unfinishedSessions,
 } from "../src/main/shoot-session.js";
@@ -218,6 +219,17 @@ describe("finishSession", () => {
   });
 });
 
+describe("removeFile", () => {
+  it("deletes a file and is fine with one already gone", async () => {
+    const root = project();
+    const file = join(root, "camera.mp4.part");
+    writeFileSync(file, "x");
+    await removeFile(file);
+    expect(existsSync(file)).toBe(false);
+    await removeFile(file);
+  });
+});
+
 describe("capture support", () => {
   it("offers system audio on macOS 14.2+ and Windows, not on older macOS or Linux", () => {
     expect(systemAudioSupport("darwin", "26.3.0")).toBe("available");
@@ -226,6 +238,7 @@ describe("capture support", () => {
     expect(systemAudioSupport("darwin", "13.6")).toBe("macos-old");
     expect(systemAudioSupport("win32", "10.0.22631")).toBe("available");
     expect(systemAudioSupport("linux", "6.8.0")).toBe("linux");
+    expect(["darwin", "win32", "linux"].map((platform) => contentProtectionSupport(platform as NodeJS.Platform))).toEqual([true, true, false]);
   });
 
   it("lists screens before windows, without Frameshell's own windows", () => {

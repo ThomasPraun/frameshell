@@ -10,6 +10,11 @@ export function systemAudioSupport(platform: NodeJS.Platform, version: string): 
   return major > 14 || (major === 14 && minor >= 2) ? "available" : "macos-old";
 }
 
+/** `BrowserWindow.setContentProtection` works on macOS and Windows only; elsewhere it does nothing. */
+export function contentProtectionSupport(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "win32";
+}
+
 /** What {@link screenSources} reads of a `desktopCapturer` source. */
 export interface CapturerSource {
   id: string;

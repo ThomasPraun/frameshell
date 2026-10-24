@@ -1,9 +1,9 @@
 // Shoot session files (ADR 0024 decisions 1 and 3): one file per source under `assets/shoot/<id>/`, appended chunk by
 // chunk while recording, plus a small state file so a session cut short by a crash is finished on the next open.
 import { execFile } from "node:child_process";
-import { appendFile, mkdir, readdir, rename, rm, rmdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, rm, rmdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { exists, readJsonIfExists, writeJsonAtomic } from "@frameshell/core/fs-util";
+import { exists, readJsonIfExists, renameRetrying, writeJsonAtomic } from "@frameshell/core/fs-util";
 import { ErrorCode, type MethodParams, RpcError } from "@frameshell/protocol";
 import { SHOOT_ROLES, type ShootFinish, type ShootRole, type ShootSourceSpec } from "../shared/api.js";
 import type { DaemonLink } from "./daemon-link.js";
@@ -217,24 +217,29 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
       continue;
     }
     if (size === 0) {
-      await rm(part, { force: true });
+      await removeFile(part);
       warnings.push(`${source.file}: nothing was recorded.`);
       continue;
     }
     if (crashed || needsRemux(source.mime)) {
       // `.tmp`: ignored by the daemon's watcher until the rename.
       const temp = `${final}.remux.tmp`;
+      let repaired = true;
       try {
         await deps.remux(part, temp, source.mime);
-        await rename(temp, final);
-        await rm(part, { force: true });
       } catch (error) {
-        await rm(temp, { force: true });
+        repaired = false;
+        await removeFile(temp);
         warnings.push(`${source.file}: could not be repaired (${(error as Error).message}); kept as recorded.`);
-        await rename(part, final);
+      }
+      if (repaired) {
+        await renameRetrying(temp, final);
+        await removeFile(part);
+      } else {
+        await renameRetrying(part, final);
       }
     } else {
-      await rename(part, final);
+      await renameRetrying(part, final);
     }
     present.push(source);
   }
@@ -267,6 +272,24 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
   if (files.length === 0) await rmdir(folder).catch(() => undefined);
   await rm(statePath(root, id), { force: true });
   return { id, folder: sessionFolder(id), files, group, recovered: crashed, warnings };
+}
+
+/** Longest {@link removeFile} waits for a deleted file's name to go, ms. */
+const REMOVE_WAIT_MS = 5_000;
+
+/**
+ * Delete `path` and wait until its name is gone. On Windows a file another process still has open (an antivirus scan
+ * of a file ffmpeg just read, a process killed a moment ago) is only marked for deletion and stays listed until that
+ * handle closes; a busy file is retried. Throws when the name is still there after {@link REMOVE_WAIT_MS}.
+ */
+export async function removeFile(path: string): Promise<void> {
+  await rm(path, { force: true, maxRetries: 10, retryDelay: 100 });
+  const deadline = Date.now() + REMOVE_WAIT_MS;
+  while (await exists(path)) {
+    if (Date.now() >= deadline) throw new Error(`${path} could not be deleted: another program has it open.`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await rm(path, { force: true }).catch(() => undefined);
+  }
 }
 
 /** {@link FinishDeps.remux} with the ffmpeg at the path `ffmpeg` resolves to. */

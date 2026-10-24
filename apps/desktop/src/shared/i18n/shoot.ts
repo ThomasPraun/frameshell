@@ -24,6 +24,8 @@ const en = {
   level: (name: string) => `Level of ${name}`,
   preview: (name: string) => `Preview of ${name}`,
   protectHint: "Frameshell hides its windows from screen recordings while recording. If they still show, record a window instead of the whole screen.",
+  unprotectedHint:
+    "On this system Frameshell cannot hide its windows from screen recordings. Record a window instead of the whole screen, or move Frameshell to another display.",
   start: "Start shoot",
   end: "End shoot",
   starting: "Starting…",
@@ -60,6 +62,8 @@ const es: typeof en = {
   level: (name) => `Nivel de ${name}`,
   preview: (name) => `Vista previa de ${name}`,
   protectHint: "Frameshell oculta sus ventanas de las grabaciones de pantalla mientras graba. Si aun así aparecen, graba una ventana en lugar de la pantalla completa.",
+  unprotectedHint:
+    "En este sistema Frameshell no puede ocultar sus ventanas de las grabaciones de pantalla. Graba una ventana en lugar de la pantalla completa, o mueve Frameshell a otra pantalla.",
   start: "Empezar rodaje",
   end: "Terminar rodaje",
   starting: "Empezando…",
