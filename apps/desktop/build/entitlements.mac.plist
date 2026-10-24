@@ -2,9 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Hardened runtime exceptions. JIT and unsigned executable memory: V8 (Electron, and the bundled CLI and
      daemon, which run as Electron in Node mode). Library validation off: plugins may load native addons that
-     are not signed by our team. -->
+     are not signed by our team. Camera and audio input: the Shoot view records them (ADR 0024); also the inherit
+     plist, since the helper processes open the devices. -->
 <plist version="1.0">
   <dict>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>

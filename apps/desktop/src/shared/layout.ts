@@ -9,12 +9,12 @@ export type PanelId = "sidebar" | "terminal" | "timeline";
 /**
  * Panels that can move out to their own window (ADR 0012). Each terminal tab
  * moves on its own, in a window of its own; so does each sidebar view
- * (`explorer`, `history`, `plugins`, `angles`, `people`). The editor moves with all its tabs.
+ * (`explorer`, `history`, `plugins`, `angles`, `people`, `shoot`). The editor moves with all its tabs.
  */
 export type DetachablePanel = "preview" | "terminal" | "timeline" | "editor" | SidebarView;
 
 /** Every {@link DetachablePanel}, for validating stored and requested names. */
-export const DETACHABLE_PANELS: readonly DetachablePanel[] = ["preview", "terminal", "timeline", "editor", "explorer", "history", "plugins", "angles", "people"];
+export const DETACHABLE_PANELS: readonly DetachablePanel[] = ["preview", "terminal", "timeline", "editor", "explorer", "history", "plugins", "angles", "people", "shoot"];
 
 /**
  * Panels whose window opens again with the project. A terminal's session
@@ -27,7 +27,7 @@ export const REOPENED_PANELS: readonly DetachablePanel[] = DETACHABLE_PANELS.fil
 export const PANEL_WINDOW_PREFIX = "frameshell-panel:";
 
 /** Views of the left sidebar. */
-export type SidebarView = "explorer" | "history" | "plugins" | "angles" | "people";
+export type SidebarView = "explorer" | "history" | "plugins" | "angles" | "people" | "shoot";
 
 /** One resizable, collapsible panel. `size` is px along its drag axis and survives collapse. */
 export interface PanelState {
@@ -50,7 +50,7 @@ export const PANEL_BOUNDS: Record<PanelId, { min: number; max: number }> = {
   timeline: { min: 100, max: 900 },
 };
 
-const SIDEBAR_VIEWS: readonly SidebarView[] = ["explorer", "history", "plugins", "angles", "people"];
+const SIDEBAR_VIEWS: readonly SidebarView[] = ["explorer", "history", "plugins", "angles", "people", "shoot"];
 const CENTER_SPLIT = { min: 0.2, max: 0.8 };
 
 /** Layout of a project opened for the first time. Terminal is wide: the agent lives there. */

@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 61;
+export const PROTOCOL_VERSION = 62;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1504,15 +1504,20 @@ export const methods = {
       "was matched `against`. Below 0.5 no trustworthy match was found: that file is not shifted (it starts with the reference), " +
       "`synced` is false and a warning says so; check it by ear or eye, then fix it with `multicam.offset` (cameras) or " +
       "`multicam.mic` (mics). Only the first ten minutes of each file are matched. Needs two or more cameras with a picture; " +
-      "the reference is the first file with sound; a file without sound is not synced. " +
+      "the reference is the first file with sound; a file without sound is not synced. With `offsets` (known start times, e.g. " +
+      "from one recorder's clock) nothing is matched: one camera is enough (its shot is then `solo`), no file needs sound, and " +
+      "`sync` reports `confidence` and `against` null. `screens` marks cameras that are screen shares (as `multicam.angle` `screen`). " +
       "Fails with InvalidOperation (file missing or unreadable, no picture, no file with sound, outside the project, bad `soundOf`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       assets: z
         .array(z.string().min(1))
-        .min(2)
-        .describe("Camera files with a picture, inside the project, absolute or relative to `cwd`; the first one sets the clock unless it has no sound."),
+        .min(1)
+        .describe(
+          "Camera files with a picture, inside the project, absolute or relative to `cwd`; the first one sets the clock unless it has no sound. " +
+            "Two or more unless `offsets` is given.",
+        ),
       names: z.array(z.string().min(1)).optional().describe("Angle names in the same order, e.g. the people. Default: file names."),
       mics: z.array(z.string().min(1)).optional().describe("Separate sound files (audio or video files; only the sound is used), same rules as `assets`."),
       micNames: z.array(z.string().min(1)).optional().describe("Mic names in the same order as `mics`. Default: file names."),
@@ -1521,6 +1526,17 @@ export const methods = {
         .optional()
         .describe("One entry per camera, in order: a 1-based index into `mics`, `none` or `camera`. Default: see the description."),
       name: z.string().min(1).optional().describe("Name of the group and its program track. Default track name `Multicam`."),
+      offsets: z
+        .array(z.number().nonnegative())
+        .optional()
+        .describe(
+          "Known offsets instead of matching sound: one per file, cameras then mics, the group-clock second at which the file's time 0 plays, " +
+            "e.g. `[0, 0.012, 0.003]`. Default: measured.",
+        ),
+      screens: z
+        .array(z.int().min(1))
+        .optional()
+        .describe("1-based numbers of the cameras that are screen shares, e.g. `[2]`. Default: none."),
     }),
     result: MulticamCreateResultSchema,
   },

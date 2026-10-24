@@ -841,8 +841,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "transition.remove": (params, caller) => operate("transition.remove", params, caller),
     "clip.key": (params, caller) => operate("clip.key", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name }, caller) => {
+    "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name, offsets, screens }, caller) => {
       const dir = await root(cwd);
+      const outside = screens?.find((screen) => screen > assets.length);
+      if (outside !== undefined) {
+        throw new RpcError(ErrorCode.InvalidOperation, `multicam.create: screen ${outside} is not a camera number (1 to ${assets.length}).`, {
+          op: "multicam.create",
+          reason: "screens",
+          field: "screens",
+        });
+      }
       const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
         root: dir,
         cwd,
@@ -851,12 +859,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         mics,
         micNames,
         soundOf,
+        offsets,
       });
       const angles = measured.assets.map((asset, i) => ({
         asset,
         ...(names ? { name: names[i]! } : {}),
         offset: measured.plan[i]!.offset,
         ...(measured.soundOf[i] !== undefined ? { mic: measured.soundOf[i]! } : {}),
+        ...(screens?.includes(i + 1) ? { screen: true } : {}),
       }));
       const micFiles = measured.mics.map((asset, i) => ({
         asset,

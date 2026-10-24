@@ -243,6 +243,46 @@ describe("multicam.create", () => {
       code: ErrorCode.InvalidOperation,
       message: expect.stringContaining("outside the project"),
     });
-    await expect(conn.request("multicam.create", { cwd: project, assets: [files["ana"]!] })).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+    await expect(conn.request("multicam.create", { cwd: project, assets: [files["ana"]!] })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("known `offsets`"),
+    });
   });
+
+  it("takes known offsets without matching: one silent camera is enough, its shot is solo, and screens are marked", async () => {
+    const solo = await conn.request("multicam.create", {
+      cwd: project,
+      assets: [files["mute"]!],
+      mics: [files["ana-rec"]!],
+      soundOf: ["1"],
+      offsets: [0.25, 0],
+      name: "Shoot",
+    });
+    expect(solo.sync.map(({ offset, confidence, against, synced }) => ({ offset, confidence, against, synced }))).toEqual([
+      { offset: 0.25, confidence: null, against: null, synced: true },
+      { offset: 0, confidence: null, against: null, synced: true },
+    ]);
+    expect(solo.warnings).toEqual([]);
+    const pair = await conn.request("multicam.create", {
+      cwd: project,
+      assets: [files["mute"]!, files["mute2"]!],
+      names: ["Camera", "Screen"],
+      offsets: [0, 0.004],
+      screens: [2],
+    });
+    const shown = await conn.request("timeline.show", { cwd: project });
+    const soloTrack = shown.tracks.find((track) => track.id === solo.track)!;
+    expect(soloTrack.clips).toEqual([expect.objectContaining({ shot: "solo", angles: [solo.sync[0]!.angle] })]);
+    const group = shown.groups!.find((candidate) => candidate.id === pair.group)!;
+    expect(group.angles.map((angle) => [angle.name, angle.offset, angle.screen ?? false])).toEqual([
+      ["Camera", 0, false],
+      ["Screen", 0.004, true],
+    ]);
+    await expect(
+      conn.request("multicam.create", { cwd: project, assets: [files["mute"]!], offsets: [0, 1] }),
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("2 offset(s) for 1 file(s)") });
+    await expect(
+      conn.request("multicam.create", { cwd: project, assets: [files["mute"]!], offsets: [0], screens: [2] }),
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("screen 2") });
+  }, MEDIA_TIMEOUT);
 });

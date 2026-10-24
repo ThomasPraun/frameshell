@@ -7,6 +7,7 @@ import { HistoryPanel } from "./HistoryPanel.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { PeoplePanel } from "./PeoplePanel.js";
 import { ReviewSwitch } from "./ReviewSwitch.js";
+import { ShootPanel } from "./ShootPanel.js";
 
 /** The sidebar's views, in tab order, with their names. */
 export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
@@ -15,11 +16,12 @@ export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
   { id: "plugins", label: t.workspace.plugins },
   { id: "angles", label: t.workspace.angles },
   { id: "people", label: t.workspace.people },
+  { id: "shoot", label: t.workspace.shoot },
 ];
 
-/** The views an image project (ADR 0017) offers: no one speaks in a picture, so no People view. */
+/** The views an image project (ADR 0017) offers: no one speaks or is recorded in a picture, so no People or Shoot view. */
 export function sidebarViews(image: boolean): readonly { id: SidebarView; label: string }[] {
-  return image ? SIDEBAR_VIEWS.filter(({ id }) => id !== "people") : SIDEBAR_VIEWS;
+  return image ? SIDEBAR_VIEWS.filter(({ id }) => id !== "people" && id !== "shoot") : SIDEBAR_VIEWS;
 }
 
 /** Name of a sidebar view, as its tab shows it. */
@@ -28,7 +30,7 @@ export function sidebarLabel(view: SidebarView): string {
 }
 
 /**
- * Left column: explorer, history and plugins as switchable views. Each view
+ * Left column: explorer, history, plugins, angles, people and shoot as switchable views. Each view
  * can move to its own window (ADR 0012); its tab then shows where it went.
  */
 export function Sidebar({
@@ -144,6 +146,7 @@ function SidebarViewBody({
   }
   if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
   if (view === "people") return <PeoplePanel mediaUrl={mediaUrl} />;
+  if (view === "shoot") return <ShootPanel />;
   return (
     <p className="empty">
       {t.workspace.noPlugins}

@@ -46,7 +46,7 @@ const OPEN_TIMEOUT_MS = 60_000;
  * a cold daemon. `settled: false` returns while the boot screen may still show. `env` adds to or overrides the app's
  * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`). `paths` are passed as files to open, like Open with does,
  * instead of `--project`. `lang` is the OS language the app sees (`--lang`); English unless a spec asks, so text
- * selectors hold on any machine.
+ * selectors hold on any machine. `args` adds Chromium switches, e.g. `--use-fake-device-for-media-stream`.
  */
 export async function launch(
   box: Sandbox,
@@ -55,7 +55,8 @@ export async function launch(
     env = {},
     paths,
     lang = "en",
-  }: { settled?: boolean; env?: Record<string, string>; paths?: string[]; lang?: string } = {},
+    args = [],
+  }: { settled?: boolean; env?: Record<string, string>; paths?: string[]; lang?: string; args?: string[] } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
@@ -63,6 +64,7 @@ export async function launch(
     args: [
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       `--lang=${lang}`,
+      ...args,
       ...(packagedApp ? [] : [mainEntry]),
       ...(paths ?? ["--project", box.projectDir]),
     ],
