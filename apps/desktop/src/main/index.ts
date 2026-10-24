@@ -1,13 +1,32 @@
 // Electron main: windows, IPC, terminals, explorer watcher, daemon link (SPEC §3.2).
 // Env: FRAMESHELL_DATA_DIR / FRAMESHELL_CONFIG_DIR isolate user dirs (tests); FRAMESHELL_SOCKET picks the daemon;
 // FRAMESHELL_PREVIEW_PROBE=1 exposes preview measurement hooks (ADR 0001 harness) and keeps hidden windows at full rate.
+// FRAMESHELL_SHOOT_STAND_IN=1 offers one stand-in screen to the Shoot view that captures the app's own page (e2e: real
+// screen capture needs an OS permission no test can grant).
 // Args: --project <dir> opens that folder at startup.
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type BaseWindow, BrowserWindow, Menu, clipboard, type WebContents, app, dialog, ipcMain, nativeImage, protocol, screen, shell, utilityProcess } from "electron";
+import {
+  type BaseWindow,
+  BrowserWindow,
+  Menu,
+  clipboard,
+  type WebContents,
+  app,
+  desktopCapturer,
+  dialog,
+  ipcMain,
+  nativeImage,
+  protocol,
+  screen,
+  session,
+  shell,
+  utilityProcess,
+  webContents,
+} from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
@@ -28,6 +47,10 @@ import {
   type PersonTarget,
   type ProposalChange,
   type ReviewEvent,
+  SHOOT_ROLES,
+  type ShootFinish,
+  type ShootRole,
+  type ShootSourceSpec,
   type TimelineChange,
   type TimelineEdit,
   type ProjectSetup,
@@ -68,7 +91,19 @@ import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
 import { PANEL_WINDOW_MIN, PanelWindowStore, cascade, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
-import { terminalToolPaths } from "./terminal-tools.js";
+import { projectBinaries, terminalToolPaths } from "./terminal-tools.js";
+import { contentProtectionSupport, screenSources, systemAudioSupport } from "./shoot-capture.js";
+import {
+  ChunkWriter,
+  type SessionState,
+  beginSession,
+  ffmpegRemux,
+  finishSession,
+  isSessionId,
+  markStarted,
+  recoverable,
+  unfinishedSessions,
+} from "./shoot-session.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { UiBridge } from "./ui-bridge.js";
@@ -151,12 +186,13 @@ const PLACEMENT_SAVE_MS = 400;
 // must keep pointing at the installed app.
 const binDir = join(app.getPath("userData"), app.isPackaged ? "bin" : "bin-dev");
 const cliShim = join(binDir, process.platform === "win32" ? "frameshell.cmd" : "frameshell");
-/** Same dirs as the daemon (spawned with this env): terminals see the binaries it runs. Locates only, never installs. */
+/** Same dirs as the daemon (spawned with this env): terminals see the binaries it runs. Installs only ffmpeg, for shoot remuxes. */
 const binaries = new BinaryManager(resolveAppDirs(process.env));
 const recentFile = join(app.getPath("userData"), "recent.json");
 const MAX_RECENT = 10;
 /** Preview measurement mode: the renderer gets `?probe=1`. */
 const PREVIEW_PROBE = process.env["FRAMESHELL_PREVIEW_PROBE"] === "1";
+const SHOOT_STAND_IN = process.env["FRAMESHELL_SHOOT_STAND_IN"] === "1";
 if (PREVIEW_PROBE) {
   // Real-time measurements: timers, rAF and audio must not slow down when the window loses focus.
   app.commandLine.appendSwitch("disable-background-timer-throttling");
@@ -210,6 +246,12 @@ interface WindowState {
    * with it but stay detached, so they open again with the project.
    */
   closingPanels: boolean;
+  /** Shoot session recording in this window (ADR 0024), with the project it records into; null when none. */
+  shoot: { root: string; session: SessionState } | null;
+  /** Sessions of the shown project finished without an End since it opened (crash recovery), oldest first. */
+  recoveredShoots: ShootFinish[];
+  /** What the window's next `getDisplayMedia` captures (`shoot.pickScreen`); null denies it. */
+  pickedScreen: { id: string | null; systemAudio: boolean } | null;
 }
 const windows = new Map<number, WindowState>();
 /** Project window state of each detached panel window, by the panel window's webContents id. */
@@ -250,6 +292,9 @@ function createWindow(projectDir?: string): BrowserWindow {
     startDir: projectDir,
     offered: null,
     closingPanels: false,
+    shoot: null,
+    recoveredShoots: [],
+    pickedScreen: null,
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -278,12 +323,17 @@ function createWindow(projectDir?: string): BrowserWindow {
   contents.on("will-navigate", (event) => event.preventDefault());
   // A reload drops the documents the panel windows show: close them, still detached, and the new page opens them again.
   contents.on("did-start-navigation", ({ isMainFrame, isSameDocument }) => {
-    if (isMainFrame && !isSameDocument) closePanelWindows(state);
+    if (isMainFrame && !isSameDocument) {
+      closePanelWindows(state);
+      abandonShoot(state);
+    }
   });
+  contents.on("render-process-gone", () => abandonShoot(state));
   contents.on("did-finish-load", () => (state.closingPanels = false));
   window.once("ready-to-show", () => window.show());
   window.on("close", () => closePanelWindows(state));
   window.on("closed", () => {
+    abandonShoot(state);
     const exiting = state.terminals.killAll();
     exitingShells.add(exiting);
     void exiting.then(() => exitingShells.delete(exiting));
@@ -337,6 +387,7 @@ function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: Bro
   panelOwners.set(childId, state);
   void panelWindows.setDetached(panel, true);
   if (panelWindows.placement(panel, screen.getAllDisplays())?.fullScreen) child.setFullScreen(true);
+  if (state.shoot) child.setContentProtection(true);
   child.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -452,7 +503,9 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   if (state.project) mediaRoots.revoke(state.project.mediaUrl);
   revokeLive(state);
   state.project = project;
+  state.recoveredShoots = [];
   state.window.setTitle(`${project.name} — Frameshell`);
+  void recoverShoots(state, project.dir);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
   await rememberRecent(project.dir);
@@ -900,6 +953,164 @@ function registerPeopleIpc(): void {
   );
 }
 
+/** Appends recorded chunks of every window's shoot session. */
+const shootChunks = new ChunkWriter();
+/** Sessions recording now, `<project root>\0<id>`: crash recovery leaves them alone. */
+const activeShoots = new Set<string>();
+
+/** {@link finishSession}'s app side for the project rooted at `root`. */
+function shootDeps(root: string) {
+  return {
+    request: daemon.request.bind(daemon) as DaemonLink["request"],
+    alone: <T>(work: () => Promise<T>) => editor.alone(work),
+    remux: ffmpegRemux(async () => binaries.ensure("ffmpeg", { dir: root, binaries: await projectBinaries(root) })),
+  };
+}
+
+/** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+function protectShoot(state: WindowState, on: boolean): void {
+  for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
+}
+
+/** The window's recording ended without an End (reload, crash, close): finish it as a crash recovery would. */
+function abandonShoot(state: WindowState): void {
+  const shoot = state.shoot;
+  if (!shoot) return;
+  state.shoot = null;
+  protectShoot(state, false);
+  void shootChunks
+    .flushed()
+    .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
+    .then((finish) => {
+      if (state.project?.dir !== shoot.root) return;
+      state.recoveredShoots.push(finish);
+      send(state.window.webContents, Channel.shootRecoveredChanged, finish);
+    })
+    .catch(() => undefined) // The state file stays: the next open retries.
+    .finally(() => activeShoots.delete(`${shoot.root}\0${shoot.session.id}`));
+}
+
+/** Finish the project's sessions a crash left unfinished (ADR 0024 decision 3), one at a time; failures retry next open. */
+async function recoverShoots(state: WindowState, root: string): Promise<void> {
+  for (const id of await unfinishedSessions(root)) {
+    const key = `${root}\0${id}`;
+    if (activeShoots.has(key) || !(await recoverable(root, id))) continue;
+    activeShoots.add(key);
+    try {
+      const finish = await finishSession(root, id, true, shootDeps(root));
+      if (state.project?.dir !== root) continue;
+      state.recoveredShoots.push(finish);
+      send(state.window.webContents, Channel.shootRecoveredChanged, finish);
+    } catch {
+      // Daemon unreachable or a file locked: the state file stays for the next open.
+    } finally {
+      activeShoots.delete(key);
+    }
+  }
+}
+
+/** The window's recording session `id`; throws for any other id, so the renderer can only write its own files. */
+function shootOf(state: WindowState, id: unknown): { root: string; session: SessionState } {
+  if (!isSessionId(id) || state.shoot?.session.id !== id) throw new Error("No such shoot session is recording in this window.");
+  return state.shoot;
+}
+
+/**
+ * `getDisplayMedia` of a project window: only what its Shoot view picked just before (`shoot.pickScreen`), else
+ * refused. The stand-in captures the asking page itself.
+ */
+async function answerDisplayMedia(
+  request: Electron.DisplayMediaRequestHandlerHandlerRequest,
+  callback: (streams: Electron.Streams) => void,
+): Promise<void> {
+  const contents = request.frame ? webContents.fromFrame(request.frame) : undefined;
+  const state = contents ? (windows.get(contents.id) ?? panelOwners.get(contents.id)) : undefined;
+  const pick = state?.pickedScreen ?? null;
+  if (state) state.pickedScreen = null;
+  if (!pick || !request.frame) return callback({});
+  if (SHOOT_STAND_IN) return callback({ video: request.frame });
+  try {
+    const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+    const source = pick.id ? sources.find((candidate) => candidate.id === pick.id) : sources.find((candidate) => candidate.id.startsWith("screen:"));
+    if (!source) return callback({});
+    callback(pick.systemAudio ? { video: source, audio: "loopback" } : { video: source });
+  } catch {
+    callback({});
+  }
+}
+
+/** The Shoot view's calls (ADR 0024): sources, session files appended here, the group made through the daemon. */
+function registerShootIpc(): void {
+  ipcMain.handle(Channel.shootSupport, () =>
+    outcome(async () => ({
+      systemAudio: systemAudioSupport(process.platform, process.getSystemVersion()),
+      contentProtection: contentProtectionSupport(process.platform),
+    })),
+  );
+  ipcMain.handle(Channel.shootScreens, () =>
+    outcome(async () => {
+      if (SHOOT_STAND_IN) return [{ id: "stand-in", name: "Stand-in screen", kind: "screen" as const, thumbnail: "" }];
+      const own = new Set(BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId()));
+      const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 320, height: 180 } });
+      return screenSources(sources, own);
+    }),
+  );
+  ipcMain.handle(Channel.shootPickScreen, (event, id: unknown, systemAudio: unknown) =>
+    outcome(async () => {
+      stateOf(event.sender).pickedScreen = { id: typeof id === "string" ? id : null, systemAudio: systemAudio === true };
+    }),
+  );
+  ipcMain.handle(Channel.shootBegin, (event, sources: ShootSourceSpec[]) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      if (state.shoot) throw new Error("A shoot is already recording in this window.");
+      const specs = (Array.isArray(sources) ? sources : []).flatMap((spec) =>
+        SHOOT_ROLES.includes(spec?.role) && typeof spec.mime === "string" && typeof spec.label === "string"
+          ? [{ role: spec.role, mime: spec.mime, label: spec.label.slice(0, 120) || spec.role }]
+          : [],
+      );
+      const created = await beginSession(project.dir, specs);
+      state.shoot = { root: project.dir, session: created };
+      activeShoots.add(`${project.dir}\0${created.id}`);
+      protectShoot(state, true);
+      return created.id;
+    }),
+  );
+  ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
+    outcome(async () => {
+      const shoot = shootOf(stateOf(event.sender), id);
+      await markStarted(shoot.root, shoot.session.id, starts ?? {});
+      for (const source of shoot.session.sources) {
+        const start = starts?.[source.role];
+        if (typeof start === "number" && Number.isFinite(start)) source.start = start;
+      }
+    }),
+  );
+  ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
+    outcome(async () => {
+      const shoot = shootOf(stateOf(event.sender), id);
+      if (!(data instanceof Uint8Array)) throw new Error("A chunk is bytes.");
+      await shootChunks.append(shoot.root, shoot.session, role, data);
+    }),
+  );
+  ipcMain.handle(Channel.shootEnd, (event, id: unknown) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
+      state.shoot = null;
+      protectShoot(state, false);
+      try {
+        await shootChunks.flushed();
+        return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
+      } finally {
+        activeShoots.delete(`${shoot.root}\0${shoot.session.id}`);
+      }
+    }),
+  );
+  ipcMain.handle(Channel.shootRecovered, (event) => outcome(async () => [...stateOf(event.sender).recoveredShoots]));
+}
+
 function registerIpc(): void {
   ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
   ipcMain.handle(Channel.agentsDetect, () => findAgents());
@@ -1138,6 +1349,7 @@ function registerIpc(): void {
     outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),
   );
   registerPeopleIpc();
+  registerShootIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
   );
@@ -1522,6 +1734,7 @@ app.whenReady().then(async () => {
   await writeCliShim(binDir, { runtime: process.execPath, cliEntry, ...(process.platform === "win32" ? {} : { socket: socketPath }) });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, mediaRoots));
   protocol.handle(LIVE_SCHEME, (request) => serveLive(request, livePages));
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => void answerDisplayMedia(request, callback));
   await panelWindows.load();
   text = strings(uiLanguage(languageChoice, app.getLocale()));
   await updater.load();

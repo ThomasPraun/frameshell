@@ -1075,8 +1075,9 @@ class Edit {
 
   /**
    * One multicam group from `args.angles` and `args.mics` (offsets already
-   * measured), its program track on top, and one `grid` shot over the cameras'
-   * whole length. A mic runs on past the cameras without extending the group.
+   * measured), its program track on top, and one shot over the cameras' whole
+   * length: `grid`, or `solo` for a single camera. A mic runs on past the
+   * cameras without extending the group.
    */
   async multicamCreate(args: OperationArgs<"multicam.create">): Promise<void> {
     const seen = new Set<string>();
@@ -1104,7 +1105,7 @@ class Edit {
       }
       const name = given.name ?? basename(given.asset).replace(/\.[^.]*$/, "");
       const offset = Math.round(given.offset * 1000) / 1000;
-      angles.push({ id: this.angleId(name, angles), name, asset: given.asset, offset });
+      angles.push({ id: this.angleId(name, angles), name, asset: given.asset, offset, ...(given.screen ? { screen: true } : {}) });
       end = Math.max(end, offset + info.duration);
     }
     const taken: { id: string }[] = [...angles, ...RESERVED_MIC_IDS.map((id) => ({ id }))];
@@ -1133,7 +1134,7 @@ class Edit {
       kind: "program",
       name: args.name ?? "Multicam",
       group: id,
-      clips: [{ id: this.newId("c"), type: "shot", start: 0, in: 0, out: last, shot: "grid", angles: angles.map((angle) => angle.id) }],
+      clips: [{ id: this.newId("c"), type: "shot", start: 0, in: 0, out: last, shot: angles.length === 1 ? "solo" : "grid", angles: angles.map((angle) => angle.id) }],
     };
     this.draft.groups = [...(this.draft.groups ?? []), group];
     this.draft.tracks.push(track);

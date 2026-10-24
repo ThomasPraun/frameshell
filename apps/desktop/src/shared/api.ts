@@ -547,6 +547,39 @@ export interface FrameshellApi {
     /** Called with the progress of a {@link people.suggest} with `download`. Returns an unsubscribe function. */
     onSuggestProgress(listener: (progress: ModelProgress) => void): () => void;
   };
+  shoot: {
+    /** What this machine can record besides cameras and mics; see {@link ShootSupport}. */
+    support(): Promise<ShootSupport>;
+    /**
+     * Screens and windows that can be recorded, with thumbnails (Frameshell's own list, never the system picker).
+     * The first call may raise the OS's screen recording permission prompt. Rejects with the OS's reason.
+     */
+    screens(): Promise<ShootScreenSource[]>;
+    /**
+     * What the window's next `getDisplayMedia` captures: screen or window `id` (null: the main screen), with system
+     * audio when `systemAudio`. Call right before it.
+     */
+    pickScreen(id: string | null, systemAudio: boolean): Promise<void>;
+    /**
+     * Start a shoot session (ADR 0024) recording `sources` (a mic among them): main makes its folder under
+     * `assets/shoot/`, keeps its state for crash recovery and keeps the project's windows out of screen captures.
+     * Resolves with the session id. Rejects when a session is already recording in this window.
+     */
+    begin(sources: ShootSourceSpec[]): Promise<string>;
+    /** Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. */
+    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<void>;
+    /** Append one recorded chunk of `role` to its file, in call order per role. */
+    chunk(id: string, role: ShootRole, data: Uint8Array): Promise<void>;
+    /**
+     * End session `id` once every recorder stopped and its chunks were handed over: final files, ingest, and one
+     * multicam group on the main timeline when something has a picture. Rejects with the daemon's message.
+     */
+    end(id: string): Promise<ShootFinish>;
+    /** Sessions of the window's project finished without an End (after a crash), oldest first, since it opened. */
+    recovered(): Promise<ShootFinish[]>;
+    /** Called with each session {@link recovered} adds. Returns an unsubscribe function. */
+    onRecovered(listener: (finish: ShootFinish) => void): () => void;
+  };
   scripts: {
     /**
      * `script.outline` of a script of the window's project (project-relative path): its scenes with the
@@ -564,6 +597,55 @@ export interface FrameshellApi {
     /** Hide the banner in every window until the app restarts. */
     dismiss(): void;
   };
+}
+
+/** What a shoot session records, one file each (ADR 0024): camera, screen or window, microphone, system audio. */
+export const SHOOT_ROLES = ["camera", "screen", "mic", "system"] as const;
+
+/** One of {@link SHOOT_ROLES}. */
+export type ShootRole = (typeof SHOOT_ROLES)[number];
+
+/** A source to record, as the Shoot view asks for it. */
+export interface ShootSourceSpec {
+  role: ShootRole;
+  /** `MediaRecorder` type it records, e.g. `video/mp4;codecs=avc1.640028`. */
+  mime: string;
+  /** Device or window name; names the angle or mic of the session's group. */
+  label: string;
+}
+
+/**
+ * System audio on this machine: `available`, or why not: `linux` (no loopback capture), `macos-old` (needs macOS
+ * 14.2 or later). Where it is missing, a loopback input device can be picked as a microphone.
+ */
+export interface ShootSupport {
+  systemAudio: "available" | "linux" | "macos-old";
+  /** Frameshell's windows can be hidden from screen captures while recording (`setContentProtection`: macOS, Windows). */
+  contentProtection: boolean;
+}
+
+/** A screen or window that can be recorded. */
+export interface ShootScreenSource {
+  id: string;
+  name: string;
+  kind: "screen" | "window";
+  /** Thumbnail as a data URL; empty when the OS gave none. */
+  thumbnail: string;
+}
+
+/** A finished shoot session. */
+export interface ShootFinish {
+  id: string;
+  /** Project-relative folder, `assets/shoot/<id>`. */
+  folder: string;
+  /** Project-relative files recorded, now being ingested. */
+  files: string[];
+  /** Multicam group made of it on the main timeline; null when nothing had a picture or the group was refused. */
+  group: string | null;
+  /** Finished on a later open: the app or the window ended while recording. */
+  recovered: boolean;
+  /** Daemon warnings and files that could not be repaired or held nothing, in English. */
+  warnings: string[];
 }
 
 /**
@@ -706,6 +788,15 @@ export const Channel = {
   peopleChanged: "people:changed",
   peopleScanJob: "people:scan-job",
   peopleSuggestProgress: "people:suggest-progress",
+  shootSupport: "shoot:support",
+  shootScreens: "shoot:screens",
+  shootPickScreen: "shoot:pick-screen",
+  shootBegin: "shoot:begin",
+  shootStarted: "shoot:started",
+  shootChunk: "shoot:chunk",
+  shootEnd: "shoot:end",
+  shootRecovered: "shoot:recovered",
+  shootRecoveredChanged: "shoot:recovered-changed",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",

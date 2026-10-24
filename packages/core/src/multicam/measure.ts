@@ -34,6 +34,8 @@ export interface MeasureRequest {
   micNames?: readonly string[] | undefined;
   /** One entry per camera: a 1-based mic index, `none` or `camera`; absent = {@link resolveSoundOf} defaults. */
   soundOf?: readonly string[] | undefined;
+  /** Known offsets, cameras then mics: nothing is matched, and one camera is enough. Absent = measured. */
+  offsets?: readonly number[] | undefined;
 }
 
 /** Output of {@link measureAngles}. */
@@ -82,7 +84,7 @@ export function resolveSoundOf(given: readonly string[] | undefined, cameras: nu
 
 /**
  * Resolve the files and measure every file's offset against all the others
- * (ADR 0016, {@link planSync}). Throws InvalidOperation naming the file and
+ * (ADR 0016, {@link planSync}), or take the known `offsets`. Throws InvalidOperation naming the file and
  * the fix when a file is outside the project, a camera has no picture, a mic
  * has no sound, a file cannot be decoded, listed twice, or no file has sound
  * at all, and AssetNotFound when it does not exist.
@@ -102,6 +104,21 @@ export async function measureAngles(source: MeasureSource, request: MeasureReque
         { op, reason: "names", field },
       );
     }
+  }
+  const known = request.offsets;
+  if (known !== undefined && known.length !== request.assets.length + mics.length) {
+    throw new RpcError(
+      ErrorCode.InvalidOperation,
+      `${op}: ${known.length} offset(s) for ${request.assets.length + mics.length} file(s); give one per file, cameras then mics.`,
+      { op, reason: "offsets", field: "offsets" },
+    );
+  }
+  if (known === undefined && request.assets.length < 2) {
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: one camera has nothing to be synced with; give two or more, or known \`offsets\`.`, {
+      op,
+      reason: "offsets",
+      field: "assets",
+    });
   }
   const soundOf = resolveSoundOf(request.soundOf, request.assets.length, mics.length);
   const assets = request.assets.map((asset) => projectPath(root, cwd, asset, "asset", op));
@@ -137,7 +154,11 @@ export async function measureAngles(source: MeasureSource, request: MeasureReque
       throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${asset} has no sound; a mic needs an audio stream.`, { op, reason: "no streams", field: "mics" });
     }
     // A silent camera has nothing to match: unsynced, it starts with the reference and gets the usual warning.
-    profiles.push(probe.audio ? await profileOf(source, root, asset) : null);
+    if (known === undefined) profiles.push(probe.audio ? await profileOf(source, root, asset) : null);
+  }
+  if (known !== undefined) {
+    const plan = known.map((offset) => ({ offset: Math.round(offset * 1000) / 1000, confidence: null, synced: true, against: null }));
+    return { assets, mics: micAssets, soundOf, plan };
   }
   if (profiles.every((profile) => profile === null)) {
     throw new RpcError(ErrorCode.InvalidOperation, `${op}: none of the files has sound, so there is nothing to sync them by.`, {

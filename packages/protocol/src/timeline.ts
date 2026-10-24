@@ -306,10 +306,13 @@ export const operationArgs = {
             .nullable()
             .optional()
             .describe("Index into `mics` of the mic that carries this angle's sound; null for no sound. Default: the angle's own file."),
+          screen: z.boolean().optional().describe("True: a screen share, not a person. Default false."),
         }),
       )
-      .min(2)
-      .describe("The synced cameras, each with a picture. The `multicam.create` method measures the offsets and passes them here."),
+      .min(1)
+      .describe(
+        "The synced cameras, each with a picture. The `multicam.create` method measures the offsets (or takes known ones) and passes them here.",
+      ),
     mics: z
       .array(
         z.strictObject({
@@ -615,7 +618,9 @@ export const AngleSyncSchema = z.object({
     .min(0)
     .max(1)
     .nullable()
-    .describe("0 (no shared sound found) to 1 (unmistakable) for the audio match with `against`; null for the reference file itself."),
+    .describe(
+      "0 (no shared sound found) to 1 (unmistakable) for the audio match with `against`; null for the reference file itself and with known `offsets`.",
+    ),
   against: z.string().nullable().describe("Id of the already placed file this one was matched with (the best match of all); null for the reference or when nothing matched."),
   synced: z
     .boolean()
@@ -629,7 +634,7 @@ export const AngleSyncSchema = z.object({
 export const MulticamCreateResultSchema = OperationResultSchema.extend({
   group: z.string().describe("Id of the new group."),
   track: z.string().describe("Id of the new program track."),
-  clip: z.string().describe("Id of the initial `grid` shot, which covers the whole group."),
+  clip: z.string().describe("Id of the initial shot (`grid`, `solo` for one camera), which covers the whole group."),
   sync: z.array(AngleSyncSchema).describe("One entry per file: the cameras in the order given, then the mics."),
 });
 

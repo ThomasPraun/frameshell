@@ -1,0 +1,30 @@
+# Acceptance: recording a shoot in the app (ADR 0024)
+
+> I open Rodaje, pick my camera, mic and the Zoom window, and turn on system audio: all four meters and previews move. I press Start, talk for a few minutes while the call plays, and press End. The timeline gets one multicam group: the camera and the call window as angles (the window marked as a screen), my mic and the call's audio as mics, all in sync.
+
+This first part covers the recorder only (#390): sources, levels, the continuous session, crash recovery and signing. Takes, the teleprompter and live recognition come with #391 to #393 and extend this doc. The e2e test (`apps/desktop/e2e/shoot.spec.ts`) covers the same flow with Chromium's fake camera and microphone and a stand-in screen; the steps below need real devices and macOS permissions, which no test can grant.
+
+Manual run by the owner with real devices, in the **packaged, signed** app (step 7) and in the built app (`pnpm --filter @frameshell/desktop build && pnpm --filter @frameshell/desktop start`). About 30 minutes. Note each friction as an issue; write results to `docs/research/shoot-acceptance-run.md` (date, version, machine, macOS version, numbers asked for below).
+
+## Material
+
+- A Mac on macOS 14.2 or later with a camera and a microphone (built-in is fine), a second app that plays sound (a browser with a video, or a Zoom or Meet test call).
+- A fresh project. Camera, Microphone, Screen & System Audio Recording permissions not yet granted to Frameshell (System Settings > Privacy & Security), so the prompts are seen.
+- Optional: a clapper or a hand clap in front of the camera, for the sync check.
+
+## Steps
+
+1. **Sources.** Open the Shoot view (Spanish UI: Rodaje). Click "Allow camera and microphone": macOS asks for camera and microphone with Frameshell's own wording. Check: the cameras and microphones are listed by name; the default mic is picked and its meter moves when you speak; picking the camera shows its picture.
+2. **Screens and windows.** Click "Choose screen or window…": macOS asks for Screen Recording the first time. Check: screens come first, then windows, with thumbnails; no Frameshell window is in the list; the system picker never shows. Pick the browser or call window: its preview moves. Pick a whole Retina screen once and check in step 5 that `screen.mp4` is at most 1440 px on its shorter side.
+3. **System audio.** Turn on System audio and play sound in the other app: its meter moves. Stop the sound for 10 s: the view warns that system audio is silent. Record which permission macOS asked for (System Audio Recording only, or also Screen Recording).
+4. **Record.** Press Start shoot. Check: the time counts; the sources are locked; Frameshell's preview plays no sound if you press play; the camera light is on. In the other app, take a screenshot or a screen recording of the screen with Frameshell on it: Frameshell's windows are hidden (black or missing). If they still show (ScreenCaptureKit), note it. Switch the sidebar to another view and back, and move the Shoot view to its own window: the recording goes on. Clap once in front of the camera. Talk for 2 to 3 minutes.
+5. **End.** Press End shoot. Check: "Saved 4 files to assets/shoot/<id>." and the multicam group note. In Finder, `assets/shoot/<id>/` holds `camera.mp4`, `screen.mp4`, `mic.m4a`, `system.m4a` (or `.webm` where MP4 was not offered: note which), no `.part` file; `.frameshell/shoot/sessions/` is empty. The files ingest like imports (status bar jobs). On the timeline: one program track `Shoot <id>`; the Angles view shows camera and window; `timeline.show` (or the file) has the window angle with `screen: true` and both mics. Play across the clap: picture and sound agree (note the offset you see, by eye, in frames).
+6. **Crash.** Start a second session, record 30 s, then force-quit Frameshell (Activity Monitor > Force Quit, or `kill -9` of the main process). Open the project again and open the Shoot view. Check: "Recovered a shoot that was interrupted: assets/shoot/<id>."; a second group on the timeline; the files play to within about 3 s of the kill (MP4 loses at most one fragment). Also try reloading the window (View > Reload) while recording: the session is finished at once as a recovered one.
+7. **Signed build.** In the packaged, signed app (`docs/release.md`): steps 1 to 3 work (the hardened runtime needs `device.camera` and `device.audio-input`, and the usage strings). Check the prompt texts are Frameshell's.
+8. **Spanish.** Switch View > Language to Español: the view reads Rodaje, every label is Spanish.
+
+## Other platforms (not run yet)
+
+- macOS 13 to 14.1: System audio is off with a reason; a loopback device (BlackHole) picked as the microphone records the call's sound.
+- Windows: `audio: 'loopback'` follows the Electron docs; untested.
+- Linux: System audio is off with a reason; a PulseAudio/PipeWire "Monitor of …" input picked as the microphone.

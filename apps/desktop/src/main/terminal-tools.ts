@@ -33,7 +33,7 @@ export async function terminalToolPaths(locator: ToolLocator, projectDir: string
 }
 
 /** `binaries` of `frameshell.json` when it is a string map; otherwise none (the daemon validates the file). */
-async function projectBinaries(projectDir: string): Promise<Record<string, string> | undefined> {
+export async function projectBinaries(projectDir: string): Promise<Record<string, string> | undefined> {
   try {
     const { binaries } = JSON.parse(await readFile(join(projectDir, "frameshell.json"), "utf8")) as { binaries?: unknown };
     if (typeof binaries !== "object" || binaries === null || Array.isArray(binaries)) return undefined;

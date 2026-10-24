@@ -33,6 +33,7 @@ const en = {
   plugins: "Plugins",
   angles: "Angles",
   people: "People",
+  shoot: "Shoot",
   sidebarViews: "Sidebar views",
   inOwnWindow: (view: string) => `${view}, in its own window`,
   noPlugins:
@@ -96,6 +97,7 @@ const es: typeof en = {
   plugins: "Plugins",
   angles: "Ángulos",
   people: "Personas",
+  shoot: "Rodaje",
   sidebarViews: "Vistas de la barra lateral",
   inOwnWindow: (view) => `${view}, en su propia ventana`,
   noPlugins:

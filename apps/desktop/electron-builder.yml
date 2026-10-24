@@ -40,6 +40,11 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Shown by macOS when the Shoot view first records (ADR 0024); without them a signed build gets no camera, mic or system audio.
+  extendInfo:
+    NSCameraUsageDescription: Frameshell records your camera when you start a shoot.
+    NSMicrophoneUsageDescription: Frameshell records your microphone when you start a shoot.
+    NSAudioCaptureUsageDescription: Frameshell records system audio, such as a call, when you turn it on for a shoot.
   # Open with Frameshell for videos, audio and images (#184, ADR 0015, 0017). Alternate rank: listed in Finder's Open with, never the
   # default player or viewer.
   fileAssociations:

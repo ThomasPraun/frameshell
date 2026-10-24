@@ -115,6 +115,14 @@ describe("multicam.create", () => {
     const missing = await rejection(applyOperation(BASE(), create([{ asset: "assets/ana.mp4", offset: 0 }, { asset: "assets/nope.mp4", offset: 0 }]), context()));
     expect(missing.code).toBe(ErrorCode.AssetNotFound);
   });
+
+  it("makes a solo shot for a single camera and keeps the screen mark of an angle", async () => {
+    const angles = [{ asset: "assets/ben.mp4", name: "Screen", offset: 0.5, screen: true }];
+    const applied = await applyOperation(BASE(), { op: "multicam.create", args: { angles } } as OperationRequest, context());
+    expect(applied.timeline.groups![0]!.angles).toEqual([{ id: "screen", name: "Screen", asset: "assets/ben.mp4", offset: 0.5, screen: true }]);
+    const program = applied.timeline.tracks.find((track) => track.kind === "program") as ProgramTrack;
+    expect(program.clips).toEqual([expect.objectContaining({ shot: "solo", angles: ["screen"], out: 18.5 })]);
+  });
 });
 
 describe("multicam.offset", () => {

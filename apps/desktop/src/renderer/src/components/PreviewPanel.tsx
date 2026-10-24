@@ -31,6 +31,7 @@ import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
 import { rich, t } from "../i18n.js";
+import { useShootRecording } from "../shoot/recorder.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
@@ -135,6 +136,9 @@ export function PreviewPanel({
       player.current = null;
     };
   }, [project.mediaUrl]);
+
+  const shooting = useShootRecording();
+  useEffect(() => player.current?.setMuted(shooting), [shooting, project.mediaUrl]);
 
   useEffect(() => {
     if (!program) return;

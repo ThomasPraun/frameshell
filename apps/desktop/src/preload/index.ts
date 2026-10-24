@@ -143,6 +143,17 @@ const api: FrameshellApi = {
     onScan: (listener) => subscribe(Channel.peopleScanJob, listener),
     onSuggestProgress: (listener) => subscribe(Channel.peopleSuggestProgress, listener),
   },
+  shoot: {
+    support: () => invokeOutcome(Channel.shootSupport),
+    screens: () => invokeOutcome(Channel.shootScreens),
+    pickScreen: (id, systemAudio) => invokeOutcome(Channel.shootPickScreen, id, systemAudio),
+    begin: (sources) => invokeOutcome(Channel.shootBegin, sources),
+    started: (id, starts) => invokeOutcome(Channel.shootStarted, id, starts),
+    chunk: (id, role, data) => invokeOutcome(Channel.shootChunk, id, role, data),
+    end: (id) => invokeOutcome(Channel.shootEnd, id),
+    recovered: () => invokeOutcome(Channel.shootRecovered),
+    onRecovered: (listener) => subscribe(Channel.shootRecoveredChanged, listener),
+  },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),
   },

@@ -45,6 +45,9 @@ export class PreviewPlayer implements TransportPlayer {
   readonly #events: PlayerEvents;
   #program: Program | null = null;
   #context: AudioContext | null = null;
+  /** Program output gain; zero while {@link setMuted}, so the audio clock keeps running. */
+  #output: GainNode | null = null;
+  #muted = false;
   readonly #audioReady: Promise<void>;
   #anchor: Anchor | null = null;
   #clock: Clock | null = null;
@@ -162,6 +165,12 @@ export class PreviewPlayer implements TransportPlayer {
     this.#send({ type: "seek", frame: this.#frameOf(time) });
   }
 
+  /** Silence the program output (a shoot records, ADR 0024 decision 7) or give it back. Playback and its clock go on. */
+  setMuted(muted: boolean): void {
+    this.#muted = muted;
+    if (this.#output) this.#output.gain.value = muted ? 0 : 1;
+  }
+
   dispose(): void {
     this.#disposed = true;
     this.#playToken++;
@@ -244,6 +253,8 @@ export class PreviewPlayer implements TransportPlayer {
       outputChannelCount: [1],
     });
     const output = context.createGain();
+    output.gain.value = this.#muted ? 0 : 1;
+    this.#output = output;
     node.connect(output);
     if (this.#probe) await this.#probe.insert(context, output);
     else output.connect(context.destination);
