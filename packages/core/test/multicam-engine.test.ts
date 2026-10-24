@@ -190,11 +190,10 @@ describe("shot edits", () => {
     expect(transform.message).toMatch(/shots take no `transform`/);
   });
 
-  it("refuses clip.add on a program track as not supported yet, and shot clips elsewhere", async () => {
+  it("takes only shots on a program track with clip.add, and shot clips nowhere else", async () => {
     const error = await rejection(apply(base(), "clip.add", { track: "t_p", asset: "assets/talk.mp4" }));
-    expect(error.code).toBe(ErrorCode.Unsupported);
-    expect(error.data).toMatchObject({ op: "clip.add", feature: "shot.add" });
-    expect(error.message).toMatch(/not supported yet/);
+    expect(error.code).toBe(ErrorCode.InvalidOperation);
+    expect(error.message).toMatch(/holds shots only/);
     const typed = await rejection(apply(base(), "clip.add", { track: "t_a", type: "shot", duration: 1 }));
     expect(typed.code).toBe(ErrorCode.InvalidOperation);
     expect(typed.message).toMatch(/shot clips belong on a program track/);

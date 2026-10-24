@@ -25,6 +25,7 @@ import { type GcClass, sweep } from "../gc.js";
 import { locateScript } from "../scripts/outline.js";
 import { resolveAsset, transcriptPathsFor } from "../transcripts/transcriber.js";
 import { type HeardWord, type TakeComparison, compareTake } from "./compare.js";
+import { type SessionTake, TAKE_WORDS_DIR, isSessionTake, readTakeWords, takeHeard } from "./session.js";
 
 /** Cache of take comparisons, keyed by script text, transcript and people links (derived, swept by `gc`). */
 export const SHOOT_CACHE_DIR = ".frameshell/shoot";
@@ -42,6 +43,19 @@ export interface ShootServiceOptions {
   assetHash?: (root: string, rel: string) => Promise<string | null>;
   /** The timeline `id` as the caller sees it, for cue times; null when there is none. */
   timeline?: (root: string, id: string) => Promise<Timeline | null>;
+  /** True while a take recorded in the app is being transcribed (its `shoot` job is queued or running). */
+  analyzing?: (root: string, take: string) => boolean;
+}
+
+/** Where a take's heard words come from: a transcript, or a recorded take's own words. */
+interface HeardSource {
+  /** Project-relative file the words come from. */
+  rel: string;
+  /** Its text, for the comparison cache key. */
+  text: string;
+  /** The words; `whole` is the person linked to the whole transcript, if any. */
+  heard(whole: string | null): HeardWord[];
+  language: string | null;
 }
 
 type TakeInfo = ShootStatusResult["takes"][number];
@@ -72,6 +86,7 @@ export class ShootService {
   readonly #onChanged: NonNullable<ShootServiceOptions["onChanged"]>;
   readonly #assetHash: NonNullable<ShootServiceOptions["assetHash"]>;
   readonly #timeline: NonNullable<ShootServiceOptions["timeline"]>;
+  readonly #analyzing: NonNullable<ShootServiceOptions["analyzing"]>;
   /** Last change of each project in flight, by canonical root: the next one waits for it. */
   readonly #tails = new Map<string, Promise<unknown>>();
 
@@ -79,6 +94,7 @@ export class ShootService {
     this.#onChanged = options.onChanged ?? (() => {});
     this.#assetHash = options.assetHash ?? (async () => null);
     this.#timeline = options.timeline ?? (async () => null);
+    this.#analyzing = options.analyzing ?? (() => false);
   }
 
   /** `shoot.status`. Throws `ScriptNotFound`, `OutsideProject` or `InvalidProjectFile`. */
@@ -92,7 +108,9 @@ export class ShootService {
     const takes: TakeInfo[] = [];
     for (const take of file.takes) {
       if (!sceneSlugs.has(take.scene)) warnings.push(`Take ${take.id} starts at scene "${take.scene}", which the script no longer has.`);
-      if (!(await isFile(join(root, ...take.asset.split("/"))))) warnings.push(`Take ${take.id}: ${take.asset} does not exist.`);
+      const abs = join(root, ...take.asset.split("/"));
+      // A take of a session still recording reads the file being written.
+      if (!(await isFile(abs)) && !(take.session && (await isFile(`${abs}.part`)))) warnings.push(`Take ${take.id}: ${take.asset} does not exist.`);
       const analysis = await this.#analyze(root, loaded, take);
       const comparison = analysis.comparison;
       takes.push({
@@ -103,6 +121,7 @@ export class ShootService {
         discarded: take.discarded === true,
         by: take.by ?? null,
         transcript: analysis.transcript,
+        session: take.session ? { id: take.session.id, start: take.session.start, end: take.session.end, group: take.session.group ?? null } : null,
         state: analysis.state,
         problem: analysis.problem,
         scenes: comparison?.scenes ?? [],
@@ -242,6 +261,61 @@ export class ShootService {
     });
   }
 
+  /**
+   * `shoot.session.cut`: add a take that is a range of a session recording in the app. Throws like {@link add}, and
+   * `InvalidOperation` for a sound file outside `assets/`.
+   */
+  async cut(
+    root: string,
+    cwd: string,
+    params: { script: string; scene: string; session: SessionTake["session"]; recordedAt?: string | undefined; by: string },
+  ): Promise<{ file: string; script: string; take: SessionTake }> {
+    return this.#change(root, async () => {
+      const loaded = await this.#load(root, cwd, params.script);
+      if (!loaded.parsed.scenes.some((scene) => scene.slug === params.scene)) {
+        throw invalid("shoot.session.cut", "unknown scene", `No scene "${params.scene}" in ${loaded.script}; scenes: ${loaded.parsed.scenes.map((s) => s.slug).join(", ")}.`);
+      }
+      const outside = params.session.sounds.find((sound) => !/^assets\/(?!.*(^|\/)\.\.(\/|$))/.test(sound.asset));
+      if (outside) throw invalid("shoot.session.cut", "outside assets", `${outside.asset} is not a file under assets/.`);
+      const take: SessionTake = {
+        id: newTakeId(loaded.file),
+        asset: params.session.sounds[0]!.asset,
+        scene: params.scene,
+        recordedAt: params.recordedAt ?? new Date().toISOString(),
+        by: params.by,
+        session: params.session,
+      };
+      await this.#write(root, loaded, { ...loaded.file, takes: [...loaded.file.takes, take] }, "add", take.id);
+      return { file: loaded.fileRel, script: loaded.script, take };
+    });
+  }
+
+  /** The parsed shoot script `script` (project-relative). Throws `ScriptNotFound`. */
+  async script(root: string, script: string): Promise<ShootScript> {
+    return (await this.#load(root, root, script)).parsed;
+  }
+
+  /** The takes of session `session` in the shoot file of `script`, in recorded order. */
+  async sessionTakes(root: string, cwd: string, script: string, session: string): Promise<SessionTake[]> {
+    const loaded = await this.#load(root, cwd, script);
+    return loaded.file.takes.filter((take): take is SessionTake => isSessionTake(take) && take.session.id === session);
+  }
+
+  /** Name `group` as the multicam group of session `session` on each of its takes (`shoot.changed` `ended`). */
+  async endSession(root: string, cwd: string, params: { script: string; session: string; group: string | null }): Promise<void> {
+    await this.#change(root, async () => {
+      const loaded = await this.#load(root, cwd, params.script);
+      let changed = false;
+      const takes = loaded.file.takes.map((take) => {
+        if (!isSessionTake(take) || take.session.id !== params.session) return take;
+        changed = true;
+        const { group: _group, ...session } = take.session;
+        return { ...take, session: params.group ? { ...session, group: params.group } : session };
+      });
+      if (changed) await this.#write(root, loaded, { ...loaded.file, takes }, "ended", undefined);
+    });
+  }
+
   /** Delete (or list) cached comparisons no take of any shoot file uses now. */
   async gc(root: string, options: { dryRun: boolean; temps: boolean }): Promise<GcEntry[]> {
     const keys = new Set<string>();
@@ -254,8 +328,8 @@ export class ShootService {
         const { text } = await locateScript(root, root, parsed.value.script);
         const loaded: Loaded = { script: parsed.value.script, text, parsed: parseShootScript(text), fileRel: `${SHOOTS_DIR}/${name}`, file: parsed.value };
         for (const take of parsed.value.takes) {
-          const source = await this.#source(root, take);
-          if (source.transcript) keys.add(await cacheKey(root, loaded, source.transcript));
+          const { source } = await this.#source(root, take);
+          if (source) keys.add(await cacheKey(root, loaded, source));
         }
       } catch {
         // A shoot file or script that cannot be read now may be fixed later: keep every comparison.
@@ -289,9 +363,60 @@ export class ShootService {
     this.#onChanged(root, loaded.script, change, take);
   }
 
+  /** Where the take's words come from, or why there are none. */
+  async #source(root: string, take: ShootTake): Promise<{ source: HeardSource | null; state: TakeInfo["state"]; problem: string | null }> {
+    if (isSessionTake(take)) return this.#sessionSource(root, take);
+    const found = await this.#transcriptOf(root, take.asset);
+    if (!found.transcript) return { source: null, state: found.state, problem: found.problem };
+    const { rel, text, value } = found.transcript;
+    return { source: { rel, text, heard: (whole) => heardWords(value, whole), language: value.language ?? null }, state: "analyzed", problem: null };
+  }
+
+  /**
+   * A take of a session: once the session ended and every sound file has its transcript, the transcripts' words in
+   * the take's range (so their text edits count); before that, the take's own words from its Cut.
+   */
+  async #sessionSource(root: string, take: SessionTake): Promise<{ source: HeardSource | null; state: TakeInfo["state"]; problem: string | null }> {
+    const { session } = take;
+    if (session.group !== undefined) {
+      const found = [];
+      for (const sound of session.sounds) found.push({ sound, transcript: (await this.#transcriptOf(root, sound.asset)).transcript });
+      if (found.every((entry) => entry.transcript !== null)) {
+        const parts = found as { sound: (typeof found)[number]["sound"]; transcript: NonNullable<(typeof found)[number]["transcript"]> }[];
+        return {
+          source: {
+            rel: parts[0]!.transcript.rel,
+            text: `${session.start}\0${session.end}\0${parts.map((part) => part.transcript.text).join("\0")}`,
+            heard: (whole) =>
+              parts
+                .flatMap(({ sound, transcript }) =>
+                  heardWords(transcript.value, whole).map((word) => ({ ...word, start: round3(word.start + sound.offset), end: round3(word.end + sound.offset) })),
+                )
+                .filter((word) => (word.start + word.end) / 2 >= session.start && (word.start + word.end) / 2 <= session.end)
+                .sort((a, b) => a.start - b.start),
+            language: parts[0]!.transcript.value.language ?? null,
+          },
+          state: "analyzed",
+          problem: null,
+        };
+      }
+    }
+    const own = await readTakeWords(root, take.id);
+    if (own) {
+      const words = own.value;
+      return { source: { rel: `${TAKE_WORDS_DIR}/${take.id}.json`, text: own.text, heard: () => takeHeard(words), language: words.sounds[0]?.language ?? null }, state: "analyzed", problem: null };
+    }
+    if (this.#analyzing(root, take.id)) return { source: null, state: "transcribing", problem: `Take ${take.id} is being transcribed.` };
+    return {
+      source: null,
+      state: "no-transcript",
+      problem: `Take ${take.id} was not transcribed; once its session has ended, run \`frameshell transcribe ${take.asset}\`.`,
+    };
+  }
+
   /** The asset's transcript, or why there is none. */
-  async #source(root: string, take: ShootTake): Promise<{ transcript: { rel: string; text: string; value: Transcript } | null; state: TakeInfo["state"]; problem: string | null }> {
-    for (const rel of new Set(transcriptPathsFor(take.asset))) {
+  async #transcriptOf(root: string, asset: string): Promise<{ transcript: { rel: string; text: string; value: Transcript } | null; state: TakeInfo["state"]; problem: string | null }> {
+    for (const rel of new Set(transcriptPathsFor(asset))) {
       let text: string;
       try {
         text = await readFile(join(root, ...rel.split("/")), "utf8");
@@ -305,28 +430,28 @@ export class ShootService {
         parsed = { ok: false as const, error: (error as Error).message };
       }
       if (!parsed.ok) return { transcript: null, state: "unreadable", problem: `${rel} is not a valid transcript: ${parsed.error.split("\n")[0]}` };
-      if (parsed.value.asset !== take.asset) continue;
-      const hash = await this.#assetHash(root, take.asset);
+      if (parsed.value.asset !== asset) continue;
+      const hash = await this.#assetHash(root, asset);
       if (hash !== null && hash !== parsed.value.assetHash) {
-        return { transcript: null, state: "stale-transcript", problem: `${take.asset} changed since ${rel} was written; run \`frameshell transcribe ${take.asset}\` again.` };
+        return { transcript: null, state: "stale-transcript", problem: `${asset} changed since ${rel} was written; run \`frameshell transcribe ${asset}\` again.` };
       }
       return { transcript: { rel, text, value: parsed.value }, state: "analyzed", problem: null };
     }
-    return { transcript: null, state: "no-transcript", problem: `${take.asset} has no transcript; run \`frameshell transcribe ${take.asset}\` (add \`--speakers\` when several people speak).` };
+    return { transcript: null, state: "no-transcript", problem: `${asset} has no transcript; run \`frameshell transcribe ${asset}\` (add \`--speakers\` when several people speak).` };
   }
 
   async #analyze(root: string, loaded: Loaded, take: ShootTake): Promise<Analysis> {
-    const source = await this.#source(root, take);
-    if (!source.transcript) return { transcript: null, state: source.state, problem: source.problem, comparison: null };
-    const key = await cacheKey(root, loaded, source.transcript);
+    const { source, state, problem } = await this.#source(root, take);
+    if (!source) return { transcript: null, state, problem, comparison: null };
+    const key = await cacheKey(root, loaded, source);
     const cachePath = join(root, ...SHOOT_CACHE_DIR.split("/"), `${key}.json`);
     const cached = (await readJsonIfExists(cachePath).catch(() => undefined)) as TakeComparison | undefined;
-    if (cached !== undefined) return { transcript: source.transcript.rel, state: "analyzed", problem: null, comparison: cached };
-    const heard = heardWords(source.transcript.value, await wholeTranscriptPerson(root, source.transcript.rel));
-    const comparison = compareTake(loaded.parsed, heard, source.transcript.value.language ?? null);
+    if (cached !== undefined) return { transcript: source.rel, state: "analyzed", problem: null, comparison: cached };
+    const heard = source.heard(await wholeTranscriptPerson(root, source.rel));
+    const comparison = compareTake(loaded.parsed, heard, source.language);
     await writeJsonAtomic(cachePath, comparison);
     this.#onChanged(root, loaded.script, "analyzed", take.id);
-    return { transcript: source.transcript.rel, state: "analyzed", problem: null, comparison };
+    return { transcript: source.rel, state: "analyzed", problem: null, comparison };
   }
 
   async #change<T>(root: string, work: () => Promise<T>): Promise<T> {
@@ -434,6 +559,10 @@ function newTakeId(file: ShootFile): string {
     const id = `k_${randomBytes(3).toString("hex")}`;
     if (!file.takes.some((take) => take.id === id)) return id;
   }
+}
+
+function round3(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
 }
 
 function invalid(op: string, reason: string, message: string): RpcError {

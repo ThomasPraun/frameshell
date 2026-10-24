@@ -46,6 +46,7 @@ import {
   type PeopleChange,
   type PersonTarget,
   type ProposalChange,
+  type ShootChange,
   type ReviewEvent,
   SHOOT_ROLES,
   type ShootFinish,
@@ -100,8 +101,10 @@ import {
   ffmpegRemux,
   finishSession,
   isSessionId,
+  markScript,
   markStarted,
   recoverable,
+  sessionSounds,
   unfinishedSessions,
 } from "./shoot-session.js";
 import { TimelineEditor } from "./timeline-editor.js";
@@ -492,6 +495,11 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
         send(contents, Channel.clipsJob, null);
         send(contents, Channel.peopleScanJob, null);
       },
+    }),
+    // Shoot (ADR 0023): the Shoot view follows takes, analyses and decisions by anyone.
+    daemon.subscribe("shoot.changed", project.dir, {
+      onEvent: ({ project: _project, ...change }) => send(contents, Channel.shootChanged, change satisfies ShootChange),
+      onResync: () => send(contents, Channel.shootChanged, null),
     }),
     // People (ADR 0020): the People panel follows changes by anyone, agents included.
     daemon.subscribe("people.changed", project.dir, {
@@ -1109,6 +1117,44 @@ function registerShootIpc(): void {
     }),
   );
   ipcMain.handle(Channel.shootRecovered, (event) => outcome(async () => [...stateOf(event.sender).recoveredShoots]));
+  ipcMain.handle(Channel.shootCut, (event, id: unknown, take: { script: string; scene: string; start: number; end: number; recordedAt: string }) =>
+    outcome(async () => {
+      const shoot = shootOf(stateOf(event.sender), id);
+      await markScript(shoot.root, shoot.session.id, take.script);
+      shoot.session.script = take.script;
+      const result = await daemon.request("shoot.session.cut", {
+        cwd: shoot.root,
+        script: take.script,
+        scene: take.scene,
+        session: shoot.session.id,
+        start: take.start,
+        end: take.end,
+        sounds: sessionSounds(shoot.session),
+        recordedAt: take.recordedAt,
+      });
+      return result.take.id;
+    }),
+  );
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  ipcMain.handle(Channel.shootCheck, (event, script: string) => outcome(async () => daemon.request("script.check", { cwd: await dirOf(event.sender), file: script })));
+  ipcMain.handle(Channel.shootStatus, (event, script: string) => outcome(async () => daemon.request("shoot.status", { cwd: await dirOf(event.sender), script })));
+  ipcMain.handle(Channel.shootAccept, (event, script: string, take: string, options: { deviations?: string[]; undo?: boolean }) =>
+    outcome(async () =>
+      daemon.request("shoot.accept", {
+        cwd: await dirOf(event.sender),
+        script,
+        take,
+        ...(options?.deviations ? { deviations: options.deviations } : {}),
+        undo: options?.undo === true,
+      }),
+    ),
+  );
+  ipcMain.handle(Channel.shootChoose, (event, script: string, scene: string, take: string | null) =>
+    outcome(async () => daemon.request("shoot.choose", { cwd: await dirOf(event.sender), script, scene, take })),
+  );
+  ipcMain.handle(Channel.shootAssemble, (event, script: string) =>
+    outcome(async () => editor.alone(async () => daemon.request("shoot.assemble", { cwd: await dirOf(event.sender), script }))),
+  );
 }
 
 function registerIpc(): void {
@@ -1352,9 +1398,6 @@ function registerIpc(): void {
   registerShootIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
-  );
-  ipcMain.handle(Channel.shootStatus, (event, script: string) =>
-    outcome(async () => daemon.request("shoot.status", { cwd: (await requireProject(stateOf(event.sender))).project.dir, script })),
   );
   ipcMain.handle(Channel.clipsLive, (event, timeline: string, clip: string) =>
     outcome(async (): Promise<LiveClipPage> => {

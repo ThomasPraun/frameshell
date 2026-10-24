@@ -123,6 +123,25 @@ describe("multicam.create", () => {
     const program = applied.timeline.tracks.find((track) => track.kind === "program") as ProgramTrack;
     expect(program.clips).toEqual([expect.objectContaining({ shot: "solo", angles: ["screen"], out: 18.5 })]);
   });
+
+  it("adds shots to a program track with clip.add: pip for a screen and a camera by default, take and scriptRef kept", async () => {
+    const angles = [
+      { asset: "assets/ana.mp4", name: "Camera", offset: 0 },
+      { asset: "assets/ben.mp4", name: "Screen", offset: 0, screen: true },
+    ];
+    const created = await applyOperation(BASE(), { op: "multicam.create", args: { angles } } as OperationRequest, context());
+    const program = created.timeline.tracks.find((track) => track.kind === "program") as ProgramTrack;
+    const emptied = await applyOperation(created.timeline, { op: "clip.remove", args: { clip: program.clips[0]!.id } } as OperationRequest, context());
+    const add = (args: Record<string, unknown>) => applyOperation(emptied.timeline, { op: "clip.add", args: { track: program.id, ...args } } as OperationRequest, context());
+    const added = await add({ type: "shot", in: 2, out: 5, start: 0, take: "k_1a2b3c", scriptRef: "scripts/launch.md#hook" });
+    const shots = (added.timeline.tracks.find((track) => track.kind === "program") as ProgramTrack).clips;
+    expect(shots).toEqual([expect.objectContaining({ type: "shot", start: 0, in: 2, out: 5, shot: "pip", angles: ["screen", "camera"], take: "k_1a2b3c", scriptRef: "scripts/launch.md#hook" })]);
+    const solo = await add({ type: "shot", in: 0, out: 1, angles: ["camera"] });
+    expect((solo.timeline.tracks.find((track) => track.kind === "program") as ProgramTrack).clips[0]).toMatchObject({ shot: "solo", angles: ["camera"] });
+    expect(await rejection(add({ type: "media", asset: "assets/ana.mp4" }))).toMatchObject({ message: expect.stringContaining("holds shots only") });
+    expect(await rejection(add({ type: "shot", in: 0, out: 30 }))).toMatchObject({ message: expect.stringContaining("past its end") });
+    expect(await rejection(add({ type: "shot", in: 1 }))).toMatchObject({ message: expect.stringContaining("need `in` and `out`") });
+  });
 });
 
 describe("multicam.offset", () => {

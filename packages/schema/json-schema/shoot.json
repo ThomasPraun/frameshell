@@ -32,7 +32,7 @@
           "asset": {
             "type": "string",
             "minLength": 1,
-            "description": "Project-relative media file, `/`-separated, e.g. `assets/hook-2.mp4`."
+            "description": "Project-relative media file, `/`-separated, e.g. `assets/hook-2.mp4`; for a session take its microphone file."
           },
           "scene": {
             "type": "string",
@@ -52,6 +52,63 @@
             "description": "Author that linked the take, e.g. `cli` or `agent:claude:s1`.",
             "type": "string",
             "minLength": 1
+          },
+          "session": {
+            "description": "Set for a take recorded in the app: its range of the session; absent for a whole imported file.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^\\d{8}-\\d{6}(-\\d+)?$"
+              },
+              "start": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Session-clock second the take starts (key `T`)."
+              },
+              "end": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Session-clock second the take ends (key `C`); after `start`."
+              },
+              "sounds": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "asset": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Project-relative file, e.g. `assets/shoot/20261024-153012/mic.m4a`; recorded as `<file>.part` until the session ends."
+                    },
+                    "offset": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Session-clock second at which the file's time 0 plays."
+                    }
+                  },
+                  "required": [
+                    "asset",
+                    "offset"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The microphone first, then system audio when it was on."
+              },
+              "group": {
+                "description": "Multicam group made of the session once it ended; absent while it records.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "start",
+              "end",
+              "sounds"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

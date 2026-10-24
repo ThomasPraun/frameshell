@@ -13,7 +13,6 @@ import type {
   RevertConflict,
   MulticamTurnsResult,
   ScriptOutlineResult,
-  ShootStatusResult,
   SegmentedPoint,
   TimelineRejection,
   TimelineView,
@@ -122,6 +121,9 @@ export type PersonTarget =
   | { speaker: { transcript: string; speaker?: string } }
   | { angle: { timeline: string; group: string; angle: string } }
   | { face: { asset: string; at: number; x: number; y: number } };
+
+/** A shoot file change (daemon `shoot.changed`, ADR 0023) without the project root. */
+export type ShootChange = Omit<EventParams<"shoot.changed">, "project">;
 
 /** A review-mode proposal step (daemon `proposal.changed`) without the project root. */
 export type ProposalChange = Omit<EventParams<"proposal.changed">, "project">;
@@ -580,8 +582,23 @@ export interface FrameshellApi {
     recovered(): Promise<ShootFinish[]>;
     /** Called with each session {@link recovered} adds. Returns an unsubscribe function. */
     onRecovered(listener: (finish: ShootFinish) => void): () => void;
-    /** `shoot.status` of a shoot script of the window's project (project-relative path). Rejects with the daemon's message. */
-    status(script: string): Promise<ShootStatusResult>;
+    /**
+     * Cut (key `C`, ADR 0024): the range `start`..`end` (session clock, s) of recording session `id` becomes a take of
+     * `script` starting at `scene`; the daemon transcribes and compares it in a `shoot` job. Resolves with the take id.
+     */
+    cut(id: string, take: { script: string; scene: string; start: number; end: number; recordedAt: string }): Promise<string>;
+    /** `script.check` of a script of the window's project: its scenes, lines and words. Rejects with the daemon's message. */
+    check(script: string): Promise<MethodResult<"script.check">>;
+    /** `shoot.status` of a shoot script. Rejects with the daemon's message. */
+    status(script: string): Promise<MethodResult<"shoot.status">>;
+    /** `shoot.accept`: `deviations` of `take` (all when omitted), or take them back with `undo`. */
+    accept(script: string, take: string, options?: { deviations?: string[]; undo?: boolean }): Promise<MethodResult<"shoot.accept">>;
+    /** `shoot.choose`: the take of `scene` that goes into the cut; null goes back to the newest. */
+    choose(script: string, scene: string, take: string | null): Promise<MethodResult<"shoot.choose">>;
+    /** `shoot.assemble` of every scene. */
+    assemble(script: string): Promise<MethodResult<"shoot.assemble">>;
+    /** Called on every `shoot.changed` of the project, or with null after a daemon reconnect. Returns an unsubscribe function. */
+    onChanged(listener: (change: ShootChange | null) => void): () => void;
   };
   scripts: {
     /**
@@ -800,7 +817,13 @@ export const Channel = {
   shootEnd: "shoot:end",
   shootRecovered: "shoot:recovered",
   shootRecoveredChanged: "shoot:recovered-changed",
+  shootCut: "shoot:cut",
+  shootCheck: "shoot:check",
   shootStatus: "shoot:status",
+  shootAccept: "shoot:accept",
+  shootChoose: "shoot:choose",
+  shootAssemble: "shoot:assemble",
+  shootChanged: "shoot:changed",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",
