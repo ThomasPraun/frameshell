@@ -72,6 +72,9 @@ import { FileTransactionStore, TransactionTracker } from "./history/transactions
 import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { checkScript } from "./scripts/check.js";
+import { AGENT_SKILLS_DIR } from "./plugins/skills.js";
+import { CORE_SKILL_NAME, installCoreSkill } from "./skills/install.js";
+import { coreSkillState, refreshCoreSkill } from "./skills/refresh.js";
 import { assembleShoot, planScenes } from "./shoot/assemble.js";
 import { ShootService } from "./shoot/service.js";
 import { type SessionTake, ffmpegRangeExtractor, standInProvider, standInWords, takeWordsPath, transcribeTake, writeSessionTranscripts } from "./shoot/session.js";
@@ -231,8 +234,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
+  /** Skill files updated on their own when a project opened, by canonical root, until `status` reports them. */
+  const skillUpdates = new Map<string, string[]>();
   const projects = new ProjectRegistry({
     onOpen: (dir) => {
+      // An unedited older copy of the agent skill becomes this version's; never blocks opening (#396).
+      void refreshCoreSkill(dir).then(
+        (result) => {
+          if (result.written.length + result.removed.length > 0) skillUpdates.set(canonicalPathSync(dir), [...result.written, ...result.removed]);
+        },
+        () => undefined,
+      );
       media.attach(dir);
       timelineWatcher.attach(dir);
       const key = canonicalPathSync(dir);
@@ -747,14 +759,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     status: async ({ cwd }, caller) => {
       const project = await projects.openEnclosing(cwd);
       let trust = null;
+      let skill = null;
       if (project) {
         const pins = await projects.readPins(project.dir);
         trust = { state: await plugins.trustState(project.dir, pins), plugins: pins };
+        const key = canonicalPathSync(project.dir);
+        skill = { ...(await coreSkillState(project.dir)), updated: skillUpdates.get(key) ?? [] };
+        skillUpdates.delete(key);
       }
       return {
         daemon: { ...identity, uptimeMs: Date.now() - startedAt, clients: clients.size, socketPath },
         project,
         trust,
+        skill,
         synced: project ? syncedFolder(project.dir) : null,
         openProjects: projects.list(),
         rejections: project ? await timelines.rejections(project.dir) : [],
@@ -782,7 +799,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     doctor: async ({ cwd, install }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
-      return runDoctor(binaries, { project, install });
+      return { ...(await runDoctor(binaries, { project, install })), skill: found ? await coreSkillState(found.dir) : null };
+    },
+    "skill.update": async ({ cwd, force }) => {
+      const dir = await root(cwd);
+      if ((await coreSkillState(dir)).state === "absent") {
+        const written = (await installCoreSkill(dir)).map((path) => path.slice(`${AGENT_SKILLS_DIR}/${CORE_SKILL_NAME}/`.length));
+        return { ...(await coreSkillState(dir)), written, removed: [] };
+      }
+      return refreshCoreSkill(dir, { force });
     },
     "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),

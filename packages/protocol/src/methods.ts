@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 63;
+export const PROTOCOL_VERSION = 64;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -401,6 +401,19 @@ const ExportPresetResultSchema = z.looseObject({
   plugin: z.string().nullable().describe("Package that contributed the preset; null for presets built into Frameshell."),
 });
 
+/** A project's copy of the core agent skill against the bundled one (#396). */
+const CoreSkillStateSchema = z.object({
+  state: z
+    .enum(["current", "outdated", "edited", "absent"])
+    .describe(
+      "`current`: same as this Frameshell's skill. `outdated`: an older shipped version, unedited; it is updated when " +
+        "the project opens. `edited`: someone changed Frameshell's files in it, so it is left alone: `frameshell skill " +
+        "update --force` replaces them (files they added stay). `absent`: no copy (deleted or `init --no-skill`).",
+    ),
+  dir: z.string().describe("Project-relative directory of the copy, `.claude/skills/frameshell`."),
+  edited: z.array(z.string()).describe("Files of the copy that differ from every shipped version."),
+});
+
 /** Image formats `frame` writes. */
 const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
 
@@ -553,6 +566,11 @@ export const methods = {
       review: ReviewStateSchema.nullable().describe(
         "Review mode of `project` (ADR 0019), as `proposal.status` reports it; null when there is no project.",
       ),
+      skill: CoreSkillStateSchema.extend({
+        updated: z.array(z.string()).describe("Files the daemon updated on its own when the project opened, reported once; empty otherwise."),
+      })
+        .nullable()
+        .describe("The project's copy of the agent skill; null when there is no project."),
       caller: z
         .object({
           client: z.string().describe("Client id the caller sent in its handshake."),
@@ -633,6 +651,23 @@ export const methods = {
         .array(CodecReportSchema)
         .describe("Empty when ffmpeg is not installed or not runnable."),
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
+      skill: CoreSkillStateSchema.nullable().describe("The project's copy of the agent skill; null when `cwd` is in no project."),
+    }),
+  },
+  "skill.update": {
+    mutating: true,
+    description:
+      "Bring the project's copy of the core agent skill (`.claude/skills/frameshell/`) to this Frameshell's version. " +
+      "An unedited older copy is also updated on its own when the project opens. An edited copy is left alone unless " +
+      "`force`, which replaces Frameshell's files; files someone added to the folder always stay. An absent copy is " +
+      "written again. Fails with ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      force: z.boolean().default(false).describe("Replace Frameshell's files even when edited."),
+    }),
+    result: CoreSkillStateSchema.extend({
+      written: z.array(z.string()).describe("Files written, relative to `dir`."),
+      removed: z.array(z.string()).describe("Files Frameshell no longer ships, removed because unedited."),
     }),
   },
   "project.trust": {

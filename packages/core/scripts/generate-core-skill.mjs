@@ -1,21 +1,46 @@
 // Bundles skills/frameshell/**/*.md into src/skills/core-skill.ts, so `project.init` can install the skill
 // from any build (npm package, packaged app) without files outside the package.
 // A test fails when the bundle drifts from skills/frameshell: run `pnpm gen:skill` after editing it.
+// It also adds the files' SHA-256 to src/skills/shipped.json, the versions a project's copy may hold
+// unedited (#396). `--seed-tags` adds every version at the release tags too (needs the git tags).
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const repo = fileURLToPath(new URL("../../../", import.meta.url));
 const source = fileURLToPath(new URL("../../../skills/frameshell/", import.meta.url));
 const target = new URL("../src/skills/core-skill.ts", import.meta.url);
+const shippedFile = new URL("../src/skills/shipped.json", import.meta.url);
+
+const normalize = (text) => text.replace(/\r\n/g, "\n");
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 const files = readdirSync(source, { recursive: true, encoding: "utf8" })
   .filter((file) => file.endsWith(".md"))
   .map((file) => file.split("\\").join("/"))
   .sort();
-const entries = files.map((file) => {
-  const content = readFileSync(join(source, file), "utf8").replace(/\r\n/g, "\n");
-  return `  ${JSON.stringify(file)}: ${JSON.stringify(content)},`;
-});
+const contents = new Map(files.map((file) => [file, normalize(readFileSync(join(source, file), "utf8"))]));
+const entries = files.map((file) => `  ${JSON.stringify(file)}: ${JSON.stringify(contents.get(file))},`);
+
+const shipped = JSON.parse(readFileSync(shippedFile, "utf8"));
+const add = (file, text) => {
+  const hashes = new Set(shipped[file] ?? []);
+  hashes.add(sha256(text));
+  shipped[file] = [...hashes].sort();
+};
+for (const [file, text] of contents) add(file, text);
+if (process.argv.includes("--seed-tags")) {
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  for (const tag of git("tag", "--list", "v*").split("\n").filter(Boolean)) {
+    const listed = git("ls-tree", "-r", "--name-only", tag, "skills/frameshell/").split("\n").filter((path) => path.endsWith(".md"));
+    for (const path of listed) add(path.slice("skills/frameshell/".length), normalize(git("show", `${tag}:${path}`)));
+  }
+}
+const sorted = Object.fromEntries(Object.keys(shipped).sort().map((file) => [file, shipped[file]]));
+writeFileSync(shippedFile, `${JSON.stringify(sorted, null, 2)}\n`);
+const hashLines = Object.entries(sorted).map(([file, hashes]) => `  ${JSON.stringify(file)}: ${JSON.stringify(hashes)},`);
 
 writeFileSync(
   target,
@@ -29,6 +54,14 @@ writeFileSync(
 export const CORE_SKILL_FILES: Readonly<Record<string, string>> = {
 ${entries.join("\n")}
 };
+
+/**
+ * SHA-256 (hex, LF line ends) of every version of each skill file Frameshell has shipped, from
+ * \`shipped.json\`: a project's copy whose files all match one of these is unedited and may be updated.
+ */
+export const SHIPPED_SKILL_HASHES: Readonly<Record<string, readonly string[]>> = {
+${hashLines.join("\n")}
+};
 `,
 );
-console.log(`wrote src/skills/core-skill.ts (${files.length} files)`);
+console.log(`wrote src/skills/core-skill.ts (${files.length} files) and src/skills/shipped.json`);
