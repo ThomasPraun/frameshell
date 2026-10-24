@@ -1,7 +1,6 @@
-import { parseShootScript } from "@frameshell/schema";
+import { parseShootScript, spellNumber } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import { type HeardWord, compareTake } from "../src/shoot/compare.js";
-import { spellNumber } from "../src/shoot/numbers.js";
 
 // Pure comparison of a take against a shoot script (ADR 0023 decision 4), on synthetic transcripts.
 

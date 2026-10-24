@@ -273,7 +273,10 @@ const WHISPER_COMMIT = "927cfce34f31707e17f2bff35c349632fb9e2c3a";
 const WHISPER_RELEASE = `${WHISPER_CPP}/releases/download/b5130`;
 const WHISPER_VERSION = "1.9.4";
 
-function whisperLinux(arch: "x64" | "arm64", sha256: string, size: number, cpuLibs: readonly string[]): PinnedBuild {
+/** An executable of whisper.cpp Frameshell installs: the transcriber, or the resident server of live recognition (ADR 0024). */
+export type WhisperTool = "whisper-cli" | "whisper-server";
+
+function whisperLinux(arch: "x64" | "arm64", sha256: string, size: number, cpuLibs: readonly string[], tool: WhisperTool = "whisper-cli"): PinnedBuild {
   const dir = `whisper-bin-ubuntu-${arch}`;
   return {
     version: WHISPER_VERSION,
@@ -284,7 +287,7 @@ function whisperLinux(arch: "x64" | "arm64", sha256: string, size: number, cpuLi
         urls: [`${WHISPER_RELEASE}/${dir}.tar.gz`],
         sha256,
         size,
-        files: { "whisper-cli": `${dir}/whisper-cli` },
+        files: { [tool]: `${dir}/${tool}` },
         // RUNPATH is $ORIGIN: libraries sit next to the executable under their SONAME.
         support: {
           "libwhisper.so.1": `${dir}/libwhisper.so.1.9.4`,
@@ -304,6 +307,7 @@ function whisperWindows(
   size: number,
   dlls: readonly string[],
   gpu: Pick<PinnedBuild, "accelerator" | "requires"> = {},
+  tool: WhisperTool = "whisper-cli",
 ): PinnedBuild {
   return {
     version: WHISPER_VERSION,
@@ -315,7 +319,7 @@ function whisperWindows(
         urls: [`${WHISPER_RELEASE}/${asset}`],
         sha256,
         size,
-        files: { "whisper-cli": "Release/whisper-cli.exe" },
+        files: { [tool]: `Release/${tool}.exe` },
         // Windows loads DLLs from the executable's directory first.
         support: Object.fromEntries(dlls.map((dll) => [dll, `Release/${dll}`])),
       },
@@ -342,9 +346,11 @@ export const WHISPER_SOURCE = {
  * (`packages/core/scripts/whisper-cpp-build.mjs`).
  */
 export interface FrameshellWhisperBuild {
+  /** The one executable in the asset; it picks the release ({@link frameshellWhisperTag}). */
+  readonly tool: WhisperTool;
   readonly platform: PlatformKey;
   readonly accelerator: Accelerator;
-  /** Release asset: uncompressed tar holding `whisper-cli` and `LICENSE`. */
+  /** Release asset: uncompressed tar holding the tool and `LICENSE`. */
   readonly asset: string;
   readonly sha256: string;
   readonly size: number;
@@ -354,14 +360,32 @@ export interface FrameshellWhisperBuild {
   readonly runner: string;
 }
 
-/** Frameshell release holding the {@link WHISPER_FRAMESHELL_BUILDS}. A published release is never changed: a re-pin takes a new tag. */
+/**
+ * Frameshell release holding the `whisper-cli` {@link WHISPER_FRAMESHELL_BUILDS}. A published release is never
+ * changed: a re-pin takes a new tag.
+ */
 export const WHISPER_FRAMESHELL_TAG = "whisper-cpp-1.9.4-fs1";
+
+/** Frameshell release holding the `whisper-server` builds (ADR 0024 live recognition); same rule as {@link WHISPER_FRAMESHELL_TAG}. */
+export const WHISPER_SERVER_FRAMESHELL_TAG = "whisper-server-1.9.4-fs1";
+
+/** Release of a Frameshell build of `tool`. */
+export function frameshellWhisperTag(tool: WhisperTool): string {
+  return tool === "whisper-cli" ? WHISPER_FRAMESHELL_TAG : WHISPER_SERVER_FRAMESHELL_TAG;
+}
 
 /** Only the `whisper-cli` target, statically linked: nothing to place next to it. */
 const WHISPER_CLI_ONLY = ["-DBUILD_SHARED_LIBS=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF", "-DWHISPER_SDL2=OFF"];
 
+/** Only the `whisper-server` target (its HTTP library is vendored), statically linked. */
+const WHISPER_SERVER_ONLY = ["-DBUILD_SHARED_LIBS=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=ON", "-DWHISPER_SDL2=OFF"];
+
 /** Metal with its shader source embedded: one static executable. */
-const MACOS_METAL = [...WHISPER_CLI_ONLY, "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.3"];
+const METAL = ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.3"];
+const MACOS_METAL = [...WHISPER_CLI_ONLY, ...METAL];
+
+/** Intel Macs are cross-compiled on Apple silicon. Every Intel Mac that runs macOS 13 has AVX2. */
+const MACOS_X64 = ["-DCMAKE_OSX_ARCHITECTURES=x86_64", "-DGGML_NATIVE=OFF", "-DGGML_AVX=ON", "-DGGML_AVX2=ON", "-DGGML_FMA=ON", "-DGGML_F16C=ON"];
 
 /**
  * `GGML_NATIVE=OFF`: never tune for the build machine (not reproducible, and
@@ -369,11 +393,21 @@ const MACOS_METAL = [...WHISPER_CLI_ONLY, "-DGGML_METAL=ON", "-DGGML_METAL_EMBED
  * x64 ggml then targets AVX2/FMA/F16C, hence the AVX2 probe. OpenMP off: no
  * `libgomp` needed at run time.
  */
-const LINUX_VULKAN = [...WHISPER_CLI_ONLY, "-DGGML_NATIVE=OFF", "-DGGML_OPENMP=OFF", "-DGGML_VULKAN=ON"];
+const VULKAN = ["-DGGML_NATIVE=OFF", "-DGGML_OPENMP=OFF", "-DGGML_VULKAN=ON"];
+const LINUX_VULKAN = [...WHISPER_CLI_ONLY, ...VULKAN];
+
+/** whisper-server builds as CI printed them (`docs/binaries.md`, re-pin step 4). */
+const WHISPER_SERVER_PINS = {
+  "darwin-arm64": { sha256: "56d724137bdf2cde0b5ebaeef1347657df7926b8de0d48afd693ce26456a0dfd", size: 4_981_248 },
+  "darwin-x64": { sha256: "7c71b2a5fd89ed02b68329c5d56856773b8b6ffe6ef58d4bf7a9ef7e7f10caee", size: 5_524_992 },
+  "linux-x64": { sha256: "939186af93c9e16d6f3560d5cb00d2c6fb532b7edd3fc6328d38551f33c9696a", size: 47_628_288 },
+  "linux-arm64": { sha256: "553ba6a9cf2c7e079af90906c1e16bccf64d79bb31dbddbefd9af6a4c20a7a4e", size: 47_256_576 },
+} as const;
 
 /** Every Frameshell-built whisper.cpp asset. Hashes come from CI; `docs/binaries.md` says how to re-pin. */
 export const WHISPER_FRAMESHELL_BUILDS: readonly FrameshellWhisperBuild[] = [
   {
+    tool: "whisper-cli",
     platform: "darwin-arm64",
     accelerator: "metal",
     asset: `whisper-cli-${WHISPER_VERSION}-darwin-arm64-metal.tar`,
@@ -383,24 +417,17 @@ export const WHISPER_FRAMESHELL_BUILDS: readonly FrameshellWhisperBuild[] = [
     runner: "macos-15",
   },
   {
+    tool: "whisper-cli",
     platform: "darwin-x64",
     accelerator: "metal",
     asset: `whisper-cli-${WHISPER_VERSION}-darwin-x64-metal.tar`,
     sha256: "49dfaaebde59cb00e91946bca501c3a183e8d016cfc1cad310c3494af2465be8",
     size: 5_062_656,
-    // Cross-compiled on Apple silicon. Every Intel Mac that runs macOS 13 has AVX2.
-    configure: [
-      ...MACOS_METAL,
-      "-DCMAKE_OSX_ARCHITECTURES=x86_64",
-      "-DGGML_NATIVE=OFF",
-      "-DGGML_AVX=ON",
-      "-DGGML_AVX2=ON",
-      "-DGGML_FMA=ON",
-      "-DGGML_F16C=ON",
-    ],
+    configure: [...MACOS_METAL, ...MACOS_X64],
     runner: "macos-15",
   },
   {
+    tool: "whisper-cli",
     platform: "linux-x64",
     accelerator: "vulkan",
     asset: `whisper-cli-${WHISPER_VERSION}-linux-x64-vulkan.tar`,
@@ -410,6 +437,7 @@ export const WHISPER_FRAMESHELL_BUILDS: readonly FrameshellWhisperBuild[] = [
     runner: "ubuntu-24.04",
   },
   {
+    tool: "whisper-cli",
     platform: "linux-arm64",
     accelerator: "vulkan",
     asset: `whisper-cli-${WHISPER_VERSION}-linux-arm64-vulkan.tar`,
@@ -418,15 +446,30 @@ export const WHISPER_FRAMESHELL_BUILDS: readonly FrameshellWhisperBuild[] = [
     configure: LINUX_VULKAN,
     runner: "ubuntu-24.04-arm",
   },
+  ...(Object.keys(WHISPER_SERVER_PINS) as (keyof typeof WHISPER_SERVER_PINS)[]).map((platform): FrameshellWhisperBuild => {
+    const mac = platform.startsWith("darwin");
+    const accelerator = mac ? "metal" : "vulkan";
+    return {
+      tool: "whisper-server",
+      platform,
+      accelerator,
+      asset: `whisper-server-${WHISPER_VERSION}-${platform}-${accelerator}.tar`,
+      ...WHISPER_SERVER_PINS[platform],
+      configure: mac
+        ? [...WHISPER_SERVER_ONLY, ...METAL, ...(platform === "darwin-x64" ? MACOS_X64 : ["-DCMAKE_OSX_ARCHITECTURES=arm64"])]
+        : [...WHISPER_SERVER_ONLY, ...VULKAN],
+      runner: mac ? "macos-15" : platform === "linux-arm64" ? "ubuntu-24.04-arm" : "ubuntu-24.04",
+    };
+  }),
 ];
 
 /** Download URL of a Frameshell-built asset. */
-export function frameshellWhisperUrl(build: Pick<FrameshellWhisperBuild, "asset">): string {
-  return `https://github.com/ThomasPraun/frameshell/releases/download/${WHISPER_FRAMESHELL_TAG}/${build.asset}`;
+export function frameshellWhisperUrl(build: Pick<FrameshellWhisperBuild, "asset" | "tool">): string {
+  return `https://github.com/ThomasPraun/frameshell/releases/download/${frameshellWhisperTag(build.tool)}/${build.asset}`;
 }
 
-function frameshellWhisper(platform: PlatformKey, gpu: Pick<PinnedBuild, "requires"> = {}): PinnedBuild {
-  const build = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform);
+function frameshellWhisper(platform: PlatformKey, gpu: Pick<PinnedBuild, "requires"> = {}, tool: WhisperTool = "whisper-cli"): PinnedBuild {
+  const build = WHISPER_FRAMESHELL_BUILDS.find((candidate) => candidate.platform === platform && candidate.tool === tool);
   if (!build) throw new Error(`No Frameshell whisper.cpp build for ${platform}`);
   return {
     version: WHISPER_VERSION,
@@ -439,7 +482,7 @@ function frameshellWhisper(platform: PlatformKey, gpu: Pick<PinnedBuild, "requir
         urls: [frameshellWhisperUrl(build)],
         sha256: build.sha256,
         size: build.size,
-        files: { "whisper-cli": "whisper-cli" },
+        files: { [tool]: tool },
         support: { LICENSE: "LICENSE" },
       },
     ],
@@ -462,6 +505,15 @@ const WIN_X64_CPU_DLLS = [
 ].map((variant) => `ggml-cpu-${variant}.dll`);
 
 const WIN_X64_DLLS = ["whisper.dll", "ggml.dll", "ggml-base.dll", ...WIN_X64_CPU_DLLS];
+const WIN_ARM64_DLLS = ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll", "libomp140.aarch64.dll"];
+
+const AVX2_PROBE: MachineProbe = { command: "grep", args: ["-qw", "avx2", "/proc/cpuinfo"], proves: "an AVX2 CPU" };
+
+/** Upstream CPU archives of release b5130: both `whisper-cli` and `whisper-server` come from them. */
+const UPSTREAM_LINUX_X64 = ["53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32", 9_793_438] as const;
+const UPSTREAM_LINUX_ARM64 = ["93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6", 4_605_905] as const;
+const UPSTREAM_WIN_X64 = ["whisper-bin-x64.zip", "f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c", 8_573_270] as const;
+const UPSTREAM_WIN_ARM64 = ["whisper-bin-win-cpu-arm64.zip", "799543b926ab5b6c2d60cab269a2092e0ae8d27820e9e15429e59de3699546fc", 4_361_895] as const;
 
 /**
  * whisper.cpp `whisper-cli`, pinned: DTW and VAD behaviour change between
@@ -483,13 +535,13 @@ export const WHISPER_PACKAGE: BinaryPackage = {
     "darwin-x64": frameshellWhisper("darwin-x64"),
     "linux-x64": [
       frameshellWhisper("linux-x64", {
-        requires: [VULKAN_PROBE, { command: "grep", args: ["-qw", "avx2", "/proc/cpuinfo"], proves: "an AVX2 CPU" }],
+        requires: [VULKAN_PROBE, AVX2_PROBE],
       }),
-      whisperLinux("x64", "53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32", 9_793_438, X64_CPU_LIBS),
+      whisperLinux("x64", ...UPSTREAM_LINUX_X64, X64_CPU_LIBS),
     ],
     "linux-arm64": [
       frameshellWhisper("linux-arm64", { requires: [VULKAN_PROBE] }),
-      whisperLinux("arm64", "93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6", 4_605_905, ["libggml-cpu.so"]),
+      whisperLinux("arm64", ...UPSTREAM_LINUX_ARM64, ["libggml-cpu.so"]),
     ],
     "win32-x64": [
       // Self-contained: ships cudart, cuBLAS and cuBLASLt 12. Only the driver (nvcuda.dll) comes from the system.
@@ -500,14 +552,37 @@ export const WHISPER_PACKAGE: BinaryPackage = {
         [...WIN_X64_DLLS, "ggml-cuda.dll", "cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"],
         { accelerator: "cuda", requires: [NVIDIA_PROBE] },
       ),
-      whisperWindows("whisper-bin-x64.zip", "f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c", 8_573_270, WIN_X64_DLLS),
+      whisperWindows(...UPSTREAM_WIN_X64, WIN_X64_DLLS),
     ],
-    "win32-arm64": whisperWindows(
-      "whisper-bin-win-cpu-arm64.zip",
-      "799543b926ab5b6c2d60cab269a2092e0ae8d27820e9e15429e59de3699546fc",
-      4_361_895,
-      ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll", "libomp140.aarch64.dll"],
-    ),
+    "win32-arm64": whisperWindows(...UPSTREAM_WIN_ARM64, WIN_ARM64_DLLS),
+  },
+};
+
+/**
+ * whisper.cpp `whisper-server`, the resident process of the teleprompter's live recognition (ADR 0024 decision
+ * 5): same pinned commit as {@link WHISPER_PACKAGE}. Upstream's CPU archives already hold it (installed apart, so
+ * the transcriber's install stays as it is); macOS and Linux GPU take Frameshell builds like `whisper-cli`.
+ * Windows is CPU only: the CUDA archive is 675 MB, and the small live models run on CPU (the speed check picks the
+ * smaller one when needed).
+ */
+export const WHISPER_SERVER_PACKAGE: BinaryPackage = {
+  name: "whisper-server",
+  tools: ["whisper-server"],
+  onDemand: true,
+  versionProbe: { args: ["--help"], pattern: /usage: \S*(whisper-server)/ },
+  builds: {
+    "darwin-arm64": frameshellWhisper("darwin-arm64", {}, "whisper-server"),
+    "darwin-x64": frameshellWhisper("darwin-x64", {}, "whisper-server"),
+    "linux-x64": [
+      frameshellWhisper("linux-x64", { requires: [VULKAN_PROBE, AVX2_PROBE] }, "whisper-server"),
+      whisperLinux("x64", ...UPSTREAM_LINUX_X64, X64_CPU_LIBS, "whisper-server"),
+    ],
+    "linux-arm64": [
+      frameshellWhisper("linux-arm64", { requires: [VULKAN_PROBE] }, "whisper-server"),
+      whisperLinux("arm64", ...UPSTREAM_LINUX_ARM64, ["libggml-cpu.so"], "whisper-server"),
+    ],
+    "win32-x64": whisperWindows(...UPSTREAM_WIN_X64, WIN_X64_DLLS, {}, "whisper-server"),
+    "win32-arm64": whisperWindows(...UPSTREAM_WIN_ARM64, WIN_ARM64_DLLS, {}, "whisper-server"),
   },
 };
 
@@ -532,6 +607,15 @@ export const WHISPER_MODELS: readonly ManagedModel[] = [
   whisperModel("large-v3-turbo-q5_0", "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574_041_195),
   whisperModel("large-v3-turbo-q8_0", "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1", 874_188_075),
   whisperModel("large-v3-turbo", "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69", 1_624_555_275),
+];
+
+/**
+ * Models of live recognition (ADR 0024 decision 5), same revision: `small-q5_1` by default, `base-q5_1` on
+ * machines the speed check finds too slow for it.
+ */
+export const LIVE_WHISPER_MODELS: readonly ManagedModel[] = [
+  whisperModel("small-q5_1", "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb", 190_085_487),
+  whisperModel("base-q5_1", "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898", 59_707_625),
 ];
 
 /** Candidates for `platform`, in preference order; empty when nothing is pinned. */
@@ -803,10 +887,11 @@ export const PHOTO_SEGMENTATION_MODELS: readonly ManagedModel[] = [
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   FFMPEG_PACKAGE,
   WHISPER_PACKAGE,
+  WHISPER_SERVER_PACKAGE,
   CHROME_HEADLESS_SHELL_PACKAGE,
   SHERPA_ONNX_PACKAGE,
   ONNX_RUNTIME_WEB_PACKAGE,
 ];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS, ...PHOTO_SEGMENTATION_MODELS];
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...LIVE_WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS, ...PHOTO_SEGMENTATION_MODELS];

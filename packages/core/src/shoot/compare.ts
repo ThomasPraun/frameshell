@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { type ShootScript, personNameKey } from "@frameshell/schema";
-import { MIN_SIMILARITY, normalizeToken, similarity } from "../transcripts/align.js";
-import { type NumberLanguage, numberLanguage, spellNumber } from "./numbers.js";
+import { type ShootScript, normalizeToken, numberLanguage, personNameKey, similarity, spokenTokens } from "@frameshell/schema";
+import { MIN_SIMILARITY } from "../transcripts/align.js";
 
 /**
  * Compare one take against its shoot script (ADR 0023 decision 4), with no clock on the script side.
@@ -129,7 +128,7 @@ export function compareTake(script: ShootScript, heard: readonly HeardWord[], la
       const tokenStart: number[] = [];
       line.words.forEach((word, w) => {
         tokenStart.push(e.length);
-        for (const text of tokens(word, spell)) e.push({ text, line: index, word: w });
+        for (const text of spokenTokens(word, spell)) e.push({ text, line: index, word: w });
       });
       tokenStart.push(e.length);
       lines.push({ scene: scene.slug, sceneIndex, line: line.line, words: line.words, speaker: line.speaker, text: line.text, free, tokenStart });
@@ -137,7 +136,7 @@ export function compareTake(script: ShootScript, heard: readonly HeardWord[], la
   });
   const h: HeardToken[] = [];
   heard.forEach((word, index) => {
-    for (const text of tokens(word.text, spell)) h.push({ text, word: index });
+    for (const text of spokenTokens(word.text, spell)) h.push({ text, word: index });
   });
   const out = script.shoot.follow === "topics" ? compareTopics(lines, e, h, heard) : compareWords(script, lines, e, h, heard);
   const lineText = new Map(lines.map((line) => [line.line, line.text]));
@@ -483,14 +482,6 @@ class Similarities {
 }
 
 /** Comparable tokens of one written or heard word; digits spelled out in `language`. */
-function tokens(text: string, language: NumberLanguage | null): string[] {
-  return text.split(/\s+/).flatMap((part) => {
-    const bare = part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-    const spelled = language ? spellNumber(bare, language) : null;
-    return (spelled ?? [part]).map(normalizeToken).filter((token) => token.length > 0);
-  });
-}
-
 function added(scene: string | null, line: number | null, heard: readonly HeardWord[], words: number[]): Omit<Deviation, "id"> {
   const text = wordsText(heard, words);
   return { kind: "added", scene, line, expected: "", heard: text, words: null, at: span(heard, words), maybeTranscription: shortOrNumber(text) };

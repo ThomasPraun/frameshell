@@ -268,3 +268,5 @@ export {
 } from "./transitions.js";
 
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";
+export { type NumberLanguage, numberLanguage, spellNumber } from "./numbers.js";
+export { editDistance, normalizeToken, similarity, spokenTokens } from "./spoken.js";

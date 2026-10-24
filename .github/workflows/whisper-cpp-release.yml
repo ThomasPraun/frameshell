@@ -1,10 +1,11 @@
 # Frameshell's whisper.cpp builds (SPEC §9: prebuilt, pinned). Upstream ships
 # no macOS CLI and no Linux GPU build, so CI builds the pinned tag for those
-# targets and publishes them on a GitHub release the binary manager downloads.
+# targets and publishes them on GitHub releases the binary manager downloads:
+# one release for whisper-cli, one for whisper-server (ADR 0024).
 #
 # Every run rebuilds each asset and fails unless the bytes equal the pin in
 # packages/core/src/binaries/manifest.ts (the builds are reproducible). PRs
-# only build and check. On main, the release is created once, from those
+# only build and check. On main, each release is created once, from those
 # checked bytes; an existing release is never changed, only verified.
 # Re-pin: docs/binaries.md.
 name: whisper.cpp release builds
@@ -55,7 +56,7 @@ jobs:
 
   build:
     needs: matrix
-    name: build ${{ matrix.platform }}
+    name: build ${{ matrix.asset }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -86,11 +87,11 @@ jobs:
           glslc --version
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc -b packages/core
-      - run: node packages/core/scripts/whisper-cpp-build.mjs build ${{ matrix.platform }} whisper-assets
+      - run: node packages/core/scripts/whisper-cpp-build.mjs build ${{ matrix.asset }} whisper-assets
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: whisper-${{ matrix.platform }}
+          name: whisper-${{ matrix.asset }}
           path: whisper-assets/
           if-no-files-found: ignore
           retention-days: 30
@@ -117,24 +118,26 @@ jobs:
           pattern: whisper-*
           path: whisper-assets
           merge-multiple: true
-      - name: Publish or verify the release
+      - name: Publish or verify the releases
         run: |
           set -euo pipefail
           node packages/core/scripts/whisper-cpp-build.mjs release > release.txt
-          tag=$(head -n 1 release.txt)
-          tail -n +2 release.txt > whisper-assets/SHA256SUMS.txt
-          cd whisper-assets
-          # Only pinned bytes are ever published.
-          sha256sum --check --strict SHA256SUMS.txt
-          if gh release view "$tag" > /dev/null 2>&1; then
-            mkdir published
-            gh release download "$tag" --dir published --pattern '*.tar'
-            (cd published && sha256sum --check --strict ../SHA256SUMS.txt)
-            echo "Release $tag already published and matches the pins."
-            exit 0
-          fi
-          cat > notes.md <<EOF
-          whisper.cpp ${tag#whisper-cpp-} built by Frameshell CI from the pinned upstream source (WHISPER_SOURCE), for targets upstream publishes no executable for. MIT licence: LICENSE inside each archive. Recipes and pins: packages/core/src/binaries/manifest.ts. Build: packages/core/scripts/whisper-cpp-build.mjs at ${GITHUB_SHA}.
+          for tag in $(cut -d ' ' -f 1 release.txt | sort -u); do
+            dir="release-$tag"
+            mkdir -p "$dir"
+            awk -v tag="$tag" '$1 == tag { print $2 "  " $3 }' release.txt > "$dir/SHA256SUMS.txt"
+            for asset in $(awk '{ print $2 }' "$dir/SHA256SUMS.txt"); do cp "whisper-assets/$asset" "$dir/"; done
+            # Only pinned bytes are ever published.
+            (cd "$dir" && sha256sum --check --strict SHA256SUMS.txt)
+            if gh release view "$tag" > /dev/null 2>&1; then
+              mkdir "$dir/published"
+              gh release download "$tag" --dir "$dir/published" --pattern '*.tar'
+              (cd "$dir/published" && sha256sum --check --strict ../SHA256SUMS.txt)
+              echo "Release $tag already published and matches the pins."
+              continue
+            fi
+            cat > "$dir/notes.md" <<EOF
+          ${tag} built by Frameshell CI from the pinned upstream whisper.cpp source (WHISPER_SOURCE), for targets upstream publishes no executable for. MIT licence: LICENSE inside each archive. Recipes and pins: packages/core/src/binaries/manifest.ts. Build: packages/core/scripts/whisper-cpp-build.mjs at ${GITHUB_SHA}.
           EOF
-          gh release create "$tag" --draft --title "$tag" --notes-file notes.md --target "$GITHUB_SHA" ./*.tar SHA256SUMS.txt
-          gh release edit "$tag" --draft=false
+            (cd "$dir" && gh release create "$tag" --draft --title "$tag" --notes-file notes.md --target "$GITHUB_SHA" ./*.tar SHA256SUMS.txt && gh release edit "$tag" --draft=false)
+          done

@@ -163,6 +163,24 @@ Re-pin whisper.cpp:
 4. Frameshell builds: hash `https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/<commit>` into `WHISPER_SOURCE`, bump `WHISPER_FRAMESHELL_TAG` (a published release is never changed), and set each `WHISPER_FRAMESHELL_BUILDS` hash to 64 zeros and size 0. Push a PR: the `whisper.cpp release builds` workflow builds every asset and fails, printing each asset's SHA-256 and size. Pin those and push again: the next run rebuilds and must match, which proves the build reproducible. A changed toolchain (runner image, Xcode, apt packages) changes the bytes the same way: re-pin. After merge, the workflow publishes the release from `main`.
 5. Run `FRAMESHELL_TEST_REAL_WHISPER=1 pnpm test` on each platform you can reach (`FRAMESHELL_TEST_DATA_DIR=<dir>` keeps the 574 MB model between runs).
 
+## Live recognition (`whisper-server`) and its models
+
+Used by the teleprompter's live following (ADR 0024 decision 5): one resident `whisper-server` in the desktop app's main process, fed 3.5 s windows every 0.5 s, `-ac 400`, greedy decoding. Same pinned commit as `whisper-cli` (above), package `whisper-server` (`WHISPER_SERVER_PACKAGE`), installed apart so the transcriber's install is untouched. On demand, and only after the person agrees in the Shoot view: it is ~5 MB (macOS) to ~48 MB (Linux Vulkan) plus a 60 to 190 MB model.
+
+| Platform | Candidate | Asset | Licence |
+|---|---|---|---|
+| darwin-arm64, darwin-x64 | **Metal**, Frameshell build, same recipe as `whisper-cli` with the server target (`-DWHISPER_BUILD_SERVER=ON`, `--target whisper-server`) | `whisper-server-1.9.4-darwin-<arch>-metal.tar` on release `whisper-server-1.9.4-fs1` | MIT |
+| linux-x64, linux-arm64 | **Vulkan**, Frameshell build, same probes as `whisper-cli` | `whisper-server-1.9.4-linux-<arch>-vulkan.tar` on the same release | MIT |
+| linux-x64, linux-arm64 | CPU: the very upstream archive `whisper-cli` pins (it holds `whisper-server` too, same libraries) | `whisper-bin-ubuntu-<arch>.tar.gz` | MIT |
+| win32-x64, win32-arm64 | CPU only: the upstream CPU archive `whisper-cli` pins (`Release/whisper-server.exe`, same DLLs) | `whisper-bin-x64.zip`, `whisper-bin-win-cpu-arm64.zip` | MIT |
+
+- **No CUDA candidate on Windows.** The CUDA archive is 675 MB; downloading it a second time for the live models is not worth it. The models are small enough for a CPU, and the speed check (below) takes `base-q5_1` when `small-q5_1` is too slow.
+- **Start check.** `whisper-server` has no `--version`: the version probe is `--help` (exit 0, `usage: … whisper-server`), in the manager and in the CI build.
+- **Models** (same Hugging Face revision as the transcription models, MIT): `ggml-small-q5_1` (190,085,487 bytes, `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb`) by default, `ggml-base-q5_1` (59,707,625 bytes, `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`) on slow machines. Hashes are Hugging Face's LFS oids at the pinned revision.
+- **Speed check.** The first start times two 3.5 s windows with `small-q5_1`; above 350 ms per window (0.7 of the hop) it switches to `base-q5_1`. The choice is kept per machine in `<dataDir>/shoot/live-model.json` (delete it to measure again). Spike numbers on an M3: `small-q5_1` 156 ms, `base-q5_1` 56 ms per window (`docs/research/shoot-capture.md` Q5).
+- **Releases.** The Frameshell builds are made, checked and published by the same workflow as `whisper-cli` (`.github/workflows/whisper-cpp-release.yml`, `whisper-cpp-build.mjs build <asset>`): one release per tool (`frameshellWhisperTag`), each created once from `main` and only verified after. Re-pinning works as for `whisper-cli` (step 4 above): zero the `WHISPER_SERVER_PINS` hashes and sizes, bump `WHISPER_SERVER_FRAMESHELL_TAG`, and pin what CI prints.
+- Verified when pinning (2026-10-24): the upstream archives' SHA-256 equal the `whisper-cli` pins and they list `whisper-server` (`tar -tf`); its Linux libraries (`libwhisper.so.1`, `libggml.so.0`, glibc, libstdc++) and Windows DLL imports (`whisper.dll`, `ggml.dll`, MSVC runtime, `WS2_32.dll`) were read from the binaries and are those already installed for `whisper-cli`. The four Frameshell builds were built twice by CI with the same bytes and passed their start check on the runner. Not executed: the server on Linux, Windows or an Intel Mac; a real voice on any machine (owner run, `docs/acceptance/shoot.md` steps 15 to 21).
+
 ## Headless Chrome (`chrome-headless-shell`)
 
 Used by the official `@frameshell/hyperframes` plugin: `@hyperframes/producer` renders compositions in it, found through `PRODUCER_HEADLESS_SHELL_PATH` (ADR 0002). On demand: the first HyperFrames render installs it; `doctor` lists it but never reports it missing.

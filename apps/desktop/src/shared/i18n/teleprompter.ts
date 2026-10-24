@@ -21,6 +21,13 @@ const en = {
   text: "Teleprompter text",
   free: "Free",
   open: "Open teleprompter",
+  follow: "Follow voice",
+  liveReady: "Following your voice. Keys still correct it.",
+  liveInstalling: (percent: number | null) => `Getting voice recognition ready${percent === null ? "…" : `: ${percent}%`}`,
+  liveWarming: "Starting voice recognition (the first time takes about 20 seconds)…",
+  liveUnavailable: (reason: string) => `Voice recognition unavailable, move it with the keys: ${reason}`,
+  liveOff: "Voice recognition starts when the Shoot view is open.",
+  liveDownload: "Voice recognition is not installed yet: download it from the Shoot view.",
 };
 
 const es: typeof en = {
@@ -44,6 +51,13 @@ const es: typeof en = {
   text: "Texto del teleprompter",
   free: "Libre",
   open: "Abrir teleprompter",
+  follow: "Seguir la voz",
+  liveReady: "Siguiendo tu voz. Las teclas lo siguen corrigiendo.",
+  liveInstalling: (percent) => `Preparando el reconocimiento de voz${percent === null ? "…" : `: ${percent}%`}`,
+  liveWarming: "Iniciando el reconocimiento de voz (la primera vez tarda unos 20 segundos)…",
+  liveUnavailable: (reason) => `Reconocimiento de voz no disponible, muévelo con las teclas: ${reason}`,
+  liveOff: "El reconocimiento de voz se inicia cuando la vista Rodaje está abierta.",
+  liveDownload: "El reconocimiento de voz todavía no está instalado: descárgalo desde la vista Rodaje.",
 };
 
 export const teleprompter = { en, es };

@@ -160,6 +160,11 @@ const api: FrameshellApi = {
     choose: (script, scene, take) => invokeOutcome(Channel.shootChoose, script, scene, take),
     assemble: (script) => invokeOutcome(Channel.shootAssemble, script),
     onChanged: (listener) => subscribe(Channel.shootChanged, listener),
+    liveWarm: (install) => ipcRenderer.invoke(Channel.shootLiveWarm, install === true),
+    liveAudio: (samples) => ipcRenderer.send(Channel.shootLiveAudio, samples),
+    liveReset: () => ipcRenderer.send(Channel.shootLiveReset),
+    onLiveStatus: (listener) => subscribe(Channel.shootLiveStatus, listener),
+    onLiveHeard: (listener) => subscribe(Channel.shootLiveHeard, listener),
   },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),

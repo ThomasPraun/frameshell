@@ -1,3 +1,5 @@
+import { normalizeToken, similarity } from "@frameshell/schema";
+
 /** A transcribed word on some clock, in seconds. */
 export interface TimedWord {
   text: string;
@@ -209,35 +211,6 @@ function tokenize(words: readonly TimedWord[]): Token[] {
 /** `text` as the aligner compares it: tokens normalized by {@link normalizeToken}, space-joined. */
 export function comparableText(text: string): string {
   return text.split(/\s+/).map(normalizeToken).filter((part) => part.length > 0).join(" ");
-}
-
-/** Lowercase, accents and punctuation gone: `¿Está?` → `esta`. Whisper varies all three between runs. Shared with `shoot/compare.ts`. */
-export function normalizeToken(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
-    .toLocaleLowerCase()
-    .replace(/[\p{P}\p{S}]+/gu, "");
-}
-
-/** 1 - edit distance / longer length. Tokens of up to 2 characters must be equal: `de` vs `el` is not a spelling variant. Shared with `shoot/compare.ts`. */
-export function similarity(a: string, b: string): number {
-  if (a === b) return 1;
-  const longer = Math.max(a.length, b.length);
-  if (longer <= 2) return 0;
-  return 1 - levenshtein(a, b) / longer;
-}
-
-function levenshtein(a: string, b: string): number {
-  let row = Array.from({ length: b.length + 1 }, (_, k) => k);
-  for (let x = 1; x <= a.length; x++) {
-    const next = [x];
-    for (let y = 1; y <= b.length; y++) {
-      next[y] = Math.min(row[y]! + 1, next[y - 1]! + 1, row[y - 1]! + (a[x - 1] === b[y - 1] ? 0 : 1));
-    }
-    row = next;
-  }
-  return row[b.length]!;
 }
 
 function round(value: number): number {

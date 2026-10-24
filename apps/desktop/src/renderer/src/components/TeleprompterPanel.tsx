@@ -16,6 +16,9 @@ import {
   stopOf,
 } from "../teleprompter/model.js";
 import { teleprompter, useTeleprompter, useTeleprompterSettings } from "../teleprompter/store.js";
+import { useLiveFollow } from "../teleprompter/follow.js";
+import { useLiveStatus } from "../shoot/live.js";
+import type { LiveStatus } from "../../../shared/api.js";
 import { scriptFiles } from "../timeline/scenes.js";
 import { elementOf, windowOf } from "../windows.js";
 
@@ -31,6 +34,12 @@ export function TeleprompterPanel() {
   const chosen = scripts.list?.find(({ path }) => path === state.script) ?? scripts.list?.[0] ?? null;
   const stream = useMemo(() => (chosen ? promptStream(chosen.script) : null), [chosen]);
   const current = stream && state.position ? stopOf(stream, state.position) : -1;
+  const liveStatus = useLiveStatus();
+  useLiveFollow(stream, settings.follow);
+  const skipped = useMemo(
+    () => new Set(stream ? state.skipped.flatMap((mark) => (stopOf(stream, mark) === -1 ? [] : [stream.stops[stopOf(stream, mark)]!.sentence])) : []),
+    [stream, state.skipped],
+  );
 
   useEffect(() => {
     if (chosen && chosen.path !== state.script) teleprompter.setScript(chosen.path);
@@ -141,6 +150,11 @@ export function TeleprompterPanel() {
             <input type="checkbox" checked={settings.cues} onChange={(event) => teleprompter.setSettings({ cues: event.target.checked })} />
             {t.teleprompter.cues}
           </label>
+          <label className="teleprompter-check" title={liveNote(liveStatus)} data-testid="teleprompter-follow" data-live={liveStatus.state}>
+            <input type="checkbox" checked={settings.follow} onChange={(event) => teleprompter.setSettings({ follow: event.target.checked })} />
+            {t.teleprompter.follow}
+            {settings.follow && <span className={`teleprompter-live is-${liveStatus.state}`} aria-label={liveNote(liveStatus)} />}
+          </label>
           <button className="button" data-testid="teleprompter-hold" aria-pressed={state.held} onClick={() => teleprompter.setHeld(!state.held)}>
             {state.held ? t.teleprompter.resume : t.teleprompter.hold}
           </button>
@@ -161,6 +175,7 @@ export function TeleprompterPanel() {
             mirror={settings.mirror}
             cues={settings.cues}
             held={state.held}
+            skipped={skipped}
             onKey={onKey}
           />
         )
@@ -181,6 +196,7 @@ function PromptView({
   mirror,
   cues,
   held,
+  skipped,
   onKey,
 }: {
   stream: PromptStream;
@@ -189,6 +205,8 @@ function PromptView({
   mirror: boolean;
   cues: boolean;
   held: boolean;
+  /** Sentences live following marked skipped. */
+  skipped: ReadonlySet<number>;
   onKey: (event: KeyboardEvent<HTMLDivElement>) => void;
 }) {
   const view = useRef<HTMLDivElement>(null);
@@ -289,6 +307,7 @@ function PromptView({
                   cues={cues}
                   mark={current < line.start ? "ahead" : current >= line.end ? "said" : current}
                   sentence={sentence && line.start <= sentence.start && sentence.end <= line.end ? sentence : null}
+                  struck={struckIn(stream, line, skipped)}
                 />
               ))}
             </section>
@@ -301,8 +320,8 @@ function PromptView({
 
 /**
  * One shoot line: speaker, stops and cues. `mark` is where the reader is against it (every stop still ahead, all
- * said, or the current stop in it), and `sentence` the current sentence when it is in this line, so a move
- * redraws only the lines it touches.
+ * said, or the current stop in it), `sentence` the current sentence when it is in this line, and `struck` its
+ * skipped sentences (see {@link struckIn}), so a move redraws only the lines it touches.
  */
 const LineView = memo(function LineView({
   stream,
@@ -310,13 +329,16 @@ const LineView = memo(function LineView({
   cues,
   mark,
   sentence,
+  struck,
 }: {
   stream: PromptStream;
   line: PromptLine;
   cues: boolean;
   mark: "ahead" | "said" | number;
   sentence: PromptSentence | null;
+  struck: string;
 }) {
+  const strike = new Set(struck ? struck.split(",").map(Number) : []);
   const shown = line.cues.filter((cue) => cues || cue.free);
   if (line.start === line.end && shown.length === 0) return null;
   const cuesBefore = (stop: number) =>
@@ -337,6 +359,7 @@ const LineView = memo(function LineView({
       said ? "is-said" : "",
       isCurrent ? "is-current" : "",
       sentence && stop >= sentence.start && stop < sentence.end ? "in-sentence" : "",
+      strike.has(stream.stops[stop]!.sentence) ? "is-skipped" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -356,6 +379,24 @@ const LineView = memo(function LineView({
     </p>
   );
 });
+
+/** Skipped sentences of `line`, comma-joined: a string, so an unchanged line keeps its memo. */
+function struckIn(stream: PromptStream, line: PromptLine, skipped: ReadonlySet<number>): string {
+  if (skipped.size === 0 || line.start === line.end) return "";
+  const first = stream.stops[line.start]!.sentence;
+  const last = stream.stops[line.end - 1]!.sentence;
+  return [...skipped].filter((sentence) => sentence >= first && sentence <= last).sort((a, b) => a - b).join(",");
+}
+
+/** What the live recognizer is doing, as the follow switch's hint says it. */
+function liveNote(status: LiveStatus): string {
+  if (status.state === "ready") return t.teleprompter.liveReady;
+  if (status.state === "installing") return t.teleprompter.liveInstalling(status.progress === null ? null : Math.round(status.progress * 100));
+  if (status.state === "warming") return t.teleprompter.liveWarming;
+  if (status.state === "unavailable") return t.teleprompter.liveUnavailable(status.detail ?? "");
+  if (status.state === "download") return t.teleprompter.liveDownload;
+  return t.teleprompter.liveOff;
+}
 
 /** Shoot scripts of the project (`shoot: true`), read again when a script changes; `list` is null before the first read. */
 function useShootScripts(): { list: { path: string; script: ShootScript }[] | null; error: string | null } {

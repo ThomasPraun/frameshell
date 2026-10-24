@@ -12,6 +12,11 @@ export interface TeleprompterState {
   position: PromptPosition | null;
   /** Held: drivers' moves are ignored until resumed; the person's keys still move it. */
   held: boolean;
+  /**
+   * Sentences live following jumped over, each by its first word: provisional marks drawn struck through, never
+   * written to the project. Cleared with the script.
+   */
+  skipped: readonly PromptPosition[];
 }
 
 /** Per-viewer display settings, kept in this renderer's storage. */
@@ -22,18 +27,20 @@ export interface TeleprompterSettings {
   mirror: boolean;
   /** Cues shown (small); a `[FREE: …]` slot shows either way. */
   cues: boolean;
+  /** Live recognition moves it (ADR 0024 decision 5) when it is available. */
+  follow: boolean;
 }
 
 const SETTINGS_KEY = "frameshell.teleprompter.settings";
-const DEFAULT_SETTINGS: TeleprompterSettings = { fontSize: FONT_SIZES.initial, mirror: false, cues: true };
+const DEFAULT_SETTINGS: TeleprompterSettings = { fontSize: FONT_SIZES.initial, mirror: false, cues: true, follow: true };
 
-let state: TeleprompterState = { script: null, position: null, held: false };
+let state: TeleprompterState = { script: null, position: null, held: false, skipped: [] };
 let settings: TeleprompterSettings = readSettings();
 const listeners = new Set<() => void>();
 const openers = new Set<() => void>();
 
 function set(next: TeleprompterState): void {
-  if (next.script === state.script && next.position === state.position && next.held === state.held) return;
+  if (next.script === state.script && next.position === state.position && next.held === state.held && next.skipped === state.skipped) return;
   state = next;
   for (const listener of [...listeners]) listener();
 }
@@ -45,6 +52,7 @@ function readSettings(): TeleprompterSettings {
       fontSize: fontSize(raw.fontSize),
       mirror: typeof raw.mirror === "boolean" ? raw.mirror : DEFAULT_SETTINGS.mirror,
       cues: typeof raw.cues === "boolean" ? raw.cues : DEFAULT_SETTINGS.cues,
+      follow: typeof raw.follow === "boolean" ? raw.follow : DEFAULT_SETTINGS.follow,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -68,7 +76,7 @@ export const teleprompter = {
   },
   /** Show `script`; a different script drops the position, so the panel starts it at its next scene. */
   setScript(script: string | null): void {
-    if (script !== state.script) set({ ...state, script, position: null });
+    if (script !== state.script) set({ ...state, script, position: null, skipped: [] });
   },
   /**
    * Move to `position` in the current script (`script` names another to switch to it first). A driver's move
@@ -78,8 +86,12 @@ export const teleprompter = {
     if (source === "follow" && state.held) return false;
     const current = state.position;
     if (script === state.script && current && current.scene === position.scene && current.line === position.line && current.word === position.word) return true;
-    set({ ...state, script, position: { ...position } });
+    set({ ...state, script, position: { ...position }, skipped: script === state.script ? state.skipped : [] });
     return true;
+  },
+  /** Replace the provisional skipped marks (see {@link TeleprompterState.skipped}). */
+  setSkipped(skipped: readonly PromptPosition[]): void {
+    set({ ...state, skipped });
   },
   /** Hold or resume: see {@link TeleprompterState.held}. */
   setHeld(held: boolean): void {
@@ -102,7 +114,7 @@ export const teleprompter = {
   setSettings(change: Partial<TeleprompterSettings>): void {
     const next = { ...settings, ...change };
     next.fontSize = fontSize(next.fontSize);
-    if (next.fontSize === settings.fontSize && next.mirror === settings.mirror && next.cues === settings.cues) return;
+    if (next.fontSize === settings.fontSize && next.mirror === settings.mirror && next.cues === settings.cues && next.follow === settings.follow) return;
     settings = next;
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
