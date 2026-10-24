@@ -70,6 +70,7 @@ import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
 import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
+import { checkScript } from "./scripts/check.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef } from "./timeline/service.js";
@@ -749,6 +750,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
+    "script.check": async ({ cwd, file }) => {
+      const dir = await root(cwd);
+      const names = await people.names(dir).then(
+        (found) => ({ people: found }),
+        (error: unknown) => ({ people: [], warning: `people.json could not be read, speakers not matched: ${(error as Error).message.split("\n")[0]}` }),
+      );
+      return checkScript(dir, cwd, file, names);
+    },
     "timeline.show": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
       return timelines.show(dir, timeline, await viewOf(dir, caller, view));

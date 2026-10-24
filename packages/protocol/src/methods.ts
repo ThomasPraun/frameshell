@@ -11,7 +11,7 @@ import {
   ViewedShape,
 } from "./proposals.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema } from "@frameshell/schema";
+import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, ShootMetaSchema, ShootSceneSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -43,7 +43,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 58;
+export const PROTOCOL_VERSION = 59;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1233,6 +1233,54 @@ export const methods = {
         .array(ClipLocationSchema.extend({ scriptRef: z.string() }))
         .describe("Clips referencing this file at an anchor with no scene; fix with `clip.set` `scriptRef`."),
       warnings: z.array(z.string()).describe("Frontmatter problems, duplicate headings, bad word ranges, unreadable timelines or transcripts skipped."),
+    }),
+  },
+  "script.check": {
+    description:
+      "Check a shoot script (ADR 0023): a script in `scripts/` with `shoot: true` that says, line by line, what each " +
+      "person says on camera. Write it from the person's own script (any format), which stays untouched: name it in " +
+      "`source` with `source_hash` (first 12 hex digits of its SHA-256). Returns the frontmatter, the speakers (each " +
+      "with the `people.json` person of the same name, ignoring case), and per scene (`## ` heading; a closing timing " +
+      "`(0:05–0:40)` is its `expected` length in seconds and is not part of the anchor) its lines: each non-blank text " +
+      "line, its speaker (`**Name:**` holds until the next name), its spoken `words` and its cues (`[LABEL: text]`, " +
+      "never spoken; `[FREE: …]` is unscripted speech checked only for presence and length). `source.stale` is true " +
+      "when the original changed since: write the shoot script again from it. Never fails on content: unknown " +
+      "speakers, a stale or missing source, empty scenes, leftover placeholders (`<…>`, `{{…}}`, `[TODO: …]`) and " +
+      "frontmatter problems become `warnings`; clean when `warnings` is empty. Fails with ScriptNotFound (data lists " +
+      "the scripts there are) or OutsideProject.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z
+        .string()
+        .min(1)
+        .describe("Markdown file inside the project, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch.md`."),
+    }),
+    result: z.object({
+      path: z.string().describe("Script file, project-relative and `/`-separated."),
+      meta: ScriptMetaSchema,
+      shoot: ShootMetaSchema,
+      source: z
+        .object({
+          path: z.string().describe("Absolute path the frontmatter `source` resolves to (relative ones from the project root)."),
+          found: z.boolean().describe("Whether the file exists and could be read."),
+          hash: z.string().nullable().describe("First 12 hex digits of its SHA-256 now; null when not found."),
+          stale: z.boolean().nullable().describe("True when `hash` differs from `source_hash`; null when either is unknown."),
+        })
+        .nullable()
+        .describe("The person's original; null without a frontmatter `source`."),
+      speakers: z
+        .array(
+          z.object({
+            name: z.string().describe("Name as first written in the script."),
+            person: z.string().nullable().describe("Id of the `people.json` person with this name (ignoring case); null when none."),
+            lines: z.int().describe("Lines this speaker says."),
+          }),
+        )
+        .describe("In order of first use; empty when the script names nobody (one speaker)."),
+      scenes: z
+        .array(ShootSceneSchema.extend({ ref: z.string().describe("`scriptRef` value for this scene: `<path>#<slug>`.") }))
+        .describe("In file order."),
+      warnings: z.array(z.string()).describe("Everything to fix before recording; empty when the script is clean."),
     }),
   },
   "timeline.show": {
@@ -2458,6 +2506,8 @@ export type ProposalWaitResult = MethodResult<"proposal.wait">;
 
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
+/** Result of `script.check`. */
+export type ScriptCheckResult = MethodResult<"script.check">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;

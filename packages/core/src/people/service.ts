@@ -84,6 +84,11 @@ export class PeopleService {
     this.#onChanged = options.onChanged ?? (() => {});
   }
 
+  /** Id and name of each person, in file order, without checking links. Throws `InvalidProjectFile`. */
+  async names(root: string): Promise<{ id: string; name: string }[]> {
+    return (await readPeople(root)).people.map(({ id, name }) => ({ id, name }));
+  }
+
   /** Everyone in the project, each link marked `missing` with the reason when its target is gone. */
   async list(root: string): Promise<{ people: PersonInfo[]; dismissed: string[] }> {
     const file = await readPeople(root);
