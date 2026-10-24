@@ -2,6 +2,36 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Shoot (ADR 0023, 0024)
+
+**Shoot script**:
+A script in `scripts/` marked `shoot: true` that says, line by line, what each person says on camera; written by the agent from the person's own script, which stays untouched.
+_Avoid_: compatible script, frameshell script, teleprompter text
+
+**Take**:
+One recording of part of a shoot script: one or more scenes, or part of one. In the app, a range of a shoot session.
+_Avoid_: clip, attempt
+
+**Shoot session**:
+One continuous recording in the app, from Start to End: every source records without stopping, and takes are ranges in it. One multicam group per session.
+_Avoid_: recording, session (alone: a CLI session is something else)
+
+**Teleprompter**:
+The panel that shows the shoot script while recording, with the word being said kept on a fixed focus line.
+_Avoid_: prompter, autocue
+
+**Deviation**:
+A difference between a take and its shoot script (a word missing, changed or added, a line moved or restarted, a long pause, the wrong person, a scene too long or short), marked for the person to accept or record again; never blocking.
+_Avoid_: error, mistake, warning
+
+**Chosen take**:
+The take of a scene that goes into the assembled timeline; the newest one covering it unless the person picks another.
+_Avoid_: best take, selected take
+
+**Cue**:
+A bracketed mark in a shoot script (`[VISUAL: …]`) that is never spoken: what to show, how to say it. `[FREE: …]` is the cue for unscripted speech.
+_Avoid_: mark, note, direction
+
 ## People (ADR 0020)
 
 **Person**:

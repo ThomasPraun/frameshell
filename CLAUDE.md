@@ -61,6 +61,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Ask agent (Cmd/Ctrl+L, context menu, reference format, preview region, `.frameshell/context/`) | `renderer/src/ask/`; main `src/main/context-frames.ts` |
 | Subtitle tracks (words, cues, presets, layout: shared by export and preview; ASS burn, bundled font) | `packages/schema/src/subtitles.ts`; `packages/core/src/export/ass.ts`, `export/fonts.ts`; `renderer/src/subtitles/`, `components/SubtitleInspector.tsx` |
 | Scripts (outline parser, slugs, scriptRef check) | `packages/schema/src/script.ts`, `packages/core/src/scripts/outline.ts` |
+| Shoot / Rodaje (shoot script conventions, takes, deviations, assembly; in-app capture, shoot session = one multicam group, teleprompter, live recognition; not `multicam direct`) | ADR 0023, 0024; spike numbers `docs/research/shoot-capture.md`; never `--use-fake-ui-for-media-stream` for screen capture |
 | MCP server (tools from registry, resources, frame images, default project from active window) | `docs/mcp.md`; `packages/mcp/src/server.ts`, `mcp/src/project.ts`; ADR 0014 |
 | MCP UI state + navigation (`ui_*`, broker daemon → app window) | `docs/mcp.md`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts` |
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
