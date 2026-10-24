@@ -13,6 +13,9 @@ export const SHOOT_USAGE = `  shoot status <script>        Scenes of a shoot scr
                                Pick the take that goes into the cut for a scene; \`default\` = the newest covering it
   shoot discard <script> <take> [--restore]
                                Set a take aside (never chosen); --restore brings it back
+  shoot assemble <script> [<scene>…] [--no-snap]
+                               Build the first cut: each scene's chosen take in script order, restarts and
+                               long pauses cut out, edges snapped into pauses; one transaction (\`revert\` it)
 `;
 
 /** Flags each `shoot` command takes besides the global ones. */
@@ -22,6 +25,7 @@ export const SHOOT_FLAGS: Record<string, readonly string[]> = {
   "shoot accept": ["undo"],
   "shoot choose": [],
   "shoot discard": ["restore"],
+  "shoot assemble": ["no-snap"],
 };
 
 /** A parsed `shoot` command. */
@@ -30,12 +34,13 @@ export type ShootInvocation =
   | { kind: "shoot.add"; script: string; asset: string; scene?: string; recordedAt?: string }
   | { kind: "shoot.accept"; script: string; take: string; deviations: string[]; undo: boolean }
   | { kind: "shoot.choose"; script: string; scene: string; take: string | null }
-  | { kind: "shoot.discard"; script: string; take: string; restore: boolean };
+  | { kind: "shoot.discard"; script: string; take: string; restore: boolean }
+  | { kind: "shoot.assemble"; script: string; scenes: string[]; snap: boolean };
 
 /** Parse `shoot <sub> …`; null when the shape is wrong. */
 export function parseShoot(
   rest: string[],
-  options: { scene?: string | undefined; "recorded-at"?: string | undefined; undo?: boolean | undefined; restore?: boolean | undefined },
+  options: { scene?: string | undefined; "recorded-at"?: string | undefined; undo?: boolean | undefined; restore?: boolean | undefined; "no-snap"?: boolean | undefined },
 ): ShootInvocation | null {
   const [sub, ...args] = rest;
   switch (sub) {
@@ -56,6 +61,8 @@ export function parseShoot(
       return args.length === 3 ? { kind: "shoot.choose", script: args[0]!, scene: args[1]!, take: args[2] === "default" ? null : args[2]! } : null;
     case "discard":
       return args.length === 2 ? { kind: "shoot.discard", script: args[0]!, take: args[1]!, restore: options.restore === true } : null;
+    case "assemble":
+      return args.length >= 1 ? { kind: "shoot.assemble", script: args[0]!, scenes: args.slice(1), snap: options["no-snap"] !== true } : null;
     default:
       return null;
   }
@@ -96,6 +103,16 @@ export async function executeShoot(conn: DaemonConnection, inv: ShootInvocation,
     case "shoot.discard": {
       const result = await conn.request("shoot.discard", { cwd, script: inv.script, take: inv.take, restore: inv.restore });
       return json ? print(result) : `${result.discarded ? "Discarded" : "Restored"} take ${result.take}\n`;
+    }
+    case "shoot.assemble": {
+      const result = await conn.request("shoot.assemble", { cwd, script: inv.script, snap: inv.snap, ...(inv.scenes.length > 0 ? { scenes: inv.scenes } : {}) });
+      if (json) return print(result);
+      const lines = [`Assembled ${result.timeline}${result.created ? " (new timeline)" : ""}${result.tx ? ` in ${result.tx}` : ": nothing changed"}`];
+      for (const scene of result.scenes) {
+        lines.push(`  #${scene.slug}  ${scene.action}${scene.take ? `  take ${scene.take}` : ""}${scene.clips.length > 0 ? `  clips ${scene.clips.join(", ")}` : ""}`);
+      }
+      lines.push(...result.warnings.map((warning) => `warning: ${warning}`));
+      return `${lines.join("\n")}\n`;
     }
   }
 }

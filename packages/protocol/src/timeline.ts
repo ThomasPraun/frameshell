@@ -14,6 +14,7 @@ import {
   type SubtitlePosition,
   type SubtitlePresetId,
   KEY_EASES,
+  TakeIdSchema,
   TrackSchema,
   TransformSchema,
 } from "@frameshell/schema";
@@ -196,6 +197,7 @@ export const operationArgs = {
     gain: z.number().optional().describe("Audio gain in dB, e.g. -18. Default 0."),
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
+    take: TakeIdSchema.optional().describe("Shoot take the clip comes from (`k_…`), as `shoot.assemble` sets it; leave it out otherwise."),
     ripple: rippleArg("Make room: clips starting at or after `start` move right by the new clip's length."),
     rippleTracks: rippleTracksArg,
     snap: z

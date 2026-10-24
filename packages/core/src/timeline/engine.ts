@@ -367,6 +367,7 @@ class Edit {
         ? { audio: { ...(args.gain !== undefined ? { gain: args.gain } : {}), ...(args.muted !== undefined ? { muted: args.muted } : {}) } }
         : {}),
       ...(args.scriptRef ? { scriptRef: args.scriptRef } : {}),
+      ...(args.take ? { take: args.take } : {}),
     };
     if (args.snap === true && type !== "media") {
       throw this.invalid(`only media clips take \`snap\`; ${type} clips have no audio to snap to.`, { field: "snap" });

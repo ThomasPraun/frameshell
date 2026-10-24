@@ -1782,7 +1782,8 @@ function timelineRel(id: string): string {
   return `timelines/${id}.json`;
 }
 
-function timelinePath(root: string, id: string): string {
+/** `timelines/<id>.json` of project `root`, absolute. */
+export function timelinePath(root: string, id: string): string {
   return join(root, "timelines", `${id}.json`);
 }
 

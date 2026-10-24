@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 60;
+export const PROTOCOL_VERSION = 61;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1315,9 +1315,13 @@ export const methods = {
             label: z.string(),
             text: z.string().nullable(),
             free: z.boolean(),
+            time: z
+              .number()
+              .nullable()
+              .describe("Timeline seconds of the cue in the assembled timeline (`shoot.assemble`), from the words around it; null until its scene is assembled."),
           }),
         )
-        .describe("Every cue of the script in order, for placing visuals."),
+        .describe("Every cue of the script in order, for placing visuals (`[VISUAL: …]` becomes a clip or overlay at `time`)."),
       warnings: z.array(z.string()).describe("`script check` warnings of the script, and takes that point at a missing asset or scene."),
     }),
   },
@@ -1336,6 +1340,43 @@ export const methods = {
       recordedAt: z.string().min(1).optional().describe("ISO 8601 time it was recorded; default now. Newer takes are chosen by default."),
     }),
     result: z.object({ file: z.string().describe("Shoot file written, project-relative."), take: TakeInfoSchema }),
+  },
+  "shoot.assemble": {
+    mutating: true,
+    description:
+      "Build the first cut of a shoot (ADR 0023) in its timeline (`timeline` of `shoot.status`, created when missing): per " +
+      "scene, in script order, the chosen take from its first to its last line, restarts and pauses over 1.5 s cut out, " +
+      "0.15 s handles, edges snapped into pauses (`snap: false` keeps them exact), each clip linked to its scene " +
+      "(`scriptRef`) and carrying its take (`take`). A scene already assembled is replaced in place and what follows " +
+      "moves by the change in length; a scene whose take did not change is left alone. Only clips carrying one of the " +
+      "shoot's takes are removed: clips, overlays and subtitles anyone else placed stay. One transaction (label " +
+      "`Assemble <scene>`, or `Assemble <script>` for several), undone with `revert`; held as a proposal in review mode. " +
+      "Then place the visuals from the cues' `time` in `shoot.status`. Fails with ScriptNotFound, InvalidProjectFile or " +
+      "the timeline operations' errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script, e.g. `scripts/launch.md`."),
+      scenes: z.array(z.string().min(1)).min(1).optional().describe("Scene slugs to (re)assemble; default every scene."),
+      snap: z.boolean().default(true).describe("Snap clip edges into audio pauses (ADR 0003)."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id written."),
+      created: z.boolean().describe("True when the timeline file was created by this call."),
+      tx: z.string().nullable().describe("Transaction id, for `revert`; null when nothing changed."),
+      scenes: z
+        .array(
+          z.object({
+            slug: z.string(),
+            take: z.string().nullable(),
+            action: z
+              .enum(["placed", "unchanged", "removed", "none"])
+              .describe("`placed`: new clips. `unchanged`: already as planned. `removed`: old clips taken out, no take covers it now. `none`: nothing to place."),
+            clips: z.array(z.string()).describe("Clip ids of the scene now."),
+          }),
+        )
+        .describe("Scenes assembled, in script order."),
+      warnings: z.array(z.string()),
+    }),
   },
   "shoot.discard": {
     mutating: true,

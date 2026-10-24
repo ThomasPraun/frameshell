@@ -6,8 +6,11 @@ import {
   PEOPLE_FILE,
   SHOOTS_DIR,
   type ShootFile,
+  type MediaClip,
+  type ShootLine,
   type ShootScript,
   type ShootTake,
+  type Timeline,
   type Transcript,
   createShootFile,
   parsePeopleFile,
@@ -37,6 +40,8 @@ export interface ShootServiceOptions {
   onChanged?: (root: string, script: string, change: ShootChange, take: string | undefined) => void;
   /** Content hash (`sha256:<hex>`) of a project file when known, to tell a stale transcript; null when unknown. */
   assetHash?: (root: string, rel: string) => Promise<string | null>;
+  /** The timeline `id` as the caller sees it, for cue times; null when there is none. */
+  timeline?: (root: string, id: string) => Promise<Timeline | null>;
 }
 
 type TakeInfo = ShootStatusResult["takes"][number];
@@ -66,12 +71,14 @@ interface Analysis {
 export class ShootService {
   readonly #onChanged: NonNullable<ShootServiceOptions["onChanged"]>;
   readonly #assetHash: NonNullable<ShootServiceOptions["assetHash"]>;
+  readonly #timeline: NonNullable<ShootServiceOptions["timeline"]>;
   /** Last change of each project in flight, by canonical root: the next one waits for it. */
   readonly #tails = new Map<string, Promise<unknown>>();
 
   constructor(options: ShootServiceOptions = {}) {
     this.#onChanged = options.onChanged ?? (() => {});
     this.#assetHash = options.assetHash ?? (async () => null);
+    this.#timeline = options.timeline ?? (async () => null);
   }
 
   /** `shoot.status`. Throws `ScriptNotFound`, `OutsideProject` or `InvalidProjectFile`. */
@@ -130,8 +137,19 @@ export class ShootService {
     // A scene with nothing to say (cues only) is never the next one to record.
     const recordable = new Set(parsed.scenes.filter((scene) => scene.lines.some((line) => line.words.length > 0 || line.cues.some((cue) => cue.free))).map((scene) => scene.slug));
     const next = scenes.find((scene) => scene.state !== "done" && recordable.has(scene.slug))?.slug ?? null;
-    const cues = parsed.scenes.flatMap((scene) => scene.lines.flatMap((line) => line.cues.map((cue) => ({ scene: scene.slug, line: line.line, label: cue.label, text: cue.text, free: cue.free }))));
-    return { script: loaded.script, file: loaded.fileRel, timeline: file.timeline ?? shootSlug(loaded.script), scenes, takes, next, cues, warnings };
+    const timelineId = file.timeline ?? shootSlug(loaded.script);
+    const assembled = await this.#timeline(root, timelineId).catch(() => null);
+    const chosenOf = new Map(scenes.map((scene) => [scene.slug, takes.find((take) => take.id === scene.chosen) ?? null]));
+    const cues = parsed.scenes.flatMap((scene) =>
+      scene.lines.flatMap((line) =>
+        line.cues.map((cue) => {
+          const take = chosenOf.get(scene.slug) ?? null;
+          const time = assembled && take ? cueTime(assembled, `${loaded.script}#${scene.slug}`, take, scene.slug, line, cue.at) : null;
+          return { scene: scene.slug, line: line.line, label: cue.label, text: cue.text, free: cue.free, time };
+        }),
+      ),
+    );
+    return { script: loaded.script, file: loaded.fileRel, timeline: timelineId, scenes, takes, next, cues, warnings };
   }
 
   /** `shoot.add`. Throws `ScriptNotFound`, `AssetNotFound`, `OutsideProject`, `InvalidOperation`, `InvalidProjectFile`. */
@@ -329,6 +347,32 @@ export function classifyShootCache(name: string, isDirectory: boolean): GcClass 
   const keyed = /^([0-9a-f]{24})\.json$/.exec(name);
   if (keyed) return { kind: "shoot", key: keyed[1]! };
   if (/^[0-9a-f]{24}\.json\..+\.tmp$/.test(name)) return { kind: "temp", key: null };
+  return null;
+}
+
+/**
+ * Timeline time of a cue: its place in the take, from how far into its line it sits (a cue-only line
+ * takes the end of the line before it), mapped through the assembled clip holding that moment.
+ */
+function cueTime(timeline: Timeline, ref: string, take: TakeInfo, scene: string, line: ShootLine, at: number): number | null {
+  const lines = take.lines.filter((outcome) => outcome.scene === scene && outcome.at !== null);
+  const own = lines.find((outcome) => outcome.line === line.line);
+  let t: number | null;
+  if (own?.at && line.words.length > 0) t = own.at.start + (Math.min(at, line.words.length) / line.words.length) * (own.at.end - own.at.start);
+  else {
+    const before = lines.filter((outcome) => outcome.line < line.line).at(-1);
+    t = before?.at?.end ?? lines[0]?.at?.start ?? null;
+  }
+  if (t === null) return null;
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video" && track.kind !== "audio") continue;
+    for (const any of track.clips) {
+      if (any.type !== "media") continue;
+      const clip = any as MediaClip;
+      if (clip.take !== take.id || clip.scriptRef !== ref) continue;
+      if (t >= clip.in - 1e-6 && t <= clip.out + 1e-6) return Math.round((clip.start + (t - clip.in) / (clip.speed ?? 1)) * 1000) / 1000;
+    }
+  }
   return null;
 }
 

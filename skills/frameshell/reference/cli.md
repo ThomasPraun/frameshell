@@ -18,6 +18,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell shoot accept <script> <take> [<deviation>…] [--undo]` | Let deviations pass (default all of the take's). Only what the person asked for. `--undo` takes it back. |
 | `frameshell shoot choose <script> <scene> <take\|default>` | Pick the take that goes into the cut for a scene; `default` = the newest covering it. |
 | `frameshell shoot discard <script> <take> [--restore]` | Set a take aside, never chosen; `--restore` brings it back. |
+| `frameshell shoot assemble <script> [<scene>…] [--no-snap]` | Build the first cut in the shoot's timeline (created when missing): each scene's chosen take in script order, restarts and pauses over 1.5 s cut out, edges snapped into pauses, clips linked to their scene. A scene already assembled is replaced in place, what follows moves; clips anyone else placed stay. One transaction: `frameshell revert <tx>` undoes it. |
 | `frameshell people list` | Optional `people.json` (see [people.md](people.md)): who is who across files. Each person's links; `MISSING` ones with the reason (kept, ignored). `--json`: `people`, `dismissed`. |
 | `frameshell people add <name>` | New person, id `p_…` generated; names are unique ignoring case. |
 | `frameshell people rename <person> <name>` | `<person>` is an id or the exact name. Writes the new name into the transcript of each linked speaker. |
