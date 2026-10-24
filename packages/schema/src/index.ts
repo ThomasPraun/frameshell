@@ -114,6 +114,19 @@ export {
 export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
+  SHOOT_SCHEMA_URL,
+  SHOOTS_DIR,
+  TakeIdSchema,
+  ShootTakeSchema,
+  AcceptedDeviationSchema,
+  ShootFileSchema,
+  type ShootFile,
+  type ShootTake,
+  createShootFile,
+  parseShootFile,
+  shootSlug,
+} from "./shoot.js";
+export {
   PLUGIN_MANIFEST_FILE,
   PLUGIN_MANIFEST_SCHEMA_URL,
   BUILTIN_COMMANDS,

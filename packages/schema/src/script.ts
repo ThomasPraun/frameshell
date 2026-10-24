@@ -439,8 +439,11 @@ function readWordsComment(body: string[], slug: string, warnings: string[]): { w
   }
 }
 
-/** A spoken word: a letter or digit, then letters, marks, digits, apostrophes, `_` and `-`. */
-const WORD = /[\p{L}\p{N}][\p{L}\p{M}\p{N}'’_-]*/gu;
+/**
+ * A spoken word: a letter or digit, then letters, marks, digits, apostrophes, `_` and `-`. A number keeps
+ * its separators (`1.500`, `1,5`), so it is said as one number.
+ */
+const WORD = /\p{N}+(?:[.,]\p{N}+)+|[\p{L}\p{N}][\p{L}\p{M}\p{N}'’_-]*/gu;
 
 function countWords(text: string): number {
   return text.match(WORD)?.length ?? 0;
