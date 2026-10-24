@@ -63,6 +63,11 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "take": {
+                          "description": "Shoot take this clip was placed from by `shoot.assemble` (ADR 0023); re-assembly replaces only clips that carry a take of its shoot.",
+                          "type": "string",
+                          "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
+                        },
                         "transform": {
                           "type": "object",
                           "properties": {
@@ -346,6 +351,11 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "take": {
+                          "description": "Shoot take this clip was placed from by `shoot.assemble` (ADR 0023); re-assembly replaces only clips that carry a take of its shoot.",
+                          "type": "string",
+                          "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
+                        },
                         "transform": {
                           "type": "object",
                           "properties": {
@@ -621,6 +631,11 @@
                           "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "take": {
+                          "description": "Shoot take this clip was placed from by `shoot.assemble` (ADR 0023); re-assembly replaces only clips that carry a take of its shoot.",
+                          "type": "string",
+                          "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
                         },
                         "transform": {
                           "type": "object",

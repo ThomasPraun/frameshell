@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { ElementsSchema } from "./element-styles.js";
+import { TakeIdSchema } from "./shoot.js";
 
 /** Canonical `$schema` URL for `timelines/*.json`. */
 export const TIMELINE_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/timeline.json`;
@@ -112,6 +113,9 @@ const clipBase = {
   id: ClipIdSchema,
   start: ClipStartSchema,
   scriptRef: ScriptRefSchema,
+  take: TakeIdSchema.optional().describe(
+    "Shoot take this clip was placed from by `shoot.assemble` (ADR 0023); re-assembly replaces only clips that carry a take of its shoot.",
+  ),
   transform: TransformSchema.optional(),
   audio: ClipAudioSchema.optional(),
   dissolve: TransitionSeconds.optional().describe(

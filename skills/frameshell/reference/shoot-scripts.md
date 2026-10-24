@@ -82,6 +82,8 @@ A take is one recording of part of the script: a scene, several, or part of one.
 3. **Tell the person, then do what they say.** Report the deviations in plain words, scene by scene, and `next`. The person lets them pass or records again. Accept only what they asked for: `frameshell shoot accept <script> <take> [<deviation id>…]` (no ids = the whole take), `--undo` to take it back. A scene is `done` when its chosen take covers every line and all its deviations are accepted.
 4. **Choosing and discarding.** `frameshell shoot choose <script> <scene> <take>` picks a take for a scene (`default` goes back to the newest). `frameshell shoot discard <script> <take>` sets one aside; `--restore` brings it back.
 
+5. **First cut.** `frameshell shoot assemble scripts/<name>.md` puts each scene's chosen take into the shoot's timeline (`timeline` in `shoot status`), in script order, with restarts and long pauses cut out. Run it again after a new take or a new choice: only scenes whose take changed are replaced, and what follows moves with them. Clips you or the person added stay. Then place the visuals: each cue in `shoot status` has `time`, its timeline second (`[VISUAL: …]` becomes a clip or overlay there, linked with `--script-ref`). Name scenes to assemble only those: `frameshell shoot assemble scripts/<name>.md hook`.
+
 With `follow: topics` only `missing` lines are reported: a line counts as said when about half of its content words are heard, in any order.
 
 An accepted deviation stays accepted while its script line and the heard words stay the same; editing that line of the script brings it back.

@@ -384,6 +384,7 @@ function parseBuiltin(
     "recorded-at"?: string | undefined;
     undo?: boolean | undefined;
     restore?: boolean | undefined;
+    "no-snap"?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -619,6 +620,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "shoot.accept":
     case "shoot.choose":
     case "shoot.discard":
+    case "shoot.assemble":
       return executeShoot(conn, inv, cwd, flags.json);
     case "people.ranges":
       return executePeople(conn, inv, cwd, flags.json);

@@ -26,11 +26,11 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, findPerson, parseTimeline } from "@frameshell/schema";
+import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
-import { canonicalPath, canonicalPathSync } from "./fs-util.js";
+import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
 import { BinaryManager } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -71,10 +71,11 @@ import { FileTransactionStore, TransactionTracker } from "./history/transactions
 import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { checkScript } from "./scripts/check.js";
+import { assembleShoot, planScenes } from "./shoot/assemble.js";
 import { ShootService } from "./shoot/service.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
-import { TimelineService, type TxRef } from "./timeline/service.js";
+import { TimelineService, type TxRef, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -276,6 +277,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const shoots = new ShootService({
     onChanged: (dir, script, change, take) => publishFor("shoot.changed", dir, { project: dir, script, change, ...(take !== undefined ? { take } : {}) }),
     assetHash: async (dir, rel) => (await media.list(dir)).find((asset) => asset.path === rel)?.hash ?? null,
+    timeline: async (dir, id) => (await exists(timelinePath(dir, id))) ? (await timelines.viewTimeline(dir, id, "current")).timeline : null,
   });
   /** Cached face scans of every file in `assets/`; content hashes come from the media index. */
   const faceScans =
@@ -758,6 +760,54 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
     "shoot.status": async ({ cwd, script }) => shoots.status(await root(cwd), cwd, script),
     "shoot.add": async ({ cwd, script, asset, scene, recordedAt }, caller) => shoots.add(await root(cwd), cwd, { script, asset, scene, recordedAt, by: journalAuthorOf(caller) }),
+    "shoot.assemble": async ({ cwd, script, scenes: wanted, snap }, caller) => {
+      const dir = await root(cwd);
+      const status = await shoots.status(dir, cwd, script);
+      const timeline = status.timeline;
+      const unknown = (wanted ?? []).filter((slug) => !status.scenes.some((scene) => scene.slug === slug));
+      if (unknown.length > 0) {
+        throw new RpcError(ErrorCode.InvalidOperation, `shoot.assemble: no scene ${unknown.join(", ")} in ${status.script}; scenes: ${status.scenes.map((scene) => scene.slug).join(", ")}.`, {
+          op: "shoot.assemble",
+          reason: "unknown scene",
+          field: "scenes",
+        });
+      }
+      let created = false;
+      if (!(await exists(timelinePath(dir, timeline)))) {
+        await timelines.writeFile(dir, timeline, `${JSON.stringify(createTimeline(timeline), null, 2)}\n`);
+        created = true;
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const titles = wanted?.length === 1 ? status.scenes.find((scene) => scene.slug === wanted[0])!.title : status.script;
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Assemble ${titles}` };
+      const author = journalAuthorOf(caller);
+      let changed = false;
+      const warnings: string[] = [];
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        const outcomes = await assembleShoot(
+          planScenes(status),
+          wanted ? new Set(wanted) : null,
+          new Set(status.takes.map((take) => take.id)),
+          {
+            load: async () => (await loadFor(dir, timeline, caller)).timeline,
+            apply: async (request) => {
+              const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
+              await transactions.applied(key, tx);
+              changed = true;
+              warnings.push(...result.warnings);
+              return { added: result.changes.added };
+            },
+            hasVideo: async (asset) => (await media.probe(dir, asset)).video !== null,
+          },
+          snap,
+        );
+        return { timeline, created, tx: changed ? tx.id : null, scenes: outcomes, warnings };
+      } finally {
+        await settle(key, tx);
+      }
+    },
     "shoot.discard": async ({ cwd, script, take, restore }) => shoots.discard(await root(cwd), cwd, { script, take, restore }),
     "shoot.accept": async ({ cwd, script, take, deviations, undo }, caller) =>
       shoots.accept(await root(cwd), cwd, { script, take, deviations, undo, by: journalAuthorOf(caller) }),
