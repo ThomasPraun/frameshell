@@ -36,6 +36,25 @@ export function levelDb(samples: ArrayLike<number>): number {
   return rms > 0 ? Math.max(LEVEL_FLOOR, 20 * Math.log10(rms)) : LEVEL_FLOOR;
 }
 
+/**
+ * Analyser size (a power of two, as `AnalyserNode.fftSize` needs) that holds at least `ms` of sound at `sampleRate`:
+ * each meter reading then covers the whole time since the last one, so no sound falls between readings.
+ */
+export function meterWindow(sampleRate: number, ms: number): number {
+  const needed = (sampleRate * ms) / 1000;
+  let size = 32;
+  while (size < needed && size < 32768) size *= 2;
+  return size;
+}
+
+/** How fast a meter falls back after a peak, dB per second: a 20 ms click stays visible for about two seconds. */
+export const METER_FALL_DB_PER_S = 24;
+
+/** The level a meter shows: the new reading, or the previous one fallen by {@link METER_FALL_DB_PER_S} over `ms`. */
+export function heldLevel(shown: number, reading: number, ms: number): number {
+  return Math.max(reading, LEVEL_FLOOR, shown - (METER_FALL_DB_PER_S * ms) / 1000);
+}
+
 /** Meter fill for a level, 0..1: -60 dBFS and below empty, 0 dBFS full. */
 export function meterFill(db: number): number {
   return Math.min(1, Math.max(0, (db + 60) / 60));

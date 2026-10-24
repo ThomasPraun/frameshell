@@ -5,6 +5,8 @@ import {
   SILENCE_WARN_MS,
   VIDEO_TYPES,
   capSize,
+  heldLevel,
+  meterWindow,
   elapsedLabel,
   levelDb,
   meterFill,
@@ -42,6 +44,20 @@ describe("levels", () => {
     expect(meterFill(-100)).toBe(0);
     expect(meterFill(-30)).toBeCloseTo(0.5);
     expect(meterFill(3)).toBe(1);
+  });
+
+  it("reads windows that cover the time between readings and holds peaks while they fall back", () => {
+    expect(meterWindow(48_000, 100)).toBe(8192);
+    expect(meterWindow(44_100, 100)).toBe(8192);
+    expect(meterWindow(16_000, 100)).toBe(2048);
+    expect(meterWindow(8_000_000, 100)).toBe(32768);
+    let shown = heldLevel(LEVEL_FLOOR, -13, 100);
+    expect(shown).toBe(-13);
+    for (let tick = 0; tick < 10; tick++) shown = heldLevel(shown, LEVEL_FLOOR, 100);
+    expect(shown).toBeCloseTo(-13 - 24, 6);
+    expect(heldLevel(shown, -5, 100)).toBe(-5);
+    for (let tick = 0; tick < 100; tick++) shown = heldLevel(shown, LEVEL_FLOOR, 100);
+    expect(shown).toBe(LEVEL_FLOOR);
   });
 
   it("warns once system audio has been silent for 10 s, and forgets the silence at the first sound", () => {

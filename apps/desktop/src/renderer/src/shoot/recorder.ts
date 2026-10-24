@@ -2,7 +2,7 @@
 // the Shoot view switches tabs or moves to its own window (ADR 0012). Main appends the chunks and finishes the session.
 import { useSyncExternalStore } from "react";
 import type { ShootFinish, ShootRole, ShootScreenSource, ShootSourceSpec, ShootSupport } from "../../../shared/api.js";
-import { capSize, levelDb, pickType, silentSince, silentTooLong } from "./model.js";
+import { LEVEL_FLOOR, capSize, heldLevel, levelDb, meterWindow, pickType, silentSince, silentTooLong } from "./model.js";
 
 /** A camera or microphone. */
 export interface ShootDevice {
@@ -76,8 +76,7 @@ export function createShootRecorder() {
   const listeners = new Set<() => void>();
   let micStream: MediaStream | null = null;
   let audio: AudioContext | null = null;
-  const meters = new Map<"mic" | "system", { analyser: AnalyserNode; source: MediaStreamAudioSourceNode }>();
-  let meterTimer: number | undefined;
+  const meters = new Map<"mic" | "system", { analyser: AnalyserNode; source: MediaStreamAudioSourceNode }>();  let meterTimer: number | undefined;
   let silence: number | null = null;
   let initialized = false;
   let mounted = 0;
@@ -118,25 +117,30 @@ export function createShootRecorder() {
     // Analysed only, never connected to the output: the mic must not play back.
     const source = audio.createMediaStreamSource(new MediaStream([track]));
     const analyser = audio.createAnalyser();
-    analyser.fftSize = 2048;
+    analyser.fftSize = meterWindow(audio.sampleRate, LEVEL_MS);
     source.connect(analyser);
     meters.set(kind, { analyser, source });
     meterTimer ??= window.setInterval(readLevels, LEVEL_MS);
   }
 
   function readLevels(): void {
-    const buffer = new Float32Array(2048);
     const level = (kind: "mic" | "system") => {
       const node = meters.get(kind);
-      if (!node) return -100;
+      if (!node) return LEVEL_FLOOR;
+      const buffer = new Float32Array(node.analyser.fftSize);
       node.analyser.getFloatTimeDomainData(buffer);
       return levelDb(buffer);
     };
-    const micLevel = level("mic");
-    const systemLevel = level("system");
+    const mic = level("mic");
+    const system = level("system");
     const now = performance.now();
-    silence = state.systemAudio && meters.has("system") ? silentSince(silence, systemLevel, now) : null;
-    set({ micLevel, systemLevel, systemSilent: silentTooLong(silence, now) });
+    // The silence check reads the level as it is; the meters hold peaks so a short sound is seen.
+    silence = state.systemAudio && meters.has("system") ? silentSince(silence, system, now) : null;
+    set({
+      micLevel: meters.has("mic") ? heldLevel(state.micLevel, mic, LEVEL_MS) : LEVEL_FLOOR,
+      systemLevel: meters.has("system") ? heldLevel(state.systemLevel, system, LEVEL_MS) : LEVEL_FLOOR,
+      systemSilent: silentTooLong(silence, now),
+    });
     if (meters.size === 0) {
       window.clearInterval(meterTimer);
       meterTimer = undefined;
