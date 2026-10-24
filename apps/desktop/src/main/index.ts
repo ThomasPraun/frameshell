@@ -101,6 +101,7 @@ import {
   finishSession,
   isSessionId,
   markStarted,
+  recoverable,
   unfinishedSessions,
 } from "./shoot-session.js";
 import { TimelineEditor } from "./timeline-editor.js";
@@ -993,7 +994,7 @@ function abandonShoot(state: WindowState): void {
 async function recoverShoots(state: WindowState, root: string): Promise<void> {
   for (const id of await unfinishedSessions(root)) {
     const key = `${root}\0${id}`;
-    if (activeShoots.has(key)) continue;
+    if (activeShoots.has(key) || !(await recoverable(root, id))) continue;
     activeShoots.add(key);
     try {
       const finish = await finishSession(root, id, true, shootDeps(root));

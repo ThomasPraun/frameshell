@@ -38,6 +38,8 @@ export interface SessionState {
   id: string;
   /** ISO time the session began. */
   createdAt: string;
+  /** Process that records it (Frameshell's main): while it lives, the session is not crashed, whoever looks. */
+  pid?: number;
   sources: SessionSource[];
 }
 
@@ -91,6 +93,7 @@ export async function beginSession(root: string, specs: readonly ShootSourceSpec
     version: 1,
     id,
     createdAt: now.toISOString(),
+    pid: process.pid,
     sources: specs.map(({ role, mime, label }) => ({ role, file: fileNameOf(role, mime), mime, label, start: null })),
   };
   await writeJsonAtomic(statePath(root, id), state);
@@ -138,6 +141,27 @@ export async function readSession(root: string, id: string): Promise<SessionStat
   const raw = (await readJsonIfExists(statePath(root, id)).catch(() => null)) as SessionState | null;
   if (!raw || raw.version !== 1 || raw.id !== id || !Array.isArray(raw.sources)) return null;
   return raw;
+}
+
+/** True while process `pid` runs (signal 0 only checks; EPERM means it runs as another user). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Whether session `id` was left by a crash and can be finished now: false while the process that records it still
+ * runs (another Frameshell instance on the same project, as unpackaged builds allow), so its files are never cut
+ * from under it; a later open retries. A reused pid only delays recovery.
+ */
+export async function recoverable(root: string, id: string, alive: (pid: number) => boolean = processAlive): Promise<boolean> {
+  const state = await readSession(root, id);
+  if (!state) return false;
+  return state.pid === undefined || state.pid === process.pid || !alive(state.pid);
 }
 
 /** Ids of the sessions of the project rooted at `root` that have a state file: not finished. Oldest first. */

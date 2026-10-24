@@ -19,6 +19,7 @@ import {
   markStarted,
   offsetsOf,
   readSession,
+  recoverable,
   removeFile,
   sessionId,
   unfinishedSessions,
@@ -216,6 +217,23 @@ describe("finishSession", () => {
     expect(finish.files).toHaveLength(4);
     expect(readdirSync(folder).sort()).toEqual(["camera.mp4", "mic.m4a", "screen.mp4", "system.webm"]);
     expect(await unfinishedSessions(root)).toEqual([]);
+  });
+});
+
+describe("recoverable", () => {
+  it("leaves a session alone while the process recording it runs, and takes it once that process is gone", async () => {
+    const root = project();
+    const state = await beginSession(root, SPECS, AT);
+    expect((await readSession(root, state.id))!.pid).toBe(process.pid);
+    expect(await recoverable(root, state.id)).toBe(true);
+    const file = join(root, SHOOT_STATE_DIR, `${state.id}.json`);
+    writeFileSync(file, JSON.stringify({ ...state, pid: 999_999 }));
+    expect(await recoverable(root, state.id, () => true)).toBe(false);
+    expect(await recoverable(root, state.id, () => false)).toBe(true);
+    const { pid: _pid, ...older } = state;
+    writeFileSync(file, JSON.stringify(older));
+    expect(await recoverable(root, state.id, () => true)).toBe(true);
+    expect(await recoverable(root, "20200101-000000")).toBe(false);
   });
 });
 

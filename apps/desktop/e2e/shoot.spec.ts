@@ -1,6 +1,7 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
@@ -120,7 +121,13 @@ test("finishes a session the app was killed in on the next open", async () => {
   await page.waitForTimeout(1500);
   const killed = app.process();
   const exited = new Promise((resolve) => killed.once("exit", resolve));
-  killed.kill("SIGKILL");
+  if (process.platform === "win32") {
+    // Playwright starts Electron through a shell on Windows: the pid is cmd.exe's, and killing it leaves Electron
+    // running. A crash ends Frameshell's main process itself, so end the whole tree, Electron's main included.
+    execFileSync("taskkill", ["/pid", String(killed.pid), "/T", "/F"], { stdio: "ignore" });
+  } else {
+    killed.kill("SIGKILL");
+  }
   await exited;
   const unfinished = readdirSync(join(box.projectDir, ".frameshell", "shoot", "sessions"));
   expect(unfinished).toHaveLength(1);
