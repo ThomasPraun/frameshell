@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isScriptPath, parseScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
+import { isScriptPath, parseScript, parseShootScript, scriptRefPathProblem, scriptSlug, splitScriptRef } from "../src/index.js";
 
 describe("scene words comment (ADR 0015)", () => {
   const scene = (text: string) => parseScript(text).scenes[0]!;
@@ -157,5 +157,76 @@ describe("scriptRefPathProblem", () => {
     expect(scriptRefPathProblem(path("scripts\\..\\..\\x.md#s"))).toMatch(/`\.\.`/);
     expect(scriptRefPathProblem(path("scripts/..#s"))).toMatch(/`\.\.`/);
     expect(scriptRefPathProblem("scripts/a\0.md")).toMatch(/NUL/);
+  });
+});
+
+describe("shoot scripts (ADR 0023)", () => {
+  const launch = [
+    "---",
+    "title: Launch video",
+    "shoot: true",
+    "source: drafts/guion.docx",
+    "source_hash: 3F9A1C0E2B7D",
+    "---",
+    "",
+    "## Hook (0:00–0:05)",
+    "**Ana:** ¿Cuántas pestañas tenés abiertas ahora mismo?",
+    "[VISUAL: Ana close-up, browser with 23 tabs behind]",
+    "",
+    "## The problem (0:05-1:02:10)",
+    "**Ana:** Veintitrés. [beat] Yo *también*.",
+    "**Juan**: Y ninguna la vas a [leer](https://example.com).",
+    "[FREE: Juan tells how he lost a client]",
+  ].join("\n");
+
+  it("reads lines with held speakers, spoken words and cues at their word position", () => {
+    const script = parseShootScript(launch);
+    expect(script.shoot).toEqual({ shoot: true, source: "drafts/guion.docx", sourceHash: "3f9a1c0e2b7d", follow: "words" });
+    expect(script.speakers).toEqual(["Ana", "Juan"]);
+    expect(script.warnings).toEqual([]);
+    const [hook, problem] = script.scenes;
+    expect(hook!.lines).toEqual([
+      { line: 9, speaker: "Ana", text: "¿Cuántas pestañas tenés abiertas ahora mismo?", words: ["Cuántas", "pestañas", "tenés", "abiertas", "ahora", "mismo"], cues: [] },
+      { line: 10, speaker: "Ana", text: "", words: [], cues: [{ label: "VISUAL", text: "Ana close-up, browser with 23 tabs behind", at: 0, free: false }] },
+    ]);
+    expect(problem!.lines[0]).toMatchObject({ speaker: "Ana", text: "Veintitrés. Yo también.", words: ["Veintitrés", "Yo", "también"], cues: [{ label: "beat", text: null, at: 1, free: false }] });
+    expect(problem!.lines[1]).toMatchObject({ speaker: "Juan", text: "Y ninguna la vas a leer.", cues: [] });
+    expect(problem!.lines[2]).toMatchObject({ speaker: "Juan", words: [], cues: [{ label: "FREE", text: "Juan tells how he lost a client", free: true }] });
+    expect(problem!.words).toBe(9);
+  });
+
+  it("takes the heading timing as expected length, out of title and slug", () => {
+    const script = parseShootScript(launch);
+    expect(script.scenes.map((scene) => [scene.title, scene.slug, scene.expected])).toEqual([
+      ["Hook", "hook", 5],
+      ["The problem", "the-problem", 3725],
+    ]);
+    expect(parseScript(launch).scenes.map((scene) => scene.slug)).toEqual(["hook", "the-problem"]);
+    expect(parseScript("## Hook (0:00–0:05)\nHi").scenes[0]).toMatchObject({ title: "Hook (0:00–0:05)", slug: "hook-000005" });
+    expect(parseShootScript("---\nshoot: true\n---\n## Hook (0:09–0:05)\nHi").warnings).toEqual([expect.stringMatching(/ends before it starts/)]);
+  });
+
+  it("never speaks headings, rules, comments, fenced code or list and quote marks", () => {
+    const script = parseShootScript(["---", "shoot: true", "---", "## A", "### Note", "---", "<!-- aside --> Hola", "```", "code here", "```", "- uno", "> dos", "1. tres"].join("\n"));
+    expect(script.scenes[0]!.lines.map((line) => line.text)).toEqual(["Hola", "uno", "dos", "tres"]);
+    expect(script.speakers).toEqual([]);
+    expect(script.warnings).toEqual([]);
+  });
+
+  it("warns, never fails, on broken conventions", () => {
+    const text = ["---", "shoot: yes", "follow: vibes", "source: x.docx", "source_hash: nope", "---", "Intro line", "## A", "Hello <name>.", "**Ana:** Hi [TODO: fact]", "## B", "[VISUAL: logo]"].join("\n");
+    const warnings = parseShootScript(text).warnings.join("\n");
+    for (const expected of [/`shoot` must be `true`/, /`follow` must be/, /`source_hash` must be 12 hex/, /`source` has no `source_hash`/, /before the first `## `/, /placeholder <name>/, /placeholder \[TODO: fact\]/, /Line 9 comes before any `\*\*Name:\*\*`/, /Scene "b" has nothing to say/]) {
+      expect(warnings).toMatch(expected);
+    }
+    expect(parseShootScript("## A\nHi").warnings).toEqual(["Not a shoot script: add `shoot: true` to the frontmatter."]);
+    expect(parseShootScript("---\nshoot: true\nfollow: topics\n---\n").shoot.follow).toBe("topics");
+    expect(parseShootScript("---\nshoot: true\n---\n").warnings).toEqual([expect.stringMatching(/^No scenes/)]);
+  });
+
+  it("matches speaker names ignoring case and keeps the first spelling", () => {
+    const script = parseShootScript("---\nshoot: true\n---\n## A\n**ana:** uno\n**ANA:** dos\n**Ana Pérez:** tres");
+    expect(script.speakers).toEqual(["ana", "Ana Pérez"]);
+    expect(script.scenes[0]!.lines.map((line) => line.speaker)).toEqual(["ana", "ANA", "Ana Pérez"]);
   });
 });

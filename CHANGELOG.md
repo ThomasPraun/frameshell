@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shoot scripts (ADR 0023, #387, protocol v59): a script in `scripts/` with `shoot: true` says line by line what each person says on camera. `frameshell script check <file>` (daemon `script.check`, MCP `script_check`) returns its scenes with expected lengths from heading timings `(0:05–0:40)`, each line with its speaker (`**Name:**`, held until the next), spoken words and cues (`[LABEL: …]`, never spoken; `[FREE: …]` for unscripted speech), the speakers matched to `people.json`, and whether the person's original (`source`, `source_hash`) changed since. Problems are warnings, never failures. New skill page `shoot-scripts.md`: the format, mapping other tools' marks, and the rule that the original is never written. In a shoot script the heading timing is left out of the scene's title and anchor.
 - People in the app, the rest of ADR 0020 decision 11 (#374, protocol v58):
   - The transcript view's speaker-label menu has "Link to person…" (type a name: an existing person, or a new one added on the spot) and, for a linked speaker, "Unlink from <name>".
   - The People panel shows each person's seconds speaking and on screen in the main timeline, and a play button beside each linked voice (and each suggestion naming a voice) that plays up to 8 s of that speaker's longest stretch from the preview audio; nothing is written.

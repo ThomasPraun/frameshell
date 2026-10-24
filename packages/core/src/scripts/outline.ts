@@ -83,8 +83,12 @@ export async function checkScriptRef(root: string, ref: string): Promise<string 
   return `scriptRef "${ref}": no scene "${anchor}" in ${path}; scenes: ${known}. Stored anyway.`;
 }
 
-/** Project-relative `/`-path and text of an existing, readable script file. */
-async function locateScript(root: string, cwd: string, file: string): Promise<{ path: string; text: string }> {
+/**
+ * Project-relative `/`-path and text of an existing, readable script file:
+ * `file` absolute, or relative to `cwd`, then to `root`. Throws
+ * `OutsideProject` or `ScriptNotFound`.
+ */
+export async function locateScript(root: string, cwd: string, file: string): Promise<{ path: string; text: string }> {
   const candidates = isAbsolute(file) ? [file] : [resolve(cwd, file), resolve(root, file)];
   const inside = candidates.map((candidate) => relativeInside(root, candidate)).filter((rel): rel is string => rel !== null);
   if (inside.length === 0) {
