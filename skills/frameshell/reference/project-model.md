@@ -43,6 +43,8 @@ exports/                 render output
 
 Plain Markdown; optional frontmatter `title`, `target_duration`, `aspect`. Each `## ` heading is a scene whose slug is the anchor in a clip's `scriptRef`. `frameshell script outline <file>` lists scenes, their refs and the clips linked to each; empty scenes still need footage. A scene may name its transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` right under the heading (word ids repeat across transcripts, so name the file; the bare `w_000010..w_000042` works only when one transcript holds both ids); the outline then gives `wordRange` and `span` (timeline seconds those words occupy, per timeline), so you can place its clips on the words. Clips do not follow their words when audio is cut: re-read the outline after cutting. Unknown ids, an ambiguous bare range or a reversed range come back as `warnings`.
 
+A script with `shoot: true` in its frontmatter is a shoot script: lines, `**Name:**` speakers and `[LABEL: …]` cues, checked with `frameshell script check <file>`. Format: [shoot-scripts.md](shoot-scripts.md).
+
 ## Direct timeline edits
 
 Editing `timelines/*.json` by hand is allowed, as a last resort for a change no command expresses. The daemon accepts the edit only when the file's `revision` equals its current one and the result is valid, and journals it as author `file`. Otherwise it restores its version and keeps yours under `.frameshell/rejected/`; `frameshell status` lists why. Read the file right before editing and keep `revision` as read.

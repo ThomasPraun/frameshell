@@ -104,6 +104,25 @@ describe("frameshell script outline", () => {
   });
 });
 
+describe("frameshell script check", () => {
+  it("prints scenes, lines with speakers and cues, and the warnings; --json has the lines", () => {
+    writeFileSync(
+      join(project, "scripts", "shoot.md"),
+      ["---", "shoot: true", "---", "## Hook (0:00–0:05)", "**Ana:** Hola a todos.", "[VISUAL: close-up]", "## Outro", "[NOTE: smile]"].join("\n"),
+    );
+    const result = frameshell(["script", "check", "scripts/shoot.md"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/^scripts\/shoot\.md · shoot, follow words · 2 scenes$/m);
+    expect(result.stdout).toMatch(/^ {2}#hook {2}Hook {2}line 4 {2}3 words {2}expected 5 s$/m);
+    expect(result.stdout).toMatch(/^ {7}5 {2}Ana: Hola a todos\.$/m);
+    expect(result.stdout).toMatch(/^ {7}6 {2}Ana: \[VISUAL: close-up\]$/m);
+    expect(result.stdout).toMatch(/Warnings:\n {2}Scene "outro" has nothing to say/);
+    const check = JSON.parse(frameshell(["script", "check", "scripts/shoot.md", "--json"]).stdout);
+    expect(check.scenes[0].lines[0]).toEqual({ line: 5, speaker: "Ana", text: "Hola a todos.", words: ["Hola", "a", "todos"], cues: [] });
+    expect(frameshell(["script", "check"]).code).toBe(2);
+  });
+});
+
 describe("frameshell clip set --script-ref", () => {
   it("links a clip to a scene, warning but storing when the scene does not exist", () => {
     const ok = frameshell(["clip", "set", "c_free", "--script-ref", "scripts/promo.md#por-qué"]);

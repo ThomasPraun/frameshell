@@ -17,6 +17,7 @@ import {
   type Progress,
   type ReviewState,
   RpcError,
+  type ScriptCheckResult,
   type ScriptOutlineResult,
   type StatusResult,
   type TranscribeResult,
@@ -102,6 +103,8 @@ Commands:
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
 ${PEOPLE_USAGE}  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
+  script check <file>          Check a shoot script (\`shoot: true\`): scenes, lines with speaker, spoken
+                               words and cues, speakers vs people.json, stale source, warnings
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
                                files as resources. Register: claude mcp add frameshell -- frameshell mcp
   <plugin> <command> [args…]   Run a plugin-provided command
@@ -137,6 +140,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
+  "script check": [],
   "proposal status": [],
   "proposal wait": ["timeout"],
   "proposal diff": ["tx"],
@@ -183,6 +187,7 @@ type Invocation =
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
+  | { kind: "script.check"; file: string }
   | { kind: "proposal.status" }
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
@@ -463,7 +468,12 @@ function parseBuiltin(
     }
     return { kind: "proposal.wait", timeout };
   }
-  if (command === "script") return rest.length === 2 && rest[0] === "outline" ? { kind: "script.outline", file: rest[1]! } : null;
+  if (command === "script") {
+    if (rest.length !== 2) return null;
+    if (rest[0] === "outline") return { kind: "script.outline", file: rest[1]! };
+    if (rest[0] === "check") return { kind: "script.check", file: rest[1]! };
+    return null;
+  }
   if (command === "init" && rest.length <= 1) {
     const projectKind = options.kind;
     if (projectKind !== undefined && projectKind !== "video" && projectKind !== "image") {
@@ -570,6 +580,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });
       return flags.json ? json(result) : formatOutline(result);
+    }
+    case "script.check": {
+      const result = await conn.request("script.check", { cwd, file: inv.file });
+      return flags.json ? json(result) : formatCheck(result);
     }
     case "proposal.status": {
       const result = await conn.request("proposal.status", { cwd });
@@ -894,6 +908,36 @@ function formatOutline(outline: ScriptOutlineResult): string {
     lines.push("Unresolved refs:", ...outline.unresolved.map(({ timeline, clip, scriptRef }) => `  ${timeline}/${clip} -> ${scriptRef}`));
   }
   if (outline.warnings.length > 0) lines.push("Warnings:", ...outline.warnings.map((warning) => `  ${warning}`));
+  return `${lines.join("\n")}\n`;
+}
+
+function formatCheck(check: ScriptCheckResult): string {
+  const { meta, shoot, scenes } = check;
+  const header = [
+    check.path,
+    ...(meta.title !== null ? [`"${meta.title}"`] : []),
+    shoot.shoot ? `shoot, follow ${shoot.follow}` : "not a shoot script",
+    `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`,
+  ].join(" · ");
+  const lines = [header];
+  if (check.source) {
+    const state = !check.source.found ? "not found" : check.source.stale === null ? `hash ${check.source.hash}` : check.source.stale ? "STALE" : "up to date";
+    lines.push(`  source ${check.source.path}  ${state}`);
+  }
+  if (check.speakers.length > 0) {
+    const who = check.speakers.map((speaker) => `${speaker.name}${speaker.person ? ` (${speaker.person})` : ""} ${speaker.lines} line${speaker.lines === 1 ? "" : "s"}`);
+    lines.push(`  speakers ${who.join(", ")}`);
+  }
+  for (const scene of scenes) {
+    const expected = scene.expected !== null ? `  expected ${scene.expected} s` : "";
+    lines.push(`  #${scene.slug}  ${scene.title}  line ${scene.line}  ${scene.words} word${scene.words === 1 ? "" : "s"}${expected}`);
+    for (const line of scene.lines) {
+      const cues = line.cues.map((cue) => `[${cue.label}${cue.text !== null ? `: ${cue.text}` : ""}]`).join(" ");
+      const said = [line.text, cues].filter((part) => part !== "").join("  ");
+      lines.push(`    ${String(line.line).padStart(4)}  ${line.speaker !== null ? `${line.speaker}: ` : ""}${said}`);
+    }
+  }
+  lines.push(check.warnings.length > 0 ? "Warnings:" : "Clean: no warnings.", ...check.warnings.map((warning) => `  ${warning}`));
   return `${lines.join("\n")}\n`;
 }
 
