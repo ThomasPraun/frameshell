@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The teleprompter centers its text, so a short line sits in the middle of the panel where the eyes already are.
 - The People panel no longer downloads the voice model (CAM++ and ONNX Runtime Web, ~60 MB) on its own when it opens: it shows the size and a "Find voice matches (downloads ~60 MB once)" button, then the download's progress. With the model installed it matches voices as before. `people.suggest` takes `download` (default true, so the CLI and agents are unchanged); with `download: false` voices that need the missing model are left out and `voiceDownload.bytes` says what it would fetch.
 
 ### Fixed

@@ -4101,6 +4101,8 @@ button.track-head:focus-visible {
   padding: 0 1.2em;
   color: #f2f2ee;
   line-height: 1.4;
+  /* Centered, so a short line sits where the eyes already are. */
+  text-align: center;
   will-change: transform;
 }
 
