@@ -31,6 +31,7 @@ import { reviewState, setReviewEnabled, startReview } from "../review/store.js";
 import { PanelWindow } from "./PanelWindow.js";
 import { Sidebar, SidebarWindow, sidebarViews } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
+import { teleprompter } from "../teleprompter/store.js";
 import { StatusBar } from "./StatusBar.js";
 import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
@@ -129,17 +130,23 @@ export function Workspace({ project }: { project: ProjectView }) {
     void window.frameshell.panels.detached().then((panels) => setDetached(new Set(panels)));
   }, [project.dir]);
 
+  // The Shoot view's "Open teleprompter": the teleprompter goes to its own window, for a second screen or a prompter.
+  useEffect(() => teleprompter.onOpen(() => setPanelDetached("teleprompter", true)), [setPanelDetached]);
+
   useEffect(() => {
     void window.frameshell.layout.load().then(setLayout);
   }, [project.dir]);
 
-  // Clip ids and times belong to one project: another project starts with nothing selected, at 0, and so does leaving this one.
+  // Clip ids, times and the teleprompter's place belong to one project: another project starts with nothing selected, at 0,
+  // and so does leaving this one.
   useEffect(() => {
     selection.clear();
     transport.seek(0);
+    teleprompter.setScript(null);
     return () => {
       selection.clear();
       transport.seek(0);
+      teleprompter.setScript(null);
     };
   }, [project.dir]);
 

@@ -13,6 +13,7 @@ import type {
   RevertConflict,
   MulticamTurnsResult,
   ScriptOutlineResult,
+  ShootStatusResult,
   SegmentedPoint,
   TimelineRejection,
   TimelineView,
@@ -579,6 +580,8 @@ export interface FrameshellApi {
     recovered(): Promise<ShootFinish[]>;
     /** Called with each session {@link recovered} adds. Returns an unsubscribe function. */
     onRecovered(listener: (finish: ShootFinish) => void): () => void;
+    /** `shoot.status` of a shoot script of the window's project (project-relative path). Rejects with the daemon's message. */
+    status(script: string): Promise<ShootStatusResult>;
   };
   scripts: {
     /**
@@ -797,6 +800,7 @@ export const Channel = {
   shootEnd: "shoot:end",
   shootRecovered: "shoot:recovered",
   shootRecoveredChanged: "shoot:recovered-changed",
+  shootStatus: "shoot:status",
   updatesStatus: "updates:status",
   updatesChanged: "updates:changed",
   updatesRestart: "updates:restart",
