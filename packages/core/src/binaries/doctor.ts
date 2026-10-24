@@ -17,7 +17,7 @@ export interface DoctorOptions {
  * packages (whisper.cpp) are reported, never flagged missing and never
  * installed here: their feature installs them on first use.
  */
-export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<DoctorResult> {
+export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<Omit<DoctorResult, "skill">> {
   const { project, install = false, exec = execProcess } = options;
   const tools = binaries.tools();
   if (install) {

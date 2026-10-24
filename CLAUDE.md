@@ -70,7 +70,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Release packaging, signing secrets, cutting a release | `docs/release.md` |
 | Update check (mode per platform, opt-out, release update files, stale daemon after update) | `docs/release.md` "Updates"; `apps/desktop/src/main/updater.ts`, `main/update-check.ts`, `main/stale-daemon.ts` |
 | Landing page frameshell.dev (Astro, own npm, Cloudflare Pages, hero video slot) | `website/README.md` |
-| Agent skill (content, bundle into core, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/`, `core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
+| Agent skill (content, bundle into core, shipped hashes + refresh of project copy, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/` (`refresh.ts`, `shipped.json` grows on `pnpm gen:skill`), `core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 
 ## Rules
 

@@ -102,7 +102,9 @@ Commands:
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
+${PEOPLE_USAGE}${SHOOT_USAGE}  skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
+                               version; an edited copy needs --force (files you added stay)
+  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
   script check <file>          Check a shoot script (\`shoot: true\`): scenes, lines with speaker, spoken
                                words and cues, speakers vs people.json, stale source, warnings
@@ -118,7 +120,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
@@ -147,6 +149,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "proposal diff": ["tx"],
   ...PEOPLE_FLAGS,
   ...SHOOT_FLAGS,
+  "skill update": ["force"],
   mcp: [],
 };
 
@@ -195,6 +198,7 @@ type Invocation =
   | { kind: "proposal.diff"; tx?: string }
   | PeopleInvocation
   | ShootInvocation
+  | { kind: "skill.update"; force: boolean }
   | TimelineInvocation;
 
 interface Flags {
@@ -331,7 +335,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -385,11 +389,13 @@ function parseBuiltin(
     undo?: boolean | undefined;
     restore?: boolean | undefined;
     "no-snap"?: boolean | undefined;
+    force?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "people") return parsePeople(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
+  if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
     const at = Number(options.at);
@@ -622,6 +628,13 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "shoot.discard":
     case "shoot.assemble":
       return executeShoot(conn, inv, cwd, flags.json);
+    case "skill.update": {
+      const result = await conn.request("skill.update", { cwd, force: inv.force });
+      if (flags.json) return json(result);
+      const changed = [...result.written.map((file) => `  wrote ${file}`), ...result.removed.map((file) => `  removed ${file}`)];
+      if (changed.length > 0) return `Agent skill ${result.dir} updated:\n${changed.join("\n")}\n`;
+      return `${skillLine(result) ?? `Agent skill ${result.dir} is current.`}\n`;
+    }
     case "people.ranges":
       return executePeople(conn, inv, cwd, flags.json);
     case "people.suggest":
@@ -1077,6 +1090,11 @@ function formatStatus(status: StatusResult, cwd: string): string {
     const count = Object.keys(trust.plugins).length;
     lines.push(`Plugins: ${count} declared, ${trustLabel(trust.state)}`);
   }
+  if (status.skill) {
+    const line = skillLine(status.skill);
+    if (line) lines.push(line);
+    if (status.skill.updated.length > 0) lines.push(`Agent skill: updated to this version (${status.skill.updated.length} file${status.skill.updated.length === 1 ? "" : "s"}).`);
+  }
   // Active jobs and failures matter; finished ones are noise.
   const shown = status.jobs.filter((job) => job.state !== "done" && job.state !== "canceled");
   const active = status.jobs.filter((job) => job.state === "queued" || job.state === "running").length;
@@ -1140,9 +1158,20 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
       lines.push(`  ${`${codec.name} ${codec.kind}`.padEnd(28)} ${codec.label.padEnd(24)} ${state}`);
     }
   }
+  if (report.skill) lines.push("", skillLine(report.skill) ?? `Agent skill: ${report.skill.dir} is current.`);
   lines.push("", report.problems.length === 0 ? "No problems found." : "Problems:");
   for (const problem of report.problems) lines.push(`  - ${problem}`);
   return `${lines.join("\n")}\n`;
+}
+
+/** What to say about the project's copy of the agent skill; null when it is current. */
+function skillLine(skill: { state: string; dir: string; edited: string[] }): string | null {
+  if (skill.state === "edited") {
+    return `Agent skill: ${skill.dir} has edits (${skill.edited.join(", ")}), so it was not updated to this version. \`frameshell skill update --force\` replaces Frameshell's files; files you added stay.`;
+  }
+  if (skill.state === "outdated") return `Agent skill: ${skill.dir} is an older version; it updates when the project opens, or run \`frameshell skill update\`.`;
+  if (skill.state === "absent") return `Agent skill: none in this project; \`frameshell skill update\` writes it.`;
+  return null;
 }
 
 function trustLabel(state: string): string {
