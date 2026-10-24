@@ -34,6 +34,7 @@ const en = {
   angles: "Angles",
   people: "People",
   shoot: "Shoot",
+  teleprompter: "Teleprompter",
   sidebarViews: "Sidebar views",
   inOwnWindow: (view: string) => `${view}, in its own window`,
   noPlugins:
@@ -98,6 +99,7 @@ const es: typeof en = {
   angles: "Ángulos",
   people: "Personas",
   shoot: "Rodaje",
+  teleprompter: "Teleprompter",
   sidebarViews: "Vistas de la barra lateral",
   inOwnWindow: (view) => `${view}, en su propia ventana`,
   noPlugins:

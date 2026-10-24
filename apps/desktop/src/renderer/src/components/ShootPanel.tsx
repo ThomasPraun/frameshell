@@ -3,6 +3,7 @@ import type { ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { elapsedLabel, meterFill } from "../shoot/model.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
+import { teleprompter } from "../teleprompter/store.js";
 
 /**
  * Shoot view (ADR 0024, Spanish UI "Rodaje"): pick a camera, a microphone (the one required source), a screen or
@@ -29,6 +30,11 @@ export function ShootPanel() {
   return (
     <div className="shoot-panel" data-testid="shoot-panel" data-phase={state.phase}>
       <p className="shoot-hint">{t.shoot.intro}</p>
+      <div className="shoot-row">
+        <button className="button" data-testid="shoot-teleprompter" onClick={() => teleprompter.open()}>
+          {t.teleprompter.open}
+        </button>
+      </div>
       {state.access === false && (
         <div className="shoot-row">
           <button className="button" onClick={() => void shoot.requestAccess()}>

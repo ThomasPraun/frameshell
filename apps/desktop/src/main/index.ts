@@ -1353,6 +1353,9 @@ function registerIpc(): void {
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
     outcome(async () => daemon.request("script.outline", { cwd: (await requireProject(stateOf(event.sender))).project.dir, file })),
   );
+  ipcMain.handle(Channel.shootStatus, (event, script: string) =>
+    outcome(async () => daemon.request("shoot.status", { cwd: (await requireProject(stateOf(event.sender))).project.dir, script })),
+  );
   ipcMain.handle(Channel.clipsLive, (event, timeline: string, clip: string) =>
     outcome(async (): Promise<LiveClipPage> => {
       const state = stateOf(event.sender);
