@@ -4,6 +4,7 @@ import { t } from "../i18n.js";
 import { elapsedLabel, meterFill } from "../shoot/model.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
 import { teleprompter } from "../teleprompter/store.js";
+import { ShootTakes } from "./ShootTakes.js";
 
 /**
  * Shoot view (ADR 0024, Spanish UI "Rodaje"): pick a camera, a microphone (the one required source), a screen or
@@ -169,6 +170,8 @@ export function ShootPanel() {
         )}
         {recording && state.startedAt !== null && <Elapsed since={state.startedAt} />}
       </div>
+
+      <ShootTakes />
 
       {state.error && (
         <p className="shoot-error" role="alert">

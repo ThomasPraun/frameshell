@@ -344,11 +344,9 @@ class Edit {
 
   async clipAdd(args: OperationArgs<"clip.add">): Promise<void> {
     const target = this.clipTrack(args.track);
-    if (target.kind === "program") {
-      throw this.unsupported(`track ${target.id} is a program track; adding shots with \`clip.add\` is not supported yet.`, {
-        feature: "shot.add",
-        hint: "Change its shots with `clip.split`, `clip.trim`, `clip.move` or `clip.remove`, or edit the timeline file.",
-      });
+    if (target.kind === "program") return this.shotAdd(target, args);
+    if (args.shot !== undefined || args.angles !== undefined) {
+      throw this.invalid("`shot` and `angles` are for shots on a program track.", { field: args.shot !== undefined ? "shot" : "angles" });
     }
     const track = target;
     const rippled = this.rippleScope(args, track);
@@ -458,6 +456,47 @@ class Edit {
         if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
       }
     }
+    track.clips.push(clip);
+  }
+
+  /**
+   * `clip.add` of a `shot` on a program track: `in`/`out` on the group clock, its layout and angles given or
+   * defaulted (a screen and one other angle: `pip`; one angle: `solo`; else `grid`, screens first). The checks
+   * every shot edit gets (angles of the group with a picture, not past the group's end, no overlap) run after.
+   */
+  shotAdd(track: ProgramTrack, args: OperationArgs<"clip.add">): void {
+    if (args.type !== "shot") {
+      throw this.invalid(`track ${track.id} is a program track: it holds shots only.`, { field: "type", hint: "Pass `type: \"shot\"`, or use a video or audio track." });
+    }
+    this.refuse(args, ["asset", "source", "speed", "props", "transform", "gain", "muted", "duration"], "shots");
+    if (args.snap === true) throw this.invalid("shots take no `snap`.", { field: "snap" });
+    if (args.in === undefined || args.out === undefined) throw this.invalid("shots need `in` and `out` on the group clock.", { field: args.in === undefined ? "in" : "out" });
+    const group = programGroup(this.draft, track);
+    if (!group) throw this.invalid(`program track ${track.id} names no group of this timeline.`, { field: "track" });
+    const screens = group.angles.filter((angle) => angle.screen === true).map((angle) => angle.id);
+    const angles = args.angles ?? [...screens, ...group.angles.filter((angle) => angle.screen !== true).map((angle) => angle.id)];
+    const shot = args.shot ?? (angles.length === 2 && screens.includes(angles[0]!) ? "pip" : angles.length === 1 ? "solo" : "grid");
+    const clipIn = this.grid.snap(args.in);
+    const out = this.grid.snap(args.out);
+    if (out <= clipIn) throw this.invalid(`out ${out} must be after in ${clipIn}.`, { field: "out" });
+    if (args.scriptRef !== undefined) this.checkScriptRefShape(args.scriptRef);
+    const start = args.start === undefined ? this.grid.snap(Math.max(0, ...track.clips.map((clip) => clip.start + clip.out - clip.in))) : this.grid.snap(args.start);
+    if (args.ripple === true) {
+      const length = out - clipIn;
+      const from = this.grid.frame(start);
+      for (const other of track.clips) if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
+    }
+    const clip: ShotClip = {
+      id: this.newId("c"),
+      type: "shot",
+      start,
+      in: clipIn,
+      out,
+      shot,
+      angles,
+      ...(args.scriptRef ? { scriptRef: args.scriptRef } : {}),
+      ...(args.take ? { take: args.take } : {}),
+    };
     track.clips.push(clip);
   }
 

@@ -7,6 +7,7 @@ import {
   type EventName,
   type EventParams,
   type HandshakeResult,
+  type JobInfo,
   type JsonRpcRequest,
   type MethodName,
   type MethodResult,
@@ -73,6 +74,7 @@ import { IdempotencyCache } from "./idempotency.js";
 import { checkScript } from "./scripts/check.js";
 import { assembleShoot, planScenes } from "./shoot/assemble.js";
 import { ShootService } from "./shoot/service.js";
+import { type SessionTake, ffmpegRangeExtractor, standInProvider, standInWords, takeWordsPath, transcribeTake, writeSessionTranscripts } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, timelinePath } from "./timeline/service.js";
@@ -123,6 +125,11 @@ export interface DaemonOptions {
   voiceEmbedder?: VoiceEmbedder;
   /** Photo segmentation model for `segment.prepare`. Defaults to MobileSAM on ONNX Runtime Web from {@link DaemonOptions.binaries}, in a worker thread. */
   segmentEngine?: SegmentEngine;
+  /**
+   * End-to-end tests only: takes recorded in the app are "heard" as their scene's words without its last line
+   * ({@link standInWords}) instead of being transcribed. Default false.
+   */
+  shootStandIn?: boolean;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -274,8 +281,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const people = new PeopleService({
     onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, ...(person !== undefined ? { person } : {}) }),
   });
+  /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
+  const takeRuns = new Map<string, Promise<void>>();
   const shoots = new ShootService({
     onChanged: (dir, script, change, take) => publishFor("shoot.changed", dir, { project: dir, script, change, ...(take !== undefined ? { take } : {}) }),
+    analyzing: (dir, take) => takeRuns.has(`${dir}\0${take}`),
     assetHash: async (dir, rel) => (await media.list(dir)).find((asset) => asset.path === rel)?.hash ?? null,
     timeline: async (dir, id) => (await exists(timelinePath(dir, id))) ? (await timelines.viewTimeline(dir, id, "current")).timeline : null,
   });
@@ -420,6 +430,51 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       else transcriptions.delete(key);
     }
   };
+  /**
+   * Queue the `shoot` job of a take cut in the app: its range of each sound file to PCM, transcribed with the
+   * project's provider and model (or the stand-in), then compared, which publishes `shoot.changed` `analyzed`.
+   */
+  const queueTake = (dir: string, script: string, take: SessionTake): JobInfo => {
+    const key = `${dir}\0${take.id}`;
+    let finish!: () => void;
+    takeRuns.set(key, new Promise<void>((resolve) => (finish = resolve)));
+    return jobs.enqueue({
+      kind: "shoot",
+      project: dir,
+      asset: take.asset,
+      output: takeWordsPath(dir, take.id),
+      run: async (ctx) => {
+        try {
+          const { config } = (await readEnclosingProject(dir))!;
+          const overrides = { dir, binaries: config.binaries };
+          const providerId = options.shootStandIn ? "stand-in" : (config.transcription?.provider ?? "whisper-cpp");
+          const provider = options.shootStandIn
+            ? standInProvider(standInWords(await shoots.script(dir, script), take.scene))
+            : await plugins.transcriptionProvider(dir, providerId);
+          ctx.update({ step: "transcribe", progress: 0.1 });
+          await transcribeTake({
+            root: dir,
+            take,
+            extract: ffmpegRangeExtractor(() => binaries.ensure("ffmpeg", overrides), ctx.signal),
+            providerId,
+            provider,
+            model: config.transcription?.model,
+            language: config.transcription?.language,
+            context: {
+              ensureBinary: (name) => binaries.ensure(name, overrides),
+              ensureModel: (id) => binaries.ensureModel(id),
+              progress: () => {},
+            },
+          });
+          takeRuns.delete(key);
+          await shoots.status(dir, dir, script);
+        } finally {
+          takeRuns.delete(key);
+          finish();
+        }
+      },
+    });
+  };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (
     op: OperationRequest["op"],
@@ -448,6 +503,102 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     await settle(key, tx);
     return result;
   };
+  /** `multicam.create`: measure (or take the known offsets of) the files, then add the group, its program track and first shot. */
+  const createGroup = async (
+    { cwd, timeline, assets, names, mics, micNames, soundOf, name, offsets, screens }: ValidatedParams<"multicam.create">,
+    caller: Caller,
+  ): Promise<MethodResult<"multicam.create">> => {
+      const dir = await root(cwd);
+      const outside = screens?.find((screen) => screen > assets.length);
+      if (outside !== undefined) {
+        throw new RpcError(ErrorCode.InvalidOperation, `multicam.create: screen ${outside} is not a camera number (1 to ${assets.length}).`, {
+          op: "multicam.create",
+          reason: "screens",
+          field: "screens",
+        });
+      }
+      const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
+        root: dir,
+        cwd,
+        assets,
+        names,
+        mics,
+        micNames,
+        soundOf,
+        offsets,
+      });
+      const angles = measured.assets.map((asset, i) => ({
+        asset,
+        ...(names ? { name: names[i]! } : {}),
+        offset: measured.plan[i]!.offset,
+        ...(measured.soundOf[i] !== undefined ? { mic: measured.soundOf[i]! } : {}),
+        ...(screens?.includes(i + 1) ? { screen: true } : {}),
+      }));
+      const micFiles = measured.mics.map((asset, i) => ({
+        asset,
+        ...(micNames ? { name: micNames[i]! } : {}),
+        offset: measured.plan[measured.assets.length + i]!.offset,
+      }));
+      // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
+      let written: Timeline | undefined;
+      const result = await operate("multicam.create", { cwd, timeline, angles, ...(micFiles.length > 0 ? { mics: micFiles } : {}), ...(name ? { name } : {}) }, caller, (after) => {
+        written = after;
+      });
+      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
+      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
+      if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the operation wrote no new group");
+      const { sync, warnings } = syncReport(group, measured.plan);
+      return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
+    };
+  /** `shoot.assemble`. */
+  const assemble = async ({ cwd, script, scenes: wanted, snap }: ValidatedParams<"shoot.assemble">, caller: Caller): Promise<MethodResult<"shoot.assemble">> => {
+      const dir = await root(cwd);
+      const status = await shoots.status(dir, cwd, script);
+      const timeline = status.timeline;
+      const unknown = (wanted ?? []).filter((slug) => !status.scenes.some((scene) => scene.slug === slug));
+      if (unknown.length > 0) {
+        throw new RpcError(ErrorCode.InvalidOperation, `shoot.assemble: no scene ${unknown.join(", ")} in ${status.script}; scenes: ${status.scenes.map((scene) => scene.slug).join(", ")}.`, {
+          op: "shoot.assemble",
+          reason: "unknown scene",
+          field: "scenes",
+        });
+      }
+      let created = false;
+      if (!(await exists(timelinePath(dir, timeline)))) {
+        await timelines.writeFile(dir, timeline, `${JSON.stringify(createTimeline(timeline), null, 2)}\n`);
+        created = true;
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const titles = wanted?.length === 1 ? status.scenes.find((scene) => scene.slug === wanted[0])!.title : status.script;
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Assemble ${titles}` };
+      const author = journalAuthorOf(caller);
+      let changed = false;
+      const warnings: string[] = [];
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        const outcomes = await assembleShoot(
+          planScenes(status),
+          wanted ? new Set(wanted) : null,
+          new Set(status.takes.map((take) => take.id)),
+          {
+            load: async () => (await loadFor(dir, timeline, caller)).timeline,
+            apply: async (request) => {
+              const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
+              await transactions.applied(key, tx);
+              changed = true;
+              warnings.push(...result.warnings);
+              return { added: result.changes.added };
+            },
+            hasVideo: async (asset) => (await media.probe(dir, asset)).video !== null,
+          },
+          snap,
+        );
+        return { timeline, created, tx: changed ? tx.id : null, scenes: outcomes, warnings };
+      } finally {
+        await settle(key, tx);
+      }
+    };
   /** Results of jobs queued by {@link inJob}, by job id: a request that finds one running for its input waits it out. */
   const awaitedJobs = new Map<string, Promise<unknown>>();
   /**
@@ -760,53 +911,33 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
     "shoot.status": async ({ cwd, script }) => shoots.status(await root(cwd), cwd, script),
     "shoot.add": async ({ cwd, script, asset, scene, recordedAt }, caller) => shoots.add(await root(cwd), cwd, { script, asset, scene, recordedAt, by: journalAuthorOf(caller) }),
-    "shoot.assemble": async ({ cwd, script, scenes: wanted, snap }, caller) => {
+    "shoot.assemble": (params, caller) => assemble(params, caller),
+    "shoot.session.cut": async ({ cwd, script, scene, session, start, end, sounds, recordedAt }, caller) => {
       const dir = await root(cwd);
-      const status = await shoots.status(dir, cwd, script);
-      const timeline = status.timeline;
-      const unknown = (wanted ?? []).filter((slug) => !status.scenes.some((scene) => scene.slug === slug));
-      if (unknown.length > 0) {
-        throw new RpcError(ErrorCode.InvalidOperation, `shoot.assemble: no scene ${unknown.join(", ")} in ${status.script}; scenes: ${status.scenes.map((scene) => scene.slug).join(", ")}.`, {
-          op: "shoot.assemble",
-          reason: "unknown scene",
-          field: "scenes",
-        });
-      }
-      let created = false;
-      if (!(await exists(timelinePath(dir, timeline)))) {
-        await timelines.writeFile(dir, timeline, `${JSON.stringify(createTimeline(timeline), null, 2)}\n`);
-        created = true;
-      }
-      const key = authorOf(caller);
-      const next = transactions.next(key, { standalone: true });
-      const titles = wanted?.length === 1 ? status.scenes.find((scene) => scene.slug === wanted[0])!.title : status.script;
-      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Assemble ${titles}` };
-      const author = journalAuthorOf(caller);
-      let changed = false;
+      const cut = await shoots.cut(dir, cwd, { script, scene, session: { id: session, start, end, sounds }, recordedAt, by: journalAuthorOf(caller) });
+      const job = queueTake(dir, cut.script, cut.take);
+      const status = await shoots.status(dir, cwd, cut.script);
+      return { file: cut.file, take: status.takes.find((take) => take.id === cut.take.id)!, job };
+    },
+    "shoot.session.end": async ({ cwd, script, session, assets, names, mics, micNames, soundOf, offsets, screens, name }, caller) => {
+      const dir = await root(cwd);
+      const takes = await shoots.sessionTakes(dir, cwd, script, session);
+      await Promise.all(takes.map((take) => takeRuns.get(`${dir}\0${take.id}`)));
+      const transcripts = await writeSessionTranscripts(dir, takes, { hash: (rel) => media.hash(dir, rel) });
+      const { timeline } = await shoots.status(dir, cwd, script);
+      if (!(await exists(timelinePath(dir, timeline)))) await timelines.writeFile(dir, timeline, `${JSON.stringify(createTimeline(timeline), null, 2)}\n`);
       const warnings: string[] = [];
-      await transactions.touching(key, tx, { root: dir, timeline });
-      try {
-        const outcomes = await assembleShoot(
-          planScenes(status),
-          wanted ? new Set(wanted) : null,
-          new Set(status.takes.map((take) => take.id)),
-          {
-            load: async () => (await loadFor(dir, timeline, caller)).timeline,
-            apply: async (request) => {
-              const result = await timelines.apply({ root: dir, cwd, timeline, request, author, tx });
-              await transactions.applied(key, tx);
-              changed = true;
-              warnings.push(...result.warnings);
-              return { added: result.changes.added };
-            },
-            hasVideo: async (asset) => (await media.probe(dir, asset)).video !== null,
-          },
-          snap,
-        );
-        return { timeline, created, tx: changed ? tx.id : null, scenes: outcomes, warnings };
-      } finally {
-        await settle(key, tx);
+      let group: string | null = null;
+      if (assets.length > 0) {
+        const created = await createGroup({ cwd, timeline, assets, names, mics, micNames, soundOf, name, offsets, screens }, caller);
+        group = created.group;
+        warnings.push(...created.warnings);
+        // The session's chosen takes become its shots: the shot over the whole recording would only be cut away.
+        await operate("clip.remove", { cwd, timeline, clip: created.clip }, caller);
       }
+      await shoots.endSession(dir, cwd, { script, session, group });
+      const assembled = await assemble({ cwd, script, snap: true }, caller);
+      return { timeline, group, transcripts, tx: assembled.tx, warnings: [...warnings, ...assembled.warnings] };
     },
     "shoot.discard": async ({ cwd, script, take, restore }) => shoots.discard(await root(cwd), cwd, { script, take, restore }),
     "shoot.accept": async ({ cwd, script, take, deviations, undo }, caller) =>
@@ -841,49 +972,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "transition.remove": (params, caller) => operate("transition.remove", params, caller),
     "clip.key": (params, caller) => operate("clip.key", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
-    "multicam.create": async ({ cwd, timeline, assets, names, mics, micNames, soundOf, name, offsets, screens }, caller) => {
-      const dir = await root(cwd);
-      const outside = screens?.find((screen) => screen > assets.length);
-      if (outside !== undefined) {
-        throw new RpcError(ErrorCode.InvalidOperation, `multicam.create: screen ${outside} is not a camera number (1 to ${assets.length}).`, {
-          op: "multicam.create",
-          reason: "screens",
-          field: "screens",
-        });
-      }
-      const measured = await measureAngles({ probe: (d, a) => media.probe(d, a), profile: (d, a) => energy.profile(d, a) }, {
-        root: dir,
-        cwd,
-        assets,
-        names,
-        mics,
-        micNames,
-        soundOf,
-        offsets,
-      });
-      const angles = measured.assets.map((asset, i) => ({
-        asset,
-        ...(names ? { name: names[i]! } : {}),
-        offset: measured.plan[i]!.offset,
-        ...(measured.soundOf[i] !== undefined ? { mic: measured.soundOf[i]! } : {}),
-        ...(screens?.includes(i + 1) ? { screen: true } : {}),
-      }));
-      const micFiles = measured.mics.map((asset, i) => ({
-        asset,
-        ...(micNames ? { name: micNames[i]! } : {}),
-        offset: measured.plan[measured.assets.length + i]!.offset,
-      }));
-      // Read from the timeline this operation wrote: a later write by someone else cannot change the answer.
-      let written: Timeline | undefined;
-      const result = await operate("multicam.create", { cwd, timeline, angles, ...(micFiles.length > 0 ? { mics: micFiles } : {}), ...(name ? { name } : {}) }, caller, (after) => {
-        written = after;
-      });
-      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
-      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
-      if (!group || !track || track.kind !== "program") throw new Error("multicam.create: the operation wrote no new group");
-      const { sync, warnings } = syncReport(group, measured.plan);
-      return { ...result, group: group.id, track: track.id, clip: track.clips[0]!.id, sync, warnings: [...result.warnings, ...warnings] };
-    },
+    "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at }, caller) => {
       const dir = await root(cwd);
       const plan = await planGallery(gallery, { root: dir, cwd, asset, names, at });

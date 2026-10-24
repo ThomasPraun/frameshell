@@ -16,7 +16,9 @@ import {
   finishSession,
   groupRequest,
   isSessionId,
+  markScript,
   markStarted,
+  sessionSounds,
   offsetsOf,
   readSession,
   recoverable,
@@ -41,6 +43,7 @@ function fakeDeps(options: { failRemux?: boolean; refuseGroup?: boolean; noFrame
   const deps: FinishDeps = {
     request: (async (method: string, params: Record<string, unknown>) => {
       calls.push({ method, params });
+      if (method === "shoot.session.end") return { timeline: "launch", group: (params["assets"] as string[]).length > 0 ? "g_2" : null, transcripts: [], tx: null, warnings: [] };
       if (method === "multicam.create") {
         if (options.refuseGroup) throw new RpcError(ErrorCode.InvalidOperation, "multicam.create: camera.mp4 has no moving picture");
         const empty = (params["assets"] as string[]).find((asset) => asset.endsWith(`/${options.noFrames}`));
@@ -217,6 +220,46 @@ describe("finishSession", () => {
     expect(finish.files).toHaveLength(4);
     expect(readdirSync(folder).sort()).toEqual(["camera.mp4", "mic.m4a", "screen.mp4", "system.webm"]);
     expect(await unfinishedSessions(root)).toEqual([]);
+  });
+});
+
+describe("sessions with takes", () => {
+  it("names the session's sound files with their offsets, as a Cut sends them", async () => {
+    const root = project();
+    const state = await beginSession(root, SPECS, AT);
+    await markStarted(root, state.id, { camera: 10, screen: 12, mic: 11, system: 10 });
+    expect(sessionSounds((await readSession(root, state.id))!)).toEqual([
+      { asset: `assets/shoot/${state.id}/mic.m4a`, offset: 0.001 },
+      { asset: `assets/shoot/${state.id}/system.webm`, offset: 0 },
+    ]);
+  });
+
+  it("ends a session with takes through shoot.session.end, with the group's files, offsets and script", async () => {
+    const root = project();
+    const state = await beginSession(root, SPECS, AT);
+    const folder = join(root, "assets/shoot", state.id);
+    for (const source of state.sources) writeFileSync(join(folder, source.file + PART_SUFFIX), Buffer.from(source.role));
+    await markStarted(root, state.id, { camera: 10, screen: 12, mic: 11, system: 10 });
+    await markScript(root, state.id, "scripts/launch.md");
+    const { deps, calls } = fakeDeps();
+    const finish = await finishSession(root, state.id, false, deps);
+    expect(finish.group).toBe("g_2");
+    expect(calls.map((call) => call.method)).toEqual(["asset.import", "shoot.session.end"]);
+    expect(calls[1]!.params).toMatchObject({
+      script: "scripts/launch.md",
+      session: state.id,
+      assets: [`assets/shoot/${state.id}/camera.mp4`, `assets/shoot/${state.id}/screen.mp4`],
+      offsets: [0, 0.002, 0.001, 0],
+      screens: [2],
+    });
+
+    const micOnly = project();
+    const alone = await beginSession(micOnly, [SPECS[2]!], AT);
+    writeFileSync(join(micOnly, "assets/shoot", alone.id, "mic.m4a.part"), "mic");
+    await markScript(micOnly, alone.id, "scripts/launch.md");
+    const quiet = fakeDeps();
+    expect((await finishSession(micOnly, alone.id, false, quiet.deps)).group).toBeNull();
+    expect(quiet.calls[1]).toMatchObject({ method: "shoot.session.end", params: { assets: [], offsets: [] } });
   });
 });
 

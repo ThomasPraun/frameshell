@@ -41,6 +41,8 @@ export interface SessionState {
   /** Process that records it (Frameshell's main): while it lives, the session is not crashed, whoever looks. */
   pid?: number;
   sources: SessionSource[];
+  /** Shoot script the session's takes belong to (ADR 0024): set at the first Cut; the session's end then goes through it. */
+  script?: string;
 }
 
 /** `true` for a well-formed session id; ids from the renderer are checked with it before any path is built. */
@@ -109,6 +111,26 @@ export async function markStarted(root: string, id: string, starts: Partial<Reco
     if (typeof start === "number" && Number.isFinite(start)) source.start = start;
   }
   await writeJsonAtomic(statePath(root, id), state);
+}
+
+/** Remember that session `id` holds takes of `script`, so its end (or recovery) makes them shots. */
+export async function markScript(root: string, id: string, script: string): Promise<void> {
+  const state = await readSession(root, id);
+  if (!state) throw new Error(`No unfinished shoot session ${id}.`);
+  if (state.script === script) return;
+  await writeJsonAtomic(statePath(root, id), { ...state, script });
+}
+
+/**
+ * The session's sound files (microphone first, then system audio) and their offsets on the session clock, as a
+ * take's Cut names them; the same offsets {@link groupRequest} gives the group, so take ranges are on its clock.
+ */
+export function sessionSounds(state: SessionState): { asset: string; offset: number }[] {
+  const offsets = offsetsOf(state.sources);
+  return (["mic", "system"] as const).flatMap((role) => {
+    const index = state.sources.findIndex((source) => source.role === role);
+    return index < 0 ? [] : [{ asset: `${sessionFolder(state.id)}/${state.sources[index]!.file}`, offset: offsets[index]! }];
+  });
 }
 
 /**
@@ -272,11 +294,20 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
   if (files.length > 0) {
     await deps.request("asset.import", { cwd: root, files: files.map((file) => join(root, file)), mode: "copy" });
     let grouped = present;
-    for (let params = groupRequest(root, id, grouped); params; params = groupRequest(root, id, grouped)) {
+    const script = state.script;
+    // With takes, the daemon also writes their words as transcripts and makes them the group's shots on the shoot's timeline.
+    for (let params = groupRequest(root, id, grouped); params || script; params = groupRequest(root, id, grouped)) {
       try {
-        const result = await deps.alone(() => deps.request("multicam.create", { ...params!, timeline: "main" }));
-        group = result.group;
-        warnings.push(...result.warnings);
+        if (script) {
+          const asked = params ?? { cwd: root, assets: [], offsets: [] };
+          const result = await deps.alone(() => deps.request("shoot.session.end", { ...asked, offsets: asked.offsets ?? [], script, session: id }));
+          group = result.group;
+          warnings.push(...result.warnings);
+        } else {
+          const result = await deps.alone(() => deps.request("multicam.create", { ...params!, timeline: "main" }));
+          group = result.group;
+          warnings.push(...result.warnings);
+        }
         break;
       } catch (error) {
         // Refused for good (an unreadable file): the files stay as assets. Anything else is retried on the next open.

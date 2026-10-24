@@ -1037,6 +1037,11 @@
                       "description": "Script scene this clip realizes: `scripts/<file>.md#<anchor>`; without `#anchor`, the whole script.",
                       "type": "string",
                       "minLength": 1
+                    },
+                    "take": {
+                      "description": "Shoot take this shot was placed from by `shoot.assemble` (a take recorded in the app, ADR 0024).",
+                      "type": "string",
+                      "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
                     }
                   },
                   "required": [

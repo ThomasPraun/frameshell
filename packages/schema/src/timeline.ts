@@ -204,6 +204,7 @@ export const ShotClipSchema = z
       .describe("Set by the director: 0 (a guess) to 1 (sure). Absent on shots a person chose."),
     reason: z.string().min(1).optional().describe("Set by the director: why it chose this shot, in a few words."),
     scriptRef: ScriptRefSchema,
+    take: TakeIdSchema.optional().describe("Shoot take this shot was placed from by `shoot.assemble` (a take recorded in the app, ADR 0024)."),
   })
   .superRefine((shot, ctx) => {
     if (shot.out <= shot.in) ctx.addIssue({ code: "custom", message: "must be after `in`", path: ["out"] });

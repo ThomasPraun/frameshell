@@ -64,6 +64,7 @@ follow: words
 A take is one recording of part of the script: a scene, several, or part of one. Frameshell compares each take word by word against the script and marks every difference; none blocks anything.
 
 1. **Link it.** `frameshell import <file> --wait`, then `frameshell transcribe assets/<file>` (add `--speakers` when several people speak in one file), then `frameshell shoot add scripts/<name>.md assets/<file> --scene <slug>` with the scene it starts at. The order does not matter: a take is compared as soon as its file has a transcript.
+   **Takes recorded in the app** (the Shoot view, keys T and C) need none of this: each is a range of one recording session (`session` in `shoot status`: id, `start`/`end` on the session clock, `group`), transcribed and compared seconds after C (`state: transcribing` meanwhile; times in `lines` and `deviations` are session-clock seconds). When the session ends, its takes' words become the transcripts of `assets/shoot/<session>/mic.m4a` (and `system.m4a`), the session becomes a multicam group on the shoot's timeline, and its chosen takes become shots of that group's program track. `shoot assemble` reports such scenes as `waiting` while the session still records.
 2. **Read the result.** `frameshell shoot status scripts/<name>.md --json`. Per scene: `state` (`none`, `deviations`, `done`), `chosen` (the newest take covering it unless the person picked one), `pending`. Per take: `lines` (how each line was said) and `deviations`:
 
    | Kind | Means |

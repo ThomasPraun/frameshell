@@ -164,12 +164,15 @@ export const operationArgs = {
     force: z.boolean().default(false).describe("Also remove the track's clips. Default false: a track with clips is refused."),
   }),
   "clip.add": z.strictObject({
-    track: TrackRef.describe("Video or audio track to place the clip on."),
+    track: TrackRef.describe("Video or audio track to place the clip on, or a program track for a `shot`."),
     type: z
       .string()
       .min(1)
       .default("media")
-      .describe("`media` (default: a file under assets/), `timeline` (nested timeline file) or an adapter clip type, e.g. `hyperframes`."),
+      .describe(
+        "`media` (default: a file under assets/), `timeline` (nested timeline file), an adapter clip type, e.g. `hyperframes`, or " +
+          "`shot` on a program track (`in`/`out` on the group clock, `shot` and `angles` optional).",
+      ),
     asset: z
       .string()
       .min(1)
@@ -198,6 +201,15 @@ export const operationArgs = {
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
     take: TakeIdSchema.optional().describe("Shoot take the clip comes from (`k_…`), as `shoot.assemble` sets it; leave it out otherwise."),
+    shot: z
+      .enum(SHOT_LAYOUTS)
+      .optional()
+      .describe("`shot` only: layout. Default: `pip` for a screen angle and one other, `solo` for one angle, else `grid`."),
+    angles: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe("`shot` only: angle ids of the group, in layout order. Default: every angle (the screen first)."),
     ripple: rippleArg("Make room: clips starting at or after `start` move right by the new clip's length."),
     rippleTracks: rippleTracksArg,
     snap: z

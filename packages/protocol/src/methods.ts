@@ -12,7 +12,7 @@ import {
 } from "./proposals.js";
 import { ShootChangedSchema, ShootSceneStatusSchema, TakeInfoSchema } from "./shoot.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, ShootMetaSchema, ShootSceneSchema } from "@frameshell/schema";
+import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 62;
+export const PROTOCOL_VERSION = 63;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -217,13 +217,14 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`render`: export a timeline to a video file (`render` method). " +
         "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
         "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
-        "`people`: find, follow and embed the faces of video assets (`people.scan`).",
+        "`people`: find, follow and embed the faces of video assets (`people.scan`). " +
+        "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -244,13 +245,14 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people", "transcribe"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
-        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another).",
+        "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
+        "`shoot`: transcribe.",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1369,8 +1371,11 @@ export const methods = {
             slug: z.string(),
             take: z.string().nullable(),
             action: z
-              .enum(["placed", "unchanged", "removed", "none"])
-              .describe("`placed`: new clips. `unchanged`: already as planned. `removed`: old clips taken out, no take covers it now. `none`: nothing to place."),
+              .enum(["placed", "unchanged", "removed", "none", "waiting"])
+              .describe(
+                "`placed`: new clips. `unchanged`: already as planned. `removed`: old clips taken out, no take covers it now. `none`: nothing to place. " +
+                  "`waiting`: its take was recorded in the app and its session still records; it becomes shots of the session's program track when the session ends.",
+              ),
             clips: z.array(z.string()).describe("Clip ids of the scene now."),
           }),
         )
@@ -1420,6 +1425,54 @@ export const methods = {
       take: z.string().min(1).nullable().describe("Take id, or null for the default."),
     }),
     result: z.object({ file: z.string(), scene: z.string(), take: z.string().nullable(), previous: z.string().nullable().describe("What was picked before; null = the default.") }),
+  },
+  "shoot.session.cut": {
+    mutating: true,
+    internal: true,
+    description:
+      "The app's Cut (ADR 0024 decision 4): add a take that is the range `start`..`end` of a session still recording, then " +
+      "queue a `shoot` job that cuts that range of each sound file to 16 kHz mono PCM, transcribes it with the project's " +
+      "model and compares it with the script (`shoot.changed` `analyzed`). Sound files are read as they grow (`<file>.part`).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script."),
+      scene: z.string().min(1).describe("Scene the take starts at: the one the Shoot view shows as current."),
+      session: ShootSessionIdSchema,
+      start: z.number().nonnegative().describe("Session-clock second of `T`."),
+      end: z.number().positive().describe("Session-clock second of `C`."),
+      sounds: z.array(SessionSoundSchema).min(1).describe("Microphone first, then system audio."),
+      recordedAt: z.string().min(1).optional().describe("ISO 8601 time of `T`; default now."),
+    }),
+    result: z.object({ file: z.string(), take: TakeInfoSchema, job: JobSchema }),
+  },
+  "shoot.session.end": {
+    mutating: true,
+    internal: true,
+    description:
+      "End a session that has takes (ADR 0024 decisions 1 and 4), its files final: wait for its takes' `shoot` jobs, write " +
+      "the takes' words as the transcripts of its sound files, make the session one multicam group (as `multicam.create` with " +
+      "`offsets`) on the shoot's timeline, created when missing, without the first covering shot, and assemble the shoot, so " +
+      "the session's chosen takes become shots of the group's program track.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script whose takes the session holds."),
+      session: ShootSessionIdSchema,
+      assets: z.array(z.string().min(1)).describe("Picture files (camera, screen), as `multicam.create` takes them; empty: no group."),
+      names: z.array(z.string().min(1)).optional(),
+      mics: z.array(z.string().min(1)).optional(),
+      micNames: z.array(z.string().min(1)).optional(),
+      soundOf: z.array(z.string().min(1)).optional(),
+      offsets: z.array(z.number().nonnegative()).describe("One per file, pictures then mics."),
+      screens: z.array(z.int().min(1)).optional(),
+      name: z.string().min(1).optional(),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline the group went to: the shoot's."),
+      group: z.string().nullable().describe("New group; null when nothing had a picture."),
+      transcripts: z.array(z.string()).describe("Transcript files written, project-relative."),
+      tx: z.string().nullable().describe("Transaction of the assembly; null when nothing changed."),
+      warnings: z.array(z.string()),
+    }),
   },
   "timeline.show": {
     description:

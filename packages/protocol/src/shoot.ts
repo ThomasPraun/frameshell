@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { TakeIdSchema } from "@frameshell/schema";
+import { ShootSessionIdSchema, TakeIdSchema } from "@frameshell/schema";
 
 // Shoot (ADR 0023): takes of a shoot script compared word by word, kept in `shoots/<script slug>.json`.
 
 /** What `shoot.changed` reports. */
-export const SHOOT_CHANGES = ["add", "discard", "restore", "accept", "unaccept", "choose", "analyzed"] as const;
+export const SHOOT_CHANGES = ["add", "discard", "restore", "accept", "unaccept", "choose", "analyzed", "ended"] as const;
 
 const AtSchema = z
   .object({ start: z.number(), end: z.number() })
   .nullable()
-  .describe("Seconds in the take's file; null when nothing was heard.");
+  .describe("Seconds in the take's file (on the session clock for a take recorded in the app); null when nothing was heard.");
 
 /** One difference between a take and its shoot script. */
 export const DeviationSchema = z.object({
@@ -41,11 +41,24 @@ export const TakeInfoSchema = z.object({
   recordedAt: z.string().describe("ISO 8601."),
   discarded: z.boolean(),
   by: z.string().nullable().describe("Author that linked it."),
-  transcript: z.string().nullable().describe("Transcript file compared, project-relative; null when the asset has none."),
+  transcript: z
+    .string()
+    .nullable()
+    .describe("Transcript file compared, project-relative (for a take recorded in the app while its session runs, its words under `.frameshell/shoot/takes/`); null when the asset has none."),
+  session: z
+    .object({
+      id: ShootSessionIdSchema,
+      start: z.number().describe("Session-clock second the take starts."),
+      end: z.number().describe("Session-clock second it ends."),
+      group: z.string().nullable().describe("Multicam group of the session; null while it records."),
+    })
+    .nullable()
+    .describe("A take recorded in the app: its range of a shoot session (ADR 0024); null for a whole imported file."),
   state: z
-    .enum(["analyzed", "no-transcript", "stale-transcript", "unreadable"])
+    .enum(["analyzed", "transcribing", "no-transcript", "stale-transcript", "unreadable"])
     .describe(
-      "`analyzed`: compared. `no-transcript`: run `frameshell transcribe <asset>` first. `stale-transcript`: the file changed since " +
+      "`analyzed`: compared. `transcribing`: a take recorded in the app is being transcribed (job kind `shoot`). " +
+        "`no-transcript`: run `frameshell transcribe <asset>` first. `stale-transcript`: the file changed since " +
         "it was transcribed; transcribe again. `unreadable`: the transcript is broken (`problem` says why).",
     ),
   problem: z.string().nullable().describe("Why it is not analyzed, with the command that fixes it; null when analyzed."),
@@ -83,6 +96,9 @@ export const ShootChangedSchema = z.object({
   script: z.string().describe("Shoot script, project-relative."),
   change: z
     .enum(SHOOT_CHANGES)
-    .describe("A take was added, discarded or restored, deviations were accepted or unaccepted, a take was chosen, or a take was compared for the first time since it or the script changed."),
+    .describe(
+      "A take was added (also cut in the app), discarded or restored, deviations were accepted or unaccepted, a take was chosen, " +
+        "a take was compared for the first time since it or the script changed, or a session recorded in the app ended (`ended`).",
+    ),
   take: TakeIdSchema.optional().describe("Take it happened to; absent for `choose` back to the default."),
 });

@@ -85,6 +85,9 @@ export function createShootRecorder() {
   let mounted = 0;
   let releaseTimer: number | undefined;
   let session: { id: string; recorders: { role: ShootRole; recorder: MediaRecorder; queue: Promise<void> }[] } | null = null;
+  /** `performance.now()` of the first recorder's start: 0 on the session clock (the group clock). */
+  let origin: number | null = null;
+  let beforeEnd: (() => Promise<void>) | null = null;
 
   const set = (next: Partial<ShootState>) => {
     state = { ...state, ...next };
@@ -183,6 +186,15 @@ export function createShootRecorder() {
   const store = {
     /** Current state; the same object until it changes. */
     get: (): ShootState => state,
+    /** The recording session and the time on its clock now, s; null while none records. */
+    clock(): { session: string; seconds: number } | null {
+      if (!session || origin === null || state.phase !== "recording") return null;
+      return { session: session.id, seconds: Math.max(0, (performance.now() - origin) / 1000) };
+    },
+    /** Run `work` when End is pressed, before the recorders stop (the takes store cuts an open take). */
+    setBeforeEnd(work: (() => Promise<void>) | null): void {
+      beforeEnd = work;
+    },
     /** Call `listener` after every change. Returns an unsubscribe function. */
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
@@ -331,6 +343,7 @@ export function createShootRecorder() {
           starts[role] = performance.now();
           recorder.start(1000);
         }
+        origin = Math.min(...Object.values(starts));
         set({ phase: "recording", startedAt: performance.now() });
         await api().started(opened, starts);
       } catch (error) {
@@ -348,6 +361,8 @@ export function createShootRecorder() {
     async end(): Promise<void> {
       const current = session;
       if (!current || state.phase === "ending") return;
+      // An open take is cut first, while the session clock still runs.
+      await beforeEnd?.().catch((error: unknown) => set({ error: message(error) }));
       set({ phase: "ending" });
       await Promise.all(
         current.recorders.map(

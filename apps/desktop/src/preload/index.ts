@@ -153,7 +153,13 @@ const api: FrameshellApi = {
     end: (id) => invokeOutcome(Channel.shootEnd, id),
     recovered: () => invokeOutcome(Channel.shootRecovered),
     onRecovered: (listener) => subscribe(Channel.shootRecoveredChanged, listener),
+    cut: (id, take) => invokeOutcome(Channel.shootCut, id, take),
+    check: (script) => invokeOutcome(Channel.shootCheck, script),
     status: (script) => invokeOutcome(Channel.shootStatus, script),
+    accept: (script, take, options) => invokeOutcome(Channel.shootAccept, script, take, options ?? {}),
+    choose: (script, scene, take) => invokeOutcome(Channel.shootChoose, script, scene, take),
+    assemble: (script) => invokeOutcome(Channel.shootAssemble, script),
+    onChanged: (listener) => subscribe(Channel.shootChanged, listener),
   },
   scripts: {
     outline: (file) => invokeOutcome(Channel.scriptsOutline, file),

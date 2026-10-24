@@ -1,5 +1,5 @@
 import type { ShootStatusResult } from "@frameshell/protocol";
-import type { AnyClip, ClipTrack, MediaClip, Timeline } from "@frameshell/schema";
+import { type AnyClip, type ClipTrack, type MediaClip, type ProgramTrack, type Timeline, isShotClip } from "@frameshell/schema";
 import type { OperationRequest } from "../timeline/engine.js";
 
 /**
@@ -7,7 +7,8 @@ import type { OperationRequest } from "../timeline/engine.js";
  * take's span from its first to its last line, restarts and long pauses cut out, edges with a handle.
  * Scenes go in script order. A scene is replaced in place: its old clips (those carrying one of the
  * shoot's takes and the scene's `scriptRef`) are removed, what follows moves by the change in length,
- * and the new clips are added. Clips the person or an agent placed are never removed.
+ * and the new clips are added. Clips the person or an agent placed are never removed. A take recorded in the
+ * app (ADR 0024) becomes shots of its session's program track, on the group clock, once the session ended.
  */
 
 /** Seconds of take kept around the first and last word, and around a long pause cut out (ADR 0023). */
@@ -16,6 +17,8 @@ export const ASSEMBLE_HANDLE_S = 0.15;
 const MIN_PIECE_S = 0.1;
 /** Edge difference still taken as the same placement: energy snapping moves edges by up to a window. */
 const SAME_EDGE_S = 0.75;
+/** Edge difference still taken as the same shot: shot edges are rounded to the frame grid (one frame at 24 fps). */
+const SAME_SHOT_EDGE_S = 0.042;
 /** Room made for snapped edges before adding a scene's clips, per clip; closed again afterwards. */
 const SNAP_ROOM_S = 1.5;
 
@@ -32,6 +35,10 @@ export interface ScenePlan {
   ref: string;
   take: string | null;
   asset: string | null;
+  /** Multicam group of the take's session: the pieces become its shots. Null for a take of a whole file. */
+  group: string | null;
+  /** The take was recorded in the app and its session still records: nothing to place yet. */
+  waiting: boolean;
   pieces: PlannedPiece[];
 }
 
@@ -40,7 +47,7 @@ export interface SceneOutcome {
   slug: string;
   take: string | null;
   /** `placed`: new clips; `unchanged`: already as planned; `removed`: old clips taken out, no take covers it; `none`: nothing to do. */
-  action: "placed" | "unchanged" | "removed" | "none";
+  action: "placed" | "unchanged" | "removed" | "none" | "waiting";
   clips: string[];
 }
 
@@ -59,8 +66,9 @@ export function planScenes(status: ShootStatusResult): ScenePlan[] {
   const takes = new Map(status.takes.map((take) => [take.id, take]));
   return status.scenes.map((scene) => {
     const take = scene.chosen ? takes.get(scene.chosen) : undefined;
-    const none = { slug: scene.slug, title: scene.title, ref: scene.ref, take: null, asset: null, pieces: [] };
+    const none = { slug: scene.slug, title: scene.title, ref: scene.ref, take: null, asset: null, group: null, waiting: false, pieces: [] };
     if (!take) return none;
+    if (take.session && take.session.group === null) return { ...none, take: take.id, waiting: true };
     const said = take.lines.filter((line) => line.scene === scene.slug && line.status !== "outside" && line.at !== null).map((line) => line.at!);
     if (said.length === 0) return none;
     const start = Math.min(...said.map((at) => at.start));
@@ -81,7 +89,16 @@ export function planScenes(status: ShootStatusResult): ScenePlan[] {
     }
     const last = end + ASSEMBLE_HANDLE_S;
     if (last - from >= MIN_PIECE_S) pieces.push({ in: round(from), out: round(last) });
-    return { slug: scene.slug, title: scene.title, ref: scene.ref, take: take.id, asset: take.asset, pieces: merge(pieces) };
+    return {
+      slug: scene.slug,
+      title: scene.title,
+      ref: scene.ref,
+      take: take.id,
+      asset: take.asset,
+      group: take.session?.group ?? null,
+      waiting: false,
+      pieces: merge(pieces),
+    };
   });
 }
 
@@ -94,6 +111,11 @@ export async function assembleShoot(plans: readonly ScenePlan[], only: ReadonlyS
   for (const [index, plan] of plans.entries()) {
     if (only !== null && !only.has(plan.slug)) continue;
     const timeline = await deps.load();
+    const program = plan.group === null ? null : programTrackOf(timeline, plan.group);
+    if (plan.waiting || (plan.group !== null && program === null)) {
+      outcomes.push({ slug: plan.slug, take: plan.take, action: "waiting", clips: [] });
+      continue;
+    }
     const own = sceneClips(timeline, plan.ref, takes);
     if (plan.take === null && own.length === 0) {
       outcomes.push({ slug: plan.slug, take: null, action: "none", clips: [] });
@@ -105,7 +127,7 @@ export async function assembleShoot(plans: readonly ScenePlan[], only: ReadonlyS
     }
     // Where the scene goes: where its clips were, else right after the scenes before it.
     const earlier = new Set(plans.slice(0, index).map((other) => other.ref));
-    const before = clipTracksOf(timeline).flatMap((track) => track.clips).filter((clip) => isAssembled(clip, takes) && clip.scriptRef !== undefined && earlier.has(clip.scriptRef));
+    const before = clipTracksOf(timeline).flatMap((track): AnyClip[] => [...track.clips]).filter((clip) => isAssembled(clip, takes) && clip.scriptRef !== undefined && earlier.has(clip.scriptRef));
     const at = own.length > 0 ? Math.min(...own.map(({ clip }) => clip.start)) : Math.max(0, ...before.map(end));
     const oldEnd = own.length > 0 ? Math.max(...own.map(({ clip }) => end(clip))) : at;
     const trackHint = own[0]?.track ?? null;
@@ -117,17 +139,20 @@ export async function assembleShoot(plans: readonly ScenePlan[], only: ReadonlyS
       continue;
     }
     const length = plan.pieces.reduce((sum, piece) => sum + piece.out - piece.in, 0);
-    const room = snap ? SNAP_ROOM_S * plan.pieces.length : 0;
+    // Shots are never snapped: their sound is the group's, cut on the group clock.
+    const snapping = snap && program === null;
+    const room = snapping ? SNAP_ROOM_S * plan.pieces.length : 0;
     const moved = await shiftAfter(deps, oldEnd, at + length + room - oldEnd, new Set());
-    const track = trackHint ?? (await shootTrack(deps, plan.asset, takes));
+    const track = program?.id ?? trackHint ?? (await shootTrack(deps, plan.asset, takes));
     const added: string[] = [];
     let cursor = at;
     for (const piece of plan.pieces) {
-      const args = { track, type: "media", asset: plan.asset, start: cursor, in: piece.in, out: piece.out, scriptRef: plan.ref, take: plan.take, ...(snap ? { snap: true } : {}) };
+      const source = program ? { type: "shot" } : { type: "media", asset: plan.asset, ...(snapping ? { snap: true } : {}) };
+      const args = { track, ...source, start: cursor, in: piece.in, out: piece.out, scriptRef: plan.ref, take: plan.take };
       const result = await deps.apply({ op: "clip.add", args } as OperationRequest);
       const id = result.added[0]!;
       added.push(id);
-      const placed = clipTracksOf(await deps.load()).flatMap((t) => t.clips).find((clip) => clip.id === id)!;
+      const placed = clipTracksOf(await deps.load()).flatMap((t): AnyClip[] => [...t.clips]).find((clip) => clip.id === id)!;
       cursor = end(placed);
     }
     // Close the room left for snapping: what followed now starts where the scene ends.
@@ -141,7 +166,7 @@ export async function assembleShoot(plans: readonly ScenePlan[], only: ReadonlyS
 /** Clips of the scene's earlier assembly, by start, with their track. */
 function sceneClips(timeline: Timeline, ref: string, takes: ReadonlySet<string>): { clip: AnyClip; track: string }[] {
   return clipTracksOf(timeline)
-    .flatMap((track) => track.clips.map((clip) => ({ clip, track: track.id })))
+    .flatMap((track) => (track.clips as readonly AnyClip[]).map((clip) => ({ clip, track: track.id })))
     .filter(({ clip }) => isAssembled(clip, takes) && clip.scriptRef === ref)
     .sort((a, b) => a.clip.start - b.clip.start);
 }
@@ -150,10 +175,13 @@ function sceneClips(timeline: Timeline, ref: string, takes: ReadonlySet<string>)
 function same(own: readonly { clip: AnyClip }[], plan: ScenePlan): boolean {
   if (own.length !== plan.pieces.length) return false;
   return own.every(({ clip }, i) => {
-    if (clip.type !== "media") return false;
+    const piece = plan.pieces[i]!;
+    if (isShotClip(clip)) {
+      return plan.group !== null && clip.take === plan.take && Math.abs(clip.in - piece.in) <= SAME_SHOT_EDGE_S && Math.abs(clip.out - piece.out) <= SAME_SHOT_EDGE_S;
+    }
+    if (clip.type !== "media" || plan.group !== null) return false;
     const media = clip as MediaClip;
     if (media.take !== plan.take || media.asset !== plan.asset) return false;
-    const piece = plan.pieces[i]!;
     return Math.abs(media.in - piece.in) <= SAME_EDGE_S && Math.abs(media.out - piece.out) <= SAME_EDGE_S;
   });
 }
@@ -166,7 +194,7 @@ async function shiftAfter(deps: AssembleDeps, from: number, delta: number, skip:
   if (Math.abs(delta) < 1e-6) return [];
   const timeline = await deps.load();
   const later = clipTracksOf(timeline)
-    .flatMap((track) => track.clips)
+    .flatMap((track): AnyClip[] => [...track.clips])
     .filter((clip) => clip.start >= from - 1e-6 && !skip.has(clip.id))
     .sort((a, b) => (delta > 0 ? b.start - a.start : a.start - b.start));
   const moved: { id: string; start: number }[] = [];
@@ -182,7 +210,7 @@ async function shiftAfter(deps: AssembleDeps, from: number, delta: number, skip:
 async function shootTrack(deps: AssembleDeps, asset: string, takes: ReadonlySet<string>): Promise<string> {
   const kind = (await deps.hasVideo(asset)) ? "video" : "audio";
   const timeline = await deps.load();
-  const used = clipTracksOf(timeline).find((track) => track.kind === kind && track.clips.some((clip) => isAssembled(clip, takes)));
+  const used = clipTracksOf(timeline).find((track) => track.kind === kind && (track.clips as readonly AnyClip[]).some((clip) => isAssembled(clip, takes)));
   if (used) return used.id;
   const { added } = await deps.apply({ op: "track.add", args: { kind, name: kind === "video" ? "Shoot" : "Shoot audio" } } as OperationRequest);
   return added[0]!;
@@ -193,11 +221,18 @@ function isAssembled(clip: AnyClip, takes: ReadonlySet<string>): boolean {
   return take !== undefined && takes.has(take);
 }
 
-function clipTracksOf(timeline: Timeline): ClipTrack[] {
-  return timeline.tracks.filter((track): track is ClipTrack => track.kind === "video" || track.kind === "audio");
+/** Video, audio and program tracks: every track an assembly places on or moves clips of. */
+function clipTracksOf(timeline: Timeline): (ClipTrack | ProgramTrack)[] {
+  return timeline.tracks.filter((track): track is ClipTrack | ProgramTrack => track.kind === "video" || track.kind === "audio" || track.kind === "program");
+}
+
+/** The program track showing `group`; null when the timeline has none. */
+function programTrackOf(timeline: Timeline, group: string): ProgramTrack | null {
+  return timeline.tracks.find((track): track is ProgramTrack => track.kind === "program" && track.group === group) ?? null;
 }
 
 function end(clip: AnyClip): number {
+  if (isShotClip(clip)) return clip.start + clip.out - clip.in;
   if (clip.type === "media") {
     const media = clip as MediaClip;
     return media.start + (media.out - media.in) / (media.speed ?? 1);
