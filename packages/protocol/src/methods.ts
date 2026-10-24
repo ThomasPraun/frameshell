@@ -10,6 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
+import { ShootChangedSchema, ShootSceneStatusSchema, TakeInfoSchema } from "./shoot.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, ShootMetaSchema, ShootSceneSchema } from "@frameshell/schema";
 import {
@@ -43,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 59;
+export const PROTOCOL_VERSION = 60;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -159,7 +160,7 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "shoot", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
@@ -167,7 +168,8 @@ const GcEntrySchema = z.object({
         "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
-        "other models) in `.frameshell/people/`. `temp`: leftover of an interrupted job or transcription.",
+        "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
+        "`.frameshell/shoot/`. `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
@@ -360,13 +362,14 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
       "`proposal.changed`: the project's review-mode proposal opened, grew, became ready, was rebased or closed. " +
       "`people.changed`: a person was added, renamed or removed, a link was added or removed, or a suggestion " +
       "was dismissed (`people.json`). " +
+      "`shoot.changed`: a take of a shoot script was added, discarded, chosen or compared, or deviations were accepted (`shoots/*.json`). " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -1282,6 +1285,100 @@ export const methods = {
         .describe("In file order."),
       warnings: z.array(z.string()).describe("Everything to fix before recording; empty when the script is clean."),
     }),
+  },
+  "shoot.status": {
+    description:
+      "Where a shoot is (ADR 0023): every scene of the shoot script with its state (`none`, `deviations`, `done`), the " +
+      "take chosen for it (the newest covering it unless picked with `shoot.choose`) and how many deviations wait; " +
+      "every take with how it said each line and every deviation (missing, changed, added, moved, restart, pause, " +
+      "speaker, length, free) with its `accepted` flag; `next`, the first scene in script order not done (never " +
+      "enforced); and the cues. Takes are compared against their asset's transcript when asked (cached): a take " +
+      "whose asset has no transcript says so in `problem`. Reacting to a newly analyzed take without being asked is " +
+      "fine (placing b-roll of a scene that just became done); never accept deviations or record in the person's " +
+      "place unless asked. Fails with ScriptNotFound, OutsideProject or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch.md`."),
+    }),
+    result: z.object({
+      script: z.string().describe("Shoot script, project-relative."),
+      file: z.string().describe("Shoot file, project-relative (`shoots/<slug>.json`); it may not exist yet."),
+      timeline: z.string().describe("Timeline the first cut goes into."),
+      scenes: z.array(ShootSceneStatusSchema).describe("In script order."),
+      takes: z.array(TakeInfoSchema).describe("Oldest first, discarded ones included."),
+      next: z.string().nullable().describe("Slug of the first scene not done; null when every scene is done."),
+      cues: z
+        .array(
+          z.object({
+            scene: z.string(),
+            line: z.int().describe("1-based file line."),
+            label: z.string(),
+            text: z.string().nullable(),
+            free: z.boolean(),
+          }),
+        )
+        .describe("Every cue of the script in order, for placing visuals."),
+      warnings: z.array(z.string()).describe("`script check` warnings of the script, and takes that point at a missing asset or scene."),
+    }),
+  },
+  "shoot.add": {
+    mutating: true,
+    description:
+      "Link an existing media file as a take of a shoot script (ADR 0023), starting at `scene` (default the first). " +
+      "It is compared against the script once the file has a transcript (`transcribe` it first, with `--speakers` " +
+      "when several people speak). The id is generated (`k_` + 6 hex). Undo with `shoot.discard`. Fails with " +
+      "ScriptNotFound, AssetNotFound, OutsideProject, InvalidOperation (unknown scene) or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script, e.g. `scripts/launch.md`."),
+      asset: z.string().min(1).describe("Media file inside the project, absolute or relative to `cwd`, e.g. `assets/hook-2.mp4`."),
+      scene: z.string().min(1).optional().describe("Slug of the scene the take starts at; default the first scene."),
+      recordedAt: z.string().min(1).optional().describe("ISO 8601 time it was recorded; default now. Newer takes are chosen by default."),
+    }),
+    result: z.object({ file: z.string().describe("Shoot file written, project-relative."), take: TakeInfoSchema }),
+  },
+  "shoot.discard": {
+    mutating: true,
+    description:
+      "Set a take aside: it stays listed but is never chosen, and a scene that had it picked goes back to the newest " +
+      "take. `restore: true` brings it back (the inverse). Fails with InvalidOperation (unknown take), ScriptNotFound or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script."),
+      take: z.string().min(1).describe("Take id, e.g. `k_3fa2c1`."),
+      restore: z.boolean().default(false).describe("Undo an earlier discard."),
+    }),
+    result: z.object({ file: z.string(), take: z.string(), discarded: z.boolean() }),
+  },
+  "shoot.accept": {
+    mutating: true,
+    description:
+      "Let deviations of a take pass (ADR 0023): the given ids, or every current one when `deviations` is left out " +
+      "(the whole take). An accepted deviation stays accepted while its script line and heard words stay the same. " +
+      "`undo: true` takes the acceptance back (the inverse). Accept only what the person asked for. Fails with " +
+      "InvalidOperation (unknown take, a deviation id the take does not have now, or a take not analyzed yet), ScriptNotFound or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script."),
+      take: z.string().min(1).describe("Take id."),
+      deviations: z.array(z.string().min(1)).min(1).optional().describe("Deviation ids from `shoot.status`; default all of the take's."),
+      undo: z.boolean().default(false).describe("Take the acceptance back."),
+    }),
+    result: z.object({ file: z.string(), take: z.string(), deviations: z.array(z.string()).describe("Ids whose acceptance changed.") }),
+  },
+  "shoot.choose": {
+    mutating: true,
+    description:
+      "Pick the take that goes into the cut for a scene, or `take: null` to go back to the default (the newest take " +
+      "covering it). Choosing again with the previous value is the inverse. Fails with InvalidOperation (unknown " +
+      "scene or take, a discarded take, or one that does not cover the scene), ScriptNotFound or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z.string().min(1).describe("Shoot script."),
+      scene: z.string().min(1).describe("Scene slug."),
+      take: z.string().min(1).nullable().describe("Take id, or null for the default."),
+    }),
+    result: z.object({ file: z.string(), scene: z.string(), take: z.string().nullable(), previous: z.string().nullable().describe("What was picked before; null = the default.") }),
   },
   "timeline.show": {
     description:
@@ -2451,6 +2548,12 @@ export const notifications = {
       "A hand edit of the file sends nothing. Re-read with `people.list`.",
     params: PeopleChangedSchema,
   },
+  "shoot.changed": {
+    description:
+      "A shoot file changed or a take was compared (ADR 0023). Sent to connections subscribed with `events.subscribe`. " +
+      "Re-read with `shoot.status`.",
+    params: ShootChangedSchema,
+  },
   "ui.command": {
     description:
       "Navigation command for one app window (`view`, as it registered with `ui.publish`). Not subscribable: sent to " +
@@ -2506,6 +2609,8 @@ export type ProposalWaitResult = MethodResult<"proposal.wait">;
 
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
+/** Result of `shoot.status`. */
+export type ShootStatusResult = MethodResult<"shoot.status">;
 /** Result of `script.check`. */
 export type ScriptCheckResult = MethodResult<"script.check">;
 

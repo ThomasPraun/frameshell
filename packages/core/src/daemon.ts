@@ -71,6 +71,7 @@ import { FileTransactionStore, TransactionTracker } from "./history/transactions
 import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { checkScript } from "./scripts/check.js";
+import { ShootService } from "./shoot/service.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef } from "./timeline/service.js";
@@ -271,6 +272,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const review = new ReviewSwitch(dirs);
   const people = new PeopleService({
     onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, ...(person !== undefined ? { person } : {}) }),
+  });
+  const shoots = new ShootService({
+    onChanged: (dir, script, change, take) => publishFor("shoot.changed", dir, { project: dir, script, change, ...(take !== undefined ? { take } : {}) }),
+    assetHash: async (dir, rel) => (await media.list(dir)).find((asset) => asset.path === rel)?.hash ?? null,
   });
   /** Cached face scans of every file in `assets/`; content hashes come from the media index. */
   const faceScans =
@@ -715,7 +720,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
       const proposals = await timelines.gcProposals(dir, dryRun);
-      const removed = [...derived.removed, ...cache.removed, ...proposals].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      const shootCache = await shoots.gc(dir, { dryRun, temps });
+      const removed = [...derived.removed, ...cache.removed, ...proposals, ...shootCache].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       const skipped = [...derived.skipped, ...cache.skipped];
       if (!temps) skipped.push({ area: "temp", reason: "jobs of this project are running; temp files may be theirs." });
       const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -750,6 +756,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
     "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
+    "shoot.status": async ({ cwd, script }) => shoots.status(await root(cwd), cwd, script),
+    "shoot.add": async ({ cwd, script, asset, scene, recordedAt }, caller) => shoots.add(await root(cwd), cwd, { script, asset, scene, recordedAt, by: journalAuthorOf(caller) }),
+    "shoot.discard": async ({ cwd, script, take, restore }) => shoots.discard(await root(cwd), cwd, { script, take, restore }),
+    "shoot.accept": async ({ cwd, script, take, deviations, undo }, caller) =>
+      shoots.accept(await root(cwd), cwd, { script, take, deviations, undo, by: journalAuthorOf(caller) }),
+    "shoot.choose": async ({ cwd, script, scene, take }) => shoots.choose(await root(cwd), cwd, { script, scene, take }),
     "script.check": async ({ cwd, file }) => {
       const dir = await root(cwd);
       const names = await people.names(dir).then(

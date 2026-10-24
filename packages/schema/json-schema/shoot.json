@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "script": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Project-relative shoot script, e.g. `scripts/launch.md`."
+    },
+    "timeline": {
+      "description": "Timeline the first cut is assembled into; default the script slug.",
+      "type": "string",
+      "minLength": 1
+    },
+    "takes": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
+          },
+          "asset": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project-relative media file, `/`-separated, e.g. `assets/hook-2.mp4`."
+          },
+          "scene": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the scene the take starts at, as the person or app named it; the comparison finds where it really starts."
+          },
+          "recordedAt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ISO 8601 time the take was recorded (or linked); newer takes are chosen by default."
+          },
+          "discarded": {
+            "description": "True when the take is set aside: never chosen, still listed.",
+            "type": "boolean"
+          },
+          "by": {
+            "description": "Author that linked the take, e.g. `cli` or `agent:claude:s1`.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "asset",
+          "scene",
+          "recordedAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "chosen": {
+      "default": {},
+      "description": "Scene slug to the take the person picked; scenes not here use the newest take covering them.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
+      }
+    },
+    "accepted": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "take": {
+            "type": "string",
+            "pattern": "^k_[A-Za-z0-9][A-Za-z0-9_-]*$"
+          },
+          "deviation": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Deviation id from `shoot.status`; it stays the same while the script line and the heard words stay the same."
+          },
+          "by": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Author that accepted it."
+          },
+          "at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ISO 8601 time it was accepted."
+          }
+        },
+        "required": [
+          "take",
+          "deviation",
+          "by",
+          "at"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "script"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/shoot.json"
+}

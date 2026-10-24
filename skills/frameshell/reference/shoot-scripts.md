@@ -58,3 +58,30 @@ follow: words
 4. When `source.stale` is true, the original changed after you wrote the script: write the shoot script again from it, keep the scene headings that did not change (clip links point at them), set the new `source_hash`, and check again.
 
 `frameshell script outline` still works on a shoot script (scenes, anchors, linked clips).
+
+## Takes
+
+A take is one recording of part of the script: a scene, several, or part of one. Frameshell compares each take word by word against the script and marks every difference; none blocks anything.
+
+1. **Link it.** `frameshell import <file> --wait`, then `frameshell transcribe assets/<file>` (add `--speakers` when several people speak in one file), then `frameshell shoot add scripts/<name>.md assets/<file> --scene <slug>` with the scene it starts at. The order does not matter: a take is compared as soon as its file has a transcript.
+2. **Read the result.** `frameshell shoot status scripts/<name>.md --json`. Per scene: `state` (`none`, `deviations`, `done`), `chosen` (the newest take covering it unless the person picked one), `pending`. Per take: `lines` (how each line was said) and `deviations`:
+
+   | Kind | Means |
+   |---|---|
+   | `missing` | Script words not heard |
+   | `changed` | Other words heard in their place, also a close spelling |
+   | `added` | Words heard that the script lacks, also before the first and after the last line |
+   | `moved` | A line said out of order |
+   | `restart` | An earlier attempt of a line the take repeats; the last complete attempt counts |
+   | `pause` | Over 1.5 s of silence inside a line |
+   | `speaker` | Someone else said the line (needs speakers in the transcript, or a person linked to the whole transcript) |
+   | `length` | The scene is more than 25% off its heading timing |
+   | `free` | A `[FREE: …]` slot with under 5 s of speech |
+
+   `maybeTranscription: true` marks a difference the transcription may have made (a number, a close spelling, one short word). Tell the person; do not hide it.
+3. **Tell the person, then do what they say.** Report the deviations in plain words, scene by scene, and `next`. The person lets them pass or records again. Accept only what they asked for: `frameshell shoot accept <script> <take> [<deviation id>…]` (no ids = the whole take), `--undo` to take it back. A scene is `done` when its chosen take covers every line and all its deviations are accepted.
+4. **Choosing and discarding.** `frameshell shoot choose <script> <scene> <take>` picks a take for a scene (`default` goes back to the newest). `frameshell shoot discard <script> <take>` sets one aside; `--restore` brings it back.
+
+With `follow: topics` only `missing` lines are reported: a line counts as said when about half of its content words are heard, in any order.
+
+An accepted deviation stays accepted while its script line and the heard words stay the same; editing that line of the script brings it back.

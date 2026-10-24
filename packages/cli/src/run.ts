@@ -28,6 +28,7 @@ import {
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
+import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import {
@@ -101,7 +102,7 @@ Commands:
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
+${PEOPLE_USAGE}${SHOOT_USAGE}  script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
   script check <file>          Check a shoot script (\`shoot: true\`): scenes, lines with speaker, spoken
                                words and cues, speakers vs people.json, stale source, warnings
@@ -117,13 +118,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -145,6 +146,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "proposal wait": ["timeout"],
   "proposal diff": ["tx"],
   ...PEOPLE_FLAGS,
+  ...SHOOT_FLAGS,
   mcp: [],
 };
 
@@ -192,6 +194,7 @@ type Invocation =
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
   | PeopleInvocation
+  | ShootInvocation
   | TimelineInvocation;
 
 interface Flags {
@@ -258,6 +261,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           onscreen: { type: "boolean", default: false },
           reject: { type: "boolean", default: false },
           person: { type: "string" },
+          scene: { type: "string" },
+          "recorded-at": { type: "string" },
+          undo: { type: "boolean", default: false },
+          restore: { type: "boolean", default: false },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -324,7 +331,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -373,10 +380,15 @@ function parseBuiltin(
     reject?: boolean | undefined;
     person?: string | undefined;
     segment?: boolean | undefined;
+    scene?: string | undefined;
+    "recorded-at"?: string | undefined;
+    undo?: boolean | undefined;
+    restore?: boolean | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "people") return parsePeople(rest, options);
+  if (command === "shoot") return parseShoot(rest, options);
   if (command === "inspect") {
     if (rest.length > 0) return null;
     const at = Number(options.at);
@@ -602,6 +614,12 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "people.unlink":
     case "people.scan":
       return executePeople(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
+    case "shoot.status":
+    case "shoot.add":
+    case "shoot.accept":
+    case "shoot.choose":
+    case "shoot.discard":
+      return executeShoot(conn, inv, cwd, flags.json);
     case "people.ranges":
       return executePeople(conn, inv, cwd, flags.json);
     case "people.suggest":

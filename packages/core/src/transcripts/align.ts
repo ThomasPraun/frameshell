@@ -23,8 +23,8 @@ export type WordHearing =
 const MATCH_WINDOW_S = 2;
 /** Score lost at the edge of the window, so a repeated phrase goes to its nearest copy. */
 const TIME_PENALTY = 0.2;
-/** Lowest text similarity a 1:1 match accepts. */
-const MIN_SIMILARITY = 0.6;
+/** Lowest text similarity a 1:1 match accepts. Shared with `shoot/compare.ts`. */
+export const MIN_SIMILARITY = 0.6;
 /** Lowest similarity a split/merge match accepts: stricter, or `a`+`todos` would absorb a lost `a` into `todos`. */
 const MIN_MERGE_SIMILARITY = 0.9;
 /** An unmatched heard token this close to an expected word's span means speech was there. */
@@ -211,8 +211,8 @@ export function comparableText(text: string): string {
   return text.split(/\s+/).map(normalizeToken).filter((part) => part.length > 0).join(" ");
 }
 
-/** Lowercase, accents and punctuation gone: `¿Está?` → `esta`. Whisper varies all three between runs. */
-function normalizeToken(text: string): string {
+/** Lowercase, accents and punctuation gone: `¿Está?` → `esta`. Whisper varies all three between runs. Shared with `shoot/compare.ts`. */
+export function normalizeToken(text: string): string {
   return text
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
@@ -220,8 +220,8 @@ function normalizeToken(text: string): string {
     .replace(/[\p{P}\p{S}]+/gu, "");
 }
 
-/** 1 - edit distance / longer length. Tokens of up to 2 characters must be equal: `de` vs `el` is not a spelling variant. */
-function similarity(a: string, b: string): number {
+/** 1 - edit distance / longer length. Tokens of up to 2 characters must be equal: `de` vs `el` is not a spelling variant. Shared with `shoot/compare.ts`. */
+export function similarity(a: string, b: string): number {
   if (a === b) return 1;
   const longer = Math.max(a.length, b.length);
   if (longer <= 2) return 0;
