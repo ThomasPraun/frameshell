@@ -143,19 +143,32 @@ describe("follower in a FREE slot", () => {
   it("waits on the slot until speech was heard and then stopped, then goes on with the script", () => {
     let state = follow(free, words, followAt(free, words, 0), hear("hola a todos esto es el principio"), "es").state;
     expect(followStop(free, words, state)).toBe(slot);
-    expect(state.hold).toEqual({ stop: slot, heard: false });
+    expect(state.hold).toEqual({ stop: slot, heard: false, windows: 0 });
     // Silence before any free speech keeps it waiting; unscripted words that touch the script do not move it.
     state = follow(free, words, state, { words: [], silence: 3 }, "es").state;
     expect(followStop(free, words, state)).toBe(slot);
     state = follow(free, words, state, hear("nos conocimos en el principio de todo"), "es").state;
     expect(followStop(free, words, state)).toBe(slot);
-    const done = follow(free, words, state, hear("y fue genial", 1.5), "es");
+    for (let window = 0; window < 8; window++) state = follow(free, words, state, hear("y fue genial", 1), "es").state;
+    const done = follow(free, words, state, hear("y fue genial", 2.5), "es");
     expect(done.moved).toBe(true);
     expect(free.stops[followStop(free, words, done.state)]!.text).toBe("Y");
     expect(free.stops[followStop(free, words, follow(free, words, done.state, hear("y ahora seguimos con"), "es").state)]!.text).toBe("el");
   });
 
+  it("holds through a thinking pause and through a pause soon after the first words", () => {
+    const placed = followAt(free, words, slot);
+    // First words, then a long silence at once: under 4 s of speech in the slot, so it stays.
+    let early = follow(free, words, placed, hear("nos conocimos en"), "es").state;
+    for (let window = 0; window < 4; window++) early = follow(free, words, early, { words: [], silence: 3.5 }, "es").state;
+    expect(followStop(free, words, early)).toBe(slot);
+    // Past 4 s: a 2 s thinking pause stays, a 2.5 s one leaves.
+    for (let window = 0; window < 4; window++) early = follow(free, words, early, { words: [], silence: 1 }, "es").state;
+    expect(follow(free, words, early, hear("y luego", 2), "es").moved).toBe(false);
+    expect(follow(free, words, early, { words: [], silence: 2.5 }, "es").moved).toBe(true);
+  });
+
   it("starts held when placed on the slot", () => {
-    expect(followAt(free, words, slot)).toMatchObject({ hold: { stop: slot, heard: false }, floor: slot });
+    expect(followAt(free, words, slot)).toMatchObject({ hold: { stop: slot, heard: false, windows: 0 }, floor: slot });
   });
 });

@@ -5,7 +5,8 @@ const en = {
   liveUnavailable: (reason: string) =>
     `The teleprompter cannot follow your voice here, so move it with the arrow keys. Voice recognition is unavailable: ${reason}`,
   liveStarting: "Getting voice recognition ready for the teleprompter…",
-  liveDownload: (megabytes: number) => `Let the teleprompter follow your voice (downloads ~${megabytes} MB once)`,
+  liveDownload: (megabytes: number) => `Download voice recognition (~${megabytes} MB, once)`,
+  liveDownloadWhy: "Lets the teleprompter follow your voice.",
   allow: "Allow camera and microphone",
   denied: (reason: string) => `Camera and microphone unavailable: ${reason}`,
   camera: "Camera",
@@ -79,7 +80,8 @@ const es: typeof en = {
   liveUnavailable: (reason) =>
     `El teleprompter no puede seguir tu voz aquí, así que muévelo con las flechas. El reconocimiento de voz no está disponible: ${reason}`,
   liveStarting: "Preparando el reconocimiento de voz para el teleprompter…",
-  liveDownload: (megabytes) => `Que el teleprompter siga tu voz (descarga ~${megabytes} MB una vez)`,
+  liveDownload: (megabytes) => `Descargar el reconocimiento de voz (~${megabytes} MB, una vez)`,
+  liveDownloadWhy: "Permite que el teleprompter siga tu voz.",
   allow: "Permitir cámara y micrófono",
   denied: (reason) => `Cámara y micrófono no disponibles: ${reason}`,
   camera: "Cámara",

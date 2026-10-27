@@ -46,6 +46,7 @@ export function ShootPanel() {
           <button className="button" data-testid="shoot-live-download" onClick={() => live.warm(true)}>
             {t.shoot.liveDownload(Math.max(1, Math.round((liveStatus.bytes ?? 0) / 1_000_000)))}
           </button>
+          <span className="shoot-note">{t.shoot.liveDownloadWhy}</span>
         </div>
       )}
       <div className="shoot-row">
