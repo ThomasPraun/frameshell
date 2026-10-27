@@ -123,6 +123,7 @@ export function ShootPanel() {
         {picking && !locked && (
           <div className="shoot-screens" role="listbox" aria-label={t.shoot.screen}>
             <p className="shoot-note">{state.screensError ? t.shoot.screensFailed(state.screensError) : t.shoot.screensHint}</p>
+            {state.screens?.some((screen) => screen.offDesktop) && <p className="shoot-note">{t.shoot.offDesktopHint}</p>}
             {state.screens?.map((screen) => (
               <button
                 key={screen.id}
@@ -132,7 +133,11 @@ export function ShootPanel() {
                 data-testid="shoot-screen-option"
                 onClick={() => choose(screen)}
               >
-                {screen.thumbnail ? <img src={screen.thumbnail} alt="" /> : <span className="shoot-screen-empty" />}
+                {screen.thumbnail ? (
+                  <img src={screen.thumbnail} alt="" />
+                ) : (
+                  <span className="shoot-screen-empty">{screen.offDesktop ? t.shoot.offDesktop : null}</span>
+                )}
                 <span className="shoot-screen-label">
                   {t.shoot.screenKind[screen.kind]}: {screen.name}
                 </span>

@@ -691,6 +691,8 @@ export interface ShootScreenSource {
   kind: "screen" | "window";
   /** Thumbnail as a data URL; empty when the OS gave none. */
   thumbnail: string;
+  /** macOS: a window off the active Space (another desktop, full screen), minimized or hidden; no thumbnail. */
+  offDesktop?: boolean;
 }
 
 /** A finished shoot session. */

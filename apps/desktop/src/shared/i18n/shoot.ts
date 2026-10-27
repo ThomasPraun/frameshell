@@ -18,6 +18,9 @@ const en = {
   screensFailed: (reason: string) => `Screens unavailable: ${reason}`,
   screensHint: "Pick what to record. Frameshell's own windows stay out of the recording.",
   screenKind: { screen: "Screen", window: "Window" },
+  offDesktop: "Other desktop",
+  offDesktopHint:
+    "Windows without a preview are on another desktop, in full screen, minimized or hidden. A minimized or hidden window records nothing until you show it again.",
   systemAudio: "System audio",
   systemAudioHint: "Sound of other apps, such as a call.",
   systemAudioMissing: {
@@ -89,6 +92,9 @@ const es: typeof en = {
   screensFailed: (reason) => `Pantallas no disponibles: ${reason}`,
   screensHint: "Elige qué grabar. Las ventanas de Frameshell quedan fuera de la grabación.",
   screenKind: { screen: "Pantalla", window: "Ventana" },
+  offDesktop: "Otro escritorio",
+  offDesktopHint:
+    "Las ventanas sin vista previa están en otro escritorio, en pantalla completa, minimizadas u ocultas. Una ventana minimizada u oculta no graba nada hasta que la vuelvas a mostrar.",
   systemAudio: "Audio del sistema",
   systemAudioHint: "El sonido de otras apps, como una llamada.",
   systemAudioMissing: {

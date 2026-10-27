@@ -3954,6 +3954,13 @@ button.track-head:focus-visible {
   background: #000;
 }
 
+.shoot-screen-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
 .shoot-screen-label {
   overflow: hidden;
   text-overflow: ellipsis;
