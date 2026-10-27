@@ -2,7 +2,6 @@
 // tracked changes against a script line.
 import type { ShootStatusResult } from "@frameshell/protocol";
 import { editsText } from "../history-commands.js";
-import { elementOf } from "../windows.js";
 
 /** A deviation as `shoot.status` reports it. */
 export type DeviationInfo = ShootStatusResult["takes"][number]["deviations"][number];
@@ -24,7 +23,7 @@ export function sceneAfter(status: ShootStatusResult | null, scene: string | nul
 /** What a key press asks of the takes while recording: `take` (T, a new take), `cut` (C), or null. */
 export function takeKey(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "repeat" | "isComposing" | "target">): "take" | "cut" | null {
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.isComposing) return null;
-  if (editsText(event.target) || elementOf(event.target)?.tagName === "SELECT") return null;
+  if (editsText(event.target)) return null;
   const key = event.key.toLowerCase();
   return key === "t" ? "take" : key === "c" ? "cut" : null;
 }

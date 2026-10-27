@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The teleprompter's voice recognition comes back by itself. After 10 minutes without audio the recognizer stops; coming back to the Shoot view left it off while Follow voice stayed on, and the teleprompter did not move with no sign why. Following now starts it again (never downloading anything), and next to the Follow voice switch the teleprompter says in words whether it is listening, starting, off (with a Turn on button), not installed or unavailable. While a shoot records, the Shoot view says Frameshell's windows, the teleprompter included, are hidden from screen recordings and screenshots by other apps (macOS and Windows). T and C keep taking and cutting takes while a source select holds focus.
+- The teleprompter has a Back to start button that moves to the first word of the script.
+
 ### Added
 
 - The teleprompter follows your voice (ADR 0024 decisions 5 and 6, #393). With the Shoot view open, live recognition listens to the microphone (mixed with system audio) and the teleprompter moves with what you say: never more than the word being said, a skipped sentence struck through once the next one is clearly heard, a restart taken back, coughs and unrelated speech ignored, and a `[FREE: …]` slot held until you pause. Keys still correct it, Space holds it, and the Follow voice switch turns it off. Live words only move the teleprompter: nothing is written to the project. It runs a resident `whisper-server` (new managed package, same pinned whisper.cpp commit as `whisper-cli`; Frameshell builds for macOS Metal and Linux Vulkan on release `whisper-server-1.9.4-fs1`, upstream's CPU archives elsewhere) with the `small-q5_1` model, or `base-q5_1` where a speed check finds the machine too slow; the choice is kept in `<dataDir>/shoot/live-model.json`. Nothing is downloaded until you agree in the Shoot view (~195 MB on a Mac); where it cannot run, the view says so and the teleprompter is moved by keys.

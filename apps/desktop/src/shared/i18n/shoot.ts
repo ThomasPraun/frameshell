@@ -32,6 +32,7 @@ const en = {
   level: (name: string) => `Level of ${name}`,
   preview: (name: string) => `Preview of ${name}`,
   protectHint: "Frameshell hides its windows from screen recordings while recording. If they still show, record a window instead of the whole screen.",
+  windowsHidden: "While recording, Frameshell's windows, the teleprompter included, are hidden from screen recordings and screenshots taken by other apps.",
   unprotectedHint:
     "On this system Frameshell cannot hide its windows from screen recordings. Record a window instead of the whole screen, or move Frameshell to another display.",
   start: "Start shoot",
@@ -107,6 +108,7 @@ const es: typeof en = {
   level: (name) => `Nivel de ${name}`,
   preview: (name) => `Vista previa de ${name}`,
   protectHint: "Frameshell oculta sus ventanas de las grabaciones de pantalla mientras graba. Si aun así aparecen, graba una ventana en lugar de la pantalla completa.",
+  windowsHidden: "Mientras grabas, las ventanas de Frameshell, el teleprompter incluido, quedan ocultas de las grabaciones de pantalla y las capturas de otras apps.",
   unprotectedHint:
     "En este sistema Frameshell no puede ocultar sus ventanas de las grabaciones de pantalla. Graba una ventana en lugar de la pantalla completa, o mueve Frameshell a otra pantalla.",
   start: "Empezar rodaje",
