@@ -49,7 +49,11 @@ test("the teleprompter follows the voice it hears, strikes a skipped sentence, w
   // Free speech, even one touching the script, keeps it on the slot until a pause.
   await hear("we met at school and the rest is history");
   await expect(current).toHaveText("Freehow we met");
+  // A thinking pause (2 s) does not end it, and neither does silence before 4 s of speech in the slot.
   await hear("", 2);
+  await child.waitForTimeout(300);
+  await expect(current).toHaveText("Freehow we met");
+  for (let window = 0; window < 8; window++) await hear("", 3);
   await expect(current).toHaveText("The");
   await hear("the rest of the story");
   await expect(current).toHaveText("goes");

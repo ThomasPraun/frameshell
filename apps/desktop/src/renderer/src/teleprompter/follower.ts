@@ -19,7 +19,11 @@ export const FOLLOW_OPTIONS = {
   gapScript: -0.9,
   gapHeard: -0.8,
   /** Seconds without speech at a window's end that end a `[FREE: …]` slot, once something was said in it. */
-  freePause: 1.2,
+  freePause: 2.5,
+  /** Seconds since the first speech in a `[FREE: …]` slot before a pause can end it: a thinking pause early in a story is not its end. */
+  freeMinSpeech: 4,
+  /** Seconds between two recognition windows; twin of `LIVE_HOP_S` in `main/live-recognition.ts`. The follower has no clock, so it counts windows. */
+  hop: 0.5,
   /** A window where any 3 tokens in a row repeat this often is a recognizer loop and is ignored. */
   loopRepeats: 3,
 };
@@ -40,8 +44,8 @@ export interface FollowState {
   last: number;
   /** Stops before this one count as passed: a FREE slot left behind. */
   floor: number;
-  /** A `[FREE: …]` slot the reader is in, and whether speech was heard there yet; null when none. */
-  hold: { stop: number; heard: boolean } | null;
+  /** A `[FREE: …]` slot the reader is in, whether speech was heard there yet, and the windows seen since the first speech; null when none. */
+  hold: { stop: number; heard: boolean; windows: number } | null;
 }
 
 /** One recognition window. */
@@ -78,7 +82,7 @@ export function followScript(stream: PromptStream, language: NumberLanguage | nu
 export function followAt(stream: PromptStream, script: FollowScript, stop: number): FollowState {
   let last = -1;
   while (last + 1 < script.stops.length && script.stops[last + 1]! < stop) last++;
-  const hold = stream.stops[stop]?.kind === "free" ? { stop, heard: false } : null;
+  const hold = stream.stops[stop]?.kind === "free" ? { stop, heard: false, windows: 0 } : null;
   return { last, floor: stop, hold };
 }
 
@@ -118,8 +122,9 @@ export function isLoop(tokens: readonly string[], repeats = FOLLOW_OPTIONS.loopR
 /**
  * Follow one recognition window. Windows overlap, so the same words come again and again: a step is idempotent.
  * A lone word, unrelated speech or a recognizer loop never moves the reader. In a FREE slot the reader waits until
- * speech was heard and then stopped for {@link FOLLOW_OPTIONS.freePause}, unless the script goes on with skip-strong
- * evidence.
+ * speech was heard for {@link FOLLOW_OPTIONS.freeMinSpeech} and then stopped for {@link FOLLOW_OPTIONS.freePause},
+ * unless the script goes on with skip-strong evidence. Time in the slot is the windows seen times
+ * {@link FOLLOW_OPTIONS.hop}.
  */
 export function follow(
   stream: PromptStream,
@@ -132,9 +137,10 @@ export function follow(
   const unchanged: FollowStep = { state, moved: false, skipped: [] };
   const all = window.words.flatMap((word) => spokenTokens(word, language));
   if (state.hold) {
-    const hold = all.length > 0 ? { ...state.hold, heard: true } : state.hold;
-    if (hold !== state.hold) state = { ...state, hold };
-    if (hold.heard && window.silence >= options.freePause) return { state: { ...state, floor: hold.stop + 1, hold: null }, moved: true, skipped: [] };
+    const prior = state.hold;
+    const hold = prior.heard ? { ...prior, windows: prior.windows + 1 } : all.length > 0 ? { ...prior, heard: true } : prior;
+    if (hold !== prior) state = { ...state, hold };
+    if (hold.heard && hold.windows * options.hop >= options.freeMinSpeech && window.silence >= options.freePause) return { state: { ...state, floor: hold.stop + 1, hold: null }, moved: true, skipped: [] };
   }
   const heard = all.slice(-options.tail);
   if (heard.length === 0 || isLoop(all, options.loopRepeats)) return { ...unchanged, state };
@@ -192,7 +198,7 @@ export function follow(
   const before = followStop(stream, script, state);
   let next: FollowState = { last: position, floor: jump < 0 ? 0 : state.floor, hold: null };
   const stop = followStop(stream, script, next);
-  if (stream.stops[stop]?.kind === "free") next = { ...next, hold: { stop, heard: false } };
+  if (stream.stops[stop]?.kind === "free") next = { ...next, hold: { stop, heard: false, windows: 0 } };
   // Skipped: a sentence jumped over, at least half of what was left of it absent from the window's words. The
   // alignment can bridge a short sentence with gaps, so its path does not tell.
   const landed = followStop(stream, script, next);
