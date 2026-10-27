@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import type { ShootSourceSpec } from "../src/shared/api.js";
-import { contentProtectionSupport, screenSources, systemAudioSupport } from "../src/main/shoot-capture.js";
+import { contentProtectionSupport, offDesktopWindows, screenSources, systemAudioSupport } from "../src/main/shoot-capture.js";
 import {
   ChunkWriter,
   type FinishDeps,
@@ -313,5 +313,55 @@ describe("capture support", () => {
       { id: "screen:1:0", name: "Entire screen", kind: "screen", thumbnail: "" },
       { id: "window:12:0", name: "Zoom Meeting", kind: "window", thumbnail: "data:image/png;base64,AA" },
     ]);
+  });
+
+  it("adds off-desktop windows last, without thumbnail, unless listed already or Frameshell's", () => {
+    const sources = [
+      { id: "window:12:0", name: "Zoom Meeting", thumbnail: { isEmpty: () => true, toDataURL: () => "" } },
+      { id: "screen:1:0", name: "Entire screen", thumbnail: { isEmpty: () => true, toDataURL: () => "" } },
+    ];
+    const away = [
+      { id: "window:12:0", name: "Zoom Meeting" },
+      { id: "window:7:0", name: "Frameshell" },
+      { id: "window:30:0", name: "Meet - Chrome" },
+    ];
+    expect(screenSources(sources, new Set(["window:7:0"]), away)).toEqual([
+      { id: "screen:1:0", name: "Entire screen", kind: "screen", thumbnail: "" },
+      { id: "window:12:0", name: "Zoom Meeting", kind: "window", thumbnail: "" },
+      { id: "window:30:0", name: "Meet - Chrome", kind: "window", thumbnail: "", offDesktop: true },
+    ]);
+  });
+
+  it("keeps titled, shareable, off-screen app windows of a useful size from the macOS window list", () => {
+    const window = (number: number, extra: Record<string, unknown> = {}) => ({
+      kCGWindowNumber: number,
+      kCGWindowLayer: 0,
+      kCGWindowName: `Window ${number}`,
+      kCGWindowOwnerPID: 500,
+      kCGWindowSharingState: 1,
+      kCGWindowAlpha: 1,
+      kCGWindowBounds: { X: 0, Y: 0, Width: 1200, Height: 800 },
+      ...extra,
+    });
+    const list = [
+      window(1),
+      window(2, { kCGWindowIsOnscreen: true }),
+      window(3, { kCGWindowLayer: 25 }),
+      window(4, { kCGWindowName: "" }),
+      window(5, { kCGWindowName: undefined }),
+      window(6, { kCGWindowOwnerPID: 42 }),
+      window(7, { kCGWindowSharingState: 0 }),
+      window(8, { kCGWindowAlpha: 0 }),
+      window(9, { kCGWindowBounds: { X: 0, Y: 0, Width: 312, Height: 40 } }),
+      window(10, { kCGWindowBounds: undefined }),
+      window(11, { kCGWindowName: "  Zoom Meeting " }),
+      null,
+      "junk",
+    ];
+    expect(offDesktopWindows(list, 42)).toEqual([
+      { id: "window:1:0", name: "Window 1" },
+      { id: "window:11:0", name: "Zoom Meeting" },
+    ]);
+    expect(offDesktopWindows(null, 42)).toEqual([]);
   });
 });

@@ -93,7 +93,8 @@ import { PANEL_WINDOW_MIN, PanelWindowStore, cascade, placeOnDisplays, panelWind
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { projectBinaries, terminalToolPaths } from "./terminal-tools.js";
-import { contentProtectionSupport, screenSources, systemAudioSupport } from "./shoot-capture.js";
+import { macWindowList } from "./mac-windows.js";
+import { contentProtectionSupport, offDesktopWindows, screenSources, systemAudioSupport } from "./shoot-capture.js";
 import { LiveRecognizer, type LiveSource, standInLive } from "./live-recognition.js";
 import {
   ChunkWriter,
@@ -1024,6 +1025,9 @@ function shootOf(state: WindowState, id: unknown): { root: string; session: Sess
   return state.shoot;
 }
 
+/** macOS windows the last Shoot list offered beyond `desktopCapturer` (`offDesktopWindows`), by id: their names. */
+const offDesktopOffered = new Map<string, string>();
+
 /**
  * `getDisplayMedia` of a project window: only what its Shoot view picked just before (`shoot.pickScreen`), else
  * refused. The stand-in captures the asking page itself.
@@ -1040,7 +1044,11 @@ async function answerDisplayMedia(
   if (SHOOT_STAND_IN) return callback({ video: request.frame });
   try {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
-    const source = pick.id ? sources.find((candidate) => candidate.id === pick.id) : sources.find((candidate) => candidate.id.startsWith("screen:"));
+    const listed = pick.id ? sources.find((candidate) => candidate.id === pick.id) : sources.find((candidate) => candidate.id.startsWith("screen:"));
+    // Chromium captures a window on another Space by its id alone; desktopCapturer just does not list it.
+    const awayName = pick.id ? offDesktopOffered.get(pick.id) : undefined;
+    const away = pick.id && awayName !== undefined ? { id: pick.id, name: awayName } : undefined;
+    const source = listed ?? away;
     if (!source) return callback({});
     callback(pick.systemAudio ? { video: source, audio: "loopback" } : { video: source });
   } catch {
@@ -1121,8 +1129,14 @@ function registerShootIpc(): void {
     outcome(async () => {
       if (SHOOT_STAND_IN) return [{ id: "stand-in", name: "Stand-in screen", kind: "screen" as const, thumbnail: "" }];
       const own = new Set(BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId()));
-      const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 320, height: 180 } });
-      return screenSources(sources, own);
+      const [sources, all] = await Promise.all([
+        desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 320, height: 180 } }),
+        macWindowList(),
+      ]);
+      const offered = screenSources(sources, own, offDesktopWindows(all, process.pid));
+      offDesktopOffered.clear();
+      for (const source of offered) if (source.offDesktop) offDesktopOffered.set(source.id, source.name);
+      return offered;
     }),
   );
   ipcMain.handle(Channel.shootPickScreen, (event, id: unknown, systemAudio: unknown) =>
