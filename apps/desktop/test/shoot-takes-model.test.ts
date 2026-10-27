@@ -41,6 +41,12 @@ describe("takeKey", () => {
     expect(key("t", { metaKey: true })).toBeNull();
     expect(key("c", { repeat: true })).toBeNull();
   });
+  it("still reads them when a select kept focus, but not in a text field", () => {
+    const select = { nodeType: 1, tagName: "SELECT", isContentEditable: false } as unknown as EventTarget;
+    const input = { nodeType: 1, tagName: "INPUT", type: "text", isContentEditable: false } as unknown as EventTarget;
+    expect(key("t", { target: select })).toBe("take");
+    expect(key("t", { target: input })).toBeNull();
+  });
 });
 
 describe("lineMarks", () => {

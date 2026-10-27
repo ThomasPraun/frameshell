@@ -17,7 +17,8 @@ import {
 } from "../teleprompter/model.js";
 import { teleprompter, useTeleprompter, useTeleprompterSettings } from "../teleprompter/store.js";
 import { useLiveFollow } from "../teleprompter/follow.js";
-import { useLiveStatus } from "../shoot/live.js";
+import { live, useLiveStatus } from "../shoot/live.js";
+import { liveWord } from "../shoot/live-state.js";
 import type { LiveStatus } from "../../../shared/api.js";
 import { scriptFiles } from "../timeline/scenes.js";
 import { elementOf, windowOf } from "../windows.js";
@@ -155,6 +156,19 @@ export function TeleprompterPanel() {
             {t.teleprompter.follow}
             {settings.follow && <span className={`teleprompter-live is-${liveStatus.state}`} aria-label={liveNote(liveStatus)} />}
           </label>
+          {settings.follow && (
+            <span className="teleprompter-live-state" data-testid="teleprompter-live-state" data-word={liveWord(liveStatus)} title={liveNote(liveStatus)}>
+              {t.teleprompter.liveWord[liveWord(liveStatus)]}
+              {liveWord(liveStatus) === "off" && (
+                <button className="button" data-testid="teleprompter-live-on" onClick={() => live.warm()}>
+                  {t.teleprompter.liveTurnOn}
+                </button>
+              )}
+            </span>
+          )}
+          <button className="button" data-testid="teleprompter-start" disabled={!stream || stream.stops.length === 0} onClick={() => move(0)}>
+            {t.teleprompter.backToStart}
+          </button>
           <button className="button" data-testid="teleprompter-hold" aria-pressed={state.held} onClick={() => teleprompter.setHeld(!state.held)}>
             {state.held ? t.teleprompter.resume : t.teleprompter.hold}
           </button>

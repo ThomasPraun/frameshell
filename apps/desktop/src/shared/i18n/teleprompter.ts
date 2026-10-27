@@ -26,8 +26,11 @@ const en = {
   liveInstalling: (percent: number | null) => `Getting voice recognition ready${percent === null ? "…" : `: ${percent}%`}`,
   liveWarming: "Starting voice recognition (the first time takes about 20 seconds)…",
   liveUnavailable: (reason: string) => `Voice recognition unavailable, move it with the keys: ${reason}`,
-  liveOff: "Voice recognition starts when the Shoot view is open.",
+  liveOff: "Voice recognition is off. Turn it on to follow your voice.",
   liveDownload: "Voice recognition is not installed yet: download it from the Shoot view.",
+  liveWord: { listening: "Listening", starting: "Starting…", off: "Off", missing: "Not installed: see the Shoot view", unavailable: "Unavailable" },
+  liveTurnOn: "Turn on",
+  backToStart: "Back to start",
 };
 
 const es: typeof en = {
@@ -56,8 +59,11 @@ const es: typeof en = {
   liveInstalling: (percent) => `Preparando el reconocimiento de voz${percent === null ? "…" : `: ${percent}%`}`,
   liveWarming: "Iniciando el reconocimiento de voz (la primera vez tarda unos 20 segundos)…",
   liveUnavailable: (reason) => `Reconocimiento de voz no disponible, muévelo con las teclas: ${reason}`,
-  liveOff: "El reconocimiento de voz se inicia cuando la vista Rodaje está abierta.",
+  liveOff: "El reconocimiento de voz está apagado. Actívalo para seguir tu voz.",
   liveDownload: "El reconocimiento de voz todavía no está instalado: descárgalo desde la vista Rodaje.",
+  liveWord: { listening: "Escuchando", starting: "Iniciando…", off: "Apagado", missing: "No instalado: mira la vista Rodaje", unavailable: "No disponible" },
+  liveTurnOn: "Activar",
+  backToStart: "Volver al inicio",
 };
 
 export const teleprompter = { en, es };

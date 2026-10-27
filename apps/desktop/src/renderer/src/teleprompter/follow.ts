@@ -4,6 +4,7 @@
 import { type NumberLanguage, numberLanguage } from "@frameshell/schema";
 import { useEffect } from "react";
 import { live } from "../shoot/live.js";
+import { shouldWake } from "../shoot/live-state.js";
 import { shoot } from "../shoot/recorder.js";
 import { type FollowScript, type FollowState, follow, followAt, followScript, followStop } from "./follower.js";
 import { type PromptPosition, type PromptStream, positionOf, stopOf } from "./model.js";
@@ -65,7 +66,11 @@ export function useLiveFollow(stream: PromptStream | null, on: boolean): void {
       if (kept.length !== skipped.length) teleprompter.setSkipped(kept);
     });
 
-    const feed = () => live.listen(live.status().state === "ready" ? shoot.audioTracks() : []);
+    // Off after main stopped the idle server: start it again (never downloads).
+    const feed = () => {
+      if (shouldWake(live.status(), true)) live.warm();
+      live.listen(live.status().state === "ready" ? shoot.audioTracks() : []);
+    };
     const offStatus = live.subscribe(feed);
     const offShoot = shoot.subscribe(feed);
     feed();

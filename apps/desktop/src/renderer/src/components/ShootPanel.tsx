@@ -54,6 +54,11 @@ export function ShootPanel() {
           {t.teleprompter.open}
         </button>
       </div>
+      {recording && state.protection === true && (
+        <p className="shoot-note" data-testid="shoot-windows-hidden">
+          {t.shoot.windowsHidden}
+        </p>
+      )}
       {state.access === false && (
         <div className="shoot-row">
           <button className="button" onClick={() => void shoot.requestAccess()}>

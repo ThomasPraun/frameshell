@@ -8,6 +8,8 @@ import tapUrl from "./live-tap.worklet.ts?worker&url";
 let status: LiveStatus = { state: "off", model: null, detail: null, progress: null };
 const listeners = new Set<() => void>();
 let following = false;
+/** A warm-up request is in flight: another click or status change does not send a second. */
+let asking = false;
 let tap: { context: AudioContext; tracks: readonly MediaStreamTrack[]; stop: () => void } | null = null;
 
 function setStatus(next: LiveStatus): void {
@@ -35,7 +37,12 @@ export const live = {
       window.frameshell.shoot.onLiveStatus(setStatus);
     }
     if (status.state === "ready" || status.state === "installing" || status.state === "warming") return;
-    void window.frameshell.shoot.liveWarm(install).then(setStatus);
+    if (asking && !install) return;
+    asking = true;
+    void window.frameshell.shoot
+      .liveWarm(install)
+      .then(setStatus)
+      .finally(() => (asking = false));
   },
   /** Called with the words of each recognized window. Returns the function that stops it. */
   onHeard(listener: (heard: LiveHeard) => void): () => void {
