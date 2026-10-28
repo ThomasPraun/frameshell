@@ -22,11 +22,13 @@ import { liveWord } from "../shoot/live-state.js";
 import type { LiveStatus } from "../../../shared/api.js";
 import { scriptFiles } from "../timeline/scenes.js";
 import { elementOf, windowOf } from "../windows.js";
+import { TakeStatus } from "./TakeStatus.js";
 
 /**
  * Teleprompter (ADR 0024 decision 6): a shoot script with the word being said held on a focus line in the middle,
  * the text gliding up under it. Moved by keys here; its position lives in {@link teleprompter}, so the Shoot view
  * and live following read and drive the same one. Meant for its own window, on a second screen or a prompter.
+ * While a shoot records, a strip above the text says where the takes are ({@link TakeStatus}).
  */
 export function TeleprompterPanel() {
   const state = useTeleprompter();
@@ -174,6 +176,7 @@ export function TeleprompterPanel() {
           </button>
         </span>
       </div>
+      <TakeStatus place="teleprompter" mirror={settings.mirror} />
       {scripts.error ? (
         <p className="empty">{t.teleprompter.unreadable(scripts.error)}</p>
       ) : scripts.list && !chosen ? (

@@ -3,6 +3,7 @@ import { t } from "../i18n.js";
 import { useShoot } from "../shoot/recorder.js";
 import { type DeviationInfo, currentScene, lineMarks } from "../shoot/takes-model.js";
 import { takes, useTakes } from "../shoot/takes.js";
+import { TakeStatus } from "./TakeStatus.js";
 
 /**
  * The Shoot view's takes (ADR 0023, 0024): the shoot script, its scenes with their state, and the current scene's
@@ -21,7 +22,6 @@ export function ShootTakes() {
   const chosen = status?.takes.find((take) => take.id === sceneStatus?.chosen) ?? null;
   const deviations = chosen?.deviations.filter((deviation) => deviation.scene === scene) ?? [];
   const pending = deviations.filter((deviation) => !deviation.accepted);
-  const transcribing = status?.takes.some((take) => take.state === "transcribing") ?? false;
 
   if (state.scripts === null) return null;
   if (state.scripts.length === 0) return <p className="shoot-note">{t.shoot.noScript}</p>;
@@ -61,6 +61,7 @@ export function ShootTakes() {
         </ol>
       )}
 
+      <TakeStatus place="shoot" />
       {recording && (
         <div className="shoot-row">
           <button className="button" data-testid="shoot-take" onClick={() => void takes.take()}>
@@ -69,14 +70,8 @@ export function ShootTakes() {
           <button className="button" data-testid="shoot-cut" disabled={!state.open} onClick={() => void takes.cut()}>
             {t.shoot.cut}
           </button>
-          {state.open && (
-            <span className="shoot-take-open" data-testid="shoot-take-open">
-              {t.shoot.takeOpen(status?.scenes.find((candidate) => candidate.slug === state.open!.scene)?.title ?? state.open.scene)}
-            </span>
-          )}
         </div>
       )}
-      {transcribing && <p className="shoot-note">{t.shoot.transcribing}</p>}
 
       {sceneStatus && (
         <div className="shoot-current" data-testid="shoot-current" data-scene={sceneStatus.slug}>

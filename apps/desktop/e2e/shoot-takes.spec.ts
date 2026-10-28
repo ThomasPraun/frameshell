@@ -42,10 +42,10 @@ const scene = (slug: string) => page.locator(`[data-testid="shoot-scene"][data-s
 /** T, a few seconds of recording, then C. */
 async function recordTake(): Promise<void> {
   await page.keyboard.press("t");
-  await expect(page.getByTestId("shoot-take-open")).toBeVisible();
+  await expect(page.getByTestId("take-status-open")).toBeVisible();
   await page.waitForTimeout(2500);
   await page.keyboard.press("c");
-  await expect(page.getByTestId("shoot-take-open")).toHaveCount(0);
+  await expect(page.getByTestId("take-status-open")).toHaveCount(0);
 }
 
 test("T and C record takes that are checked against the script; accept, record again and end make the first cut", async () => {

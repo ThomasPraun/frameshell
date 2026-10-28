@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import { listenEverywhere } from "../windows.js";
 import { shoot } from "./recorder.js";
-import { currentScene, sceneAfter, takeKey } from "./takes-model.js";
+import { type CutTake, type OpenTake, currentScene, nextTakeNumber, sceneAfter, takeKey } from "./takes-model.js";
 
 /** Everything the Shoot view shows about takes. */
 export interface TakesState {
@@ -16,8 +16,10 @@ export interface TakesState {
   status: ShootStatusResult | null;
   /** Scene the person picked as current; null follows `status.next`. */
   picked: string | null;
-  /** The take being recorded: its start on the session clock and the scene it starts at. */
-  open: { start: number; scene: string } | null;
+  /** The take being recorded. */
+  open: OpenTake | null;
+  /** The take cut last; its state is read from `status`. */
+  last: CutTake | null;
   error: string | null;
 }
 
@@ -26,7 +28,7 @@ const REFRESH_MS = 150;
 
 /** Create a takes store. The app has one ({@link takes}). */
 export function createTakes() {
-  let state: TakesState = { scripts: null, script: null, check: null, status: null, picked: null, open: null, error: null };
+  let state: TakesState = { scripts: null, script: null, check: null, status: null, picked: null, open: null, last: null, error: null };
   const listeners = new Set<() => void>();
   let mounted = 0;
   let initialized = false;
@@ -133,8 +135,9 @@ export function createTakes() {
       if (state.open) await store.cut();
       const clock = shoot.clock();
       if (!clock) return;
+      const last = state.last?.session === clock.session ? state.last : null;
       // The scene stays current once recorded, also when it is done: only Next scene or a click moves on.
-      set({ open: { start: clock.seconds, scene }, picked: scene });
+      set({ open: { start: clock.seconds, scene, number: nextTakeNumber(state.status, scene, last) }, last, picked: scene });
     },
 
     /** C: end the open take; the daemon transcribes and compares it. */
@@ -143,12 +146,14 @@ export function createTakes() {
       const clock = shoot.clock();
       const script = state.script;
       if (!open || !clock || !script) return;
-      set({ open: null });
-      if (clock.seconds - open.start < 0.5) return;
+      const cut: CutTake = { id: null, session: clock.session, scene: open.scene, number: open.number, short: clock.seconds - open.start < 0.5, error: null };
+      set({ open: null, last: cut });
+      if (cut.short) return;
+      const settle = (next: Partial<CutTake>) => state.last === cut && set({ last: { ...cut, ...next } });
       try {
-        await api().cut(clock.session, { script, scene: open.scene, start: round(open.start), end: round(clock.seconds), recordedAt: new Date().toISOString() });
+        settle({ id: await api().cut(clock.session, { script, scene: open.scene, start: round(open.start), end: round(clock.seconds), recordedAt: new Date().toISOString() }) });
       } catch (error) {
-        set({ error: message(error) });
+        settle({ error: message(error) });
       }
     },
 

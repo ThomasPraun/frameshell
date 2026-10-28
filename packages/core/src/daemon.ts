@@ -77,7 +77,16 @@ import { CORE_SKILL_NAME, installCoreSkill } from "./skills/install.js";
 import { coreSkillState, refreshCoreSkill } from "./skills/refresh.js";
 import { assembleShoot, planScenes } from "./shoot/assemble.js";
 import { ShootService } from "./shoot/service.js";
-import { type SessionTake, ffmpegRangeExtractor, standInProvider, standInWords, takeWordsPath, transcribeTake, writeSessionTranscripts } from "./shoot/session.js";
+import {
+  type SessionTake,
+  ffmpegRangeExtractor,
+  readTakeWords,
+  standInProvider,
+  standInWords,
+  takeWordsPath,
+  transcribeTake,
+  writeSessionTranscripts,
+} from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, timelinePath } from "./timeline/service.js";
@@ -295,9 +304,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
   const takeRuns = new Map<string, Promise<void>>();
+  /** Why the last transcription of such a take failed, by the same key; gone once it runs again. */
+  const takeFailures = new Map<string, string>();
   const shoots = new ShootService({
     onChanged: (dir, script, change, take) => publishFor("shoot.changed", dir, { project: dir, script, change, ...(take !== undefined ? { take } : {}) }),
     analyzing: (dir, take) => takeRuns.has(`${dir}\0${take}`),
+    failure: (dir, take) => takeFailures.get(`${dir}\0${take}`) ?? null,
     assetHash: async (dir, rel) => (await media.list(dir)).find((asset) => asset.path === rel)?.hash ?? null,
     timeline: async (dir, id) => (await exists(timelinePath(dir, id))) ? (await timelines.viewTimeline(dir, id, "current")).timeline : null,
   });
@@ -456,6 +468,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       asset: take.asset,
       output: takeWordsPath(dir, take.id),
       run: async (ctx) => {
+        takeFailures.delete(key);
         try {
           const { config } = (await readEnclosingProject(dir))!;
           const overrides = { dir, binaries: config.binaries };
@@ -480,6 +493,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           });
           takeRuns.delete(key);
           await shoots.status(dir, dir, script);
+        } catch (error) {
+          takeFailures.set(key, (error as Error).message);
+          takeRuns.delete(key);
+          publishFor("shoot.changed", dir, { project: dir, script, change: "failed", take: take.id });
+          throw error;
         } finally {
           takeRuns.delete(key);
           finish();
@@ -946,8 +964,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "shoot.session.end": async ({ cwd, script, session, assets, names, mics, micNames, soundOf, offsets, screens, name }, caller) => {
       const dir = await root(cwd);
-      const takes = await shoots.sessionTakes(dir, cwd, script, session);
-      await Promise.all(takes.map((take) => takeRuns.get(`${dir}\0${take.id}`)));
+      const { script: scriptPath, takes } = await shoots.sessionTakes(dir, cwd, script, session);
+      const runs = () => Promise.all(takes.map((take) => takeRuns.get(`${dir}\0${take.id}`)));
+      await runs();
+      // A take whose run failed or was lost (cut as the session ended, a daemon restart) is transcribed again now
+      // that its files are finished, so its words reach the transcripts.
+      for (const take of takes) if (!takeRuns.has(`${dir}\0${take.id}`) && !(await readTakeWords(dir, take.id))) queueTake(dir, scriptPath, take);
+      await runs();
       const transcripts = await writeSessionTranscripts(dir, takes, { hash: (rel) => media.hash(dir, rel) });
       const { timeline } = await shoots.status(dir, cwd, script);
       if (!(await exists(timelinePath(dir, timeline)))) await timelines.writeFile(dir, timeline, `${JSON.stringify(createTimeline(timeline), null, 2)}\n`);

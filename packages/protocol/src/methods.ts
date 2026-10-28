@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 64;
+export const PROTOCOL_VERSION = 65;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1484,8 +1484,8 @@ export const methods = {
     mutating: true,
     internal: true,
     description:
-      "End a session that has takes (ADR 0024 decisions 1 and 4), its files final: wait for its takes' `shoot` jobs, write " +
-      "the takes' words as the transcripts of its sound files, make the session one multicam group (as `multicam.create` with " +
+      "End a session that has takes (ADR 0024 decisions 1 and 4), its files final: wait for its takes' `shoot` jobs (and run " +
+      "again, on the final files, those of takes left without words), write the takes' words as the transcripts of its sound files, make the session one multicam group (as `multicam.create` with " +
       "`offsets`) on the shoot's timeline, created when missing, without the first covering shot, and assemble the shoot, so " +
       "the session's chosen takes become shots of the group's program track.",
     params: z.strictObject({

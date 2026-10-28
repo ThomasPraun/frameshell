@@ -45,6 +45,8 @@ export interface ShootServiceOptions {
   timeline?: (root: string, id: string) => Promise<Timeline | null>;
   /** True while a take recorded in the app is being transcribed (its `shoot` job is queued or running). */
   analyzing?: (root: string, take: string) => boolean;
+  /** Why the last transcription of a take recorded in the app failed; null when none failed. */
+  failure?: (root: string, take: string) => string | null;
 }
 
 /** Where a take's heard words come from: a transcript, or a recorded take's own words. */
@@ -87,6 +89,7 @@ export class ShootService {
   readonly #assetHash: NonNullable<ShootServiceOptions["assetHash"]>;
   readonly #timeline: NonNullable<ShootServiceOptions["timeline"]>;
   readonly #analyzing: NonNullable<ShootServiceOptions["analyzing"]>;
+  readonly #failure: NonNullable<ShootServiceOptions["failure"]>;
   /** Last change of each project in flight, by canonical root: the next one waits for it. */
   readonly #tails = new Map<string, Promise<unknown>>();
 
@@ -95,6 +98,7 @@ export class ShootService {
     this.#assetHash = options.assetHash ?? (async () => null);
     this.#timeline = options.timeline ?? (async () => null);
     this.#analyzing = options.analyzing ?? (() => false);
+    this.#failure = options.failure ?? (() => null);
   }
 
   /** `shoot.status`. Throws `ScriptNotFound`, `OutsideProject` or `InvalidProjectFile`. */
@@ -295,10 +299,10 @@ export class ShootService {
     return (await this.#load(root, root, script)).parsed;
   }
 
-  /** The takes of session `session` in the shoot file of `script`, in recorded order. */
-  async sessionTakes(root: string, cwd: string, script: string, session: string): Promise<SessionTake[]> {
+  /** The takes of session `session` in the shoot file of `script`, in recorded order, and the script's project path. */
+  async sessionTakes(root: string, cwd: string, script: string, session: string): Promise<{ script: string; takes: SessionTake[] }> {
     const loaded = await this.#load(root, cwd, script);
-    return loaded.file.takes.filter((take): take is SessionTake => isSessionTake(take) && take.session.id === session);
+    return { script: loaded.script, takes: loaded.file.takes.filter((take): take is SessionTake => isSessionTake(take) && take.session.id === session) };
   }
 
   /** Name `group` as the multicam group of session `session` on each of its takes (`shoot.changed` `ended`). */
@@ -407,10 +411,11 @@ export class ShootService {
       return { source: { rel: `${TAKE_WORDS_DIR}/${take.id}.json`, text: own.text, heard: () => takeHeard(words), language: words.sounds[0]?.language ?? null }, state: "analyzed", problem: null };
     }
     if (this.#analyzing(root, take.id)) return { source: null, state: "transcribing", problem: `Take ${take.id} is being transcribed.` };
+    const failure = this.#failure(root, take.id);
     return {
       source: null,
       state: "no-transcript",
-      problem: `Take ${take.id} was not transcribed; once its session has ended, run \`frameshell transcribe ${take.asset}\`.`,
+      problem: `Take ${take.id} was not transcribed${failure ? ` (${failure})` : ""}; once its session has ended, run \`frameshell transcribe ${take.asset}\`.`,
     };
   }
 

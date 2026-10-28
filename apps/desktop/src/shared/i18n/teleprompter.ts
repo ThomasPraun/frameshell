@@ -31,6 +31,7 @@ const en = {
   liveWord: { listening: "Listening", starting: "Starting…", off: "Off", missing: "Not installed: see the Shoot view", unavailable: "Unavailable" },
   liveTurnOn: "Turn on",
   backToStart: "Back to start",
+  takeDifferences: (number: number, count: number) => `Take ${number}: ${count} ${count === 1 ? "difference" : "differences"}, review in the Shoot view`,
 };
 
 const es: typeof en = {
@@ -64,6 +65,7 @@ const es: typeof en = {
   liveWord: { listening: "Escuchando", starting: "Iniciando…", off: "Apagado", missing: "No instalado: mira la vista Rodaje", unavailable: "No disponible" },
   liveTurnOn: "Activar",
   backToStart: "Volver al inicio",
+  takeDifferences: (number, count) => `Toma ${number}: ${count} ${count === 1 ? "diferencia" : "diferencias"}, revísalas en la vista Rodaje`,
 };
 
 export const teleprompter = { en, es };
