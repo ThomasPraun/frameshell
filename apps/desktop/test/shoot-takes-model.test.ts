@@ -1,6 +1,16 @@
 import type { ShootStatusResult } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { type DeviationInfo, currentScene, lineMarks, sceneAfter, takeKey } from "../src/renderer/src/shoot/takes-model.js";
+import {
+  type CutTake,
+  type DeviationInfo,
+  currentScene,
+  cutOutcome,
+  lineMarks,
+  nextTakeNumber,
+  sceneAfter,
+  sceneTitle,
+  takeKey,
+} from "../src/renderer/src/shoot/takes-model.js";
 
 const status = (next: string | null) =>
   ({ scenes: [{ slug: "hook" }, { slug: "problem" }, { slug: "outro" }], next }) as unknown as ShootStatusResult;
@@ -68,5 +78,37 @@ describe("lineMarks", () => {
       ["eh", "heard"],
     ]);
     expect(notes.map((note) => note.kind)).toEqual(["pause"]);
+  });
+});
+
+describe("take feedback", () => {
+  type Take = ShootStatusResult["takes"][number];
+  const take = (id: string, scene: string, extra: Partial<Take> = {}) =>
+    ({ id, scene, discarded: false, state: "analyzed", problem: null, deviations: [], ...extra }) as unknown as Take;
+  const withTakes = (takes: Take[]) => ({ scenes: [{ slug: "hook", title: "Hook" }], takes, next: "hook" }) as unknown as ShootStatusResult;
+  const cut = (extra: Partial<CutTake> = {}): CutTake => ({ id: "t2", session: "s", scene: "hook", number: 2, short: false, error: null, ...extra });
+
+  it("numbers a scene's takes, counting a cut on its way and leaving out discarded and short ones", () => {
+    const status = withTakes([take("t1", "hook"), take("t0", "hook", { discarded: true }), take("t9", "problem")]);
+    expect(nextTakeNumber(null, "hook", null)).toBe(1);
+    expect(nextTakeNumber(status, "hook", null)).toBe(2);
+    expect(nextTakeNumber(status, "hook", cut({ id: null }))).toBe(3);
+    expect(nextTakeNumber(status, "hook", cut({ short: true }))).toBe(2);
+    expect(nextTakeNumber(status, "problem", cut())).toBe(2);
+  });
+
+  it("reads the cut take's outcome from the status", () => {
+    expect(cutOutcome(withTakes([]), cut({ id: null }))).toEqual({ kind: "analyzing" });
+    expect(cutOutcome(withTakes([]), cut())).toEqual({ kind: "analyzing" });
+    expect(cutOutcome(withTakes([take("t2", "hook", { state: "transcribing" })]), cut())).toEqual({ kind: "analyzing" });
+    expect(cutOutcome(withTakes([take("t2", "hook")]), cut())).toEqual({ kind: "analyzed", differences: 0 });
+    const missing = deviation("missing", null, "a", "");
+    expect(cutOutcome(withTakes([take("t2", "hook", { deviations: [missing] })]), cut())).toEqual({ kind: "analyzed", differences: 1 });
+    const failed = take("t2", "hook", { state: "no-transcript", problem: "ffmpeg failed" });
+    expect(cutOutcome(withTakes([failed]), cut())).toEqual({ kind: "failed", problem: "ffmpeg failed" });
+    expect(cutOutcome(withTakes([]), cut({ id: null, error: "daemon gone" }))).toEqual({ kind: "failed", problem: "daemon gone" });
+    expect(cutOutcome(withTakes([]), cut({ id: null, short: true }))).toEqual({ kind: "short" });
+    expect(sceneTitle(withTakes([]), "hook")).toBe("Hook");
+    expect(sceneTitle(null, "hook")).toBe("hook");
   });
 });

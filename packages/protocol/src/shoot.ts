@@ -4,7 +4,7 @@ import { ShootSessionIdSchema, TakeIdSchema } from "@frameshell/schema";
 // Shoot (ADR 0023): takes of a shoot script compared word by word, kept in `shoots/<script slug>.json`.
 
 /** What `shoot.changed` reports. */
-export const SHOOT_CHANGES = ["add", "discard", "restore", "accept", "unaccept", "choose", "analyzed", "ended"] as const;
+export const SHOOT_CHANGES = ["add", "discard", "restore", "accept", "unaccept", "choose", "analyzed", "failed", "ended"] as const;
 
 const AtSchema = z
   .object({ start: z.number(), end: z.number() })
@@ -98,7 +98,8 @@ export const ShootChangedSchema = z.object({
     .enum(SHOOT_CHANGES)
     .describe(
       "A take was added (also cut in the app), discarded or restored, deviations were accepted or unaccepted, a take was chosen, " +
-        "a take was compared for the first time since it or the script changed, or a session recorded in the app ended (`ended`).",
+        "a take was compared for the first time since it or the script changed, a take recorded in the app could not be transcribed " +
+        "(`failed`), or a session recorded in the app ended (`ended`).",
     ),
   take: TakeIdSchema.optional().describe("Take it happened to; absent for `choose` back to the default."),
 });

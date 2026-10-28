@@ -20,6 +20,51 @@ export function sceneAfter(status: ShootStatusResult | null, scene: string | nul
   return status.scenes[index + 1]?.slug ?? null;
 }
 
+/** The take being recorded: its start on the session clock, the scene it starts at, and its number in that scene. */
+export interface OpenTake {
+  start: number;
+  scene: string;
+  number: number;
+}
+
+/** The take cut last: its id once the daemon has it, or why it was not kept. */
+export interface CutTake {
+  /** Null while the cut is on its way, and for a take not kept. */
+  id: string | null;
+  session: string;
+  scene: string;
+  number: number;
+  /** Cut under half a second after T: nothing was kept. */
+  short: boolean;
+  /** The cut itself failed. */
+  error: string | null;
+}
+
+/** Number of the next take of `scene`: one past its takes in the status and the cut still on its way. */
+export function nextTakeNumber(status: ShootStatusResult | null, scene: string, last: CutTake | null): number {
+  const listed = status?.takes.filter((take) => take.scene === scene && !take.discarded).length ?? 0;
+  const pending = last && last.scene === scene && !last.short && last.error === null ? last.number : 0;
+  return Math.max(listed, pending) + 1;
+}
+
+/** A scene's title as the status names it; the slug when unknown. */
+export function sceneTitle(status: ShootStatusResult | null, slug: string): string {
+  return status?.scenes.find((scene) => scene.slug === slug)?.title || slug;
+}
+
+/** Where the take cut last is: being analyzed, analyzed (with its number of differences), failed, or not kept. */
+export type CutOutcome = { kind: "analyzing" } | { kind: "analyzed"; differences: number } | { kind: "failed"; problem: string } | { kind: "short" };
+
+/** The outcome of `last`, read from the status: the take's state there is the one truth. */
+export function cutOutcome(status: ShootStatusResult | null, last: CutTake): CutOutcome {
+  if (last.short) return { kind: "short" };
+  if (last.error !== null) return { kind: "failed", problem: last.error };
+  const take = last.id === null ? undefined : status?.takes.find((candidate) => candidate.id === last.id);
+  if (!take || take.state === "transcribing") return { kind: "analyzing" };
+  if (take.state === "analyzed") return { kind: "analyzed", differences: take.deviations.length };
+  return { kind: "failed", problem: take.problem ?? take.state };
+}
+
 /** What a key press asks of the takes while recording: `take` (T, a new take), `cut` (C), or null. */
 export function takeKey(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "repeat" | "isComposing" | "target">): "take" | "cut" | null {
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.isComposing) return null;

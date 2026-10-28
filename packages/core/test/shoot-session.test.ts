@@ -123,6 +123,31 @@ describe("takes recorded in the app", () => {
     expect((await conn.request("shoot.assemble", { cwd: root, script: SCRIPT_PATH, snap: false })).scenes.map((scene) => scene.action)).toEqual(["unchanged", "unchanged"]);
   }, 180_000);
 
+  it("analyzes a take cut as the session ends, also one whose run failed, and writes it into the transcripts", async () => {
+    const endParams = { cwd: root, script: SCRIPT_PATH, session: SESSION, assets: [`${FOLDER}/camera.mp4`], mics: [`${FOLDER}/mic.m4a`], soundOf: ["1"], offsets: [0, 0.002] };
+    // A take whose run failed: its sound file was not there when the job ran.
+    renameSync(join(root, `${FOLDER}/mic.m4a.part`), join(root, `${FOLDER}/mic.m4a.aside`));
+    const lost = await conn.request("shoot.session.cut", { cwd: root, script: SCRIPT_PATH, scene: "hook", session: SESSION, start: 1, end: 4, sounds: SOUNDS });
+    // The status says why, from the failed job.
+    expect(await analyzed(lost.take.id)).toMatchObject({ state: "no-transcript", problem: expect.stringContaining("ffmpeg could not cut") });
+    renameSync(join(root, `${FOLDER}/mic.m4a.aside`), join(root, `${FOLDER}/mic.m4a.part`));
+
+    // C then End at once: the session's files are finished while the take's job starts.
+    const last = await conn.request("shoot.session.cut", { cwd: root, script: SCRIPT_PATH, scene: "problem", session: SESSION, start: 5, end: 10, sounds: SOUNDS });
+    renameSync(join(root, `${FOLDER}/mic.m4a.part`), join(root, `${FOLDER}/mic.m4a`));
+    renameSync(join(root, `${FOLDER}/camera.mp4.part`), join(root, `${FOLDER}/camera.mp4`));
+    const ended = await conn.request("shoot.session.end", endParams);
+
+    expect(ended.transcripts).toEqual([`transcripts/shoot/${SESSION}/mic.words.json`]);
+    const transcript = JSON.parse(readFileSync(join(root, "transcripts", "shoot", SESSION, "mic.words.json"), "utf8"));
+    expect(transcript.words.map((w: { text: string }) => w.text)).toEqual(["Hola", "a", "todos", "y", "al", "canal", "de", "hoy", "Hoy", "hablamos", "de", "cámaras", "Nadie", "lee", "el", "manual", "su", "cámara", "nueva"]);
+    const after = await conn.request("shoot.status", { cwd: root, script: SCRIPT_PATH });
+    expect(after.takes.map((take) => [take.id, take.state])).toEqual([
+      [lost.take.id, "analyzed"],
+      [last.take.id, "analyzed"],
+    ]);
+  }, 180_000);
+
   it("refuses a sound file outside assets/ and an unknown scene", async () => {
     await expect(
       conn.request("shoot.session.cut", { cwd: root, script: SCRIPT_PATH, scene: "hook", session: SESSION, start: 0, end: 1, sounds: [{ asset: "../x.m4a", offset: 0 }] }),

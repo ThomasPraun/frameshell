@@ -120,11 +120,10 @@ export async function transcribeTake(options: TranscribeTakeOptions): Promise<Ta
   const sounds: TakeSoundWords[] = [];
   for (const [index, sound] of session.sounds.entries()) {
     const final = join(root, ...sound.asset.split("/"));
-    const input = (await exists(final)) ? final : final + PART_SUFFIX;
     const { from, to } = fileRange(session.start, session.end, sound.offset);
     const wav = join(root, ...TAKE_WORDS_DIR.split("/"), `${take.id}-${index + 1}.wav`);
     await mkdir(join(root, ...TAKE_WORDS_DIR.split("/")), { recursive: true });
-    await options.extract(input, from, to, wav);
+    await extractRecorded(options.extract, final, from, to, wav);
     const asked = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
     const result = await options.provider.transcribe(wav, asked, options.context);
     const at = from + sound.offset;
@@ -140,6 +139,22 @@ export async function transcribeTake(options: TranscribeTakeOptions): Promise<Ta
   const words: TakeWords = { version: 1, take: take.id, session: session.id, start: session.start, end: session.end, sounds };
   await writeJsonAtomic(takeWordsPath(root, take.id), words);
   return words;
+}
+
+/**
+ * Extract from the sound file `final`, or from its `.part` while the session still records. The session's end
+ * renames or remuxes `.part` into `final` at any moment, also between the choice and ffmpeg opening the file: a
+ * `.part` gone by then is read again as the finished file.
+ */
+async function extractRecorded(extract: RangeExtractor, final: string, from: number, to: number, wav: string): Promise<void> {
+  const part = final + PART_SUFFIX;
+  const input = (await exists(final)) ? final : part;
+  try {
+    await extract(input, from, to, wav);
+  } catch (error) {
+    if (input !== part || (await exists(part)) || !(await exists(final))) throw error;
+    await extract(final, from, to, wav);
+  }
 }
 
 /**

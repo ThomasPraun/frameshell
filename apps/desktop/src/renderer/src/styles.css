@@ -4296,9 +4296,113 @@ button.track-head:focus-visible {
   color: var(--accent);
 }
 
-.shoot-take-open {
+/* Take status (TakeStatus.tsx): one line, readable from a few steps away, never flashing. */
+.take-status-hint {
+  margin: 0;
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.take-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border-left: 3px solid var(--line);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.take-status:has(.is-open) {
+  border-left-color: var(--danger);
+}
+
+/* In the teleprompter: a band above the text, the same height whatever it says, so the text never moves for it. */
+.take-status.is-teleprompter {
+  flex-wrap: nowrap;
+  border-radius: 0;
+  border-left: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: #111;
+  color: #e8e8e8;
+  font-size: 20px;
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.take-status.is-teleprompter > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Through a beam-splitter the band reads like the text it sits above. */
+.take-status.is-mirrored {
+  transform: scaleX(-1);
+}
+
+.take-status-main {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.take-status-dot {
+  align-self: center;
+  width: 0.6em;
+  height: 0.6em;
+  flex: none;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.take-status-time {
   color: var(--danger);
+}
+
+.take-status-key {
+  color: var(--text-muted);
+}
+
+.take-status-outcome {
+  border-radius: 4px;
+  animation: take-status-arrive 1.6s ease-out;
+}
+
+.take-status-outcome.is-analyzing {
+  color: var(--text-muted);
+}
+
+.take-status-outcome.is-clean {
+  color: var(--diff-added);
+}
+
+.take-status-outcome.is-differences {
+  color: var(--accent);
+}
+
+.take-status-outcome.is-failed,
+.take-status-outcome.is-short {
+  color: var(--danger);
+}
+
+@keyframes take-status-arrive {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .take-status-outcome {
+    animation: none;
+  }
 }
 
 .shoot-current {
