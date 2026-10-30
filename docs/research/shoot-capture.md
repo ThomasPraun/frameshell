@@ -181,7 +181,9 @@ Approach: normalize accents, case, punctuation and digits (`30` = `treinta`); ta
 
 - **System audio from other apps is captured on macOS 26.3** with `audio: 'loopback'`, through both the Tap and the opt-out path: YouTube in a browser, mean -14 dB, peak 0 dB. With nothing playing the track is digital silence (-91 dB), not an error, so the UI must show a level meter. The app's own output is captured too (a 440 Hz tone the spike played came through at -13 to -21 dB), so the app must stay silent while recording or exclude itself.
 - The display track arrives at native Retina size (3024x1964); the recorder must constrain it (1080p or 1440p).
-- Not yet done: camera + screen sync with real devices (barcode + clap), macOS 13 to 14.1, Windows, Linux, real-voice follower run.
+- Not yet done: camera + screen sync with real devices (barcode + clap), macOS 13 to 14.1, Windows, Linux.
+
+**Real-voice follower run** (2026-10-27 to 2026-10-29, Apple M3, macOS 26.3; details in `shoot-acceptance-run.md`): the speed check picked `ggml-small-q5_1` at 179 ms per window. On a quiet machine the teleprompter follows the owner's voice well, a little behind; with the machine loaded (load average above 17) it lags and loses its place.
 
 ## Open items for the owner
 
@@ -189,4 +191,4 @@ Approach: normalize accents, case, punctuation and digits (`30` = `treinta`); ta
 2. `npm run manual-screen` (after removing the fake-UI switch from it): real camera + real screen together, start offsets and screen capture latency (barcode overlay); then a clap test for the camera.
 3. Done on macOS 26.3: `audio: 'loopback'` captures other apps (see Owner runs). Still open: macOS 13 to 14.1, Windows, Linux.
 4. Mp4 + Opus 100 ms offset: confirm or explain with a real player (not only ffmpeg).
-5. Real-voice recording for the follower and the model choice.
+5. Done on macOS 26.3: real-voice follower run and model choice (see Owner runs).
