@@ -3,27 +3,15 @@ import type { FileNode } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
+import { placeItems } from "../file-commands.js";
 import { windowOf } from "../windows.js";
-import { type MenuItem, contextMenu } from "./ContextMenu.js";
+import { contextMenu } from "./ContextMenu.js";
 
 /** Folders a fresh project shows open: where the agent writes first. */
 const INITIALLY_OPEN = new Set(["scripts", "timelines"]);
 
 /** Media under here has no editor: a click selects it (for "Ask agent") as well as opening it. */
 const ASSETS_DIR = "assets/";
-
-const agent = navigator.userAgent;
-const PLATFORM = agent.includes("Mac") ? "mac" : agent.includes("Windows") ? "windows" : "linux";
-
-/** Commands on any file or folder: where it is, then Move to Trash (main asks first; the OS trash is the undo). */
-function placeItems(path: string): MenuItem[] {
-  const files = window.frameshell.files;
-  return [
-    { label: t.editor.reveal(PLATFORM), separated: true, run: () => void files.reveal(path) },
-    { label: t.editor.copyPath, run: () => void files.copyPath(path) },
-    { label: t.editor.moveToTrash(PLATFORM === "windows"), separated: true, danger: true, run: () => void files.trash(path) },
-  ];
-}
 
 /** Every file path of a tree. */
 function filePaths(nodes: readonly FileNode[]): string[] {
