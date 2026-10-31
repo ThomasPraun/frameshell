@@ -5,9 +5,14 @@ import { t } from "./i18n.js";
 const agent = navigator.userAgent;
 const PLATFORM = agent.includes("Mac") ? "mac" : agent.includes("Windows") ? "windows" : "linux";
 
-/** "Reveal in Finder" (or the platform's file manager) for project-relative `path`. */
+/** "Reveal in Finder", or the platform's file manager. */
+export function revealLabel(): string {
+  return t.editor.reveal(PLATFORM);
+}
+
+/** {@link revealLabel} for project-relative `path`. */
 export function revealItem(path: string, separated = false): MenuItem {
-  return { label: t.editor.reveal(PLATFORM), separated, run: () => void window.frameshell.files.reveal(path) };
+  return { label: revealLabel(), separated, run: () => void window.frameshell.files.reveal(path) };
 }
 
 /** Reveal, Copy path, then Move to Trash (main asks first; the OS trash is the undo) for project-relative `path`. */

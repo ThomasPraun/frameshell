@@ -257,6 +257,10 @@ export interface FrameshellApi {
     init(dir: string): Promise<OpenOutcome>;
     /** Recently opened project folders, newest first. */
     recent(): Promise<string[]>;
+    /** Drop `dir` from the recent list (the folder stays); resolves to the list left. */
+    forgetRecent(dir: string): Promise<string[]>;
+    /** Show recent project folder `dir` in Finder / Explorer / the file manager; ignored for folders not in the list. */
+    revealRecent(dir: string): Promise<void>;
     /** Stop warning that this window's project is in a synced folder (#187); kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
     /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
@@ -782,6 +786,8 @@ export const Channel = {
   projectOpen: "project:open",
   projectInit: "project:init",
   projectRecent: "project:recent",
+  projectForgetRecent: "project:forget-recent",
+  projectRevealRecent: "project:reveal-recent",
   projectDismissSync: "project:dismiss-sync",
   projectChooseVideos: "project:choose-videos",
   projectPlanVideos: "project:plan-videos",

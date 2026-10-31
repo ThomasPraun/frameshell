@@ -10,6 +10,8 @@ const en = {
   createHere: "Create a project here",
   recent: "Recent",
   recentProjects: "Recent projects",
+  openRecent: "Open",
+  forgetRecent: "Remove from Recent",
   notVideo: (names: string) => `Not a video, audio or image file: ${names}`,
   form: "New project from video, audio or image",
   /** Three or more chosen videos: the first two named, the rest counted. */
@@ -43,6 +45,8 @@ const es: typeof en = {
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
   recentProjects: "Proyectos recientes",
+  openRecent: "Abrir",
+  forgetRecent: "Quitar de Recientes",
   notVideo: (names) => `No es un archivo de video, audio ni imagen: ${names}`,
   form: "Nuevo proyecto desde un video, audio o imagen",
   andMore: (first, more) => `${first} y ${more} más`,
