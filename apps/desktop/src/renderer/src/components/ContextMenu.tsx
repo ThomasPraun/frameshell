@@ -7,6 +7,10 @@ export interface MenuItem {
   /** Shortcut hint shown on the right, e.g. `⌘L`. */
   shortcut?: string;
   disabled?: boolean;
+  /** Starts a new group: a line is drawn above it. */
+  separated?: boolean;
+  /** Destroys or removes something: drawn in the danger color. */
+  danger?: boolean;
   run: () => void;
 }
 
@@ -116,11 +120,12 @@ export function ContextMenuHost() {
         event.preventDefault();
       }}
     >
-      {menu.items.map((item) => (
+      {menu.items.flatMap((item, index) => [
+        ...(item.separated && index > 0 ? [<div key={`${item.label}-line`} role="separator" className="context-menu-separator" />] : []),
         <button
           key={item.label}
           role="menuitem"
-          className="context-menu-item"
+          className={`context-menu-item${item.danger ? " is-danger" : ""}`}
           disabled={item.disabled}
           onClick={() => {
             contextMenu.close();
@@ -129,8 +134,8 @@ export function ContextMenuHost() {
         >
           <span>{item.label}</span>
           {item.shortcut && <kbd>{item.shortcut}</kbd>}
-        </button>
-      ))}
+        </button>,
+      ])}
     </div>
   );
   return menu.view === window ? element : createPortal(element, menu.view.document.body);

@@ -44,7 +44,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 65;
+export const PROTOCOL_VERSION = 66;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1208,6 +1208,29 @@ export const methods = {
     result: z.object({
       project: z.string().describe("Absolute root of the project holding the file."),
       path: z.string().describe("Written file, project-relative and `/`-separated."),
+    }),
+  },
+  "file.uses": {
+    // The app's Move to Trash only: it lists what would go missing before asking the person.
+    internal: true,
+    description:
+      "What in the enclosing project's timelines names a file or folder: media, timeline and generated clips by " +
+      "`asset` or `source`, multicam angles and mics by `asset`. A folder matches everything under it. Read-only.",
+    params: z.strictObject({
+      path: AbsolutePath.describe("Absolute file or folder path inside a project."),
+    }),
+    result: z.object({
+      project: z.string().describe("Absolute root of the project holding the path."),
+      path: z.string().describe("The path, project-relative and `/`-separated."),
+      uses: z
+        .array(
+          z.object({
+            timeline: z.string().describe("Timeline id."),
+            id: z.string().describe("Clip id, or multicam group id for an angle or mic."),
+            ref: z.string().describe("The project-relative path it names."),
+          }),
+        )
+        .describe("Sorted by timeline, then id; empty when nothing names it."),
     }),
   },
   "events.subscribe": {

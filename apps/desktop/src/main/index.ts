@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -111,6 +111,7 @@ import {
 } from "./shoot-session.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
+import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
@@ -1331,6 +1332,44 @@ function registerIpc(): void {
     } catch (error) {
       return { error: (error as Error).message };
     }
+  });
+
+  ipcMain.handle(Channel.filesTrash, (event, path: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const said = text.app.dialogs;
+      const config = JSON.parse(await readFile(join(project.dir, "frameshell.json"), "utf8")) as { main?: string };
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+      const refused = trashRefusal(path, config.main ?? "timelines/main.json", said);
+      if (refused) {
+        await box({ type: "info", message: refused, buttons: [said.ok], noLink: true });
+        return false;
+      }
+      const absolute = projectPathOf(project.dir, path);
+      const { uses } = await daemon.request("file.uses", { path: absolute });
+      const bin = said.trashBin(process.platform === "win32");
+      const { response } = await box({
+        type: uses.length > 0 ? "warning" : "question",
+        message: said.trashTitle(basename(absolute), bin),
+        detail: trashDetail(uses, bin, said),
+        buttons: [said.moveToTrash(bin), said.cancel],
+        defaultId: uses.length > 0 ? 1 : 0,
+        cancelId: 1,
+        noLink: true,
+      });
+      if (response !== 0) return false;
+      await shell.trashItem(absolute);
+      return true;
+    }),
+  );
+  ipcMain.handle(Channel.filesReveal, async (event, path: string) => {
+    const { project } = await requireProject(stateOf(event.sender));
+    shell.showItemInFolder(projectPathOf(project.dir, path));
+  });
+  ipcMain.handle(Channel.filesCopyPath, async (event, path: string) => {
+    const { project } = await requireProject(stateOf(event.sender));
+    clipboard.writeText(projectPathOf(project.dir, path));
   });
 
   ipcMain.handle(Channel.terminalCreate, async (event, size: { cols: number; rows: number }) => {

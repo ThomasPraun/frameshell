@@ -22,6 +22,11 @@ const en = {
     `Scene \`#${slug}\` has no clips yet. Link one with \`frameshell clip set <clip> --script-ref <script>#${slug}\`.`,
   folderEmpty: "This folder is empty.",
   projectFiles: "Project files",
+  open: "Open",
+  reveal: (platform: "mac" | "windows" | "linux"): string =>
+    platform === "mac" ? "Reveal in Finder" : platform === "windows" ? "Show in File Explorer" : "Show in file manager",
+  copyPath: "Copy path",
+  moveToTrash: (windows: boolean): string => (windows ? "Move to Recycle Bin" : "Move to Trash"),
 };
 
 const es: typeof en = {
@@ -46,6 +51,11 @@ const es: typeof en = {
     `La escena \`#${slug}\` aún no tiene clips. Vincula uno con \`frameshell clip set <clip> --script-ref <script>#${slug}\`.`,
   folderEmpty: "Esta carpeta está vacía.",
   projectFiles: "Archivos del proyecto",
+  open: "Abrir",
+  reveal: (platform) =>
+    platform === "mac" ? "Mostrar en Finder" : platform === "windows" ? "Mostrar en el Explorador de archivos" : "Mostrar en el gestor de archivos",
+  copyPath: "Copiar ruta",
+  moveToTrash: (windows) => (windows ? "Mover a la Papelera de reciclaje" : "Mover a la Papelera"),
 };
 
 export const editor = { en, es };

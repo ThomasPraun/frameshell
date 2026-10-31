@@ -29,6 +29,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Generated clips (render cache, keys, background renders, export layers) | `packages/core/src/clips/renderer.ts`, `clips/cache-key.ts`; adapters `plugins/hyperframes` (ADR 0002), `plugins/remotion` (bundle as cache input, outside-project code, `refreshRenders`; ADR 0009); SPEC §6.5 |
 | Plugin host, install, trust; npm the app bundles for machines without Node | `packages/core/src/plugins/host.ts`, `plugins/npm-runtime.ts`, `apps/desktop/scripts/bundle-npm.mjs`; author API `packages/plugin-api` |
 | Desktop app (IPC surface main/renderer) | `apps/desktop/src/shared/api.ts` |
+| Context menus (one in-page menu, separators, danger items; Explorer Open/Reveal/Copy path/Move to Trash; epic #414) | `renderer/src/components/ContextMenu.tsx`, `components/Explorer.tsx`; main `src/main/trash.ts`; daemon `file.uses` `packages/core/src/file-uses.ts` |
 | Desktop UI strings (en + es, language choice, parity test) | `apps/desktop/src/shared/i18n/`, renderer `t`/`rich` in `renderer/src/i18n.ts`, main `src/main/language.ts`; `apps/desktop/test/i18n.test.ts` |
 | Agent guide above terminals (agent catalog, install commands, Start by path, suggestions), Connect Claude Desktop (config edit keeps other bytes) | `apps/desktop/src/main/agent-catalog.ts`, `main/claude-desktop.ts`, `renderer/src/components/AgentGuide.tsx` |
 | New project from video (folder beside video, name clash, clone test), audio project background + subtitles (`main/audio-background.ts`), drops, Open with (single instance, `open-file`, Windows registry) | `apps/desktop/src/main/video-project.ts`, `main/media-files.ts`, `main/open-paths.ts`, `build/installer.nsh`, `renderer/src/components/Welcome.tsx`, `renderer/src/file-drop.ts`; ADR 0013 |
@@ -86,7 +87,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
 - Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
 - Panel code may run in detached panel window (ADR 0012). rAF, timers, observers, focus, fullscreen, `message`: take from element's own window (`ownerDocument.defaultView`). Global keys via `listenEverywhere`. Never `instanceof HTMLElement` on events or nodes: use `elementOf`/`isTag` (`renderer/src/windows.ts`).
-- Renderer never writes project files: save via daemon `file.write`. Main only reads + watches.
+- Renderer never writes project files: save via daemon `file.write`. Main only reads + watches. Only exception: Explorer Move to Trash (`main/trash.ts`, OS trash after confirm listing daemon `file.uses`).
 - node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
 - New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.

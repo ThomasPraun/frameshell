@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Right-click menu in the Explorer (#415, protocol v66). A file offers Ask agent, Open, Reveal in Finder (Show in File Explorer on Windows), Copy path and Move to Trash; a folder offers the last three. Move to Trash asks first, naming the timeline clips that use the file and saying they show as missing, then moves it to the system Trash (Recycle Bin), where it can be put back. `frameshell.json`, `.frameshell/` and the main timeline are refused. New app-only daemon method `file.uses` lists what in the project's timelines names a file or folder. Context menus gain separators and items drawn in the danger color.
+
 ## [0.16.0] - 2026-10-29
 
 ### Added
