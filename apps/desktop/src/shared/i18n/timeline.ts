@@ -109,6 +109,11 @@ const en = {
   clearAnglePainted: (name: string) => `Clear everything painted for ${name}`,
   clearAllPainted: "Clear every painted turn",
   addDissolve: "Add dissolve",
+  splitAtPlayhead: "Split at playhead",
+  trimStartToPlayhead: "Trim start to playhead",
+  trimEndToPlayhead: "Trim end to playhead",
+  deleteClips: (count: number) => (count === 1 ? "Delete clip" : `Delete ${count} clips`),
+  rippleDeleteClips: (count: number) => (count === 1 ? "Ripple delete clip" : `Ripple delete ${count} clips`),
   addFade: "Add fade",
   removeTransition: "Remove transition",
 };
@@ -217,6 +222,11 @@ const es: typeof en = {
   clearAnglePainted: (name) => `Borrar todo lo pintado para ${name}`,
   clearAllPainted: "Borrar todos los turnos pintados",
   addDissolve: "Añadir disolvencia",
+  splitAtPlayhead: "Dividir en el cursor de reproducción",
+  trimStartToPlayhead: "Recortar el inicio hasta el cursor",
+  trimEndToPlayhead: "Recortar el final hasta el cursor",
+  deleteClips: (count) => (count === 1 ? "Eliminar clip" : `Eliminar ${count} clips`),
+  rippleDeleteClips: (count) => (count === 1 ? "Eliminar clip y cerrar hueco" : `Eliminar ${count} clips y cerrar hueco`),
   addFade: "Añadir fundido",
   removeTransition: "Quitar transición",
 };

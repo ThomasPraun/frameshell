@@ -16,6 +16,7 @@ import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/
 import { turnsKey } from "../angles/model.js";
 import { useGroupsTurns } from "../angles/useTurns.js";
 import { openAskMenu } from "../ask/ask-agent.js";
+import { revealItem } from "../file-commands.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
@@ -84,6 +85,9 @@ const SNAP_PX = 8;
 /** Status line messages fade after this long. */
 const STATUS_MS = 6_000;
 const isMac = navigator.userAgent.includes("Mac");
+/** Delete and ripple delete as menus show their keys (Backspace works too). */
+const DELETE_KEY = isMac ? "⌫" : "Del";
+const RIPPLE_DELETE_KEY = isMac ? "⇧⌫" : "Shift+Del";
 
 /** Scroll and zoom, kept outside React state: they change every frame while scrolling. */
 interface ViewState {
@@ -649,15 +653,16 @@ function TimelineCanvas({
     [run],
   );
 
-  const command = (kind: EditCommand) => {
+  /** Run `kind` on clips `ids` (default: the selection as this render saw it). */
+  const command = (kind: EditCommand, ids: readonly string[] = selectedClips) => {
     const current = latest.current;
     if (!current.layout) return;
     // Nudges build on those still on their way: a held key moves on from where the last press put the clips.
     const nudging = kind.kind === "nudge";
     const base = nudging && inFlight.current ? withStarts(current.layout, inFlight.current.starts) : current.layout;
-    const edits = commandEdits(kind, { layout: base, selected: selectedClips, playhead: transport.get().time, fps: current.fps });
+    const edits = commandEdits(kind, { layout: base, selected: ids, playhead: transport.get().time, fps: current.fps });
     if (edits.length === 0) {
-      onStatus({ tone: "info", text: nothingToDo(kind, selectedClips.length > 0) });
+      onStatus({ tone: "info", text: nothingToDo(kind, ids.length > 0) });
       return;
     }
     if (!nudging) {
@@ -680,7 +685,7 @@ function TimelineCanvas({
         else flight.until = Math.max(flight.until, result.revision);
         settleNudges();
       },
-      commandOptions(kind, selectedClips),
+      commandOptions(kind, ids),
     );
   };
 
@@ -1027,7 +1032,33 @@ function TimelineCanvas({
     if (gesture.current) cancelDrag();
   };
 
-  /** Right-click: a clip not yet selected becomes the selection, then "Ask agent" opens on it. */
+  /**
+   * Edit commands on right-clicked clips `ids` (the selection, or the clip alone when it was not in it), as their keys
+   * run them; disabled where the key would do nothing. Ids are passed on: the menu outlives this render's selection.
+   */
+  const clipItems = (clip: ClipBox, ids: readonly string[]): MenuItem[] => {
+    const current = latest.current;
+    const can = (kind: EditCommand) =>
+      current.layout !== null && commandEdits(kind, { layout: current.layout, selected: ids, playhead: transport.get().time, fps: current.fps }).length > 0;
+    const item = (label: string, shortcut: string, kind: EditCommand, extra: Partial<MenuItem> = {}): MenuItem => ({
+      label,
+      shortcut,
+      disabled: !can(kind),
+      run: () => command(kind, ids),
+      ...extra,
+    });
+    const file = clip.asset ?? clip.source;
+    return [
+      item(t.timeline.splitAtPlayhead, "S", { kind: "split" }, { separated: true }),
+      item(t.timeline.trimStartToPlayhead, "[", { kind: "trim", side: "head" }),
+      item(t.timeline.trimEndToPlayhead, "]", { kind: "trim", side: "tail" }),
+      ...(file ? [revealItem(file, true)] : []),
+      item(t.timeline.deleteClips(ids.length), DELETE_KEY, { kind: "delete", ripple: false }, { separated: true, danger: true }),
+      item(t.timeline.rippleDeleteClips(ids.length), RIPPLE_DELETE_KEY, { kind: "delete", ripple: true }, { danger: true }),
+    ];
+  };
+
+  /** Right-click: a clip not yet selected becomes the selection, then "Ask agent" and its edit commands open on it. */
   const onContextMenu = (event: MouseEvent) => {
     const box = scroller.current!;
     const rect = box.getBoundingClientRect();
@@ -1043,7 +1074,9 @@ function TimelineCanvas({
     const scene = layout && !grab ? sceneAt(layout, state.current, x, y) : null;
     if (scene) pickScene(scene);
     else if (grab && !edge && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
-    openAskMenu(event, edge ? edgeItems(edge) : []);
+    const onClip = grab && !edge ? grab.clip : null;
+    const ids = onClip ? (selected.has(onClip.id) ? selectedClips : [onClip.id]) : [];
+    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : []);
   };
 
   return (
