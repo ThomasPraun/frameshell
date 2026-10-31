@@ -86,6 +86,16 @@ const en = {
     squareSize: "Square (1080x1080)",
     verticalSize: "Vertical (1080x1920)",
     cancel: "Cancel",
+    trashTitle: (name: string, bin: string) => `Move “${name}” to the ${bin}?`,
+    trashUsed: (count: number, timelines: string) =>
+      `${count === 1 ? "1 clip uses it" : `${count} clips use it`} (${timelines}): ${count === 1 ? "it shows" : "they show"} as missing until you put it back.`,
+    trashRestore: (bin: string) => `You can put it back from the ${bin}.`,
+    moveToTrash: (bin: string) => `Move to ${bin}`,
+    trashOutside: "Only files inside the project can be moved to the trash.",
+    trashProjectFile: (path: string) => `${path} holds the project itself and cannot be moved to the trash.`,
+    trashMainTimeline: "This is the project's main timeline and cannot be moved to the trash.",
+    trashBin: (windows: boolean): string => (windows ? "Recycle Bin" : "Trash"),
+    ok: "OK",
   },
   setup: {
     starting: "Setting up transcription…",
@@ -227,6 +237,16 @@ const es: typeof en = {
     squareSize: "Cuadrada (1080x1080)",
     verticalSize: "Vertical (1080x1920)",
     cancel: "Cancelar",
+    trashTitle: (name, bin) => `¿Mover “${name}” a la ${bin}?`,
+    trashUsed: (count, timelines) =>
+      `${count === 1 ? "Lo usa 1 clip" : `Lo usan ${count} clips`} (${timelines}): ${count === 1 ? "aparece" : "aparecen"} como faltante hasta que lo recuperes.`,
+    trashRestore: (bin) => `Puedes recuperarlo desde la ${bin}.`,
+    moveToTrash: (bin) => `Mover a la ${bin}`,
+    trashOutside: "Solo se pueden mover a la papelera archivos dentro del proyecto.",
+    trashProjectFile: (path) => `${path} contiene el proyecto en sí y no se puede mover a la papelera.`,
+    trashMainTimeline: "Es la línea de tiempo principal del proyecto y no se puede mover a la papelera.",
+    trashBin: (windows) => (windows ? "Papelera de reciclaje" : "Papelera"),
+    ok: "Aceptar",
   },
   setup: {
     starting: "Preparando la transcripción…",

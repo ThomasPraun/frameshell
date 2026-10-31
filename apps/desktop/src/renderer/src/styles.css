@@ -2870,6 +2870,16 @@ button.track-head:focus-visible {
   cursor: default;
 }
 
+.context-menu-item.is-danger:not(:disabled) {
+  color: var(--danger);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
 .context-menu-item kbd {
   font: 11px var(--font-mono);
   color: var(--text-muted);

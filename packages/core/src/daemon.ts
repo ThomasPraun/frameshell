@@ -66,6 +66,7 @@ import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
+import { fileUses } from "./file-uses.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -902,6 +903,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }));
     },
     "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
+    "file.uses": ({ path }) => fileUses(path),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);

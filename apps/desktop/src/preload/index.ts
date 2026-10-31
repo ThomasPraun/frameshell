@@ -44,6 +44,9 @@ const api: FrameshellApi = {
       if (reply.error) throw new Error(reply.error);
     },
     onChanged: (listener) => subscribe(Channel.filesChanged, listener),
+    trash: (path) => invokeOutcome(Channel.filesTrash, path),
+    reveal: (path) => ipcRenderer.invoke(Channel.filesReveal, path),
+    copyPath: (path) => ipcRenderer.invoke(Channel.filesCopyPath, path),
     pathOf: (file) => webUtils.getPathForFile(file),
   },
   terminals: {

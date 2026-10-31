@@ -305,6 +305,15 @@ export interface FrameshellApi {
     write(path: string, content: string): Promise<void>;
     /** Called with changed project-relative paths. Returns an unsubscribe function. */
     onChanged(listener: (paths: string[]) => void): () => void;
+    /**
+     * Move a project-relative file or folder to the OS trash after a confirm naming the timeline clips that use
+     * it (daemon `file.uses`). False when the person cancelled, or when it is one of the project's own files (a message box says so).
+     */
+    trash(path: string): Promise<boolean>;
+    /** Show a project-relative file or folder in Finder / Explorer / the file manager. */
+    reveal(path: string): Promise<void>;
+    /** Put the absolute path of a project-relative file or folder on the clipboard. */
+    copyPath(path: string): Promise<void>;
     /** Absolute path of a file dropped from the OS; empty for a file that is not on disk. */
     pathOf(file: File): string;
   };
@@ -788,6 +797,9 @@ export const Channel = {
   filesRead: "files:read",
   filesWrite: "files:write",
   filesChanged: "files:changed",
+  filesTrash: "files:trash",
+  filesReveal: "files:reveal",
+  filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
   terminalWrite: "terminal:write",
