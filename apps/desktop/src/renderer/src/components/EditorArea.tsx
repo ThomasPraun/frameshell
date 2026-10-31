@@ -1,5 +1,5 @@
 import { isScriptPath, parseScript } from "@frameshell/schema";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
 import { askAgent } from "../ask/ask-agent.js";
@@ -7,7 +7,9 @@ import { t } from "../i18n.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { copyPathItem, revealItem } from "../file-commands.js";
 import { windowOf } from "../windows.js";
+import { contextMenu } from "./ContextMenu.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { ProposalBar } from "./ProposalBar.js";
 import { TRANSCRIPT_SHORTCUT, TRANSCRIPT_TAB, type TranscriptFocus, TranscriptView } from "./TranscriptView.js";
@@ -281,6 +283,26 @@ export function EditorArea({
     onClose(path);
   };
 
+  /** Right-click on a tab: close it, the others or all (each unsaved one asks), and the file commands. */
+  const openTabMenu = (event: MouseEvent, path: string) => {
+    event.preventDefault();
+    const view = windowOf(event.target);
+    const closeAll = (keep: string | null) => {
+      for (const other of tabs) if (other !== keep) close(other, view);
+    };
+    contextMenu.open(
+      event.clientX,
+      event.clientY,
+      [
+        { label: t.editor.close, run: () => close(path, view) },
+        { label: t.editor.closeOthers, disabled: tabs.length < 2, run: () => closeAll(path) },
+        { label: t.editor.closeAll, run: () => closeAll(null) },
+        ...(path === TRANSCRIPT_TAB ? [] : [revealItem(path, true), copyPathItem(path)]),
+      ],
+      view,
+    );
+  };
+
   const reloadFromDisk = (path: string) => {
     const doc = docs.current.get(path);
     if (!doc?.model) return;
@@ -311,6 +333,7 @@ export function EditorArea({
                 if (event.button === 1) close(path, windowOf(event.target));
               }}
               onClick={() => onActivate(path)}
+              onContextMenu={(event) => openTabMenu(event, path)}
             >
               <span className="file-tab-name">{path === TRANSCRIPT_TAB ? t.workspace.transcript : path.slice(path.lastIndexOf("/") + 1)}</span>
               <button

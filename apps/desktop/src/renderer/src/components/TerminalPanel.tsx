@@ -2,13 +2,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TerminalInfo } from "../../../shared/api.js";
 import { askTarget } from "../ask/ask-target.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
+import { windowOf } from "../windows.js";
+import { contextMenu } from "./ContextMenu.js";
 import { AgentGuide } from "./AgentGuide.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
@@ -20,6 +22,8 @@ interface Tab {
   info: TerminalInfo | null;
   exitCode: number | null;
   detached: boolean;
+  /** Name typed with "Rename terminal"; null shows the shell or agent and number. */
+  name: string | null;
 }
 
 /** How long the Ask agent target's tab flashes, ms. */
@@ -106,8 +110,10 @@ export function TerminalPanel({
   ref?: Ref<AgentTerminal>;
 }) {
   const nextKey = useRef(1);
-  const [tabs, setTabs] = useState<Tab[]>(() => [{ key: 0, info: null, exitCode: null, detached: false }]);
+  const [tabs, setTabs] = useState<Tab[]>(() => [{ key: 0, info: null, exitCode: null, detached: false, name: null }]);
   const [active, setActive] = useState(0);
+  /** Tab whose name shows as an input (tab menu "Rename terminal"). */
+  const [renaming, setRenaming] = useState<number | null>(null);
   /** Agent CLI running in each terminal, by terminal id; absent when none. */
   const [agents, setAgents] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [flashing, setFlashing] = useState<number | null>(null);
@@ -146,7 +152,7 @@ export function TerminalPanel({
           reveal();
           const added = nextKey.current++;
           pending.current.set(added, lines);
-          setTabs((was) => [...was, { key: added, info: null, exitCode: null, detached: false }]);
+          setTabs((was) => [...was, { key: added, info: null, exitCode: null, detached: false, name: null }]);
           setActive(added);
           return;
         }
@@ -219,7 +225,7 @@ export function TerminalPanel({
 
   const add = () => {
     const key = nextKey.current++;
-    setTabs((current) => [...current, { key, info: null, exitCode: null, detached: false }]);
+    setTabs((current) => [...current, { key, info: null, exitCode: null, detached: false, name: null }]);
     setActive(key);
   };
 
@@ -242,8 +248,33 @@ export function TerminalPanel({
   }, []);
 
   const label = (tab: Tab, index: number) => {
+    if (tab.name) return tab.name;
     const agent = tab.info ? agents.get(tab.info.id) : undefined;
     return tab.info ? `${agent ?? tab.info.shell} ${index + 1}` : t.terminal.starting;
+  };
+
+  /** Save the name typed in a tab; an empty name brings back the shell or agent and number. */
+  const rename = (key: number, typed: string) => {
+    setRenaming(null);
+    setTabs((current) => current.map((tab) => (tab.key === key ? { ...tab, name: typed.trim() || null } : tab)));
+  };
+
+  const openTabMenu = (event: MouseEvent, tab: Tab) => {
+    event.preventDefault();
+    contextMenu.open(
+      event.clientX,
+      event.clientY,
+      [
+        { label: t.terminal.renameTerminal, run: () => setRenaming(tab.key) },
+        {
+          label: tab.detached ? t.workspace.dockBack(t.terminal.terminalName) : t.workspace.openInWindow(t.terminal.terminalName),
+          run: () => setDetached(tab.key, !tab.detached),
+        },
+        { label: t.terminal.newTerminal, separated: true, run: add },
+        { label: t.terminal.closeTerminal, separated: true, danger: true, run: () => close(tab.key) },
+      ],
+      windowOf(event.target),
+    );
   };
 
   const view = (tab: Tab, shown: boolean) => (
@@ -290,8 +321,27 @@ export function TerminalPanel({
                 className={`terminal-tab${tab.key === active ? " is-active" : ""}${tab.exitCode !== null ? " has-exited" : ""}${agent ? " is-agent" : ""}${tab.detached ? " is-detached" : ""}${flashing === tab.key ? " is-flashing" : ""}`}
                 title={tab.info ? t.terminal.sessionTitle(tab.info.session, agent, tab.detached) : undefined}
                 onClick={() => setActive(tab.key)}
+                onContextMenu={(event) => openTabMenu(event, tab)}
               >
-                <span>{label(tab, index)}</span>
+                {renaming === tab.key ? (
+                  <input
+                    className="terminal-tab-input"
+                    data-testid="terminal-rename-input"
+                    defaultValue={label(tab, index)}
+                    aria-label={t.terminal.tabName(label(tab, index))}
+                    autoFocus
+                    onFocus={(event) => event.currentTarget.select()}
+                    onClick={(event) => event.stopPropagation()}
+                    onBlur={() => setRenaming(null)}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Escape") setRenaming(null);
+                      else if (event.key === "Enter") rename(tab.key, event.currentTarget.value);
+                    }}
+                  />
+                ) : (
+                  <span>{label(tab, index)}</span>
+                )}
                 <button
                   className="terminal-tab-close"
                   aria-label={t.terminal.closeTerminal}

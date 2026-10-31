@@ -15,12 +15,17 @@ export function revealItem(path: string, separated = false): MenuItem {
   return { label: revealLabel(), separated, run: () => void window.frameshell.files.reveal(path) };
 }
 
+/** "Copy path": the absolute path of project-relative `path` on the clipboard. */
+export function copyPathItem(path: string): MenuItem {
+  return { label: t.editor.copyPath, run: () => void window.frameshell.files.copyPath(path) };
+}
+
 /** Reveal, Copy path, then Move to Trash (main asks first; the OS trash is the undo) for project-relative `path`. */
 export function placeItems(path: string): MenuItem[] {
   const files = window.frameshell.files;
   return [
     revealItem(path, true),
-    { label: t.editor.copyPath, run: () => void files.copyPath(path) },
+    copyPathItem(path),
     { label: t.editor.moveToTrash(PLATFORM === "windows"), separated: true, danger: true, run: () => void files.trash(path) },
   ];
 }
