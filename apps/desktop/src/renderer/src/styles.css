@@ -2315,6 +2315,17 @@ button.track-head {
   cursor: pointer;
 }
 
+.track-name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-app);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
 button.track-head:hover {
   background: var(--bg-hover);
 }
