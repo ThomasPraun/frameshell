@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { projectPathOf, trashDetail, trashRefusal } from "../src/main/trash.js";
 import { strings } from "../src/shared/i18n/index.js";
@@ -35,7 +35,7 @@ describe("trashDetail", () => {
 
 describe("projectPathOf", () => {
   it("resolves inside the project and refuses ways out", () => {
-    const dir = join("/", "p");
+    const dir = resolve("/", "p");
     expect(projectPathOf(dir, "exports/cut.mp4")).toBe(join(dir, "exports", "cut.mp4"));
     expect(() => projectPathOf(dir, "../other")).toThrow(/not inside the project/);
     expect(() => projectPathOf(dir, "")).toThrow(/not inside the project/);
