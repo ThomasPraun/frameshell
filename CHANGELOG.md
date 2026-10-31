@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Right-click menu in the Explorer (#415, protocol v66). A file offers Ask agent, Open, Reveal in Finder (Show in File Explorer on Windows), Copy path and Move to Trash; a folder offers the last three. Move to Trash asks first, naming the timeline clips that use the file and saying they show as missing, then moves it to the system Trash (Recycle Bin), where it can be put back. `frameshell.json`, `.frameshell/` and the main timeline are refused. New app-only daemon method `file.uses` lists what in the project's timelines names a file or folder. Context menus gain separators and items drawn in the danger color.
 - Right-click menu on timeline clips (#416): Split at playhead, Trim start / end to playhead, Reveal the clip's file in Finder (media, nested timeline or composition), Delete and Ripple delete, each with its key shown and disabled where the key would do nothing. It acts on the right-clicked clip, or on the whole selection when the clip is in it.
 - Right-click menu on track headers (#417): Rename track (typed in place; an empty name clears it), Add subtitles of that track, Add video or audio track, and Delete track (naming how many clips go with it; undo brings them back). Right-click on empty lane space adds a video, audio or subtitle track.
+- Right-click menu on recent projects in the welcome screen (#418): Open, Reveal in Finder, and Remove from Recent (the folder stays on disk).
 
 ## [0.16.0] - 2026-10-29
 

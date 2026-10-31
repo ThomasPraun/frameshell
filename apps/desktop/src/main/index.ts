@@ -568,6 +568,13 @@ async function rememberRecent(dir: string): Promise<void> {
   await writeFile(recentFile, JSON.stringify(list, null, 2));
 }
 
+async function forgetRecent(dir: string): Promise<string[]> {
+  const list = (await readRecent()).filter((item) => item !== dir);
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(recentFile, JSON.stringify(list, null, 2));
+  return list;
+}
+
 async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
   const result = await dialog.showOpenDialog(window, {
     title: text.app.dialogs.openFolder,
@@ -1247,6 +1254,11 @@ function registerIpc(): void {
     return state.project;
   });
   ipcMain.handle(Channel.projectRecent, () => readRecent());
+  ipcMain.handle(Channel.projectForgetRecent, (_event, dir: string) => forgetRecent(dir));
+  ipcMain.handle(Channel.projectRevealRecent, async (_event, dir: string) => {
+    // Only folders main put in the list: the renderer cannot point the file manager anywhere else.
+    if ((await readRecent()).includes(dir)) shell.showItemInFolder(dir);
+  });
   ipcMain.handle(Channel.projectDismissSync, async (event) => {
     const state = stateOf(event.sender);
     const { project } = await requireProject(state);

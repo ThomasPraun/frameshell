@@ -20,7 +20,6 @@ import { useProjectKind } from "../preview/useProgram.js";
 import { cutToAngle } from "../timeline/angle-cut.js";
 import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
-import { ContextMenuHost } from "./ContextMenu.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
@@ -513,7 +512,6 @@ export function Workspace({ project }: { project: ProjectView }) {
           <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} mediaUrl={project.mediaUrl} />
         </PanelWindow>
       ))}
-      <ContextMenuHost />
       {dropping && (
         <div className="drop-target" aria-hidden="true">
           <p>{t.workspace.dropToImport}</p>

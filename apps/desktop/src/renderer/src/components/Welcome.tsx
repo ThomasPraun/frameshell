@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
 import { useFileDrop } from "../file-drop.js";
+import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
+import { contextMenu } from "./ContextMenu.js";
 
-/** First screen of a window with no project: start from a video, audio or image file, open a folder, reopen a recent one, or create a project. */
+/**
+ * First screen of a window with no project: start from a video, audio or image file, open a folder, reopen a recent
+ * one (right-click: Open, Reveal, Remove from Recent), or create a project.
+ */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
   const [notProject, setNotProject] = useState<string | null>(null);
@@ -124,7 +129,20 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
             <ul>
               {recent.map((dir) => (
                 <li key={dir}>
-                  <button className="link" disabled={busy} onClick={() => void run(() => window.frameshell.project.open(dir))}>
+                  <button
+                    className="link"
+                    disabled={busy}
+                    onClick={() => void run(() => window.frameshell.project.open(dir))}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const project = window.frameshell.project;
+                      contextMenu.open(event.clientX, event.clientY, [
+                        { label: t.welcome.openRecent, run: () => void run(() => project.open(dir)) },
+                        { label: revealLabel(), separated: true, run: () => void project.revealRecent(dir) },
+                        { label: t.welcome.forgetRecent, separated: true, run: () => void project.forgetRecent(dir).then(setRecent) },
+                      ]);
+                    }}
+                  >
                     <span className="recent-name">{dir.split(/[\\/]/).filter(Boolean).pop()}</span>
                     <span className="recent-path">{dir}</span>
                   </button>
