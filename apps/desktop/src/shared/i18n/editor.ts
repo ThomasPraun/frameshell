@@ -23,6 +23,9 @@ const en = {
   folderEmpty: "This folder is empty.",
   projectFiles: "Project files",
   open: "Open",
+  close: "Close",
+  closeOthers: "Close others",
+  closeAll: "Close all",
   reveal: (platform: "mac" | "windows" | "linux"): string =>
     platform === "mac" ? "Reveal in Finder" : platform === "windows" ? "Show in File Explorer" : "Show in file manager",
   copyPath: "Copy path",
@@ -52,6 +55,9 @@ const es: typeof en = {
   folderEmpty: "Esta carpeta está vacía.",
   projectFiles: "Archivos del proyecto",
   open: "Abrir",
+  close: "Cerrar",
+  closeOthers: "Cerrar las demás",
+  closeAll: "Cerrar todas",
   reveal: (platform) =>
     platform === "mac" ? "Mostrar en Finder" : platform === "windows" ? "Mostrar en el Explorador de archivos" : "Mostrar en el gestor de archivos",
   copyPath: "Copiar ruta",

@@ -2315,6 +2315,16 @@ button.track-head {
   cursor: pointer;
 }
 
+.terminal-tab-input {
+  width: 9em;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-app);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
 .track-name-input {
   flex: 1;
   min-width: 0;

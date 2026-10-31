@@ -8,6 +8,8 @@ const en = {
   starting: "starting…",
   newTerminal: "New terminal",
   closeTerminal: "Close terminal",
+  renameTerminal: "Rename terminal",
+  tabName: (label: string) => `Name of terminal ${label}`,
   hideTerminal: "Hide terminal",
   sessionTitle: (session: string, agent: string | undefined, detached: boolean) =>
     `${agent ? `Agent ${agent} in session` : "Session"} ${session}${detached ? ", in its own window" : ""}`,
@@ -21,6 +23,8 @@ const es: typeof en = {
   starting: "iniciando…",
   newTerminal: "Nueva terminal",
   closeTerminal: "Cerrar terminal",
+  renameTerminal: "Renombrar terminal",
+  tabName: (label) => `Nombre de la terminal ${label}`,
   hideTerminal: "Ocultar terminal",
   sessionTitle: (session, agent, detached) =>
     `${agent ? `Agente ${agent} en la sesión` : "Sesión"} ${session}${detached ? ", en su propia ventana" : ""}`,
