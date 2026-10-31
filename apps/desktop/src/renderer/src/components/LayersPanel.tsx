@@ -21,7 +21,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
  * The timeline's place in an image project (ADR 0017): its video tracks as
  * layers, topmost first. A click selects the layer's clip (the inspector,
  * which also replaces its image, and the preview handles follow), double-click
- * renames, the row buttons move or delete it, right-click asks the agent.
+ * renames, the row buttons move or delete it, and right-click offers Ask agent and the same commands.
  * Every change is a `ui` edit, undoable from here as from the timeline.
  */
 export function LayersPanel({
@@ -102,7 +102,12 @@ export function LayersPanel({
   };
   const onContextMenu = (event: MouseEvent, layer: Layer) => {
     select(layer);
-    openAskMenu(event);
+    openAskMenu(event, [
+      { label: t.layers.rename, separated: true, run: () => setRenaming(layer.track) },
+      { label: t.layers.moveUp, disabled: !layer.up, run: () => move(layer, 1) },
+      { label: t.layers.moveDown, disabled: !layer.down, run: () => move(layer, -1) },
+      { label: t.layers.remove, separated: true, danger: true, run: () => remove(layer) },
+    ]);
   };
 
   return (

@@ -1,5 +1,6 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { openAskMenu } from "../ask/ask-agent.js";
 import { abortedTransactions, authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
 import { t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
@@ -55,6 +56,19 @@ export function HistoryPanel() {
       setNotice({ target, tone: "error", text: (failure as Error).message, conflicts: [] });
     }
   }, []);
+
+  /**
+   * Right-click on a transaction or operation: select it (its diff shows on the timeline), then Ask agent, Revert and,
+   * for a transaction, show or hide its operations. Opens once the selection is in, so Ask agent names the entry.
+   */
+  const openMenu = async (event: MouseEvent, target: string, options: { aborted: boolean; toggle?: { open: boolean; run: () => void } }) => {
+    event.preventDefault();
+    await select(target);
+    openAskMenu(event, [
+      { label: t.history.revert, separated: true, disabled: options.aborted || busy !== null, run: () => void revert(target) },
+      ...(options.toggle ? [{ label: options.toggle.open ? t.history.hideOps : t.history.showOps, run: options.toggle.run }] : []),
+    ]);
+  };
 
   const revert = async (target: string) => {
     setBusy(target);
@@ -130,13 +144,17 @@ export function HistoryPanel() {
               onToggle={() => toggle(key)}
               onSelect={() => void select(tx.tx)}
               onRevert={() => void revert(tx.tx)}
+              onMenu={(event) => void openMenu(event, tx.tx, { aborted: isAborted, toggle: { open, run: () => toggle(key) } })}
             />
             {notice && notice.target === tx.tx && <NoticeBox notice={notice} onShow={(id) => void select(id)} />}
             {open && (
               <ul className="history-ops" aria-label={t.history.opsLabel(tx.tx)}>
                 {tx.operations.map((op) => (
                   <li key={op.id} data-op={op.id} data-selected={selected === op.id || undefined}>
-                    <div className={`history-op${selected === op.id ? " is-active" : ""}`}>
+                    <div
+                      className={`history-op${selected === op.id ? " is-active" : ""}`}
+                      onContextMenu={(event) => void openMenu(event, op.id, { aborted: isAborted })}
+                    >
                       <button className="history-op-main" onClick={() => void select(op.id)} title={t.history.opTitle(op.id, op.revision)}>
                         <span className="history-op-title">{operationTitle(op)}</span>
                         <span className="history-op-touched">{op.touched.join(" ")}</span>
@@ -175,6 +193,7 @@ function TransactionRow({
   onToggle,
   onSelect,
   onRevert,
+  onMenu,
 }: {
   tx: HistoryTransaction;
   active: boolean;
@@ -186,12 +205,13 @@ function TransactionRow({
   onToggle: () => void;
   onSelect: () => void;
   onRevert: () => void;
+  onMenu: (event: MouseEvent) => void;
 }) {
   const author = authorOf(tx.author);
   const count = tx.operations.length;
   return (
     <>
-      <div className={`history-row${active ? " is-active" : ""}${aborted ? " is-aborted" : ""}`}>
+      <div className={`history-row${active ? " is-active" : ""}${aborted ? " is-aborted" : ""}`} onContextMenu={onMenu}>
         <button
           className="history-expand"
           aria-expanded={open}

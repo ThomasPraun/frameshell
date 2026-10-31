@@ -239,6 +239,16 @@ test("an agent selects a person with ui_select: their words and spans, reported 
   expect(unknown).toMatchObject({ error: true, text: expect.stringContaining('no person "Nobody"') });
 });
 
+test("right-click on a person offers Rename and Remove after Ask agent (#420)", async () => {
+  await person("Juanito").click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem")).toHaveText([/Ask agent/, "Rename Juanito", "Remove Juanito"]);
+  await menu.getByRole("menuitem", { name: "Rename Juanito" }).click();
+  await expect(page.getByTestId("person-rename-input")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("person-rename-input")).toHaveCount(0);
+});
+
 test("the panel opens in its own window with the same people", async () => {
   await page.getByTestId("sidebar-detach").click();
   const detached = await panelWindow(app, "people");
