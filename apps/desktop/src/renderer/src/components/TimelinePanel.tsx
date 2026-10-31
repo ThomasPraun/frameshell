@@ -385,6 +385,8 @@ function TimelineCanvas({
   latest.current = { layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
+  /** Track whose header shows a name input (track menu "Rename track"). */
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
 
   /** Forget nudges in flight once none is pending and the shown timeline has their last revision. */
@@ -899,9 +901,9 @@ function TimelineCanvas({
     else selection.selectTrack(track, "timeline");
   };
 
-  /** Add a subtitle track following the likeliest track, then select it for its style. */
-  const addSubtitles = () => {
-    const follows = subtitleSource(latest.current.layout, selectedClips, subtitles);
+  /** Add a subtitle track following `track`, or else the likeliest track, then select it for its style. */
+  const addSubtitles = (track?: string) => {
+    const follows = track ?? subtitleSource(latest.current.layout, selectedClips, subtitles);
     if (!follows) {
       onStatus({ tone: "info", text: t.timeline.addTrackFirst });
       return;
@@ -1058,6 +1060,71 @@ function TimelineCanvas({
     ];
   };
 
+  /** The header's "Add subtitle track" button as a menu entry. */
+  const addSubtitlesItem = (): MenuItem => ({
+    label: t.timeline.addSubtitleTrack,
+    disabled: !latest.current.layout?.rows.some((row) => row.kind === "video" || row.kind === "audio"),
+    run: () => addSubtitles(),
+  });
+
+  /** Add a video or audio track on top of the stack. */
+  const addTrackItems = (separated: boolean): MenuItem[] => [
+    { label: t.timeline.addVideoTrack, separated, run: () => send([{ op: "track.add", args: { kind: "video" } }]) },
+    { label: t.timeline.addAudioTrack, run: () => send([{ op: "track.add", args: { kind: "audio" } }]) },
+  ];
+
+  /** Right-click on a track header: rename it, add subtitles of it or another track, delete it (with its clips). */
+  const openTrackMenu = (event: MouseEvent, row: TrackRow) => {
+    event.preventDefault();
+    selection.selectTrack(row.id, "timeline");
+    const clipTrack = row.kind === "video" || row.kind === "audio";
+    const clips = row.kind === "subtitles" ? 0 : row.clips.length;
+    contextMenu.open(
+      event.clientX,
+      event.clientY,
+      [
+        { label: t.timeline.renameTrack, run: () => setRenaming(row.id) },
+        ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
+        ...(image ? [] : addTrackItems(true)),
+        {
+          label: t.timeline.deleteTrack(row.label, clips),
+          separated: true,
+          danger: true,
+          run: () => send([{ op: "track.remove", args: { track: row.id, ...(clips > 0 ? { force: true } : {}) } }]),
+        },
+      ],
+      windowOf(event.target),
+    );
+  };
+
+  /** Save the name typed in a track header; an empty name clears it. */
+  const rename = (row: TrackRow, typed: string) => {
+    setRenaming(null);
+    const name = typed.trim() || null;
+    if (name !== row.name) send([{ op: "track.set", args: { track: row.id, name } }]);
+  };
+
+  /** Header of `row` while it is renamed: an input in place of its name. */
+  const renameHead = (row: TrackRow) => (
+    <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }}>
+      <span className="track-id">{row.label}</span>
+      <input
+        className="track-name-input"
+        data-testid="track-rename-input"
+        defaultValue={row.name ?? ""}
+        aria-label={t.timeline.trackName(row.label)}
+        autoFocus
+        onFocus={(event) => event.currentTarget.select()}
+        onBlur={() => setRenaming(null)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Escape") setRenaming(null);
+          else if (event.key === "Enter") rename(row, event.currentTarget.value);
+        }}
+      />
+    </div>
+  );
+
   /** Right-click: a clip not yet selected becomes the selection, then "Ask agent" and its edit commands open on it. */
   const onContextMenu = (event: MouseEvent) => {
     const box = scroller.current!;
@@ -1076,7 +1143,8 @@ function TimelineCanvas({
     else if (grab && !edge && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
     const onClip = grab && !edge ? grab.clip : null;
     const ids = onClip ? (selected.has(onClip.id) ? selectedClips : [onClip.id]) : [];
-    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : []);
+    const empty = !edge && !onClip && !scene && !image;
+    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : empty ? [...addTrackItems(true), addSubtitlesItem()] : []);
   };
 
   return (
@@ -1126,7 +1194,7 @@ function TimelineCanvas({
               aria-label={t.timeline.addSubtitleTrack}
               title={t.timeline.addSubtitleTitle}
               disabled={!layout?.rows.some((row) => row.kind === "video" || row.kind === "audio")}
-              onClick={addSubtitles}
+              onClick={() => addSubtitles()}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -1145,17 +1213,22 @@ function TimelineCanvas({
             {layout?.rows.map((row) =>
               row.kind === "program" ? (
                 <div key={row.id} className="program-head" style={{ height: row.height + row.lanesHeight }} data-lanes={row.lanes.length > 0 ? "open" : "closed"}>
-                  <button
-                    className={`track-head track-program${selectedTrack === row.id ? " is-selected" : ""}`}
-                    style={{ height: row.height }}
-                    title={t.timeline.programHeadTitle(row.id)}
-                    aria-pressed={selectedTrack === row.id}
-                    data-track={row.id}
-                    onClick={() => selection.selectTrack(row.id, "timeline")}
-                  >
-                    <span className="track-id">{row.label}</span>
-                    <span className="track-label">{row.name ?? ""}</span>
-                  </button>
+                  {renaming === row.id ? (
+                    renameHead(row)
+                  ) : (
+                    <button
+                      className={`track-head track-program${selectedTrack === row.id ? " is-selected" : ""}`}
+                      style={{ height: row.height }}
+                      title={t.timeline.programHeadTitle(row.id)}
+                      aria-pressed={selectedTrack === row.id}
+                      data-track={row.id}
+                      onClick={() => selection.selectTrack(row.id, "timeline")}
+                      onContextMenu={(event) => openTrackMenu(event, row)}
+                    >
+                      <span className="track-id">{row.label}</span>
+                      <span className="track-label">{row.name ?? ""}</span>
+                    </button>
+                  )}
                   {row.angles.length > 0 && (
                     <button
                       className={`icon-button turn-lanes-toggle${lanesOpen.has(row.id) ? " on" : ""}`}
@@ -1186,6 +1259,8 @@ function TimelineCanvas({
                     </div>
                   ))}
                 </div>
+              ) : renaming === row.id ? (
+                renameHead(row)
               ) : row.kind === "subtitles" ? (
                 <button
                   key={row.id}
@@ -1195,12 +1270,20 @@ function TimelineCanvas({
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
+                  onContextMenu={(event) => openTrackMenu(event, row)}
                 >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}</span>
                 </button>
               ) : (
-                <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }} title={row.id}>
+                <div
+                  key={row.id}
+                  className={`track-head track-${row.kind}`}
+                  style={{ height: row.height }}
+                  title={row.id}
+                  data-track={row.id}
+                  onContextMenu={(event) => openTrackMenu(event, row)}
+                >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? ""}</span>
                 </div>

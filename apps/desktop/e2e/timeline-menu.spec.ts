@@ -117,3 +117,31 @@ test("on a selection of several clips the menu deletes them all", async () => {
   await expect.poll(savedIds).not.toContain("c_three");
   expect(savedIds()).toHaveLength(2);
 });
+
+function savedTracks(): { id: string; kind: string; name?: string; clips: unknown[] }[] {
+  return JSON.parse(readFileSync(mainFile, "utf8")).tracks;
+}
+
+const head = (track: string) => page.locator(`.track-head[data-track="${track}"]`);
+
+test("a track header's menu renames the track in place", async () => {
+  await head("v2").click({ button: "right" });
+  await expect(menu().getByRole("menuitem")).toHaveText(["Rename track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
+  await menu().getByRole("menuitem", { name: "Rename track" }).click();
+  const input = page.getByTestId("track-rename-input");
+  await expect(input).toBeFocused();
+  await input.fill("Logos");
+  await input.press("Enter");
+  await expect.poll(() => savedTracks().find((track) => track.id === "v2")?.name).toBe("Logos");
+  await expect(head("v2")).toContainText("Logos");
+});
+
+test("empty lane space adds tracks, and a header deletes a track with its clips", async () => {
+  await rightClick(40, "v1");
+  await menu().getByRole("menuitem", { name: "Add audio track" }).click();
+  await expect.poll(() => savedTracks().filter((track) => track.kind === "audio")).toHaveLength(1);
+
+  await head("v2").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Delete track V2 and its clip" }).click();
+  await expect.poll(() => savedTracks().map((track) => track.id)).not.toContain("v2");
+});
