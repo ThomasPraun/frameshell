@@ -86,7 +86,8 @@ test("a clip's menu lists the edit commands with their keys, and Split splits it
 
 test("commands the key would refuse are disabled: the playhead is not over the clip", async () => {
   await playheadTo(0);
-  await rightClick(13, "v1");
+  // The middle of c_three (12 to 15 s): a small CI window shows ~6 px a second, so 1 s from an edge offers transitions.
+  await rightClick(13.5, "v1");
   await expect(menu().getByRole("menuitem", { name: /Split at playhead/ })).toBeDisabled();
   await expect(menu().getByRole("menuitem", { name: /Trim start to playhead/ })).toBeDisabled();
   await expect(menu().getByRole("menuitem", { name: /^Delete clip/ })).toBeEnabled();
