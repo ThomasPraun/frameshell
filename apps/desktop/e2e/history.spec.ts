@@ -189,3 +189,16 @@ test("an aborted transaction stays listed, dimmed and marked aborted, without Re
   // Other entries keep their Revert.
   await expect(row("tighten intro").getByRole("button", { name: /^Revert tx_/ })).toHaveCount(1);
 });
+
+test("right-click on an entry selects it and offers Ask agent, Revert and its operations (#420)", async () => {
+  await row("tighten intro").locator(".history-row").click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem")).toHaveText([/Ask agent/, "Revert", /^(Show|Hide) operations$/]);
+  await expect(menu.getByRole("menuitem", { name: /Ask agent/ })).toBeEnabled();
+  await expect(row("tighten intro")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Escape");
+
+  await row("try a move").locator(".history-row").click({ button: "right" });
+  await expect(menu.getByRole("menuitem", { name: "Revert" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+});

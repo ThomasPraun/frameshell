@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Right-click menu on track headers (#417): Rename track (typed in place; an empty name clears it), Add subtitles of that track, Add video or audio track, and Delete track (naming how many clips go with it; undo brings them back). Right-click on empty lane space adds a video, audio or subtitle track.
 - Right-click menu on recent projects in the welcome screen (#418): Open, Reveal in Finder, and Remove from Recent (the folder stays on disk).
 - Right-click menus on tabs (#419). Editor tabs: Close, Close others, Close all (each unsaved file still asks), Reveal in Finder and Copy path. Terminal tabs: Rename terminal (typed in place; an empty name brings back the shell or agent name), Open in its own window or Dock back, New terminal, Close terminal.
+- Right-click menus in History, People and Layers (#420). A History entry is selected (its changes show on the timeline) and offers Ask agent, Revert and Show / Hide operations; an operation offers Ask agent and Revert. A person offers Rename and Remove; a layer offers Rename, Move up, Move down and Delete layer.
 
 ## [0.16.0] - 2026-10-29
 
