@@ -33,6 +33,8 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   ({ app, page } = await launch(box));
+  // The daemon is up once the project shows.
+  await expect(page.locator(".titlebar-project")).toHaveText("Smoke demo");
 });
 
 test.afterAll(async () => {
