@@ -6,6 +6,8 @@ import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
 import { t } from "../i18n.js";
 import { windowOf } from "../windows.js";
+import { agentTargets } from "./agent-targets.js";
+import { type ChatTarget, shortcutTarget } from "./chat-targets.js";
 import { referenceLines } from "./reference.js";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -13,32 +15,46 @@ const isMac = navigator.userAgent.includes("Mac");
 /** Shortcut as menus show it. */
 export const ASK_SHORTCUT = isMac ? "⌘L" : "Ctrl+L";
 
-/** What the workspace does for the command: send the reference to the agent target, or put it on the clipboard. */
-export interface AskHandlers {
-  run(extra: readonly string[]): void;
+/** What the workspace installs as the command (see {@link askAgent}). */
+export interface AskHandler {
+  /** Send the selection's reference, then `extra`, to `target`; null when there is no target to choose from. */
+  send(extra: readonly string[], target: ChatTarget | null): void;
+  /** Put the selection's reference on the clipboard (the same lines `send` delivers). */
   copy(): void;
+  /** Every target now, as {@link ChatTarget}s (ADR 0025): agents in the app's terminals, then outside it. */
+  targets(): ChatTarget[];
 }
 
-let handlers: AskHandlers | null = null;
+let handler: AskHandler | null = null;
 
 /**
  * The command. The workspace installs what it does (it owns the terminal
  * panel and its collapsed state); panels only call {@link askAgent.run}.
  */
 export const askAgent = {
-  /** Chat about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace is up. */
-  run(extra: readonly string[] = []): void {
-    handlers?.run(extra);
+  /**
+   * Chat about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace
+   * is up. Without `target`, it goes where Cmd/Ctrl+L sends: the target used last, else the first.
+   */
+  run(extra: readonly string[] = [], target?: ChatTarget): void {
+    if (!handler) return;
+    const chosen = target ?? shortcutTarget(handler.targets(), agentTargets.get().last);
+    if (chosen) agentTargets.use(chosen.id);
+    handler.send(extra, chosen);
   },
-  /** Put the current selection's reference on the clipboard (the same lines {@link askAgent.run} types); no-op before the workspace is up. */
+  /** Put the current selection's reference on the clipboard (the same lines {@link askAgent.run} sends); no-op before the workspace is up. */
   copy(): void {
-    handlers?.copy();
+    handler?.copy();
+  },
+  /** Every target the command can reach now; empty before the workspace is up. */
+  targets(): ChatTarget[] {
+    return handler?.targets() ?? [];
   },
   /** Make `next` the command; returns an uninstall function. */
-  install(next: AskHandlers): () => void {
-    handlers = next;
+  install(next: AskHandler): () => void {
+    handler = next;
     return () => {
-      if (handlers === next) handlers = null;
+      if (handler === next) handler = null;
     };
   },
 };
@@ -125,16 +141,36 @@ async function clipRenders(): Promise<ClipRenderInfo[]> {
 }
 
 /**
- * "Chat about this" and "Copy reference" for the current selection, both
+ * The "Chat about this" menu entry: with several targets (ADR 0025), a submenu names them and marks the one
+ * Cmd/Ctrl+L goes to; with one or none, it sends at once. Disabled with nothing selected.
+ */
+export function askMenuItem(): MenuItem {
+  const disabled = !hasSelection(selection.get());
+  const targets = askAgent.targets();
+  if (targets.length < 2) {
+    return { label: t.workspace.chatAboutThis, shortcut: ASK_SHORTCUT, disabled, run: () => askAgent.run() };
+  }
+  const next = shortcutTarget(targets, agentTargets.get().last);
+  return {
+    label: t.workspace.chatAboutThis,
+    shortcut: ASK_SHORTCUT,
+    disabled,
+    items: targets.map((target) => ({
+      label: target.label,
+      ...(target.id === next?.id ? { shortcut: ASK_SHORTCUT } : {}),
+      run: () => askAgent.run([], target),
+    })),
+  };
+}
+
+/**
+ * {@link askMenuItem} and "Copy reference" for the current selection, both
  * disabled with nothing selected. Menus that open through `contextMenu`
  * directly put these first, after selecting what was right-clicked.
  */
 export function askItems(): MenuItem[] {
   const disabled = !hasSelection(selection.get());
-  return [
-    { label: t.workspace.chatAboutThis, shortcut: ASK_SHORTCUT, disabled, run: () => askAgent.run() },
-    { label: t.workspace.copyReference, disabled, run: () => askAgent.copy() },
-  ];
+  return [askMenuItem(), { label: t.workspace.copyReference, disabled, run: () => askAgent.copy() }];
 }
 
 /**

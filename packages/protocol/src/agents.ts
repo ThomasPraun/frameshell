@@ -32,3 +32,17 @@ export function agentLabel(name: string): string | null {
 export function agentAuthor(label: string, session: string | null): string {
   return session ? `agent:${label}:${session}` : `agent:${label}`;
 }
+
+/**
+ * MCP client names (`clientInfo.name`) of agents that have their own label in app terminals, so one agent keeps one
+ * label: Claude Code 2.1.317 sends `claude-code` (read from its build, 2026-11-02; ADR 0025).
+ */
+const CLIENT_AGENTS: Readonly<Record<string, string>> = {
+  "claude-code": "claude",
+};
+
+/** Agent label of a client name (MCP `clientInfo.name`, `frameshell ask --as`): a known client's terminal label, else {@link agentLabel}. */
+export function clientAgentLabel(client: string): string | null {
+  const label = agentLabel(client);
+  return label === null ? null : (CLIENT_AGENTS[label] ?? label);
+}

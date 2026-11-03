@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AuthorSchema, agentAuthor, agentLabel, parseParams } from "../src/index.js";
+import { AuthorSchema, INBOX_WAIT_MAX_S, agentAuthor, agentLabel, clientAgentLabel, parseParams } from "../src/index.js";
 
 describe("agent labels", () => {
   it("turns a free-form agent name into a label", () => {
@@ -15,6 +15,28 @@ describe("agent labels", () => {
 
   it("caps a label at 32 characters", () => {
     expect(agentLabel("a".repeat(40))).toBe("a".repeat(32));
+  });
+});
+
+describe("client agent labels", () => {
+  it("give a known MCP client its app terminal label, and any other client its own", () => {
+    expect(clientAgentLabel("claude-code")).toBe("claude");
+    expect(clientAgentLabel("Claude-Code")).toBe("claude");
+    expect(clientAgentLabel("claude-ai")).toBe("claude-ai");
+    expect(clientAgentLabel("Codex")).toBe("codex");
+    expect(clientAgentLabel("")).toBeNull();
+  });
+});
+
+describe("inbox methods", () => {
+  const cwd = process.cwd();
+
+  it("take an optional target and a bounded wait", () => {
+    expect(parseParams("inbox.take", { cwd })).toEqual({ cwd });
+    expect(parseParams("inbox.wait", { cwd, target: "claude", timeout: 5 })).toEqual({ cwd, target: "claude", timeout: 5 });
+    expect(() => parseParams("inbox.wait", { cwd, timeout: INBOX_WAIT_MAX_S + 1 })).toThrow(/timeout/);
+    expect(() => parseParams("inbox.put", { cwd, target: "claude", lines: [] })).toThrow(/lines/);
+    expect(() => parseParams("target.register", { cwd, client: "claude-code", kind: "hook" })).toThrow(/kind/);
   });
 });
 

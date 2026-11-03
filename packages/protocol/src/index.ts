@@ -6,6 +6,7 @@ export * from "./people.js";
 export * from "./shoot.js";
 export * from "./models.js";
 export * from "./agents.js";
+export * from "./targets.js";
 export * from "./ui.js";
 export * from "./probe.js";
 export { assertSocketPathFits, resolveSocketPath } from "./socket-path.js";

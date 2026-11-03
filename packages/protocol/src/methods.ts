@@ -12,6 +12,15 @@ import {
 } from "./proposals.js";
 import { ModelIdSchema, ModelListResultSchema, RegisteredModelSchema } from "./models.js";
 import { ShootChangedSchema, ShootSceneStatusSchema, TakeInfoSchema } from "./shoot.js";
+import {
+  AgentClientSchema,
+  AgentTargetKindSchema,
+  AgentTargetSchema,
+  INBOX_WAIT_DEFAULT_S,
+  INBOX_WAIT_MAX_S,
+  InboxTakeResultSchema,
+  TargetChangedSchema,
+} from "./targets.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
@@ -166,7 +175,7 @@ const GcEntrySchema = z.object({
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
-        "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
+        "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
@@ -365,7 +374,7 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
@@ -373,6 +382,8 @@ const EventNameSchema = z
       "`people.changed`: a person was added, renamed or removed, a link was added or removed, or a suggestion " +
       "was dismissed (`people.json`). " +
       "`shoot.changed`: a take of a shoot script was added, discarded, chosen or compared, or deviations were accepted (`shoots/*.json`). " +
+      "`target.changed`: an agent target of the project registered or left, a reference was queued for it, or it read " +
+      "its references (ADR 0025). " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -998,10 +1009,10 @@ export const methods = {
     }),
   },
   "context.write": {
-    // The app's Ask agent only: it may not write under `.frameshell/` itself (the daemon is the only writer).
+    // The app's Chat about this only: it may not write under `.frameshell/` itself (the daemon is the only writer).
     internal: true,
     description:
-      "Write one Ask agent details file (ADR 0011) into `.frameshell/context/`: what a pick or a preview region points at " +
+      "Write one Chat about this details file (ADR 0011) into `.frameshell/context/`: what a pick or a preview region points at " +
       "(layers, element facts), for the agent to read from the reference line. Regenerable and gitignored; `gc` deletes " +
       "files older than 7 days. Replaces a file of the same name. Fails with OutsideProject when `.frameshell/context` leaves the project.",
     params: z.strictObject({
@@ -1351,6 +1362,86 @@ export const methods = {
       dir: z.string().describe("Project root."),
       events: z.array(EventNameSchema).describe("Events this connection still receives for `dir`."),
     }),
+  },
+  "target.register": {
+    description:
+      "Register this connection as an agent target of the enclosing project (ADR 0025) until it closes or " +
+      "`target.unregister`: the app's \"Chat about this\" can then send it references, read with `inbox.take` or " +
+      "`inbox.wait`. Every connection of one client on one project is one target with one inbox. Sent by `frameshell mcp` " +
+      "on MCP `initialize` and by `frameshell ask --wait`. Registering again (another client) moves the registration.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      client: AgentClientSchema,
+      title: z.string().min(1).max(200).optional().describe("Display name, e.g. MCP `clientInfo.title` (`Claude Code`)."),
+      kind: AgentTargetKindSchema,
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      target: AgentTargetSchema,
+    }),
+  },
+  "target.unregister": {
+    description: "This connection stops being an agent target of the enclosing project. Not registered: nothing happens.",
+    internal: true,
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({ dir: z.string().describe("Project root.") }),
+  },
+  "target.list": {
+    description: "Agent targets of the enclosing project (ADR 0025): who \"Chat about this\" can reach outside the app's terminals.",
+    internal: true,
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      targets: z.array(AgentTargetSchema).describe("Sorted by id."),
+    }),
+  },
+  "inbox.put": {
+    description:
+      "Queue a reference for agent target `target` of the enclosing project; it waits, in memory only, until the target " +
+      "reads it. Sent by the app's \"Chat about this\". Fails with InvalidParams naming the targets when `target` is unknown.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).describe("Target id, e.g. `claude`."),
+      lines: z.array(z.string()).min(1).describe("The reference's lines."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      target: AgentTargetSchema.describe("The target after queueing."),
+      read: z.boolean().describe("A reader waiting with `inbox.wait` took it at once: nothing was queued."),
+    }),
+  },
+  "inbox.take": {
+    description:
+      "Take the references the person sent you from the Frameshell app (right-click \"Chat about this\" or Cmd/Ctrl+L on " +
+      "clips, words, a range, a frame region, files…): each is `[frameshell] …` lines naming what they point at, then " +
+      "maybe their request. Call it when the person says \"this\", \"here\", \"what I sent\" or \"what I selected\" " +
+      "and no `[frameshell]` line is in their message, then resolve the lines before acting. Taking removes them; " +
+      "`references` is empty when nothing waits. Reads this client's inbox; `target` reads another one.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).optional().describe("Target id to read, e.g. `claude`. Default: the caller's own."),
+    }),
+    result: InboxTakeResultSchema,
+  },
+  "inbox.wait": {
+    description:
+      "Wait for the person to point at something in the Frameshell app, then take it as `inbox.take` does: when " +
+      "nothing waits, block until the person sends a reference or `timeout` seconds pass " +
+      `(default ${INBOX_WAIT_DEFAULT_S}, max ${INBOX_WAIT_MAX_S}); \`references\` is empty after a timeout. Fails with ` +
+      "InvalidParams when the caller is no target and names none.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).optional().describe("Target id to read, e.g. `claude`. Default: the caller's own."),
+      timeout: z
+        .number()
+        .positive()
+        .max(INBOX_WAIT_MAX_S)
+        .optional()
+        .describe(`Seconds to wait, at most ${INBOX_WAIT_MAX_S}. Default ${INBOX_WAIT_DEFAULT_S}.`),
+    }),
+    result: InboxTakeResultSchema,
   },
   "script.outline": {
     description:
@@ -2820,6 +2911,12 @@ export const notifications = {
       "A shoot file changed or a take was compared (ADR 0023). Sent to connections subscribed with `events.subscribe`. " +
       "Re-read with `shoot.status`.",
     params: ShootChangedSchema,
+  },
+  "target.changed": {
+    description:
+      "The project's agent targets (ADR 0025) changed: one registered or left, a reference was queued for one, or one " +
+      "read its references (`read`). Sent to connections subscribed with `events.subscribe`.",
+    params: TargetChangedSchema,
   },
   "ui.command": {
     description:

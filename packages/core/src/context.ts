@@ -5,7 +5,7 @@ import { writeTextAtomic } from "./fs-util.js";
 import type { GcClass } from "./gc.js";
 
 /**
- * Project-relative directory of "Ask agent" captures (SPEC §10, ADR 0011):
+ * Project-relative directory of "Chat about this" captures (SPEC §10, ADR 0011):
  * frame captures `f_<frame>.png`, pick details `e_<frame>_<n>.json` and photo
  * masks `m_<frame>_<x>_<y>_<k>.png` (ADR 0022: asset pixels, `k` = 1 to 3).
  * Regenerable, gitignored with the rest of `.frameshell/`.

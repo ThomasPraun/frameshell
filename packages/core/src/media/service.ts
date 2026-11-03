@@ -319,7 +319,7 @@ export class MediaService {
     removed.push(
       ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
       ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || peopleKeys.has(key) })),
-      // "Ask agent" captures: by age only, never by key.
+      // "Chat about this" captures: by age only, never by key.
       ...(await sweep({
         ...common,
         dir: CONTEXT_DIR,

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { classifyContext, writeContext } from "../src/context.js";
 import { tempDir } from "./helpers.js";
 
-// Seam under test: the Ask agent details files the daemon writes for the app (ADR 0011, `context.write`).
+// Seam under test: the Chat about this details files the daemon writes for the app (ADR 0011, `context.write`).
 
 describe("writeContext", () => {
   it("writes the details file under .frameshell/context, creating the folder", async () => {

@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { type DaemonConnection, ErrorCode, RpcError } from "@frameshell/protocol";
 
 /** Where the project of a call without `cwd` came from. */
@@ -53,6 +55,17 @@ export class ProjectResolver {
         hint: "Ask the user to open the project in the Frameshell app, or pass `cwd`: an absolute directory inside the project.",
       },
     );
+  }
+}
+
+/**
+ * True when `dir` or a parent holds `frameshell.json` (the project file core's `readEnclosingProject` finds), checked
+ * on disk so a server outside any project neither connects to nor starts the daemon to find out.
+ */
+export function insideProject(dir: string): boolean {
+  for (let at = resolve(dir); ; at = dirname(at)) {
+    if (existsSync(join(at, "frameshell.json"))) return true;
+    if (dirname(at) === at) return false;
   }
 }
 

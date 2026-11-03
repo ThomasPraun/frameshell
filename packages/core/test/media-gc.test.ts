@@ -206,7 +206,7 @@ describe("MediaService.gc", () => {
     for (const rel of orphan) expect(existsSync(join(root, rel))).toBe(true);
   });
 
-  it("deletes Ask agent captures older than 7 days, keeps recent ones and anything else in the folder", async () => {
+  it("deletes Chat about this captures older than 7 days, keeps recent ones and anything else in the folder", async () => {
     const { root, media } = await setup();
     plant(root, ".frameshell/context/f_0421.png", "png", 8 * DAY_MS);
     plant(root, ".frameshell/context/e_0421_1.json", "{}", 8 * DAY_MS);

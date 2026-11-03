@@ -9,3 +9,4 @@ export {
   spawnDetachedDaemon,
 } from "./daemon-client.js";
 export { MCP_USAGE, type McpIo, runMcp } from "./mcp-command.js";
+export { ASK_USAGE, type AskIo, formatReferences, runAsk } from "./ask-command.js";

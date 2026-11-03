@@ -1,5 +1,6 @@
 import type { Lang } from "./i18n/index.js";
 import type {
+  AgentTarget,
   AssetInfo,
   ClipRendersResult,
   HistoryDiffResult,
@@ -109,6 +110,9 @@ export interface TerminalInfo {
  * timeline may have changed meanwhile.
  */
 export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
+
+/** A change of the project's agent targets (daemon `target.changed`, ADR 0025) without the project root. */
+export type TargetsChange = Omit<EventParams<"target.changed">, "project">;
 
 /** A people change (daemon `people.changed`, ADR 0020) without the project root. */
 export type PeopleChange = Omit<EventParams<"people.changed">, "project">;
@@ -447,6 +451,15 @@ export interface FrameshellApi {
     /** Ask, then add Frameshell to Claude Desktop's config; resolves with the state after (unchanged if declined). */
     connectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
     disconnectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
+    /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
+    targets(): Promise<AgentTarget[]>;
+    /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
+    send(id: string, lines: string[]): Promise<MethodResult<"inbox.put">>;
+    /**
+     * Called on every {@link TargetsChange} of the window's project, or with null after a daemon reconnect, when
+     * changes may have been missed. Returns an unsubscribe function.
+     */
+    onTargets(listener: (change: TargetsChange | null) => void): () => void;
   };
   menu: {
     /** Called with each application menu command aimed at this window. Returns an unsubscribe function. */
@@ -795,6 +808,9 @@ export const Channel = {
   agentsClaudeDesktop: "agents:claude-desktop",
   agentsConnectClaudeDesktop: "agents:connect-claude-desktop",
   agentsDisconnectClaudeDesktop: "agents:disconnect-claude-desktop",
+  agentsTargets: "agents:targets",
+  agentsSend: "agents:send",
+  agentsTargetsChanged: "agents:targets-changed",
   projectCurrent: "project:current",
   projectOpenFolder: "project:open-folder",
   projectOpen: "project:open",

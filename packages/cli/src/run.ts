@@ -25,6 +25,7 @@ import {
   type TranscribeVerifyResult,
   resolveSocketPath,
 } from "@frameshell/protocol";
+import { ASK_FLAGS, runAsk } from "./ask-command.js";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
@@ -110,6 +111,11 @@ ${PEOPLE_USAGE}${SHOOT_USAGE}  skill update [--force]       Update the project's
                                linked clips, frontmatter (title, target_duration, aspect)
   script check <file>          Check a shoot script (\`shoot: true\`): scenes, lines with speaker, spoken
                                words and cues, speakers vs people.json, stale source, warnings
+  ask --take [--target id]     Print what the person sent from the app ("Chat about this") and remove it; nothing
+                               when nothing waits or the app is closed (never starts the daemon)
+  ask --wait [--as name] [--timeout s]
+                               Show this terminal in the app's "Chat about this" menu and block until the person
+                               sends something; exit 6 when nothing came. \`frameshell ask --help\` for more
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
                                files as resources. Register: claude mcp add frameshell -- frameshell mcp
   <plugin> <command> [args…]   Run a plugin-provided command
@@ -153,6 +159,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   ...SHOOT_FLAGS,
   ...MODEL_FLAGS,
   "skill update": ["force"],
+  ask: ASK_FLAGS,
   mcp: [],
 };
 
@@ -221,6 +228,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     io.stderr("`frameshell mcp` serves MCP over the process's own stdin/stdout; run the `frameshell` binary.\n");
     return 2;
   }
+  if (firstWord === "ask") return runAsk(argv.filter((_, index) => index !== argv.indexOf("ask")), io);
   let invocation: Invocation;
   let flags: Flags;
   if (firstWord !== undefined && !BUILTINS.has(firstWord)) {
