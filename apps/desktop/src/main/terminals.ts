@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import * as pty from "node-pty";
-import { agentCommands, agentOfCommand, foregroundCommand } from "./agent-detect.js";
+import { agentCommands, agentOfCommand } from "@frameshell/protocol";
+import { foregroundCommand } from "./agent-detect.js";
 import { OutputRing, type OutputRingLimits } from "./output-ring.js";
 import type { TerminalLaunch } from "./terminal-launch.js";
 

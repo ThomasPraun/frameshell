@@ -4,7 +4,7 @@ import { resolveSocketPath } from "@frameshell/protocol";
 import { serveStdio } from "@frameshell/mcp";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { CLI_VERSION } from "./run.js";
-import { resolveAgent } from "./session.js";
+import { resolveMcpAgent } from "./session.js";
 
 /** Usage of `frameshell mcp`. */
 export const MCP_USAGE = `Usage: frameshell mcp
@@ -30,7 +30,7 @@ export interface McpIo {
  * Run `frameshell mcp [--help]` until the MCP client disconnects. Operations
  * are attributed to `FRAMESHELL_SESSION`, else to a session id made for this
  * server, so they group into transactions the model can revert;
- * `FRAMESHELL_AGENT` names the agent they are journaled under.
+ * `FRAMESHELL_AGENT` names the agent they are journaled under, else the MCP client does (`agent:claude:<session>` for Claude Code).
  * Returns the exit code.
  */
 export async function runMcp(argv: string[], io: McpIo): Promise<number> {
@@ -48,12 +48,12 @@ export async function runMcp(argv: string[], io: McpIo): Promise<number> {
     version: CLI_VERSION,
     stdin: io.stdin,
     stdout: io.stdout,
-    connect: () =>
+    connect: (mcpClient) =>
       connectOrStartDaemon({
         socketPath: resolveSocketPath(io.env),
         client: `mcp/${CLI_VERSION}`,
         session,
-        agent: resolveAgent(io.env),
+        agent: resolveMcpAgent(io.env, mcpClient),
         env: io.env,
       }),
   });

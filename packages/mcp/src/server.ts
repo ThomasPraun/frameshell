@@ -36,9 +36,11 @@ export interface McpServerOptions {
   cwd: string;
   /**
    * Open a handshaken daemon connection. Called lazily on the first tool call
-   * or resource read, and again after the connection drops.
+   * or resource read, and again after the connection drops. `client` is the
+   * MCP client `initialize` named, so the handshake can journal its operations
+   * under that agent (ADR 0025 decision 6).
    */
-  connect: () => Promise<DaemonConnection>;
+  connect: (client: McpClient) => Promise<DaemonConnection>;
   /** Reported to MCP clients as the server version. */
   version?: string;
 }
@@ -79,7 +81,9 @@ export function createMcpServer(options: McpServerOptions): Server {
     for (const uri of uris) if (subscribed.has(uri)) server.sendResourceUpdated({ uri }).catch(() => {});
     if (listChanged) server.sendResourceListChanged().catch(() => {});
   };
-  const link = new DaemonLink(options.connect, {
+  /** The MCP client (`initialize`), registered as the agent target of the default project (ADR 0025). */
+  let client: McpClient = null;
+  const link = new DaemonLink(() => options.connect(client), {
     onTimelineChanged: ({ timeline }) => {
       const isNew = !known.has(timeline);
       known.add(timeline);
@@ -92,8 +96,6 @@ export function createMcpServer(options: McpServerOptions): Server {
   });
   const resolver = new ProjectResolver(cwd, () => link.get());
   let current: string | null = null;
-  /** The MCP client (`initialize`), registered as the agent target of the default project (ADR 0025). */
-  let client: AgentClient | null = null;
   /** The default project now; a switch (the user moved to another window) re-announces every resource. */
   const resolve = async (): Promise<ResolvedProject> => {
     const project = await resolver.resolve();
@@ -308,10 +310,13 @@ class DaemonUnreachable extends Error {
 }
 
 /** MCP client as `initialize` named it. */
-interface AgentClient {
+export interface AgentClient {
   name: string;
   title?: string;
 }
+
+/** The MCP client of a server, null until `initialize`. */
+export type McpClient = AgentClient | null;
 
 /** What a {@link DaemonLink} tells its owner. */
 interface LinkEvents {

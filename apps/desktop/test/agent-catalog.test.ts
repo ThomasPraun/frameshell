@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_CATALOG, detectAgents, extraAgentDirs, findCommand, startCommand } from "../src/main/agent-catalog.js";
-import { agentOfCommand } from "../src/main/agent-detect.js";
+import { agentOfCommand } from "@frameshell/protocol";
 
 describe("agent catalog", () => {
   it("offers agents that terminal detection labels with the same id", () => {

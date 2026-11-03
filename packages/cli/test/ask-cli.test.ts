@@ -35,7 +35,7 @@ async function setup() {
   connections.push(app);
   const dir = join(root, "talk");
   await app.request("project.init", { dir });
-  const env = { FRAMESHELL_SOCKET: socketPath, FRAMESHELL_DATA_DIR: dirs.dataDir, FRAMESHELL_CONFIG_DIR: dirs.configDir, FRAMESHELL_SESSION: "sh-test" };
+  const env = { FRAMESHELL_SOCKET: socketPath, FRAMESHELL_DATA_DIR: dirs.dataDir, FRAMESHELL_CONFIG_DIR: dirs.configDir, FRAMESHELL_SESSION: "sh-test", ...(process.env["FRAMESHELL_AGENT_COMMANDS"] ? { FRAMESHELL_AGENT_COMMANDS: process.env["FRAMESHELL_AGENT_COMMANDS"] } : {}) };
   const ask = async (argv: string[], extra: NodeJS.ProcessEnv = {}) => {
     let stdout = "";
     let stderr = "";

@@ -13,6 +13,7 @@ import { createMcpServer } from "../src/index.js";
 let calls: { method: string; params: Record<string, unknown> }[] = [];
 let active: string | null = null;
 let connects = 0;
+let connectedAs: unknown[] = [];
 let client: Client | undefined;
 
 function fakeDaemon(projects: string[]): DaemonConnection {
@@ -37,10 +38,12 @@ function fakeDaemon(projects: string[]): DaemonConnection {
 async function connect(cwd: string, projects: string[], info = { name: "claude-code", title: "Claude Code", version: "2.1.317" }): Promise<Client> {
   calls = [];
   connects = 0;
+  connectedAs = [];
   const server = createMcpServer({
     cwd,
-    connect: async () => {
+    connect: async (mcpClient) => {
       connects++;
+      connectedAs.push(mcpClient);
       return fakeDaemon(projects);
     },
   });
@@ -85,6 +88,13 @@ describe("the MCP server as an agent target", () => {
       { method: "target.register", params: { cwd: "/videos/teaser", client: "claude-ai", kind: "mcp" } },
       { method: "target.unregister", params: { cwd: "/videos/launch" } },
     ]);
+  });
+
+  it("hands the daemon connection the client's name, so History can name the agent (ADR 0025 decision 6)", async () => {
+    active = "/videos/launch";
+    await connect("/", ["/videos/launch"]);
+    await client!.callTool({ name: "inbox_take", arguments: {} });
+    expect(connectedAs).toEqual([{ name: "claude-code", title: "Claude Code" }]);
   });
 
   it("offers `inbox_take` and `inbox_wait`, and no tool for the app's side", async () => {
