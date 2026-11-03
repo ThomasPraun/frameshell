@@ -26,7 +26,7 @@ interface Tab {
   name: string | null;
 }
 
-/** How long the Ask agent target's tab flashes, ms. */
+/** How long the Chat about this target's tab flashes, ms. */
 const FLASH_MS = 1200;
 /** The terminal font: cells are measured with it, so it must be loaded in the view's document first. */
 const FONT_FAMILY = '"JetBrains Mono Variable", Menlo, Consolas, "DejaVu Sans Mono", monospace';
@@ -72,10 +72,10 @@ function useTerminalRouter() {
   }, []);
 }
 
-/** What "Ask agent" needs of the terminals. */
+/** What "Chat about this" needs of the terminals. */
 export interface AgentTerminal {
   /**
-   * Type `lines` at the prompt of the Ask agent target (ADR 0012), without
+   * Type `lines` at the prompt of the Chat about this target (ADR 0012), without
    * pressing Enter (see `agentInput`): the last focused terminal running an
    * agent, in any window of the project; else the last focused terminal. Its
    * tab flashes; its window is never raised. A docked target becomes the

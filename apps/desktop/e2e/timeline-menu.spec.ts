@@ -71,7 +71,8 @@ test("a clip's menu lists the edit commands with their keys, and Split splits it
   await playheadTo(7);
   await rightClick(6, "v1");
   await expect(menu().getByRole("menuitem")).toHaveText([
-    /Ask agent/,
+    /Chat about this/,
+    "Copy reference",
     "Split at playheadS",
     "Trim start to playhead[",
     "Trim end to playhead]",
@@ -126,7 +127,7 @@ const head = (track: string) => page.locator(`.track-head[data-track="${track}"]
 
 test("a track header's menu renames the track in place", async () => {
   await head("v2").click({ button: "right" });
-  await expect(menu().getByRole("menuitem")).toHaveText(["Rename track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
+  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
   await menu().getByRole("menuitem", { name: "Rename track" }).click();
   const input = page.getByTestId("track-rename-input");
   await expect(input).toBeFocused();

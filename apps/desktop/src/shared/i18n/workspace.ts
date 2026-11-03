@@ -1,4 +1,4 @@
-// Project window shell: layout, status bar, sidebar, detached panels, drops, Ask agent, agent navigation notices
+// Project window shell: layout, status bar, sidebar, detached panels, drops, Chat about this, agent navigation notices
 // (Workspace, StatusBar, Sidebar, DetachControls, file-drop, ask/ask-agent, ui-link).
 
 const en = {
@@ -9,8 +9,10 @@ const en = {
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
-  askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.",
-  askAgent: "Ask agent",
+  askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to chat about.",
+  chatAboutThis: "Chat about this",
+  copyReference: "Copy reference",
+  referenceCopied: "Reference copied.",
   frameNotCaptured: (reason: string) => `Frame not captured: ${reason}`,
   detailsNotSaved: (reason: string) => `Details not saved: ${reason}`,
   /** Title of a detached panel's window. */
@@ -75,8 +77,10 @@ const es: typeof en = {
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,
   askNothing:
-    "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para preguntarle al agente.",
-  askAgent: "Preguntar al agente",
+    "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para hablar de ello.",
+  chatAboutThis: "Hablar de esto",
+  copyReference: "Copiar referencia",
+  referenceCopied: "Referencia copiada.",
   frameNotCaptured: (reason) => `No se capturó el fotograma: ${reason}`,
   detailsNotSaved: (reason) => `No se guardaron los detalles: ${reason}`,
   windowTitle: (panel, project) => `${panel} — ${project}`,

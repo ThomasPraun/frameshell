@@ -263,7 +263,7 @@ function KeyControl({
 /**
  * A generated clip's element adjustments (ADR 0021), one row each: selector,
  * move and scale, a reset, and notes for a selector that may not follow code
- * edits (with Ask agent for an id) or that matches nothing at the shown frame
+ * edits (with Chat about this for an id) or that matches nothing at the shown frame
  * (`counts`, from the clip's live page while its elements are edited).
  */
 function ElementAdjustments({

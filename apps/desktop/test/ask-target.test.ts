@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { askTarget } from "../src/renderer/src/ask/ask-target.js";
 
-// Seam under test: which terminal "Ask agent" types into (ADR 0012), whatever window each terminal is in.
+// Seam under test: which terminal "Chat about this" types into (ADR 0012), whatever window each terminal is in.
 
 const tab = (key: number, id: string | null, exitCode: number | null = null) => ({ key, info: id ? { id } : null, exitCode });
 

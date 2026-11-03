@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { captureContextFrame } from "../src/main/context-frames.js";
 import type { DaemonRequest } from "../src/main/timeline-editor.js";
 
-// Seam under test: main's "Ask agent" region capture (#49): which daemon calls it makes and the
+// Seam under test: main's "Chat about this" region capture (#49): which daemon calls it makes and the
 // project-relative path it answers. The `frame` method itself (export compiler) is tested in core.
 
 describe("context frame capture", () => {

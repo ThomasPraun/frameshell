@@ -25,7 +25,7 @@ const PRIVATE_MODES = /\x1b\[\?([\d;]+)([hl])/g;
 /**
  * Recent output of one terminal, oldest dropped first. Trims at a line start
  * when it can, so a replay starts on a whole line. Modes the program set in
- * output already dropped (bracketed paste above all: an Ask agent reference
+ * output already dropped (bracketed paste above all: an Chat about this reference
  * must not submit itself line by line) are replayed first, as they stood
  * where the kept output starts.
  */

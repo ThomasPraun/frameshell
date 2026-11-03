@@ -51,7 +51,7 @@ test("a file's menu opens it, copies its path, and moves it to the trash after a
   await page.getByRole("treeitem", { name: "exports", exact: true }).getByRole("button").first().click();
   await row(EXPORT).click({ button: "right" });
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem")).toHaveText([/Ask agent/, "Open", /Finder|File Explorer|file manager/, "Copy path", `Move to ${BIN}`]);
+  await expect(menu.getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Open", /Finder|File Explorer|file manager/, "Copy path", `Move to ${BIN}`]);
   await expect(menu.getByRole("separator")).toHaveCount(2);
 
   await menu.getByRole("menuitem", { name: "Copy path" }).click();
@@ -80,8 +80,8 @@ test("the project's own files stay: a message box says why", async () => {
   expect(existsSync(join(box.projectDir, "frameshell.json"))).toBe(true);
 });
 
-test("a folder's menu has the place commands only", async () => {
+test("a folder's menu offers Chat about this and the place commands", async () => {
   await page.getByRole("treeitem", { name: "scripts", exact: true }).getByRole("button").first().click({ button: "right" });
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText([/Finder|File Explorer|file manager/, "Copy path", `Move to ${BIN}`]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", /Finder|File Explorer|file manager/, "Copy path", `Move to ${BIN}`]);
   await page.keyboard.press("Escape");
 });

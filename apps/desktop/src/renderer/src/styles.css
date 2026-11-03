@@ -2780,7 +2780,7 @@ button.track-head:focus-visible {
   font-style: italic;
 }
 
-/* The Ask agent target: its tab, or its window's title, flashes where the reference went. */
+/* The Chat about this target: its tab, or its window's title, flashes where the reference went. */
 .terminal-tab.is-flashing,
 .terminal-window-title.is-flashing {
   animation: ask-target-flash 400ms ease-in-out 3;
@@ -2851,7 +2851,7 @@ button.track-head:focus-visible {
   opacity: 1;
 }
 
-/* ---------- Ask agent (#49) ---------- */
+/* ---------- Chat about this (#49) ---------- */
 
 /* Context menu: a raised graphite slab; the focused entry takes the amber bar the explorer uses for "active". */
 .context-menu {
@@ -2906,7 +2906,7 @@ button.track-head:focus-visible {
   color: var(--text-muted);
 }
 
-/* Explorer files picked for "Ask agent": a quieter mark than the open file's bar. */
+/* Explorer files picked for "Chat about this": a quieter mark than the open file's bar. */
 .tree-row.is-picked {
   background: rgba(227, 165, 60, 0.08);
 }

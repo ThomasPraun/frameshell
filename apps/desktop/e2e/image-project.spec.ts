@@ -76,10 +76,10 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
     await expect(layers.locator(".layers-label")).toHaveText(["logo", "poster"]);
 
-    // Right-click offers the row buttons' commands after Ask agent (#420); the top layer cannot move up.
+    // Right-click offers the row buttons' commands after Chat about this (#420); the top layer cannot move up.
     await layers.locator(".layers-row", { hasText: "logo" }).click({ button: "right" });
     const menu = page.getByRole("menu");
-    await expect(menu.getByRole("menuitem")).toHaveText([/Ask agent/, "Rename", "Move up", "Move down", "Delete layer"]);
+    await expect(menu.getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename", "Move up", "Move down", "Delete layer"]);
     await expect(menu.getByRole("menuitem", { name: "Move up" })).toBeDisabled();
     await menu.getByRole("menuitem", { name: "Move down" }).click();
     await expect(layers.locator(".layers-label")).toHaveText(["poster", "logo"]);

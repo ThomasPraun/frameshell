@@ -58,8 +58,8 @@ export function HistoryPanel() {
   }, []);
 
   /**
-   * Right-click on a transaction or operation: select it (its diff shows on the timeline), then Ask agent, Revert and,
-   * for a transaction, show or hide its operations. Opens once the selection is in, so Ask agent names the entry.
+   * Right-click on a transaction or operation: select it (its diff shows on the timeline), then Chat about this, Revert and,
+   * for a transaction, show or hide its operations. Opens once the selection is in, so Chat about this names the entry.
    */
   const openMenu = async (event: MouseEvent, target: string, options: { aborted: boolean; toggle?: { open: boolean; run: () => void } }) => {
     event.preventDefault();

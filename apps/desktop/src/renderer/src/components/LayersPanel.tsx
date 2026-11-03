@@ -21,7 +21,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
  * The timeline's place in an image project (ADR 0017): its video tracks as
  * layers, topmost first. A click selects the layer's clip (the inspector,
  * which also replaces its image, and the preview handles follow), double-click
- * renames, the row buttons move or delete it, and right-click offers Ask agent and the same commands.
+ * renames, the row buttons move or delete it, and right-click offers Chat about this and the same commands.
  * Every change is a `ui` edit, undoable from here as from the timeline.
  */
 export function LayersPanel({

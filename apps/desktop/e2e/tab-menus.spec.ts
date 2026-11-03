@@ -27,7 +27,7 @@ test("an editor tab's menu closes the other tabs and offers the file commands", 
   await page.getByRole("treeitem", { name: "frameshell.json" }).getByRole("button").click();
   await expect(fileTabs()).toHaveCount(2);
   await fileTabs().filter({ hasText: "intro.md" }).click({ button: "right" });
-  await expect(menu().getByRole("menuitem")).toHaveText(["Close", "Close others", "Close all", /Finder|File Explorer|file manager/, "Copy path"]);
+  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Close", "Close others", "Close all", /Finder|File Explorer|file manager/, "Copy path"]);
   await menu().getByRole("menuitem", { name: "Close others" }).click();
   await expect(fileTabs()).toHaveText(["intro.md"]);
 

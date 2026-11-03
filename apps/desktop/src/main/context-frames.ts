@@ -1,7 +1,7 @@
 import { join, relative, sep } from "node:path";
 import type { DaemonRequest } from "./timeline-editor.js";
 
-/** Where "Ask agent" frame captures go (SPEC §10): regenerable, gitignored with the rest of `.frameshell/`. */
+/** Where "Chat about this" frame captures go (SPEC §10): regenerable, gitignored with the rest of `.frameshell/`. */
 export const CONTEXT_DIR = [".frameshell", "context"] as const;
 
 /** Timeline the preview plays and regions are drawn on. */
