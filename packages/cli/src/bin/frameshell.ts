@@ -8,7 +8,7 @@ const stderr = (text: string) => void process.stderr.write(text);
 if (argv[0] === "ask") {
   // Prompt hooks run it on every message: load only what it needs (ADR 0025).
   const { runAsk } = await import("../ask-command.js");
-  process.exitCode = await runAsk(argv.slice(1), { stdout: (text) => process.stdout.write(text), stderr, cwd: process.cwd(), env: process.env });
+  process.exitCode = await runAsk(argv.slice(1), { stdout: (text) => process.stdout.write(text), stderr, cwd: process.cwd(), env: process.env, stdin: process.stdin });
 } else if (argv[0] === "mcp") {
   const { runMcp } = await import("../mcp-command.js");
   // Long-lived: stdout carries MCP messages only.

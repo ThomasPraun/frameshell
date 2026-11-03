@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AgentChoice, ClaudeDesktopStatus } from "../../../shared/api.js";
+import type { AgentChoice, ClaudeCodeStatus, ClaudeDesktopStatus } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 
 /** Remembered across projects and restarts: a per-viewer convenience, so browser storage. */
@@ -44,12 +44,14 @@ export function AgentGuide({
   const [hidden, setHidden] = useState(readHidden);
   const [choices, setChoices] = useState<AgentChoice[] | null>(null);
   const [claude, setClaude] = useState<ClaudeDesktopStatus | null>(null);
+  const [code, setCode] = useState<ClaudeCodeStatus | null>(null);
   const [installTyped, setInstallTyped] = useState(false);
   const [opened, setOpened] = useState(false);
 
   const detect = useCallback(() => {
     void window.frameshell.agents.detect().then(setChoices);
     void window.frameshell.agents.claudeDesktop().then(setClaude);
+    void window.frameshell.agents.claudeCode().then(setCode);
   }, []);
   useEffect(detect, [detect]);
 
@@ -153,6 +155,19 @@ export function AgentGuide({
           ) : (
             <button className="link" onClick={() => void window.frameshell.agents.connectClaudeDesktop().then(setClaude)}>
               {t.agents.connectClaude}
+            </button>
+          ))}
+        {code?.installed &&
+          (code.connected ? (
+            <span>
+              {t.agents.codeConnected}{" "}
+              <button className="link" onClick={() => void window.frameshell.agents.disconnectClaudeCode().then(setCode)}>
+                {t.agents.disconnectCode}
+              </button>
+            </span>
+          ) : (
+            <button className="link" onClick={() => void window.frameshell.agents.connectClaudeCode().then(setCode)}>
+              {t.agents.connectCode}
             </button>
           ))}
         <button className="link" onClick={() => void window.frameshell.agents.installCli()}>

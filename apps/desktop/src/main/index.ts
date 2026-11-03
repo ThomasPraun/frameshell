@@ -38,6 +38,7 @@ import {
   type LiveClipPage,
   type MenuCommand,
   type AgentChoice,
+  type ClaudeCodeStatus,
   type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
@@ -75,6 +76,14 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import {
+  claudeCodeHookCommand,
+  claudeCodePaths,
+  claudeCodeServer,
+  claudeCodeState,
+  connectClaudeCode,
+  disconnectClaudeCode,
+} from "@frameshell/cli";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
 import {
   InvalidConfigError,
@@ -1275,6 +1284,9 @@ function registerIpc(): void {
   ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
   ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
   ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
+  ipcMain.handle(Channel.agentsClaudeCode, () => claudeCodeStatus());
+  ipcMain.handle(Channel.agentsConnectClaudeCode, (event) => changeClaudeCode(true, event.sender));
+  ipcMain.handle(Channel.agentsDisconnectClaudeCode, (event) => changeClaudeCode(false, event.sender));
   ipcMain.handle(Channel.agentsTargets, (event) =>
     outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
   );
@@ -1817,6 +1829,58 @@ async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promi
     await box({ type: "error", message: said.failed, detail });
   }
   return claudeDesktopStatus();
+}
+
+/** Frameshell's server and prompt hook in Claude Code's user settings, run through the app's stable shim (ADR 0025). */
+const claudeCodeSetup = { command: cliShim, platform: process.platform };
+
+async function claudeCodeStatus(): Promise<ClaudeCodeStatus> {
+  const paths = claudeCodePaths(homedir(), process.env);
+  const { installed, server, hook, connected } = await claudeCodeState(paths, claudeCodeSetup).catch(() => ({
+    installed: true,
+    server: false,
+    hook: false,
+    connected: false,
+  }));
+  return { installed, server, hook, connected };
+}
+
+/** Add (after showing both entries) or remove Frameshell's MCP server and prompt hook in Claude Code's user settings. */
+async function changeClaudeCode(connect: boolean, sender: WebContents): Promise<ClaudeCodeStatus> {
+  const said = text.agents.codeDialog;
+  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
+  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  const paths = claudeCodePaths(homedir(), process.env);
+  try {
+    if (connect) {
+      if (!(await claudeCodeStatus()).installed) {
+        await box({ type: "info", message: said.notInstalled });
+        return claudeCodeStatus();
+      }
+      const server = JSON.stringify({ mcpServers: { [SERVER_KEY]: claudeCodeServer(claudeCodeSetup) } }, null, 2);
+      const hook = claudeCodeHookCommand(claudeCodeSetup);
+      const { response } = await box({
+        type: "question",
+        message: said.connect,
+        detail: said.connectDetail(paths.mcp, server, paths.settings, hook),
+        buttons: [said.connectButton, said.cancel],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response !== 0) return claudeCodeStatus();
+      const backups = await connectClaudeCode(paths, claudeCodeSetup);
+      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
+      await box({ type: "info", message: said.connected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
+    } else {
+      const backups = await disconnectClaudeCode(paths);
+      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
+      await box({ type: "info", message: said.disconnected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
+    }
+  } catch (error) {
+    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
+    await box({ type: "error", message: said.failed, detail });
+  }
+  return claudeCodeStatus();
 }
 
 /**

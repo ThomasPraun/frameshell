@@ -31,7 +31,23 @@ const en = {
   connectClaude: "Connect Claude Desktop",
   disconnectClaude: "Disconnect Claude Desktop",
   claudeConnected: "Claude Desktop is connected",
+  connectCode: "Connect Claude Code",
+  disconnectCode: "Disconnect Claude Code",
+  codeConnected: "Claude Code is connected",
   installCli: "Install the 'frameshell' command for other terminals",
+  codeDialog: {
+    connect: "Connect Claude Code to Frameshell?",
+    connectDetail: (mcpFile: string, server: string, settingsFile: string, hook: string) =>
+      `Frameshell adds this server to ${mcpFile}:\n\n${server}\n\nand this hook, which runs on every message you send in Claude Code, to ${settingsFile}:\n\n${hook}\n\nThe hook hands Claude Code what you send with "Chat about this"; it prints nothing outside a Frameshell project or with the app closed. Everything else in both files stays as it is, and each file is backed up first.`,
+    connectButton: "Connect",
+    cancel: "Cancel",
+    connected: "Claude Code is connected. Restart your running Claude Code sessions to use Frameshell.",
+    backups: (files: string) => `Backup of the previous settings:\n${files}`,
+    disconnected: "Frameshell was removed from Claude Code. Restart your running Claude Code sessions to apply it.",
+    notInstalled: "Claude Code is not installed on this computer.",
+    failed: "Could not change Claude Code's settings.",
+    invalid: (file: string) => `${file} is not valid JSON, or its hooks are not a list. Fix or remove it, then connect again.`,
+  },
   dialog: {
     connect: "Connect Claude Desktop to Frameshell?",
     connectDetail: (file: string, entry: string) =>
@@ -74,7 +90,23 @@ const es: typeof en = {
   connectClaude: "Conectar Claude Desktop",
   disconnectClaude: "Desconectar Claude Desktop",
   claudeConnected: "Claude Desktop está conectado",
+  connectCode: "Conectar Claude Code",
+  disconnectCode: "Desconectar Claude Code",
+  codeConnected: "Claude Code está conectado",
   installCli: "Instalar el comando 'frameshell' para otras terminales",
+  codeDialog: {
+    connect: "¿Conectar Claude Code con Frameshell?",
+    connectDetail: (mcpFile, server, settingsFile, hook) =>
+      `Frameshell agrega este servidor a ${mcpFile}:\n\n${server}\n\ny este hook, que se ejecuta con cada mensaje que envías en Claude Code, a ${settingsFile}:\n\n${hook}\n\nEl hook le entrega a Claude Code lo que envías con "Hablar de esto"; no imprime nada fuera de un proyecto de Frameshell ni con la app cerrada. Todo lo demás de ambos archivos queda como está y antes se guarda una copia de cada uno.`,
+    connectButton: "Conectar",
+    cancel: "Cancelar",
+    connected: "Claude Code está conectado. Reinicia tus sesiones de Claude Code abiertas para usar Frameshell.",
+    backups: (files) => `Copia de la configuración anterior:\n${files}`,
+    disconnected: "Se quitó Frameshell de Claude Code. Reinicia tus sesiones de Claude Code abiertas para aplicarlo.",
+    notInstalled: "Claude Code no está instalado en esta computadora.",
+    failed: "No se pudo cambiar la configuración de Claude Code.",
+    invalid: (file) => `${file} no es un JSON válido, o sus hooks no son una lista. Corrígelo o bórralo y vuelve a conectar.`,
+  },
   dialog: {
     connect: "¿Conectar Claude Desktop con Frameshell?",
     connectDetail: (file, entry) =>

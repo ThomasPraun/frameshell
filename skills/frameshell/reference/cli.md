@@ -84,6 +84,7 @@ Accepting and rejecting a proposal is the person's, in the app: there is no comm
 | Command | Use |
 |---|---|
 | `frameshell ask --take [--target id]` | Print the `[frameshell]` lines the person sent from the app ("Chat about this") and remove them; a blank line between references. Prints nothing (exit 0) when none waits, outside a project, or when the app's daemon is not running: it never starts one. Default target: the agent you run under; see [selection.md](selection.md). |
+| `frameshell setup claude-code [--status \| --remove] [--command path]` | Connect Claude Code at user level: the MCP server and a Claude Code prompt hook (`frameshell ask --take --target claude --hook`) so what the person sends from the app reaches their next message. Only Frameshell's entries change, with a backup; safe to repeat. Suggest it when the person uses Claude Code and "what I sent" does not arrive; do not run it unasked. |
 | `frameshell ask --wait [--as name] [--timeout s]` | Show this terminal in the app's "Chat about this" menu (as `--as`, default `FRAMESHELL_AGENT` or `terminal`) and block until the person sends something (default 300 s, max 3600). Exit 6 when nothing came. |
 
 `status` lists open transactions; one left open by a closed shell is ended with `FRAMESHELL_SESSION=<its session> frameshell tx commit` (or `tx abort`).
