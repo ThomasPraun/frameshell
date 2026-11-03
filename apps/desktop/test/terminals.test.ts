@@ -1,11 +1,13 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { terminalLaunch } from "../src/main/terminal-launch.js";
 import { TerminalManager, type TerminalManagerOptions } from "../src/main/terminals.js";
 
 // Real ptys running the user's real login shell: the same path the app takes.
+// vitest.config.ts turns every known agent off for the CLI's parent-process walk; detection here needs them on.
+vi.stubEnv("FRAMESHELL_AGENT_COMMANDS", "");
 const managers: TerminalManager[] = [];
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.killAll()));

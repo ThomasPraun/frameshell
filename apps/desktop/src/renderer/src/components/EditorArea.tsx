@@ -297,7 +297,7 @@ export function EditorArea({
       event.clientY,
       [
         ...(file ? askItems() : []),
-        { label: t.editor.close, run: () => close(path, view) },
+        { label: t.editor.close, separated: file, run: () => close(path, view) },
         { label: t.editor.closeOthers, disabled: tabs.length < 2, run: () => closeAll(path) },
         { label: t.editor.closeAll, run: () => closeAll(null) },
         ...(file ? [revealItem(path, true), copyPathItem(path)] : []),

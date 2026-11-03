@@ -1,6 +1,6 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
@@ -48,8 +48,9 @@ function saved(id: string): Record<string, unknown> {
   return timeline.tracks.flatMap((track: { clips: { id: string }[] }) => track.clips).find((clip: { id: string }) => clip.id === id);
 }
 
-/** Journal lines: operation and author, oldest first. */
+/** Journal lines: operation and author, oldest first. The daemon appends after it saves the timeline, so poll it. */
 function journaled(): { op: string; author: string }[] {
+  if (!existsSync(journal)) return [];
   return readFileSync(journal, "utf8")
     .split("\n")
     .filter(Boolean)
@@ -67,11 +68,11 @@ test("right-clicking a cut adds a dissolve, and removes it again", async () => {
   await expect(lanes()).toHaveAttribute("data-clips", "2");
   await rightClickEdge(4, "Add dissolve");
   await expect.poll(() => saved("c_two")["dissolve"]).toBe(0.5);
-  expect(journaled()).toEqual([{ op: "transition.set", author: "ui" }]);
+  await expect.poll(journaled).toEqual([{ op: "transition.set", author: "ui" }]);
 
   await rightClickEdge(4, "Remove transition");
   await expect.poll(() => saved("c_two")["dissolve"]).toBeUndefined();
-  expect(journaled().at(-1)).toEqual({ op: "transition.remove", author: "ui" });
+  await expect.poll(() => journaled().at(-1)).toEqual({ op: "transition.remove", author: "ui" });
 });
 
 test("right-clicking a cut adds a fade as two halves; the inspector reads and edits it", async () => {
