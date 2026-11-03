@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { agentLabel } from "@frameshell/protocol";
+import { agentCommands, agentLabel, agentOfCommand, clientAgentLabel } from "@frameshell/protocol";
 
 /** The process that ran the CLI: the user's or agent's shell. */
 export interface ShellProbe {
@@ -9,7 +9,12 @@ export interface ShellProbe {
   ppid: number;
   /** Opaque start time of process `pid`, or null when unknown. Tells a shell apart from a later one reusing its pid. */
   startTime(pid: number): string | null;
+  /** Parent pid and command line of process `pid`, or null when unknown (gone, Windows). */
+  process(pid: number): { ppid: number; argv: string[] } | null;
 }
+
+/** Ancestors looked at for an agent: a shell, a harness's tool runner and the agent itself are well within it. */
+const MAX_ANCESTORS = 8;
 
 /**
  * Terminal session the CLI reports in its handshake (SPEC §6.2):
@@ -29,19 +34,48 @@ export function resolveSession(env: NodeJS.ProcessEnv, probe: ShellProbe = curre
 }
 
 /**
- * Agent label the CLI reports in its handshake (SPEC §6.2), from
- * `FRAMESHELL_AGENT`: unset = undefined (the app's detection of the terminal
- * decides); empty or unusable = null (not an agent, overriding detection).
+ * Agent label the CLI (and MCP server) reports in its handshake (SPEC §6.2).
+ * `FRAMESHELL_AGENT` decides when set: empty or unusable = null (not an agent,
+ * overriding detection). Otherwise the agent found in the parent process chain
+ * (`claude` → its shell → `frameshell`), by the names app terminals detect
+ * (`agentCommands`); undefined when none, which leaves it to the app's
+ * detection of the terminal.
  */
-export function resolveAgent(env: NodeJS.ProcessEnv): string | null | undefined {
+export function resolveAgent(env: NodeJS.ProcessEnv, probe: ShellProbe = currentShell()): string | null | undefined {
   const named = env["FRAMESHELL_AGENT"];
-  if (named === undefined) return undefined;
-  return agentLabel(named);
+  if (named !== undefined) return agentLabel(named);
+  const commands = agentCommands(env);
+  const seen = new Set<number>();
+  for (let pid = probe.ppid, depth = 0; pid > 1 && !seen.has(pid) && depth < MAX_ANCESTORS; depth++) {
+    seen.add(pid);
+    const found = probe.process(pid);
+    if (found === null) return undefined;
+    const label = agentOfCommand(found.argv, commands);
+    if (label !== null) return label;
+    pid = found.ppid;
+  }
+  return undefined;
+}
+
+/**
+ * Agent label of the MCP server: `FRAMESHELL_AGENT` as {@link resolveAgent}, else the label of the MCP client
+ * (`initialize` `clientInfo.name`, ADR 0025 decision 6), else what {@link resolveAgent} finds in the process chain.
+ */
+export function resolveMcpAgent(
+  env: NodeJS.ProcessEnv,
+  client: { name: string } | null,
+  probe: ShellProbe = currentShell(),
+): string | null | undefined {
+  if (env["FRAMESHELL_AGENT"] === undefined && client) {
+    const label = clientAgentLabel(client.name);
+    if (label !== null) return label;
+  }
+  return resolveAgent(env, probe);
 }
 
 /** {@link ShellProbe} of this process. */
 export function currentShell(): ShellProbe {
-  return { ppid: process.ppid, startTime: processStartTime };
+  return { ppid: process.ppid, startTime: processStartTime, process: processInfo };
 }
 
 /** Start time from `/proc` on Linux, `ps` on other Unixes; null on Windows (no cheap source) or on failure. */
@@ -60,6 +94,23 @@ function processStartTime(pid: number): string | null {
       timeout: 2000,
     }).trim();
     return out === "" ? null : out;
+  } catch {
+    return null;
+  }
+}
+
+/** Parent pid and command line from `ps` (what a process set as its title shows there); null on Windows or on failure. */
+function processInfo(pid: number): { ppid: number; argv: string[] } | null {
+  if (process.platform === "win32") return null;
+  try {
+    const out = execFileSync("ps", ["-ww", "-o", "ppid=,args=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    }).trim();
+    const match = /^(\d+)\s+(.+)$/.exec(out);
+    return match ? { ppid: Number(match[1]), argv: match[2]!.split(/\s+/) } : null;
   } catch {
     return null;
   }
