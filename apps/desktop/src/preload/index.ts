@@ -133,6 +133,12 @@ const api: FrameshellApi = {
   multicam: {
     turns: (timeline, group) => invokeOutcome(Channel.multicamTurns, timeline, group),
   },
+  models: {
+    list: () => invokeOutcome(Channel.modelsList),
+    use: (model) => invokeOutcome(Channel.modelsUse, model),
+    pickFile: () => ipcRenderer.invoke(Channel.modelsPickFile),
+    add: (id, file, options) => invokeOutcome(Channel.modelsAdd, id, file, options),
+  },
   people: {
     list: () => invokeOutcome(Channel.peopleList),
     add: (name) => invokeOutcome(Channel.peopleAdd, name),
