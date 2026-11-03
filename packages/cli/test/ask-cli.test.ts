@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Daemon, startDaemon } from "@frameshell/core";
@@ -63,6 +64,34 @@ describe("frameshell ask", () => {
     expect(await ask(["--take", "--target", "claude"])).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 
+  it("--take --hook reads the project directory from the hook input, and never fails the prompt", async () => {
+    const { dir, app } = await setup();
+    const mcp = await connectToDaemon(daemon!.socketPath, { client: "mcp/test" });
+    connections.push(mcp);
+    await mcp.request("target.register", { cwd: dir, client: "claude-code", kind: "mcp" });
+    await app.request("inbox.put", { cwd: dir, target: "claude", lines: ["[frameshell] clip c_a"] });
+    const env = { FRAMESHELL_SOCKET: daemon!.socketPath };
+    const hook = async (input: string, cwd: string) => {
+      let stdout = "";
+      let stderr = "";
+      const code = await runAsk(["--take", "--target", "claude", "--hook"], {
+        stdout: (text) => (stdout += text),
+        stderr: (text) => (stderr += text),
+        cwd,
+        env,
+        stdin: Readable.from([input]),
+      });
+      return { code, stdout, stderr };
+    };
+    // Outside any project the hook prints nothing and exits 0 (exit 2 would block the prompt).
+    expect(await hook("not json", tmpdir())).toEqual({ code: 0, stdout: "", stderr: "" });
+    expect(await hook(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "hi {", cwd: dir }), tmpdir())).toEqual({
+      code: 0,
+      stdout: "[frameshell] clip c_a\n",
+      stderr: "",
+    });
+  });
+
   it("--wait shows the terminal as a target and prints the next reference", async () => {
     const { dir, app, ask } = await setup();
     const waiting = ask(["--wait", "--as", "codex", "--timeout", "30"]);
@@ -84,6 +113,22 @@ describe("frameshell ask", () => {
     expect(await out(["--take", "--timeout", "5"])).toBe(2);
     expect(await out(["--wait", "--target", "claude"])).toBe(2);
     expect(await out(["--wait", "--timeout", "0"])).toBe(2);
+    expect(await out(["--wait", "--hook"])).toBe(2);
+  });
+
+  it("--take --hook with no daemon running prints nothing, exits 0, starts none and stays within the hook budget", () => {
+    const socketPath = socketPathFor("none");
+    const started = Date.now();
+    const result = spawnSync(process.execPath, [cliBin, "ask", "--take", "--target", "claude", "--hook"], {
+      cwd: tmpdir(),
+      encoding: "utf8",
+      input: JSON.stringify({ cwd: tmpdir() }),
+      env: { ...process.env, FRAMESHELL_SOCKET: socketPath },
+    });
+    // Every Claude Code prompt pays for this process (ADR 0025 consequences); the budget is loose for slow CI.
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect({ code: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({ code: 0, stdout: "", stderr: "" });
+    if (process.platform !== "win32") expect(existsSync(socketPath)).toBe(false);
   });
 
   it("--take with no daemon running prints nothing, exits 0 and starts none", () => {

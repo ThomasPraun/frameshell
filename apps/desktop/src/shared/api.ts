@@ -450,6 +450,10 @@ export interface FrameshellApi {
     /** Ask, then add Frameshell to Claude Desktop's config; resolves with the state after (unchanged if declined). */
     connectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
     disconnectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
+    claudeCode(): Promise<ClaudeCodeStatus>;
+    /** Ask, then add Frameshell's MCP server and prompt hook to Claude Code's user settings (ADR 0025); resolves with the state after. */
+    connectClaudeCode(): Promise<ClaudeCodeStatus>;
+    disconnectClaudeCode(): Promise<ClaudeCodeStatus>;
     /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
     targets(): Promise<AgentTarget[]>;
     /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
@@ -786,6 +790,18 @@ export interface ClaudeDesktopStatus {
   connected: boolean;
 }
 
+/** Frameshell's entries in Claude Code's user settings (ADR 0025 decision 7). */
+export interface ClaudeCodeStatus {
+  /** Claude Code's settings exist: it is installed, or was. */
+  installed: boolean;
+  /** `~/.claude.json` runs this app's `frameshell mcp`. */
+  server: boolean;
+  /** `settings.json` has the prompt hook that hands over what "Chat about this" sent. */
+  hook: boolean;
+  /** Both. */
+  connected: boolean;
+}
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
@@ -794,6 +810,9 @@ export const Channel = {
   agentsClaudeDesktop: "agents:claude-desktop",
   agentsConnectClaudeDesktop: "agents:connect-claude-desktop",
   agentsDisconnectClaudeDesktop: "agents:disconnect-claude-desktop",
+  agentsClaudeCode: "agents:claude-code",
+  agentsConnectClaudeCode: "agents:connect-claude-code",
+  agentsDisconnectClaudeCode: "agents:disconnect-claude-code",
   agentsTargets: "agents:targets",
   agentsSend: "agents:send",
   agentsTargetsChanged: "agents:targets-changed",
