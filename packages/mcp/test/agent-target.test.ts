@@ -1,6 +1,6 @@
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,7 +21,7 @@ function fakeDaemon(projects: string[]): DaemonConnection {
     request: async (method: string, params: Record<string, unknown>) => {
       calls.push({ method, params });
       const cwd = params["cwd"] as string | undefined;
-      const project = projects.find((dir) => cwd === dir || cwd?.startsWith(`${dir}/`)) ?? null;
+      const project = projects.find((dir) => cwd === dir || cwd?.startsWith(`${dir}/`) || cwd?.startsWith(`${dir}${sep}`)) ?? null;
       if (method === "status") return { project: project ? { dir: project } : null };
       if (method === "ui.active") return { dir: active };
       if (method === "target.register") return { dir: project, target: {} };

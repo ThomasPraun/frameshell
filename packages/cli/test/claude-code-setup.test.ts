@@ -29,8 +29,8 @@ const OTHER_SETTINGS =
 
 describe("claudeCodePaths", () => {
   it("uses ~/.claude.json and ~/.claude/settings.json, or CLAUDE_CONFIG_DIR", () => {
-    expect(claudeCodePaths("/home/ana", {})).toEqual({ mcp: "/home/ana/.claude.json", settings: "/home/ana/.claude/settings.json" });
-    expect(claudeCodePaths("/home/ana", { CLAUDE_CONFIG_DIR: "/cfg" })).toEqual({ mcp: "/cfg/.claude.json", settings: "/cfg/settings.json" });
+    expect(claudeCodePaths("/home/ana", {})).toEqual({ mcp: join("/home/ana", ".claude.json"), settings: join("/home/ana", ".claude", "settings.json") });
+    expect(claudeCodePaths("/home/ana", { CLAUDE_CONFIG_DIR: "/cfg" })).toEqual({ mcp: join("/cfg", ".claude.json"), settings: join("/cfg", "settings.json") });
   });
 });
 
