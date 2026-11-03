@@ -10,7 +10,8 @@ const AGENT_NOTICE_MS = 6_000;
  * Bottom strip: which daemon serves the project, which terminal session CLI
  * calls are attributed to, a transient `notice` (e.g. why "Ask agent" did nothing),
  * the background `setup` of a new project (#188), and briefly what the agent
- * just did to the view (MCP navigation).
+ * just did to the view (MCP navigation), and the connected agents while the
+ * terminal panel is closed (ADR 0025 decision 8).
  */
 export function StatusBar({
   project,
@@ -18,12 +19,18 @@ export function StatusBar({
   session,
   notice = null,
   setup = null,
+  agentTargets = [],
+  onShowTerminal,
 }: {
   project: ProjectView;
   activeFile: string | null;
   session: string | null;
   notice?: string | null;
   setup?: ProjectSetup | null;
+  /** Connected agents to list; the caller passes them only while the terminal panel is closed. */
+  agentTargets?: readonly string[];
+  /** Reopens the terminal panel from the agents entry. */
+  onShowTerminal?: () => void;
 }) {
   const agent = useAgentNotice();
   const [shown, setShown] = useState(agent);
@@ -59,6 +66,11 @@ export function StatusBar({
         <span className="status-item status-agent" data-testid="agent-notice" role="status" key={shown.at}>
           {shown.text}
         </span>
+      )}
+      {agentTargets.length > 0 && (
+        <button className="status-item status-agents" data-testid="connected-agents" title={t.workspace.connectedAgentsTitle} onClick={onShowTerminal}>
+          {t.workspace.connectedAgents(agentTargets.join(", "))}
+        </button>
       )}
       {session && (
         <span className="status-item" data-testid="active-session" title={t.workspace.activeSessionTitle}>

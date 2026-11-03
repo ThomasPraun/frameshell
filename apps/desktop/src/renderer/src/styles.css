@@ -3175,6 +3175,19 @@ button.track-head:focus-visible {
   color: var(--accent);
 }
 
+.status-agents {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-agents:hover {
+  color: var(--accent);
+}
+
 .status-notice {
   color: var(--accent);
   overflow: hidden;
