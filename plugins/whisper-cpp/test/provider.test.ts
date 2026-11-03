@@ -237,6 +237,65 @@ describe("whisper-cpp provider", () => {
     expect(result.model).toBe("large-v3-turbo");
   });
 
+  it("lists its pinned models with their managed files and its default", () => {
+    const provider = createWhisperProvider();
+    expect(provider.defaultModel).toBe("large-v3-turbo-q5_0");
+    expect(provider.models).toContainEqual({ id: "large-v3-turbo-q8_0", managedModel: "ggml-large-v3-turbo-q8_0" });
+    expect(provider.userModels).toEqual({ formats: ["ggml"], options: [{ key: "dtw", values: expect.arrayContaining(["small", "large.v3.turbo"]) }] });
+  });
+
+  it("runs a registered ggml model with its DTW preset", async () => {
+    const engine = fakeEngine({ transcription: [] });
+    const { ctx, requested } = context();
+    const asked: { id: string; formats: readonly string[] }[] = [];
+    ctx.userModel = async (id, formats) => {
+      asked.push({ id, formats });
+      return { id, path: "/home/ana/ggml-es.bin", format: "ggml", sha256: "a".repeat(64), changed: false, options: { dtw: "small" } };
+    };
+    const result = await createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { model: "es-small" }, ctx);
+    expect(asked).toEqual([{ id: "es-small", formats: ["ggml"] }]);
+    expect(requested).toEqual(["binary:whisper-cli"]);
+    const args = engine.calls[0]!.args;
+    expect(args[args.indexOf("-m") + 1]).toBe("/home/ana/ggml-es.bin");
+    expect(args[args.indexOf("-dtw") + 1]).toBe("small");
+    expect(args).toContain("-nfa");
+    expect(result).toMatchObject({ model: "es-small" });
+    expect(result.notes).toBeUndefined();
+  });
+
+  it("runs a registered model without DTW and says word starts are less precise", async () => {
+    const engine = fakeEngine({ transcription: [] });
+    const { ctx, progress } = context();
+    ctx.userModel = async (id) => ({ id, path: "/m.bin", format: "ggml", sha256: "b".repeat(64), changed: false, options: {} });
+    const result = await createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { model: "mine" }, ctx);
+    const args = engine.calls[0]!.args;
+    expect(args).not.toContain("-dtw");
+    expect(args).not.toContain("-nfa");
+    expect(result.notes).toEqual([expect.stringMatching(/"mine" has no DTW preset.*--dtw/)]);
+    expect(progress.map((p) => p.stage)).toContain("model-no-dtw");
+  });
+
+  it("refuses a DTW preset whisper.cpp does not know", async () => {
+    const engine = fakeEngine({ transcription: [] });
+    const { ctx } = context();
+    ctx.userModel = async (id) => ({ id, path: "/m.bin", format: "ggml", sha256: "c".repeat(64), changed: false, options: { dtw: "huge" } });
+    await expect(createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { model: "mine" }, ctx)).rejects.toThrow(
+      /DTW preset "huge".*large\.v3/,
+    );
+    expect(engine.calls).toEqual([]);
+  });
+
+  it("passes the host's error for a model registered nowhere", async () => {
+    const engine = fakeEngine({ transcription: [] });
+    const { ctx } = context();
+    ctx.userModel = async (id) => {
+      throw new Error(`Model "${id}" is not registered on this machine.`);
+    };
+    await expect(createWhisperProvider({ runEngine: engine.run }).transcribe(holaMundoWav(), { model: "nope" }, ctx)).rejects.toThrow(
+      /"nope" is not registered/,
+    );
+  });
+
   it("surfaces engine failures", async () => {
     const run: RunEngine = async () => {
       throw new Error("whisper-cli exited with code 3:\nfailed to open audio");

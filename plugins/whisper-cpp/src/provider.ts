@@ -26,6 +26,15 @@ export const MODELS: Readonly<Record<string, { dtw: string }>> = {
   "large-v3-turbo": { dtw: "large.v3.turbo" },
 };
 
+/**
+ * Alignment-heads presets whisper-cli `-dtw` knows at the pinned version: a model registered by the user names
+ * the one of the model it was trained from (`frameshell model add <id> <file> --dtw <preset>`).
+ */
+export const DTW_PRESETS: readonly string[] = [
+  "tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en",
+  "large.v1", "large.v2", "large.v3", "large.v3.turbo",
+];
+
 /** Options for {@link createWhisperProvider}. */
 export interface WhisperProviderOptions {
   /** Engine seam; defaults to spawning whisper-cli. */
@@ -41,7 +50,9 @@ export interface WhisperProviderOptions {
  * whisper.cpp provider with ADR 0003 settings: `-dtw <preset> -nfa -ml 1 -sow
  * -ojf` (DTW needs flash attention off; one segment per word), never `--vad`
  * (it breaks DTW times at the pinned version). Word start = DTW onset, end =
- * derived from audio energy. A `prompt` goes to `--prompt` (a window
+ * derived from audio energy. A model the user registered (ggml only) runs with
+ * its `dtw` option, or without DTW (onsets from token times, said in progress
+ * and in the result's notes). A `prompt` goes to `--prompt` (a window
  * re-transcribed alone keeps the case and punctuation of the text before it).
  * A run that fails after a GPU backend started
  * (driver error, out of GPU memory) is retried once on CPU (`-ng`).
@@ -51,15 +62,38 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
   const coldShaderNoticeMs = options.coldShaderNoticeMs ?? 1500;
   return {
     id: PROVIDER_ID,
+    models: Object.keys(MODELS).map((id) => ({ id, managedModel: `ggml-${id}` })),
+    defaultModel: DEFAULT_MODEL,
+    userModels: { formats: ["ggml"], options: [{ key: "dtw", values: DTW_PRESETS }] },
     async transcribe(audio, { language, model = DEFAULT_MODEL, prompt }, context): Promise<TranscriptionResult> {
-      const preset = MODELS[model];
-      if (!preset) {
+      const pinned = MODELS[model];
+      if (!pinned && !context.userModel) {
         throw new Error(`Unknown whisper.cpp model "${model}". Available: ${Object.keys(MODELS).join(", ")} (default ${DEFAULT_MODEL}).`);
       }
       context.progress({ message: "Preparing whisper.cpp", stage: "binary", values: { name: "whisper.cpp" } });
       const binary = await context.ensureBinary(WHISPER_BINARY);
       context.progress({ message: `Preparing model ${model}`, stage: "model", values: { model } });
-      const modelPath = await context.ensureModel(`ggml-${model}`);
+      const notes: string[] = [];
+      let modelPath: string;
+      let dtw: string | null;
+      if (pinned) {
+        modelPath = await context.ensureModel(`ggml-${model}`);
+        dtw = pinned.dtw;
+      } else {
+        const registered = await context.userModel!(model, ["ggml"]);
+        modelPath = registered.path;
+        dtw = registered.options["dtw"] ?? null;
+        if (dtw !== null && !DTW_PRESETS.includes(dtw)) {
+          throw new Error(`Model "${model}" names DTW preset "${dtw}", which whisper.cpp does not know. Use one of: ${DTW_PRESETS.join(", ")}.`);
+        }
+        if (dtw === null) {
+          const note =
+            `Model "${model}" has no DTW preset, so word starts come from token times and are less precise. ` +
+            `Register it again with \`--dtw <preset>\` of the model it was trained from (${DTW_PRESETS.join(", ")}).`;
+          notes.push(note);
+          context.progress({ message: note, stage: "model-no-dtw", values: { model } });
+        }
+      }
 
       const work = await mkdtemp(join(tmpdir(), "frameshell-whisper-"));
       try {
@@ -68,8 +102,7 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
           "-m", modelPath,
           "-f", audio,
           "-l", language ?? "auto",
-          "-dtw", preset.dtw,
-          "-nfa",
+          ...(dtw ? ["-dtw", dtw, "-nfa"] : []),
           "-ml", "1",
           "-sow",
           "-ojf",
@@ -102,6 +135,7 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
         const lang = language ?? parsed.language;
         return {
           model,
+          ...(notes.length > 0 ? { notes } : {}),
           ...(lang ? { language: lang } : {}),
           words: timeWords(parsed.words, speech, duration),
           device: monitor.device(),

@@ -926,6 +926,27 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/** The transcript view's model picker (#427): thin daemon requests for the window's project, plus the file dialog. */
+function registerModelIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
+  ipcMain.handle(Channel.modelsUse, (event, model: string | null) =>
+    outcome(async () => daemon.request("transcription.set", { cwd: await dirOf(event.sender), model })),
+  );
+  ipcMain.handle(Channel.modelsPickFile, async (event) => {
+    const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
+      title: text.models.chooseFile,
+      // Every file stays pickable: whisper.cpp models often end in `.bin`; the daemon reads the format from the bytes.
+      filters: [{ name: text.models.fileFilter, extensions: ["bin", "gguf", "onnx", "ggml"] }, { name: "*", extensions: ["*"] }],
+      properties: ["openFile"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(Channel.modelsAdd, (_event, id: string, file: string, options: Record<string, string>) =>
+    outcome(async () => daemon.request("model.add", { id, file, options })),
+  );
+}
+
 /** The People panel's calls (ADR 0020): thin daemon requests for the window's project, made by the app (no `by`). */
 function registerPeopleIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
@@ -1522,6 +1543,7 @@ function registerIpc(): void {
     outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),
   );
   registerPeopleIpc();
+  registerModelIpc();
   registerShootIpc();
   registerLiveIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>

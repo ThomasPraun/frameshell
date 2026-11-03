@@ -29,6 +29,7 @@ import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
+import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import {
@@ -75,7 +76,8 @@ Commands:
   plugin list                  List the project's plugins and what they contribute
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
              [--provider p] [--model m] [--language l]
-                               First run downloads the engine and model (minutes, once)
+                               First run downloads the engine and model (minutes, once). --model: one the
+                               provider ships or one registered with \`model add\` (see \`model list\`)
   transcribe --verify <export> [--timeline id] [--provider p] [--model m] [--language l]
                                Re-transcribe an export and list the source words lost at cuts,
                                with timeline position and clip; exit 1 if any was lost
@@ -83,7 +85,7 @@ Commands:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-  render [--preset p] [--out file] [--timeline id]
+${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
                                Waits for the render job, printing progress; exit 1 if it fails
@@ -120,13 +122,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -149,6 +151,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "proposal diff": ["tx"],
   ...PEOPLE_FLAGS,
   ...SHOOT_FLAGS,
+  ...MODEL_FLAGS,
   "skill update": ["force"],
   mcp: [],
 };
@@ -198,6 +201,7 @@ type Invocation =
   | { kind: "proposal.diff"; tx?: string }
   | PeopleInvocation
   | ShootInvocation
+  | ModelInvocation
   | { kind: "skill.update"; force: boolean }
   | TimelineInvocation;
 
@@ -269,6 +273,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "recorded-at": { type: "string" },
           undo: { type: "boolean", default: false },
           restore: { type: "boolean", default: false },
+          dtw: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -335,7 +340,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -390,11 +395,13 @@ function parseBuiltin(
     restore?: boolean | undefined;
     "no-snap"?: boolean | undefined;
     force?: boolean | undefined;
+    dtw?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "people") return parsePeople(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
+  if (command === "model") return parseModel(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -628,6 +635,17 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "shoot.discard":
     case "shoot.assemble":
       return executeShoot(conn, inv, cwd, flags.json);
+    case "model.list":
+    case "model.add":
+    case "model.remove":
+    case "model.default":
+    case "transcription.set":
+      return executeModel(conn, inv, {
+        cwd,
+        json: flags.json,
+        settleTrust: () => settleTrust(conn, flags, io),
+        progress: flags.json ? undefined : progressPrinter(io),
+      });
     case "skill.update": {
       const result = await conn.request("skill.update", { cwd, force: inv.force });
       if (flags.json) return json(result);
@@ -899,6 +917,8 @@ function formatTranscribe(result: TranscribeResult): string {
   if (result.speechInside.length > 0) {
     lines.push(`  warning: ${result.speechInside.join(", ")} hide${result.speechInside.length === 1 ? "s" : ""} untranscribed speech; never cut inside`);
   }
+  if (result.modelHash) lines.push(`  model file ${result.modelHash}`);
+  lines.push(...result.warnings.map((warning) => `  warning: ${warning}`));
   return `${lines.join("\n")}\n`;
 }
 

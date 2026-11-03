@@ -15,7 +15,7 @@ exports/                 render output
 
 ## `frameshell.json`
 
-`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `kind` (`image` for an image project, see [image-projects.md](image-projects.md); absent = video), `transcription` (`provider`, `model`, `language`), `export` (`defaultPreset`, `loudness`), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
+`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `kind` (`image` for an image project, see [image-projects.md](image-projects.md); absent = video), `transcription` (`provider`, `model`, `language`; `model` is an id, never a path: a model file is registered per machine with `frameshell model add`), `export` (`defaultPreset`, `loudness`), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
 
 ## Timeline
 
@@ -38,6 +38,7 @@ exports/                 render output
 - `edits`: human corrections keyed by word id, `{ "w_000002": { "text": "a todos" } }`, or who says it, `{ "w_000002": { "speaker": "s2" } }`. Subtitles and verify show the edited text. Correct a word by adding to `edits`; leave `words` as the engine wrote them.
 - `speakers` (after `transcribe --speakers`): `[{ id: "s1", name: "Ana" }]`; each word then has a `speaker` id. Rename a person by changing `name`, never the `id`.
 - `assetHash`: the transcript is stale when the asset changes; re-run `transcribe`.
+- `provider`, `model` (id), and `modelHash` (`sha256:<hex>`) when the model was a file registered on the machine that transcribed it.
 
 ## Scripts
 

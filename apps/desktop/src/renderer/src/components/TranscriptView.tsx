@@ -1,4 +1,4 @@
-import { type MouseEvent, type PointerEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type MouseEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PersonInfo, TimelineView } from "@frameshell/protocol";
 import { findPerson } from "@frameshell/schema";
 import { openAskMenu } from "../ask/ask-agent.js";
@@ -26,6 +26,7 @@ import {
 } from "../transcript/model.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import type { MenuItem } from "./ContextMenu.js";
+import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
 
 /** Pseudo path of the transcript editor tab: never a project file (`:` is not in project paths). */
 export const TRANSCRIPT_TAB = "frameshell:transcript";
@@ -84,6 +85,7 @@ interface Marked {
  *   the menu also links the speaker to a person, or unlinks it (ADR 0020).
  * - Right-click opens "Chat about this" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
+ * - The toolbar's model picker sets the project's transcription model (#427).
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);
@@ -92,6 +94,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   const { words: selectedWords, origin } = useSelection();
   const selected = useMemo(() => new Set(selectedWords.map((word) => `${word.transcript}#${word.word}`)), [selectedWords]);
   const [status, setStatus] = useState<{ text: string; tone: "info" | "error" | "warning" } | null>(null);
+  const modelStatus = useCallback<ModelStatus>((text, tone) => setStatus({ text, tone }), []);
   const [restoring, setRestoring] = useState<ReadonlySet<string>>(new Set());
   const [marked, setMarked] = useState<Marked | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -419,6 +422,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             onPick={(speaker) => void saveSpeaker(pickerAssets[0]!.path, speakerTargets(pickerAssets[0]!), speaker)}
           />
         )}
+        <ModelPicker onStatus={modelStatus} />
         <span
           className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : status?.tone === "warning" ? " timeline-status-warning" : ""}`}
           role="status"

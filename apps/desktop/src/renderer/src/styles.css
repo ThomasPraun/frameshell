@@ -2046,6 +2046,35 @@ code {
   font-size: 11.5px;
 }
 
+/* Transcription model picker (#427), with the inline form that registers a model file. */
+.transcript-toolbar .transcript-model {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Beside "Said by…", which already took the free space. */
+.transcript-toolbar .transcript-speaker-picker + .transcript-model {
+  margin-left: 0;
+}
+
+.transcript-toolbar .transcript-model-picker {
+  max-width: 240px;
+}
+
+.transcript-model-register {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.transcript-model-register .clip-field-input {
+  width: 140px;
+}
+
 /* "Said by…": sets the speaker of the selected words. */
 .transcript-toolbar .transcript-speaker-picker {
   flex: none;

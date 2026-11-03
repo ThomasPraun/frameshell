@@ -197,3 +197,13 @@ _Avoid_: voice, cluster, participant
 **Painted turn**:
 A stretch of the group clock a person marked as spoken or silent for one angle (`painted` in the group, `multicam paint`); it replaces the angle's measured speaking turns inside its range.
 _Avoid_: manual turn, override
+
+## Transcription models (#427)
+
+**Pinned model**:
+A model a transcription provider ships, downloaded and checksum-verified by the host on first use.
+_Avoid_: built-in model, bundled model
+
+**Registered model**:
+A model file the user registered on one machine under an id (`frameshell model add`), kept with its SHA-256 in `models.json` in the config dir. Projects name only the id, so the same project uses whichever file each machine registered.
+_Avoid_: custom model path, local model

@@ -8,6 +8,7 @@ import { createWhisperProvider } from "./provider.js";
 
 export {
   DEFAULT_MODEL,
+  DTW_PRESETS,
   MODELS,
   PROVIDER_ID,
   WHISPER_BINARY,

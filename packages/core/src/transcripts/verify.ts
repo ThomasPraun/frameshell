@@ -13,7 +13,7 @@ import {
 import { type MediaClip, type Timeline, type Transcript, withProgramSound } from "@frameshell/schema";
 import { type WordHearing, alignWords, comparableText } from "./align.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./audio.js";
-import { type TranscriberTools, resolveTranscript } from "./transcriber.js";
+import { type TranscriberTools, providerContext, resolveTranscript } from "./transcriber.js";
 import { classifyWindowWav, readPcmWav, transcribeWindow } from "./window.js";
 import type { GcClass } from "../gc.js";
 
@@ -45,8 +45,10 @@ export interface VerifyExportOptions {
   providerId: string;
   /** The provider, or a loader run after the cheap checks. */
   provider: TranscriptionProvider | (() => Promise<TranscriptionProvider>);
-  /** Absent: the source transcripts' model when they come from the same provider, else the provider default. */
+  /** Absent: the source transcripts' model when they come from the same provider, else {@link defaultModel}. */
   model?: string | undefined;
+  /** This machine's default model of the provider (`model.default`); absent: the provider default. */
+  defaultModel?: string | undefined;
   /** Absent: the source transcripts' language. */
   language?: string | undefined;
   /** Binaries and models for extraction and the provider. */
@@ -122,7 +124,7 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
   const sources = await sourceTranscripts(projectDir, timeline, options.assetHash);
   const { words: kept, unchecked, warnings } = keptWords(timeline, sources);
   const transcripts = [...sources.values()].flatMap((source) => ("transcript" in source ? [source.transcript] : []));
-  const model = options.model ?? transcripts.find((t) => t.provider === providerId)?.model;
+  const model = options.model ?? transcripts.find((t) => t.provider === providerId)?.model ?? options.defaultModel;
   const language = options.language ?? transcripts.find((t) => t.language)?.language;
   const provider = typeof options.provider === "function" ? await options.provider() : options.provider;
 
@@ -137,11 +139,7 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
   };
   const audio = join(projectDir, ...VERIFY_CACHE_DIR.split("/"), `${randomBytes(6).toString("hex")}.wav`);
   const transcribeOptions = { ...(model ? { model } : {}), ...(language ? { language } : {}) };
-  const context = {
-    ensureBinary: (name: string) => tools.ensureBinary(name, progress),
-    ensureModel: (id: string) => tools.ensureModel(id, progress),
-    progress: (update: Progress) => progress({ ...update }),
-  };
+  const { context } = providerContext(tools, progress);
   let result: TranscriptionResult;
   let exportSeconds: number | null;
   let report: Report;

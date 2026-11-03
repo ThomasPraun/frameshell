@@ -530,6 +530,19 @@ export interface FrameshellApi {
      */
     turns(timeline: string, group: string): Promise<MulticamTurnsResult>;
   };
+  models: {
+    /** `model.list` for the window's project (#427): provider models, files registered on this machine, the project's choice. */
+    list(): Promise<MethodResult<"model.list">>;
+    /** `transcription.set`: the project's model, or null for the default. Rejects with the daemon's message, e.g. ModelNotRegistered. */
+    use(model: string | null): Promise<MethodResult<"transcription.set">>;
+    /** Ask for a model file in the system dialog. Resolves with its absolute path, or null when cancelled. */
+    pickFile(): Promise<string | null>;
+    /**
+     * `model.add`: register `file` on this machine under `id`, with provider `options` (whisper.cpp `dtw`). Rejects
+     * with the daemon's message, e.g. UnsupportedModelFormat for a pickle file.
+     */
+    add(id: string, file: string, options: Record<string, string>): Promise<MethodResult<"model.add">>;
+  };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
     list(): Promise<MethodResult<"people.list">>;
@@ -856,6 +869,10 @@ export const Channel = {
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
   multicamTurns: "multicam:turns",
+  modelsList: "models:list",
+  modelsUse: "models:use",
+  modelsPickFile: "models:pick-file",
+  modelsAdd: "models:add",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",

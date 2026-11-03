@@ -1,16 +1,14 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
-import { pipeline } from "node:stream/promises";
-import type { TranscriptionProvider, TranscriptionResult } from "@frameshell/plugin-api";
+import type { ModelFormat, TranscribeContext, TranscriptionProvider, TranscriptionResult, UserModel } from "@frameshell/plugin-api";
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
-import { exists, readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
+import { exists, readJsonIfExists, renameRetrying, sha256File, writeJsonAtomic } from "../fs-util.js";
 import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
 import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
+import { notRegistered } from "./model-registry.js";
 import { carrySpeakers, nextSpeakerIdOf } from "./speaker-labels.js";
 import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
 
@@ -43,6 +41,44 @@ export interface TranscriberTools {
   ensureBinary(name: string, onProgress: (progress: Progress) => void): Promise<string>;
   /** See `BinaryManager.ensureModel`. */
   ensureModel(id: string, onProgress: (progress: Progress) => void): Promise<string>;
+  /** See `ModelRegistry.resolve`. Absent: no model is registered (every id fails with `ModelNotRegistered`). */
+  userModel?(id: string, formats: readonly ModelFormat[]): Promise<UserModel>;
+}
+
+/**
+ * The provider's {@link TranscribeContext} for one run over `tools`, and what it saw of registered models: a model
+ * file that changed since registration is announced once, and {@link ProviderContext.used} tells the hash of each
+ * registered model the provider took.
+ */
+export interface ProviderContext {
+  context: TranscribeContext;
+  /** Registered models the provider resolved, by id. */
+  used: ReadonlyMap<string, UserModel>;
+  /** Warnings for the result: changed model files, then the provider's `notes`. */
+  warnings(result: TranscriptionResult): string[];
+}
+
+/** See {@link ProviderContext}. */
+export function providerContext(tools: TranscriberTools, progress: (progress: Progress) => void): ProviderContext {
+  const used = new Map<string, UserModel>();
+  const changed: string[] = [];
+  const context: TranscribeContext = {
+    ensureBinary: (name) => tools.ensureBinary(name, progress),
+    ensureModel: (id) => tools.ensureModel(id, progress),
+    async userModel(id, formats) {
+      if (!tools.userModel) throw notRegistered(id, "unknown");
+      const model = await tools.userModel(id, formats);
+      if (model.changed && !used.has(id)) {
+        const warning = `Model file ${model.path} ("${id}") changed since it was registered; using it as it is now (sha256:${model.sha256}).`;
+        changed.push(warning);
+        progress({ message: warning, stage: "model-changed", values: { model: id, file: model.path } });
+      }
+      used.set(id, model);
+      return model;
+    },
+    progress: (update) => progress({ ...update }),
+  };
+  return { context, used, warnings: (result) => [...changed, ...(result.notes ?? [])] };
 }
 
 /**
@@ -129,11 +165,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   }
 
   const transcribeOptions = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
-  const context = {
-    ensureBinary: (name: string) => tools.ensureBinary(name, progress),
-    ensureModel: (id: string) => tools.ensureModel(id, progress),
-    progress: (update: Progress) => progress({ ...update }),
-  };
+  const { context, used, warnings } = providerContext(tools, progress);
   let result: TranscriptionResult;
   try {
     result = await provider.transcribe(audio, transcribeOptions, context);
@@ -167,6 +199,8 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     speechInside.push(word.id);
   });
   const speakers = carrySpeakers(assigned.words, assigned.edits, previous);
+  const registered = used.get(result.model);
+  const modelHash = registered ? `sha256:${registered.sha256}` : null;
   const transcript: Transcript = {
     $schema: TRANSCRIPT_SCHEMA_URL,
     schemaVersion: SCHEMA_VERSION,
@@ -174,6 +208,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     assetHash: `sha256:${hash}`,
     provider: providerId,
     model: result.model,
+    ...(modelHash ? { modelHash } : {}),
     ...(result.language ? { language: result.language } : {}),
     words: assigned.words,
     edits: assigned.edits,
@@ -191,6 +226,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     audioSource,
     provider: providerId,
     model: result.model,
+    modelHash,
     language: result.language ?? null,
     device: result.device ?? null,
     words: assigned.words.length,
@@ -200,6 +236,7 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     recoveredWords: long.recovered,
     speechInside,
     seconds: Math.round(performance.now() - started) / 1000,
+    warnings: warnings(result),
   };
 }
 
@@ -377,11 +414,6 @@ function round(seconds: number): number {
   return Math.round(seconds * 1000) / 1000;
 }
 
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  await pipeline(createReadStream(path), hash);
-  return hash.digest("hex");
-}
 
 async function isFile(path: string): Promise<boolean> {
   try {
