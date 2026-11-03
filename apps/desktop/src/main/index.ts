@@ -1671,6 +1671,7 @@ function buildMenu(): void {
       label: said.view,
       submenu: [
         { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-terminal", label: said.terminal, accelerator: "CmdOrCtrl+\\", registerAccelerator: false, click: (_item, focused) => command("toggleTerminal", focused) },
         { type: "separator" },
         {
           label: said.language,

@@ -11,6 +11,7 @@ import {
   togglePanel,
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
+import { useConnectedAgentTargets } from "../ask/connected-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
@@ -65,6 +66,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const setup = useProjectSetup();
+  const connectedAgents = useConnectedAgentTargets();
   // An image project (ADR 0017) shows its layers where the timeline goes.
   const image = useProjectKind() === "image";
   const dragBase = useRef<Layout | null>(null);
@@ -276,6 +278,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   useEffect(() => {
     const stop = startReview();
     const offMenu = window.frameshell.menu.onCommand((command) => {
+      if (command === "toggleTerminal") toggle("terminal");
       if (command === "toggleReview") void setReviewEnabled(!reviewState().enabled);
     });
     return () => {
@@ -523,6 +526,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         session={activeSession}
         notice={notice}
         setup={setup}
+        agentTargets={terminal.collapsed ? connectedAgents : []}
+        onShowTerminal={() => toggle("terminal")}
       />
       {sidebarViews(image).filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>

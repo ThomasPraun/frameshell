@@ -235,9 +235,10 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * Command an application menu entry sends to the focused project window.
  * `showTranscript`: open the transcript view (View > Transcript).
  * `imageFromFrame`: make an image project from the frame at the playhead (File > New Image from Frame, ADR 0017).
+ * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview";
+export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview" | "toggleTerminal";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
