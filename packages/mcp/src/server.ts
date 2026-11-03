@@ -41,7 +41,20 @@ export interface McpServerOptions {
   connect: () => Promise<DaemonConnection>;
   /** Reported to MCP clients as the server version. */
   version?: string;
+  /**
+   * Opt in to Claude Code channels (research preview): declare `experimental['claude/channel']` and push each
+   * reference sent to this client's inbox as `notifications/claude/channel`, taking it from the inbox (ADR 0025).
+   */
+  channel?: boolean;
 }
+
+/** Seconds one `inbox.wait` of the channel pump blocks before it asks again. */
+const CHANNEL_WAIT_S = 120;
+
+const CHANNEL_INSTRUCTIONS =
+  " References the person sends from the Frameshell app (\"Chat about this\") also arrive on their own as " +
+  "`<channel source=\"frameshell\">` events holding the `[frameshell]` lines: resolve them as `inbox_take` would " +
+  "return them. They are one-way and already taken from the inbox, so do not `inbox_take` for them.";
 
 const INSTRUCTIONS =
   "Frameshell edits video projects: timelines of clips on tracks, times in decimal seconds (timeline seconds for " +
@@ -67,7 +80,14 @@ export function createMcpServer(options: McpServerOptions): Server {
   const { cwd } = options;
   const server = new Server(
     { name: "frameshell", version: options.version ?? "0.0.0" },
-    { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } }, instructions: INSTRUCTIONS },
+    {
+      capabilities: {
+        tools: {},
+        resources: { subscribe: true, listChanged: true },
+        ...(options.channel ? { experimental: { "claude/channel": {} } } : {}),
+      },
+      instructions: options.channel ? INSTRUCTIONS + CHANNEL_INSTRUCTIONS : INSTRUCTIONS,
+    },
   );
   const tools = buildTools(cwd);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
@@ -94,6 +114,8 @@ export function createMcpServer(options: McpServerOptions): Server {
   let current: string | null = null;
   /** The MCP client (`initialize`), registered as the agent target of the default project (ADR 0025). */
   let client: AgentClient | null = null;
+  let pumping = false;
+  let closing = false;
   /** The default project now; a switch (the user moved to another window) re-announces every resource. */
   const resolve = async (): Promise<ResolvedProject> => {
     const project = await resolver.resolve();
@@ -101,6 +123,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (project.root !== current) {
       const switched = current !== null;
       current = project.root;
+      if (options.channel) void pump();
       if (switched) {
         known.clear();
         if (subscribed.size > 0) await link.watch(project.root).catch(() => {});
@@ -108,6 +131,31 @@ export function createMcpServer(options: McpServerOptions): Server {
       }
     }
     return project;
+  };
+  /**
+   * Channel mode: hold an `inbox.wait` for this client and push what arrives as a channel event. Taking is what
+   * makes a pushed reference count as read, so a hook or `inbox_take` finds nothing again (no double delivery).
+   */
+  const pump = async (): Promise<void> => {
+    if (pumping) return;
+    pumping = true;
+    let delay = 1_000;
+    while (!closing) {
+      try {
+        const project = await resolve();
+        if (client) await link.register(project.root, client);
+        const conn = await link.get();
+        const { references, target } = await conn.request("inbox.wait", { cwd: project.cwd, timeout: CHANNEL_WAIT_S });
+        delay = 1_000;
+        for (const reference of references) {
+          await server.notification(channelEvent(reference, target) as never);
+        }
+      } catch {
+        // Not registered yet, daemon away or project gone: ask again, slower each time.
+        await new Promise((done) => setTimeout(done, delay).unref?.());
+        delay = Math.min(delay * 2, 30_000);
+      }
+    }
   };
   const resources = new ProjectResources(resolve, () => link.get());
   const watch = async () => {
@@ -193,10 +241,25 @@ export function createMcpServer(options: McpServerOptions): Server {
 
   const close = server.onclose;
   server.onclose = () => {
+    closing = true;
     link.close();
     close?.();
   };
   return server;
+}
+
+/**
+ * A reference as a Claude Code channel event: its lines as the body, and `meta` keys that are identifiers (letters,
+ * digits, underscores; Claude Code drops others silently).
+ */
+export function channelEvent(
+  reference: { lines: string[]; sentAt: string },
+  target: string | null,
+): { method: "notifications/claude/channel"; params: { content: string; meta: Record<string, string> } } {
+  return {
+    method: "notifications/claude/channel",
+    params: { content: reference.lines.join("\n"), meta: { ...(target ? { target } : {}), sent_at: reference.sentAt } },
+  };
 }
 
 /** Tool error: `isError` result the model reads and can act on, never a protocol error. */
@@ -334,6 +397,7 @@ class DaemonLink {
   #watched: string | null = null;
   /** Project root registered as an agent target, and as which client. */
   #target: { root: string; client: AgentClient } | null = null;
+  #registration: Promise<void> = Promise.resolve();
   #lost = false;
   #closed = false;
   #retry: NodeJS.Timeout | undefined;
@@ -367,15 +431,18 @@ class DaemonLink {
   }
 
   /** Register as agent target `client` of the project at `root` from now on, instead of the one before, across reconnects. */
-  async register(root: string, client: AgentClient): Promise<void> {
-    if (this.#target?.root === root) return;
+  register(root: string, client: AgentClient): Promise<void> {
+    // Same root: wait for the registration under way rather than return before it is done.
+    if (this.#target?.root === root) return this.#registration;
     const previous = this.#target?.root;
     this.#target = { root, client };
     const opened = this.#current !== null;
-    const conn = await this.get();
-    // A connection opened just now registered on its own.
-    if (opened) await this.#register(conn);
-    if (previous) await conn.request("target.unregister", { cwd: previous }).catch(() => {});
+    return (this.#registration = (async () => {
+      const conn = await this.get();
+      // A connection opened just now registered on its own.
+      if (opened) await this.#register(conn);
+      if (previous) await conn.request("target.unregister", { cwd: previous }).catch(() => {});
+    })());
   }
 
   close(): void {
