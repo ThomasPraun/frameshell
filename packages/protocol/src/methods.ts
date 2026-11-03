@@ -10,6 +10,7 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
+import { ModelIdSchema, ModelListResultSchema, RegisteredModelSchema } from "./models.js";
 import { ShootChangedSchema, ShootSceneStatusSchema, TakeInfoSchema } from "./shoot.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
@@ -1043,7 +1044,11 @@ export const methods = {
         .string()
         .min(1)
         .optional()
-        .describe("Provider model id, e.g. `large-v3-turbo-q5_0`. Default: `transcription.model`, else the provider's default."),
+        .describe(
+          "Model id: one the provider ships (`large-v3-turbo-q5_0`) or one registered on this machine with `model.add`. " +
+            "Default: `transcription.model`, else this machine's default (`model.default`), else the provider's default. " +
+            "An id that is neither fails with ModelNotRegistered.",
+        ),
       language: z
         .string()
         .min(1)
@@ -1062,6 +1067,10 @@ export const methods = {
         ),
       provider: z.string(),
       model: z.string(),
+      modelHash: z
+        .string()
+        .nullable()
+        .describe("`sha256:<hex>` of the registered model file used (`model.add`), also written to the transcript; null for the provider's own models."),
       language: z.string().nullable().describe("Language used or detected; null when the provider did not say."),
       device: z.string().nullable().describe("Compute device the engine used (`metal`, `cuda`, `cpu`); null when unknown."),
       words: z.int().describe("Number of words written."),
@@ -1081,6 +1090,12 @@ export const methods = {
             "words the transcript lacks. Never cut inside them; check by ear.",
         ),
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
+      warnings: z
+        .array(z.string())
+        .describe(
+          "What makes this transcript less reliable, e.g. a registered model file that changed since `model.add`, or " +
+            "word timing without alignment data for a custom whisper.cpp model.",
+        ),
     }),
   },
   "transcribe.verify": {
@@ -1112,7 +1127,10 @@ export const methods = {
         .string()
         .min(1)
         .optional()
-        .describe("Provider model id. Default: `transcription.model`, else the model of the source transcripts, else the provider's default."),
+        .describe(
+          "Model id. Default: `transcription.model`, else the model of the source transcripts, else this machine's default " +
+            "(`model.default`), else the provider's default.",
+        ),
       language: z
         .string()
         .min(1)
@@ -1187,6 +1205,87 @@ export const methods = {
       unassigned: z.int().describe("Words no speech segment covers: they have no speaker."),
       corrections: z.int().describe("Human speaker corrections in `edits`, kept and applied."),
       seconds: z.number().describe("Wall time of the whole call."),
+    }),
+  },
+  "model.list": {
+    description:
+      "List transcription models: model files registered on this machine (`model.add`) with their state, this " +
+        "machine's default model per provider, and, with `cwd`, the project's providers with the models they ship " +
+        "(size, downloaded) and the model a `transcribe` there would use. A project names only a model id " +
+        "(`transcription.model`); the file behind a registered id is per machine.",
+    params: z.strictObject({
+      cwd: CwdParam.optional().describe("Directory inside a project, to list its providers and transcription settings."),
+    }),
+    result: ModelListResultSchema,
+  },
+  "model.add": {
+    mutating: true,
+    description:
+      "Register a local model file under `id` on this machine, for `transcribe --model <id>` or `transcription.model`. " +
+        "Only formats that cannot run code: whisper.cpp ggml, gguf, ONNX; pickle-based files (`.nemo`, `.pt`, " +
+        "`.ckpt`) fail with UnsupportedModelFormat. The file is not verified: registering it is the user's consent. " +
+        "Its SHA-256 is stored (hashing a large file takes seconds; progress arrives as notifications) and written " +
+        "into each transcript made with it. Registering an id again replaces it. The file stays where it is. Only " +
+        "register a file the user named.",
+    params: z.strictObject({
+      id: ModelIdSchema,
+      file: AbsolutePath.describe("Absolute path of the model file, e.g. `/home/ana/models/ggml-es-small.bin`."),
+      options: z
+        .record(z.string().regex(/^[a-z][a-zA-Z0-9]*$/), z.string().min(1))
+        .default({})
+        .describe(
+          "Provider settings kept with it. whisper.cpp: `dtw`, the alignment-heads preset of the model it was trained " +
+            "from (`tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large.v1`, " +
+            "`large.v2`, `large.v3`, `large.v3.turbo`); without it word onsets come from token times (less precise).",
+        ),
+    }),
+    result: z.object({
+      model: RegisteredModelSchema,
+      replaced: z.boolean().describe("True when `id` was registered before, to another file or the same one."),
+    }),
+  },
+  "model.remove": {
+    mutating: true,
+    description:
+      "Forget model `id` on this machine. The file is not deleted. Defaults naming it are cleared. Projects naming it " +
+        "fail to transcribe with ModelNotRegistered until it is registered again. Fails with ModelNotRegistered.",
+    params: z.strictObject({ id: ModelIdSchema }),
+    result: z.object({
+      removed: RegisteredModelSchema,
+      defaults: z.array(z.string()).describe("Providers whose machine default was this model, now cleared."),
+    }),
+  },
+  "model.default": {
+    mutating: true,
+    description:
+      "Set or clear this machine's default model for a provider: what `transcribe` uses in projects that set no " +
+        "`transcription.model`. The id is checked when it is registered or the project at `cwd` lists it.",
+    params: z.strictObject({
+      provider: z.string().min(1).default("whisper-cpp").describe("Provider id. Default `whisper-cpp`."),
+      model: z.string().min(1).nullable().describe("Model id; null clears the default (the provider's own then)."),
+      cwd: CwdParam.optional().describe("Directory inside a project whose provider lists the models it ships, to check a model id that is not registered."),
+    }),
+    result: z.object({
+      provider: z.string(),
+      model: z.string().nullable(),
+      previous: z.string().nullable().describe("Default before; null when none."),
+    }),
+  },
+  "transcription.set": {
+    mutating: true,
+    description:
+      "Set the project's transcription model (and provider) in `frameshell.json` `transcription`, keeping every other " +
+        "key. A null `model` removes `transcription.model`: this machine's default, else the provider's, is used. " +
+        "The model id is checked like `model.default`. Fails with ProjectNotFound, ModelNotRegistered.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      provider: z.string().min(1).optional().describe("Provider id. Default: the project's, else `whisper-cpp`."),
+      model: z.string().min(1).nullable().describe("Model id, or null for the default."),
+    }),
+    result: z.object({
+      provider: z.string(),
+      model: z.string().nullable(),
+      previous: z.string().nullable().describe("`transcription.model` before; null when unset."),
     }),
   },
   "file.write": {
@@ -2943,7 +3042,7 @@ export const ErrorCode = {
   ProjectExists: -32003,
   /** data: `{ path, details }` */
   InvalidProjectFile: -32004,
-  /** data: `{ path, details }` of the global `config.json` */
+  /** data: `{ path, details }` of the global `config.json` or the model registry `models.json` */
   InvalidGlobalConfig: -32005,
   /** data: `{ binary, platform }`: no build pinned for this platform and no override. */
   BinaryUnavailable: -32006,
@@ -3041,6 +3140,14 @@ export const ErrorCode = {
    * `building`, `decided`, `unknown` (no such open proposal), `stale` or `rejected` (your proposal closed unapplied).
    */
   ProposalState: -32042,
+  /**
+   * data: `{ id, reason, file?, hint }`; reason `unknown` (the model is not registered on this machine and the
+   * provider does not ship it), `missing-file` (its registered file is gone) or `format` (its format is not one
+   * the provider reads). `hint` says how to register it.
+   */
+  ModelNotRegistered: -32043,
+  /** data: `{ file, reason }`: the file is not a ggml, gguf or ONNX model, or is pickle-based (it could run code). */
+  UnsupportedModelFormat: -32044,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

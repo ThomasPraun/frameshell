@@ -176,7 +176,9 @@ export {
   transcribeAsset,
   resolveTranscript,
   transcriptPathsFor,
+  providerContext,
 } from "./transcripts/transcriber.js";
+export { MODEL_REGISTRY_FILE, ModelRegistry, detectModelFormat } from "./transcripts/model-registry.js";
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
 export { type DiarizeAssetOptions, type DiarizeRequest, type Diarizer, diarizeAsset, parseDiarization, sherpaDiarizer } from "./transcripts/speakers.js";

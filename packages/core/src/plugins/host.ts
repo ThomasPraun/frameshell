@@ -217,6 +217,13 @@ export class PluginHost {
     return normalizeResult(result, full, owner.info.name);
   }
 
+  /** Every transcription provider of the project's loaded plugins. Throws `ProjectNotTrusted`. */
+  async transcriptionProviders(root: string): Promise<TranscriptionProvider[]> {
+    const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    if (!loaded && trust !== "not-required") throw notTrusted(root, trust, pins);
+    return (loaded ?? []).flatMap((p) => [...p.providers.values()]);
+  }
+
   /**
    * Transcription provider `id` from the project's loaded plugins. Throws
    * `ProjectNotTrusted`, `InvalidPlugin` (its plugin failed to load) or

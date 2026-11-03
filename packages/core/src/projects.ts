@@ -143,6 +143,21 @@ export class ProjectRegistry {
   }
 
   /**
+   * Replace `transcription` of `frameshell.json` (removed when null), keeping every other key as written; resolves
+   * with the one it replaced. Throws `InvalidProjectFile` when the result would not validate.
+   */
+  async writeTranscription(root: string, transcription: ProjectConfig["transcription"] | null): Promise<ProjectConfig["transcription"]> {
+    const { raw, config } = await readConfig(root);
+    const { transcription: _previous, ...rest } = raw;
+    const next = transcription ? { ...rest, transcription } : rest;
+    const configPath = join(root, PROJECT_FILE);
+    const parsed = parseProjectConfig(next);
+    if (!parsed.ok) throw invalid(configPath, parsed.error);
+    await writeJsonAtomic(configPath, next);
+    return config.transcription;
+  }
+
+  /**
    * Replace a text file inside the project enclosing `path`, atomically.
    * Confinement checks real paths, not path text: symlinked dirs cannot lead
    * outside the project, and case variants of `.frameshell/` are refused on
