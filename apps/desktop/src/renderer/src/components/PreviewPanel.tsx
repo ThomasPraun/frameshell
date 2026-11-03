@@ -60,8 +60,8 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * clip gets handles to move and scale it, and the inspector below sets its
  * placement and sound (a selected subtitle track's style is set there too;
  * subtitle tracks draw over the picture as export burns them). The region tool draws a rectangle on the frame for
- * "Ask agent" (SPEC §10): it becomes the shared selection, with the
- * playhead's time; Escape clears it. Right-click opens "Ask agent".
+ * "Chat about this" (SPEC §10): it becomes the shared selection, with the
+ * playhead's time; Escape clears it. Right-click opens "Chat about this".
  * A generated clip whose render is not ready plays its composition live
  * when it is the topmost picture and its adapter supports it (ADR 0010).
  * Double-clicking a generated clip enters its elements (ADR 0021,

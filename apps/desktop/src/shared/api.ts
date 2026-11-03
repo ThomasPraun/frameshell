@@ -479,13 +479,13 @@ export interface FrameshellApi {
   context: {
     /**
      * Capture the main timeline's frame at `at` (timeline seconds) for an
-     * "Ask agent" region reference (SPEC §10), rendered by the daemon's
+     * "Chat about this" region reference (SPEC §10), rendered by the daemon's
      * `frame` method under `.frameshell/context/`. Resolves with its
      * project-relative path. Rejects with the daemon's message.
      */
     captureFrame(at: number): Promise<string>;
     /**
-     * Write an "Ask agent" details file `name` (`e_<frame>_<n>.json`) with
+     * Write an "Chat about this" details file `name` (`e_<frame>_<n>.json`) with
      * JSON `content` under `.frameshell/context/` through the daemon's
      * `context.write` (ADR 0011). Resolves with its project-relative path.
      */

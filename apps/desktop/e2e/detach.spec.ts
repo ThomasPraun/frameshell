@@ -122,10 +122,10 @@ test("F shows the detached preview full screen, Escape leaves it", async () => {
   await expect.poll(() => panelFullScreen()).toBe(false);
 });
 
-test("right-click in the panel window opens the Ask agent menu there", async () => {
+test("right-click in the panel window opens the Chat about this menu there", async () => {
   const child = await panelWindow(app, "preview");
   await child.getByTestId("preview-frame").click({ button: "right" });
-  await expect(child.getByRole("menuitem", { name: /Ask agent/ })).toBeVisible();
+  await expect(child.getByRole("menuitem", { name: /Chat about this/ })).toBeVisible();
   await expect(page.getByRole("menu")).toHaveCount(0);
   await child.keyboard.press("Escape");
   await expect(child.getByRole("menu")).toHaveCount(0);

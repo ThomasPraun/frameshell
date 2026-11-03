@@ -1,7 +1,7 @@
 import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import { t } from "../i18n.js";
-import { openAskMenu } from "../ask/ask-agent.js";
+import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
 import { placeItems } from "../file-commands.js";
 import { windowOf } from "../windows.js";
@@ -10,7 +10,7 @@ import { contextMenu } from "./ContextMenu.js";
 /** Folders a fresh project shows open: where the agent writes first. */
 const INITIALLY_OPEN = new Set(["scripts", "timelines"]);
 
-/** Media under here has no editor: a click selects it (for "Ask agent") as well as opening it. */
+/** Media under here has no editor: a click selects it (for "Chat about this") as well as opening it. */
 const ASSETS_DIR = "assets/";
 
 /** Every file path of a tree. */
@@ -20,9 +20,9 @@ function filePaths(nodes: readonly FileNode[]): string[] {
 
 /**
  * Project tree, refreshed live from the main-process watcher. Files are
- * selectable in the shared selection store for "Ask agent": a click on an
+ * selectable in the shared selection store for "Chat about this": a click on an
  * asset, Cmd/Ctrl-click on any file (toggles, without opening), or a
- * right-click, which opens its menu ("Ask agent", Open, Reveal, Copy path,
+ * right-click, which opens its menu ("Chat about this", Open, Reveal, Copy path,
  * Move to Trash; a folder gets the last three). Deleted files leave the selection.
  */
 export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string) => void; activeFile: string | null }) {
@@ -92,7 +92,8 @@ function Nodes({
   const onContextMenu = (event: MouseEvent, node: FileNode) => {
     if (node.kind === "dir") {
       event.preventDefault();
-      contextMenu.open(event.clientX, event.clientY, placeItems(node.path), windowOf(event.target));
+      if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
+      contextMenu.open(event.clientX, event.clientY, [...askItems(), ...placeItems(node.path)], windowOf(event.target));
       return;
     }
     if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");

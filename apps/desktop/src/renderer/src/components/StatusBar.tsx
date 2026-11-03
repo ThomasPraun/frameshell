@@ -8,7 +8,7 @@ const AGENT_NOTICE_MS = 6_000;
 
 /**
  * Bottom strip: which daemon serves the project, which terminal session CLI
- * calls are attributed to, a transient `notice` (e.g. why "Ask agent" did nothing),
+ * calls are attributed to, a transient `notice` (e.g. why "Chat about this" did nothing),
  * the background `setup` of a new project (#188), and briefly what the agent
  * just did to the view (MCP navigation).
  */

@@ -3,7 +3,7 @@ import { type ElectronApplication, type Locator, type Page, expect, test } from 
 import { isWindows, launch, panelWindow, runInTerminal, sandbox, terminalText } from "./harness.js";
 
 // Detachable panels (ADR 0012), part 2: a terminal tab moves to its own window and back with its shell still
-// running and its screen intact (main replays the pty's recent output), and "Ask agent" types into the last focused
+// running and its screen intact (main replays the pty's recent output), and "Chat about this" types into the last focused
 // terminal running an agent, in whatever window it is, and flashes its tab.
 const box = sandbox("ask");
 const FILE = "frameshell.json";
@@ -69,7 +69,7 @@ test("a terminal tab moves to its own window still running, with its screen, and
   await expect(tabs()).not.toHaveClass(/is-detached/);
 });
 
-test("Ask agent from the detached preview types into the last focused terminal, in its own window, and flashes its tab", async () => {
+test("Chat about this from the detached preview types into the last focused terminal, in its own window, and flashes its tab", async () => {
   await page.getByRole("button", { name: "New terminal" }).click();
   await expect(tabs()).toHaveCount(2);
   await runInTerminal(page, `node "${FAKE_AGENT}"`);
@@ -99,7 +99,7 @@ test("Ask agent from the detached preview types into the last focused terminal, 
   await preview.close();
 });
 
-test("Ask agent prefers the terminal running an agent over a shell focused later", async () => {
+test("Chat about this prefers the terminal running an agent over a shell focused later", async () => {
   test.skip(isWindows, "Agents are not detected on Windows: the target is the last focused terminal");
   await expect(tabs().nth(1)).toHaveAttribute("data-agent", "fake", { timeout: 15_000 });
   const before = (await terminalText(agentWindow)).split(FILE).length;

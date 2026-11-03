@@ -1,4 +1,4 @@
-// "Ask agent" reference text (SPEC decision 21, §10): what the user selected, as plain lines any agent CLI reads.
+// "Chat about this" reference text (SPEC decision 21, §10): what the user selected, as plain lines any agent CLI reads.
 import type { TimelineView } from "@frameshell/protocol";
 import type { SelectedPoint, SelectedWord, Selection } from "../selection.js";
 import { wordPlacement } from "../transcript/model.js";
@@ -64,6 +64,11 @@ function wordLines(selection: Selection, view: TimelineView | null): string[] {
     const text = quote(words.map((word) => word.text).join(" "));
     return [`${TAG} subtitle ${text}`, span(from, to), ...(clip ? [`clip ${clip}`] : []), ids].join(" · ");
   });
+}
+
+function trackLine(id: string, view: TimelineView | null): string {
+  const track = view?.tracks.find((candidate) => candidate.id === id);
+  return [`${TAG} track ${id}`, track ? `${track.kind}${track.name ? ` ${quote(track.name)}` : ""}` : null].filter(Boolean).join(" · ");
 }
 
 function clipLine(id: string, view: TimelineView | null): string {
@@ -160,7 +165,7 @@ function pointLine(point: SelectedPoint, view: TimelineView | null, extras: Refe
  * The reference of `selection`, one line per selected item (SPEC §10):
  * words become subtitle lines (one per clip playing them), clips one line
  * each, a History pick its transaction or operation first, a script scene
- * one line naming its time span (when picked on the timeline's scene band) and its clips, a bare timeline range, explorer files (`asset`
+ * one line naming its time span (when picked on the timeline's scene band) and its clips, a bare timeline range, a track picked by its header (`track v1 · video "Picture"`), explorer files (`asset`
  * under `assets/`, else `file`), a preview region naming the clips under it
  * (topmost first) and its saved `frame` capture when there is one, or
  * `frame pending` while a render it needs is not ready (ADR 0011), and
@@ -197,6 +202,7 @@ export function referenceLines(selection: Selection, view: TimelineView | null, 
   const lines: string[] = [];
   if (selection.history) lines.push(`${TAG} ${selection.history.startsWith("op_") ? "operation" : "transaction"} ${selection.history}`);
   lines.push(...selection.clips.map((id) => clipLine(id, view)));
+  if (lines.length === 0 && selection.track) lines.push(trackLine(selection.track, view));
   if (lines.length === 0 && selection.range) lines.push(`${TAG} range ${span(selection.range.from, selection.range.to)}`);
   return lines;
 }

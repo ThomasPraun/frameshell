@@ -2,7 +2,7 @@ import { isScriptPath, parseScript } from "@frameshell/schema";
 import { type MouseEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type SceneLink, type ScriptLinks, linkScenes } from "../../../shared/script-links.js";
-import { askAgent } from "../ask/ask-agent.js";
+import { askAgent, askItems } from "../ask/ask-agent.js";
 import { t } from "../i18n.js";
 import { languageFor, monaco } from "../monaco.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
@@ -32,7 +32,7 @@ interface OpenDoc {
  * linked or not, the scene of a selected clip is highlighted (the whole
  * script for a clip whose `scriptRef` has no `#anchor`), clicking a scene
  * heading selects its clips, and clicking the whole-script flag on line 1
- * selects the clips linked to the whole script. "Ask agent" (Cmd/Ctrl+L or
+ * selects the clips linked to the whole script. "Chat about this" (Cmd/Ctrl+L or
  * the editor's context menu) in a script first selects the scene under the
  * caret; elsewhere it asks about the current selection.
  *
@@ -124,7 +124,7 @@ export function EditorArea({
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void save());
     const ask = instance.addAction({
       id: "frameshell.askAgent",
-      label: t.workspace.askAgent,
+      label: t.workspace.chatAboutThis,
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
       contextMenuGroupId: "navigation",
       contextMenuOrder: 0,
@@ -290,14 +290,17 @@ export function EditorArea({
     const closeAll = (keep: string | null) => {
       for (const other of tabs) if (other !== keep) close(other, view);
     };
+    const file = path !== TRANSCRIPT_TAB;
+    if (file) selection.selectFiles([path], "explorer");
     contextMenu.open(
       event.clientX,
       event.clientY,
       [
+        ...(file ? askItems() : []),
         { label: t.editor.close, run: () => close(path, view) },
         { label: t.editor.closeOthers, disabled: tabs.length < 2, run: () => closeAll(path) },
         { label: t.editor.closeAll, run: () => closeAll(null) },
-        ...(path === TRANSCRIPT_TAB ? [] : [revealItem(path, true), copyPathItem(path)]),
+        ...(file ? [revealItem(path, true), copyPathItem(path)] : []),
       ],
       view,
     );

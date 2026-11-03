@@ -8,7 +8,7 @@ import { launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 // Scene spans on the timeline (ADR 0015): a script whose scenes name transcript words shows one span per scene in a
 // band under the ruler, hollow until a clip with the scene's `scriptRef` exists. Real daemon, fixture project with a
 // hand-written transcript (no media: spans come from the transcript and the timeline file), a stand-in agent TUI
-// (e2e/fake-agent.mjs) for the "Ask agent" reference, clicks on canvas pixels.
+// (e2e/fake-agent.mjs) for the "Chat about this" reference, clicks on canvas pixels.
 const box = sandbox("scenes");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const FAKE_AGENT = join(import.meta.dirname, "fake-agent.mjs");
@@ -65,7 +65,7 @@ test("a click on a span selects its time range and the scene", async () => {
   await expect(lanes()).toHaveAttribute("data-range", "3.2-5.7");
 });
 
-test("Ask agent on a span references the scene and its time", async () => {
+test("Chat about this on a span references the scene and its time", async () => {
   await clickBand(1.5);
   await page.locator(".timeline-scroller").focus();
   await page.keyboard.press(`${MOD}+l`);

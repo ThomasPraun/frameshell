@@ -39,7 +39,7 @@ import { isTranscriptPath } from "../transcript/useTranscripts.js";
 import { elementOf, listenEverywhere, windowOf } from "../windows.js";
 
 const SAVE_DELAY_MS = 300;
-/** How long an "Ask agent" notice stays in the status bar, ms. */
+/** How long a "Chat about this" notice stays in the status bar, ms. */
 const NOTICE_MS = 5000;
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -198,25 +198,43 @@ export function Workspace({ project }: { project: ProjectView }) {
     { ignore: ".terminal-view" },
   );
 
-  // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
+  // "Chat about this" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent;
+  // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => {
     let asking = false;
-    return askAgent.install((extra) => {
-      if (asking) return;
-      asking = true;
-      void composeReference()
-        .then(({ lines: reference, warning }) => {
-          const lines = [...reference, ...extra];
-          if (lines.length === 0) {
-            setNotice(t.workspace.askNothing);
-            return;
-          }
-          terminals.current?.type(lines, () => {
-            if (terminalCollapsed.current) toggle("terminal");
-          });
-          setNotice(warning);
-        })
-        .finally(() => (asking = false));
+    return askAgent.install({
+      run(extra) {
+        if (asking) return;
+        asking = true;
+        void composeReference()
+          .then(({ lines: reference, warning }) => {
+            const lines = [...reference, ...extra];
+            if (lines.length === 0) {
+              setNotice(t.workspace.askNothing);
+              return;
+            }
+            terminals.current?.type(lines, () => {
+              if (terminalCollapsed.current) toggle("terminal");
+            });
+            setNotice(warning);
+          })
+          .finally(() => (asking = false));
+      },
+      copy() {
+        if (asking) return;
+        asking = true;
+        void composeReference()
+          .then(async ({ lines, warning }) => {
+            if (lines.length === 0) {
+              setNotice(t.workspace.askNothing);
+              return;
+            }
+            await navigator.clipboard.writeText(lines.join("\n"));
+            setNotice(warning ?? t.workspace.referenceCopied);
+          })
+          .catch((error: Error) => setNotice(error.message))
+          .finally(() => (asking = false));
+      },
     });
   }, [toggle]);
 
@@ -527,7 +545,7 @@ function panelAt(target: EventTarget | null): WorkspacePanel | null {
 }
 
 /**
- * Whether Cmd/Ctrl+L at `target` is "Ask agent". Monaco runs it as its own
+ * Whether Cmd/Ctrl+L at `target` is "Chat about this". Monaco runs it as its own
  * action (it knows the scene under the caret); in a terminal on Linux and
  * Windows, Ctrl+L stays the shell's clear-screen.
  */

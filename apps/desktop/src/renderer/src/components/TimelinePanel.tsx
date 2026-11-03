@@ -15,7 +15,7 @@ import {
 import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
 import { turnsKey } from "../angles/model.js";
 import { useGroupsTurns } from "../angles/useTurns.js";
-import { openAskMenu } from "../ask/ask-agent.js";
+import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { revealItem } from "../file-commands.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
@@ -798,11 +798,13 @@ function TimelineCanvas({
     const group = row.group ?? "";
     const shots = shotSpans(row.clips);
     const here = unpaintEdits(group, lane.angle.id, shots, lane.painted, time);
+    selection.selectTrack(row.id, "timeline");
     contextMenu.open(
       event.clientX,
       event.clientY,
       [
-        { label: t.timeline.backToMeasured, disabled: here.length === 0, run: () => send(here) },
+        ...askItems(),
+        { label: t.timeline.backToMeasured, separated: true, disabled: here.length === 0, run: () => send(here) },
         { label: t.timeline.clearAnglePainted(lane.angle.name), disabled: lane.painted.length === 0, run: () => send([clearEdit(group, lane.angle.id)]) },
         { label: t.timeline.clearAllPainted, disabled: row.lanes.every((other) => other.painted.length === 0), run: () => send([clearEdit(group, null)]) },
       ],
@@ -886,7 +888,7 @@ function TimelineCanvas({
     setHover(null);
   };
 
-  /** A scene span of the band pressed: its time range is selected, with the scene and its clips (Ask agent names `<script>#<slug>`). */
+  /** A scene span of the band pressed: its time range is selected, with the scene and its clips (Chat about this names `<script>#<slug>`). */
   const pickScene = (scene: SceneBox) =>
     selection.selectScene({ script: scene.script, slug: scene.slug, title: scene.title }, scene.clips, {
       range: { from: scene.start, to: scene.end },
@@ -1083,7 +1085,8 @@ function TimelineCanvas({
       event.clientX,
       event.clientY,
       [
-        { label: t.timeline.renameTrack, run: () => setRenaming(row.id) },
+        ...askItems(),
+        { label: t.timeline.renameTrack, separated: true, run: () => setRenaming(row.id) },
         ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
         ...(image ? [] : addTrackItems(true)),
         {
@@ -1125,7 +1128,7 @@ function TimelineCanvas({
     </div>
   );
 
-  /** Right-click: a clip not yet selected becomes the selection, then "Ask agent" and its edit commands open on it. */
+  /** Right-click: a clip not yet selected becomes the selection, then "Chat about this" and its edit commands open on it. */
   const onContextMenu = (event: MouseEvent) => {
     const box = scroller.current!;
     const rect = box.getBoundingClientRect();

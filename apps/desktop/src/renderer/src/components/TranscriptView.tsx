@@ -82,7 +82,7 @@ interface Marked {
  *   correction in `edits`, which wins over diarization. Double-clicking a
  *   speaker's name, or its context menu, renames it in the file's `speakers`;
  *   the menu also links the speaker to a person, or unlinks it (ADR 0020).
- * - Right-click opens "Ask agent" on the selection (a kept word outside it is
+ * - Right-click opens "Chat about this" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {

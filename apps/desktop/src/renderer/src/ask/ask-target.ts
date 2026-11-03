@@ -1,4 +1,4 @@
-// Where "Ask agent" types (ADR 0012): a project's terminals may be docked or in windows of their own.
+// Where "Chat about this" types (ADR 0012): a project's terminals may be docked or in windows of their own.
 
 /** What the target rule needs of a terminal tab. */
 export interface AskTab {
@@ -10,7 +10,7 @@ export interface AskTab {
 }
 
 /**
- * The Ask agent target among `tabs`, live ones only: the most recently
+ * The Chat about this target among `tabs`, live ones only: the most recently
  * focused tab running an agent (`agents` by terminal id), else the most
  * recently focused, else the `active` tab, else the first. `focusOrder` holds
  * tab keys, most recent last. Null when no shell runs.

@@ -112,7 +112,7 @@ export function fragileSelector(selector: string): boolean {
   return !selector.includes("#") || selector.includes(":nth-child");
 }
 
-/** What Ask agent asks for a fragile selector (agent-facing, English): an `id` on the element, the entry keyed by it. */
+/** What Chat about this asks for a fragile selector (agent-facing, English): an `id` on the element, the entry keyed by it. */
 export function idRequest(clip: string, selector: string): string {
   return (
     `Give the element \`${selector}\` of clip ${clip} an id in its composition source, then move its entry in the clip's ` +
