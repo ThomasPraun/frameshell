@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BinaryManager, DIARIZATION_TOOL, type Daemon, SEGMENTATION_MODEL, SPEAKER_EMBEDDING_MODEL, startDaemon } from "@frameshell/core";
 import { tempDir, uniqueSocketPath } from "../../core/test/helpers.js";
+import { mediaTools } from "../../core/test/media-tools.js";
 
 // Black-box: the built CLI against an in-process daemon with a stand-in diarizer and fake model files.
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
@@ -38,7 +39,9 @@ beforeAll(async () => {
   dirs = { dataDir: tempDir(), configDir: tempDir() };
   const engine = join(tempDir(), DIARIZATION_TOOL);
   writeFileSync(engine, "");
-  writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify({ binaries: { [DIARIZATION_TOOL]: engine } }));
+  // Attaching the project ingests talk.mp4: with the test ffmpeg at hand it fails at once instead of installing ffmpeg.
+  const { ffmpeg, ffprobe } = await mediaTools();
+  writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify({ binaries: { [DIARIZATION_TOOL]: engine, ffmpeg, ffprobe } }));
   const binaries = new BinaryManager(dirs);
   for (const id of [SEGMENTATION_MODEL, SPEAKER_EMBEDDING_MODEL]) {
     const model = await binaries.locateModel(id);
@@ -50,6 +53,8 @@ beforeAll(async () => {
     dirs,
     binaries,
     extractAudio: async (_input, output) => writeFileSync(output, "wav"),
+    // Voice prints of the found speakers: a stand-in, so the run never downloads the speaker model's runtime.
+    voiceEmbedder: async ({ stretches }) => stretches.map((_, index) => (index % 2 === 0 ? [1, 0] : [0, 1])),
     diarize: async ({ speakers, onProgress }) => {
       counts.push(speakers);
       onProgress(0.5);

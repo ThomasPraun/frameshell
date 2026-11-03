@@ -60,6 +60,11 @@ export const TranscriptSchema = z
     assetHash: z.string().regex(/^sha256:[0-9a-f]{64}$/, "must be `sha256:` + 64 lowercase hex digits"),
     provider: z.string().min(1),
     model: z.string().min(1),
+    /**
+     * `sha256:<hex>` of the model file a user registered on this machine (`frameshell model add`); absent for
+     * the provider's own pinned models, which the host verifies.
+     */
+    modelHash: z.string().regex(/^sha256:[0-9a-f]{64}$/, "must be `sha256:` + 64 lowercase hex digits").optional(),
     language: z.string().optional(),
     words: z.array(WordSchema),
     edits: z.record(WordIdSchema, WordEditSchema).default({}),

@@ -15,7 +15,7 @@ import { useSyncExternalStore } from "react";
  * timeline highlights what it changed. A subtitle track (#22) is selected
  * from its lane (alone, or with the words of a cue); the inspector edits its
  * style. Timeline editing (#16)
- * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Ask agent"
+ * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Chat about this"
  * (#49) quotes it, and the player (#15) may follow it. Those extend
  * {@link Selection} here; never keep a second store.
  *

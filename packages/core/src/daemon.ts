@@ -19,6 +19,7 @@ import {
   type ValidatedParams,
   type AppDirs,
   PROPOSAL_WAIT_DEFAULT_S,
+  INBOX_WAIT_DEFAULT_S,
   type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
@@ -27,12 +28,12 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
+import { type MulticamGroup, type ProgramTrack, type ProjectConfig, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
-import { BinaryManager } from "./binaries/manager.js";
+import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
@@ -66,6 +67,7 @@ import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
+import { fileUses } from "./file-uses.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -95,9 +97,11 @@ import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
-import { resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
+import { ModelRegistry, notRegistered } from "./transcripts/model-registry.js";
+import { type TranscriberTools, providerContext, resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
+import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
@@ -199,6 +203,26 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const clients = new Set<Socket>();
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
+  const models = new ModelRegistry(dirs.configDir);
+  /** Binaries, pinned models and this machine's registered models for a transcription provider. */
+  const transcriberTools = (overrides: ProjectBinaries): TranscriberTools => ({
+    ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
+    ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
+    userModel: (id, formats) => models.resolve(id, formats),
+  });
+  /** Model of a transcription when the caller names none: the project's, else this machine's default. */
+  const configuredModel = async (config: ProjectConfig, providerId: string) =>
+    config.transcription?.model ?? (await models.defaultFor(providerId));
+  /**
+   * Throw `ModelNotRegistered` for a model id that is neither registered here nor shipped by provider `providerId`
+   * of the project at `dir`. Ids are not checked when the provider cannot be loaded, or does not list its models.
+   */
+  const checkModelId = async (model: string, providerId: string, dir: string | null) => {
+    if ((await models.has(model)) || dir === null) return;
+    const provider = await plugins.transcriptionProvider(dir, providerId).catch(() => null);
+    if (!provider?.models || provider.models.some((pinned) => pinned.id === model) || provider.defaultModel === model) return;
+    throw notRegistered(model, "unknown");
+  };
   const events = new EventHub();
   // Hub key of each root as jobs and media name it (the caller's spelling). `events.subscribe` keys by
   // `canonicalPath`: publishing under the raw root misses subscribers of another spelling (Windows 8.3
@@ -483,13 +507,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             extract: ffmpegRangeExtractor(() => binaries.ensure("ffmpeg", overrides), ctx.signal),
             providerId,
             provider,
-            model: config.transcription?.model,
+            model: await configuredModel(config, providerId),
             language: config.transcription?.language,
-            context: {
-              ensureBinary: (name) => binaries.ensure(name, overrides),
-              ensureModel: (id) => binaries.ensureModel(id),
-              progress: () => {},
-            },
+            context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);
           await shoots.status(dir, dir, script);
@@ -753,6 +773,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return listed;
   };
   const ui = new UiBroker();
+  // ADR 0025: agents outside the app's terminals, and the references the app sends them. Owners are connections' callers.
+  const targets = new AgentTargets({
+    onChanged: (key, list, read) => events.publish("target.changed", key, { project: key, targets: list, read }),
+  });
+  /**
+   * Target `caller` reads on project `key`: the one it names, else the one it registered as, else the one named
+   * after its agent label (a CLI run by an agent whose MCP server registered). Null when none applies.
+   */
+  const inboxOf = (caller: Caller, key: string, named: string | undefined): string | null => {
+    if (named !== undefined) return named;
+    const own = targets.targetOf(caller, key);
+    if (own !== null) return own;
+    const agent = agentOf(caller);
+    return agent !== null && targets.has(key, agent) ? agent : null;
+  };
   /** Hub key of the project enclosing `cwd`, as `ui.publish` registers windows under. */
   const projectKey = async (cwd: string) => canonicalPath(await root(cwd));
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
@@ -844,17 +879,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { dir, config } = (await readEnclosingProject(cwd))!;
       const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
       const overrides = { dir, binaries: config.binaries };
+      const chosenModel = model ?? (await configuredModel(config, providerId));
       return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
         providerId,
         provider: () => plugins.transcriptionProvider(dir, providerId),
-        model: model ?? config.transcription?.model,
+        model: chosenModel,
         language: language ?? config.transcription?.language,
-        tools: {
-          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
-          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
-        },
+        tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
         progress: request.progress,
@@ -868,10 +901,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         projectDir: dir,
         asset: resolve(cwd, asset),
         speakers,
-        tools: {
-          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
-          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
-        },
+        tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
         diarize: options.diarize,
@@ -891,17 +921,64 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         providerId,
         provider: () => plugins.transcriptionProvider(dir, providerId),
         model: model ?? config.transcription?.model,
+        defaultModel: await models.defaultFor(providerId),
         language: language ?? config.transcription?.language,
-        tools: {
-          ensureBinary: (name, onProgress) => binaries.ensure(name, overrides, { onProgress }),
-          ensureModel: (id, onProgress) => binaries.ensureModel(id, { onProgress }),
-        },
+        tools: transcriberTools(overrides),
         assetHash: async (rel) => (await media.derivedAudio(dir, rel)).hash,
         extractAudio: options.extractAudio,
         progress: request.progress,
       }));
     },
+    "model.list": async ({ cwd }) => {
+      const listed = await models.list();
+      if (!cwd) return { ...listed, providers: [], providersError: null, project: null };
+      const found = await readEnclosingProject(cwd);
+      if (!found) return { ...listed, providers: [], providersError: `No Frameshell project in ${cwd} or its parents.`, project: null };
+      const { dir, config } = found;
+      let providers: MethodResult<"model.list">["providers"] = [];
+      let providersError: string | null = null;
+      try {
+        providers = await Promise.all(
+          (await plugins.transcriptionProviders(dir)).map(async (provider) => ({
+            id: provider.id,
+            defaultModel: provider.defaultModel ?? null,
+            userModels: provider.userModels
+              ? { formats: [...provider.userModels.formats], options: (provider.userModels.options ?? []).map(({ key, values }) => ({ key, values: [...values] })) }
+              : null,
+            models: await Promise.all(
+              (provider.models ?? []).map(async ({ id, managedModel }) => {
+                const location = managedModel ? await binaries.locateModel(managedModel).catch(() => null) : null;
+                return { id, size: location?.pinned.size ?? null, downloaded: location?.installed ?? false };
+              }),
+            ),
+          })),
+        );
+      } catch (error) {
+        providersError = (error as Error).message;
+      }
+      const providerId = config.transcription?.provider ?? "whisper-cpp";
+      const own = providers.find((provider) => provider.id === providerId)?.defaultModel ?? null;
+      const effective = config.transcription?.model ?? listed.defaults[providerId] ?? own;
+      return { ...listed, providers, providersError, project: { dir, provider: providerId, model: config.transcription?.model ?? null, effective } };
+    },
+    "model.add": async ({ id, file, options: settings }, _caller, request) => models.add(id, file, settings, request.progress),
+    "model.remove": async ({ id }) => models.remove(id),
+    "model.default": async ({ provider, model, cwd }) => {
+      const dir = cwd ? ((await readEnclosingProject(cwd))?.dir ?? null) : null;
+      if (model !== null) await checkModelId(model, provider, dir);
+      return { provider, model, previous: await models.setDefault(provider, model) };
+    },
+    "transcription.set": async ({ cwd, provider, model }) => {
+      await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
+      const { dir, config } = (await readEnclosingProject(cwd))!;
+      const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
+      if (model !== null) await checkModelId(model, providerId, dir);
+      const { model: _previous, ...kept } = config.transcription ?? {};
+      const previous = await projects.writeTranscription(dir, { ...kept, provider: providerId, ...(model !== null ? { model } : {}) });
+      return { provider: providerId, model, previous: previous?.model ?? null };
+    },
     "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
+    "file.uses": ({ path }) => fileUses(path),
     "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);
@@ -1451,6 +1528,45 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const by = author.startsWith("agent:") ? author : undefined;
       return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
     },
+    "target.register": async ({ cwd, client, title, kind }, caller) => {
+      const dir = await root(cwd);
+      return { dir, target: targets.register(caller, await canonicalPath(dir), { client, title, kind }) };
+    },
+    "target.unregister": async ({ cwd }, caller) => {
+      const dir = await root(cwd);
+      targets.unregister(caller, await canonicalPath(dir));
+      return { dir };
+    },
+    "target.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, targets: targets.list(await canonicalPath(dir)) };
+    },
+    "inbox.put": async ({ cwd, target, lines }) => {
+      const dir = await root(cwd);
+      return { dir, ...targets.put(await canonicalPath(dir), target, lines) };
+    },
+    "inbox.take": async ({ cwd, target }, caller) => {
+      const dir = await root(cwd);
+      const key = await canonicalPath(dir);
+      const id = inboxOf(caller, key, target);
+      return { dir, target: id, references: id === null ? [] : targets.take(key, id) };
+    },
+    "inbox.wait": async ({ cwd, target, timeout }, caller) => {
+      const dir = await root(cwd);
+      const key = await canonicalPath(dir);
+      const id = inboxOf(caller, key, target);
+      if (id === null || !targets.has(key, id)) {
+        const known = targets.list(key).map((each) => each.id);
+        throw new RpcError(
+          ErrorCode.InvalidParams,
+          id === null
+            ? "This connection is no agent target of the project: register first (`frameshell ask --wait` does) or name a `target`."
+            : `No agent target \`${id}\` in this project; ${known.length > 0 ? `targets: ${known.join(", ")}` : "none is registered"}.`,
+          { issues: [{ path: ["target"], message: id === null ? "required" : "unknown target" }], targets: known },
+        );
+      }
+      return { dir, target: id, references: await targets.wait(caller, key, id, (timeout ?? INBOX_WAIT_DEFAULT_S) * 1000) };
+    },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
@@ -1517,6 +1633,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     socket.on("close", () => {
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
+      targets.drop(caller);
       ui.drop(sink);
       clients.delete(socket);
       armIdleTimer();

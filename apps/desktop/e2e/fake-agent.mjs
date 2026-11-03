@@ -1,4 +1,4 @@
-// Stand-in for an agent TUI such as Claude Code, for the "Ask agent" e2e test (#49): raw-mode stdin, bracketed
+// Stand-in for an agent TUI such as Claude Code, for the "Chat about this" e2e test (#49): raw-mode stdin, bracketed
 // paste on, the input line echoed as typed. Enter outside a paste submits: it prints SUBMITTED, which the test
 // must never see. Ctrl+C quits. Run with `node fake-agent.mjs`.
 const ESC = "\u001b";

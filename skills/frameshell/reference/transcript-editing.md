@@ -6,7 +6,7 @@ Cutting a recording by its words: remove silences and retakes, add subtitles, ex
 
 1. **Import.** `frameshell import <file…> --wait` copies the footage into `assets/` and blocks until its proxy, audio sidecar and waveform exist (exit 1 if one failed). `--link` avoids copying a large file (the source must stay). Done = every file shows `done`.
 2. **Place it.** `frameshell track add video --name Camera --json`, then `frameshell clip add <track> assets/<file> --json` (whole asset at the track's end). Audio-only material goes on `track add audio`.
-3. **Transcribe.** `frameshell transcribe assets/<file> --language <code> --json` writes `transcripts/<file minus extension>.words.json`; the output names the file. Needs a transcription plugin: when it fails with `TranscriptionProviderNotFound`, run the install command its message gives. The first run downloads the engine and a 574 MB model (minutes, once).
+3. **Transcribe.** `frameshell transcribe assets/<file> --language <code> --json` writes `transcripts/<file minus extension>.words.json`; the output names the file. Needs a transcription plugin: when it fails with `TranscriptionProviderNotFound`, run the install command its message gives. The first run downloads the engine and a 574 MB model (minutes, once). The model is the project's `transcription.model`, else this machine's default, else the provider's; see *Choosing the model*.
 4. **Find what to remove** (see *Choosing cuts*). Write the ranges down in timeline seconds before cutting anything.
 5. **Cut** inside one transaction, **last range first**: a cut shifts everything after it left, so cutting from the end keeps the earlier ranges valid.
    ```sh
@@ -22,6 +22,15 @@ Cutting a recording by its words: remove silences and retakes, add subtitles, ex
 8. **Verify.** `frameshell transcribe --verify exports/<file>.mp4 --json` re-transcribes the export and lists in `lost` every kept word cut off at a clip edge (`clipped: true`, not heard even in a re-check of the audio around it), with its timeline position `at`, `clip` and `cut`. Fix each: extend the edge over the word with `frameshell clip trim <clip> --out <s> --ripple` (tail) or `--in <s> --ripple` (head), render, verify again. `uncertain` lists words to check by ear (`repeat`: whisper may have collapsed a retake; `garbled`; `unheard`: a recognition miss, the audio is there). Never trim for an `uncertain` word: a trim fixes only a cut that falls inside a word. `unchecked` names clips whose asset has no current transcript. The report is the whole check: it writes no transcript, so there is nothing to transcribe or clean up afterwards.
 
 Done = `lost` is empty, every `uncertain` word reviewed, and the user has the export path and the transaction ids.
+
+## Choosing the model
+
+`frameshell model list --json` shows the models the provider ships (size, downloaded), model files registered on this machine, this machine's defaults (`defaults`) and what `transcribe` uses in this project (`project.effective`).
+
+- A user's own model file (a fine-tuned Whisper for their language) is registered once per machine by id: `frameshell model add <id> <file> --dtw <preset>`. whisper.cpp reads ggml files; `--dtw` names the alignment preset of the model it was trained from (`small`, `large.v3`, …) and keeps word starts precise; without it word starts come from token times and `transcribe` warns. Only register a file the user named. Pickle checkpoints (`.nemo`, `.pt`, `.ckpt`) fail with `UnsupportedModelFormat`: ask for the model's ggml or ONNX export.
+- `frameshell model use <id>` writes the project's `transcription.model` (`default` removes it); `frameshell model default <id> --provider whisper-cpp` sets this machine's default for projects that name none. `frameshell model remove <id>` forgets a registration, never the file.
+- The project names only the id, so it stays portable: on a machine where that id is not registered, `transcribe` fails with `ModelNotRegistered` and says how to register it. Never switch to another model on your own; ask the user for the file.
+- A transcript made with a registered model records its `modelHash`. `transcribe` warns (`warnings`) when the file changed since it was registered.
 
 ## Choosing cuts
 

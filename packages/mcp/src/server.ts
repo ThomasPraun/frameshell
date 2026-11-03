@@ -22,7 +22,7 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { contactSheet, decodePng, encodePng, fitWithin } from "./png.js";
-import { ProjectResolver, type ResolvedProject, appProjectNote } from "./project.js";
+import { ProjectResolver, type ResolvedProject, appProjectNote, insideProject } from "./project.js";
 import { ProjectResources, STATUS_URI, historyUri, timelineUri, transcriptUri } from "./resources.js";
 import { CAPTURE_MAX_SIDE, FramesStripParams, STRIP_MAX_WIDTH, type ToolSpec, buildTools } from "./tools.js";
 
@@ -36,12 +36,27 @@ export interface McpServerOptions {
   cwd: string;
   /**
    * Open a handshaken daemon connection. Called lazily on the first tool call
-   * or resource read, and again after the connection drops.
+   * or resource read, and again after the connection drops. `client` is the
+   * MCP client `initialize` named, so the handshake can journal its operations
+   * under that agent (ADR 0025 decision 6).
    */
-  connect: () => Promise<DaemonConnection>;
+  connect: (client: McpClient) => Promise<DaemonConnection>;
   /** Reported to MCP clients as the server version. */
   version?: string;
+  /**
+   * Opt in to Claude Code channels (research preview): declare `experimental['claude/channel']` and push each
+   * reference sent to this client's inbox as `notifications/claude/channel`, taking it from the inbox (ADR 0025).
+   */
+  channel?: boolean;
 }
+
+/** Seconds one `inbox.wait` of the channel pump blocks before it asks again. */
+const CHANNEL_WAIT_S = 120;
+
+const CHANNEL_INSTRUCTIONS =
+  " References the person sends from the Frameshell app (\"Chat about this\") also arrive on their own as " +
+  "`<channel source=\"frameshell\">` events holding the `[frameshell]` lines: resolve them as `inbox_take` would " +
+  "return them. They are one-way and already taken from the inbox, so do not `inbox_take` for them.";
 
 const INSTRUCTIONS =
   "Frameshell edits video projects: timelines of clips on tracks, times in decimal seconds (timeline seconds for " +
@@ -51,6 +66,8 @@ const INSTRUCTIONS =
   "group several operations. Look at what you built with `frame_capture` and `frames_strip`. `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
+  "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
+  "`[frameshell]` lines. " +
   "Tools without `cwd` act on the project enclosing the directory this server started in; when that is in no " +
   "project (one server for every project, e.g. Claude Desktop), on the project open in the Frameshell app window " +
   "the user used last, and the result then names it in a `Project: <dir>` line: check it is the project you mean, " +
@@ -65,7 +82,14 @@ export function createMcpServer(options: McpServerOptions): Server {
   const { cwd } = options;
   const server = new Server(
     { name: "frameshell", version: options.version ?? "0.0.0" },
-    { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } }, instructions: INSTRUCTIONS },
+    {
+      capabilities: {
+        tools: {},
+        resources: { subscribe: true, listChanged: true },
+        ...(options.channel ? { experimental: { "claude/channel": {} } } : {}),
+      },
+      instructions: options.channel ? INSTRUCTIONS + CHANNEL_INSTRUCTIONS : INSTRUCTIONS,
+    },
   );
   const tools = buildTools(cwd);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
@@ -77,7 +101,9 @@ export function createMcpServer(options: McpServerOptions): Server {
     for (const uri of uris) if (subscribed.has(uri)) server.sendResourceUpdated({ uri }).catch(() => {});
     if (listChanged) server.sendResourceListChanged().catch(() => {});
   };
-  const link = new DaemonLink(options.connect, {
+  /** The MCP client (`initialize`), registered as the agent target of the default project (ADR 0025). */
+  let client: McpClient = null;
+  const link = new DaemonLink(() => options.connect(client), {
     onTimelineChanged: ({ timeline }) => {
       const isNew = !known.has(timeline);
       known.add(timeline);
@@ -90,12 +116,16 @@ export function createMcpServer(options: McpServerOptions): Server {
   });
   const resolver = new ProjectResolver(cwd, () => link.get());
   let current: string | null = null;
+  let pumping = false;
+  let closing = false;
   /** The default project now; a switch (the user moved to another window) re-announces every resource. */
   const resolve = async (): Promise<ResolvedProject> => {
     const project = await resolver.resolve();
+    if (client) void link.register(project.root, client).catch(() => {});
     if (project.root !== current) {
       const switched = current !== null;
       current = project.root;
+      if (options.channel) void pump();
       if (switched) {
         known.clear();
         if (subscribed.size > 0) await link.watch(project.root).catch(() => {});
@@ -103,6 +133,31 @@ export function createMcpServer(options: McpServerOptions): Server {
       }
     }
     return project;
+  };
+  /**
+   * Channel mode: hold an `inbox.wait` for this client and push what arrives as a channel event. Taking is what
+   * makes a pushed reference count as read, so a hook or `inbox_take` finds nothing again (no double delivery).
+   */
+  const pump = async (): Promise<void> => {
+    if (pumping) return;
+    pumping = true;
+    let delay = 1_000;
+    while (!closing) {
+      try {
+        const project = await resolve();
+        if (client) await link.register(project.root, client);
+        const conn = await link.get();
+        const { references, target } = await conn.request("inbox.wait", { cwd: project.cwd, timeout: CHANNEL_WAIT_S });
+        delay = 1_000;
+        for (const reference of references) {
+          await server.notification(channelEvent(reference, target) as never);
+        }
+      } catch {
+        // Not registered yet, daemon away or project gone: ask again, slower each time.
+        await new Promise((done) => setTimeout(done, delay).unref?.());
+        delay = Math.min(delay * 2, 30_000);
+      }
+    }
   };
   const resources = new ProjectResources(resolve, () => link.get());
   const watch = async () => {
@@ -177,12 +232,36 @@ export function createMcpServer(options: McpServerOptions): Server {
     return {};
   });
 
+  // A server started inside a project registers at once, so "Chat about this" can reach it before any tool call;
+  // one started elsewhere (a global server) registers on the project of its first call, never starting a daemon idly.
+  server.oninitialized = () => {
+    const info = server.getClientVersion();
+    if (!info) return;
+    client = { name: info.name, ...(info.title ? { title: info.title } : {}) };
+    if (insideProject(cwd)) void resolve().catch(() => {});
+  };
+
   const close = server.onclose;
   server.onclose = () => {
+    closing = true;
     link.close();
     close?.();
   };
   return server;
+}
+
+/**
+ * A reference as a Claude Code channel event: its lines as the body, and `meta` keys that are identifiers (letters,
+ * digits, underscores; Claude Code drops others silently).
+ */
+export function channelEvent(
+  reference: { lines: string[]; sentAt: string },
+  target: string | null,
+): { method: "notifications/claude/channel"; params: { content: string; meta: Record<string, string> } } {
+  return {
+    method: "notifications/claude/channel",
+    params: { content: reference.lines.join("\n"), meta: { ...(target ? { target } : {}), sent_at: reference.sentAt } },
+  };
 }
 
 /** Tool error: `isError` result the model reads and can act on, never a protocol error. */
@@ -293,6 +372,15 @@ class DaemonUnreachable extends Error {
   override readonly name = "DaemonUnreachable";
 }
 
+/** MCP client as `initialize` named it. */
+export interface AgentClient {
+  name: string;
+  title?: string;
+}
+
+/** The MCP client of a server, null until `initialize`. */
+export type McpClient = AgentClient | null;
+
 /** What a {@link DaemonLink} tells its owner. */
 interface LinkEvents {
   onTimelineChanged(params: EventParams<"timeline.changed">): void;
@@ -303,15 +391,21 @@ interface LinkEvents {
 
 /**
  * One lazily opened daemon connection, reopened after it drops, with the
- * `timeline.changed` subscription renewed on each new connection.
+ * `timeline.changed` subscription and the agent target registration renewed
+ * on each new connection. The daemon drops the registration with the
+ * connection: the process exiting unregisters it.
  */
 class DaemonLink {
   readonly #connect: () => Promise<DaemonConnection>;
   readonly #events: LinkEvents;
   #current: Promise<DaemonConnection> | null = null;
   #watched: string | null = null;
+  /** Project root registered as an agent target, and as which client. */
+  #target: { root: string; client: AgentClient } | null = null;
+  #registration: Promise<void> = Promise.resolve();
   #lost = false;
   #closed = false;
+  #retry: NodeJS.Timeout | undefined;
 
   constructor(connect: () => Promise<DaemonConnection>, events: LinkEvents) {
     this.#connect = connect;
@@ -341,8 +435,24 @@ class DaemonLink {
     if (previous) await conn.request("events.unsubscribe", { cwd: previous, events: WATCHED }).catch(() => {});
   }
 
+  /** Register as agent target `client` of the project at `root` from now on, instead of the one before, across reconnects. */
+  register(root: string, client: AgentClient): Promise<void> {
+    // Same root: wait for the registration under way rather than return before it is done.
+    if (this.#target?.root === root) return this.#registration;
+    const previous = this.#target?.root;
+    this.#target = { root, client };
+    const opened = this.#current !== null;
+    return (this.#registration = (async () => {
+      const conn = await this.get();
+      // A connection opened just now registered on its own.
+      if (opened) await this.#register(conn);
+      if (previous) await conn.request("target.unregister", { cwd: previous }).catch(() => {});
+    })());
+  }
+
   close(): void {
     this.#closed = true;
+    clearTimeout(this.#retry);
     void this.#current?.then((conn) => conn.close(), () => {});
   }
 
@@ -366,11 +476,30 @@ class DaemonLink {
     void conn.closed.then(() => {
       if (this.#current !== null) this.#lost = true;
       this.#current = null;
+      this.#reconnect(1_000);
     });
     if (this.#watched) await this.#subscribe(conn, this.#watched);
+    // The project may be gone since: the registration is best effort, never a reason to refuse the connection.
+    if (this.#target) await this.#register(conn).catch(() => {});
     if (this.#lost && this.#watched) this.#events.onResync();
     this.#lost = false;
     return conn;
+  }
+
+  /** While registered as a target, reconnect soon after a loss: the app lists only connected targets. */
+  #reconnect(delay: number): void {
+    if (this.#closed || !this.#target) return;
+    clearTimeout(this.#retry);
+    this.#retry = setTimeout(() => {
+      if (this.#current) return;
+      this.get().catch(() => this.#reconnect(Math.min(delay * 2, 30_000)));
+    }, delay);
+    this.#retry.unref?.();
+  }
+
+  async #register(conn: DaemonConnection): Promise<void> {
+    const { root, client } = this.#target!;
+    await conn.request("target.register", { cwd: root, client: client.name, ...(client.title ? { title: client.title } : {}), kind: "mcp" });
   }
 
   async #subscribe(conn: DaemonConnection, root: string): Promise<void> {

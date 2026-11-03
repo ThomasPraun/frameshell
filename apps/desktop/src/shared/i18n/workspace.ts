@@ -1,4 +1,4 @@
-// Project window shell: layout, status bar, sidebar, detached panels, drops, Ask agent, agent navigation notices
+// Project window shell: layout, status bar, sidebar, detached panels, drops, Chat about this, agent navigation notices
 // (Workspace, StatusBar, Sidebar, DetachControls, file-drop, ask/ask-agent, ui-link).
 
 const en = {
@@ -9,8 +9,18 @@ const en = {
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
-  askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.",
-  askAgent: "Ask agent",
+  askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to chat about.",
+  chatAboutThis: "Chat about this",
+  copyReference: "Copy reference",
+  referenceCopied: "Reference copied.",
+  /** An agent outside the app's terminals (ADR 0025), e.g. `Claude Code · launch`. */
+  askExternalTarget: (agent: string, project: string) => `${agent} · ${project}`,
+  askSentWaiting: (agent: string) => `Sent to ${agent}, waiting for it to read`,
+  askRead: (agent: string) => `${agent} read it`,
+  askNotSent: (agent: string, reason: string) => `Not sent to ${agent}: ${reason}`,
+  askCopied: "No agent to send to: the reference is on the clipboard.",
+  askPending: (agent: string, count: number) => `${agent}: ${count} waiting`,
+  askPendingTitle: "References sent with Chat about this that the agent has not read yet",
   frameNotCaptured: (reason: string) => `Frame not captured: ${reason}`,
   detailsNotSaved: (reason: string) => `Details not saved: ${reason}`,
   /** Title of a detached panel's window. */
@@ -51,6 +61,8 @@ const en = {
   hide: "Hide",
   dontShowAgain: "Don't show again for this project",
   activeSessionTitle: "FRAMESHELL_SESSION of the active terminal",
+  connectedAgents: (names: string) => `Agents: ${names}`,
+  connectedAgentsTitle: "Agents connected to this project. Show the terminal panel (Cmd/Ctrl+\\).",
   agentSeek: (time: string) => `Agent moved the playhead to ${time}`,
   agentPlay: "Agent started playback",
   agentPause: "Agent paused playback",
@@ -75,8 +87,17 @@ const es: typeof en = {
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,
   askNothing:
-    "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para preguntarle al agente.",
-  askAgent: "Preguntar al agente",
+    "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para hablar de ello.",
+  chatAboutThis: "Hablar de esto",
+  copyReference: "Copiar referencia",
+  referenceCopied: "Referencia copiada.",
+  askExternalTarget: (agent, project) => `${agent} · ${project}`,
+  askSentWaiting: (agent) => `Enviado a ${agent}, esperando que lo lea`,
+  askRead: (agent) => `${agent} lo leyó`,
+  askNotSent: (agent, reason) => `No se envió a ${agent}: ${reason}`,
+  askCopied: "No hay un agente al que enviarlo: la referencia quedó en el portapapeles.",
+  askPending: (agent, count) => `${agent}: ${count} en espera`,
+  askPendingTitle: "Referencias enviadas con Hablar de esto que el agente aún no leyó",
   frameNotCaptured: (reason) => `No se capturó el fotograma: ${reason}`,
   detailsNotSaved: (reason) => `No se guardaron los detalles: ${reason}`,
   windowTitle: (panel, project) => `${panel} — ${project}`,
@@ -113,6 +134,8 @@ const es: typeof en = {
   hide: "Ocultar",
   dontShowAgain: "No volver a mostrar para este proyecto",
   activeSessionTitle: "FRAMESHELL_SESSION de la terminal activa",
+  connectedAgents: (names) => `Agentes: ${names}`,
+  connectedAgentsTitle: "Agentes conectados a este proyecto. Mostrar el panel de terminal (Cmd/Ctrl+\\).",
   agentSeek: (time) => `El agente movió el cursor de reproducción a ${time}`,
   agentPlay: "El agente inició la reproducción",
   agentPause: "El agente pausó la reproducción",

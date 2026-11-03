@@ -24,6 +24,7 @@
     "@frameshell/core": "workspace:*",
     "@frameshell/mcp": "workspace:*",
     "@frameshell/protocol": "workspace:*",
-    "@frameshell/schema": "workspace:*"
+    "@frameshell/schema": "workspace:*",
+    "jsonc-parser": "3.3.1"
   }
 }

@@ -25,6 +25,10 @@
       "type": "string",
       "minLength": 1
     },
+    "modelHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "language": {
       "type": "string"
     },

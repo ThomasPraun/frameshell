@@ -49,6 +49,8 @@ export interface ClipBox {
   end: number;
   /** Media clips: project-relative asset, for waveform and thumbnails. */
   asset: string | null;
+  /** Timeline and generated clips: project-relative `source` (nested timeline file, composition entry); else null. */
+  source: string | null;
   /** Source seconds at `start`. */
   in: number;
   /** Source seconds per timeline second. */
@@ -305,6 +307,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     start: clip.start,
     end,
     asset,
+    source: kind === "media" || kind === "shot" ? null : source,
     in: num("in", 0),
     speed: num("speed", 1),
     problem: clip.end === null ? (problem ?? t.timeline.lengthUnknown) : null,

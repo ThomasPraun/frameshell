@@ -6,7 +6,7 @@ import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harn
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// "Ask agent" (#49) in the built app: a real daemon, a synthetic take with a hand-written transcript on the
+// "Chat about this" (#49) in the built app: a real daemon, a synthetic take with a hand-written transcript on the
 // timeline, and a stand-in agent TUI (e2e/fake-agent.mjs: raw stdin, bracketed paste, prints SUBMITTED on
 // Enter) running in the real terminal. Cmd/Ctrl+L and the context menu type SPEC §10 references at its prompt.
 const box = sandbox("ask");
@@ -105,9 +105,27 @@ test("the context menu of a word selects it and asks about it", async () => {
   const four = await middle(3);
   await page.mouse.click(four.x, four.y, { button: "right" });
   await expect(word(3)).toHaveClass(/is-selected/);
-  await page.getByRole("menuitem", { name: /Ask agent/ }).click();
+  await page.getByRole("menuitem", { name: /Chat about this/ }).click();
   await expect.poll(() => terminalText(page)).toContain('[frameshell] subtitle "four" · 00:00:03.20–00:00:03.70 · clip c_a · word w_000004');
   expect(await terminalText(page)).not.toContain("SUBMITTED");
+});
+
+test("Copy reference in a context menu puts the same [frameshell] lines on the clipboard, typing nothing", async () => {
+  const before = await terminalText(page);
+  const one = await middle(0);
+  await page.mouse.click(one.x, one.y, { button: "right" });
+  await expect(word(0)).toHaveClass(/is-selected/);
+  await page.getByRole("menuitem", { name: "Copy reference" }).click();
+  await expect
+    .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+    .toBe('[frameshell] subtitle "one" · 00:00:00.20–00:00:00.70 · clip c_a · word w_000001');
+  expect(await terminalText(page)).toBe(before);
+});
+
+test("the track header menu offers Chat about this and Copy reference for the track", async () => {
+  await page.locator(`.track-head[data-track="v1"]`).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Copy reference" }).click();
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toMatch(/^\[frameshell\] track v1 · video/);
 });
 
 test("an explorer asset's context menu asks about the file", async () => {
@@ -115,7 +133,7 @@ test("an explorer asset's context menu asks about the file", async () => {
   const row = page.getByRole("treeitem", { name: ASSET }).getByRole("button");
   await row.click({ button: "right" });
   await expect(row).toHaveAttribute("data-picked", "true");
-  await page.getByRole("menuitem", { name: /Ask agent/ }).click();
+  await page.getByRole("menuitem", { name: /Chat about this/ }).click();
   await expect.poll(() => terminalText(page)).toContain(`[frameshell] asset ${ASSET}`);
 });
 

@@ -11,7 +11,7 @@ export type PersonTime = "speaks" | "onscreen";
 let latest = 0;
 
 /**
- * Select `person` in the shared store (ADR 0020): at once, so "Ask agent" and `ui_state` know the pick, then with
+ * Select `person` in the shared store (ADR 0020): at once, so "Chat about this" and `ui_state` know the pick, then with
  * their spans from `people.ranges` of the main timeline and, for `speaks`, the words of their linked
  * voices the timeline plays. `reveal` moves the timeline and the playhead to the first span (a click does; a
  * refresh after an edit does not). `origin` defaults to the People panel. Resolves with the daemon's message when

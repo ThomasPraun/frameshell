@@ -2,6 +2,24 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Talking to the agent (ADR 0025)
+
+**Reference**:
+The `[frameshell] …` lines that name what the person selected or pointed at, for an agent to read.
+_Avoid_: context, prompt, mention
+
+**Chat about this**:
+The action that sends a reference of the selection to an agent target (Cmd/Ctrl+L, right-click).
+_Avoid_: Ask agent (former name), send to agent
+
+**Agent target**:
+Somewhere a reference can go: an app terminal running an agent, or an external agent (an MCP client, a waiting `frameshell ask`) that presented itself to the daemon.
+_Avoid_: agent (alone), session, recipient
+
+**Inbox**:
+The references waiting for one external agent target until it reads them.
+_Avoid_: queue, mailbox
+
 ## Shoot (ADR 0023, 0024)
 
 **Shoot script**:
@@ -179,3 +197,13 @@ _Avoid_: voice, cluster, participant
 **Painted turn**:
 A stretch of the group clock a person marked as spoken or silent for one angle (`painted` in the group, `multicam paint`); it replaces the angle's measured speaking turns inside its range.
 _Avoid_: manual turn, override
+
+## Transcription models (#427)
+
+**Pinned model**:
+A model a transcription provider ships, downloaded and checksum-verified by the host on first use.
+_Avoid_: built-in model, bundled model
+
+**Registered model**:
+A model file the user registered on one machine under an id (`frameshell model add`), kept with its SHA-256 in `models.json` in the config dir. Projects name only the id, so the same project uses whichever file each machine registered.
+_Avoid_: custom model path, local model

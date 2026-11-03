@@ -24,6 +24,8 @@ const api: FrameshellApi = {
     open: (dir) => ipcRenderer.invoke(Channel.projectOpen, dir),
     init: (dir) => ipcRenderer.invoke(Channel.projectInit, dir),
     recent: () => ipcRenderer.invoke(Channel.projectRecent),
+    forgetRecent: (dir) => ipcRenderer.invoke(Channel.projectForgetRecent, dir),
+    revealRecent: (dir) => ipcRenderer.invoke(Channel.projectRevealRecent, dir),
     dismissSyncWarning: () => ipcRenderer.invoke(Channel.projectDismissSync),
     chooseVideos: () => invokeOutcome(Channel.projectChooseVideos),
     planVideos: (files, place) => invokeOutcome(Channel.projectPlanVideos, files, place),
@@ -44,6 +46,9 @@ const api: FrameshellApi = {
       if (reply.error) throw new Error(reply.error);
     },
     onChanged: (listener) => subscribe(Channel.filesChanged, listener),
+    trash: (path) => invokeOutcome(Channel.filesTrash, path),
+    reveal: (path) => ipcRenderer.invoke(Channel.filesReveal, path),
+    copyPath: (path) => ipcRenderer.invoke(Channel.filesCopyPath, path),
     pathOf: (file) => webUtils.getPathForFile(file),
   },
   terminals: {
@@ -96,6 +101,12 @@ const api: FrameshellApi = {
     claudeDesktop: () => ipcRenderer.invoke(Channel.agentsClaudeDesktop),
     connectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsConnectClaudeDesktop),
     disconnectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsDisconnectClaudeDesktop),
+    claudeCode: () => ipcRenderer.invoke(Channel.agentsClaudeCode),
+    connectClaudeCode: () => ipcRenderer.invoke(Channel.agentsConnectClaudeCode),
+    disconnectClaudeCode: () => ipcRenderer.invoke(Channel.agentsDisconnectClaudeCode),
+    targets: () => invokeOutcome(Channel.agentsTargets),
+    send: (id, lines) => invokeOutcome(Channel.agentsSend, id, lines),
+    onTargets: (listener) => subscribe(Channel.agentsTargetsChanged, listener),
   },
   menu: {
     onCommand: (listener) => subscribe(Channel.menuCommand, listener),
@@ -127,6 +138,12 @@ const api: FrameshellApi = {
   },
   multicam: {
     turns: (timeline, group) => invokeOutcome(Channel.multicamTurns, timeline, group),
+  },
+  models: {
+    list: () => invokeOutcome(Channel.modelsList),
+    use: (model) => invokeOutcome(Channel.modelsUse, model),
+    pickFile: () => ipcRenderer.invoke(Channel.modelsPickFile),
+    add: (id, file, options) => invokeOutcome(Channel.modelsAdd, id, file, options),
   },
   people: {
     list: () => invokeOutcome(Channel.peopleList),

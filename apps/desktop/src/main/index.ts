@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -38,6 +38,7 @@ import {
   type LiveClipPage,
   type MenuCommand,
   type AgentChoice,
+  type ClaudeCodeStatus,
   type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
@@ -45,6 +46,7 @@ import {
   type ModelProgress,
   type PeopleChange,
   type PersonTarget,
+  type TargetsChange,
   type ProposalChange,
   type ShootChange,
   type ReviewEvent,
@@ -74,6 +76,14 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import {
+  claudeCodeHookCommand,
+  claudeCodePaths,
+  claudeCodeServer,
+  claudeCodeState,
+  connectClaudeCode,
+  disconnectClaudeCode,
+} from "@frameshell/cli";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
 import {
   InvalidConfigError,
@@ -111,6 +121,7 @@ import {
 } from "./shoot-session.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
+import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
@@ -508,6 +519,11 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.peopleChanged, change satisfies PeopleChange),
       onResync: () => send(contents, Channel.peopleChanged, null),
     }),
+    // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
+    daemon.subscribe("target.changed", project.dir, {
+      onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
+      onResync: () => send(contents, Channel.agentsTargetsChanged, null),
+    }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.daemonEvents = subscriptions;
   if (state.project) mediaRoots.revoke(state.project.mediaUrl);
@@ -565,6 +581,13 @@ async function rememberRecent(dir: string): Promise<void> {
   const list = [dir, ...(await readRecent()).filter((item) => item !== dir)].slice(0, MAX_RECENT);
   await mkdir(app.getPath("userData"), { recursive: true });
   await writeFile(recentFile, JSON.stringify(list, null, 2));
+}
+
+async function forgetRecent(dir: string): Promise<string[]> {
+  const list = (await readRecent()).filter((item) => item !== dir);
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(recentFile, JSON.stringify(list, null, 2));
+  return list;
 }
 
 async function pickFolder(window: BrowserWindow): Promise<string | undefined> {
@@ -918,6 +941,27 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/** The transcript view's model picker (#427): thin daemon requests for the window's project, plus the file dialog. */
+function registerModelIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
+  ipcMain.handle(Channel.modelsUse, (event, model: string | null) =>
+    outcome(async () => daemon.request("transcription.set", { cwd: await dirOf(event.sender), model })),
+  );
+  ipcMain.handle(Channel.modelsPickFile, async (event) => {
+    const result = await dialog.showOpenDialog(stateOf(event.sender).window, {
+      title: text.models.chooseFile,
+      // Every file stays pickable: whisper.cpp models often end in `.bin`; the daemon reads the format from the bytes.
+      filters: [{ name: text.models.fileFilter, extensions: ["bin", "gguf", "onnx", "ggml"] }, { name: "*", extensions: ["*"] }],
+      properties: ["openFile"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(Channel.modelsAdd, (_event, id: string, file: string, options: Record<string, string>) =>
+    outcome(async () => daemon.request("model.add", { id, file, options })),
+  );
+}
+
 /** The People panel's calls (ADR 0020): thin daemon requests for the window's project, made by the app (no `by`). */
 function registerPeopleIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
@@ -1240,12 +1284,26 @@ function registerIpc(): void {
   ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
   ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
   ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
+  ipcMain.handle(Channel.agentsClaudeCode, () => claudeCodeStatus());
+  ipcMain.handle(Channel.agentsConnectClaudeCode, (event) => changeClaudeCode(true, event.sender));
+  ipcMain.handle(Channel.agentsDisconnectClaudeCode, (event) => changeClaudeCode(false, event.sender));
+  ipcMain.handle(Channel.agentsTargets, (event) =>
+    outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
+  );
+  ipcMain.handle(Channel.agentsSend, (event, id: string, lines: string[]) =>
+    outcome(async () => daemon.request("inbox.put", { cwd: (await requireProject(stateOf(event.sender))).project.dir, target: id, lines })),
+  );
   ipcMain.handle(Channel.projectCurrent, async (event) => {
     const state = stateOf(event.sender);
     await state.opening;
     return state.project;
   });
   ipcMain.handle(Channel.projectRecent, () => readRecent());
+  ipcMain.handle(Channel.projectForgetRecent, (_event, dir: string) => forgetRecent(dir));
+  ipcMain.handle(Channel.projectRevealRecent, async (_event, dir: string) => {
+    // Only folders main put in the list: the renderer cannot point the file manager anywhere else.
+    if ((await readRecent()).includes(dir)) shell.showItemInFolder(dir);
+  });
   ipcMain.handle(Channel.projectDismissSync, async (event) => {
     const state = stateOf(event.sender);
     const { project } = await requireProject(state);
@@ -1331,6 +1389,44 @@ function registerIpc(): void {
     } catch (error) {
       return { error: (error as Error).message };
     }
+  });
+
+  ipcMain.handle(Channel.filesTrash, (event, path: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const said = text.app.dialogs;
+      const config = JSON.parse(await readFile(join(project.dir, "frameshell.json"), "utf8")) as { main?: string };
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+      const refused = trashRefusal(path, config.main ?? "timelines/main.json", said);
+      if (refused) {
+        await box({ type: "info", message: refused, buttons: [said.ok], noLink: true });
+        return false;
+      }
+      const absolute = projectPathOf(project.dir, path);
+      const { uses } = await daemon.request("file.uses", { path: absolute });
+      const bin = said.trashBin(process.platform === "win32");
+      const { response } = await box({
+        type: uses.length > 0 ? "warning" : "question",
+        message: said.trashTitle(basename(absolute), bin),
+        detail: trashDetail(uses, bin, said),
+        buttons: [said.moveToTrash(bin), said.cancel],
+        defaultId: uses.length > 0 ? 1 : 0,
+        cancelId: 1,
+        noLink: true,
+      });
+      if (response !== 0) return false;
+      await shell.trashItem(absolute);
+      return true;
+    }),
+  );
+  ipcMain.handle(Channel.filesReveal, async (event, path: string) => {
+    const { project } = await requireProject(stateOf(event.sender));
+    shell.showItemInFolder(projectPathOf(project.dir, path));
+  });
+  ipcMain.handle(Channel.filesCopyPath, async (event, path: string) => {
+    const { project } = await requireProject(stateOf(event.sender));
+    clipboard.writeText(projectPathOf(project.dir, path));
   });
 
   ipcMain.handle(Channel.terminalCreate, async (event, size: { cols: number; rows: number }) => {
@@ -1471,6 +1567,7 @@ function registerIpc(): void {
     outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),
   );
   registerPeopleIpc();
+  registerModelIpc();
   registerShootIpc();
   registerLiveIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
@@ -1620,6 +1717,7 @@ function buildMenu(): void {
       label: said.view,
       submenu: [
         { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-terminal", label: said.terminal, accelerator: "CmdOrCtrl+\\", registerAccelerator: false, click: (_item, focused) => command("toggleTerminal", focused) },
         { type: "separator" },
         {
           label: said.language,
@@ -1731,6 +1829,58 @@ async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promi
     await box({ type: "error", message: said.failed, detail });
   }
   return claudeDesktopStatus();
+}
+
+/** Frameshell's server and prompt hook in Claude Code's user settings, run through the app's stable shim (ADR 0025). */
+const claudeCodeSetup = { command: cliShim, platform: process.platform };
+
+async function claudeCodeStatus(): Promise<ClaudeCodeStatus> {
+  const paths = claudeCodePaths(homedir(), process.env);
+  const { installed, server, hook, connected } = await claudeCodeState(paths, claudeCodeSetup).catch(() => ({
+    installed: true,
+    server: false,
+    hook: false,
+    connected: false,
+  }));
+  return { installed, server, hook, connected };
+}
+
+/** Add (after showing both entries) or remove Frameshell's MCP server and prompt hook in Claude Code's user settings. */
+async function changeClaudeCode(connect: boolean, sender: WebContents): Promise<ClaudeCodeStatus> {
+  const said = text.agents.codeDialog;
+  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
+  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  const paths = claudeCodePaths(homedir(), process.env);
+  try {
+    if (connect) {
+      if (!(await claudeCodeStatus()).installed) {
+        await box({ type: "info", message: said.notInstalled });
+        return claudeCodeStatus();
+      }
+      const server = JSON.stringify({ mcpServers: { [SERVER_KEY]: claudeCodeServer(claudeCodeSetup) } }, null, 2);
+      const hook = claudeCodeHookCommand(claudeCodeSetup);
+      const { response } = await box({
+        type: "question",
+        message: said.connect,
+        detail: said.connectDetail(paths.mcp, server, paths.settings, hook),
+        buttons: [said.connectButton, said.cancel],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response !== 0) return claudeCodeStatus();
+      const backups = await connectClaudeCode(paths, claudeCodeSetup);
+      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
+      await box({ type: "info", message: said.connected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
+    } else {
+      const backups = await disconnectClaudeCode(paths);
+      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
+      await box({ type: "info", message: said.disconnected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
+    }
+  } catch (error) {
+    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
+    await box({ type: "error", message: said.failed, detail });
+  }
+  return claudeCodeStatus();
 }
 
 /**

@@ -221,6 +221,15 @@ export interface TranscriptionProvider {
   /** Name used by `frameshell transcribe --provider` and `transcription.provider` in `frameshell.json`. */
   readonly id: string;
   /**
+   * Models this provider ships (pinned and verified by the host), for model pickers and `frameshell model list`.
+   * Models users register themselves are not listed here: the host knows them.
+   */
+  readonly models?: readonly ProviderModel[];
+  /** Model used when neither the call, the project nor the machine names one. */
+  readonly defaultModel?: string;
+  /** How the provider reads model files users register (see {@link TranscribeContext.userModel}); absent: it reads none. */
+  readonly userModels?: UserModelSupport;
+  /**
    * Transcribe `audio`: a 16 kHz mono 16-bit PCM WAV the host extracted from
    * the asset (from its PCM sidecar when ingested). Seconds in this file are
    * source-asset seconds. Throw to fail; the message reaches the user.
@@ -253,6 +262,14 @@ export interface TranscribeContext {
   ensureBinary(name: string): Promise<string>;
   /** Absolute path of a model file the host manages by id, downloaded and checksum-verified first when missing. */
   ensureModel(id: string): Promise<string>;
+  /**
+   * A model file the user registered on this machine under `id` (`frameshell model add <id> <file>`), not
+   * verified by the host: registering it was the user's consent. Rejects with a message naming the id and how to
+   * register it when it is not registered, when its file is gone, or when its format is not in `formats`. A file
+   * that changed since it was registered is used anyway; the host warns and records its new hash.
+   * Absent on hosts older than this API addition: treat every non-pinned id as unknown then.
+   */
+  userModel?(id: string, formats: readonly ModelFormat[]): Promise<UserModel>;
   /** Report progress to whoever waits (CLI stderr, app). Cheap; call freely. */
   progress(update: TranscriptionProgress): void;
 }
@@ -269,10 +286,51 @@ export interface TranscriptionProgress {
   values?: Record<string, string | number>;
 }
 
+/**
+ * File format of a user model. Only formats that hold data and cannot run code are accepted: whisper.cpp `ggml`,
+ * `gguf` and `onnx`. Pickle-based files (`.nemo`, `.pt`, `.ckpt`) are refused at registration.
+ */
+export type ModelFormat = "ggml" | "gguf" | "onnx";
+
+/** A model the provider ships, as listed in {@link TranscriptionProvider.models}. */
+export interface ProviderModel {
+  /** Id for `--model` and `transcription.model`, e.g. `large-v3-turbo-q5_0`. */
+  id: string;
+  /** Host-managed model file behind it (see {@link TranscribeContext.ensureModel}), for its size and download state. */
+  managedModel?: string;
+}
+
+/** What a provider accepts as a registered model, for model pickers. */
+export interface UserModelSupport {
+  /** Formats it reads. */
+  formats: readonly ModelFormat[];
+  /** Settings a registration may carry, each with the values it takes (whisper.cpp: `dtw` and its presets). */
+  options?: readonly { key: string; values: readonly string[] }[];
+}
+
+/** A model file the user registered on this machine; see {@link TranscribeContext.userModel}. */
+export interface UserModel {
+  id: string;
+  /** Absolute path of the file. */
+  path: string;
+  format: ModelFormat;
+  /** Lowercase hex SHA-256 of the file as it is now. */
+  sha256: string;
+  /** True when the file's bytes differ from the ones registered. */
+  changed: boolean;
+  /** Provider settings stored with the registration (`--dtw large.v3` → `{ dtw: "large.v3" }`). */
+  options: Readonly<Record<string, string>>;
+}
+
 /** What a provider returns. */
 export interface TranscriptionResult {
   /** Model actually used; written to the transcript. */
   model: string;
+  /**
+   * What the user should know about this result, one sentence each, e.g. that word timing is coarser without
+   * alignment data for a custom model. Reported back with the transcription; not written to the transcript.
+   */
+  notes?: string[];
   /** Language actually used or detected. */
   language?: string;
   /** In time order. */

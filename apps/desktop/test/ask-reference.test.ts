@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { agentInput, referenceLines, referenceTime } from "../src/renderer/src/ask/reference.js";
 import type { Selection, SelectedWord } from "../src/renderer/src/selection.js";
 
-// Seam under test: "Ask agent" (#49) reference text, SPEC §10 format. Selection and timeline view in, the
+// Seam under test: "Chat about this" (#49) reference text, SPEC §10 format. Selection and timeline view in, the
 // lines typed into the agent terminal out; then the exact keystrokes for a terminal with or without bracketed paste.
 
 const ASSET = "assets/take.mp4";
@@ -74,6 +74,11 @@ describe("reference lines", () => {
     const [line] = referenceLines({ ...blank, words: long, range: { from: 0, to: 8.9 }, origin: "transcript" }, view);
     expect(line).toMatch(/^\[frameshell\] subtitle "say \\"hi\\" word word .*…" · 00:00:00\.00–00:00:08\.90 · clip c_0001 · words w_000001–w_000030$/);
     expect(/subtitle "(.*)" · /.exec(line!)![1]!.length).toBeLessThan(70);
+  });
+
+  it("names a track picked by its header", () => {
+    expect(referenceLines({ ...blank, track: "v1" }, view)).toEqual(['[frameshell] track v1 · video "Picture"']);
+    expect(referenceLines({ ...blank, track: "v2" }, view)).toEqual(["[frameshell] track v2 · video"]);
   });
 
   it("writes one line per selected clip, with what it plays, where and on which track", () => {

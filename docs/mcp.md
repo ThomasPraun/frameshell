@@ -30,7 +30,9 @@ An explicit `cwd` always wins. The daemon answers step 2 with the internal `ui.a
 Claude Desktop (macOS, Windows): **Connect Claude Desktop** in the app's agent guide, above the terminals, adds the server to `claude_desktop_config.json` (`main/claude-desktop.ts`): only the `mcpServers.frameshell` key changes, through the stable `frameshell` shim in the app's data directory, and the old file goes to `claude_desktop_config.json.frameshell-backup`. Claude Desktop starts the server outside any project, so tools act on the project of the app window the user works in (below).
 
 
-Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. They are journaled as `agent:<label>:<session>` when `FRAMESHELL_AGENT` names the agent, or when the app detected one in its terminal. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
+Claude Code: **Connect Claude Code** in the agent guide (shown when Claude Code's settings exist) or `frameshell setup claude-code [--status | --remove] [--command path]` adds, at user level, the server to `~/.claude.json` (`mcpServers.frameshell`, as `claude mcp add --scope user` writes it) and a `UserPromptSubmit` hook to `~/.claude/settings.json` (both under `CLAUDE_CONFIG_DIR` when set). Code: `packages/cli/src/claude-code-setup.ts`, editing helpers shared with Claude Desktop in `packages/cli/src/config-file.ts`. Only Frameshell's entries change (comments and layout of the rest stay), each changed file is first copied to `<file>.frameshell-backup`, running it again changes nothing, and `--remove` takes the entries out. The hook command is `frameshell ask --take --target claude --hook`: it reads the prompt's JSON on stdin for the directory (`cwd`), starts no daemon and loads no plugin, prints nothing outside a Frameshell project or with the app closed, and always exits 0 (exit 2 would block the prompt). What it prints (the `[frameshell]` lines sent from "Chat about this") joins the prompt's context. The app passes its stable shim as the command; the CLI uses `frameshell` from PATH unless `--command` says otherwise.
+
+Operations are attributed to `FRAMESHELL_SESSION` when set (app terminals set it), else to a session id made for this server run. They are journaled as `agent:<label>:<session>` when `FRAMESHELL_AGENT` names the agent, else when the MCP client's name does (`claude-code` becomes `agent:claude:…`, the same label its app terminals get), or when the app detected one in its terminal. Operations from one session group into transactions until an idle gap, so the model can revert its own work.
 
 ## Tools
 
@@ -66,6 +68,33 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 | `ui_show_tx_diff(target)` | History panel on a `tx_…`/`op_…`, its changes marked on the timeline. |
 
 Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one focused last (else the one that reported last) gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach`, `ui.active` and the `ui.command` notification carry it.
+
+## References from the app (ADR 0025)
+
+Each `frameshell mcp` process registers its client with the daemon as an **agent target** of its project on MCP `initialize` (a server started outside any project: on the project of its first call, re-registered when that follows another window), and the daemon drops it when the process exits. Target id = the client's agent label: `clientInfo.name` `claude-code` (Claude Code 2.1.317) becomes `claude`, the label its app terminals get. Several sessions of one client on one project share one target and one inbox. The app's "Chat about this" sends to a target with `inbox.put`; references wait in memory until read.
+
+| Tool | Does |
+|---|---|
+| `inbox_take` | Takes (and removes) the references waiting for this client, oldest first: `[frameshell]` lines, then any request. `target` reads another one. |
+| `inbox_wait(timeout?)` | Same, blocking until one arrives or `timeout` seconds pass (default 300, max 3600). |
+
+`target.register`, `target.unregister`, `target.list` and `inbox.put` are internal; `target.changed` tells the app who is there, what waits and who read. The CLI side is `frameshell ask --take` / `--wait`. Wiring: `packages/core/src/targets/inbox.ts`, MCP `DaemonLink.register` in `packages/mcp/src/server.ts`, CLI `packages/cli/src/ask-command.ts`, app `renderer/src/ask/` (`chat-targets.ts`, `agent-targets.ts`).
+
+### Claude Code channels (opt-in, research preview)
+
+Without anything else, Claude Code reads references when it calls `inbox_take` or when its prompt hook runs `frameshell ask --take`. A **channel** lets Claude Code react to a reference at once, even idle, with no message from the person. It is off by default and **a Claude Code research preview**: flags and rules may change.
+
+```sh
+claude mcp add frameshell -- frameshell mcp --channel     # or set FRAMESHELL_CHANNEL=1 in the server's env
+claude --dangerously-load-development-channels server:frameshell
+```
+
+- With `--channel`, `frameshell mcp` declares the `experimental['claude/channel']` capability and holds an `inbox.wait` for its client. Each reference arrives as `notifications/claude/channel`: `content` = the reference's `[frameshell]` lines, `meta` = `target` and `sent_at` (keys are letters, digits and underscores; Claude Code drops others). Claude Code shows it to the model as `<channel source="frameshell" target="claude" sent_at="...">...</channel>`.
+- Frameshell is not on Claude Code's channel allowlist, so the development flag above is needed: an interactive session only (ignored with `-p`), a confirmation dialog on start, and `server:frameshell` is the name given to `claude mcp add`. On Team and Enterprise plans an admin must first turn channels on (`channelsEnabled` managed setting); the flag does not bypass it. Claude Code drops events silently when the session did not load the server as a channel or policy blocks it.
+- A pushed reference is **taken** from the inbox, so it counts as read in the app and `inbox_take`, `--take` and the hook find nothing again: no double delivery. The cost: if Claude Code is not listening (session not started with the flag, org policy), the event is lost, not queued. Without `--channel` nothing changes.
+- One-way: there is no reply tool. The hook and `inbox_take` remain the supported path; use a channel only for the reaction without a prompt.
+
+Research on the other mechanism, Claude Code's cross-session messaging: [`docs/research/claude-code-channels-messaging.md`](research/claude-code-channels-messaging.md).
 
 ## Review mode (ADR 0019)
 

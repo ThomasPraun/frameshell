@@ -8,7 +8,7 @@ description: Transcribe project media to word level with the local whisper.cpp p
 `frameshell transcribe <asset>` writes `transcripts/<asset>.words.json`: every word with a stable `id`, `text`, `start`, `end` (source seconds, 3 decimals) and `confidence`. The name drops the extension; if a same-name asset (`interview.mp4` / `interview.wav`) already owns it, the extension is kept. Read the path the command prints, and check the file's `asset` field.
 
 - Language: pass `--language es` (or set `transcription.language` in `frameshell.json`). Without it whisper auto-detects.
-- Models: `large-v3-turbo-q5_0` (default, 574 MB), `large-v3-turbo-q8_0`, `large-v3-turbo` (f16). Pick with `--model`.
+- Models: `large-v3-turbo-q5_0` (default, 574 MB), `large-v3-turbo-q8_0`, `large-v3-turbo` (f16). Pick with `--model`, or a ggml file the user registered on this machine (`frameshell model add <id> <file> --dtw <preset>`, see `frameshell model list`). Without `--dtw` a registered model runs without DTW: word starts come from token times, less precise, and `transcribe` warns.
 - First run downloads the engine and model: minutes, once. On macOS the first run also compiles Metal shaders (15-25 s). Later runs start in about 2 s. Progress says which device ran (`metal`, `cuda`, `vulkan`, `cpu`).
 - `start` is the DTW onset: it lags real speech by ~140 ms. `end` comes from audio energy. Neither is a safe cut point: cut in pauses between words, never at raw word times.
 - whisper can drop a repeated phrase (a retake). Do not assume every spoken take is in the text; check pauses too.

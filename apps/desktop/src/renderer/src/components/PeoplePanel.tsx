@@ -198,7 +198,10 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
               data-selected={isPicked}
               onContextMenu={(event) => {
                 pick(person, selected?.id === person.id ? selected.what : "speaks", false);
-                openAskMenu(event);
+                openAskMenu(event, [
+                  { label: t.people.rename(person.name), separated: true, run: () => setRenaming(person.id) },
+                  { label: t.people.remove(person.name), separated: true, danger: true, run: () => run(peopleActions.remove(person.id)) },
+                ]);
               }}
             >
               <div className="person-head">

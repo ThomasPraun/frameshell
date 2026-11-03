@@ -1,7 +1,8 @@
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createReadStream, realpathSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { dirname } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /** True when `path` exists (file or directory). */
@@ -147,4 +148,16 @@ async function endsWithoutNewline(path: string): Promise<boolean> {
   } finally {
     await file.close();
   }
+}
+
+/** Lowercase hex SHA-256 of the file at `path`; `onBytes` hears the bytes read so far, for progress. */
+export async function sha256File(path: string, onBytes?: (read: number) => void): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(path);
+  if (onBytes) {
+    let read = 0;
+    stream.on("data", (chunk) => onBytes((read += chunk.length)));
+  }
+  await pipeline(stream, hash);
+  return hash.digest("hex");
 }

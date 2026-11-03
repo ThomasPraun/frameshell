@@ -1,5 +1,6 @@
 import type { Lang } from "./i18n/index.js";
 import type {
+  AgentTarget,
   AssetInfo,
   ClipRendersResult,
   HistoryDiffResult,
@@ -109,6 +110,9 @@ export interface TerminalInfo {
  * timeline may have changed meanwhile.
  */
 export type TimelineChange = { timeline: string; revision: number; author: string } | { timeline: null };
+
+/** A change of the project's agent targets (daemon `target.changed`, ADR 0025) without the project root. */
+export type TargetsChange = Omit<EventParams<"target.changed">, "project">;
 
 /** A people change (daemon `people.changed`, ADR 0020) without the project root. */
 export type PeopleChange = Omit<EventParams<"people.changed">, "project">;
@@ -235,9 +239,10 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * Command an application menu entry sends to the focused project window.
  * `showTranscript`: open the transcript view (View > Transcript).
  * `imageFromFrame`: make an image project from the frame at the playhead (File > New Image from Frame, ADR 0017).
+ * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview";
+export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview" | "toggleTerminal";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -257,6 +262,10 @@ export interface FrameshellApi {
     init(dir: string): Promise<OpenOutcome>;
     /** Recently opened project folders, newest first. */
     recent(): Promise<string[]>;
+    /** Drop `dir` from the recent list (the folder stays); resolves to the list left. */
+    forgetRecent(dir: string): Promise<string[]>;
+    /** Show recent project folder `dir` in Finder / Explorer / the file manager; ignored for folders not in the list. */
+    revealRecent(dir: string): Promise<void>;
     /** Stop warning that this window's project is in a synced folder (#187); kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
     /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
@@ -305,6 +314,15 @@ export interface FrameshellApi {
     write(path: string, content: string): Promise<void>;
     /** Called with changed project-relative paths. Returns an unsubscribe function. */
     onChanged(listener: (paths: string[]) => void): () => void;
+    /**
+     * Move a project-relative file or folder to the OS trash after a confirm naming the timeline clips that use
+     * it (daemon `file.uses`). False when the person cancelled, or when it is one of the project's own files (a message box says so).
+     */
+    trash(path: string): Promise<boolean>;
+    /** Show a project-relative file or folder in Finder / Explorer / the file manager. */
+    reveal(path: string): Promise<void>;
+    /** Put the absolute path of a project-relative file or folder on the clipboard. */
+    copyPath(path: string): Promise<void>;
     /** Absolute path of a file dropped from the OS; empty for a file that is not on disk. */
     pathOf(file: File): string;
   };
@@ -433,6 +451,19 @@ export interface FrameshellApi {
     /** Ask, then add Frameshell to Claude Desktop's config; resolves with the state after (unchanged if declined). */
     connectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
     disconnectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
+    claudeCode(): Promise<ClaudeCodeStatus>;
+    /** Ask, then add Frameshell's MCP server and prompt hook to Claude Code's user settings (ADR 0025); resolves with the state after. */
+    connectClaudeCode(): Promise<ClaudeCodeStatus>;
+    disconnectClaudeCode(): Promise<ClaudeCodeStatus>;
+    /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
+    targets(): Promise<AgentTarget[]>;
+    /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
+    send(id: string, lines: string[]): Promise<MethodResult<"inbox.put">>;
+    /**
+     * Called on every {@link TargetsChange} of the window's project, or with null after a daemon reconnect, when
+     * changes may have been missed. Returns an unsubscribe function.
+     */
+    onTargets(listener: (change: TargetsChange | null) => void): () => void;
   };
   menu: {
     /** Called with each application menu command aimed at this window. Returns an unsubscribe function. */
@@ -466,13 +497,13 @@ export interface FrameshellApi {
   context: {
     /**
      * Capture the main timeline's frame at `at` (timeline seconds) for an
-     * "Ask agent" region reference (SPEC §10), rendered by the daemon's
+     * "Chat about this" region reference (SPEC §10), rendered by the daemon's
      * `frame` method under `.frameshell/context/`. Resolves with its
      * project-relative path. Rejects with the daemon's message.
      */
     captureFrame(at: number): Promise<string>;
     /**
-     * Write an "Ask agent" details file `name` (`e_<frame>_<n>.json`) with
+     * Write an "Chat about this" details file `name` (`e_<frame>_<n>.json`) with
      * JSON `content` under `.frameshell/context/` through the daemon's
      * `context.write` (ADR 0011). Resolves with its project-relative path.
      */
@@ -515,6 +546,19 @@ export interface FrameshellApi {
      * (ADR 0016). Rejects with the daemon's message.
      */
     turns(timeline: string, group: string): Promise<MulticamTurnsResult>;
+  };
+  models: {
+    /** `model.list` for the window's project (#427): provider models, files registered on this machine, the project's choice. */
+    list(): Promise<MethodResult<"model.list">>;
+    /** `transcription.set`: the project's model, or null for the default. Rejects with the daemon's message, e.g. ModelNotRegistered. */
+    use(model: string | null): Promise<MethodResult<"transcription.set">>;
+    /** Ask for a model file in the system dialog. Resolves with its absolute path, or null when cancelled. */
+    pickFile(): Promise<string | null>;
+    /**
+     * `model.add`: register `file` on this machine under `id`, with provider `options` (whisper.cpp `dtw`). Rejects
+     * with the daemon's message, e.g. UnsupportedModelFormat for a pickle file.
+     */
+    add(id: string, file: string, options: Record<string, string>): Promise<MethodResult<"model.add">>;
   };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
@@ -760,6 +804,18 @@ export interface ClaudeDesktopStatus {
   connected: boolean;
 }
 
+/** Frameshell's entries in Claude Code's user settings (ADR 0025 decision 7). */
+export interface ClaudeCodeStatus {
+  /** Claude Code's settings exist: it is installed, or was. */
+  installed: boolean;
+  /** `~/.claude.json` runs this app's `frameshell mcp`. */
+  server: boolean;
+  /** `settings.json` has the prompt hook that hands over what "Chat about this" sent. */
+  hook: boolean;
+  /** Both. */
+  connected: boolean;
+}
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
@@ -768,11 +824,19 @@ export const Channel = {
   agentsClaudeDesktop: "agents:claude-desktop",
   agentsConnectClaudeDesktop: "agents:connect-claude-desktop",
   agentsDisconnectClaudeDesktop: "agents:disconnect-claude-desktop",
+  agentsClaudeCode: "agents:claude-code",
+  agentsConnectClaudeCode: "agents:connect-claude-code",
+  agentsDisconnectClaudeCode: "agents:disconnect-claude-code",
+  agentsTargets: "agents:targets",
+  agentsSend: "agents:send",
+  agentsTargetsChanged: "agents:targets-changed",
   projectCurrent: "project:current",
   projectOpenFolder: "project:open-folder",
   projectOpen: "project:open",
   projectInit: "project:init",
   projectRecent: "project:recent",
+  projectForgetRecent: "project:forget-recent",
+  projectRevealRecent: "project:reveal-recent",
   projectDismissSync: "project:dismiss-sync",
   projectChooseVideos: "project:choose-videos",
   projectPlanVideos: "project:plan-videos",
@@ -788,6 +852,9 @@ export const Channel = {
   filesRead: "files:read",
   filesWrite: "files:write",
   filesChanged: "files:changed",
+  filesTrash: "files:trash",
+  filesReveal: "files:reveal",
+  filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
   terminalWrite: "terminal:write",
@@ -837,6 +904,10 @@ export const Channel = {
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
   multicamTurns: "multicam:turns",
+  modelsList: "models:list",
+  modelsUse: "models:use",
+  modelsPickFile: "models:pick-file",
+  modelsAdd: "models:add",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",

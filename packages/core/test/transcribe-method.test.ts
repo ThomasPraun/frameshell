@@ -134,6 +134,74 @@ describe.skipIf(process.platform === "win32")("transcribe method with @frameshel
     const args = cli.args();
     expect(args[args.indexOf("-l") + 1]).toBe("en");
   }, NPM_TIMEOUT);
+
+  it(
+    "transcribes with a model file registered on this machine, named by id in frameshell.json, its hash in the transcript",
+    async () => {
+      const dir = await projectWithAsset();
+      await conn.request("plugin.install", { cwd: dir, spec: whisper.spec });
+      const file = join(tempDir(), "ggml-es-small.bin");
+      writeFileSync(file, "lmggfake weights");
+      const added = await conn.request("model.add", { id: "es-small", file, options: { dtw: "small" } });
+      expect(methods["model.add"].result.parse(added)).toEqual(added);
+      expect(added.model).toMatchObject({ id: "es-small", format: "ggml", state: "ok" });
+
+      const set = await conn.request("transcription.set", { cwd: dir, model: "es-small" });
+      expect(set).toEqual({ provider: "whisper-cpp", model: "es-small", previous: null });
+      expect(JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8")).transcription).toEqual({ provider: "whisper-cpp", model: "es-small" });
+
+      const result = await conn.request("transcribe", { cwd: dir, asset: "assets/raw-01.mp4" });
+      expect(result).toMatchObject({ model: "es-small", modelHash: `sha256:${added.model.sha256}`, warnings: [] });
+      const args = cli.args();
+      expect(args[args.indexOf("-m") + 1]).toBe(file);
+      expect(args[args.indexOf("-dtw") + 1]).toBe("small");
+      const transcript = JSON.parse(readFileSync(join(dir, "transcripts", "raw-01.words.json"), "utf8"));
+      expect(transcript).toMatchObject({ model: "es-small", modelHash: `sha256:${added.model.sha256}` });
+
+      const listed = await conn.request("model.list", { cwd: dir });
+      expect(methods["model.list"].result.parse(listed)).toEqual(listed);
+      expect(listed.models.map((m) => m.id)).toContain("es-small");
+      expect(listed.providers).toEqual([
+        expect.objectContaining({ id: "whisper-cpp", defaultModel: "large-v3-turbo-q5_0", userModels: { formats: ["ggml"], options: [expect.objectContaining({ key: "dtw" })] }, models: expect.arrayContaining([{ id: "large-v3-turbo-q5_0", size: expect.any(Number), downloaded: true }]) }),
+      ]);
+      expect(listed.project).toEqual({ dir, provider: "whisper-cpp", model: "es-small", effective: "es-small" });
+
+      await conn.request("model.remove", { id: "es-small" });
+      await expect(conn.request("transcribe", { cwd: dir, asset: "assets/raw-01.mp4" })).rejects.toMatchObject({
+        code: ErrorCode.ModelNotRegistered,
+        message: expect.stringContaining("frameshell model add es-small <file>"),
+      });
+    },
+    NPM_TIMEOUT,
+  );
+
+  it(
+    "uses this machine's default model when the project names none, and checks ids against the provider's models",
+    async () => {
+      const dir = await projectWithAsset();
+      await conn.request("plugin.install", { cwd: dir, spec: whisper.spec });
+      expect(await conn.request("model.default", { provider: "whisper-cpp", model: "large-v3-turbo-q8_0", cwd: dir })).toMatchObject({ previous: null });
+      await expect(conn.request("model.default", { provider: "whisper-cpp", model: "tiny", cwd: dir })).rejects.toMatchObject({
+        code: ErrorCode.ModelNotRegistered,
+      });
+      await expect(conn.request("transcription.set", { cwd: dir, model: "tiny" })).rejects.toMatchObject({ code: ErrorCode.ModelNotRegistered });
+      const listed = await conn.request("model.list", { cwd: dir });
+      expect(listed.project).toMatchObject({ model: null, effective: "large-v3-turbo-q8_0" });
+      const file = join(tempDir(), "ggml-mine.bin");
+      writeFileSync(file, "lmggmine");
+      await conn.request("model.add", { id: "mine", file });
+      await conn.request("model.default", { provider: "whisper-cpp", model: "mine" });
+      const result = await conn.request("transcribe", { cwd: dir, asset: "assets/raw-01.mp4" });
+      expect(result.model).toBe("mine");
+      expect(result.warnings).toEqual([expect.stringMatching(/"mine" has no DTW preset/)]);
+      const args = cli.args();
+      expect(args[args.indexOf("-m") + 1]).toBe(file);
+      expect(args).not.toContain("-dtw");
+      await conn.request("model.remove", { id: "mine" });
+      expect((await conn.request("model.list", {})).defaults).toEqual({});
+    },
+    NPM_TIMEOUT,
+  );
 });
 
 describe("transcribe method errors", () => {

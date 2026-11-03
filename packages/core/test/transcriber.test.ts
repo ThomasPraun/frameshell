@@ -290,6 +290,39 @@ describe("transcribeAsset", () => {
     expect(result).toMatchObject({ device: "metal", language: null });
   });
 
+  it("records the hash of a registered model in the transcript and warns when its file changed", async () => {
+    const dir = project();
+    const hash = "d".repeat(64);
+    const tools: TranscriberTools = {
+      ...noTools,
+      userModel: async (id) => ({ id, path: "/home/ana/mine.bin", format: "ggml", sha256: hash, changed: true, options: {} }),
+    };
+    const provider: TranscriptionProvider = {
+      id: "fake",
+      async transcribe(_audio, options, context) {
+        const model = await context.userModel!(options.model!, ["ggml"]);
+        return { model: model.id, words: words(["Hola", 0.5, 0.8]), notes: ["no DTW"] };
+      },
+    };
+    const stages: (string | undefined)[] = [];
+    const result = await run(dir, provider, { tools, model: "mine", progress: (p) => stages.push(p.stage) });
+    expect(readTranscript(dir)).toMatchObject({ model: "mine", modelHash: `sha256:${hash}` });
+    expect(result.modelHash).toBe(`sha256:${hash}`);
+    expect(result.warnings).toEqual([expect.stringMatching(/mine\.bin \("mine"\) changed since it was registered/), "no DTW"]);
+    expect(stages).toContain("model-changed");
+  });
+
+  it("writes no model hash for the provider's own models, and fails for an id registered nowhere", async () => {
+    const dir = project();
+    const { provider } = fakeProvider(words(["Hola", 0.5, 0.8]));
+    const result = await run(dir, provider, { model: "m1" });
+    expect(result).toMatchObject({ modelHash: null, warnings: [] });
+    expect(readTranscript(dir).modelHash).toBeUndefined();
+
+    const asking: TranscriptionProvider = { id: "fake", transcribe: async (_audio, _options, context) => (await context.userModel!("nope", ["ggml"]), { model: "x", words: [] }) };
+    await expect(run(dir, asking)).rejects.toMatchObject({ code: ErrorCode.ModelNotRegistered, data: { id: "nope" } });
+  });
+
   it("wraps provider errors as TranscriptionFailed and lets binary errors through unchanged", async () => {
     const dir = project();
     const failing = (error: Error): TranscriptionProvider => ({

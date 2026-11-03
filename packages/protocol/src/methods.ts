@@ -10,7 +10,17 @@ import {
   TimelineViewNameSchema,
   ViewedShape,
 } from "./proposals.js";
+import { ModelIdSchema, ModelListResultSchema, RegisteredModelSchema } from "./models.js";
 import { ShootChangedSchema, ShootSceneStatusSchema, TakeInfoSchema } from "./shoot.js";
+import {
+  AgentClientSchema,
+  AgentTargetKindSchema,
+  AgentTargetSchema,
+  INBOX_WAIT_DEFAULT_S,
+  INBOX_WAIT_MAX_S,
+  InboxTakeResultSchema,
+  TargetChangedSchema,
+} from "./targets.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
@@ -44,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 65;
+export const PROTOCOL_VERSION = 67;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -165,7 +175,7 @@ const GcEntrySchema = z.object({
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
-        "generated-clip render no timeline uses. `context`: \"Ask agent\" frame capture or pick details in " +
+        "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
@@ -364,7 +374,7 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
@@ -372,6 +382,8 @@ const EventNameSchema = z
       "`people.changed`: a person was added, renamed or removed, a link was added or removed, or a suggestion " +
       "was dismissed (`people.json`). " +
       "`shoot.changed`: a take of a shoot script was added, discarded, chosen or compared, or deviations were accepted (`shoots/*.json`). " +
+      "`target.changed`: an agent target of the project registered or left, a reference was queued for it, or it read " +
+      "its references (ADR 0025). " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -997,10 +1009,10 @@ export const methods = {
     }),
   },
   "context.write": {
-    // The app's Ask agent only: it may not write under `.frameshell/` itself (the daemon is the only writer).
+    // The app's Chat about this only: it may not write under `.frameshell/` itself (the daemon is the only writer).
     internal: true,
     description:
-      "Write one Ask agent details file (ADR 0011) into `.frameshell/context/`: what a pick or a preview region points at " +
+      "Write one Chat about this details file (ADR 0011) into `.frameshell/context/`: what a pick or a preview region points at " +
       "(layers, element facts), for the agent to read from the reference line. Regenerable and gitignored; `gc` deletes " +
       "files older than 7 days. Replaces a file of the same name. Fails with OutsideProject when `.frameshell/context` leaves the project.",
     params: z.strictObject({
@@ -1043,7 +1055,11 @@ export const methods = {
         .string()
         .min(1)
         .optional()
-        .describe("Provider model id, e.g. `large-v3-turbo-q5_0`. Default: `transcription.model`, else the provider's default."),
+        .describe(
+          "Model id: one the provider ships (`large-v3-turbo-q5_0`) or one registered on this machine with `model.add`. " +
+            "Default: `transcription.model`, else this machine's default (`model.default`), else the provider's default. " +
+            "An id that is neither fails with ModelNotRegistered.",
+        ),
       language: z
         .string()
         .min(1)
@@ -1062,6 +1078,10 @@ export const methods = {
         ),
       provider: z.string(),
       model: z.string(),
+      modelHash: z
+        .string()
+        .nullable()
+        .describe("`sha256:<hex>` of the registered model file used (`model.add`), also written to the transcript; null for the provider's own models."),
       language: z.string().nullable().describe("Language used or detected; null when the provider did not say."),
       device: z.string().nullable().describe("Compute device the engine used (`metal`, `cuda`, `cpu`); null when unknown."),
       words: z.int().describe("Number of words written."),
@@ -1081,6 +1101,12 @@ export const methods = {
             "words the transcript lacks. Never cut inside them; check by ear.",
         ),
       seconds: z.number().describe("Wall time of the whole call, including first-run downloads."),
+      warnings: z
+        .array(z.string())
+        .describe(
+          "What makes this transcript less reliable, e.g. a registered model file that changed since `model.add`, or " +
+            "word timing without alignment data for a custom whisper.cpp model.",
+        ),
     }),
   },
   "transcribe.verify": {
@@ -1112,7 +1138,10 @@ export const methods = {
         .string()
         .min(1)
         .optional()
-        .describe("Provider model id. Default: `transcription.model`, else the model of the source transcripts, else the provider's default."),
+        .describe(
+          "Model id. Default: `transcription.model`, else the model of the source transcripts, else this machine's default " +
+            "(`model.default`), else the provider's default.",
+        ),
       language: z
         .string()
         .min(1)
@@ -1189,6 +1218,87 @@ export const methods = {
       seconds: z.number().describe("Wall time of the whole call."),
     }),
   },
+  "model.list": {
+    description:
+      "List transcription models: model files registered on this machine (`model.add`) with their state, this " +
+        "machine's default model per provider, and, with `cwd`, the project's providers with the models they ship " +
+        "(size, downloaded) and the model a `transcribe` there would use. A project names only a model id " +
+        "(`transcription.model`); the file behind a registered id is per machine.",
+    params: z.strictObject({
+      cwd: CwdParam.optional().describe("Directory inside a project, to list its providers and transcription settings."),
+    }),
+    result: ModelListResultSchema,
+  },
+  "model.add": {
+    mutating: true,
+    description:
+      "Register a local model file under `id` on this machine, for `transcribe --model <id>` or `transcription.model`. " +
+        "Only formats that cannot run code: whisper.cpp ggml, gguf, ONNX; pickle-based files (`.nemo`, `.pt`, " +
+        "`.ckpt`) fail with UnsupportedModelFormat. The file is not verified: registering it is the user's consent. " +
+        "Its SHA-256 is stored (hashing a large file takes seconds; progress arrives as notifications) and written " +
+        "into each transcript made with it. Registering an id again replaces it. The file stays where it is. Only " +
+        "register a file the user named.",
+    params: z.strictObject({
+      id: ModelIdSchema,
+      file: AbsolutePath.describe("Absolute path of the model file, e.g. `/home/ana/models/ggml-es-small.bin`."),
+      options: z
+        .record(z.string().regex(/^[a-z][a-zA-Z0-9]*$/), z.string().min(1))
+        .default({})
+        .describe(
+          "Provider settings kept with it. whisper.cpp: `dtw`, the alignment-heads preset of the model it was trained " +
+            "from (`tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large.v1`, " +
+            "`large.v2`, `large.v3`, `large.v3.turbo`); without it word onsets come from token times (less precise).",
+        ),
+    }),
+    result: z.object({
+      model: RegisteredModelSchema,
+      replaced: z.boolean().describe("True when `id` was registered before, to another file or the same one."),
+    }),
+  },
+  "model.remove": {
+    mutating: true,
+    description:
+      "Forget model `id` on this machine. The file is not deleted. Defaults naming it are cleared. Projects naming it " +
+        "fail to transcribe with ModelNotRegistered until it is registered again. Fails with ModelNotRegistered.",
+    params: z.strictObject({ id: ModelIdSchema }),
+    result: z.object({
+      removed: RegisteredModelSchema,
+      defaults: z.array(z.string()).describe("Providers whose machine default was this model, now cleared."),
+    }),
+  },
+  "model.default": {
+    mutating: true,
+    description:
+      "Set or clear this machine's default model for a provider: what `transcribe` uses in projects that set no " +
+        "`transcription.model`. The id is checked when it is registered or the project at `cwd` lists it.",
+    params: z.strictObject({
+      provider: z.string().min(1).default("whisper-cpp").describe("Provider id. Default `whisper-cpp`."),
+      model: z.string().min(1).nullable().describe("Model id; null clears the default (the provider's own then)."),
+      cwd: CwdParam.optional().describe("Directory inside a project whose provider lists the models it ships, to check a model id that is not registered."),
+    }),
+    result: z.object({
+      provider: z.string(),
+      model: z.string().nullable(),
+      previous: z.string().nullable().describe("Default before; null when none."),
+    }),
+  },
+  "transcription.set": {
+    mutating: true,
+    description:
+      "Set the project's transcription model (and provider) in `frameshell.json` `transcription`, keeping every other " +
+        "key. A null `model` removes `transcription.model`: this machine's default, else the provider's, is used. " +
+        "The model id is checked like `model.default`. Fails with ProjectNotFound, ModelNotRegistered.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      provider: z.string().min(1).optional().describe("Provider id. Default: the project's, else `whisper-cpp`."),
+      model: z.string().min(1).nullable().describe("Model id, or null for the default."),
+    }),
+    result: z.object({
+      provider: z.string(),
+      model: z.string().nullable(),
+      previous: z.string().nullable().describe("`transcription.model` before; null when unset."),
+    }),
+  },
   "file.write": {
     mutating: true,
     description:
@@ -1210,6 +1320,29 @@ export const methods = {
       path: z.string().describe("Written file, project-relative and `/`-separated."),
     }),
   },
+  "file.uses": {
+    // The app's Move to Trash only: it lists what would go missing before asking the person.
+    internal: true,
+    description:
+      "What in the enclosing project's timelines names a file or folder: media, timeline and generated clips by " +
+      "`asset` or `source`, multicam angles and mics by `asset`. A folder matches everything under it. Read-only.",
+    params: z.strictObject({
+      path: AbsolutePath.describe("Absolute file or folder path inside a project."),
+    }),
+    result: z.object({
+      project: z.string().describe("Absolute root of the project holding the path."),
+      path: z.string().describe("The path, project-relative and `/`-separated."),
+      uses: z
+        .array(
+          z.object({
+            timeline: z.string().describe("Timeline id."),
+            id: z.string().describe("Clip id, or multicam group id for an angle or mic."),
+            ref: z.string().describe("The project-relative path it names."),
+          }),
+        )
+        .describe("Sorted by timeline, then id; empty when nothing names it."),
+    }),
+  },
   "events.subscribe": {
     description:
       "Receive the given events of the enclosing project as notifications on this connection until it closes or " +
@@ -1229,6 +1362,86 @@ export const methods = {
       dir: z.string().describe("Project root."),
       events: z.array(EventNameSchema).describe("Events this connection still receives for `dir`."),
     }),
+  },
+  "target.register": {
+    description:
+      "Register this connection as an agent target of the enclosing project (ADR 0025) until it closes or " +
+      "`target.unregister`: the app's \"Chat about this\" can then send it references, read with `inbox.take` or " +
+      "`inbox.wait`. Every connection of one client on one project is one target with one inbox. Sent by `frameshell mcp` " +
+      "on MCP `initialize` and by `frameshell ask --wait`. Registering again (another client) moves the registration.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      client: AgentClientSchema,
+      title: z.string().min(1).max(200).optional().describe("Display name, e.g. MCP `clientInfo.title` (`Claude Code`)."),
+      kind: AgentTargetKindSchema,
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      target: AgentTargetSchema,
+    }),
+  },
+  "target.unregister": {
+    description: "This connection stops being an agent target of the enclosing project. Not registered: nothing happens.",
+    internal: true,
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({ dir: z.string().describe("Project root.") }),
+  },
+  "target.list": {
+    description: "Agent targets of the enclosing project (ADR 0025): who \"Chat about this\" can reach outside the app's terminals.",
+    internal: true,
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      targets: z.array(AgentTargetSchema).describe("Sorted by id."),
+    }),
+  },
+  "inbox.put": {
+    description:
+      "Queue a reference for agent target `target` of the enclosing project; it waits, in memory only, until the target " +
+      "reads it. Sent by the app's \"Chat about this\". Fails with InvalidParams naming the targets when `target` is unknown.",
+    internal: true,
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).describe("Target id, e.g. `claude`."),
+      lines: z.array(z.string()).min(1).describe("The reference's lines."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      target: AgentTargetSchema.describe("The target after queueing."),
+      read: z.boolean().describe("A reader waiting with `inbox.wait` took it at once: nothing was queued."),
+    }),
+  },
+  "inbox.take": {
+    description:
+      "Take the references the person sent you from the Frameshell app (right-click \"Chat about this\" or Cmd/Ctrl+L on " +
+      "clips, words, a range, a frame region, files…): each is `[frameshell] …` lines naming what they point at, then " +
+      "maybe their request. Call it when the person says \"this\", \"here\", \"what I sent\" or \"what I selected\" " +
+      "and no `[frameshell]` line is in their message, then resolve the lines before acting. Taking removes them; " +
+      "`references` is empty when nothing waits. Reads this client's inbox; `target` reads another one.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).optional().describe("Target id to read, e.g. `claude`. Default: the caller's own."),
+    }),
+    result: InboxTakeResultSchema,
+  },
+  "inbox.wait": {
+    description:
+      "Wait for the person to point at something in the Frameshell app, then take it as `inbox.take` does: when " +
+      "nothing waits, block until the person sends a reference or `timeout` seconds pass " +
+      `(default ${INBOX_WAIT_DEFAULT_S}, max ${INBOX_WAIT_MAX_S}); \`references\` is empty after a timeout. Fails with ` +
+      "InvalidParams when the caller is no target and names none.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      target: z.string().min(1).optional().describe("Target id to read, e.g. `claude`. Default: the caller's own."),
+      timeout: z
+        .number()
+        .positive()
+        .max(INBOX_WAIT_MAX_S)
+        .optional()
+        .describe(`Seconds to wait, at most ${INBOX_WAIT_MAX_S}. Default ${INBOX_WAIT_DEFAULT_S}.`),
+    }),
+    result: InboxTakeResultSchema,
   },
   "script.outline": {
     description:
@@ -2699,6 +2912,12 @@ export const notifications = {
       "Re-read with `shoot.status`.",
     params: ShootChangedSchema,
   },
+  "target.changed": {
+    description:
+      "The project's agent targets (ADR 0025) changed: one registered or left, a reference was queued for one, or one " +
+      "read its references (`read`). Sent to connections subscribed with `events.subscribe`.",
+    params: TargetChangedSchema,
+  },
   "ui.command": {
     description:
       "Navigation command for one app window (`view`, as it registered with `ui.publish`). Not subscribable: sent to " +
@@ -2920,7 +3139,7 @@ export const ErrorCode = {
   ProjectExists: -32003,
   /** data: `{ path, details }` */
   InvalidProjectFile: -32004,
-  /** data: `{ path, details }` of the global `config.json` */
+  /** data: `{ path, details }` of the global `config.json` or the model registry `models.json` */
   InvalidGlobalConfig: -32005,
   /** data: `{ binary, platform }`: no build pinned for this platform and no override. */
   BinaryUnavailable: -32006,
@@ -3018,6 +3237,14 @@ export const ErrorCode = {
    * `building`, `decided`, `unknown` (no such open proposal), `stale` or `rejected` (your proposal closed unapplied).
    */
   ProposalState: -32042,
+  /**
+   * data: `{ id, reason, file?, hint }`; reason `unknown` (the model is not registered on this machine and the
+   * provider does not ship it), `missing-file` (its registered file is gone) or `format` (its format is not one
+   * the provider reads). `hint` says how to register it.
+   */
+  ModelNotRegistered: -32043,
+  /** data: `{ file, reason }`: the file is not a ggml, gguf or ONNX model, or is pickle-based (it could run code). */
+  UnsupportedModelFormat: -32044,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

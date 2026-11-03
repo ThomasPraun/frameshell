@@ -1,4 +1,4 @@
-// "Ask agent" (SPEC decision 21): one command, run from Cmd/Ctrl+L or any panel's context menu.
+// "Chat about this" (SPEC decision 21, ADR 0025): one command, run from Cmd/Ctrl+L or any panel's context menu, with "Copy reference".
 import type { ClipRenderInfo } from "@frameshell/protocol";
 import type { MouseEvent } from "react";
 import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
@@ -6,6 +6,8 @@ import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
 import { t } from "../i18n.js";
 import { windowOf } from "../windows.js";
+import { agentTargets } from "./agent-targets.js";
+import { type ChatTarget, shortcutTarget } from "./chat-targets.js";
 import { referenceLines } from "./reference.js";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -13,19 +15,43 @@ const isMac = navigator.userAgent.includes("Mac");
 /** Shortcut as menus show it. */
 export const ASK_SHORTCUT = isMac ? "⌘L" : "Ctrl+L";
 
-let handler: ((extra: readonly string[]) => void) | null = null;
+/** What the workspace installs as the command (see {@link askAgent}). */
+export interface AskHandler {
+  /** Send the selection's reference, then `extra`, to `target`; null when there is no target to choose from. */
+  send(extra: readonly string[], target: ChatTarget | null): void;
+  /** Put the selection's reference on the clipboard (the same lines `send` delivers). */
+  copy(): void;
+  /** Every target now, as {@link ChatTarget}s (ADR 0025): agents in the app's terminals, then outside it. */
+  targets(): ChatTarget[];
+}
+
+let handler: AskHandler | null = null;
 
 /**
  * The command. The workspace installs what it does (it owns the terminal
  * panel and its collapsed state); panels only call {@link askAgent.run}.
  */
 export const askAgent = {
-  /** Ask about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace is up. */
-  run(extra: readonly string[] = []): void {
-    handler?.(extra);
+  /**
+   * Chat about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace
+   * is up. Without `target`, it goes where Cmd/Ctrl+L sends: the target used last, else the first.
+   */
+  run(extra: readonly string[] = [], target?: ChatTarget): void {
+    if (!handler) return;
+    const chosen = target ?? shortcutTarget(handler.targets(), agentTargets.get().last);
+    if (chosen) agentTargets.use(chosen.id);
+    handler.send(extra, chosen);
+  },
+  /** Put the current selection's reference on the clipboard (the same lines {@link askAgent.run} sends); no-op before the workspace is up. */
+  copy(): void {
+    handler?.copy();
+  },
+  /** Every target the command can reach now; empty before the workspace is up. */
+  targets(): ChatTarget[] {
+    return handler?.targets() ?? [];
   },
   /** Make `next` the command; returns an uninstall function. */
-  install(next: (extra: readonly string[]) => void): () => void {
+  install(next: AskHandler): () => void {
     handler = next;
     return () => {
       if (handler === next) handler = null;
@@ -44,7 +70,8 @@ export function hasSelection(current: Selection): boolean {
     current.scene !== null ||
     current.region !== null ||
     current.points.length > 0 ||
-    current.person !== null
+    current.person !== null ||
+    current.track !== null
   );
 }
 
@@ -114,12 +141,44 @@ async function clipRenders(): Promise<ClipRenderInfo[]> {
 }
 
 /**
- * Open the "Ask agent" context menu at the pointer. Call after the panel
- * has selected what was right-clicked; the entry is disabled with nothing selected.
- * `extra` entries (the panel's own commands) follow it.
+ * The "Chat about this" menu entry: with several targets (ADR 0025), a submenu names them and marks the one
+ * Cmd/Ctrl+L goes to; with one or none, it sends at once. Disabled with nothing selected.
+ */
+export function askMenuItem(): MenuItem {
+  const disabled = !hasSelection(selection.get());
+  const targets = askAgent.targets();
+  if (targets.length < 2) {
+    return { label: t.workspace.chatAboutThis, shortcut: ASK_SHORTCUT, disabled, run: () => askAgent.run() };
+  }
+  const next = shortcutTarget(targets, agentTargets.get().last);
+  return {
+    label: t.workspace.chatAboutThis,
+    shortcut: ASK_SHORTCUT,
+    disabled,
+    items: targets.map((target) => ({
+      label: target.label,
+      ...(target.id === next?.id ? { shortcut: ASK_SHORTCUT } : {}),
+      run: () => askAgent.run([], target),
+    })),
+  };
+}
+
+/**
+ * {@link askMenuItem} and "Copy reference" for the current selection, both
+ * disabled with nothing selected. Menus that open through `contextMenu`
+ * directly put these first, after selecting what was right-clicked.
+ */
+export function askItems(): MenuItem[] {
+  const disabled = !hasSelection(selection.get());
+  return [askMenuItem(), { label: t.workspace.copyReference, disabled, run: () => askAgent.copy() }];
+}
+
+/**
+ * Open the context menu with {@link askItems} at the pointer. Call after the
+ * panel has selected what was right-clicked. `extra` entries (the panel's own
+ * commands) follow it.
  */
 export function openAskMenu(event: MouseEvent, extra: readonly MenuItem[] = []): void {
   event.preventDefault();
-  const items: MenuItem[] = [{ label: t.workspace.askAgent, shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() }, ...extra];
-  contextMenu.open(event.clientX, event.clientY, items, windowOf(event.target));
+  contextMenu.open(event.clientX, event.clientY, [...askItems(), ...extra], windowOf(event.target));
 }

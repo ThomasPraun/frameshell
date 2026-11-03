@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
-import { runMcp } from "../mcp-command.js";
-import { type CliIo, runCli } from "../run.js";
+import type { CliIo } from "../run.js";
 
 const argv = process.argv.slice(2);
 const stderr = (text: string) => void process.stderr.write(text);
 
-if (argv[0] === "mcp") {
+if (argv[0] === "ask") {
+  // Prompt hooks run it on every message: load only what it needs (ADR 0025).
+  const { runAsk } = await import("../ask-command.js");
+  process.exitCode = await runAsk(argv.slice(1), { stdout: (text) => process.stdout.write(text), stderr, cwd: process.cwd(), env: process.env, stdin: process.stdin });
+} else if (argv[0] === "mcp") {
+  const { runMcp } = await import("../mcp-command.js");
   // Long-lived: stdout carries MCP messages only.
   process.exitCode = await runMcp(argv.slice(1), { stdin: process.stdin, stdout: process.stdout, stderr, cwd: process.cwd(), env: process.env });
 } else {
@@ -28,5 +32,6 @@ if (argv[0] === "mcp") {
       }
     };
   }
+  const { runCli } = await import("../run.js");
   process.exitCode = await runCli(argv, io);
 }

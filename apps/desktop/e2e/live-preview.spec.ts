@@ -169,7 +169,7 @@ test("the Pick tool outlines the element under the pointer and picks it for the 
   // The page's own background (the card colour on <html>) is what shows elsewhere: it is the hit there.
   await pointAt(800, 400);
   await expect(outline).toHaveAttribute("data-selector", "html");
-  // Ask agent focused the terminal: back to the preview first.
+  // Chat about this focused the terminal: back to the preview first.
   await press("Escape");
   await expect(page.getByTestId("preview-pick-point")).toHaveCount(0);
 });

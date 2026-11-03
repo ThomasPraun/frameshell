@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentCommands, agentOfCommand } from "../src/main/agent-detect.js";
+import { agentCommands, agentOfCommand } from "@frameshell/protocol";
 
 // Seam: the pure matcher from a foreground command line (as `ps` reports it) to an agent label.
 describe("agentOfCommand", () => {

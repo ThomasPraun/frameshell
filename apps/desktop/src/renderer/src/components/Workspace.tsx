@@ -11,6 +11,9 @@ import {
   togglePanel,
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
+import { useConnectedAgentTargets } from "../ask/connected-targets.js";
+import { agentTargets } from "../ask/agent-targets.js";
+import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
@@ -20,7 +23,6 @@ import { useProjectKind } from "../preview/useProgram.js";
 import { cutToAngle } from "../timeline/angle-cut.js";
 import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
-import { ContextMenuHost } from "./ContextMenu.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
 import { EditorArea } from "./EditorArea.js";
@@ -40,7 +42,7 @@ import { isTranscriptPath } from "../transcript/useTranscripts.js";
 import { elementOf, listenEverywhere, windowOf } from "../windows.js";
 
 const SAVE_DELAY_MS = 300;
-/** How long an "Ask agent" notice stays in the status bar, ms. */
+/** How long a "Chat about this" notice stays in the status bar, ms. */
 const NOTICE_MS = 5000;
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -66,6 +68,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const setup = useProjectSetup();
+  const connectedAgents = useConnectedAgentTargets();
   // An image project (ADR 0017) shows its layers where the timeline goes.
   const image = useProjectKind() === "image";
   const dragBase = useRef<Layout | null>(null);
@@ -199,27 +202,69 @@ export function Workspace({ project }: { project: ProjectView }) {
     { ignore: ".terminal-view" },
   );
 
-  // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
+  // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
+  // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
+  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  // "Copy reference" puts the same lines on the clipboard.
+  useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
     let asking = false;
-    return askAgent.install((extra) => {
-      if (asking) return;
-      asking = true;
-      void composeReference()
-        .then(({ lines: reference, warning }) => {
-          const lines = [...reference, ...extra];
-          if (lines.length === 0) {
-            setNotice(t.workspace.askNothing);
-            return;
-          }
-          terminals.current?.type(lines, () => {
-            if (terminalCollapsed.current) toggle("terminal");
-          });
-          setNotice(warning);
-        })
-        .finally(() => (asking = false));
+    const reveal = () => {
+      if (terminalCollapsed.current) toggle("terminal");
+    };
+    return askAgent.install({
+      targets: () =>
+        chatTargets(terminals.current?.agents() ?? [], agentTargets.get().targets, (name) => t.workspace.askExternalTarget(name, project.name)),
+      send: (extra, target) => {
+        if (asking) return;
+        asking = true;
+        void composeReference()
+          .then(async ({ lines: reference, warning }) => {
+            const lines = [...reference, ...extra];
+            if (lines.length === 0) {
+              setNotice(t.workspace.askNothing);
+              return;
+            }
+            setNotice(warning);
+            if (target?.kind === "external") {
+              const external = agentTargets.get().targets.find((each) => each.id === target.target);
+              const name = external ? targetName(external) : target.target;
+              try {
+                const { read } = await window.frameshell.agents.send(target.target, lines);
+                agentTargets.sent(target.target, name, read);
+              } catch (error) {
+                setNotice(t.workspace.askNotSent(name, (error as Error).message));
+              }
+              return;
+            }
+            const panel = terminals.current;
+            if (panel) {
+              if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, reveal)) panel.type(lines, reveal);
+              return;
+            }
+            await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
+            setNotice(t.workspace.askCopied);
+          })
+          .catch((error: Error) => setNotice(error.message))
+          .finally(() => (asking = false));
+      },
+      copy: () => {
+        if (asking) return;
+        asking = true;
+        void composeReference()
+          .then(async ({ lines, warning }) => {
+            if (lines.length === 0) {
+              setNotice(t.workspace.askNothing);
+              return;
+            }
+            await navigator.clipboard.writeText(lines.join("\n"));
+            setNotice(warning ?? t.workspace.referenceCopied);
+          })
+          .catch((error: Error) => setNotice(error.message))
+          .finally(() => (asking = false));
+      },
     });
-  }, [toggle]);
+  }, [toggle, project.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -259,6 +304,7 @@ export function Workspace({ project }: { project: ProjectView }) {
   useEffect(() => {
     const stop = startReview();
     const offMenu = window.frameshell.menu.onCommand((command) => {
+      if (command === "toggleTerminal") toggle("terminal");
       if (command === "toggleReview") void setReviewEnabled(!reviewState().enabled);
     });
     return () => {
@@ -506,6 +552,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         session={activeSession}
         notice={notice}
         setup={setup}
+        agentTargets={terminal.collapsed ? connectedAgents : []}
+        onShowTerminal={() => toggle("terminal")}
       />
       {sidebarViews(image).filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
@@ -513,7 +561,6 @@ export function Workspace({ project }: { project: ProjectView }) {
           <SidebarWindow view={id} onDock={() => setPanelDetached(id, false)} onOpenFile={browseFile} activeFile={active} mediaUrl={project.mediaUrl} />
         </PanelWindow>
       ))}
-      <ContextMenuHost />
       {dropping && (
         <div className="drop-target" aria-hidden="true">
           <p>{t.workspace.dropToImport}</p>
@@ -529,7 +576,7 @@ function panelAt(target: EventTarget | null): WorkspacePanel | null {
 }
 
 /**
- * Whether Cmd/Ctrl+L at `target` is "Ask agent". Monaco runs it as its own
+ * Whether Cmd/Ctrl+L at `target` is "Chat about this". Monaco runs it as its own
  * action (it knows the scene under the caret); in a terminal on Linux and
  * Windows, Ctrl+L stays the shell's clear-screen.
  */
