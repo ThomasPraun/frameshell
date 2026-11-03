@@ -101,6 +101,9 @@ const api: FrameshellApi = {
     claudeDesktop: () => ipcRenderer.invoke(Channel.agentsClaudeDesktop),
     connectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsConnectClaudeDesktop),
     disconnectClaudeDesktop: () => ipcRenderer.invoke(Channel.agentsDisconnectClaudeDesktop),
+    targets: () => invokeOutcome(Channel.agentsTargets),
+    send: (id, lines) => invokeOutcome(Channel.agentsSend, id, lines),
+    onTargets: (listener) => subscribe(Channel.agentsTargetsChanged, listener),
   },
   menu: {
     onCommand: (listener) => subscribe(Channel.menuCommand, listener),

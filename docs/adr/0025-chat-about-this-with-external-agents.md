@@ -12,7 +12,7 @@ SPEC decision 21 types a reference of the selection into the prompt of an agent 
 - The target is always an app terminal (`ask/ask-target.ts`). The reference format is `[frameshell] …` lines (`ask/reference.ts`), English, read by the bundled skill.
 - Outside app terminals, CLI calls are attributed to a session made per command and MCP calls to `mcp-<random>`, with no agent name unless `FRAMESHELL_AGENT` is set (`packages/cli/src/session.ts`, `mcp-command.ts`).
 - Claude Code (docs, 2026-11-02): `UserPromptSubmit` hooks add their output to the prompt's context, stable. **Channels** (`claude/channel` capability, `notifications/claude/channel`) push into an idle session, but are a research preview, need `--channels` per session and, off Anthropic's allowlist, `--dangerously-load-development-channels`; Team and Enterprise orgs must enable them. Cross-session messaging (a per-session inbox socket, v2.1.224+) exists; its message format was not verified.
-- Not verified: whether Claude Code sends `clientInfo.name: "claude-code"` in MCP `initialize`.
+- Claude Code's MCP client sends `clientInfo` `{ name: "claude-code", title: "Claude Code" }` in `initialize` (read from the Claude Code 2.1.317 build, 2026-11-02, while implementing #429). Its target id is `claude`, the label its app terminals get (`clientAgentLabel`, `packages/protocol/src/agents.ts`).
 
 ## Decision
 

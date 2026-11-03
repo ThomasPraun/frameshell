@@ -6,6 +6,8 @@ import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
 import { t } from "../i18n.js";
 import { windowOf } from "../windows.js";
+import { agentTargets } from "./agent-targets.js";
+import { type ChatTarget, shortcutTarget } from "./chat-targets.js";
 import { referenceLines } from "./reference.js";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -13,19 +15,37 @@ const isMac = navigator.userAgent.includes("Mac");
 /** Shortcut as menus show it. */
 export const ASK_SHORTCUT = isMac ? "⌘L" : "Ctrl+L";
 
-let handler: ((extra: readonly string[]) => void) | null = null;
+/** What the workspace installs as the command (see {@link askAgent}). */
+export interface AskHandler {
+  /** Send the selection's reference, then `extra`, to `target`; null when there is no target to choose from. */
+  send(extra: readonly string[], target: ChatTarget | null): void;
+  /** Every target now, as {@link ChatTarget}s (ADR 0025): agents in the app's terminals, then outside it. */
+  targets(): ChatTarget[];
+}
+
+let handler: AskHandler | null = null;
 
 /**
  * The command. The workspace installs what it does (it owns the terminal
  * panel and its collapsed state); panels only call {@link askAgent.run}.
  */
 export const askAgent = {
-  /** Ask about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace is up. */
-  run(extra: readonly string[] = []): void {
-    handler?.(extra);
+  /**
+   * Ask about the current selection, with `extra` lines (a request) after its reference; no-op before the workspace
+   * is up. Without `target`, it goes where Cmd/Ctrl+L sends: the target used last, else the first.
+   */
+  run(extra: readonly string[] = [], target?: ChatTarget): void {
+    if (!handler) return;
+    const chosen = target ?? shortcutTarget(handler.targets(), agentTargets.get().last);
+    if (chosen) agentTargets.use(chosen.id);
+    handler.send(extra, chosen);
+  },
+  /** Every target the command can reach now; empty before the workspace is up. */
+  targets(): ChatTarget[] {
+    return handler?.targets() ?? [];
   },
   /** Make `next` the command; returns an uninstall function. */
-  install(next: (extra: readonly string[]) => void): () => void {
+  install(next: AskHandler): () => void {
     handler = next;
     return () => {
       if (handler === next) handler = null;
@@ -114,12 +134,32 @@ async function clipRenders(): Promise<ClipRenderInfo[]> {
 }
 
 /**
+ * The "Ask agent" menu entry: with several targets (ADR 0025), a submenu names them and marks the one Cmd/Ctrl+L
+ * goes to; with one or none, it sends at once. Disabled with nothing selected.
+ */
+export function askMenuItem(): MenuItem {
+  const disabled = !hasSelection(selection.get());
+  const targets = askAgent.targets();
+  if (targets.length < 2) return { label: t.workspace.askAgent, shortcut: ASK_SHORTCUT, disabled, run: () => askAgent.run() };
+  const next = shortcutTarget(targets, agentTargets.get().last);
+  return {
+    label: t.workspace.askAgent,
+    shortcut: ASK_SHORTCUT,
+    disabled,
+    items: targets.map((target) => ({
+      label: target.label,
+      ...(target.id === next?.id ? { shortcut: ASK_SHORTCUT } : {}),
+      run: () => askAgent.run([], target),
+    })),
+  };
+}
+
+/**
  * Open the "Ask agent" context menu at the pointer. Call after the panel
- * has selected what was right-clicked; the entry is disabled with nothing selected.
+ * has selected what was right-clicked; see {@link askMenuItem}.
  * `extra` entries (the panel's own commands) follow it.
  */
 export function openAskMenu(event: MouseEvent, extra: readonly MenuItem[] = []): void {
   event.preventDefault();
-  const items: MenuItem[] = [{ label: t.workspace.askAgent, shortcut: ASK_SHORTCUT, disabled: !hasSelection(selection.get()), run: () => askAgent.run() }, ...extra];
-  contextMenu.open(event.clientX, event.clientY, items, windowOf(event.target));
+  contextMenu.open(event.clientX, event.clientY, [askMenuItem(), ...extra], windowOf(event.target));
 }

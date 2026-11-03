@@ -67,6 +67,17 @@ What the user sees in the app, and a way to take them somewhere (SPEC §7b, deci
 
 Navigation tools return the app's state after the command. No app: `UiNotConnected`; refused or no answer within 5 s: `UiCommandFailed` with the reason. The app reports every change within 200 ms (reports at most every 100 ms, only when something changed). Several windows on one project: the one focused last (else the one that reported last) gets commands. Wiring: daemon broker `packages/core/src/ui/broker.ts`, main `apps/desktop/src/main/ui-bridge.ts`, renderer `apps/desktop/src/renderer/src/ui-link.ts`. Internal methods `ui.publish`, `ui.reply`, `ui.detach`, `ui.active` and the `ui.command` notification carry it.
 
+## References from the app (ADR 0025)
+
+Each `frameshell mcp` process registers its client with the daemon as an **agent target** of its project on MCP `initialize` (a server started outside any project: on the project of its first call, re-registered when that follows another window), and the daemon drops it when the process exits. Target id = the client's agent label: `clientInfo.name` `claude-code` (Claude Code 2.1.317) becomes `claude`, the label its app terminals get. Several sessions of one client on one project share one target and one inbox. The app's "Ask agent" sends to a target with `inbox.put`; references wait in memory until read.
+
+| Tool | Does |
+|---|---|
+| `inbox_take` | Takes (and removes) the references waiting for this client, oldest first: `[frameshell]` lines, then any request. `target` reads another one. |
+| `inbox_wait(timeout?)` | Same, blocking until one arrives or `timeout` seconds pass (default 300, max 3600). |
+
+`target.register`, `target.unregister`, `target.list` and `inbox.put` are internal; `target.changed` tells the app who is there, what waits and who read. The CLI side is `frameshell ask --take` / `--wait`. Wiring: `packages/core/src/targets/inbox.ts`, MCP `DaemonLink.register` in `packages/mcp/src/server.ts`, CLI `packages/cli/src/ask-command.ts`, app `renderer/src/ask/` (`chat-targets.ts`, `agent-targets.ts`).
+
 ## Review mode (ADR 0019)
 
 The person may turn on review mode for a project in the app (off by default). While it is on, every timeline change an MCP client makes waits as one **proposal** per transaction until the person accepts or rejects it in the app; nothing reaches the timeline file before. With it off, tools behave as without it.

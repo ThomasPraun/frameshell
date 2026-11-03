@@ -6,6 +6,7 @@ import { type MouseEvent, type ReactNode, type Ref, useCallback, useEffect, useI
 import { createPortal } from "react-dom";
 import type { TerminalInfo } from "../../../shared/api.js";
 import { askTarget } from "../ask/ask-target.js";
+import type { TerminalAgent } from "../ask/chat-targets.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
@@ -84,6 +85,10 @@ export interface AgentTerminal {
    * tab, a new one is opened for them.
    */
   type(lines: readonly string[], reveal: () => void): void;
+  /** Live terminals running an agent (ADR 0025), most recently focused first, each named for "Ask agent". */
+  agents(): TerminalAgent[];
+  /** Like {@link AgentTerminal.type}, into the terminal of tab `key`; false when that tab no longer runs. */
+  typeInto(key: number, lines: readonly string[], reveal: () => void): boolean;
 }
 
 /** A started xterm, as the panel drives it. */
@@ -144,18 +149,8 @@ export function TerminalPanel({
 
   useImperativeHandle(
     ref,
-    () => ({
-      type(lines, reveal) {
-        const { tabs: current, active: key, agents: running } = latest.current;
-        const target = askTarget(current, key, running, focusOrder.current);
-        if (!target) {
-          reveal();
-          const added = nextKey.current++;
-          pending.current.set(added, lines);
-          setTabs((was) => [...was, { key: added, info: null, exitCode: null, detached: false, name: null }]);
-          setActive(added);
-          return;
-        }
+    () => {
+      const deliver = (target: Tab, lines: readonly string[], reveal: () => void) => {
         if (!target.detached) {
           reveal();
           setActive(target.key);
@@ -164,8 +159,36 @@ export function TerminalPanel({
         const view = views.current.get(target.key);
         if (view) view.type(lines);
         else pending.current.set(target.key, lines);
-      },
-    }),
+      };
+      return {
+        type(lines, reveal) {
+          const { tabs: current, active: key, agents: running } = latest.current;
+          const target = askTarget(current, key, running, focusOrder.current);
+          if (target) return deliver(target, lines, reveal);
+          reveal();
+          const added = nextKey.current++;
+          pending.current.set(added, lines);
+          setTabs((was) => [...was, { key: added, info: null, exitCode: null, detached: false, name: null }]);
+          setActive(added);
+        },
+        agents() {
+          const { tabs: current, agents: running } = latest.current;
+          const recent = [...focusOrder.current].reverse();
+          const rank = (key: number) => (recent.includes(key) ? recent.indexOf(key) : recent.length);
+          return current
+            .map((tab, index) => ({ tab, index, agent: tab.info && tab.exitCode === null ? running.get(tab.info.id) : undefined }))
+            .filter((entry): entry is { tab: Tab; index: number; agent: string } => entry.agent !== undefined)
+            .sort((a, b) => rank(a.tab.key) - rank(b.tab.key))
+            .map(({ tab, index, agent }) => ({ key: tab.key, label: t.terminal.agentTarget(tab.name ?? `${t.terminal.terminal} ${index + 1}`, agent) }));
+        },
+        typeInto(key, lines, reveal) {
+          const target = latest.current.tabs.find((tab) => tab.key === key && tab.exitCode === null);
+          if (!target) return false;
+          deliver(target, lines, reveal);
+          return true;
+        },
+      };
+    },
     [flash],
   );
 

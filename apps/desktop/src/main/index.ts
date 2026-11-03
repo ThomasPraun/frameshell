@@ -45,6 +45,7 @@ import {
   type ModelProgress,
   type PeopleChange,
   type PersonTarget,
+  type TargetsChange,
   type ProposalChange,
   type ShootChange,
   type ReviewEvent,
@@ -508,6 +509,11 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("people.changed", project.dir, {
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.peopleChanged, change satisfies PeopleChange),
       onResync: () => send(contents, Channel.peopleChanged, null),
+    }),
+    // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
+    daemon.subscribe("target.changed", project.dir, {
+      onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
+      onResync: () => send(contents, Channel.agentsTargetsChanged, null),
     }),
   ]).catch(() => []); // Daemon unreachable: `timeline.show` fails too and the panel says so.
   state.daemonEvents = subscriptions;
@@ -1248,6 +1254,12 @@ function registerIpc(): void {
   ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
   ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
   ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
+  ipcMain.handle(Channel.agentsTargets, (event) =>
+    outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
+  );
+  ipcMain.handle(Channel.agentsSend, (event, id: string, lines: string[]) =>
+    outcome(async () => daemon.request("inbox.put", { cwd: (await requireProject(stateOf(event.sender))).project.dir, target: id, lines })),
+  );
   ipcMain.handle(Channel.projectCurrent, async (event) => {
     const state = stateOf(event.sender);
     await state.opening;

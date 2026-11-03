@@ -2,6 +2,16 @@
 
 In the app, the user selects something and presses Cmd/Ctrl+L ("Ask agent"): the app types one line per selected item into your prompt, each starting with `[frameshell]`, then the user writes the request ("make this shorter", "remove these words"). The lines are **what "this" means**: resolve them before acting, and act on exactly those ids.
 
+## When you run outside the app's terminals
+
+The app cannot type into your prompt then: it queues the lines for you, and you take them. Take them when the user says "this", "here", "what I sent", "what I selected" and their message holds no `[frameshell]` line:
+
+- **MCP:** `inbox_take`. Empty `references`: nothing was sent; read `ui_state` for what they have selected, or ask.
+- **CLI:** `frameshell ask --take` prints them (nothing when none waits); `--target claude` reads the inbox of another agent's MCP server, e.g. Claude Code's (target ids are agent labels).
+- **Waiting for the user to point:** `frameshell ask --wait` (MCP `inbox_wait`) blocks until they send something; exit 6 after `--timeout` with nothing.
+
+Taking removes them, so take once and keep the lines. Each reference is the same lines as below, then any request the user added.
+
 Times in the lines are timeline times as `HH:MM:SS.hh` (`00:03:12.40` = 192.4 s). Ids are the project files' ids. Several items may share one line when the terminal program has no bracketed paste; split on `[frameshell]`.
 
 | Line | Means | Resolve with |

@@ -11,6 +11,8 @@ import {
   togglePanel,
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
+import { agentTargets } from "../ask/agent-targets.js";
+import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
@@ -198,27 +200,53 @@ export function Workspace({ project }: { project: ProjectView }) {
     { ignore: ".terminal-view" },
   );
 
-  // "Ask agent" (SPEC decision 21): type the selection's reference into the target terminal (ADR 0012), unsent.
+  // "Ask agent" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
+  // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
+  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
     let asking = false;
-    return askAgent.install((extra) => {
-      if (asking) return;
-      asking = true;
-      void composeReference()
-        .then(({ lines: reference, warning }) => {
-          const lines = [...reference, ...extra];
-          if (lines.length === 0) {
-            setNotice(t.workspace.askNothing);
-            return;
-          }
-          terminals.current?.type(lines, () => {
-            if (terminalCollapsed.current) toggle("terminal");
-          });
-          setNotice(warning);
-        })
-        .finally(() => (asking = false));
+    const reveal = () => {
+      if (terminalCollapsed.current) toggle("terminal");
+    };
+    return askAgent.install({
+      targets: () =>
+        chatTargets(terminals.current?.agents() ?? [], agentTargets.get().targets, (name) => t.workspace.askExternalTarget(name, project.name)),
+      send: (extra, target) => {
+        if (asking) return;
+        asking = true;
+        void composeReference()
+          .then(async ({ lines: reference, warning }) => {
+            const lines = [...reference, ...extra];
+            if (lines.length === 0) {
+              setNotice(t.workspace.askNothing);
+              return;
+            }
+            setNotice(warning);
+            if (target?.kind === "external") {
+              const external = agentTargets.get().targets.find((each) => each.id === target.target);
+              const name = external ? targetName(external) : target.target;
+              try {
+                const { read } = await window.frameshell.agents.send(target.target, lines);
+                agentTargets.sent(target.target, name, read);
+              } catch (error) {
+                setNotice(t.workspace.askNotSent(name, (error as Error).message));
+              }
+              return;
+            }
+            const panel = terminals.current;
+            if (panel) {
+              if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, reveal)) panel.type(lines, reveal);
+              return;
+            }
+            await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
+            setNotice(t.workspace.askCopied);
+          })
+          .catch((error: Error) => setNotice(error.message))
+          .finally(() => (asking = false));
+      },
     });
-  }, [toggle]);
+  }, [toggle, project.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

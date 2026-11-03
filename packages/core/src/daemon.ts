@@ -19,6 +19,7 @@ import {
   type ValidatedParams,
   type AppDirs,
   PROPOSAL_WAIT_DEFAULT_S,
+  INBOX_WAIT_DEFAULT_S,
   type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
@@ -99,6 +100,7 @@ import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
 import { verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
+import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
@@ -754,6 +756,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return listed;
   };
   const ui = new UiBroker();
+  // ADR 0025: agents outside the app's terminals, and the references the app sends them. Owners are connections' callers.
+  const targets = new AgentTargets({
+    onChanged: (key, list, read) => events.publish("target.changed", key, { project: key, targets: list, read }),
+  });
+  /**
+   * Target `caller` reads on project `key`: the one it names, else the one it registered as, else the one named
+   * after its agent label (a CLI run by an agent whose MCP server registered). Null when none applies.
+   */
+  const inboxOf = (caller: Caller, key: string, named: string | undefined): string | null => {
+    if (named !== undefined) return named;
+    const own = targets.targetOf(caller, key);
+    if (own !== null) return own;
+    const agent = agentOf(caller);
+    return agent !== null && targets.has(key, agent) ? agent : null;
+  };
   /** Hub key of the project enclosing `cwd`, as `ui.publish` registers windows under. */
   const projectKey = async (cwd: string) => canonicalPath(await root(cwd));
   const identity: HandshakeResult = { protocolVersion: PROTOCOL_VERSION, daemonVersion: DAEMON_VERSION, pid: process.pid };
@@ -1453,6 +1470,45 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const by = author.startsWith("agent:") ? author : undefined;
       return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
     },
+    "target.register": async ({ cwd, client, title, kind }, caller) => {
+      const dir = await root(cwd);
+      return { dir, target: targets.register(caller, await canonicalPath(dir), { client, title, kind }) };
+    },
+    "target.unregister": async ({ cwd }, caller) => {
+      const dir = await root(cwd);
+      targets.unregister(caller, await canonicalPath(dir));
+      return { dir };
+    },
+    "target.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return { dir, targets: targets.list(await canonicalPath(dir)) };
+    },
+    "inbox.put": async ({ cwd, target, lines }) => {
+      const dir = await root(cwd);
+      return { dir, ...targets.put(await canonicalPath(dir), target, lines) };
+    },
+    "inbox.take": async ({ cwd, target }, caller) => {
+      const dir = await root(cwd);
+      const key = await canonicalPath(dir);
+      const id = inboxOf(caller, key, target);
+      return { dir, target: id, references: id === null ? [] : targets.take(key, id) };
+    },
+    "inbox.wait": async ({ cwd, target, timeout }, caller) => {
+      const dir = await root(cwd);
+      const key = await canonicalPath(dir);
+      const id = inboxOf(caller, key, target);
+      if (id === null || !targets.has(key, id)) {
+        const known = targets.list(key).map((each) => each.id);
+        throw new RpcError(
+          ErrorCode.InvalidParams,
+          id === null
+            ? "This connection is no agent target of the project: register first (`frameshell ask --wait` does) or name a `target`."
+            : `No agent target \`${id}\` in this project; ${known.length > 0 ? `targets: ${known.join(", ")}` : "none is registered"}.`,
+          { issues: [{ path: ["target"], message: id === null ? "required" : "unknown target" }], targets: known },
+        );
+      }
+      return { dir, target: id, references: await targets.wait(caller, key, id, (timeout ?? INBOX_WAIT_DEFAULT_S) * 1000) };
+    },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
     "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
@@ -1519,6 +1575,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     socket.on("close", () => {
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
+      targets.drop(caller);
       ui.drop(sink);
       clients.delete(socket);
       armIdleTimer();

@@ -11,6 +11,14 @@ const en = {
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
   askNothing: "Select clips, words, a time range, a file, a scene, or pick in the preview (I) to ask the agent about.",
   askAgent: "Ask agent",
+  /** An agent outside the app's terminals (ADR 0025), e.g. `Claude Code · launch`. */
+  askExternalTarget: (agent: string, project: string) => `${agent} · ${project}`,
+  askSentWaiting: (agent: string) => `Sent to ${agent}, waiting for it to read`,
+  askRead: (agent: string) => `${agent} read it`,
+  askNotSent: (agent: string, reason: string) => `Not sent to ${agent}: ${reason}`,
+  askCopied: "No agent to send to: the reference is on the clipboard.",
+  askPending: (agent: string, count: number) => `${agent}: ${count} waiting`,
+  askPendingTitle: "References sent with Ask agent that the agent has not read yet",
   frameNotCaptured: (reason: string) => `Frame not captured: ${reason}`,
   detailsNotSaved: (reason: string) => `Details not saved: ${reason}`,
   /** Title of a detached panel's window. */
@@ -77,6 +85,13 @@ const es: typeof en = {
   askNothing:
     "Selecciona clips, palabras, un rango de tiempo, un archivo, una escena, o marca en la vista previa (I) para preguntarle al agente.",
   askAgent: "Preguntar al agente",
+  askExternalTarget: (agent, project) => `${agent} · ${project}`,
+  askSentWaiting: (agent) => `Enviado a ${agent}, esperando que lo lea`,
+  askRead: (agent) => `${agent} lo leyó`,
+  askNotSent: (agent, reason) => `No se envió a ${agent}: ${reason}`,
+  askCopied: "No hay un agente al que enviarlo: la referencia quedó en el portapapeles.",
+  askPending: (agent, count) => `${agent}: ${count} en espera`,
+  askPendingTitle: "Referencias enviadas con Preguntar al agente que el agente aún no leyó",
   frameNotCaptured: (reason) => `No se capturó el fotograma: ${reason}`,
   detailsNotSaved: (reason) => `No se guardaron los detalles: ${reason}`,
   windowTitle: (panel, project) => `${panel} — ${project}`,

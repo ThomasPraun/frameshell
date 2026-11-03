@@ -22,7 +22,7 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { contactSheet, decodePng, encodePng, fitWithin } from "./png.js";
-import { ProjectResolver, type ResolvedProject, appProjectNote } from "./project.js";
+import { ProjectResolver, type ResolvedProject, appProjectNote, insideProject } from "./project.js";
 import { ProjectResources, STATUS_URI, historyUri, timelineUri, transcriptUri } from "./resources.js";
 import { CAPTURE_MAX_SIDE, FramesStripParams, STRIP_MAX_WIDTH, type ToolSpec, buildTools } from "./tools.js";
 
@@ -51,6 +51,8 @@ const INSTRUCTIONS =
   "group several operations. Look at what you built with `frame_capture` and `frames_strip`. `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
+  "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
+  "`[frameshell]` lines. " +
   "Tools without `cwd` act on the project enclosing the directory this server started in; when that is in no " +
   "project (one server for every project, e.g. Claude Desktop), on the project open in the Frameshell app window " +
   "the user used last, and the result then names it in a `Project: <dir>` line: check it is the project you mean, " +
@@ -90,9 +92,12 @@ export function createMcpServer(options: McpServerOptions): Server {
   });
   const resolver = new ProjectResolver(cwd, () => link.get());
   let current: string | null = null;
+  /** The MCP client (`initialize`), registered as the agent target of the default project (ADR 0025). */
+  let client: AgentClient | null = null;
   /** The default project now; a switch (the user moved to another window) re-announces every resource. */
   const resolve = async (): Promise<ResolvedProject> => {
     const project = await resolver.resolve();
+    if (client) void link.register(project.root, client).catch(() => {});
     if (project.root !== current) {
       const switched = current !== null;
       current = project.root;
@@ -176,6 +181,15 @@ export function createMcpServer(options: McpServerOptions): Server {
     subscribed.delete(request.params.uri);
     return {};
   });
+
+  // A server started inside a project registers at once, so "Chat about this" can reach it before any tool call;
+  // one started elsewhere (a global server) registers on the project of its first call, never starting a daemon idly.
+  server.oninitialized = () => {
+    const info = server.getClientVersion();
+    if (!info) return;
+    client = { name: info.name, ...(info.title ? { title: info.title } : {}) };
+    if (insideProject(cwd)) void resolve().catch(() => {});
+  };
 
   const close = server.onclose;
   server.onclose = () => {
@@ -293,6 +307,12 @@ class DaemonUnreachable extends Error {
   override readonly name = "DaemonUnreachable";
 }
 
+/** MCP client as `initialize` named it. */
+interface AgentClient {
+  name: string;
+  title?: string;
+}
+
 /** What a {@link DaemonLink} tells its owner. */
 interface LinkEvents {
   onTimelineChanged(params: EventParams<"timeline.changed">): void;
@@ -303,15 +323,20 @@ interface LinkEvents {
 
 /**
  * One lazily opened daemon connection, reopened after it drops, with the
- * `timeline.changed` subscription renewed on each new connection.
+ * `timeline.changed` subscription and the agent target registration renewed
+ * on each new connection. The daemon drops the registration with the
+ * connection: the process exiting unregisters it.
  */
 class DaemonLink {
   readonly #connect: () => Promise<DaemonConnection>;
   readonly #events: LinkEvents;
   #current: Promise<DaemonConnection> | null = null;
   #watched: string | null = null;
+  /** Project root registered as an agent target, and as which client. */
+  #target: { root: string; client: AgentClient } | null = null;
   #lost = false;
   #closed = false;
+  #retry: NodeJS.Timeout | undefined;
 
   constructor(connect: () => Promise<DaemonConnection>, events: LinkEvents) {
     this.#connect = connect;
@@ -341,8 +366,21 @@ class DaemonLink {
     if (previous) await conn.request("events.unsubscribe", { cwd: previous, events: WATCHED }).catch(() => {});
   }
 
+  /** Register as agent target `client` of the project at `root` from now on, instead of the one before, across reconnects. */
+  async register(root: string, client: AgentClient): Promise<void> {
+    if (this.#target?.root === root) return;
+    const previous = this.#target?.root;
+    this.#target = { root, client };
+    const opened = this.#current !== null;
+    const conn = await this.get();
+    // A connection opened just now registered on its own.
+    if (opened) await this.#register(conn);
+    if (previous) await conn.request("target.unregister", { cwd: previous }).catch(() => {});
+  }
+
   close(): void {
     this.#closed = true;
+    clearTimeout(this.#retry);
     void this.#current?.then((conn) => conn.close(), () => {});
   }
 
@@ -366,11 +404,30 @@ class DaemonLink {
     void conn.closed.then(() => {
       if (this.#current !== null) this.#lost = true;
       this.#current = null;
+      this.#reconnect(1_000);
     });
     if (this.#watched) await this.#subscribe(conn, this.#watched);
+    // The project may be gone since: the registration is best effort, never a reason to refuse the connection.
+    if (this.#target) await this.#register(conn).catch(() => {});
     if (this.#lost && this.#watched) this.#events.onResync();
     this.#lost = false;
     return conn;
+  }
+
+  /** While registered as a target, reconnect soon after a loss: the app lists only connected targets. */
+  #reconnect(delay: number): void {
+    if (this.#closed || !this.#target) return;
+    clearTimeout(this.#retry);
+    this.#retry = setTimeout(() => {
+      if (this.#current) return;
+      this.get().catch(() => this.#reconnect(Math.min(delay * 2, 30_000)));
+    }, delay);
+    this.#retry.unref?.();
+  }
+
+  async #register(conn: DaemonConnection): Promise<void> {
+    const { root, client } = this.#target!;
+    await conn.request("target.register", { cwd: root, client: client.name, ...(client.title ? { title: client.title } : {}), kind: "mcp" });
   }
 
   async #subscribe(conn: DaemonConnection, root: string): Promise<void> {

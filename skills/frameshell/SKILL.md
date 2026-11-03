@@ -71,7 +71,7 @@ When you guide the human through the app, name only these places; do not invent 
 | Who is who across files: people linked to transcript speakers, angles and faces (`people add`, `people link`, `people list`), voices and faces suggested across files (`people suggest`, `people confirm`), when a person speaks or is on screen (`people ranges`), speaker names in transcripts | [people.md](reference/people.md) |
 | Any CLI command: what it does, key flags, output | [cli.md](reference/cli.md); `frameshell --help` has every flag |
 | MCP tools, CLI or MCP, frame capture, what the user sees in the app (`ui_state`, `ui_*`) | [mcp.md](reference/mcp.md) |
-| The prompt holds a `[frameshell] …` line | [selection.md](reference/selection.md) |
+| The prompt holds a `[frameshell] …` line, or the user says "this" or "what I sent" from the app while you run outside its terminals (`inbox_take`, `frameshell ask --take`) | [selection.md](reference/selection.md) |
 | Project files on disk: `frameshell.json`, timeline, transcript, script; direct file edits | [project-model.md](reference/project-model.md) |
 | Titles, lower thirds, animated overlays (HyperFrames clips) | The `hyperframes` skill, exposed when `@frameshell/hyperframes` is installed (`frameshell plugin list` shows its skills) |
 | React-built scenes, UI demos, overlays from the user's React code (Remotion clips) | The `remotion` skill, exposed when `@frameshell/remotion` is installed |
