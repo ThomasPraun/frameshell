@@ -80,6 +80,22 @@ Each `frameshell mcp` process registers its client with the daemon as an **agent
 
 `target.register`, `target.unregister`, `target.list` and `inbox.put` are internal; `target.changed` tells the app who is there, what waits and who read. The CLI side is `frameshell ask --take` / `--wait`. Wiring: `packages/core/src/targets/inbox.ts`, MCP `DaemonLink.register` in `packages/mcp/src/server.ts`, CLI `packages/cli/src/ask-command.ts`, app `renderer/src/ask/` (`chat-targets.ts`, `agent-targets.ts`).
 
+### Claude Code channels (opt-in, research preview)
+
+Without anything else, Claude Code reads references when it calls `inbox_take` or when its prompt hook runs `frameshell ask --take`. A **channel** lets Claude Code react to a reference at once, even idle, with no message from the person. It is off by default and **a Claude Code research preview**: flags and rules may change.
+
+```sh
+claude mcp add frameshell -- frameshell mcp --channel     # or set FRAMESHELL_CHANNEL=1 in the server's env
+claude --dangerously-load-development-channels server:frameshell
+```
+
+- With `--channel`, `frameshell mcp` declares the `experimental['claude/channel']` capability and holds an `inbox.wait` for its client. Each reference arrives as `notifications/claude/channel`: `content` = the reference's `[frameshell]` lines, `meta` = `target` and `sent_at` (keys are letters, digits and underscores; Claude Code drops others). Claude Code shows it to the model as `<channel source="frameshell" target="claude" sent_at="...">...</channel>`.
+- Frameshell is not on Claude Code's channel allowlist, so the development flag above is needed: an interactive session only (ignored with `-p`), a confirmation dialog on start, and `server:frameshell` is the name given to `claude mcp add`. On Team and Enterprise plans an admin must first turn channels on (`channelsEnabled` managed setting); the flag does not bypass it. Claude Code drops events silently when the session did not load the server as a channel or policy blocks it.
+- A pushed reference is **taken** from the inbox, so it counts as read in the app and `inbox_take`, `--take` and the hook find nothing again: no double delivery. The cost: if Claude Code is not listening (session not started with the flag, org policy), the event is lost, not queued. Without `--channel` nothing changes.
+- One-way: there is no reply tool. The hook and `inbox_take` remain the supported path; use a channel only for the reaction without a prompt.
+
+Research on the other mechanism, Claude Code's cross-session messaging: [`docs/research/claude-code-channels-messaging.md`](research/claude-code-channels-messaging.md).
+
 ## Review mode (ADR 0019)
 
 The person may turn on review mode for a project in the app (off by default). While it is on, every timeline change an MCP client makes waits as one **proposal** per transaction until the person accepts or rejects it in the app; nothing reaches the timeline file before. With it off, tools behave as without it.
