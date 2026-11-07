@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offers "After the call": split the call window into its tiles, find who speaks in the system audio
   (`transcribe.speakers`, transcribing it first when needed) and link the speakers in People. `multicam.gallery`
   takes `group` and `mic` (CLI `multicam gallery --into <group> --mic <id>|none`) to add the tiles to an existing
-  group at its window angle's offset, keeping its shots; the result's `track` and `clip` may then be null
-  (protocol 70). `people.suggest` has a new kind `script`: a transcript speaker, or a whole transcript without
+  group at its window angle's offset, keeping its shots (tiles added already are refused); the result's `track`
+  and `clip` may then be null (protocol 70). `people.suggest` has a new kind `script`: a transcript speaker, or a whole transcript without
   speakers, that says 80% or more of its words in one `**Name:**`'s lines of a shoot script is that person (or a new
   one with that name); a mixed transcript without speakers gets a hint to run `transcribe --speakers`.
 

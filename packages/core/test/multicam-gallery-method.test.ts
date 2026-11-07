@@ -138,6 +138,10 @@ describe("multicam.gallery", () => {
         code: ErrorCode.InvalidOperation,
         message: expect.stringContaining('has no mic "nope"'),
       });
+      await expect(conn.request("multicam.gallery", { cwd: project, asset: files["steady"]!, group: made.group, mic })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        message: expect.stringContaining("its tiles were added before"),
+      });
     },
     MEDIA_TIMEOUT,
   );

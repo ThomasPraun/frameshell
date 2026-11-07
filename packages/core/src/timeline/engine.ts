@@ -1249,6 +1249,15 @@ class Edit {
     }
     const taken: { id: string }[] = [...group.angles, ...(group.mics ?? []), ...RESERVED_MIC_IDS.map((id) => ({ id }))];
     const tiles = this.tileAngles(args, taken, window.offset);
+    const cropKey = (angle: Angle) => (["left", "top", "right", "bottom"] as const).map((side) => angle.crop?.[side] ?? 0).join(",");
+    const there = new Set(group.angles.filter((angle) => angle.asset === args.asset).map(cropKey));
+    const twin = tiles.find((tile) => there.has(cropKey(tile)));
+    if (twin) {
+      throw this.invalid(`group ${group.id} already has an angle of ${args.asset} cut like ${twin.name}: its tiles were added before.`, {
+        field: "group",
+        hint: "Rename or fix the existing tiles with `multicam.angle` instead of adding them again.",
+      });
+    }
     const mic = args.mic !== undefined ? args.mic : window.mic;
     for (const tile of tiles) if (mic !== undefined) tile.mic = mic;
     group.angles.push(...tiles);

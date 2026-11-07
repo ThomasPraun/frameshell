@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ShootFinish, ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { callSteps, elapsedLabel, meterFill } from "../shoot/model.js";
@@ -231,14 +231,34 @@ export function ShootPanel({ onShowPeople }: { onShowPeople?: (() => void) | und
 
 type StepState = { state: "idle" } | { state: "working" } | { state: "done"; count: number } | { state: "failed"; reason: string };
 
+/** Step states by session id and step, kept while the view unmounts (another sidebar view), so a done step is not offered again. */
+const callStepStates = new Map<string, StepState>();
+const callStepListeners = new Set<() => void>();
+const IDLE: StepState = { state: "idle" };
+
+function subscribeCallSteps(listener: () => void): () => void {
+  callStepListeners.add(listener);
+  return () => callStepListeners.delete(listener);
+}
+
+/** A {@link StepState} of one session's step that outlives the view, so work finishing while it is away still lands. */
+function useStepState(key: string): [StepState, (state: StepState) => void] {
+  const state = useSyncExternalStore(subscribeCallSteps, () => callStepStates.get(key) ?? IDLE);
+  const set = (next: StepState) => {
+    callStepStates.set(key, next);
+    for (const listener of callStepListeners) listener();
+  };
+  return [state, set];
+}
+
 /**
  * What to do after a call (ADR 0024 decision 8): split the call window into its tiles, find who speaks in the system
  * audio, and link those speakers to the script's people in the People view. Each is offered, never run by itself.
  */
 function CallSteps({ finish, onShowPeople }: { finish: ShootFinish; onShowPeople: (() => void) | undefined }) {
   const steps = callSteps(finish);
-  const [gallery, setGallery] = useState<StepState>({ state: "idle" });
-  const [speakers, setSpeakers] = useState<StepState>({ state: "idle" });
+  const [gallery, setGallery] = useStepState(`${finish.id}\0gallery`);
+  const [speakers, setSpeakers] = useStepState(`${finish.id}\0speakers`);
   if (!steps.gallery && !steps.speakers && !steps.people) return null;
   const run = (set: (state: StepState) => void, work: () => Promise<number>) => {
     set({ state: "working" });

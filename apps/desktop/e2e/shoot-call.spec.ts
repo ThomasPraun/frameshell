@@ -103,4 +103,7 @@ test("offers the call's tiles, its speakers and People after a call session, and
 
   await page.getByTestId("shoot-call-people").click();
   await expect(page.getByTestId("people-panel")).toBeVisible();
+  // Back in the Shoot view the tiles are not offered again: a second run would add them twice.
+  await page.getByRole("tab", { name: "Shoot" }).click();
+  await expect(page.getByTestId("shoot-call-gallery")).toHaveAttribute("data-state", "done");
 });

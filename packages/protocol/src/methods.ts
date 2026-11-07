@@ -1875,7 +1875,7 @@ export const methods = {
       "keeping its shots. " +
       "Example: `{ asset: \"assets/call.mp4\", names: [\"Ana\", \"Ben\", \"Zoe\"] }`. Fails with InvalidOperation (file " +
       "missing, outside the project or without a picture, no tile grid found, `at` in a stretch without one, wrong number " +
-      "of `names`: data has the tile count; with `group`, no such group or mic, or no angle of it playing `asset`), or the Binary* errors when ffmpeg cannot be fetched.",
+      "of `names`: data has the tile count; with `group`, no such group or mic, no angle of it playing `asset`, or its tiles added already), or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

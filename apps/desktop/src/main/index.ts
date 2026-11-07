@@ -1314,7 +1314,8 @@ function registerShootIpc(): void {
         return await daemon.request("transcribe.speakers", { cwd, asset });
       } catch (error) {
         // No transcript yet (a session without takes) or a stale one: transcribe, then find the speakers.
-        if (!(error instanceof RpcError && error.code === ErrorCode.InvalidOperation)) throw error;
+        const reason = error instanceof RpcError && error.code === ErrorCode.InvalidOperation ? (error.data as { reason?: string } | undefined)?.reason : undefined;
+        if (reason !== "no transcript" && reason !== "stale transcript") throw error;
         await daemon.request("transcribe", { cwd, asset });
         return daemon.request("transcribe.speakers", { cwd, asset });
       }
