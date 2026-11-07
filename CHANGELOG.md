@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@frameshell/whisper-cpp` in one click, showing the download size. Takes cut meanwhile show why they failed and
   are transcribed once a plugin is installed. `shoot.status` reports `transcription` (protocol 68), and
   `frameshell shoot status` prints it.
+- A shoot session whose End could not place every chosen take on the program track (#440): two shots on the same
+  program track were refused as overlapping when 3-decimal rounding of `start`, `in` and `out` put one shot's end a
+  millisecond past the next one's start, so the later takes were silently left out. Shots may now meet within 2 ms.
+- Flaky desktop e2e: `transitions-ui` waits for the history journal before reading the keyframe entries (#379).
 
 ## [0.17.0] - 2026-11-03
 

@@ -118,5 +118,7 @@ test("a keyframe at the playhead is added, eased, re-valued and removed from the
 
   await inspector().getByRole("button", { name: "Remove the x keyframe at the current time" }).click();
   await expect.poll(() => saved("c_two")["keys"]).toBeUndefined();
-  expect(journaled().filter(({ op }) => op === "clip.key").every(({ author }) => author === "ui")).toBe(true);
+  const keyed = () => journaled().filter(({ op }) => op === "clip.key");
+  await expect.poll(() => keyed().length).toBeGreaterThan(0);
+  expect(keyed().every(({ author }) => author === "ui")).toBe(true);
 });
