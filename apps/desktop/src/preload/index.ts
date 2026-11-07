@@ -177,6 +177,7 @@ const api: FrameshellApi = {
     installTranscription: () => invokeOutcome(Channel.shootInstallTranscription),
     accept: (script, take, options) => invokeOutcome(Channel.shootAccept, script, take, options ?? {}),
     choose: (script, scene, take) => invokeOutcome(Channel.shootChoose, script, scene, take),
+    discard: (script, take, restore) => invokeOutcome(Channel.shootDiscard, script, take, restore),
     assemble: (script) => invokeOutcome(Channel.shootAssemble, script),
     onChanged: (listener) => subscribe(Channel.shootChanged, listener),
     liveWarm: (install) => ipcRenderer.invoke(Channel.shootLiveWarm, install === true),

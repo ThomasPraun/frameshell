@@ -108,3 +108,23 @@ test("T and C record takes that are checked against the script; accept, record a
       [shoot.takes[2].id, "scripts/launch.md#problem"],
     ]);
 });
+
+test("right-click a take: Discard take drops it from the cut, Restore take brings it back", async () => {
+  await page.getByTestId("shoot-scene").first().click();
+  const rows = page.getByTestId("shoot-take-row");
+  await expect(rows).toHaveCount(2);
+  const newest = rows.nth(1);
+  const id = (await newest.getAttribute("data-take"))!;
+  const discarded = () => (JSON.parse(readFileSync(join(box.projectDir, "shoots", "launch.json"), "utf8")).takes as { id: string; discarded?: boolean }[]).find((take) => take.id === id)?.discarded === true;
+
+  await newest.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Discard take" }).click();
+  await expect(newest).toHaveAttribute("data-discarded", "true");
+  expect(discarded()).toBe(true);
+
+  await newest.click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Discard take" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Restore take" }).click();
+  await expect(newest).toHaveAttribute("data-discarded", "false");
+  expect(discarded()).toBe(false);
+});

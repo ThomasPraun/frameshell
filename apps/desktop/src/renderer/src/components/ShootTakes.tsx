@@ -3,6 +3,8 @@ import { t } from "../i18n.js";
 import { useShoot } from "../shoot/recorder.js";
 import { type DeviationInfo, currentScene, lineMarks } from "../shoot/takes-model.js";
 import { takes, useTakes } from "../shoot/takes.js";
+import { windowOf } from "../windows.js";
+import { contextMenu } from "./ContextMenu.js";
 import { TakeStatus } from "./TakeStatus.js";
 
 /**
@@ -21,6 +23,7 @@ export function ShootTakes() {
   const sceneLines = check?.scenes.find((candidate) => candidate.slug === scene)?.lines ?? [];
   const chosen = status?.takes.find((take) => take.id === sceneStatus?.chosen) ?? null;
   const deviations = chosen?.deviations.filter((deviation) => deviation.scene === scene) ?? [];
+  const sceneTakes = status?.takes.filter((take) => take.scene === scene || (scene !== null && take.scenes.includes(scene))) ?? [];
   const pending = deviations.filter((deviation) => !deviation.accepted);
 
   if (state.scripts === null) return null;
@@ -86,15 +89,44 @@ export function ShootTakes() {
                 onChange={(event) => void takes.choose(sceneStatus.slug, event.target.value || null)}
               >
                 <option value="">{t.shoot.newest}</option>
-                {sceneStatus.takes.map((id, index) => (
+                {sceneStatus.takes.map((id) => (
                   <option key={id} value={id}>
-                    {t.shoot.takeName(index + 1, time(status?.takes.find((take) => take.id === id)?.recordedAt))}
+                    {takeLabel(sceneTakes, id)}
                   </option>
                 ))}
               </select>
             </label>
           ) : (
             <p className="shoot-note">{t.shoot.noTake}</p>
+          )}
+          {sceneTakes.length > 0 && (
+            <ul className="shoot-take-list" data-testid="shoot-take-list">
+              {sceneTakes.map((take) => (
+                <li
+                  key={take.id}
+                  className={`shoot-take-row${take.discarded ? " is-discarded" : ""}`}
+                  data-testid="shoot-take-row"
+                  data-take={take.id}
+                  data-discarded={take.discarded}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    contextMenu.open(
+                      event.clientX,
+                      event.clientY,
+                      [
+                        take.discarded
+                          ? { label: t.shoot.restoreTake, run: () => void takes.discard(take.id, true) }
+                          : { label: t.shoot.discardTake, danger: true, run: () => void takes.discard(take.id, false) },
+                      ],
+                      windowOf(event.target),
+                    );
+                  }}
+                >
+                  {takeLabel(sceneTakes, take.id)}
+                  {take.discarded && ` · ${t.shoot.discardedTake}`}
+                </li>
+              ))}
+            </ul>
           )}
           {chosen?.problem && chosen.state !== "transcribing" && <p className="shoot-error">{t.shoot.failed(chosen.problem)}</p>}
           <div className="shoot-lines">
@@ -159,6 +191,12 @@ function DeviationRow({ take, deviation }: { take: string; deviation: DeviationI
       )}
     </div>
   );
+}
+
+/** "Take N (time)" for `id`, N counting the scene's takes oldest first, discarded ones included. */
+function takeLabel(sceneTakes: readonly { id: string; recordedAt: string }[], id: string): string {
+  const index = sceneTakes.findIndex((take) => take.id === id);
+  return t.shoot.takeName(index + 1, time(sceneTakes[index]?.recordedAt));
 }
 
 /** Clock time of an ISO time, as the person's locale writes it; empty when unknown. */

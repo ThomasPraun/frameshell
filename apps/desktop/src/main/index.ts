@@ -1288,6 +1288,9 @@ function registerShootIpc(): void {
       }),
     ),
   );
+  ipcMain.handle(Channel.shootDiscard, (event, script: string, take: string, restore: boolean) =>
+    outcome(async () => daemon.request("shoot.discard", { cwd: await dirOf(event.sender), script, take, restore })),
+  );
   ipcMain.handle(Channel.shootChoose, (event, script: string, scene: string, take: string | null) =>
     outcome(async () => daemon.request("shoot.choose", { cwd: await dirOf(event.sender), script, scene, take })),
   );
