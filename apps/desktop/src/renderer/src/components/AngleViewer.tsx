@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type AngleTile, programRows, turnsKey, viewerModel, viewerRow } from "../angles/model.js";
 import { useTurns } from "../angles/useTurns.js";
 import { t } from "../i18n.js";
+import { mediaSrc } from "../preview/media-src.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useTransport } from "../preview/transport.js";
 import { SELECTION_TIMELINE } from "../selection.js";
@@ -93,7 +94,7 @@ function AngleTileView({
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const proxy = asset?.proxy ?? null;
-  const src = proxy ? mediaUrl + proxy.split("/").map(encodeURIComponent).join("/") : null;
+  const src = proxy ? mediaSrc(mediaUrl, proxy) : null;
 
   // Keep the angle's picture on the playhead: seek while paused, play along and fix drift while playing.
   useEffect(() => {
