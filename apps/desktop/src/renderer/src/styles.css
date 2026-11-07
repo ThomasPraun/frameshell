@@ -3944,7 +3944,7 @@ button.track-head:focus-visible {
 }
 
 .shoot-take-row:hover {
-  background: var(--hover, rgba(127, 127, 127, 0.15));
+  background: var(--bg-hover);
 }
 
 .shoot-take-row.is-discarded {

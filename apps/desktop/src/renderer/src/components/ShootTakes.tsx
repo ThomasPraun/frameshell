@@ -23,7 +23,7 @@ export function ShootTakes() {
   const sceneLines = check?.scenes.find((candidate) => candidate.slug === scene)?.lines ?? [];
   const chosen = status?.takes.find((take) => take.id === sceneStatus?.chosen) ?? null;
   const deviations = chosen?.deviations.filter((deviation) => deviation.scene === scene) ?? [];
-  const sceneTakes = status?.takes.filter((take) => take.scene === scene || sceneStatus?.takes.includes(take.id)) ?? [];
+  const sceneTakes = status?.takes.filter((take) => take.scene === scene || (scene !== null && take.scenes.includes(scene))) ?? [];
   const pending = deviations.filter((deviation) => !deviation.accepted);
 
   if (state.scripts === null) return null;
