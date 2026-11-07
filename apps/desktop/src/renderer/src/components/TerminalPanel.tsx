@@ -344,7 +344,7 @@ export function TerminalPanel({
                 data-agent={agent}
                 data-flashing={flashing === tab.key || undefined}
                 className={`terminal-tab${tab.key === active ? " is-active" : ""}${tab.exitCode !== null ? " has-exited" : ""}${agent ? " is-agent" : ""}${tab.detached ? " is-detached" : ""}${flashing === tab.key ? " is-flashing" : ""}`}
-                title={tab.info ? t.terminal.sessionTitle(tab.info.session, agent, tab.detached) : undefined}
+                data-tip={tab.info ? t.terminal.sessionTitle(tab.info.session, agent, tab.detached) : undefined}
                 onClick={() => setActive(tab.key)}
                 onContextMenu={(event) => openTabMenu(event, tab)}
               >

@@ -331,7 +331,7 @@ export function EditorArea({
               aria-selected={path === active}
               aria-label={path === TRANSCRIPT_TAB ? t.workspace.transcript : path}
               className={`file-tab${path === active ? " is-active" : ""}`}
-              title={path}
+              data-tip={path}
               onMouseDown={(event) => {
                 if (event.button === 1) close(path, windowOf(event.target));
               }}
