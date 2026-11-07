@@ -164,7 +164,7 @@ export function ShootPanel() {
       </section>
 
       <section className="shoot-source">
-        <label className="shoot-check" title={t.shoot.systemAudioHint}>
+        <label className="shoot-check" data-tip={t.shoot.systemAudioHint}>
           <input
             type="checkbox"
             data-testid="shoot-system"
@@ -192,6 +192,7 @@ export function ShootPanel() {
           <button
             className="button primary"
             data-testid="shoot-start"
+            data-tip={state.protection === true ? t.shoot.windowsHidden : undefined}
             disabled={locked || state.mic === null}
             onClick={() => void shoot.start()}
           >

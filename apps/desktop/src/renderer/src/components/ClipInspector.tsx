@@ -77,7 +77,7 @@ export function ClipInspector() {
           <button
             className="clip-inspector-button"
             disabled={!moved}
-            title={t.inspector.resetTitle}
+            data-tip={t.inspector.resetTitle}
             onClick={() => send({ op: "clip.set", args: { clip: clip.id, transform: { x: 0, y: 0, scale: 1, opacity: 1 } } })}
           >
             {t.inspector.reset}
@@ -85,7 +85,7 @@ export function ClipInspector() {
           {clip.type === "media" && (
             <button
               className="clip-inspector-button clip-inspector-replace"
-              title={t.inspector.replaceImageTitle}
+              data-tip={t.inspector.replaceImageTitle}
               onClick={() => {
                 setError(null);
                 window.frameshell.timeline.replaceImage(SELECTION_TIMELINE, clip.id).catch((failure: unknown) => setError((failure as Error).message));
@@ -107,7 +107,7 @@ export function ClipInspector() {
           <button
             className={`clip-inspector-button clip-inspector-mute${clip.muted ? " on" : ""}`}
             aria-pressed={clip.muted}
-            title={clip.muted ? t.inspector.unmuteTitle : t.inspector.muteTitle}
+            data-tip={clip.muted ? t.inspector.unmuteTitle : t.inspector.muteTitle}
             onClick={() => send({ op: "clip.set", args: { clip: clip.id, muted: !clip.muted } })}
           >
             {t.inspector.mute}
@@ -190,7 +190,7 @@ function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: Ed
       <select
         className="clip-field-select"
         aria-label={t.inspector.transitionEdge(edge)}
-        title={t.inspector.transitionEdgeTitle(edge)}
+        data-tip={t.inspector.transitionEdgeTitle(edge)}
         value={state.kind ?? "none"}
         onChange={(event) => {
           const kind = event.target.value;
@@ -233,7 +233,7 @@ function KeyControl({
         className={`clip-inspector-button key-button${atKey ? " on" : ""}`}
         aria-pressed={atKey !== null}
         aria-label={atKey ? t.inspector.keyRemove(name) : t.inspector.keyAdd(name)}
-        title={atKey ? t.inspector.keyRemove(name) : t.inspector.keyAdd(name)}
+        data-tip={atKey ? t.inspector.keyRemove(name) : t.inspector.keyAdd(name)}
         disabled={outside && !atKey}
         onClick={() => (atKey ? onSend({ remove: true }, "Remove keyframe") : onSend({}, "Add keyframe"))}
       >
@@ -245,7 +245,7 @@ function KeyControl({
         <select
           className="clip-field-select"
           aria-label={t.inspector.keyEase(name)}
-          title={t.inspector.keyEaseTitle}
+          data-tip={t.inspector.keyEaseTitle}
           value={atKey.ease ?? "linear"}
           onChange={(event) => onSend({ ease: event.target.value as KeyBox["ease"] }, "Change keyframe")}
         >
@@ -289,7 +289,7 @@ function ElementAdjustments({
         {entries.length > 1 && (
           <button
             className="clip-inspector-button"
-            title={t.inspector.elementsResetAllTitle}
+            data-tip={t.inspector.elementsResetAllTitle}
             onClick={() => onSend({ op: "clip.set", args: { clip, elements: null } }, { label: "Reset elements" })}
           >
             {t.inspector.elementsResetAll}
@@ -315,14 +315,14 @@ function ElementAdjustments({
                 <span className="element-note" title={t.inspector.elementFragileTitle}>
                   {t.inspector.elementFragile}
                 </span>
-                <button className="clip-inspector-button" title={t.inspector.elementAskIdTitle} onClick={() => askAgent.run([idRequest(clip, selector)])}>
+                <button className="clip-inspector-button" data-tip={t.inspector.elementAskIdTitle} onClick={() => askAgent.run([idRequest(clip, selector)])}>
                   {t.inspector.elementAskId}
                 </button>
               </>
             )}
             <button
               className="clip-inspector-button"
-              title={t.inspector.elementResetTitle(selector)}
+              data-tip={t.inspector.elementResetTitle(selector)}
               aria-label={t.inspector.elementResetTitle(selector)}
               onClick={() => onSend({ op: "clip.set", args: { clip, elements: { [selector]: null } } }, { label: "Reset element" })}
             >

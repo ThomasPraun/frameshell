@@ -47,7 +47,7 @@ export function SubtitleInspector({ track }: { track: string }) {
         <span className="clip-inspector-track track-subtitles">{row.label}</span>
         {row.name ?? t.inspector.subtitles}
       </span>
-      <label className="clip-field" title={t.inspector.wordsOfTitle}>
+      <label className="clip-field" data-tip={t.inspector.wordsOfTitle}>
         <span className="clip-field-label is-static">{t.inspector.wordsOf}</span>
         <select className="clip-field-select" aria-label={t.inspector.wordsOf} value={stored.follows ?? ""} onChange={(event) => send({ track, follows: event.target.value })}>
           {sources.map((source) => (
@@ -69,7 +69,7 @@ export function SubtitleInspector({ track }: { track: string }) {
         value={style.position}
         onPick={(position) => send({ track, style: { position: position as SubtitlePosition } })}
       />
-      <label className="clip-field" title={t.inspector.speakerNamesTitle}>
+      <label className="clip-field" data-tip={t.inspector.speakerNamesTitle}>
         <input type="checkbox" aria-label={t.inspector.speakerNames} checked={style.speakerNames} onChange={(event) => send({ track, style: { speakerNames: event.target.checked } })} />
         <span className="clip-field-label is-static">{t.inspector.speakerNames}</span>
       </label>

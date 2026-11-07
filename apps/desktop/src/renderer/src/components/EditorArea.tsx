@@ -342,6 +342,7 @@ export function EditorArea({
               <button
                 className={`file-tab-close${dirty ? " is-dirty" : ""}`}
                 aria-label={dirty ? t.editor.closeTabUnsaved(path) : t.editor.closeTab(path === TRANSCRIPT_TAB ? t.workspace.transcript : path)}
+                data-tip={dirty ? t.editor.closeTabUnsaved(path) : t.editor.closeTab(path === TRANSCRIPT_TAB ? t.workspace.transcript : path)}
                 onClick={(event) => {
                   event.stopPropagation();
                   close(path, windowOf(event.target));
@@ -353,7 +354,7 @@ export function EditorArea({
         {transcript && !tabs.includes(TRANSCRIPT_TAB) && (
           <button
             className="tab-strip-action"
-            title={t.editor.showTranscript(TRANSCRIPT_SHORTCUT)}
+            data-tip={t.editor.showTranscript(TRANSCRIPT_SHORTCUT)}
             onClick={() => onOpenFile(TRANSCRIPT_TAB)}
           >
             {t.workspace.transcript}

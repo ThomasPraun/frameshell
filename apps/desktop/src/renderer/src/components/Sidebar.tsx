@@ -1,5 +1,6 @@
 import type { SidebarView } from "../../../shared/layout.js";
 import { t } from "../i18n.js";
+import { panelShortcut } from "../shortcuts.js";
 import { AngleViewer } from "./AngleViewer.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
@@ -68,6 +69,7 @@ export function Sidebar({
       <PanelHeader
         onCollapse={onCollapse}
         collapseLabel={t.workspace.hideSidebar}
+        collapseKey={panelShortcut("sidebar")}
         collapseSide="left"
         actions={
           <DetachButton name={label} detached={false} disabled={detached.has(view)} onClick={() => onDetach(view, true)} testId="sidebar-detach" />
@@ -80,7 +82,7 @@ export function Sidebar({
               role="tab"
               aria-selected={view === id}
               className={`view-tab${view === id ? " is-active" : ""}${detached.has(id) ? " is-detached" : ""}`}
-              title={detached.has(id) ? t.workspace.inOwnWindow(name) : undefined}
+              data-tip={detached.has(id) ? t.workspace.inOwnWindow(name) : undefined}
               onClick={() => onView(id)}
             >
               {name}

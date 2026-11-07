@@ -97,7 +97,7 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
             <select
               className="clip-field-select"
               aria-label={t.inspector.angleSlot(index + 1)}
-              title={t.inspector.angleSlotTitle}
+              data-tip={t.inspector.angleSlotTitle}
               value={angle.id}
               onChange={(event) => {
                 const next = [...shown];
@@ -117,7 +117,7 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
             {removable && (
               <button
                 className="clip-inspector-button angle-remove"
-                title={t.inspector.removeAngleTitle(angle.name)}
+                data-tip={t.inspector.removeAngleTitle(angle.name)}
                 aria-label={t.inspector.removeAngleTitle(angle.name)}
                 onClick={() => setAngles(shown.filter((id) => id !== angle.id))}
               >
@@ -130,7 +130,7 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
           <select
             className="clip-field-select"
             aria-label={t.inspector.addAngle}
-            title={t.inspector.addAngleTitle}
+            data-tip={t.inspector.addAngleTitle}
             value=""
             onChange={(event) => event.target.value && setAngles([...shown, event.target.value])}
           >
@@ -153,7 +153,7 @@ export function ShotInspector({ row, clip, shot, view }: { row: TrackRow; clip: 
         <button
           className={`clip-inspector-button${anglesOpen ? " is-open" : ""}`}
           aria-expanded={anglesOpen}
-          title={t.inspector.editAnglesTitle}
+          data-tip={t.inspector.editAnglesTitle}
           onClick={() => setAnglesOpen(!anglesOpen)}
         >
           {t.inspector.editAngles}
@@ -199,12 +199,12 @@ function ShotReframe({ clip, shot, group }: { clip: ClipBox; shot: ShotBox; grou
               {t.inspector.reframeKeys(keys.length)}
             </span>
             {keyHere && (
-              <button className="clip-inspector-button" title={t.inspector.removeKeyTitle} onClick={() => reframe(angle, { time: at, remove: true })}>
+              <button className="clip-inspector-button" data-tip={t.inspector.removeKeyTitle} onClick={() => reframe(angle, { time: at, remove: true })}>
                 {t.inspector.removeKey}
               </button>
             )}
             {keys.length > 0 && (
-              <button className="clip-inspector-button" title={t.inspector.clearKeysTitle} onClick={() => reframe(angle, { clear: true })}>
+              <button className="clip-inspector-button" data-tip={t.inspector.clearKeysTitle} onClick={() => reframe(angle, { clear: true })}>
                 {t.inspector.clearKeys}
               </button>
             )}
@@ -240,7 +240,7 @@ function AngleSpeaker({
     <select
       className="clip-field-select angle-speaker"
       aria-label={t.inspector.angleSpeakerLabel(angle.name)}
-      title={reason}
+      data-tip={reason}
       disabled={choices.off !== null}
       value={stored}
       data-testid="angle-speaker"
@@ -315,7 +315,7 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
             <button
               className={`clip-inspector-button clip-inspector-mute${muted ? " on" : ""}`}
               aria-pressed={muted}
-              title={!heard ? t.inspector.soundFromMicTitle : muted ? t.inspector.unmuteAngleTitle : t.inspector.muteAngleTitle}
+              data-tip={!heard ? t.inspector.soundFromMicTitle : muted ? t.inspector.unmuteAngleTitle : t.inspector.muteAngleTitle}
               disabled={!heard}
               onClick={() => set(angle, { muted: !muted })}
             >
@@ -324,7 +324,7 @@ function GroupAngles({ group, colors }: { group: Group; colors: ReadonlyMap<stri
             <button
               className={`clip-inspector-button clip-inspector-screen${screen ? " on" : ""}`}
               aria-pressed={screen}
-              title={screen ? t.inspector.unscreenAngleTitle : t.inspector.screenAngleTitle}
+              data-tip={screen ? t.inspector.unscreenAngleTitle : t.inspector.screenAngleTitle}
               onClick={() => set(angle, { screen: !screen })}
             >
               {t.inspector.screen}

@@ -1,9 +1,10 @@
 // "New image from frame" (ADR 0017): Mod+Shift+S, File menu, preview context menu. Main asks the size and opens the new project.
 import { transport } from "./preview/transport.js";
 import { SELECTION_TIMELINE } from "./selection.js";
+import { shortcutLabel } from "./shortcuts.js";
 
 /** Shortcut as menus show it. */
-export const FRAME_IMAGE_SHORTCUT = navigator.userAgent.includes("Mac") ? "⌘⇧S" : "Ctrl+Shift+S";
+export const FRAME_IMAGE_SHORTCUT = shortcutLabel("Mod+Shift+S");
 
 /** The command's key: Mod+Shift+S, no Alt. */
 export function isFrameImageKey(event: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }, mac: boolean): boolean {

@@ -599,7 +599,7 @@ function TransportBar({
           className={`icon-button region-toggle${pickTool ? " on" : ""}`}
           aria-label={t.preview.pick}
           aria-pressed={pickTool}
-          title={t.preview.pickHint}
+          data-tip={t.preview.pickHint}
           disabled={disabled || vertical === true}
           onClick={onPickTool}
         >
@@ -612,7 +612,7 @@ function TransportBar({
           <button
             className={`icon-button preview-vertical${vertical ? " on" : ""}`}
             aria-pressed={vertical}
-            title={t.preview.verticalFrameHint}
+            data-tip={t.preview.verticalFrameHint}
             data-testid="preview-vertical"
             onClick={onVertical}
           >
@@ -622,12 +622,12 @@ function TransportBar({
       </div>
       {!still && (
         <div className="preview-transport-buttons">
-          <button className="icon-button" aria-label={t.preview.goToStart} title={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
+          <button className="icon-button" aria-label={t.preview.goToStart} data-tip={t.preview.goToStartHint} disabled={disabled} onClick={() => transport.seek(0)}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M4 3v10M12 3.5L6 8l6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
             </svg>
           </button>
-          <button className="icon-button" aria-label={t.preview.prevFrame} title={t.preview.prevFrameHint} disabled={disabled} onClick={() => transport.step(-1)}>
+          <button className="icon-button" aria-label={t.preview.prevFrame} data-tip={t.preview.prevFrameHint} disabled={disabled} onClick={() => transport.step(-1)}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M10 3.5L4.5 8l5.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
             </svg>
@@ -635,7 +635,7 @@ function TransportBar({
           <button
             className={`icon-button preview-play${playing ? " playing" : ""}`}
             aria-label={playing ? t.preview.pause : t.preview.play}
-            title={playing ? t.preview.pauseHint : t.preview.playHint}
+            data-tip={playing ? t.preview.pauseHint : t.preview.playHint}
             disabled={disabled}
             onClick={() => transport.toggle()}
           >
@@ -643,12 +643,12 @@ function TransportBar({
               {playing ? <path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /> : <path d="M4.5 2.5v11L13 8z" fill="currentColor" />}
             </svg>
           </button>
-          <button className="icon-button" aria-label={t.preview.nextFrame} title={t.preview.nextFrameHint} disabled={disabled} onClick={() => transport.step(1)}>
+          <button className="icon-button" aria-label={t.preview.nextFrame} data-tip={t.preview.nextFrameHint} disabled={disabled} onClick={() => transport.step(1)}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M6 3.5L11.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
             </svg>
           </button>
-          <button className="icon-button" aria-label={t.preview.goToEnd} title={t.preview.goToEndHint} disabled={disabled} onClick={() => transport.seek(Infinity)}>
+          <button className="icon-button" aria-label={t.preview.goToEnd} data-tip={t.preview.goToEndHint} disabled={disabled} onClick={() => transport.seek(Infinity)}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M12 3v10M4 3.5L10 8l-6 4.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
             </svg>
@@ -670,7 +670,7 @@ function ExportImageButton({ disabled, onNotice }: { disabled: boolean; onNotice
   return (
     <button
       className="button preview-export"
-      title={t.preview.exportImageHint}
+      data-tip={t.preview.exportImageHint}
       disabled={disabled || busy}
       data-testid="preview-export-image"
       onClick={() => {

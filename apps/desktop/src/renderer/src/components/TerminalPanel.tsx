@@ -10,6 +10,7 @@ import type { TerminalAgent } from "../ask/chat-targets.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
+import { panelShortcut } from "../shortcuts.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { AgentGuide } from "./AgentGuide.js";
@@ -319,6 +320,7 @@ export function TerminalPanel({
       <PanelHeader
         onCollapse={onCollapse}
         collapseLabel={t.terminal.hideTerminal}
+        collapseKey={panelShortcut("terminal")}
         collapseSide="right"
         actions={
           <DetachButton
@@ -368,6 +370,7 @@ export function TerminalPanel({
                 <button
                   className="terminal-tab-close"
                   aria-label={t.terminal.closeTerminal}
+                  data-tip={t.terminal.closeTerminal}
                   onClick={(event) => {
                     event.stopPropagation();
                     close(tab.key);
@@ -376,7 +379,7 @@ export function TerminalPanel({
               </div>
             );
           })}
-          <button className="icon-button" aria-label={t.terminal.newTerminal} title={t.terminal.newTerminal} onClick={add}>
+          <button className="icon-button" aria-label={t.terminal.newTerminal} data-tip={t.terminal.newTerminal} onClick={add}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.5" />
             </svg>

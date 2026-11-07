@@ -184,7 +184,7 @@ test("an angle heard through a mic (or none) cannot take gain or mute here", asy
   await expect(dub.getByRole("textbox", { name: "Gain (dB)" })).toBeDisabled();
   const mute = dub.getByRole("button", { name: "Mute" });
   await expect(mute).toBeDisabled();
-  await expect(mute).toHaveAttribute("title", "This angle is heard through a mic (or none): its level is set on the mic");
+  await expect(mute).toHaveAttribute("data-tip", "This angle is heard through a mic (or none): its level is set on the mic");
 });
 
 test("a screen angle and a pip shot: the toggle, the layout and the corner are saved through the daemon", async () => {

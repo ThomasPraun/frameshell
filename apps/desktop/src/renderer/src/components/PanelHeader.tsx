@@ -7,6 +7,7 @@ export function PanelHeader({
   onCollapse,
   collapseLabel,
   collapseSide,
+  collapseKey,
 }: {
   children: ReactNode;
   /** Buttons at the right end, before the collapse control. */
@@ -14,13 +15,15 @@ export function PanelHeader({
   onCollapse?: (() => void) | undefined;
   collapseLabel?: string;
   collapseSide?: "left" | "right" | "down" | "up";
+  /** Shortcut of the collapse control, as `panelShortcut` gives it. */
+  collapseKey?: string;
 }) {
   return (
     <div className="panel-header">
       <div className="panel-header-content">{children}</div>
       {actions}
       {onCollapse && (
-        <button className="icon-button" aria-label={collapseLabel} title={collapseLabel} onClick={onCollapse}>
+        <button className="icon-button" aria-label={collapseLabel} data-tip={collapseLabel} data-tip-key={collapseKey} onClick={onCollapse}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d={CHEVRONS[collapseSide ?? "left"]} fill="none" stroke="currentColor" strokeWidth="1.5" />
           </svg>

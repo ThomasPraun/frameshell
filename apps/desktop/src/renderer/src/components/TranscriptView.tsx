@@ -6,6 +6,7 @@ import { rich, t } from "../i18n.js";
 import { linkedPerson } from "../people/model.js";
 import { transport } from "../preview/transport.js";
 import { SELECTION_TIMELINE, type SelectedWord, selection, unionRange, useSelection } from "../selection.js";
+import { shortcutLabel } from "../shortcuts.js";
 import { formatTimecode, layoutTimeline } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import {
@@ -32,7 +33,7 @@ import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
 export const TRANSCRIPT_TAB = "frameshell:transcript";
 
 /** Shortcut that opens the transcript view, as menus and tooltips show it (View > Transcript). */
-export const TRANSCRIPT_SHORTCUT = navigator.userAgent.includes("Mac") ? "⌘⇧T" : "Ctrl+Shift+T";
+export const TRANSCRIPT_SHORTCUT = shortcutLabel("Mod+Shift+T");
 
 /** After the user scrolls the transcript, playback leaves the scroll alone this long, ms. */
 const USER_SCROLL_HOLD_MS = 2500;
@@ -588,7 +589,7 @@ function AssetSection({
                       <button
                         className="transcript-restore-run"
                         aria-label={t.transcript.restoreCut(run.length)}
-                        title={t.transcript.restoreRunTitle(run.length)}
+                        data-tip={t.transcript.restoreRunTitle(run.length)}
                         disabled={restoring.size > 0}
                         onClick={() => onRestore(run)}
                       >
@@ -690,7 +691,7 @@ function SpeakerPicker({ asset, count, onPick }: { asset: AssetTranscript; count
     <select
       className="clip-field-select transcript-speaker-picker"
       aria-label={t.transcript.saidByLabel}
-      title={t.transcript.saidByTitle(count)}
+      data-tip={t.transcript.saidByTitle(count)}
       data-testid="speaker-picker"
       value=""
       onChange={(event) => {

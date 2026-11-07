@@ -20,6 +20,7 @@ import { revealItem } from "../file-commands.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
+import { isMac, panelShortcut, shortcutLabel } from "../shortcuts.js";
 import { listenEverywhere, windowOf } from "../windows.js";
 import { useHistoryDiff } from "../history/useHistory.js";
 import { showSide } from "../review/store.js";
@@ -84,10 +85,9 @@ const DRAG_THRESHOLD_PX = 3;
 const SNAP_PX = 8;
 /** Status line messages fade after this long. */
 const STATUS_MS = 6_000;
-const isMac = navigator.userAgent.includes("Mac");
 /** Delete and ripple delete as menus show their keys (Backspace works too). */
-const DELETE_KEY = isMac ? "⌫" : "Del";
-const RIPPLE_DELETE_KEY = isMac ? "⇧⌫" : "Shift+Del";
+const DELETE_KEY = shortcutLabel("Delete");
+const RIPPLE_DELETE_KEY = shortcutLabel("Shift+Delete");
 
 /** Scroll and zoom, kept outside React state: they change every frame while scrolling. */
 interface ViewState {
@@ -270,6 +270,7 @@ export function TimelinePanel({
         actions={onDetach && <DetachButton name={t.workspace.timeline.toLowerCase()} detached={detached} onClick={onDetach} testId="timeline-detach" />}
         onCollapse={onToggle}
         collapseLabel={collapsed ? t.timeline.showTimeline : t.timeline.hideTimeline}
+        collapseKey={panelShortcut("timeline")}
         collapseSide={collapsed ? "up" : "down"}
       >
         <span className="panel-title">{t.workspace.timeline}</span>
@@ -283,7 +284,7 @@ export function TimelinePanel({
           proposed && <DiffLegend target={proposed.tx} marks={proposed.marks} onStop={() => showSide("before")} />
         )}
         {onShowTranscript && (
-          <button className="link" aria-label={t.timeline.showTranscript} title={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
+          <button className="link" aria-label={t.timeline.showTranscript} data-tip={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
             {t.workspace.transcript}
           </button>
         )}
@@ -1161,17 +1162,17 @@ function TimelineCanvas({
       <div className="timeline-heads">
         <div className="ruler-spacer">
           <div className="timeline-zoom" role="group" aria-label={t.timeline.zoomGroup}>
-            <button className="icon-button" aria-label={t.timeline.zoomOut} title={t.timeline.zoomOutTitle} onClick={() => zoom(1 / ZOOM_STEP)}>
+            <button className="icon-button" aria-label={t.timeline.zoomOut} data-tip={t.timeline.zoomOutTitle} onClick={() => zoom(1 / ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
-            <button className="icon-button" aria-label={t.timeline.zoomFit} title={t.timeline.zoomFitTitle} onClick={fit}>
+            <button className="icon-button" aria-label={t.timeline.zoomFit} data-tip={t.timeline.zoomFitTitle} onClick={fit}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
-            <button className="icon-button" aria-label={t.timeline.zoomIn} title={t.timeline.zoomInTitle} onClick={() => zoom(ZOOM_STEP)}>
+            <button className="icon-button" aria-label={t.timeline.zoomIn} data-tip={t.timeline.zoomInTitle} onClick={() => zoom(ZOOM_STEP)}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 8h8M8 4v8" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
@@ -1180,7 +1181,7 @@ function TimelineCanvas({
               className={`icon-button snap-toggle${snapping ? " on" : ""}`}
               aria-label={t.timeline.snapping}
               aria-pressed={snapping}
-              title={t.timeline.snappingTitle(isMac)}
+              data-tip={t.timeline.snappingTitle(isMac)}
               onClick={() => setSnapping((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1191,7 +1192,7 @@ function TimelineCanvas({
               className={`icon-button snap-toggle${rippling ? " on" : ""}`}
               aria-label={t.timeline.rippleTrim}
               aria-pressed={rippling}
-              title={t.timeline.rippleTrimTitle}
+              data-tip={t.timeline.rippleTrimTitle}
               onClick={() => setRippling((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1201,7 +1202,7 @@ function TimelineCanvas({
             <button
               className="icon-button"
               aria-label={t.timeline.addSubtitleTrack}
-              title={t.timeline.addSubtitleTitle}
+              data-tip={t.timeline.addSubtitleTitle}
               disabled={!layout?.rows.some((row) => row.kind === "video" || row.kind === "audio")}
               onClick={() => addSubtitles()}
             >
@@ -1228,7 +1229,7 @@ function TimelineCanvas({
                     <button
                       className={`track-head track-program${selectedTrack === row.id ? " is-selected" : ""}`}
                       style={{ height: row.height }}
-                      title={t.timeline.programHeadTitle(row.id)}
+                      data-tip={t.timeline.programHeadTitle(row.id)}
                       aria-pressed={selectedTrack === row.id}
                       data-track={row.id}
                       onClick={() => selection.selectTrack(row.id, "timeline")}
@@ -1244,7 +1245,7 @@ function TimelineCanvas({
                       className={`icon-button turn-lanes-toggle${lanesOpen.has(row.id) ? " on" : ""}`}
                       aria-pressed={lanesOpen.has(row.id)}
                       aria-label={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.showTurnLanes}
-                      title={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(row.id, isMac)}
+                      data-tip={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(row.id, isMac)}
                       data-testid="turn-lanes-toggle"
                       data-track={row.id}
                       onClick={() => onToggleLanes(row.id)}
@@ -1276,7 +1277,7 @@ function TimelineCanvas({
                   key={row.id}
                   className={`track-head track-subtitles${selectedTrack === row.id ? " is-selected" : ""}`}
                   style={{ height: row.height }}
-                  title={t.timeline.subtitleHeadTitle(row.id)}
+                  data-tip={t.timeline.subtitleHeadTitle(row.id)}
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
@@ -1376,7 +1377,7 @@ function DiffLegend({ target, marks, onStop = () => selection.clear() }: { targe
         (["added", "removed", "moved", "changed"] as const)
           .filter((kind) => counts[kind] > 0)
           .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${t.timeline.diffKinds[kind]}`}</span>)}
-      <button className="icon-button" aria-label={t.timeline.stopShowing} title={t.timeline.stopShowingTitle} onClick={onStop}>
+      <button className="icon-button" aria-label={t.timeline.stopShowing} data-tip={t.timeline.stopShowingTitle} onClick={onStop}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>

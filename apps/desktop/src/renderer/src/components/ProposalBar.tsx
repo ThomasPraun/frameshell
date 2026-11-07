@@ -47,10 +47,10 @@ export function ProposalBar() {
         </span>
       )}
       <span className="proposal-actions">
-        <button className="button" onClick={run("reject")}>
+        <button className="button" data-tip={t.review.rejectHint} onClick={run("reject")}>
           {t.review.reject}
         </button>
-        <button className="button primary" disabled={bar.kind !== "ready"} onClick={run("accept")}>
+        <button className="button primary" data-tip={t.review.acceptHint} disabled={bar.kind !== "ready"} onClick={run("accept")}>
           {t.review.accept}
         </button>
       </span>
@@ -62,7 +62,13 @@ function SideToggle({ side }: { side: ReviewSide }) {
   return (
     <span className="proposal-side" role="group" aria-label={t.review.sideLabel}>
       {(["before", "after"] as const).map((value) => (
-        <button key={value} className={side === value ? "is-active" : undefined} aria-pressed={side === value} onClick={() => showSide(value)}>
+        <button
+          key={value}
+          className={side === value ? "is-active" : undefined}
+          aria-pressed={side === value}
+          data-tip={value === "before" ? t.review.beforeHint : t.review.afterHint}
+          onClick={() => showSide(value)}
+        >
           {value === "before" ? t.review.before : t.review.after}
         </button>
       ))}

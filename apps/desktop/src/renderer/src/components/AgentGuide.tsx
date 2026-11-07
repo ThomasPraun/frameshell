@@ -77,7 +77,7 @@ export function AgentGuide({
         <span className="agent-guide-label">{t.agents.suggestions}</span>
         <div className="agent-guide-prompts">
           {t.agents.prompts.map((prompt) => (
-            <button key={prompt} className="chip" title={t.agents.suggestionTitle} onClick={() => onType(prompt)}>
+            <button key={prompt} className="chip" data-tip={t.agents.suggestionTitle} onClick={() => onType(prompt)}>
               {prompt}
             </button>
           ))}
@@ -120,7 +120,7 @@ export function AgentGuide({
               <li key={choice.id}>
                 <button
                   className="button"
-                  title={choice.install}
+                  data-tip={choice.install}
                   onClick={() => {
                     onType(choice.install);
                     setInstallTyped(true);
