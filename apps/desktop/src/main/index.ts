@@ -791,6 +791,26 @@ async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
 
 /** Official transcription plugin a project made from videos gets (#188). */
 const TRANSCRIPTION_PLUGIN = "@frameshell/whisper-cpp";
+/** Model whisper-cpp uses when nobody names one; twin of `DEFAULT_MODEL` in `plugins/whisper-cpp/src/provider.ts`. */
+const WHISPER_DEFAULT_MODEL = "large-v3-turbo-q5_0";
+
+/** Install {@link TRANSCRIPTION_PLUGIN} into the project at `dir` unless it is there. */
+async function ensureTranscriptionPlugin(dir: string): Promise<void> {
+  const { plugins } = await daemon.request("plugin.list", { cwd: dir });
+  if (!plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN)) {
+    await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
+  }
+}
+
+/** Bytes whisper-cpp still downloads in the project at `dir` before it transcribes: `whisper-cli` and its model. */
+async function transcriptionDownload(dir: string): Promise<number> {
+  const tool = await binaries.locate("whisper-cli", { dir, binaries: await projectBinaries(dir) });
+  const toolBytes = tool.installed ? 0 : (tool.pinned?.archives.reduce((total, archive) => total + archive.size, 0) ?? 0);
+  const { project } = await daemon.request("model.list", { cwd: dir });
+  // A model registered with `model add` is a file already on this machine.
+  const model = await binaries.locateModel(`ggml-${project?.effective ?? WHISPER_DEFAULT_MODEL}`).catch(() => null);
+  return toolBytes + (model && !model.installed ? model.pinned.size : 0);
+}
 /** Setup of each project created from videos, by project dir, while it runs and as it ended. */
 const setups = new Map<string, ProjectSetup>();
 
@@ -818,10 +838,7 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
   let failure = said.downloadFailed;
   try {
     running(said.starting);
-    const { plugins } = await daemon.request("plugin.list", { cwd: dir });
-    if (!plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN)) {
-      await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
-    }
+    await ensureTranscriptionPlugin(dir);
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
       running(said.transcribing(name(asset)));
@@ -1258,6 +1275,8 @@ function registerShootIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
   ipcMain.handle(Channel.shootCheck, (event, script: string) => outcome(async () => daemon.request("script.check", { cwd: await dirOf(event.sender), file: script })));
   ipcMain.handle(Channel.shootStatus, (event, script: string) => outcome(async () => daemon.request("shoot.status", { cwd: await dirOf(event.sender), script })));
+  ipcMain.handle(Channel.shootTranscriptionDownload, (event) => outcome(async () => transcriptionDownload(await dirOf(event.sender))));
+  ipcMain.handle(Channel.shootInstallTranscription, (event) => outcome(async () => ensureTranscriptionPlugin(await dirOf(event.sender))));
   ipcMain.handle(Channel.shootAccept, (event, script: string, take: string, options: { deviations?: string[]; undo?: boolean }) =>
     outcome(async () =>
       daemon.request("shoot.accept", {

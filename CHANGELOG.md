@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Shoot view in a project without a transcription provider (#411): it says so before Start and installs
+  `@frameshell/whisper-cpp` in one click, showing the download size. Takes cut meanwhile show why they failed and
+  are transcribed once a plugin is installed. `shoot.status` reports `transcription` (protocol 68), and
+  `frameshell shoot status` prints it.
+
 ## [0.17.0] - 2026-11-03
 
 ### Added

@@ -329,11 +329,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
   const takeRuns = new Map<string, Promise<void>>();
   /** Why the last transcription of such a take failed, by the same key; gone once it runs again. */
-  const takeFailures = new Map<string, string>();
+  const takeFailures = new Map<string, { message: string; dir: string; script: string; take: SessionTake }>();
   const shoots = new ShootService({
     onChanged: (dir, script, change, take) => publishFor("shoot.changed", dir, { project: dir, script, change, ...(take !== undefined ? { take } : {}) }),
     analyzing: (dir, take) => takeRuns.has(`${dir}\0${take}`),
-    failure: (dir, take) => takeFailures.get(`${dir}\0${take}`) ?? null,
+    failure: (dir, take) => takeFailures.get(`${dir}\0${take}`)?.message ?? null,
+    transcription: async (dir) => {
+      if (options.shootStandIn) return { provider: "stand-in", ready: true, problem: null };
+      const provider = (await readEnclosingProject(dir))?.config.transcription?.provider ?? "whisper-cpp";
+      return plugins.transcriptionProvider(dir, provider).then(
+        () => ({ provider, ready: true, problem: null }),
+        (error: unknown) => ({ provider, ready: false, problem: (error as Error).message }),
+      );
+    },
     assetHash: async (dir, rel) => (await media.list(dir)).find((asset) => asset.path === rel)?.hash ?? null,
     timeline: async (dir, id) => (await exists(timelinePath(dir, id))) ? (await timelines.viewTimeline(dir, id, "current")).timeline : null,
   });
@@ -514,7 +522,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           takeRuns.delete(key);
           await shoots.status(dir, dir, script);
         } catch (error) {
-          takeFailures.set(key, (error as Error).message);
+          takeFailures.set(key, { message: (error as Error).message, dir, script, take });
           takeRuns.delete(key);
           publishFor("shoot.changed", dir, { project: dir, script, change: "failed", take: take.id });
           throw error;
@@ -864,7 +872,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
-    "plugin.install": async ({ cwd, spec }) => plugins.install(await root(cwd), spec, cwd),
+    "plugin.install": async ({ cwd, spec }) => {
+      const dir = await root(cwd);
+      const installed = await plugins.install(dir, spec, cwd);
+      // Takes cut while the project had no provider (#411) get their words now.
+      for (const failed of [...takeFailures.values()]) if (failed.dir === dir) queueTake(dir, failed.script, failed.take);
+      return installed;
+    },
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
