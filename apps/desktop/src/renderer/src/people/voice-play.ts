@@ -1,11 +1,7 @@
 import type { AssetInfo } from "@frameshell/protocol";
 import { useSyncExternalStore } from "react";
+import { mediaSrc } from "../preview/media-src.js";
 import { transport } from "../preview/transport.js";
-
-/** URL of the project-relative `path` under the window's media root (`frameshell-media://`). */
-export function mediaSrc(mediaUrl: string, path: string): string {
-  return mediaUrl + path.split("/").map(encodeURIComponent).join("/");
-}
 
 /** The voice playing now, one at a time: which button started it, and how to stop it. */
 let playing: { key: string; stop: () => void } | null = null;

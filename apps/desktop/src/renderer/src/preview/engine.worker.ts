@@ -25,6 +25,7 @@ import {
   programAt,
   spanPlacement,
 } from "./program.js";
+import { mediaSrc } from "./media-src.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
 import { type EncodedPicture, type VideoSource, isReadWhole, openVideoSource } from "./video-source.js";
 
@@ -934,7 +935,7 @@ class Engine implements LayerHost {
   }
 
   #url(path: string): string {
-    return this.#mediaUrl + path.split("/").map(encodeURIComponent).join("/");
+    return mediaSrc(this.#mediaUrl, path);
   }
 
   /** Bytes `[start, end)` of a project-relative file; empty past its end. */

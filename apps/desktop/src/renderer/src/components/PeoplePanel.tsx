@@ -17,7 +17,8 @@ import {
 import { type PersonTime, pickPerson } from "../people/pick.js";
 import { usePersonTotals } from "../people/totals.js";
 import { type VoiceModelState, peopleActions, usePeople } from "../people/usePeople.js";
-import { mediaSrc, playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
+import { mediaSrc } from "../preview/media-src.js";
+import { playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
 import { useAssets } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { historyShortcut } from "../timeline/edit.js";

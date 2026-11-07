@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- One `mediaSrc` helper (`preview/media-src.ts`, worker-safe) builds media URLs for the engine worker, the Angles
+  viewer and the People panel (#385).
+
 ### Fixed
 
 - Shoot view in a project without a transcription provider (#411): it says so before Start and installs
