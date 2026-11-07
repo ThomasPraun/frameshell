@@ -90,7 +90,7 @@ export function StatusBar({
         </span>
       ))}
       {agentTargets.length > 0 && (
-        <button className="status-item status-agents" data-testid="connected-agents" title={t.workspace.connectedAgentsTitle} onClick={onShowTerminal}>
+        <button className="status-item status-agents" data-testid="connected-agents" data-tip={t.workspace.connectedAgentsTitle} onClick={onShowTerminal}>
           {t.workspace.connectedAgents(agentTargets.join(", "))}
         </button>
       )}

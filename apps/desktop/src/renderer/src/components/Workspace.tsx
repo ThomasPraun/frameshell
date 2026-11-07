@@ -20,6 +20,7 @@ import { rich, t } from "../i18n.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
+import { PANEL_KEYS, isMac, panelShortcut } from "../shortcuts.js";
 import { cutToAngle } from "../timeline/angle-cut.js";
 import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
@@ -44,13 +45,12 @@ import { elementOf, listenEverywhere, windowOf } from "../windows.js";
 const SAVE_DELAY_MS = 300;
 /** How long a "Chat about this" notice stays in the status bar, ms. */
 const NOTICE_MS = 5000;
-const isMac = navigator.userAgent.includes("Mac");
 
 /** Panels of the project window, as `data-panel` names them: what Cmd/Ctrl+Shift+Enter maximizes. */
 type WorkspacePanel = "sidebar" | "preview" | "editor" | "timeline" | "terminal";
 
 /** Keyboard toggles; Mod = Cmd on macOS, Ctrl elsewhere. */
-const SHORTCUTS: Record<string, PanelId> = { b: "sidebar", j: "timeline", "\\": "terminal" };
+const SHORTCUTS: Record<string, PanelId> = Object.fromEntries(Object.entries(PANEL_KEYS).map(([panel, key]) => [key, panel as PanelId]));
 
 /**
  * Project window: SPEC §10 layout with resizable, collapsible, per-project
@@ -427,7 +427,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
       <div className="main-row">
         {sidebar.collapsed ? (
-          <CollapsedRail side="left" label={t.workspace.showSidebar} onExpand={() => toggle("sidebar")} />
+          <CollapsedRail side="left" label={t.workspace.showSidebar} shortcut={panelShortcut("sidebar")} onExpand={() => toggle("sidebar")} />
         ) : (
           <>
             <div {...slot("sidebar")} style={{ flexBasis: sidebar.size }}>
@@ -534,7 +534,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
         {/* Terminals stay mounted while collapsed: shells and agents keep running. */}
         {!terminal.collapsed && <Splitter orientation="vertical" label={t.workspace.resizeTerminal} {...edge("terminal", -1)} />}
-        {terminal.collapsed && <CollapsedRail side="right" label={t.workspace.showTerminal} onExpand={() => toggle("terminal")} />}
+        {terminal.collapsed && <CollapsedRail side="right" label={t.workspace.showTerminal} shortcut={panelShortcut("terminal")} onExpand={() => toggle("terminal")} />}
         <div {...slot("terminal")} style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}>
           <TerminalPanel
             ref={terminals}
@@ -587,9 +587,9 @@ function askKeyApplies(target: EventTarget | null): boolean {
   return isMac || !element.closest(".xterm");
 }
 
-function CollapsedRail({ side, label, onExpand }: { side: "left" | "right"; label: string; onExpand: () => void }) {
+function CollapsedRail({ side, label, shortcut, onExpand }: { side: "left" | "right"; label: string; shortcut: string; onExpand: () => void }) {
   return (
-    <button className={`rail rail-${side}`} aria-label={label} title={label} onClick={onExpand}>
+    <button className={`rail rail-${side}`} aria-label={label} data-tip={label} data-tip-key={shortcut} onClick={onExpand}>
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path d={side === "left" ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5"} fill="none" stroke="currentColor" strokeWidth="1.5" />
       </svg>

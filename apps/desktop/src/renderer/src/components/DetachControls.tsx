@@ -22,7 +22,7 @@ export function DetachButton({
 }) {
   const label = detached ? t.workspace.dockBack(name) : t.workspace.openInWindow(name);
   return (
-    <button className="icon-button" aria-label={label} title={label} onClick={onClick} disabled={disabled} data-testid={testId}>
+    <button className="icon-button" aria-label={label} data-tip={label} onClick={onClick} disabled={disabled} data-testid={testId}>
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
           d="M9 3H13V7M13 3L8 8M7 4H3V13H12V9"

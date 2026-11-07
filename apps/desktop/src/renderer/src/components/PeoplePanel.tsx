@@ -21,12 +21,12 @@ import { mediaSrc } from "../preview/media-src.js";
 import { playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
 import { useAssets } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { isMac } from "../shortcuts.js";
 import { historyShortcut } from "../timeline/edit.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import type { TranscriptSource } from "../transcript/model.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 
-const isMac = navigator.userAgent.includes("Mac");
 
 /** Transcript file as a person reads it: without its folder. */
 const fileName = (path: string) => path.replace(/^transcripts\//, "");
@@ -230,6 +230,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                     className="person-name"
                     aria-pressed={isPicked}
                     data-testid="person-select"
+                    data-tip={t.people.pickHint(person.name)}
                     onClick={() => (isPicked ? selection.clear() : pick(person, "speaks", true))}
                   >
                     <span className="person-swatch" aria-hidden="true" />
@@ -241,12 +242,12 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                     {t.people.byAgent}
                   </span>
                 )}
-                <button className="icon-button" aria-label={t.people.rename(person.name)} title={t.people.rename(person.name)} onClick={() => setRenaming(person.id)} data-testid="person-rename">
+                <button className="icon-button" aria-label={t.people.rename(person.name)} data-tip={t.people.rename(person.name)} onClick={() => setRenaming(person.id)} data-testid="person-rename">
                   <svg viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M3 13H6L13 6L10 3L3 10V13Z" fill="none" stroke="currentColor" strokeWidth="1.3" />
                   </svg>
                 </button>
-                <button className="icon-button" aria-label={t.people.remove(person.name)} title={t.people.remove(person.name)} onClick={() => run(peopleActions.remove(person.id))} data-testid="person-remove">
+                <button className="icon-button" aria-label={t.people.remove(person.name)} data-tip={t.people.remove(person.name)} onClick={() => run(peopleActions.remove(person.id))} data-testid="person-remove">
                   <svg viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M4 4L12 12M12 4L4 12" fill="none" stroke="currentColor" strokeWidth="1.3" />
                   </svg>
@@ -261,7 +262,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                 <div className="person-pick" data-testid="person-pick">
                   <div className="person-toggle" role="group" aria-label={t.people.show}>
                     {(["speaks", "onscreen"] as const).map((what) => (
-                      <button key={what} className={selected.what === what ? "is-active" : ""} aria-pressed={selected.what === what} data-testid={`person-${what}`} onClick={() => pick(person, what, true)}>
+                      <button key={what} className={selected.what === what ? "is-active" : ""} aria-pressed={selected.what === what} data-tip={what === "speaks" ? t.people.speaksHint : t.people.onScreenHint} data-testid={`person-${what}`} onClick={() => pick(person, what, true)}>
                         {what === "speaks" ? t.people.speaks : t.people.onScreen}
                       </button>
                     ))}
@@ -407,7 +408,7 @@ function VoicePlay({
       data-playing={playing}
       disabled={!ready}
       aria-label={name}
-      title={ready ? name : t.people.noVoiceAudio}
+      data-tip={ready ? name : t.people.noVoiceAudio}
       onClick={(event) => {
         if (playing) return stopVoice();
         if (!asset || !stretch) return;
@@ -464,7 +465,7 @@ function LinkChip({
       )}
       {agent && <span className="person-link-agent" title={t.people.byAgentTitle(agent)} aria-label={t.people.byAgentTitle(agent)} />}
       {extra}
-      <button className="icon-button" aria-label={t.people.unlink(label)} title={t.people.unlink(label)} onClick={onUnlink} data-testid="person-unlink">
+      <button className="icon-button" aria-label={t.people.unlink(label)} data-tip={t.people.unlink(label)} onClick={onUnlink} data-testid="person-unlink">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
         </svg>

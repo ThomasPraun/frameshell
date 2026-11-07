@@ -130,7 +130,7 @@ export function TeleprompterPanel() {
           <button
             className="icon-button"
             aria-label={t.teleprompter.smaller}
-            title={t.teleprompter.smaller}
+            data-tip={t.teleprompter.smaller}
             disabled={settings.fontSize <= FONT_SIZES.min}
             onClick={() => teleprompter.setSettings({ fontSize: settings.fontSize - FONT_SIZES.step })}
           >
@@ -139,21 +139,21 @@ export function TeleprompterPanel() {
           <button
             className="icon-button"
             aria-label={t.teleprompter.larger}
-            title={t.teleprompter.larger}
+            data-tip={t.teleprompter.larger}
             disabled={settings.fontSize >= FONT_SIZES.max}
             onClick={() => teleprompter.setSettings({ fontSize: settings.fontSize + FONT_SIZES.step })}
           >
             {t.teleprompter.largerMark}
           </button>
-          <label className="teleprompter-check" title={t.teleprompter.mirrorHint}>
+          <label className="teleprompter-check" data-tip={t.teleprompter.mirrorHint}>
             <input type="checkbox" checked={settings.mirror} onChange={(event) => teleprompter.setSettings({ mirror: event.target.checked })} />
             {t.teleprompter.mirror}
           </label>
-          <label className="teleprompter-check" title={t.teleprompter.cuesHint}>
+          <label className="teleprompter-check" data-tip={t.teleprompter.cuesHint}>
             <input type="checkbox" checked={settings.cues} onChange={(event) => teleprompter.setSettings({ cues: event.target.checked })} />
             {t.teleprompter.cues}
           </label>
-          <label className="teleprompter-check" title={liveNote(liveStatus)} data-testid="teleprompter-follow" data-live={liveStatus.state}>
+          <label className="teleprompter-check" data-tip={liveNote(liveStatus)} data-testid="teleprompter-follow" data-live={liveStatus.state}>
             <input type="checkbox" checked={settings.follow} onChange={(event) => teleprompter.setSettings({ follow: event.target.checked })} />
             {t.teleprompter.follow}
             {settings.follow && <span className={`teleprompter-live is-${liveStatus.state}`} aria-label={liveNote(liveStatus)} />}
@@ -171,7 +171,7 @@ export function TeleprompterPanel() {
           <button className="button" data-testid="teleprompter-start" disabled={!stream || stream.stops.length === 0} onClick={() => move(0)}>
             {t.teleprompter.backToStart}
           </button>
-          <button className="button" data-testid="teleprompter-hold" aria-pressed={state.held} onClick={() => teleprompter.setHeld(!state.held)}>
+          <button className="button" data-testid="teleprompter-hold" aria-pressed={state.held} data-tip={state.held ? t.teleprompter.resumeHint : t.teleprompter.holdHint} onClick={() => teleprompter.setHeld(!state.held)}>
             {state.held ? t.teleprompter.resume : t.teleprompter.hold}
           </button>
         </span>

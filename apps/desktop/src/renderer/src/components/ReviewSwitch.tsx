@@ -13,7 +13,7 @@ export function ReviewSwitch() {
   const [asked, setAsked] = useState<boolean | null>(null);
   return (
     <div className="review-switch">
-      <label title={t.review.switchHint}>
+      <label data-tip={t.review.switchHint}>
         <input
           type="checkbox"
           checked={asked ?? enabled}

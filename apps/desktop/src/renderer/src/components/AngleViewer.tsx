@@ -120,7 +120,7 @@ function AngleTileView({
       data-in-shot={tile.inShot}
       data-speaking={tile.speaking}
       aria-label={t.angles.tile(tile.number, tile.name)}
-      title={tile.inShot ? t.angles.inShot : undefined}
+      data-tip={t.angles.tileHint(tile.number, tile.inShot)}
       aria-pressed={tile.inShot}
       // A mouse press must not focus the tile: Space/Enter would then re-activate it (cut) instead of playing.
       onMouseDown={(event) => event.preventDefault()}

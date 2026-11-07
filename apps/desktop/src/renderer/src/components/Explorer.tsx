@@ -116,7 +116,7 @@ function Nodes({
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={(event) => onClick(event, node)}
               onContextMenu={(event) => onContextMenu(event, node)}
-              title={node.path}
+              data-tip={node.path}
               data-picked={picked.has(node.path) || undefined}
             >
               <span className={`tree-glyph ${node.kind === "dir" ? (isOpen ? "dir-open" : "dir") : fileKind(node.name)}`} />

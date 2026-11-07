@@ -5,15 +5,14 @@ import { type MenuItem, contextMenu } from "../components/ContextMenu.js";
 import { SELECTION_TIMELINE, type Selection, selection } from "../selection.js";
 import { timelineSnapshot } from "../timeline/useTimelineView.js";
 import { t } from "../i18n.js";
+import { shortcutLabel } from "../shortcuts.js";
 import { windowOf } from "../windows.js";
 import { agentTargets } from "./agent-targets.js";
 import { type ChatTarget, shortcutTarget } from "./chat-targets.js";
 import { referenceLines } from "./reference.js";
 
-const isMac = navigator.userAgent.includes("Mac");
-
 /** Shortcut as menus show it. */
-export const ASK_SHORTCUT = isMac ? "⌘L" : "Ctrl+L";
+export const ASK_SHORTCUT = shortcutLabel("Mod+L");
 
 /** What the workspace installs as the command (see {@link askAgent}). */
 export interface AskHandler {

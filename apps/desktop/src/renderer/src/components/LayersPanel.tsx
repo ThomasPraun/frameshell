@@ -6,6 +6,7 @@ import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { t } from "../i18n.js";
 import { type Layer, layerLabel, layersOf, moveLayer } from "../layers/model.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
+import { isMac, panelShortcut } from "../shortcuts.js";
 import { historyShortcut } from "../timeline/edit.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { listenEverywhere } from "../windows.js";
@@ -13,7 +14,6 @@ import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 
 const TIMELINE = SELECTION_TIMELINE;
-const isMac = navigator.userAgent.includes("Mac");
 /** Pictures the media protocol serves from `assets/` (`main/media-protocol.ts`): those get a thumbnail. */
 const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
@@ -116,6 +116,7 @@ export function LayersPanel({
         actions={onDetach && <DetachButton name={t.workspace.layers.toLowerCase()} detached={detached} onClick={onDetach} testId="layers-detach" />}
         onCollapse={onToggle}
         collapseLabel={collapsed ? t.layers.show : t.layers.hide}
+        collapseKey={panelShortcut("timeline")}
         collapseSide={collapsed ? "up" : "down"}
       >
         <span className="panel-title">{t.workspace.layers}</span>
@@ -170,22 +171,22 @@ export function LayersPanel({
                       </span>
                     )}
                     <span className="layers-actions" onClick={(event) => event.stopPropagation()}>
-                      <button className="icon-button" aria-label={t.layers.rename} title={t.layers.rename} onClick={() => setRenaming(layer.track)}>
+                      <button className="icon-button" aria-label={t.layers.rename} data-tip={t.layers.rename} onClick={() => setRenaming(layer.track)}>
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M3 13l1-3.5L10.5 3 13 5.5 6.5 12z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
                         </svg>
                       </button>
-                      <button className="icon-button" aria-label={t.layers.moveUp} title={t.layers.moveUp} disabled={!layer.up} onClick={() => move(layer, 1)}>
+                      <button className="icon-button" aria-label={t.layers.moveUp} data-tip={t.layers.moveUp} disabled={!layer.up} onClick={() => move(layer, 1)}>
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />
                         </svg>
                       </button>
-                      <button className="icon-button" aria-label={t.layers.moveDown} title={t.layers.moveDown} disabled={!layer.down} onClick={() => move(layer, -1)}>
+                      <button className="icon-button" aria-label={t.layers.moveDown} data-tip={t.layers.moveDown} disabled={!layer.down} onClick={() => move(layer, -1)}>
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
                         </svg>
                       </button>
-                      <button className="icon-button layers-remove" aria-label={t.layers.remove} title={t.layers.remove} onClick={() => remove(layer)}>
+                      <button className="icon-button layers-remove" aria-label={t.layers.remove} data-tip={t.layers.remove} onClick={() => remove(layer)}>
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
                         </svg>

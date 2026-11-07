@@ -2948,6 +2948,32 @@ button.track-head:focus-visible {
   color: var(--text-muted);
 }
 
+/* The app's one tooltip (components/Tooltip.tsx): what a control does, and its shortcut. */
+.tooltip {
+  position: fixed;
+  z-index: 110;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: 320px;
+  padding: 4px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-line;
+  pointer-events: none;
+}
+
+.tooltip kbd {
+  flex: none;
+  font: 11px var(--font-mono);
+  color: var(--text-muted);
+}
+
 /* "Chat about this" with several agents: a flyout beside its item, left of it near the window's right edge. */
 .context-menu-parent {
   position: relative;

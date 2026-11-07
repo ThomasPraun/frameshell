@@ -178,7 +178,7 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
   return (
     <label
       className={`clip-field${invalid ? " is-invalid" : ""}`}
-      title={spec.title}
+      data-tip={spec.title}
       onPointerDown={onScrubStart}
       onPointerMove={(event) => {
         const value = scrubbed(event);
@@ -234,7 +234,7 @@ export function TextField({ label, title, stored, onCommit }: { label: string; t
     if (value !== stored) commitOrRestore(onCommit, value, latest, setText);
   };
   return (
-    <label className={`clip-field${invalid ? " is-invalid" : ""}`} title={title}>
+    <label className={`clip-field${invalid ? " is-invalid" : ""}`} data-tip={title}>
       <span className="clip-field-label is-static">{label}</span>
       <input
         className="clip-field-input is-text"
@@ -279,7 +279,7 @@ export function Choice({
           className={`segmented-option${option.id === value ? " on" : ""}`}
           role="radio"
           aria-checked={option.id === value}
-          title={option.title}
+          data-tip={option.title}
           onClick={() => option.id !== value && onPick(option.id)}
         >
           {option.label}

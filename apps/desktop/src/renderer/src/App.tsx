@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OpenOutcome, ProjectView } from "../../shared/api.js";
 import { ContextMenuHost } from "./components/ContextMenu.js";
+import { TooltipHost } from "./components/Tooltip.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
 import { Welcome } from "./components/Welcome.js";
 import { Workspace } from "./components/Workspace.js";
@@ -27,6 +28,7 @@ export function App() {
       {project ? <Workspace project={project} /> : <Welcome onOutcome={onOutcome} />}
       <UpdateBanner />
       <ContextMenuHost />
+      <TooltipHost />
     </>
   );
 }

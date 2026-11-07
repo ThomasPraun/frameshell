@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tooltips on icon buttons and terse controls in every panel (#409): one in-app tooltip (`components/Tooltip.tsx`)
+  shows what a control does and its shortcut (⌘ on macOS, Ctrl elsewhere) after a short hover or at once on keyboard
+  focus; Escape, a press or scrolling hide it. It works in detached panel windows. Controls mark it with `data-tip`
+  and `data-tip-key` instead of the native `title`; new tips on angle tiles, review Before/After/Accept/Reject,
+  History revert, People pick buttons, tab close buttons, teleprompter Hold and Start shoot, and panel show/hide
+  controls now name their shortcut.
+
 - Shoot view: right-click a take in the scene's take list to Discard take (danger item) or Restore take
   (`shoot.discard`, then the cut is assembled again). Part of #414.
 - Mute and hide a track (#414): timeline tracks take optional `muted: true` (video, audio and program tracks: no
@@ -21,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- One `shortcutLabel` helper (`renderer/src/shortcuts.ts`) writes shortcuts per platform for menus and tooltips;
+  the panel show/hide keys live there too (#409).
 - One `mediaSrc` helper (`preview/media-src.ts`, worker-safe) builds media URLs for the engine worker, the Angles
   viewer and the People panel (#385).
 

@@ -155,7 +155,7 @@ export function HistoryPanel() {
                       className={`history-op${selected === op.id ? " is-active" : ""}`}
                       onContextMenu={(event) => void openMenu(event, op.id, { aborted: isAborted })}
                     >
-                      <button className="history-op-main" onClick={() => void select(op.id)} title={t.history.opTitle(op.id, op.revision)}>
+                      <button className="history-op-main" onClick={() => void select(op.id)} data-tip={t.history.opTitle(op.id, op.revision)}>
                         <span className="history-op-title">{operationTitle(op)}</span>
                         <span className="history-op-touched">{op.touched.join(" ")}</span>
                       </button>
@@ -165,6 +165,7 @@ export function HistoryPanel() {
                           disabled={busy !== null}
                           onClick={() => void revert(op.id)}
                           aria-label={t.history.revertOp(op.id)}
+                          data-tip={t.history.revertOp(op.id)}
                         >
                           {t.history.revert}
                         </button>
@@ -216,12 +217,12 @@ function TransactionRow({
           className="history-expand"
           aria-expanded={open}
           aria-label={open ? t.history.hideOps : t.history.showOps}
-          title={open ? t.history.hideOps : t.history.showOps}
+          data-tip={open ? t.history.hideOps : t.history.showOps}
           onClick={onToggle}
         >
           <span className={`tree-glyph ${open ? "dir-open" : "dir"}`} />
         </button>
-        <button className="history-main" onClick={onSelect} title={tx.tx}>
+        <button className="history-main" onClick={onSelect} data-tip={tx.tx}>
           <span className="history-title">{transactionTitle(tx)}</span>
           <span className="history-meta">
             <span className={`history-author author-${author.kind}`} title={tx.author}>
@@ -241,7 +242,7 @@ function TransactionRow({
             {clock(tx.at)}
           </time>
           {!aborted && (
-            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={t.history.revertTx(tx.tx)}>
+            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={t.history.revertTx(tx.tx)} data-tip={t.history.revertTx(tx.tx)}>
               {busy === tx.tx ? t.history.reverting : t.history.revert}
             </button>
           )}
@@ -286,7 +287,7 @@ function NoticeBox({ notice, onShow }: { notice: Notice; onShow: (id: string) =>
         <ul className="history-conflicts" aria-label={t.history.conflictsLabel}>
           {notice.conflicts.map((conflict) => (
             <li key={conflict.id} data-conflict={conflict.id}>
-              <button className="link" onClick={() => onShow(conflict.id)} title={t.history.showOnTimeline(conflict.id)}>
+              <button className="link" onClick={() => onShow(conflict.id)} data-tip={t.history.showOnTimeline(conflict.id)}>
                 {`${operationTitle({ op: conflict.op, args: {} })} (${authorOf(conflict.author).name})`}
               </button>
               <span className="history-conflict-ids">{conflict.ids.join(" ")}</span>

@@ -87,7 +87,7 @@ export function ModelPicker({ onStatus }: { onStatus: ModelStatus }) {
         ref={select}
         className="clip-field-select transcript-model-picker"
         aria-label={t.models.label}
-        title={t.models.title}
+        data-tip={t.models.title}
         data-testid="model-picker"
         value={pending ? CUSTOM_CHOICE : (choices?.current ?? DEFAULT_CHOICE)}
         disabled={busy || !choices}
@@ -120,7 +120,7 @@ export function ModelPicker({ onStatus }: { onStatus: ModelStatus }) {
           <input
             className="clip-field-input"
             aria-label={t.models.idLabel}
-            title={t.models.idHint}
+            data-tip={t.models.idHint}
             value={pending.id}
             required
             maxLength={64}
@@ -132,7 +132,7 @@ export function ModelPicker({ onStatus }: { onStatus: ModelStatus }) {
               key={key}
               className="clip-field-select"
               aria-label={key === "dtw" ? t.models.dtwLabel : key}
-              title={key === "dtw" ? t.models.dtwTitle : undefined}
+              data-tip={key === "dtw" ? t.models.dtwTitle : undefined}
               value={pending.options[key] ?? ""}
               onChange={(event) => {
                 const { [key]: _old, ...rest } = pending.options;
