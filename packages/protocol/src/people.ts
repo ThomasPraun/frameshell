@@ -74,12 +74,14 @@ export const SuggestedFaceSchema = z.object({
 export const PeopleSuggestionSchema = z.object({
   id: z.string().describe("`sg_` + 8 hex, the same for the same kind and targets on every run: pass it to `people.confirm`."),
   kind: z
-    .enum(["speaker", "face", "face-speaker", "angle"])
+    .enum(["speaker", "face", "face-speaker", "angle", "script"])
     .describe(
       "`speaker`: a transcript speaker linked to nobody sounds like a person's linked voices. `face`: a face on screen for " +
         "10 s or more that nobody has: who it looks like, or nobody yet (\"Who is this?\"). `face-speaker`: in one video, " +
         "the face on screen for most of a speaker's time: the voice and the face are one person. `angle`: a multicam angle " +
-        "linked to nobody: the person named like it (or a new one with its name), plus its mic's voice and the face most on its screen.",
+        "linked to nobody: the person named like it (or a new one with its name), plus its mic's voice and the face most on its screen. " +
+        "`script`: a transcript speaker (or a whole transcript) linked to nobody says the lines a shoot script gives to one " +
+        "`**Name:**` in the takes compared with it: the person of that name (or a new one with it).",
     ),
   person: z
     .object({ id: PersonIdSchema, name: z.string() })
@@ -103,6 +105,14 @@ export const PeopleSuggestionSchema = z.object({
     .optional()
     .describe("The multicam angle to link (`angle`)."),
   face: SuggestedFaceSchema.optional().describe("The face to link (`face`, `face-speaker`, `angle`)."),
+  script: z
+    .object({
+      script: z.string().describe("Project-relative shoot script."),
+      name: z.string().describe("The `**Name:**` of the lines: the new person's name when `person` is absent."),
+      words: z.int().describe("Heard words of that voice in that person's lines."),
+    })
+    .optional()
+    .describe("The shoot script lines the voice says (`script`)."),
   links: z
     .array(z.enum(["speaker", "face", "angle"]))
     .describe("What confirming links: `speaker`, `face`, `angle`, or several (all at once); anything else is linked already."),
@@ -111,7 +121,8 @@ export const PeopleSuggestionSchema = z.object({
     .optional()
     .describe(
       "2 decimals. `speaker`: voice similarity (cosine of voice prints, about 0.7 and up). `face`: face similarity to the " +
-        "person (cosine of face prints); absent when it names nobody. `face-speaker`: share of the speaker's time the face is on screen (0.6 and up).",
+        "person (cosine of face prints); absent when it names nobody. `face-speaker`: share of the speaker's time the face is on screen (0.6 and up). " +
+        "`script`: share of the voice's words in script lines that are in that person's lines (0.8 and up).",
     ),
   reason: z.string().describe("One line for a person, e.g. `s2 (Speaker 2) in transcripts/ep2.words.json sounds like Juan (0.78).`"),
 });

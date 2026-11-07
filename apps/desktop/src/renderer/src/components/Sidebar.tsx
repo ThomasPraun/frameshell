@@ -94,7 +94,7 @@ export function Sidebar({
         {detached.has(view) ? (
           <DockedElsewhere title={sidebarLabel(view)} onBringBack={() => onDetach(view, false)} />
         ) : (
-          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} />
+          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} onShowPeople={() => onView("people")} />
         )}
       </div>
     </>
@@ -133,11 +133,14 @@ function SidebarViewBody({
   onOpenFile,
   activeFile,
   mediaUrl,
+  onShowPeople,
 }: {
   view: SidebarView;
   onOpenFile: (path: string) => void;
   activeFile: string | null;
   mediaUrl: string;
+  /** Switch the sidebar to People; absent in a view's own window. */
+  onShowPeople?: () => void;
 }) {
   if (view === "explorer") return <Explorer onOpenFile={onOpenFile} activeFile={activeFile} />;
   if (view === "history") {
@@ -150,7 +153,7 @@ function SidebarViewBody({
   }
   if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
   if (view === "people") return <PeoplePanel mediaUrl={mediaUrl} />;
-  if (view === "shoot") return <ShootPanel />;
+  if (view === "shoot") return <ShootPanel onShowPeople={onShowPeople} />;
   if (view === "teleprompter") return <TeleprompterPanel />;
   return (
     <p className="empty">

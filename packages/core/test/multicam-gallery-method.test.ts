@@ -25,7 +25,8 @@ beforeAll(async () => {
   await makeGallery(join(footage, "call.mp4"), [GALLERY_FOUR, GALLERY_THREE, GALLERY_THREE], 4);
   await makeGallery(join(footage, "steady.mp4"), [GALLERY_FOUR], 6);
   await makeClip(join(footage, "camera.mp4"), { width: 320, height: 180, durationS: 4 });
-  const { imported } = await conn.request("asset.import", { cwd: project, files: ["call", "steady", "camera"].map((name) => join(footage, `${name}.mp4`)) });
+  await makeClip(join(footage, "system.mp4"), { width: 64, height: 36, durationS: 6 });
+  const { imported } = await conn.request("asset.import", { cwd: project, files: ["call", "steady", "camera", "system"].map((name) => join(footage, `${name}.mp4`)) });
   for (const entry of imported) files[entry.asset.split("/").pop()!.replace(".mp4", "")] = entry.asset;
 }, MEDIA_TIMEOUT);
 
@@ -96,6 +97,51 @@ describe("multicam.gallery", () => {
       const steady = await conn.request("multicam.gallery", { cwd: project, asset: files["steady"]! });
       expect(steady.layouts).toEqual([{ start: 0, end: 6, tiles: 4, used: true }]);
       expect(steady.warnings.filter((warning) => warning.includes("layout"))).toEqual([]);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "adds the tiles of a recorded call window to its group, at the window's offset and heard through the given mic, keeping the shots",
+    async () => {
+      const made = await conn.request("multicam.create", {
+        cwd: project,
+        assets: [files["camera"]!, files["steady"]!],
+        names: ["Camera", "Call window"],
+        mics: [files["system"]!],
+        micNames: ["System audio"],
+        soundOf: ["1", "1"],
+        offsets: [0, 0.5, 0],
+        screens: [2],
+      });
+      const read = () => JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")) as Timeline;
+      const before = read();
+      const made0 = before.groups!.find((candidate) => candidate.id === made.group)!;
+      const mic = made0.mics![0]!.id;
+      const result = await conn.request("multicam.gallery", { cwd: project, asset: files["steady"]!, group: made.group, mic });
+      expect(methods["multicam.gallery"].result.parse(result)).toEqual(result);
+      expect(result).toMatchObject({ group: made.group, track: made.track, clip: null, mic });
+      expect(result.tiles.map((tile) => tile.name)).toEqual(["Tile 1", "Tile 2", "Tile 3", "Tile 4"]);
+
+      const after = read();
+      const group = after.groups!.find((candidate) => candidate.id === made.group)!;
+      expect(group.angles.slice(0, 2)).toEqual(made0.angles);
+      expect(group.angles.slice(2).every((angle) => angle.asset === files["steady"] && angle.offset === 0.5 && angle.mic === mic && angle.crop !== undefined)).toBe(true);
+      expect(group.mics).toEqual(made0.mics);
+      expect(after.tracks).toEqual(before.tracks);
+
+      await expect(conn.request("multicam.gallery", { cwd: project, asset: files["call"]!, group: made.group })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        message: expect.stringContaining("has no angle playing"),
+      });
+      await expect(conn.request("multicam.gallery", { cwd: project, asset: files["steady"]!, group: made.group, mic: "nope" })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        message: expect.stringContaining('has no mic "nope"'),
+      });
+      await expect(conn.request("multicam.gallery", { cwd: project, asset: files["steady"]!, group: made.group, mic })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        message: expect.stringContaining("its tiles were added before"),
+      });
     },
     MEDIA_TIMEOUT,
   );

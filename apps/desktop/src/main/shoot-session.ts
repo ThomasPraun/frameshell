@@ -290,7 +290,12 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
     present.push(source);
   }
   const files = present.map((source) => `${sessionFolder(id)}/${source.file}`);
+  const fileOf = (role: ShootRole) => {
+    const source = present.find((candidate) => candidate.role === role);
+    return source ? `${sessionFolder(id)}/${source.file}` : null;
+  };
   let group: string | null = null;
+  let timeline: string | null = null;
   if (files.length > 0) {
     await deps.request("asset.import", { cwd: root, files: files.map((file) => join(root, file)), mode: "copy" });
     let grouped = present;
@@ -302,10 +307,12 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
           const asked = params ?? { cwd: root, assets: [], offsets: [] };
           const result = await deps.alone(() => deps.request("shoot.session.end", { ...asked, offsets: asked.offsets ?? [], script, session: id }));
           group = result.group;
+          timeline = result.group ? result.timeline : null;
           warnings.push(...result.warnings);
         } else {
           const result = await deps.alone(() => deps.request("multicam.create", { ...params!, timeline: "main" }));
           group = result.group;
+          timeline = "main";
           warnings.push(...result.warnings);
         }
         break;
@@ -326,7 +333,7 @@ export async function finishSession(root: string, id: string, crashed: boolean, 
   // Nothing recorded: no empty folder left behind (rmdir refuses one that holds anything).
   if (files.length === 0) await rmdir(folder).catch(() => undefined);
   await rm(statePath(root, id), { force: true });
-  return { id, folder: sessionFolder(id), files, group, recovered: crashed, warnings };
+  return { id, folder: sessionFolder(id), files, group, timeline, screen: fileOf("screen"), system: fileOf("system"), recovered: crashed, warnings };
 }
 
 /** Longest {@link removeFile} waits for a deleted file's name to go, ms. */

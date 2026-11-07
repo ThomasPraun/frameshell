@@ -18,8 +18,22 @@ export interface HeardWord {
   text: string;
   start: number;
   end: number;
-  /** Name of who says it (transcript speaker name or linked person); null when unknown. */
+  /** Name of who says it (linked person, else transcript speaker name); null when unknown. */
   speaker: string | null;
+  /** The transcript and its speaker id (absent: a word with no speaker) the word comes from; absent for a take's own words. */
+  voice?: Voice | undefined;
+}
+
+/** A transcript speaker, or a whole transcript when `speaker` is absent: what `people.json` links (ADR 0020). */
+export interface Voice {
+  transcript: string;
+  speaker?: string | undefined;
+}
+
+/** How many words of a {@link Voice} were heard in lines the script gives to `name` (its `**Name:**`). */
+export interface VoiceTally extends Voice {
+  name: string;
+  words: number;
 }
 
 /** Kinds of {@link Deviation}, as ADR 0023 lists them. */
@@ -64,6 +78,8 @@ export interface TakeComparison {
   /** Every spoken line of the script, in order. */
   lines: LineOutcome[];
   deviations: Deviation[];
+  /** Per voice and script name, the heard words matched to that person's lines; empty in `follow: topics`. */
+  voices: VoiceTally[];
 }
 
 /** Score lost per heard token skipped inside a line: a later complete attempt beats a patched earlier one. */
@@ -169,7 +185,7 @@ function compareWords(script: ShootScript, lines: FlatLine[], e: ScriptToken[], 
   if (first === -1) {
     e.forEach((_, i) => unmatchE(i));
     if (heard.length > 0) deviations.push(added(null, null, heard, [...heard.keys()]));
-    return { scenes: [], lines: lines.filter((line) => line.words.length > 0).map((line) => ({ scene: line.scene, line: line.line, status: "outside", at: null })), deviations };
+    return { scenes: [], lines: lines.filter((line) => line.words.length > 0).map((line) => ({ scene: line.scene, line: line.line, status: "outside", at: null })), deviations, voices: [] };
   }
   e.forEach((token, i) => {
     if (token.line < first || token.line > last) unmatchE(i);
@@ -309,6 +325,7 @@ function compareWords(script: ShootScript, lines: FlatLine[], e: ScriptToken[], 
   }
 
   // Pauses inside a line, and who said it.
+  const voices = new Map<string, VoiceTally>();
   for (let li = first; li <= last; li++) {
     const line = lines[li]!;
     const matched = range(line.tokenStart[0]!, line.tokenStart.at(-1)!).filter((i) => matchE[i] !== -1);
@@ -322,6 +339,13 @@ function compareWords(script: ShootScript, lines: FlatLine[], e: ScriptToken[], 
     if (line.speaker === null || matched.length === 0) continue;
     const votes = new Map<string, { name: string; count: number }>();
     for (const word of new Set(matched.map((i) => h[matchE[i]!]!.word))) {
+      const voice = heard[word]!.voice;
+      if (voice) {
+        const key = `${voice.transcript}\0${voice.speaker ?? ""}\0${personNameKey(line.speaker)}`;
+        const tally = voices.get(key) ?? { ...voice, name: line.speaker, words: 0 };
+        tally.words++;
+        voices.set(key, tally);
+      }
       const name = heard[word]!.speaker;
       if (name === null) continue;
       const vote = votes.get(personNameKey(name)) ?? { name, count: 0 };
@@ -356,7 +380,8 @@ function compareWords(script: ShootScript, lines: FlatLine[], e: ScriptToken[], 
     if (Math.abs(length - scene.expected) <= LENGTH_TOLERANCE * scene.expected) continue;
     deviations.push({ kind: "length", scene: scene.slug, line: null, expected: `${scene.expected} s`, heard: `${round(length)} s`, words: null, at: { start: Math.min(...times.map((at) => at.start)), end: Math.max(...times.map((at) => at.end)) }, maybeTranscription: false });
   }
-  return { scenes, lines: outcomes, deviations: sortDeviations(deviations) };
+  const tallies = [...voices.values()].sort((a, b) => a.transcript.localeCompare(b.transcript) || (a.speaker ?? "").localeCompare(b.speaker ?? "") || b.words - a.words);
+  return { scenes, lines: outcomes, deviations: sortDeviations(deviations), voices: tallies };
 }
 
 /** `follow: topics`: a line is covered when enough of its content words are heard anywhere in the take. */
@@ -384,7 +409,7 @@ function compareTopics(lines: FlatLine[], e: ScriptToken[], h: HeardToken[], hea
   });
   if (first === -1 && heard.length > 0) deviations.push(added(null, null, heard, [...heard.keys()]));
   const scenes = first === -1 ? [] : [...new Set(lines.slice(first, last + 1).map((line) => line.scene))];
-  return { scenes, lines: outcomes, deviations };
+  return { scenes, lines: outcomes, deviations, voices: [] };
 }
 
 /** Weighted LCS of script against heard tokens; the heard index matched to each script token, or -1. */

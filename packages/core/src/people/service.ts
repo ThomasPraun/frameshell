@@ -26,6 +26,7 @@ import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFacesOffThre
 import { angleSuggestions } from "./angle-suggest.js";
 import { faceSuggestions } from "./face-suggest.js";
 import { type PersonRanges, type RangeKind, type RangesSource, type Span, personRanges } from "./ranges.js";
+import { type ScriptVoice, scriptSuggestions } from "./script-suggest.js";
 import { type PersonVoice, type SpeakerVoice, speakerSuggestions } from "./suggest.js";
 import { type VoiceOutcome, type VoiceWanted, meanPrint, voiceKey } from "./voices.js";
 
@@ -228,7 +229,7 @@ export class PeopleService {
       );
     }
     const chosen = [...new Set(ids)].map((id) => known.get(id)!);
-    const nameless = chosen.filter((suggestion) => !suggestion.person && suggestion.kind !== "angle");
+    const nameless = chosen.filter((suggestion) => !suggestion.person && suggestion.kind !== "angle" && suggestion.kind !== "script");
     if (!options.reject && nameless.length > 0 && options.person === undefined) {
       throw refused(
         "people.confirm",
@@ -259,7 +260,7 @@ export class PeopleService {
         let person = suggestion.person;
         let added = false;
         if (!person) {
-          const wanted = options.person ?? suggestion.angle!.name;
+          const wanted = options.person ?? suggestion.angle?.name ?? suggestion.script!.name;
           const existing = findPerson(file, wanted);
           if (existing) person = { id: existing.id, name: existing.name };
           else {
@@ -331,15 +332,17 @@ export class PeopleService {
   }
 }
 
-/** Where suggestions get voice prints and face scans. */
+/** Where suggestions get voice prints, face scans and who says the shoot scripts' lines. */
 export interface SuggestSources {
   voices: VoicePrinter;
   faces: FaceScans;
+  /** Voices heard in shoot script lines, per `**Name:**` (`ShootService.voices`); none when not given. */
+  scripts?: (() => Promise<ScriptVoice[]>) | undefined;
 }
 
 /**
  * Every suggestion for the project, dismissed ones included: `speaker`
- * first, then `angle`, `face-speaker` and `face`; and hints, each once.
+ * first, then `script`, `angle`, `face-speaker` and `face`; and hints, each once.
  */
 async function suggestAll(root: string, file: PeopleFile, sources: SuggestSources): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
   const hints: string[] = [];
@@ -359,7 +362,11 @@ async function suggestAll(root: string, file: PeopleFile, sources: SuggestSource
     hints.push(`${person.name}'s face anchor ${anchor.asset}@${anchor.at} names no face (${reason}), so it is not used.`);
   }
   const angles = angleSuggestions({ ...state, timelines: await readAllTimelines(root), people: file.people, transcripts });
-  return { suggestions: [...voice.suggestions, ...angles, ...faces.suggestions], hints: [...new Set([...hints, ...voice.hints, ...faces.hints])] };
+  const scripts = scriptSuggestions({ voices: (await sources.scripts?.()) ?? [], people: file.people, transcripts });
+  return {
+    suggestions: [...voice.suggestions, ...scripts.suggestions, ...angles, ...faces.suggestions],
+    hints: [...new Set([...hints, ...voice.hints, ...scripts.hints, ...faces.hints])],
+  };
 }
 
 /** Faces of the project and whose they are. */

@@ -147,6 +147,9 @@ describe("finishSession", () => {
       folder: `assets/shoot/${state.id}`,
       files: ["camera.mp4", "screen.mp4", "mic.m4a", "system.webm"].map((file) => `assets/shoot/${state.id}/${file}`),
       group: "g_1",
+      timeline: "main",
+      screen: `assets/shoot/${state.id}/screen.mp4`,
+      system: `assets/shoot/${state.id}/system.webm`,
       recovered: false,
       warnings: [],
     });

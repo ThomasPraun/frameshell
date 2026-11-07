@@ -179,6 +179,8 @@ const api: FrameshellApi = {
     choose: (script, scene, take) => invokeOutcome(Channel.shootChoose, script, scene, take),
     discard: (script, take, restore) => invokeOutcome(Channel.shootDiscard, script, take, restore),
     assemble: (script) => invokeOutcome(Channel.shootAssemble, script),
+    gallery: (finish) => invokeOutcome(Channel.shootGallery, finish),
+    speakers: (asset) => invokeOutcome(Channel.shootSpeakers, asset),
     onChanged: (listener) => subscribe(Channel.shootChanged, listener),
     liveWarm: (install) => ipcRenderer.invoke(Channel.shootLiveWarm, install === true),
     liveAudio: (samples) => ipcRenderer.send(Channel.shootLiveAudio, samples),

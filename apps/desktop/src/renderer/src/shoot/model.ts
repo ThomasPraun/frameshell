@@ -84,3 +84,19 @@ export function elapsedLabel(ms: number): string {
   const seconds = String(total % 60).padStart(2, "0");
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
+
+/** What the Shoot view offers after a session that recorded a call (ADR 0024 decision 8); all false for any other. */
+export interface CallSteps {
+  /** Split the screen angle into one angle per call tile (`multicam.gallery` into the session's group). */
+  gallery: boolean;
+  /** Find the speakers of the system audio (`transcribe.speakers`). */
+  speakers: boolean;
+  /** Link those speakers to the shoot script's people (People suggestions). */
+  people: boolean;
+}
+
+/** The {@link CallSteps} of a finished session: a call is system audio; the tiles need its screen angle in a group. */
+export function callSteps(finish: { group: string | null; timeline: string | null; screen: string | null; system: string | null }): CallSteps {
+  const call = finish.system !== null;
+  return { gallery: call && finish.group !== null && finish.timeline !== null && finish.screen !== null, speakers: call, people: call };
+}

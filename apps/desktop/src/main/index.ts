@@ -28,7 +28,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
-import { resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
+import { ErrorCode, RpcError, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
@@ -1296,6 +1296,30 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootAssemble, (event, script: string) =>
     outcome(async () => editor.alone(async () => daemon.request("shoot.assemble", { cwd: await dirOf(event.sender), script }))),
+  );
+  ipcMain.handle(Channel.shootGallery, (event, finish: ShootFinish) =>
+    outcome(async () => {
+      const cwd = await dirOf(event.sender);
+      if (!finish?.group || !finish.timeline || !finish.screen) throw new Error("This shoot has no screen angle in a multicam group.");
+      const { timeline, group, screen, system } = finish;
+      const shown = await daemon.request("timeline.show", { cwd, timeline });
+      const mic = shown.groups?.find((candidate) => candidate.id === group)?.mics?.find((candidate) => candidate.asset === system)?.id;
+      return editor.alone(() => daemon.request("multicam.gallery", { cwd, timeline, asset: screen, group, ...(mic ? { mic } : {}) }));
+    }),
+  );
+  ipcMain.handle(Channel.shootSpeakers, (event, asset: string) =>
+    outcome(async () => {
+      const cwd = await dirOf(event.sender);
+      try {
+        return await daemon.request("transcribe.speakers", { cwd, asset });
+      } catch (error) {
+        // No transcript yet (a session without takes) or a stale one: transcribe, then find the speakers.
+        const reason = error instanceof RpcError && error.code === ErrorCode.InvalidOperation ? (error.data as { reason?: string } | undefined)?.reason : undefined;
+        if (reason !== "no transcript" && reason !== "stale transcript") throw error;
+        await daemon.request("transcribe", { cwd, asset });
+        return daemon.request("transcribe.speakers", { cwd, asset });
+      }
+    }),
   );
 }
 

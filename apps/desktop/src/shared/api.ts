@@ -650,6 +650,13 @@ export interface FrameshellApi {
     discard(script: string, take: string, restore: boolean): Promise<MethodResult<"shoot.discard">>;
     /** `shoot.assemble` of every scene. */
     assemble(script: string): Promise<MethodResult<"shoot.assemble">>;
+    /**
+     * After a call (ADR 0024 decision 8): `multicam.gallery` on the session's screen angle, adding one angle per call
+     * tile to its group, heard through the system audio's mic.
+     */
+    gallery(finish: ShootFinish): Promise<MethodResult<"multicam.gallery">>;
+    /** `transcribe.speakers` on a recorded sound file (the call's system audio), transcribing it first when it has no transcript. */
+    speakers(asset: string): Promise<MethodResult<"transcribe.speakers">>;
     /** Called on every `shoot.changed` of the project, or with null after a daemon reconnect. Returns an unsubscribe function. */
     onChanged(listener: (change: ShootChange | null) => void): () => void;
     /**
@@ -755,8 +762,14 @@ export interface ShootFinish {
   folder: string;
   /** Project-relative files recorded, now being ingested. */
   files: string[];
-  /** Multicam group made of it on the main timeline; null when nothing had a picture or the group was refused. */
+  /** Multicam group made of it; null when nothing had a picture or the group was refused. */
   group: string | null;
+  /** Timeline holding `group`: the shoot's, else `main`; null without a group. */
+  timeline: string | null;
+  /** Project-relative screen or window recording; null when none was recorded. */
+  screen: string | null;
+  /** Project-relative system audio recording (a call's other voices); null when none was recorded. */
+  system: string | null;
   /** Finished on a later open: the app or the window ended while recording. */
   recovered: boolean;
   /** Daemon warnings and files that could not be repaired or held nothing, in English. */
@@ -948,6 +961,8 @@ export const Channel = {
   shootChoose: "shoot:choose",
   shootDiscard: "shoot:discard",
   shootAssemble: "shoot:assemble",
+  shootGallery: "shoot:gallery",
+  shootSpeakers: "shoot:speakers",
   shootChanged: "shoot:changed",
   shootLiveWarm: "shoot:live-warm",
   shootLiveAudio: "shoot:live-audio",

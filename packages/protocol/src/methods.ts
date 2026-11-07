@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 69;
+export const PROTOCOL_VERSION = 70;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1870,9 +1870,12 @@ export const methods = {
       "`multicam.angle` `crop`. `layouts` lists the stretches of the call with their tile count: when the layout changes " +
       "mid-call (someone joins or leaves, a screen share) a warning gives the times; the angles follow the layout held " +
       "longest, or the one playing at `at`. Gallery recordings only: a speaker-view or single-camera file has no grid. " +
+      "A call recorded in the app's Shoot view (ADR 0024) is already a group with the call window as a screen angle: pass " +
+      "`group` (and `mic`, the group mic of the call's system audio) to add the tiles to that group at the window's offset, " +
+      "keeping its shots. " +
       "Example: `{ asset: \"assets/call.mp4\", names: [\"Ana\", \"Ben\", \"Zoe\"] }`. Fails with InvalidOperation (file " +
       "missing, outside the project or without a picture, no tile grid found, `at` in a stretch without one, wrong number " +
-      "of `names`: data has the tile count), or the Binary* errors when ffmpeg cannot be fetched.",
+      "of `names`: data has the tile count; with `group`, no such group or mic, no angle of it playing `asset`, or its tiles added already), or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -1887,6 +1890,8 @@ export const methods = {
         .nonnegative()
         .optional()
         .describe("Recording second whose layout the tiles are cut from. Default: the layout held longest."),
+      group: operationArgs["multicam.gallery"].shape.group,
+      mic: operationArgs["multicam.gallery"].shape.mic,
     }),
     result: MulticamGalleryResultSchema,
   },
@@ -2577,7 +2582,10 @@ export const methods = {
       "either side already has, or a new one. Kind `angle`: a multicam angle (not a screen) linked to nobody: the person " +
       "named like it ignoring case, or a new person with its name, plus the angle's voice (its `speaker`, else the " +
       "speaker holding 80% of its sound's words, else the whole transcript of a mic of its own) and, when videos were " +
-      "scanned, the face most on screen in that angle; one confirmation links all of it. Suggestions answered \"no\" (`dismissed`) are left out. `hints` say what " +
+      "scanned, the face most on screen in that angle; one confirmation links all of it. Kind `script` (shoots, ADR 0024): a " +
+      "transcript speaker, or a whole transcript without speakers (your own mic), that says 80% or more of its words in a " +
+      "shoot script's lines of one `**Name:**` (at least 5 words, takes compared with their transcripts): the person of " +
+      "that name, or a new one with it; then `speaker` deviations of those takes name that person. Suggestions answered \"no\" (`dismissed`) are left out. `hints` say what " +
       "keeps voices or faces from being matched: no person has a linked speaker yet, a transcript has no speakers (run " +
       "`transcribe.speakers`), is stale, a speaker says too little, a video has no face scan (run `people.scan`), or a " +
       "face anchor names no face. Confirm only what the person agreed to or what is certain.",
@@ -2608,7 +2616,7 @@ export const methods = {
       "person's name is written into the transcript, a face is linked as a face anchor at `face.anchor`; called by an " +
       "agent, the link records it in `by`), `reject: true` adds the ids to `dismissed` in `people.json` so they are not " +
       "suggested again. A suggestion without `person` (a new face, or a voice and face nobody has) needs `person`: an " +
-      "existing person, or a new name, which adds that person (an `angle` suggestion without `person` adds a person named like the angle). Ids are checked against the current suggestions first: " +
+      "existing person, or a new name, which adds that person (an `angle` suggestion without `person` adds a person named like the angle, a `script` one a person named like its `**Name:**`). Ids are checked against the current suggestions first: " +
       "one no longer suggested, or one needing `person` without it, fails the call before anything changes. Undo a yes " +
       "with `people.unlink` (and `people.remove` for a person it added). Example: `{ suggestions: [\"sg_9c04e1d2\"] }`, " +
       "`{ suggestions: [\"sg_51aa07c3\"], person: \"Ana\" }`. Fails with InvalidOperation (reason `unknown suggestion`, " +

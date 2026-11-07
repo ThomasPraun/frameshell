@@ -2,7 +2,7 @@
 
 > I open Rodaje, pick my camera, mic and the Zoom window, and turn on system audio: all four meters and previews move. I press Start, talk for a few minutes while the call plays, and press End. The timeline gets one multicam group: the camera and the call window as angles (the window marked as a screen), my mic and the call's audio as mics, all in sync.
 
-Steps 1 to 8 cover the recorder (#390): sources, levels, the continuous session, crash recovery and signing; steps 9 to 14 the takes (#391); steps 15 to 21 the teleprompter following a real voice (#393). The e2e test (`apps/desktop/e2e/shoot.spec.ts`) covers the same flow with Chromium's fake camera and microphone and a stand-in screen; the steps below need real devices and macOS permissions, which no test can grant.
+Steps 1 to 8 cover the recorder (#390): sources, levels, the continuous session, crash recovery and signing; steps 9 to 14 the takes (#391); steps 15 to 21 the teleprompter following a real voice (#393); steps 22 to 26 a real call (#394). The e2e test (`apps/desktop/e2e/shoot.spec.ts`) covers the same flow with Chromium's fake camera and microphone and a stand-in screen; the steps below need real devices and macOS permissions, which no test can grant.
 
 Manual run by the owner with real devices, in the **packaged, signed** app (step 7) and in the built app (`pnpm --filter @frameshell/desktop build && pnpm --filter @frameshell/desktop start`). About 30 minutes. Note each friction as an issue; write results to `docs/research/shoot-acceptance-run.md` (date, version, machine, macOS version, numbers asked for below).
 
@@ -45,6 +45,16 @@ Needs a shoot script (as for the takes) and a network for the first download. Th
 19. **Free slot.** Reach a `[FREE: …]` slot, talk freely for a while, then pause about three seconds and read on: it stays on the slot while you talk (and through a short thinking pause) and moves on after the longer pause.
 20. **Keys and hold.** While it follows, press ← and ↑: it goes where you say and follows on from there. Press Space (held): it stops following; Space again resumes. Turn Follow voice off: it no longer moves by itself.
 21. **While recording.** Start shoot and record a take with T and C while it follows: the recording is unaffected (the meters, the files at End), and no live word ends up in the project (`transcripts/` gets only the take analysis). Note the CPU load in Activity Monitor (whisper-server and Frameshell).
+
+## Calls (#394)
+
+Needs a real Zoom or Meet call with at least two other people in gallery view, headphones (so your mic does not hear the call), and a shoot script whose lines name each person (`**Ana:**`, `**Juan:**`, and your own name). The e2e test (`apps/desktop/e2e/shoot-call.spec.ts`) finishes a written-out session with a synthetic gallery window; only these steps record a real call and real voices. Write the numbers to `docs/research/shoot-acceptance-run.md`.
+
+22. **Record the call.** In the Shoot view pick your camera, mic and the call's window (not the whole screen), turn on System audio: all four meters and previews move. Start shoot, record two or three takes with T and C while the others read their lines, then End shoot. Check: "Saved 4 files…", and under it "After the call" with three offers.
+23. **Tiles.** Click "Split the call window into its tiles". Check: "Added N tiles as angles of the session." with N the people in the gallery; the Angles view shows camera, window and one angle per tile; `timeline.show` has the tiles in the session's group at the window's offset, each with `mic` = the system audio's mic; the program track's shots did not change. Note any tile that shows a name label or a gutter, and whether a layout change (someone's video turned off, a screen share) was reported.
+24. **Speakers.** Click "Find who speaks in the call audio" (first time: about 95 MB download). Check: "Found N speakers…" with N the other people; `transcripts/shoot/<id>/system.words.json` has `speaker` on its words. Note words given to the wrong person.
+25. **People.** Click "Link the speakers to the script's people": the People view opens with one suggestion per call voice ("Speaker 1 in system.words.json says Juan's lines in launch.md") and one for your mic ("All of mic.words.json says …"). Confirm them. Check: `people.json` has the people with those links; in the Shoot view the takes show no `speaker` deviation for lines the right person said, and one where someone said another person's line (try it once on purpose).
+26. **Spanish.** With View > Language > Español, the offers read "Después de la llamada" and People's suggestions are in Spanish.
 
 ## Other platforms (not run yet)
 
