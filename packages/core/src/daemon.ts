@@ -1112,23 +1112,28 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.key": (params, caller) => operate("clip.key", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
     "multicam.create": (params, caller) => createGroup(params, caller),
-    "multicam.gallery": async ({ cwd, timeline, asset, names, name, at }, caller) => {
+    "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {
       const dir = await root(cwd);
       const plan = await planGallery(gallery, { root: dir, cwd, asset, names, at });
       let written: Timeline | undefined;
-      const result = await operate("multicam.gallery", { cwd, timeline, asset: plan.asset, tiles: plan.tiles, ...(name ? { name } : {}) }, caller, (after) => {
+      const args = { cwd, timeline, asset: plan.asset, tiles: plan.tiles, ...(name ? { name } : {}), ...(into !== undefined ? { group: into } : {}), ...(mic !== undefined ? { mic } : {}) };
+      const result = await operate("multicam.gallery", args, caller, (after) => {
         written = after;
       });
-      const group = written?.groups?.find((candidate) => result.changes.added.includes(candidate.id));
-      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === group?.id);
-      if (!group || !track || track.kind !== "program") throw new Error("multicam.gallery: the operation wrote no new group");
+      const whole = written?.groups?.find((candidate) => (into !== undefined ? candidate.id === into : result.changes.added.includes(candidate.id)));
+      const track = written?.tracks.find((candidate) => candidate.kind === "program" && candidate.group === whole?.id);
+      if (!whole || (into === undefined && track?.kind !== "program")) throw new Error("multicam.gallery: the operation wrote no new group");
+      // Into a group, only the tiles are new: the report and the tiles' mic are theirs.
+      const tiles = into !== undefined ? whole.angles.slice(-plan.tiles.length) : whole.angles;
+      const tileMic = into !== undefined ? (tiles[0]?.mic ?? null) : (whole.mics?.[0]?.id ?? null);
+      const group = { ...whole, angles: tiles, mics: (whole.mics ?? []).filter((candidate) => candidate.id === tileMic) };
       const report = galleryReport(group, plan);
       return {
         ...result,
         group: group.id,
-        track: track.id,
-        clip: track.clips[0]!.id,
-        mic: group.mics?.[0]?.id ?? null,
+        track: track?.id ?? null,
+        clip: into !== undefined || track?.kind !== "program" ? null : track.clips[0]!.id,
+        mic: tileMic,
         confidence: report.confidence,
         samples: plan.analysis.samples,
         tiles: report.tiles,
@@ -1533,14 +1538,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
               if (wanted.length > 0) held = true;
               return new Map(wanted.map((entry) => [voiceKey(entry), { ok: false, reason: "the voice model is not downloaded yet" }]));
             };
-      const found = await transcribing(dir, () => people.suggest(dir, { voices, faces: faceScans(dir) }));
+      const found = await transcribing(dir, () => people.suggest(dir, { voices, faces: faceScans(dir), scripts: () => shoots.voices(dir) }));
       return { dir, ...found, ...(held ? { voiceDownload: { bytes: missing } } : {}) };
     },
     "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
       const dir = await root(cwd);
       const author = journalAuthorOf(caller);
       const by = author.startsWith("agent:") ? author : undefined;
-      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir) }))) };
+      return { dir, ...(await transcribing(dir, () => people.confirm(dir, suggestions, { reject, by, person, voices: voicePrinter(dir, request.progress), faces: faceScans(dir), scripts: () => shoots.voices(dir) }))) };
     },
     "target.register": async ({ cwd, client, title, kind }, caller) => {
       const dir = await root(cwd);

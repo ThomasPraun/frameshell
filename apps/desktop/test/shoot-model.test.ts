@@ -4,6 +4,7 @@ import {
   LEVEL_FLOOR,
   SILENCE_WARN_MS,
   VIDEO_TYPES,
+  callSteps,
   capSize,
   heldLevel,
   meterWindow,
@@ -77,5 +78,19 @@ describe("elapsedLabel", () => {
     expect(elapsedLabel(0)).toBe("0:00");
     expect(elapsedLabel(61_900)).toBe("1:01");
     expect(elapsedLabel(3_725_000)).toBe("1:02:05");
+  });
+});
+
+describe("callSteps", () => {
+  const finish = { group: "g_1", timeline: "main", screen: "assets/shoot/s/screen.mp4", system: "assets/shoot/s/system.m4a" };
+
+  it("offers the tiles, the speakers and the people after a call recorded as a window with system audio", () => {
+    expect(callSteps(finish)).toEqual({ gallery: true, speakers: true, people: true });
+    expect(callSteps({ ...finish, screen: null })).toEqual({ gallery: false, speakers: true, people: true });
+    expect(callSteps({ ...finish, group: null, timeline: null })).toEqual({ gallery: false, speakers: true, people: true });
+  });
+
+  it("offers nothing without system audio", () => {
+    expect(callSteps({ ...finish, system: null })).toEqual({ gallery: false, speakers: false, people: false });
   });
 });

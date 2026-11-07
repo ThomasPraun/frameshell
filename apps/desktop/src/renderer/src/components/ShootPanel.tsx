@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { ShootScreenSource } from "../../../shared/api.js";
+import type { ShootFinish, ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
-import { elapsedLabel, meterFill } from "../shoot/model.js";
+import { callSteps, elapsedLabel, meterFill } from "../shoot/model.js";
 import { live, useLiveStatus } from "../shoot/live.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
 import { teleprompter } from "../teleprompter/store.js";
@@ -12,9 +12,9 @@ import { TranscriptionNotice } from "./TranscriptionNotice.js";
  * Shoot view (ADR 0024, Spanish UI "Rodaje"): pick a camera, a microphone (the one required source), a screen or
  * window from Frameshell's own list and system audio, each with a live preview or level; then Start and End one
  * continuous session. The recorder lives outside this view ({@link shoot}), so a session keeps recording while the
- * view switches tabs or moves to its own window.
+ * view switches tabs or moves to its own window. `onShowPeople` switches the sidebar to People; absent in a window of its own.
  */
-export function ShootPanel() {
+export function ShootPanel({ onShowPeople }: { onShowPeople?: (() => void) | undefined } = {}) {
   const state = useShoot();
   const [picking, setPicking] = useState(false);
   useEffect(() => shoot.mount(), []);
@@ -222,7 +222,97 @@ export function ShootPanel() {
               {warning}
             </p>
           ))}
+          <CallSteps key={state.finished.id} finish={state.finished} onShowPeople={onShowPeople} />
         </div>
+      )}
+    </div>
+  );
+}
+
+type StepState = { state: "idle" } | { state: "working" } | { state: "done"; count: number } | { state: "failed"; reason: string };
+
+/**
+ * What to do after a call (ADR 0024 decision 8): split the call window into its tiles, find who speaks in the system
+ * audio, and link those speakers to the script's people in the People view. Each is offered, never run by itself.
+ */
+function CallSteps({ finish, onShowPeople }: { finish: ShootFinish; onShowPeople: (() => void) | undefined }) {
+  const steps = callSteps(finish);
+  const [gallery, setGallery] = useState<StepState>({ state: "idle" });
+  const [speakers, setSpeakers] = useState<StepState>({ state: "idle" });
+  if (!steps.gallery && !steps.speakers && !steps.people) return null;
+  const run = (set: (state: StepState) => void, work: () => Promise<number>) => {
+    set({ state: "working" });
+    work().then(
+      (count) => set({ state: "done", count }),
+      (error: unknown) => set({ state: "failed", reason: (error as Error)?.message ?? String(error) }),
+    );
+  };
+  const system = finish.system;
+  return (
+    <section className="shoot-call" data-testid="shoot-call-steps" aria-label={t.shoot.callTitle}>
+      <p className="shoot-label">{t.shoot.callTitle}</p>
+      {steps.gallery && (
+        <Step
+          label={t.shoot.callGallery}
+          working={t.shoot.callGalleryWorking}
+          done={t.shoot.callGalleryDone}
+          step={gallery}
+          testId="shoot-call-gallery"
+          onRun={() => run(setGallery, async () => (await window.frameshell.shoot.gallery(finish)).tiles.length)}
+        />
+      )}
+      {steps.speakers && system && (
+        <Step
+          label={t.shoot.callSpeakers}
+          working={t.shoot.callSpeakersWorking}
+          done={t.shoot.callSpeakersDone}
+          step={speakers}
+          testId="shoot-call-speakers"
+          onRun={() => run(setSpeakers, async () => (await window.frameshell.shoot.speakers(system)).speakers.length)}
+        />
+      )}
+      {steps.people && (
+        <div className="shoot-row">
+          {onShowPeople && (
+            <button className="button" data-testid="shoot-call-people" onClick={onShowPeople}>
+              {t.shoot.callPeople}
+            </button>
+          )}
+          <span className="shoot-note">{t.shoot.callPeopleHint}</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Step({
+  label,
+  working,
+  done,
+  step,
+  testId,
+  onRun,
+}: {
+  label: string;
+  working: string;
+  done: (count: number) => string;
+  step: StepState;
+  testId: string;
+  onRun: () => void;
+}) {
+  return (
+    <div className="shoot-row" data-testid={testId} data-state={step.state}>
+      {step.state !== "done" && (
+        <button className="button" disabled={step.state === "working"} onClick={onRun}>
+          {label}
+        </button>
+      )}
+      {step.state === "working" && <span className="shoot-note">{working}</span>}
+      {step.state === "done" && <span className="shoot-note">{done(step.count)}</span>}
+      {step.state === "failed" && (
+        <span className="shoot-error" role="alert">
+          {t.shoot.callFailed(step.reason)}
+        </span>
       )}
     </div>
   );

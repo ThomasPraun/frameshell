@@ -181,7 +181,7 @@ export function galleryReport(group: MulticamGroup, plan: GalleryPlan): GalleryR
   warnings.push(
     mic
       ? `every tile hears the call's one mixed track (mic ${mic.id}), so they speak together for \`multicam turns\` until it has speakers: ` +
-          `\`frameshell transcribe ${plan.asset}\`, then \`frameshell transcribe --speakers ${plan.asset} --people ${tiles.length}\`, then ` +
+          `\`frameshell transcribe ${mic.asset}\`, then \`frameshell transcribe --speakers ${mic.asset} --people ${tiles.length}\`, then ` +
           `\`frameshell multicam angle ${group.id} <angle> --speaker <s1…>\` for each tile.`
       : `${plan.asset} has no sound: the tiles have no speaking turns, so \`direct\` cannot tell who speaks.`,
   );

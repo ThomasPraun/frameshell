@@ -17,20 +17,22 @@ import {
   parseShootFile,
   parseShootScript,
   parseTranscript,
+  personNameKey,
   shootSlug,
+  speakerLinkKey,
   wordSpeaker,
 } from "@frameshell/schema";
 import { canonicalPath, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import { locateScript } from "../scripts/outline.js";
 import { resolveAsset, transcriptPathsFor } from "../transcripts/transcriber.js";
-import { type HeardWord, type TakeComparison, compareTake } from "./compare.js";
+import { type HeardWord, type TakeComparison, type VoiceTally, compareTake } from "./compare.js";
 import { type SessionTake, TAKE_WORDS_DIR, isSessionTake, readTakeWords, takeHeard } from "./session.js";
 
 /** Cache of take comparisons, keyed by script text, transcript and people links (derived, swept by `gc`). */
 export const SHOOT_CACHE_DIR = ".frameshell/shoot";
 /** Bump when {@link compareTake} changes its output, so cached comparisons are redone. */
-const COMPARE_VERSION = 1;
+const COMPARE_VERSION = 2;
 
 /** See {@link SHOOT_CHANGES}. */
 export type ShootChange = (typeof SHOOT_CHANGES)[number];
@@ -51,16 +53,24 @@ export interface ShootServiceOptions {
   transcription?: (root: string) => Promise<ShootStatusResult["transcription"]>;
 }
 
-/** Where a take's heard words come from: a transcript, or a recorded take's own words. */
+/** Names of the people `people.json` links to transcript speakers and whole transcripts, by `speakerLinkKey`. */
+type LinkedNames = ReadonlyMap<string, string>;
+
+/** Where a take's heard words come from: transcripts, or a recorded take's own words. */
 interface HeardSource {
-  /** Project-relative file the words come from. */
+  /** Project-relative file the words come from (the first, for a session's transcripts). */
   rel: string;
+  /** Every transcript the words come from, whose people links count. */
+  rels: string[];
   /** Its text, for the comparison cache key. */
   text: string;
-  /** The words; `whole` is the person linked to the whole transcript, if any. */
-  heard(whole: string | null): HeardWord[];
+  /** The words, speakers named by the people linked to them where there are any. */
+  heard(links: LinkedNames): HeardWord[];
   language: string | null;
 }
+
+/** A {@link VoiceTally} of the takes of one shoot script. */
+export type ScriptVoiceTally = VoiceTally & { script: string };
 
 type TakeInfo = ShootStatusResult["takes"][number];
 
@@ -325,6 +335,38 @@ export class ShootService {
     });
   }
 
+  /**
+   * Who says the script's lines in each transcript the takes of every shoot file are compared with (ADR 0024 decision 8):
+   * per transcript speaker (or whole transcript) and `**Name:**`, the words heard in that person's lines, summed over
+   * the takes not discarded. A take's own words (its session still recording) have no transcript and count nowhere.
+   * Shoot files or scripts that cannot be read are left out.
+   */
+  async voices(root: string): Promise<ScriptVoiceTally[]> {
+    const sums = new Map<string, ScriptVoiceTally>();
+    for (const name of await readdirSafe(join(root, SHOOTS_DIR))) {
+      if (!name.endsWith(".json")) continue;
+      let loaded: Loaded;
+      try {
+        const parsed = parseShootFile(await readJsonIfExists(join(root, SHOOTS_DIR, name)));
+        if (!parsed.ok) continue;
+        loaded = await this.#load(root, root, parsed.value.script);
+      } catch {
+        continue;
+      }
+      for (const take of loaded.file.takes) {
+        if (take.discarded) continue;
+        const { comparison } = await this.#analyze(root, loaded, take);
+        for (const tally of comparison?.voices ?? []) {
+          const key = `${loaded.script}\0${tally.transcript}\0${tally.speaker ?? ""}\0${personNameKey(tally.name)}`;
+          const sum = sums.get(key) ?? { ...tally, script: loaded.script, words: 0 };
+          sum.words += tally.words;
+          sums.set(key, sum);
+        }
+      }
+    }
+    return [...sums.values()];
+  }
+
   /** Delete (or list) cached comparisons no take of any shoot file uses now. */
   async gc(root: string, options: { dryRun: boolean; temps: boolean }): Promise<GcEntry[]> {
     const keys = new Set<string>();
@@ -336,9 +378,10 @@ export class ShootService {
         if (!parsed.ok) throw new Error(parsed.error);
         const { text } = await locateScript(root, root, parsed.value.script);
         const loaded: Loaded = { script: parsed.value.script, text, parsed: parseShootScript(text), fileRel: `${SHOOTS_DIR}/${name}`, file: parsed.value };
+        const links = await linkedNames(root);
         for (const take of parsed.value.takes) {
           const { source } = await this.#source(root, take);
-          if (source) keys.add(await cacheKey(root, loaded, source));
+          if (source) keys.add(cacheKey(loaded, source, links));
         }
       } catch {
         // A shoot file or script that cannot be read now may be fixed later: keep every comparison.
@@ -378,7 +421,7 @@ export class ShootService {
     const found = await this.#transcriptOf(root, take.asset);
     if (!found.transcript) return { source: null, state: found.state, problem: found.problem };
     const { rel, text, value } = found.transcript;
-    return { source: { rel, text, heard: (whole) => heardWords(value, whole), language: value.language ?? null }, state: "analyzed", problem: null };
+    return { source: { rel, rels: [rel], text, heard: (links) => heardWords(value, rel, links), language: value.language ?? null }, state: "analyzed", problem: null };
   }
 
   /**
@@ -395,11 +438,12 @@ export class ShootService {
         return {
           source: {
             rel: parts[0]!.transcript.rel,
+            rels: parts.map((part) => part.transcript.rel),
             text: `${session.start}\0${session.end}\0${parts.map((part) => part.transcript.text).join("\0")}`,
-            heard: (whole) =>
+            heard: (links) =>
               parts
                 .flatMap(({ sound, transcript }) =>
-                  heardWords(transcript.value, whole).map((word) => ({ ...word, start: round3(word.start + sound.offset), end: round3(word.end + sound.offset) })),
+                  heardWords(transcript.value, transcript.rel, links).map((word) => ({ ...word, start: round3(word.start + sound.offset), end: round3(word.end + sound.offset) })),
                 )
                 .filter((word) => (word.start + word.end) / 2 >= session.start && (word.start + word.end) / 2 <= session.end)
                 .sort((a, b) => a.start - b.start),
@@ -413,7 +457,11 @@ export class ShootService {
     const own = await readTakeWords(root, take.id);
     if (own) {
       const words = own.value;
-      return { source: { rel: `${TAKE_WORDS_DIR}/${take.id}.json`, text: own.text, heard: () => takeHeard(words), language: words.sounds[0]?.language ?? null }, state: "analyzed", problem: null };
+      return {
+        source: { rel: `${TAKE_WORDS_DIR}/${take.id}.json`, rels: [], text: own.text, heard: () => takeHeard(words), language: words.sounds[0]?.language ?? null },
+        state: "analyzed",
+        problem: null,
+      };
     }
     if (this.#analyzing(root, take.id)) return { source: null, state: "transcribing", problem: `Take ${take.id} is being transcribed.` };
     const failure = this.#failure(root, take.id);
@@ -453,11 +501,12 @@ export class ShootService {
   async #analyze(root: string, loaded: Loaded, take: ShootTake): Promise<Analysis> {
     const { source, state, problem } = await this.#source(root, take);
     if (!source) return { transcript: null, state, problem, comparison: null };
-    const key = await cacheKey(root, loaded, source);
+    const links = await linkedNames(root);
+    const key = cacheKey(loaded, source, links);
     const cachePath = join(root, ...SHOOT_CACHE_DIR.split("/"), `${key}.json`);
     const cached = (await readJsonIfExists(cachePath).catch(() => undefined)) as TakeComparison | undefined;
     if (cached !== undefined) return { transcript: source.rel, state: "analyzed", problem: null, comparison: cached };
-    const heard = source.heard(await wholeTranscriptPerson(root, source.rel));
+    const heard = source.heard(links);
     const comparison = compareTake(loaded.parsed, heard, source.language);
     await writeJsonAtomic(cachePath, comparison);
     this.#onChanged(root, loaded.script, "analyzed", take.id);
@@ -511,25 +560,39 @@ function cueTime(timeline: Timeline, ref: string, take: TakeInfo, scene: string,
   return null;
 }
 
-/** Transcript words as the take says them: human text edits applied, speakers by name. */
-function heardWords(transcript: Transcript, whole: string | null): HeardWord[] {
+/**
+ * Words of transcript `rel` as the take says them: human text edits applied, each said by the person `people.json`
+ * links to its speaker (else the speaker's name in the transcript), else by the person linked to the whole transcript
+ * (one source per person, ADR 0020); so `speaker` deviations follow the links.
+ */
+function heardWords(transcript: Transcript, rel: string, links: LinkedNames): HeardWord[] {
   const names = new Map((transcript.speakers ?? []).map((speaker) => [speaker.id, speaker.name]));
+  const whole = links.get(speakerLinkKey({ transcript: rel })) ?? null;
   return transcript.words.map((word) => {
     const speaker = wordSpeaker(transcript, word);
-    return { text: transcript.edits[word.id]?.text ?? word.text, start: word.start, end: word.end, speaker: (speaker !== undefined ? names.get(speaker) : undefined) ?? whole };
+    const name = speaker !== undefined ? (links.get(speakerLinkKey({ transcript: rel, speaker })) ?? names.get(speaker)) : undefined;
+    return {
+      text: transcript.edits[word.id]?.text ?? word.text,
+      start: word.start,
+      end: word.end,
+      speaker: name ?? whole,
+      voice: { transcript: rel, ...(speaker !== undefined ? { speaker } : {}) },
+    };
   });
 }
 
-/** Name of the person `people.json` links to all of `transcript` (one source per person); null when none or unreadable. */
-async function wholeTranscriptPerson(root: string, transcript: string): Promise<string | null> {
+/** Who `people.json` links each transcript speaker and whole transcript to; empty when there is no file or it is invalid. */
+async function linkedNames(root: string): Promise<LinkedNames> {
   const parsed = parsePeopleFile(await readJsonIfExists(join(root, PEOPLE_FILE)).catch(() => undefined));
-  if (!parsed.ok) return null;
-  return parsed.value.people.find((person) => person.speakers.some((link) => link.transcript === transcript && link.speaker === undefined))?.name ?? null;
+  const names = new Map<string, string>();
+  if (!parsed.ok) return names;
+  for (const person of parsed.value.people) for (const link of person.speakers) names.set(speakerLinkKey(link), person.name);
+  return names;
 }
 
-async function cacheKey(root: string, loaded: Loaded, transcript: { rel: string; text: string }): Promise<string> {
-  const whole = await wholeTranscriptPerson(root, transcript.rel);
-  return createHash("sha256").update(`${COMPARE_VERSION}\0${loaded.text}\0${transcript.text}\0${whole ?? ""}`).digest("hex").slice(0, 24);
+function cacheKey(loaded: Loaded, source: HeardSource, links: LinkedNames): string {
+  const own = [...links].filter(([key]) => source.rels.some((rel) => key.startsWith(`${rel}\0`))).sort(([a], [b]) => a.localeCompare(b));
+  return createHash("sha256").update(`${COMPARE_VERSION}\0${loaded.text}\0${source.text}\0${JSON.stringify(own)}`).digest("hex").slice(0, 24);
 }
 
 /** Project-relative media file: `asset` absolute, or relative to `cwd`, then to `root`. */

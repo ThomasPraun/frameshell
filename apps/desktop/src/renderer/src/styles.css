@@ -4148,6 +4148,13 @@ button.track-head:focus-visible {
   font-size: 12px;
 }
 
+.shoot-call {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* Teleprompter (ADR 0024): the text glides under a fixed focus line at mid-height; its transform is set per frame. */
 .teleprompter {
   display: flex;

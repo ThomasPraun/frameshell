@@ -356,6 +356,20 @@ export const operationArgs = {
       .min(2)
       .describe("One angle per tile, each a crop of `asset`. The `multicam.gallery` method finds the tiles and passes them here."),
     name: z.string().min(1).optional().describe("Group and program track name. Default: the track is named `Multicam`."),
+    group: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Add the tiles to this existing group (id from `timeline.show`) instead of making a new one: it must have an angle " +
+          "playing `asset` (a recorded call window or screen), whose offset the tiles take. No track, shot or mic is added.",
+      ),
+    mic: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe("With `group`: the group mic every tile is heard through (id from `mics`), or null for none. Default: the sound of the angle playing `asset`."),
   }),
   "multicam.offset": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
@@ -660,13 +674,19 @@ export type MulticamCreateResult = z.output<typeof MulticamCreateResultSchema>;
 
 /** Result of `multicam.gallery`: the operation plus the tiles found and the layouts of the call. */
 export const MulticamGalleryResultSchema = OperationResultSchema.extend({
-  group: z.string().describe("Id of the new group."),
-  track: z.string().describe("Id of the new program track."),
-  clip: z.string().describe("Id of the initial `grid` shot, which covers the whole recording."),
+  group: z.string().describe("Id of the new group, or of the group given as `group`."),
+  track: z.string().nullable().describe("Id of the group's program track; null when an existing group has none."),
+  clip: z
+    .string()
+    .nullable()
+    .describe("Id of the initial `grid` shot, which covers the whole recording; null with `group` (its shots are left as they are)."),
   mic: z
     .string()
     .nullable()
-    .describe("Id of the group mic that plays the recording's sound once for every tile; null when the file has no sound (tiles are then silent)."),
+    .describe(
+      "Id of the group mic that plays the recording's sound once for every tile; null when the file has no sound (tiles are then " +
+        "silent), or, with `group`, when the tiles have no mic of their own.",
+    ),
   confidence: z.number().describe("Lowest tile confidence, 0 to 1. Below 0.5: look at the tiles before directing."),
   samples: z.int().describe("Frames analysed, evenly spread over the whole recording."),
   tiles: z

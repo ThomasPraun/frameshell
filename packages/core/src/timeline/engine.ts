@@ -1199,24 +1199,16 @@ class Edit {
    * `multicam.gallery` method): one angle per tile, each a crop of `args.asset`
    * at offset 0, and its program track with one `grid` shot over the file. The
    * file's sound plays once, through one mic every angle takes; a silent file
-   * gives silent angles and no mic.
+   * gives silent angles and no mic. With `args.group`, the tiles join that
+   * group instead (see {@link Edit.galleryIntoGroup}).
    */
   async multicamGallery(args: OperationArgs<"multicam.gallery">): Promise<void> {
     const info = await this.context.source(args.asset);
     if (!info.video || info.duration === null) {
       throw this.invalid(`${args.asset} has no moving picture; a gallery recording needs a video file.`, { field: "asset" });
     }
-    const angles: Angle[] = [];
-    args.tiles.forEach((tile, index) => {
-      const name = tile.name ?? `Tile ${index + 1}`;
-      const crop: AngleCrop = {};
-      for (const side of ["left", "top", "right", "bottom"] as const) {
-        const value = tile.crop[side];
-        if (value !== undefined && value !== 0) crop[side] = Math.round(value * 10000) / 10000;
-      }
-      this.checkCrop(crop, `tile ${index + 1}`, "tiles");
-      angles.push({ id: this.angleId(name, angles), name, asset: args.asset, offset: 0, ...(Object.keys(crop).length > 0 ? { crop } : {}) });
-    });
+    if (args.group !== undefined) return this.galleryIntoGroup(args, args.group);
+    const angles = this.tileAngles(args, [], 0);
     const mics: Mic[] = [];
     if (info.audio) {
       const taken: { id: string }[] = [...angles, ...RESERVED_MIC_IDS.map((id) => ({ id }))];
@@ -1236,6 +1228,46 @@ class Edit {
     };
     this.draft.groups = [...(this.draft.groups ?? []), group];
     this.draft.tracks.push(track);
+  }
+
+  /**
+   * The tiles of a call recorded as one angle of `groupId` (a Shoot session's call window, ADR 0024 decision 8) as
+   * more angles of that group: at that angle's offset, heard through `args.mic` (default that angle's own sound).
+   * Tracks, shots and mics stay as they are, so the session's program track keeps its shots.
+   */
+  galleryIntoGroup(args: OperationArgs<"multicam.gallery">, groupId: string): void {
+    const { group } = this.group(groupId);
+    const window = group.angles.find((angle) => angle.asset === args.asset && angle.crop === undefined) ?? group.angles.find((angle) => angle.asset === args.asset);
+    if (!window) {
+      throw this.invalid(`group ${group.id} has no angle playing ${args.asset}.`, {
+        field: "group",
+        hint: `Angles: ${group.angles.map((angle) => `${angle.id} (${angle.asset})`).join(", ")}. Without \`group\` the tiles make a new group.`,
+      });
+    }
+    if (typeof args.mic === "string" && !group.mics?.some((mic) => mic.id === args.mic)) {
+      throw this.invalid(`group ${group.id} has no mic "${args.mic}".`, { field: "mic", hint: `Mics: ${group.mics?.map((mic) => mic.id).join(", ") || "none"}.` });
+    }
+    const taken: { id: string }[] = [...group.angles, ...(group.mics ?? []), ...RESERVED_MIC_IDS.map((id) => ({ id }))];
+    const tiles = this.tileAngles(args, taken, window.offset);
+    const mic = args.mic !== undefined ? args.mic : window.mic;
+    for (const tile of tiles) if (mic !== undefined) tile.mic = mic;
+    group.angles.push(...tiles);
+  }
+
+  /** One angle per tile of `args`, ids clear of `taken`, at `offset`. */
+  tileAngles(args: OperationArgs<"multicam.gallery">, taken: readonly { id: string }[], offset: number): Angle[] {
+    const angles: Angle[] = [];
+    args.tiles.forEach((tile, index) => {
+      const name = tile.name ?? `Tile ${index + 1}`;
+      const crop: AngleCrop = {};
+      for (const side of ["left", "top", "right", "bottom"] as const) {
+        const value = tile.crop[side];
+        if (value !== undefined && value !== 0) crop[side] = Math.round(value * 10000) / 10000;
+      }
+      this.checkCrop(crop, `tile ${index + 1}`, "tiles");
+      angles.push({ id: this.angleId(name, [...taken, ...angles]), name, asset: args.asset, offset, ...(Object.keys(crop).length > 0 ? { crop } : {}) });
+    });
+    return angles;
   }
 
   /** InvalidOperation when `crop` of `what` leaves no picture: left + right or top + bottom reach 1. */

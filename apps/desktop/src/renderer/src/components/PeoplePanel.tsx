@@ -498,6 +498,10 @@ function suggestionText(suggestion: PeopleSuggestion): string {
   if (suggestion.kind === "angle" && suggestion.angle) {
     return person ? t.people.suggestAngle(suggestion.angle.name, person.name) : t.people.suggestAngleNew(suggestion.angle.name);
   }
+  if (suggestion.kind === "script" && speaker && suggestion.script) {
+    const who = speaker.speaker ? t.people.voice(voice, fileName(speaker.transcript)) : t.people.voiceWhole(fileName(speaker.transcript));
+    return person ? t.people.suggestScript(who, person.name, fileName(suggestion.script.script)) : t.people.suggestScriptNew(who, suggestion.script.name, fileName(suggestion.script.script));
+  }
   // Kinds this app does not know yet read as the daemon words them.
   return t.people.suggestOther(suggestion.reason);
 }
@@ -521,8 +525,8 @@ function SuggestionRow({
   onConfirm: (person: string | undefined) => void;
   onDismiss: () => void;
 }) {
-  // A new person from an angle takes the angle's name unless the field says otherwise.
-  const fromAngle = suggestion.kind === "angle" && !suggestion.person ? (suggestion.angle?.name ?? "") : "";
+  // A new person from an angle or a script's lines takes that name unless the field says otherwise.
+  const fromAngle = suggestion.person ? "" : suggestion.kind === "angle" ? (suggestion.angle?.name ?? "") : suggestion.kind === "script" ? (suggestion.script?.name ?? "") : "";
   const [who, setWho] = useState(fromAngle);
   const needsName = !suggestion.person;
   const extras = suggestion.kind === "angle" ? angleExtras(suggestion) : null;
