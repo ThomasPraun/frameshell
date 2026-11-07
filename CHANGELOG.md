@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   show through, the sound still plays). Set with `track.set` `muted`/`hidden` (protocol 69), CLI
   `frameshell track set <track> --muted|--unmuted --hidden|--shown`, or Mute track / Hide track in the timeline's
   track header menu; the header marks the state and a hidden track's clips are drawn faded. Export, preview,
-  `inspect.point` and the word checks read it through `withTrackMutes` and `showsPicture` (`composite.ts`), nested
-  timelines included. Existing files stay valid.
+  `inspect.point`, `people ranges --onscreen` and the word checks read it through `withTrackMutes` and `showsPicture`
+  (`composite.ts`), nested timelines included. Existing files stay valid.
 
 ### Changed
 
