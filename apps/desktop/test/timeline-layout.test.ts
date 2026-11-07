@@ -65,6 +65,19 @@ describe("layoutTimeline", () => {
     expect(layout.height).toBe(RULER_HEIGHT + 2 * LANE_HEIGHT.video + 2 * LANE_HEIGHT.audio + LANE_HEIGHT.subtitles);
   });
 
+  it("carries each track's mute and hide for the header and the lanes", () => {
+    const layout = layoutTimeline(
+      view([
+        { id: "t_v1", kind: "video", name: null, follows: null, hidden: true, clips: [] },
+        { id: "t_a1", kind: "audio", name: null, follows: null, muted: true, clips: [] },
+      ]),
+    );
+    expect(layout.rows.map((row) => [row.id, row.muted, row.hidden])).toEqual([
+      ["t_v1", false, true],
+      ["t_a1", true, false],
+    ]);
+  });
+
   it("names clips after what they play and tells media, nested timelines and generated clips apart", () => {
     const layout = layoutTimeline(
       view([

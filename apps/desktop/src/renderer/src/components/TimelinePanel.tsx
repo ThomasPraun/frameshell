@@ -1087,6 +1087,12 @@ function TimelineCanvas({
       [
         ...askItems(),
         { label: t.timeline.renameTrack, separated: true, run: () => setRenaming(row.id) },
+        ...(row.kind !== "subtitles" && !image
+          ? [{ label: row.muted ? t.timeline.unmuteTrack : t.timeline.muteTrack, run: () => send([{ op: "track.set", args: { track: row.id, muted: !row.muted } }]) }]
+          : []),
+        ...(row.kind === "video" || row.kind === "program"
+          ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => send([{ op: "track.set", args: { track: row.id, hidden: !row.hidden } }]) }]
+          : []),
         ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
         ...(image ? [] : addTrackItems(true)),
         {
@@ -1230,6 +1236,7 @@ function TimelineCanvas({
                     >
                       <span className="track-id">{row.label}</span>
                       <span className="track-label">{row.name ?? ""}</span>
+                      <TrackState row={row} />
                     </button>
                   )}
                   {row.angles.length > 0 && (
@@ -1289,6 +1296,7 @@ function TimelineCanvas({
                 >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? ""}</span>
+                  <TrackState row={row} />
                 </div>
               ),
             )}
@@ -1332,6 +1340,27 @@ function TimelineCanvas({
         <ClipList layout={layout} fps={fps} selected={selected} cues={cues} scene={selectedScene} />
       </div>
     </div>
+  );
+}
+
+/** Marks at the end of a track header: muted, hidden, or both; nothing for a track that plays and shows. */
+function TrackState({ row }: { row: TrackRow }) {
+  if (!row.muted && !row.hidden) return null;
+  return (
+    <span className="track-state" data-testid="track-state" data-muted={row.muted} data-hidden={row.hidden}>
+      {row.muted && (
+        <svg viewBox="0 0 16 16" role="img" aria-label={t.timeline.trackMuted}>
+          <title>{t.timeline.trackMuted}</title>
+          <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+      )}
+      {row.hidden && (
+        <svg viewBox="0 0 16 16" role="img" aria-label={t.timeline.trackHidden}>
+          <title>{t.timeline.trackHidden}</title>
+          <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM3 13L13 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
   );
 }
 

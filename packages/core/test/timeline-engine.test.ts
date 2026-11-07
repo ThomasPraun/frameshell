@@ -150,6 +150,31 @@ describe("track operations", () => {
     expect(renamed.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", name: "Camera", clips: [] });
   });
 
+  it("track.set mutes and hides a track, stores only true, and the inverse restores the track as it was", async () => {
+    const muted = await apply(base(), "track.set", { track: "t_v", muted: true, hidden: true });
+    expect(muted.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", muted: true, hidden: true, clips: [] });
+    expect(muted.changes).toMatchObject({ updated: ["t_v"] });
+    const undone = await apply(muted.timeline, "timeline.patch", muted.inverse.args);
+    expect(undone.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", clips: [] });
+    const shown = await apply(muted.timeline, "track.set", { track: "t_v", hidden: false });
+    expect(shown.timeline.tracks[0]).toEqual({ id: "t_v", kind: "video", muted: true, clips: [] });
+    const audio = await apply(base(), "track.set", { track: "t_a", muted: true });
+    expect(audio.timeline.tracks[1]).toMatchObject({ id: "t_a", muted: true });
+  });
+
+  it("track.set refuses to hide an audio track and to mute or hide a subtitle track", async () => {
+    const { timeline } = await apply(base(), "track.add", { kind: "subtitles", follows: "t_v" }, context({ newId: () => "t_sub" }));
+    expect((await rejection(apply(timeline, "track.set", { track: "t_a", hidden: true }))).message).toMatch(/audio tracks have no picture to hide/);
+    expect((await rejection(apply(timeline, "track.set", { track: "t_sub", hidden: true }))).message).toMatch(/subtitles tracks have no picture/);
+    expect((await rejection(apply(timeline, "track.set", { track: "t_sub", muted: true }))).message).toMatch(/subtitle tracks have no sound/);
+  });
+
+  it("an audio track with `hidden` is not a valid timeline file", () => {
+    const file = { ...base(), tracks: [{ id: "t_a", kind: "audio", hidden: true, clips: [] }] };
+    expect(parseTimeline(file)).toMatchObject({ ok: false, error: expect.stringMatching(/audio tracks have no picture to hide/) });
+    expect(parseTimeline({ ...file, tracks: [{ id: "t_v", kind: "video", muted: true, hidden: true, clips: [] }] })).toMatchObject({ ok: true });
+  });
+
   it("track.set moves a track in the stack, keeping the others' order; the inverse moves it back", async () => {
     const { timeline } = await apply(base(), "track.add", { kind: "video", name: "Logo" }, context({ newId: () => "t_logo" }));
     const lowered = await apply(timeline, "track.set", { track: "t_logo", index: 0 });

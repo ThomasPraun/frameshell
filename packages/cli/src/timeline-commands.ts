@@ -23,6 +23,9 @@ mutations print the new revision):
   track list                   Tracks in stacking order (first video track = bottom layer)
   track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n] [--preset p] [--position pos]
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
+           [--muted | --unmuted] [--hidden | --shown]
+                               --muted silences a video, audio or program track; --hidden leaves a video or
+                               program track's pictures out of export and preview (its sound still plays)
   track remove <track> [--force]
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
@@ -173,6 +176,8 @@ export const TIMELINE_OPTIONS = {
   gain: { type: "string" },
   muted: { type: "boolean" },
   unmuted: { type: "boolean" },
+  hidden: { type: "boolean" },
+  shown: { type: "boolean" },
   x: { type: "string" },
   y: { type: "string" },
   scale: { type: "string" },
@@ -243,7 +248,7 @@ const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
   "track add": ["name", "follows", "index", "preset", "position"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "muted", "unmuted", "hidden", "shown"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
   "clip move": ["start", "track"],
@@ -416,12 +421,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("name") !== undefined && values["clear-name"] === true) throw new UsageError("Pass --name or --clear-name, not both.");
       const index = num("index");
       if (index !== undefined && (!Number.isInteger(index) || index < 0)) throw new UsageError("--index: expected an integer >= 0.");
+      if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
+      if (values["hidden"] === true && values["shown"] === true) throw new UsageError("Pass --hidden or --shown, not both.");
       Object.assign(params, {
         track: args[0],
         name: values["clear-name"] === true ? null : str("name"),
         index,
         follows: str("follows"),
         style: style(),
+        muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+        hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
       });
       break;
     }
@@ -836,9 +845,14 @@ function formatTracks(result: { timeline: string; revision: number; tracks: Trac
     const name = track.name ? ` "${track.name}"` : "";
     const ends = track.end === null ? "end unknown" : `ends ${track.end} s`;
     const detail = track.kind === "subtitles" ? `follows ${track.follows}, ${styleText(track.style)}` : `${track.clips} clip(s), ${ends}`;
-    lines.push(`  ${track.id}  ${track.kind}${name}  ${detail}`);
+    lines.push(`  ${track.id}  ${track.kind}${name}  ${detail}${trackState(track)}`);
   }
   return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
+}
+
+/** `  muted`, `  hidden` or both, as a track line ends; empty for a track that plays and shows. */
+function trackState(track: { muted?: true | undefined; hidden?: true | undefined }): string {
+  return `${track.muted ? "  muted" : ""}${track.hidden ? "  hidden" : ""}`;
 }
 
 /** A subtitle track's look as rendered, e.g. `big-keyword at the bottom`; an unknown preset is named. */
@@ -860,7 +874,7 @@ function formatTimeline(view: TimelineView): string {
   if (view.tracks.length === 0) lines.push("  (no tracks: `frameshell track add video`)");
   for (const track of view.tracks) {
     const name = track.name ? ` "${track.name}"` : "";
-    lines.push(`${track.id}  ${track.kind}${name}${track.follows ? `  follows ${track.follows}` : ""}`);
+    lines.push(`${track.id}  ${track.kind}${name}${track.follows ? `  follows ${track.follows}` : ""}${trackState(track)}`);
     for (const clip of track.clips) {
       const c = clip as Record<string, unknown> & { id: string; type: string; start: number; end: number | null };
       const what = typeof c["asset"] === "string" ? c["asset"] : typeof c["source"] === "string" ? c["source"] : "";

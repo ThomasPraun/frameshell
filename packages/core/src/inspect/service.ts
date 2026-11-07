@@ -15,7 +15,7 @@ import {
   type SegmentedPoint,
   markGenerated,
 } from "@frameshell/protocol";
-import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementAt, programGroup, shotLayers } from "@frameshell/schema";
+import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementAt, programGroup, shotLayers, showsPicture } from "@frameshell/schema";
 import type { InstallProgress } from "../binaries/manager.js";
 import { writeContext } from "../context.js";
 import { encodeGrayPng } from "../segment/png.js";
@@ -202,6 +202,7 @@ export class InspectService {
   async #hits(root: string, timeline: Timeline, fps: number, frame: number, resolution: Size, pixel: { x: number; y: number }): Promise<Hit[]> {
     const hits: Hit[] = [];
     for (const track of timeline.tracks) {
+      if (!showsPicture(track)) continue;
       if (track.kind === "program") {
         const shot = track.clips.find((candidate) => Math.round(candidate.start * fps) <= frame && frame < endFrame(candidate, fps));
         const group = programGroup(timeline, track);

@@ -136,6 +136,10 @@ export interface TrackRow {
   followsLabel: string | null;
   /** Program tracks: id of the multicam group they show; null otherwise. */
   group: string | null;
+  /** The track plays no sound (`track.set` `muted`). */
+  muted: boolean;
+  /** The track shows no picture (`track.set` `hidden`); its sound still plays. */
+  hidden: boolean;
   /** Program tracks: the group's angles in group order (what the number keys pick); empty otherwise. */
   angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
@@ -242,6 +246,8 @@ export function layoutTimeline(
       name: track.name,
       followsLabel: track.follows ? (labels.get(track.follows) ?? track.follows) : null,
       group: track.kind === "program" ? (track.group ?? null) : null,
+      muted: track.muted === true,
+      hidden: track.hidden === true,
       angles,
       top,
       height,

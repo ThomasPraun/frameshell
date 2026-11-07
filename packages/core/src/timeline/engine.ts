@@ -285,11 +285,26 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
-    const { name, follows, style, index } = args;
-    if (name === undefined && follows === undefined && style === undefined && index === undefined) {
-      throw this.invalid("nothing to change.", { hint: "Pass `name` or `index`, or for subtitle tracks `follows` or `style`." });
+    const { name, follows, style, index, muted, hidden } = args;
+    if (name === undefined && follows === undefined && style === undefined && index === undefined && muted === undefined && hidden === undefined) {
+      throw this.invalid("nothing to change.", {
+        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows` or `style`.",
+      });
     }
     if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
+    if (track.kind === "subtitles" && muted !== undefined) throw this.invalid("subtitle tracks have no sound to mute.", { field: "muted" });
+    if ((track.kind === "subtitles" || track.kind === "audio") && hidden !== undefined) {
+      throw this.invalid(`${track.kind} tracks have no picture to hide; \`hidden\` is for video and program tracks.`, { field: "hidden" });
+    }
+    if (track.kind !== "subtitles") {
+      // Stored only while true: an unmuted, shown track looks as it did before the fields existed.
+      if (muted === true) track.muted = true;
+      else if (muted === false) delete track.muted;
+      if (track.kind !== "audio") {
+        if (hidden === true) track.hidden = true;
+        else if (hidden === false) delete track.hidden;
+      }
+    }
     if (name === null) delete track.name;
     else if (name !== undefined) track.name = name;
     if (index !== undefined) {

@@ -371,11 +371,21 @@ export const MulticamGroupSchema = z
     });
   });
 
+/** Track mute: silences every clip of the track, whatever its own `audio`. */
+const TrackMutedSchema = z
+  .boolean()
+  .optional()
+  .describe("True: the track plays no sound in export and preview, whatever its clips' (or angles' and mics') own `audio`. Default false.");
+
+const HIDDEN = "True: the track shows no picture in export and preview (the tracks below show through); its sound still plays. Default false.";
+
 /** Video or audio track. Clips are kept sorted by `start` and never overlap. */
 export const ClipTrackSchema = z.strictObject({
   id: Id.describe("Stable, core-generated (`t_…`)."),
   kind: z.enum(["video", "audio"]),
   name: z.string().optional(),
+  muted: TrackMutedSchema,
+  hidden: z.boolean().optional().describe(`Video tracks only. ${HIDDEN}`),
   clips: z.array(ClipSchema).describe("Sorted by `start`, never overlapping."),
 });
 
@@ -387,6 +397,8 @@ export const ProgramTrackSchema = z.strictObject({
   id: Id.describe("Stable, core-generated (`t_…`)."),
   kind: z.literal("program"),
   name: z.string().optional(),
+  muted: TrackMutedSchema,
+  hidden: z.boolean().optional().describe(HIDDEN),
   group: Id.describe("Id of the multicam group in the timeline's `groups`; one program track per group."),
   clips: z.array(ShotClipSchema).describe("Shots, sorted by `start`, never overlapping."),
 });
@@ -436,6 +448,7 @@ export const TimelineSchema = z
       claim(track.id, ["tracks", t, "id"]);
       if (track.kind !== "subtitles") track.clips.forEach((clip, c) => claim(clip.id, ["tracks", t, "clips", c, "id"]));
       if (track.kind !== "audio") return;
+      if (track.hidden !== undefined) ctx.addIssue({ code: "custom", message: "audio tracks have no picture to hide: `hidden` is for video and program tracks", path: ["tracks", t, "hidden"] });
       track.clips.forEach((clip, c) => {
         for (const prop of ["x", "y", "scale", "opacity"] as const) {
           if (clip.keys?.[prop]) ctx.addIssue({ code: "custom", message: `audio tracks take only \`gain\` keys, got \`${prop}\``, path: ["tracks", t, "clips", c, "keys", prop] });

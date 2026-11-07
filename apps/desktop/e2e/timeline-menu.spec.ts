@@ -127,7 +127,7 @@ const head = (track: string) => page.locator(`.track-head[data-track="${track}"]
 
 test("a track header's menu renames the track in place", async () => {
   await head("v2").click({ button: "right" });
-  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
+  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename track", "Mute track", "Hide track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
   await menu().getByRole("menuitem", { name: "Rename track" }).click();
   const input = page.getByTestId("track-rename-input");
   await expect(input).toBeFocused();
@@ -135,6 +135,25 @@ test("a track header's menu renames the track in place", async () => {
   await input.press("Enter");
   await expect.poll(() => savedTracks().find((track) => track.id === "v2")?.name).toBe("Logos");
   await expect(head("v2")).toContainText("Logos");
+});
+
+test("a track header's menu mutes and hides the track, the header marks it, and the menu turns it back", async () => {
+  await head("v1").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Mute track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v1")).toMatchObject({ muted: true });
+  await head("v1").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Hide track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v1")).toMatchObject({ muted: true, hidden: true });
+  await expect(head("v1").getByTestId("track-state")).toHaveAttribute("data-hidden", "true");
+  await expect(head("v1").getByRole("img", { name: /^Muted/ })).toBeVisible();
+
+  await head("v1").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Unmute track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v1")).not.toHaveProperty("muted");
+  await head("v1").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Show track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v1")).not.toHaveProperty("hidden");
+  await expect(head("v1").getByTestId("track-state")).toHaveCount(0);
 });
 
 test("empty lane space adds tracks, and a header deletes a track with its clips", async () => {

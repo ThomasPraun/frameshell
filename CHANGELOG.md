@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Shoot view: right-click a take in the scene's take list to Discard take (danger item) or Restore take
   (`shoot.discard`, then the cut is assembled again). Part of #414.
+- Mute and hide a track (#414): timeline tracks take optional `muted: true` (video, audio and program tracks: no
+  sound, whatever the clips' own audio) and `hidden: true` (video and program tracks: no picture, the tracks below
+  show through, the sound still plays). Set with `track.set` `muted`/`hidden` (protocol 69), CLI
+  `frameshell track set <track> --muted|--unmuted --hidden|--shown`, or Mute track / Hide track in the timeline's
+  track header menu; the header marks the state and a hidden track's clips are drawn faded. Export, preview,
+  `inspect.point` and the word checks read it through `withTrackMutes` and `showsPicture` (`composite.ts`), nested
+  timelines included. Existing files stay valid.
 
 ### Changed
 

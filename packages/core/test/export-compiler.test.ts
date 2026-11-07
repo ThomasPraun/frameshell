@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type Clip, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -219,6 +219,29 @@ describe("export compiler", () => {
     expect(overlayPlan.audio).toEqual(plan.audio);
     // The frame at 3.5 s has no overlay: same graph as without v2.
     expect(frame(3.5).args).toEqual(compileFrame({ timeline, fps: 30, sources, resolution, width: 1280, height: 720, at: 3.5, output: "/out/frame.png" }).args);
+  });
+
+  it("leaves a hidden track's pictures out and keeps its sound; the next shown video track is the base", () => {
+    const render = (tracks: Timeline["tracks"]) => compileRender({ timeline: { ...timeline, tracks }, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 });
+    const [v1, a1] = timeline.tracks as [ClipTrack, ClipTrack];
+    const logo = { id: "v2", kind: "video" as const, clips: [{ id: "c_logo2", type: "media" as const, asset: "assets/logo.png", start: 1, in: 0, out: 2 }] };
+    const upperHidden = render([v1, a1, { ...logo, hidden: true }]);
+    expect(upperHidden.segments).toEqual(render([v1, a1]).segments);
+    const baseHidden = render([{ ...v1, hidden: true }, a1, logo]);
+    expect(baseHidden.segments).toEqual(render([a1, logo]).segments);
+    expect(baseHidden.frames).toBe(240);
+    expect(baseHidden.audio).toEqual(plan.audio);
+  });
+
+  it("silences a muted track as if every clip on it were muted", () => {
+    const [v1, a1] = timeline.tracks as [ClipTrack, ClipTrack];
+    const render = (tracks: Timeline["tracks"]) => compileRender({ timeline: { ...timeline, tracks }, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 });
+    const music = render([v1, { ...a1, muted: true }]);
+    expect(music.audio.tracks).toHaveLength(1);
+    expect(music.audio).toEqual(render([v1, { ...a1, clips: a1.clips.map((clip) => ({ ...clip, audio: { ...clip.audio, muted: true } })) }]).audio);
+    expect(music.segments).toEqual(plan.segments);
+    const silent = render([{ ...v1, muted: true }, { ...a1, muted: true }]);
+    expect(silent.audio.tracks).toEqual([]);
   });
 
   it("places a transformed clip of the base track over black", () => {

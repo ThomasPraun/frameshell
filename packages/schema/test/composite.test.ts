@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Timeline, composePlacement, flattenTimeline, layerRect, placementOf } from "../src/index.js";
+import { type ClipTrack, type Timeline, composePlacement, flattenTimeline, layerRect, placementOf, showsPicture, withProgramSound, withTrackMutes } from "../src/index.js";
 
 describe("layer placement", () => {
   it("fills defaults: centered, fitted, opaque", () => {
@@ -83,6 +83,58 @@ describe("flattenTimeline", () => {
       { id: "c_nest/c_title", type: "media", asset: "assets/title.png", start: 5, in: 1, out: 2, transform: { x: 50, y: 0, scale: 0.25, opacity: 1 }, audio: { gain: -6 } },
     ]);
     expect(a1!.clips).toEqual([{ id: "c_nest/c_music", type: "media", asset: "assets/music.wav", start: 5, in: 2, out: 4, audio: { gain: -12 } }]);
+  });
+
+  it("mutes the clips of muted tracks, nested ones included, and keeps a hidden nested track hidden on its own track", () => {
+    const quiet = timeline("intro", [
+      { ...(intro.tracks[0] as ClipTrack) },
+      { ...(intro.tracks[1] as ClipTrack), hidden: true },
+      { ...(intro.tracks[2] as ClipTrack), muted: true },
+    ]);
+    const main = timeline("main", [
+      { id: "v1", kind: "video", clips: [{ id: "c_nest", type: "timeline", source: "timelines/intro.json", start: 0 }] },
+      { id: "a1", kind: "audio", muted: true, clips: [{ id: "c_vo", type: "media", asset: "assets/vo.wav", start: 0, in: 0, out: 2, audio: { gain: -3 } }] },
+    ]);
+    const flat = flattenTimeline(main, (source) => (source === "timelines/intro.json" ? quiet : null));
+    expect(flat.tracks.map((track) => [track.id, showsPicture(track)])).toEqual([
+      ["v1", true],
+      ["v1/h1", false],
+      ["v1/a1", false],
+      ["a1", false],
+    ]);
+    const clips = flat.tracks.map((track) => (track as { clips: { id: string; audio?: unknown }[] }).clips.map((clip) => [clip.id, clip.audio]));
+    expect(clips).toEqual([
+      [["c_nest/c_cam", undefined]],
+      [["c_nest/c_title", undefined]],
+      [["c_nest/c_music", { gain: -6, muted: true }]],
+      [["c_vo", { gain: -3, muted: true }]],
+    ]);
+    const hiddenHost = flattenTimeline(timeline("main", [{ ...(main.tracks[0] as ClipTrack), hidden: true }]), resolve);
+    expect(hiddenHost.tracks.map((track) => [track.id, showsPicture(track)])).toEqual([
+      ["v1", false],
+      ["v1/2", false],
+      ["v1/a1", false],
+    ]);
+  });
+
+  it("silences every sound of a muted program track's group, for export, preview and the word checks", () => {
+    const talk = timeline("main", [{ id: "t_p", kind: "program", muted: true, group: "g", clips: [{ id: "c_s", type: "shot", start: 0, in: 0, out: 1, shot: "solo", angles: ["ana"] }] }]);
+    talk.groups = [
+      {
+        id: "g",
+        angles: [
+          { id: "ana", name: "Ana", asset: "assets/ana.mp4", offset: 0, audio: { gain: -2 } },
+          { id: "ben", name: "Ben", asset: "assets/ben.mp4", offset: 0, mic: "lav" },
+        ],
+        mics: [{ id: "lav", name: "Lav", asset: "assets/lav.wav", offset: 0 }],
+      },
+    ];
+    const group = withTrackMutes(talk).groups![0]!;
+    expect(group.angles.map((angle) => angle.audio)).toEqual([{ gain: -2, muted: true }, undefined]);
+    expect(group.mics!.map((mic) => mic.audio)).toEqual([{ muted: true }]);
+    const heard = withProgramSound(talk).tracks.flatMap((track) => (track as { clips: { audio?: { muted?: boolean } }[] }).clips);
+    expect(heard.map((clip) => clip.audio?.muted)).toEqual([true, true]);
+    expect(withTrackMutes(intro)).toBe(intro);
   });
 
   it("honours an explicit duration and keeps sped-up media in step", () => {

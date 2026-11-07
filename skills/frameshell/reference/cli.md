@@ -39,7 +39,7 @@ Thin client of the daemon: it starts `frameshelld` when none runs, acts on the p
 | `frameshell timeline show` | Every track and clip: ids, `start`/`end` (timeline), `in`/`out` (source), speed. `--json` is compact on purpose. |
 | `frameshell track list` | Tracks bottom to top (first video track = bottom layer). |
 | `frameshell track add <video\|audio\|subtitles> [--name n] [--index n]` | New track, on top unless `--index`. Subtitle tracks need `--follows <track>`; `--preset big-keyword\|plain`, `--position top\|center\|bottom`. |
-| `frameshell track set <track> …` | Rename (`--name`, `--clear-name`); move in the stack (`--index n`, 0 = bottom layer); subtitle `--follows`, `--preset`, `--position`. |
+| `frameshell track set <track> …` | Rename (`--name`, `--clear-name`); move in the stack (`--index n`, 0 = bottom layer); silence a video, audio or program track (`--muted`, back with `--unmuted`) or leave a video or program track's pictures out while its sound plays (`--hidden`, back with `--shown`), in export and preview alike; subtitle `--follows`, `--preset`, `--position`. |
 | `frameshell track remove <track> [--force]` | `--force` when it holds clips. |
 | `frameshell clip add <track> [asset] …` | Place media (`--start`, `--in`, `--out` or `--duration`, `--speed`), or an adapter clip (`--type hyperframes --source <html> --duration s --props '<json>'`). Overlay placement `--x --y --scale --opacity`. `--ripple` inserts, moving later clips right on every video, audio and program track; `--ripple-track <track>` (repeatable) limits that to the clip's track plus the named ones. `--snap` snaps media `in`/`out` into pauses. |
 | `frameshell clip move <clip> [--start s] [--track t]` | Same length, new place; refused on overlap. |

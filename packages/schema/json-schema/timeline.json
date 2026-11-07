@@ -41,6 +41,14 @@
               "name": {
                 "type": "string"
               },
+              "muted": {
+                "description": "True: the track plays no sound in export and preview, whatever its clips' (or angles' and mics') own `audio`. Default false.",
+                "type": "boolean"
+              },
+              "hidden": {
+                "description": "Video tracks only. True: the track shows no picture in export and preview (the tracks below show through); its sound still plays. Default false.",
+                "type": "boolean"
+              },
               "clips": {
                 "type": "array",
                 "items": {
@@ -957,6 +965,14 @@
               },
               "name": {
                 "type": "string"
+              },
+              "muted": {
+                "description": "True: the track plays no sound in export and preview, whatever its clips' (or angles' and mics') own `audio`. Default false.",
+                "type": "boolean"
+              },
+              "hidden": {
+                "description": "True: the track shows no picture in export and preview (the tracks below show through); its sound still plays. Default false.",
+                "type": "boolean"
               },
               "group": {
                 "type": "string",

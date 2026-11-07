@@ -353,6 +353,27 @@ describe("subtitle tracks", () => {
   });
 });
 
+describe("track mute and hide", () => {
+  it("track set --muted/--hidden store the state, track list and timeline show print it, --unmuted/--shown clear it", () => {
+    writeFileSync(
+      join(project, "timelines", "states.json"),
+      JSON.stringify({ schemaVersion: 1, id: "states", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }, { id: "a1", kind: "audio", clips: [] }] }),
+    );
+    const states = () => JSON.parse(readFileSync(join(project, "timelines", "states.json"), "utf8"));
+    expect(frameshell(["track", "set", "v1", "--muted", "--hidden", "--timeline", "states"]).code).toBe(0);
+    expect(states().tracks[0]).toEqual({ id: "v1", kind: "video", muted: true, hidden: true, clips: [] });
+    expect(frameshell(["track", "list", "--timeline", "states"]).stdout).toContain("v1  video  0 clip(s), ends 0 s  muted  hidden");
+    expect(frameshell(["timeline", "show", "--timeline", "states"]).stdout).toContain("v1  video  muted  hidden");
+    expect(frameshell(["track", "set", "v1", "--unmuted", "--shown", "--timeline", "states"]).code).toBe(0);
+    expect(states().tracks[0]).toEqual({ id: "v1", kind: "video", clips: [] });
+    const audio = frameshell(["track", "set", "a1", "--hidden", "--timeline", "states"]);
+    expect(audio.code).toBe(1);
+    expect(audio.stderr).toMatch(/audio tracks have no picture to hide/);
+    expect(frameshell(["track", "set", "v1", "--muted", "--unmuted", "--timeline", "states"]).code).toBe(2);
+    expect(frameshell(["track", "set", "v1", "--hidden", "--shown", "--timeline", "states"]).code).toBe(2);
+  });
+});
+
 describe("transitions and keyframes", () => {
   it("transition set with only --at dissolves the edge, clip key animates, and bad flags exit 2", () => {
     const track = json<{ changes: { added: string[] } }>(["track", "add", "video", "--name", "Transitions"]).changes.added[0]!;
