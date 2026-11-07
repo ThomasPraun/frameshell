@@ -250,6 +250,8 @@ describe("on-screen spans from faces", () => {
       { start: 3.5, end: 4 },
       { start: 4, end: 5 },
     ]);
+    const hidden = { ...timeline, tracks: [{ ...timeline.tracks[0]!, hidden: true }] } as Timeline;
+    expect(faceSpans(hidden, faces)).toEqual([]);
   });
 
   it("joins personRanges onscreen with the warnings of anchors that name no face", async () => {

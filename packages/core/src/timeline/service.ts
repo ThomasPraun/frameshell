@@ -1248,6 +1248,8 @@ export class TimelineService {
         follows: track.kind === "subtitles" ? track.follows : null,
         ...(track.kind === "program" ? { group: track.group } : {}),
         ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
+        ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
+        ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
         clips,
       });
     }
@@ -1286,6 +1288,8 @@ export class TimelineService {
         follows: track.follows,
         ...(track.group !== undefined ? { group: track.group } : {}),
         ...(track.style ? { style: track.style } : {}),
+        ...(track.muted ? { muted: track.muted } : {}),
+        ...(track.hidden ? { hidden: track.hidden } : {}),
         clips: track.clips.length,
         end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
       })),

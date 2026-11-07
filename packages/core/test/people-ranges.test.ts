@@ -166,6 +166,11 @@ describe("multicam angles", () => {
     expect((await personRanges(ben, "onscreen", timeline, source)).spans).toEqual([{ start: 10, end: 30 }]);
   });
 
+  it("onscreen: a hidden program track shows nobody", async () => {
+    const hidden = { ...timeline, tracks: timeline.tracks.map((track) => (track.kind === "program" ? { ...track, hidden: true } : track)) } as Timeline;
+    expect((await personRanges(ana, "onscreen", hidden, source)).spans).toEqual([]);
+  });
+
   it("speaks: a mic's whole transcript is heard through the shots", async () => {
     const lav = person({ speakers: [{ transcript: "transcripts/lav.words.json" }] });
     const found = await personRanges(lav, "speaks", timeline, {

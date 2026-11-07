@@ -123,6 +123,18 @@ describe("multicam plan", () => {
     expect(frame.args.join(" ")).toContain("crop=");
   });
 
+  it("plays a hidden program track's sound with no picture, and a muted one's picture with no sound", () => {
+    const program = timeline.tracks[0] as Extract<Timeline["tracks"][number], { kind: "program" }>;
+    const render = (track: typeof program) => compileRender({ timeline: { ...timeline, tracks: [track] }, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 2 });
+    const hidden = render({ ...program, hidden: true });
+    expect(hidden.frames).toBe(plan.frames);
+    expect(hidden.audio).toEqual(plan.audio);
+    expect(hidden.segments.flatMap((segment) => segment.args)).not.toContain("/project/assets/ana.mp4");
+    const muted = render({ ...program, muted: true });
+    expect(muted.segments).toEqual(plan.segments);
+    expect(muted.audio.tracks).toEqual([]);
+  });
+
   it("stacks a program track by track order: footage on a later video track covers it", () => {
     const footage = { id: "c_logo", type: "media" as const, asset: "assets/ana.mp4", start: 0, in: 0, out: 1, transform: { scale: 0.5 } };
     const over: Timeline = { ...timeline, tracks: [timeline.tracks[0]!, { id: "v1", kind: "video", clips: [footage] }] };

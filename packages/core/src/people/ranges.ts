@@ -1,4 +1,4 @@
-import { type Clip, type MulticamGroup, type Person, type ProgramTrack, type ShotClip, type Timeline, type Transcript, withProgramSound, wordSpeaker } from "@frameshell/schema";
+import { type Clip, type MulticamGroup, type Person, type ProgramTrack, type ShotClip, type Timeline, type Transcript, showsPicture, withProgramSound, wordSpeaker } from "@frameshell/schema";
 import type { GroupTurns } from "../multicam/group-turns.js";
 
 /** Pauses shorter than this between two spans are bridged (the rule of `multicam.turns`). */
@@ -39,7 +39,7 @@ export interface PersonRanges {
  * When `person` speaks or is on screen on `timeline` (ADR 0020 decision 7):
  * the spans of every source below, merged ({@link mergeSpans}). `timeline`
  * must have its nested timelines flattened. Occlusion by upper tracks is not
- * subtracted. Links whose target is gone are skipped with a warning.
+ * subtracted; hidden tracks are never on screen. Links whose target is gone are skipped with a warning.
  *
  * - speaks: {@link speakerSpans} and {@link angleSpans}.
  * - onscreen: {@link angleSpans} and {@link faceSpans}.
@@ -124,7 +124,7 @@ export function speakerSpans(person: Person, timeline: Timeline, source: Pick<Ra
 export function faceSpans(timeline: Timeline, faces: ReadonlyMap<string, readonly Span[]>): Span[] {
   const spans: Span[] = [];
   for (const track of timeline.tracks) {
-    if (track.kind !== "video") continue;
+    if (track.kind !== "video" || !showsPicture(track)) continue;
     for (const clip of track.clips) {
       if (clip.type !== "media" || !("asset" in clip)) continue;
       const speed = clip.speed ?? 1;
@@ -175,6 +175,7 @@ export async function angleSpans(person: Person, kind: RangeKind, timeline: Time
       const track = timeline.tracks.find((candidate): candidate is ProgramTrack => candidate.kind === "program" && candidate.group === group.id);
       if (!track) continue;
       if (kind === "onscreen") {
+        if (!showsPicture(track)) continue;
         for (const { shot, start, length } of windows(track)) if (shot.angles.includes(link.angle)) spans.push({ start, end: start + length });
         continue;
       }

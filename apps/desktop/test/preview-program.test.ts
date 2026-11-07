@@ -209,6 +209,21 @@ describe("compileProgram", () => {
     expect(program.audio.map((span) => span.clip)).toEqual(["c1", "c2"]);
   });
 
+  it("leaves a hidden track's layer out but plays its sound, and plays no sound from a muted track, as export does", () => {
+    const program = compileProgram(
+      view([
+        { id: "v1", kind: "video", name: null, follows: null, hidden: true, clips: [clip("c1", 0, 0, 1)] },
+        { id: "a1", kind: "audio", name: null, follows: null, muted: true, clips: [{ ...clip("m1", 0, 0, 1), asset: "assets/music.wav" }] },
+        { id: "v2", kind: "video", name: null, follows: null, muted: true, clips: [clip("c2", 0, 5, 6)] },
+      ]),
+      assets(asset("assets/a.mp4"), asset("assets/music.wav")),
+    );
+    expect(program.layers.map((layer) => layer.map((span) => span.clip))).toEqual([["c2"]]);
+    expect(programAt(program, 0)).toMatchObject({ clip: "c2" });
+    expect(program.audio.map((span) => span.clip)).toEqual(["c1"]);
+    expect(program.frames).toBe(30);
+  });
+
   it("plays nested timelines flattened, as export does: their clips in the nested clip's slot and layers above", () => {
     const intro: TimelineView = {
       ...view([

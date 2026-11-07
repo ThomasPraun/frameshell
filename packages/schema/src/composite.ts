@@ -133,11 +133,17 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
  * sound ({@link programSound}), clips marked {@link isProgramSound} so they keep exact samples.
  *
+ * Track mutes are folded into the clips first ({@link withTrackMutes}), at
+ * every level. Hidden tracks stay `hidden`, and so do the tracks a hidden
+ * host track's nested clips add; a nested hidden video track goes onto its own
+ * hidden track `T/h1`, `T/h2`, … and a nested hidden program track keeps `hidden`.
+ *
  * A clip whose timeline `nested` cannot give, or that would nest a timeline
  * inside itself, stays as it is for the caller to report. The root is
  * assumed to be `timelines/<id>.json`.
  */
 export function flattenTimeline(timeline: Timeline, nested: NestedTimelines, fps?: number): Timeline {
+  timeline = withTrackMutes(timeline);
   const own = timeline.groups ?? [];
   const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`], fps);
   // Every group of the root stays, shown or not; nested ones only when shown.
@@ -185,8 +191,9 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
     const inners = new Map<Clip, { flat: Flat; duration: number }>();
     for (const clip of track.clips) {
       if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
-      const inner = nested(clip.source);
-      if (!inner) continue;
+      const found = nested(clip.source);
+      if (!found) continue;
+      const inner = withTrackMutes(found);
       const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source], fps);
       inners.set(clip, { flat, duration: durationOf(flat.tracks) });
     }
@@ -194,9 +201,10 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
     const own: Clip[] = [];
     /** Extra tracks by id, in first-seen order: layers `T/2`…, program tracks `T/p1`… and sound `T/a1`…. */
     const extra = new Map<string, ClipTrack | ProgramTrack>();
-    const extraTrack = (id: string, kind: ClipTrack["kind"]) => {
+    const hiddenHost = track.kind === "video" && track.hidden === true ? { hidden: true } : {};
+    const extraTrack = (id: string, kind: ClipTrack["kind"], hidden = false) => {
       let found = extra.get(id);
-      if (!found) extra.set(id, (found = { id, kind, clips: [] }));
+      if (!found) extra.set(id, (found = { id, kind, ...(kind === "video" && hidden ? { hidden: true } : hiddenHost), clips: [] }));
       return found as ClipTrack;
     };
     // Per host track, not per nested clip: each nested clip has its own renamed group, so its own program track.
@@ -212,6 +220,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       const to = clip.duration !== undefined ? from + clip.duration : duration;
       let videoIndex = 0;
       let audioIndex = 0;
+      let hiddenIndex = 0;
       let ownTaken = false;
       // A program track listed before the first video track keeps its place under the later ones.
       let programFirst = false;
@@ -236,14 +245,17 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
           const mics = group.mics?.map(withClipAudio);
           const renamed: MulticamGroup = { ...group, id: `${clip.id}/${group.id}`, angles, ...(mics ? { mics } : {}) };
           groups.push(renamed);
-          if (videoIndex === 0) programFirst = true;
+          if (videoIndex === 0 && child.hidden !== true) programFirst = true;
           const id = `${track.id}/p${++programIndex}`;
           const shots = child.clips.flatMap((shot) => windowShot(shot, from, to, clip) ?? []);
-          extra.set(id, { id, kind: "program", ...(child.name ? { name: child.name } : {}), group: renamed.id, clips: shots });
+          const hidden = child.hidden === true ? { hidden: true } : hiddenHost;
+          extra.set(id, { id, kind: "program", ...(child.name ? { name: child.name } : {}), ...hidden, group: renamed.id, clips: shots });
           continue;
         }
         let target: Clip[];
-        if (track.kind === "video" && child.kind === "video") {
+        if (track.kind === "video" && child.kind === "video" && child.hidden === true) {
+          target = extraTrack(`${track.id}/h${++hiddenIndex}`, "video", true).clips;
+        } else if (track.kind === "video" && child.kind === "video") {
           if (videoIndex === 0 && programFirst) videoIndex = 1;
           videoIndex++;
           target = videoIndex === 1 ? own : extraTrack(`${track.id}/${videoIndex}`, "video").clips;
@@ -817,11 +829,41 @@ export function programGroup(timeline: Pick<Timeline, "groups">, track: ProgramT
 }
 
 /**
+ * `timeline` with each muted track's mute on what makes its sound: every clip
+ * of a muted video or audio track, and for a muted program track every sound of
+ * its group ({@link groupSounds}: angles without `mic`, then mics). Clips keep
+ * their gain, so unmuting the track restores them. Unchanged when no track is muted.
+ */
+export function withTrackMutes(timeline: Timeline): Timeline {
+  const muted = (track: Track) => track.kind !== "subtitles" && track.muted === true;
+  if (!timeline.tracks.some(muted)) return timeline;
+  const silence = <T extends { audio?: ClipAudio | undefined }>(item: T): T => ({ ...item, audio: { ...item.audio, muted: true } });
+  const silent = new Set(timeline.tracks.flatMap((track) => (track.kind === "program" && track.muted === true ? [track.group] : [])));
+  const tracks = timeline.tracks.map((track): Track => {
+    if (track.kind === "subtitles" || track.kind === "program" || !muted(track)) return track;
+    return { ...track, clips: track.clips.map(silence) };
+  });
+  const groups = timeline.groups?.map((group): MulticamGroup => {
+    if (!silent.has(group.id)) return group;
+    const angles = group.angles.map((angle) => (angle.mic === undefined ? silence(angle) : angle));
+    return { ...group, angles, ...(group.mics ? { mics: group.mics.map(silence) } : {}) };
+  });
+  return { ...timeline, tracks, ...(groups ? { groups } : {}) };
+}
+
+/** True when `track` shows pictures: a video or program track that is not `hidden`. */
+export function showsPicture(track: Track): boolean {
+  return (track.kind === "video" || track.kind === "program") && track.hidden !== true;
+}
+
+/**
  * `timeline` with each program track replaced, in its place, by its
  * {@link programSound} tracks, for code that only listens (word checks,
- * audio pauses). A program track whose group is missing goes silent.
+ * audio pauses), track mutes folded in ({@link withTrackMutes}). A program
+ * track whose group is missing goes silent.
  */
 export function withProgramSound(timeline: Timeline): Timeline {
+  timeline = withTrackMutes(timeline);
   if (!timeline.tracks.some((track) => track.kind === "program")) return timeline;
   const tracks = timeline.tracks.flatMap((track): Track[] => {
     if (track.kind !== "program") return [track];

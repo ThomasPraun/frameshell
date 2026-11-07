@@ -153,6 +153,11 @@ export const operationArgs = {
       .optional()
       .describe("Subtitle tracks only: id of the video or audio track whose clips' transcript words it shows."),
     style: SubtitleStyleArgSchema.optional().describe("Subtitle tracks only: the fields given change, the others keep their value."),
+    muted: z.boolean().optional().describe("Video, audio and program tracks: true silences the whole track in export and preview; false plays it again."),
+    hidden: z
+      .boolean()
+      .optional()
+      .describe("Video and program tracks: true leaves the track's pictures out of export and preview (its sound still plays); false shows them again."),
     index: z
       .int()
       .nonnegative()
@@ -814,6 +819,12 @@ const TrackKindSchema = z
 /** Group id of a program track in track views. */
 const ProgramGroupSchema = z.string().optional().describe("Program tracks: id of the multicam group in `groups`; absent for other tracks.");
 
+/** Track mute in track views, as stored. */
+const TrackMutedViewSchema = z.literal(true).optional().describe("True: the track plays no sound (`track.set` `muted`); absent otherwise.");
+
+/** Track hide in track views, as stored. */
+const TrackHiddenViewSchema = z.literal(true).optional().describe("True: the track shows no picture, its sound still plays (`track.set` `hidden`); absent otherwise.");
+
 /** Compact track summary of `track.list`. */
 export const TrackSummarySchema = z.object({
   id: z.string(),
@@ -822,6 +833,8 @@ export const TrackSummarySchema = z.object({
   follows: z.string().nullable().describe("Subtitle tracks: followed track id; null otherwise."),
   group: ProgramGroupSchema,
   style: StoredStyleSchema,
+  muted: TrackMutedViewSchema,
+  hidden: TrackHiddenViewSchema,
   clips: z.int().describe("Number of clips (shots on a program track); 0 for subtitle tracks."),
   end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
@@ -841,6 +854,8 @@ export const TimelineViewSchema = z.object({
       follows: z.string().nullable(),
       group: ProgramGroupSchema,
       style: StoredStyleSchema,
+      muted: TrackMutedViewSchema,
+      hidden: TrackHiddenViewSchema,
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),

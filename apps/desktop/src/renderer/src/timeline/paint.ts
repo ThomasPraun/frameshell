@@ -196,6 +196,8 @@ const RANGE_ALPHA = 0.12;
 const RANGE_BAR = 3;
 /** A dragged clip stays visible in place, faded, until the daemon applies the move. */
 const DRAGGED_ALPHA = 0.35;
+/** Clips of a hidden track are drawn faded: they play their sound but show no picture. */
+const HIDDEN_TRACK_ALPHA = 0.5;
 /** Stand-in length of a diff place whose end is unknown, s (as `layout.ts` does for clips). */
 const DIFF_UNKNOWN_LENGTH_S = 2;
 /** Half the width of a key diamond, px. */
@@ -245,11 +247,12 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
       clipsDrawn += paintSubtitleLane(ctx, input, row, top, t0, t1);
       return;
     }
+    const rowAlpha = row.hidden ? HIDDEN_TRACK_ALPHA : 1;
     for (const clip of visibleClips(row.clips, t0, t1)) {
       const dragged = input.drag?.clip === clip.id || !!input.drag?.others?.some((other) => other.clip === clip.id);
-      if (dragged) ctx.globalAlpha = DRAGGED_ALPHA;
+      ctx.globalAlpha = rowAlpha * (dragged ? DRAGGED_ALPHA : 1);
       if (paintClip(ctx, input, row, clip, top, colors)) mediaDrawn++;
-      if (dragged) ctx.globalAlpha = 1;
+      ctx.globalAlpha = 1;
       clipsDrawn++;
     }
     paintTransitions(ctx, input, row, top, t0, t1);
@@ -395,7 +398,7 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   ctx.clip();
   let media = false;
   if (clip.asset && row.kind === "video") media = paintThumbnails(ctx, input, clip, x0, left, right, y, h);
-  if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted ? theme.textFaint : kind.edge);
+  if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted || row.muted ? theme.textFaint : kind.edge);
   if (clip.kind === "generated" || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem ? colors.dangerFill : kind.hatch);
   ctx.restore();
 

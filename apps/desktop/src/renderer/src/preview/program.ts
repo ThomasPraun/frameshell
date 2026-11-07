@@ -22,6 +22,7 @@ import {
   shotGroupTime,
   shotLayers,
   shotSound,
+  showsPicture,
   soundSamples,
   staticGain,
 } from "@frameshell/schema/composite";
@@ -240,9 +241,9 @@ export interface AudioSpan {
 }
 
 /**
- * The preview's program: every video track as a layer, composited bottom
- * first with each clip's placement, and the sound of every unmuted media
- * clip on every track, mixed. A program track takes one layer per angle a
+ * The preview's program: every video track not `hidden` as a layer, composited
+ * bottom first with each clip's placement, and the sound of every unmuted media
+ * clip on every unmuted track, mixed. A program track takes one layer per angle a
  * shot shows at most (one decoder each), its shots laid out by `shotLayers`,
  * and plays every angle's sound under every shot. Nested timelines are
  * flattened first. Timing and placement follow export exactly: clip edges
@@ -300,9 +301,9 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       const shots = placeShots(track, frame);
       for (const { end } of shots) frames = Math.max(frames, end);
       const group = programGroup(flat, track);
-      if (!group || moved.has(group.id)) {
+      if (showsPicture(track) && (!group || moved.has(group.id))) {
         layers.push(shots.map(({ shot, start, end }) => ({ kind: "placeholder", clip: shot.id, start, end, reason: group ? "multicam" : "unavailable", type: shot.type })));
-      } else {
+      } else if (showsPicture(track) && group) {
         layers.push(...angleSlots(shots, group, assets, fps, resolution));
       }
       if (group) audio.push(...shotAudio(shots, group, assets, rate));
@@ -329,7 +330,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       return own?.mode === "dissolve" ? own.dissolve : 0;
     };
 
-    if (track.kind === "video") {
+    if (track.kind === "video" && showsPicture(track)) {
       const pictures = kept.map(({ clip, start, end }) => pictureOf(clip, "asset" in clip ? assets.get(clip.asset) : undefined, start, end, fps, options.renders));
       layers.push(...pictureLayers(kept, pictures, edges, context, layers.length === 0 ? "bottom" : "upper"));
     }
@@ -527,8 +528,9 @@ function asTimeline(view: TimelineView, root: boolean): Timeline {
       const { end: _end, ...stored } = clip;
       return stored as unknown as Clip;
     });
-    if (track.kind === "program") return { id: track.id, kind: "program", group: track.group ?? "", clips: clips as unknown as ProgramTrack["clips"] };
-    return { id: track.id, kind: track.kind, clips };
+    const state = { ...(track.muted ? { muted: true } : {}), ...(track.hidden ? { hidden: true } : {}) };
+    if (track.kind === "program") return { id: track.id, kind: "program", ...state, group: track.group ?? "", clips: clips as unknown as ProgramTrack["clips"] };
+    return { id: track.id, kind: track.kind, ...state, clips };
   });
   return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks, ...(view.groups ? { groups: view.groups } : {}) };
 }

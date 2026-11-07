@@ -29,9 +29,11 @@ import {
   programGroup,
   programSound,
   shotLayers,
+  showsPicture,
   soundSamples,
   staticGain,
   subtitleTracks,
+  withTrackMutes,
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
@@ -518,16 +520,20 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * Place the timeline's clips on the frame grid, resolve subtitle cues, and
  * reject what export cannot render. A generated clip plays its cached render
  * like footage: from its `in` (render time = composition time), for its
- * `duration`, transformed and stacked by its track like any clip.
+ * `duration`, transformed and stacked by its track like any clip. Muted
+ * tracks are silent; hidden tracks add no picture layer but still count
+ * for the length and play their sound.
  */
 function layoutTimeline(
-  timeline: Timeline,
+  stored: Timeline,
   fps: number,
   sources: ReadonlyMap<string, ExportSource>,
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
 ): Layout {
+  // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
+  const timeline = withTrackMutes(stored);
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
   /** Picture layers in track order (SPEC §5.3: track order is stacking order). */
@@ -606,15 +612,19 @@ function layoutTimeline(
           track: track.id,
         });
       }
-      const layers = placeShots(track.clips, group, { grid, fps, sources, output, pictureless, edges: shotEdges });
-      for (const edge of shotEdges) frames = Math.max(frames, edge);
-      pictures.push({ program: true, placed: layers });
+      if (showsPicture(track)) {
+        const layers = placeShots(track.clips, group, { grid, fps, sources, output, pictureless, edges: shotEdges });
+        for (const edge of shotEdges) frames = Math.max(frames, edge);
+        pictures.push({ program: true, placed: layers });
+      } else {
+        for (const shot of track.clips) frames = Math.max(frames, grid.frame(shot.start) + 1, grid.frame(shot.start + (shot.out - shot.in)));
+      }
       // Every angle's sound plays under every shot, whatever the shot shows.
       for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound).map((placed) => ({ ...placed, exact: true as const }))));
       continue;
     }
     const placed = placeTrack(track);
-    if (track.kind === "video") pictures.push({ program: false, placed });
+    if (showsPicture(track)) pictures.push({ program: false, placed });
     audio.push(audible(placed));
   }
   if (frames === 0) {

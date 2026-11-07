@@ -228,6 +228,8 @@ export {
   isProgramSound,
   programGroup,
   withProgramSound,
+  withTrackMutes,
+  showsPicture,
 } from "./composite.js";
 export {
   SUBTITLE_FONT,
