@@ -6,6 +6,7 @@ import { live, useLiveStatus } from "../shoot/live.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
 import { teleprompter } from "../teleprompter/store.js";
 import { ShootTakes } from "./ShootTakes.js";
+import { TranscriptionNotice } from "./TranscriptionNotice.js";
 
 /**
  * Shoot view (ADR 0024, Spanish UI "Rodaje"): pick a camera, a microphone (the one required source), a screen or
@@ -35,6 +36,7 @@ export function ShootPanel() {
   return (
     <div className="shoot-panel" data-testid="shoot-panel" data-phase={state.phase}>
       <p className="shoot-hint">{t.shoot.intro}</p>
+      <TranscriptionNotice />
       {liveStatus.state === "unavailable" && (
         <p className="shoot-note" role="status" data-testid="shoot-live-unavailable">
           {t.shoot.liveUnavailable(liveStatus.detail ?? "")}

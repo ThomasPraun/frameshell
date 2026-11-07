@@ -635,6 +635,13 @@ export interface FrameshellApi {
     check(script: string): Promise<MethodResult<"script.check">>;
     /** `shoot.status` of a shoot script. Rejects with the daemon's message. */
     status(script: string): Promise<MethodResult<"shoot.status">>;
+    /** Bytes still to download before the default transcription provider transcribes a first take: its tool and model. */
+    transcriptionDownload(): Promise<number>;
+    /**
+     * Install the default transcription provider (`@frameshell/whisper-cpp`) into the window's project (#411); the
+     * daemon then transcribes the takes that failed without it. Rejects with the daemon's message.
+     */
+    installTranscription(): Promise<void>;
     /** `shoot.accept`: `deviations` of `take` (all when omitted), or take them back with `undo`. */
     accept(script: string, take: string, options?: { deviations?: string[]; undo?: boolean }): Promise<MethodResult<"shoot.accept">>;
     /** `shoot.choose`: the take of `scene` that goes into the cut; null goes back to the newest. */
@@ -933,6 +940,8 @@ export const Channel = {
   shootCut: "shoot:cut",
   shootCheck: "shoot:check",
   shootStatus: "shoot:status",
+  shootTranscriptionDownload: "shoot:transcription-download",
+  shootInstallTranscription: "shoot:install-transcription",
   shootAccept: "shoot:accept",
   shootChoose: "shoot:choose",
   shootAssemble: "shoot:assemble",

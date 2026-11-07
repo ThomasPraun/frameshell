@@ -47,6 +47,8 @@ export interface ShootServiceOptions {
   analyzing?: (root: string, take: string) => boolean;
   /** Why the last transcription of a take recorded in the app failed; null when none failed. */
   failure?: (root: string, take: string) => string | null;
+  /** Whether the project's transcription provider loads; ready when not given. */
+  transcription?: (root: string) => Promise<ShootStatusResult["transcription"]>;
 }
 
 /** Where a take's heard words come from: a transcript, or a recorded take's own words. */
@@ -90,6 +92,7 @@ export class ShootService {
   readonly #timeline: NonNullable<ShootServiceOptions["timeline"]>;
   readonly #analyzing: NonNullable<ShootServiceOptions["analyzing"]>;
   readonly #failure: NonNullable<ShootServiceOptions["failure"]>;
+  readonly #transcription: NonNullable<ShootServiceOptions["transcription"]>;
   /** Last change of each project in flight, by canonical root: the next one waits for it. */
   readonly #tails = new Map<string, Promise<unknown>>();
 
@@ -99,6 +102,7 @@ export class ShootService {
     this.#timeline = options.timeline ?? (async () => null);
     this.#analyzing = options.analyzing ?? (() => false);
     this.#failure = options.failure ?? (() => null);
+    this.#transcription = options.transcription ?? (async () => ({ provider: "whisper-cpp", ready: true, problem: null }));
   }
 
   /** `shoot.status`. Throws `ScriptNotFound`, `OutsideProject` or `InvalidProjectFile`. */
@@ -172,7 +176,8 @@ export class ShootService {
         }),
       ),
     );
-    return { script: loaded.script, file: loaded.fileRel, timeline: timelineId, scenes, takes, next, cues, warnings };
+    const transcription = await this.#transcription(root);
+    return { script: loaded.script, file: loaded.fileRel, timeline: timelineId, scenes, takes, next, cues, warnings, transcription };
   }
 
   /** `shoot.add`. Throws `ScriptNotFound`, `AssetNotFound`, `OutsideProject`, `InvalidOperation`, `InvalidProjectFile`. */

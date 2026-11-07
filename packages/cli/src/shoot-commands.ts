@@ -119,6 +119,7 @@ export async function executeShoot(conn: DaemonConnection, inv: ShootInvocation,
 
 function formatStatus(status: ShootStatusResult): string {
   const lines = [`${status.script} · ${status.file} · timeline ${status.timeline} · next: ${status.next ? `#${status.next}` : "nothing, every scene is done"}`];
+  if (!status.transcription.ready) lines.push(`Takes cannot be transcribed: ${status.transcription.problem}`);
   for (const scene of status.scenes) {
     const chosen = scene.chosen ? `take ${scene.chosen}${scene.picked ? " (picked)" : ""}` : "no take";
     lines.push(`  #${scene.slug}  ${scene.state}  ${chosen}${scene.pending > 0 ? `  ${scene.pending} pending` : ""}`);

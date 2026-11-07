@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 67;
+export const PROTOCOL_VERSION = 68;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1573,6 +1573,19 @@ export const methods = {
         )
         .describe("Every cue of the script in order, for placing visuals (`[VISUAL: …]` becomes a clip or overlay at `time`)."),
       warnings: z.array(z.string()).describe("`script check` warnings of the script, and takes that point at a missing asset or scene."),
+      transcription: z
+        .object({
+          provider: z.string().describe("`transcription.provider` of the project, else `whisper-cpp`."),
+          ready: z.boolean().describe("True when that provider loads here, so takes get their words."),
+          problem: z
+            .string()
+            .nullable()
+            .describe(
+              "Why it does not (not installed, plugin failed to load, project not trusted) and how to fix it; null when ready. " +
+                "Takes cut meanwhile fail and are transcribed again once a plugin is installed.",
+            ),
+        })
+        .describe("Whether takes can be transcribed in this project; check it before recording."),
     }),
   },
   "shoot.add": {

@@ -112,6 +112,11 @@ export function createTakes() {
       };
     },
 
+    /** Read the status of the current script again, e.g. after the project's plugins changed. */
+    reload(): Promise<void> {
+      return refresh();
+    },
+
     async selectScript(script: string): Promise<void> {
       set({ script, check: null, status: null, picked: null });
       await refresh();
