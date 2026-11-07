@@ -3930,6 +3930,28 @@ button.track-head:focus-visible {
   font-size: 11px;
 }
 
+.shoot-take-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.shoot-take-row {
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.shoot-take-row:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.15));
+}
+
+.shoot-take-row.is-discarded {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
 .shoot-error {
   margin: 0;
   color: var(--danger);

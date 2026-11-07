@@ -170,6 +170,17 @@ export function createTakes() {
         .catch((error: unknown) => set({ error: message(error) }));
     },
 
+    /** Drop `take` from the cut, or bring it back with `restore`; the cut is assembled again. */
+    async discard(take: string, restore: boolean): Promise<void> {
+      if (!state.script) return;
+      try {
+        await api().discard(state.script, take, restore);
+        await api().assemble(state.script);
+      } catch (error) {
+        set({ error: message(error) });
+      }
+    },
+
     /** Pick the take of `scene` that goes into the cut; null goes back to the newest. */
     async choose(scene: string, take: string | null): Promise<void> {
       if (!state.script) return;

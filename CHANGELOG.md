@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shoot view: right-click a take in the scene's take list to Discard take (danger item) or Restore take
+  (`shoot.discard`, then the cut is assembled again). Part of #414.
+
 ### Changed
 
 - One `mediaSrc` helper (`preview/media-src.ts`, worker-safe) builds media URLs for the engine worker, the Angles

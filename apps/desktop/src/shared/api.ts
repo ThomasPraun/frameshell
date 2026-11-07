@@ -646,6 +646,8 @@ export interface FrameshellApi {
     accept(script: string, take: string, options?: { deviations?: string[]; undo?: boolean }): Promise<MethodResult<"shoot.accept">>;
     /** `shoot.choose`: the take of `scene` that goes into the cut; null goes back to the newest. */
     choose(script: string, scene: string, take: string | null): Promise<MethodResult<"shoot.choose">>;
+    /** `shoot.discard`: drop `take` from the cut, or bring it back with `restore`. */
+    discard(script: string, take: string, restore: boolean): Promise<MethodResult<"shoot.discard">>;
     /** `shoot.assemble` of every scene. */
     assemble(script: string): Promise<MethodResult<"shoot.assemble">>;
     /** Called on every `shoot.changed` of the project, or with null after a daemon reconnect. Returns an unsubscribe function. */
@@ -944,6 +946,7 @@ export const Channel = {
   shootInstallTranscription: "shoot:install-transcription",
   shootAccept: "shoot:accept",
   shootChoose: "shoot:choose",
+  shootDiscard: "shoot:discard",
   shootAssemble: "shoot:assemble",
   shootChanged: "shoot:changed",
   shootLiveWarm: "shoot:live-warm",
