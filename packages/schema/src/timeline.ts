@@ -39,8 +39,11 @@ export const SHOT_LOW_CONFIDENCE = 0.5;
 const Seconds = z.number().nonnegative();
 const Id = z.string().min(1);
 
-/** Slack for comparing stored times, which carry 3 decimals. */
-const TIME_EPSILON = 0.0005;
+/**
+ * Slack for a shot's end (`start + out - in`): start, in and out are each rounded to 3 decimals, so the sum can sit
+ * a millisecond above the frame the next shot starts on. Far below one frame at any rate.
+ */
+const SHOT_END_EPSILON = 0.002;
 
 /** Overlay placement. Omitted fields keep their default. */
 export const TransformSchema = z
@@ -493,7 +496,7 @@ function checkProgramTrack(
     const previous = order[i - 1]!.shot;
     const { shot, c } = order[i]!;
     const end = previous.start + (previous.out - previous.in);
-    if (shot.start < end - TIME_EPSILON) {
+    if (shot.start < end - SHOT_END_EPSILON) {
       ctx.addIssue({
         code: "custom",
         message: `overlaps ${previous.id} (${previous.start}–${Math.round(end * 1000) / 1000}); shots on a program track cannot overlap`,

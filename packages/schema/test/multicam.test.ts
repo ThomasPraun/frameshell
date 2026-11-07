@@ -85,6 +85,11 @@ describe("multicam timeline model", () => {
     expect(errorOf(multicam([program([shot("c_1", 0, 0, 4, "solo", ["ana"]), shot("c_2", 4, 8, 9, "solo", ["ben"])])]))).toBeNull();
   });
 
+  it("lets a shot start on the frame its neighbour ends on, when 3-decimal rounding puts them a millisecond apart", () => {
+    // 30 fps: in 1 frame (0.033) and out 65 frames (2.167) last 64 frames (2.133 s), but out - in is 2.134.
+    expect(errorOf(multicam([program([shot("c_1", 0, 0.033, 2.167, "solo", ["ana"]), shot("c_2", 2.133, 8, 9, "solo", ["ben"])])]))).toBeNull();
+  });
+
   it("binds a program track to exactly one existing group, and a group to one program track", () => {
     expect(errorOf(multicam([program([], { group: "g_gone" })]))).toBe(
       'tracks.0.group: must name a multicam group in `groups`, got "g_gone" (groups: g_talk)',
