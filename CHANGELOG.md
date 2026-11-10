@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Timeline markers (#458, slice 1 of ADR 0029): named points on the timeline clock, `markers: [{ id, at, label,
+  color? }]` in the timeline file, labels unique ignoring case. Operations `marker.add`, `marker.set`,
+  `marker.remove` (journaled, revertible, idempotent) and `marker.list`; `timeline.show` lists them; CLI
+  `frameshell marker add --at s --label l [--color c] | set | remove | list`, MCP tools from the registry
+  (protocol 71). A `cut` of every track moves markers after it with the material and removes those inside the
+  range (with a warning); ripple trims and inserts move them too. Review mode counts marker ids as touched. In the
+  app, markers show on a lane under the ruler, the ruler's right-click menu adds, renames and deletes them, and
+  dragged clip edges snap to them. A timeline with `markers` is refused by older Frameshell versions.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

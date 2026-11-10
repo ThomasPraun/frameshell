@@ -16,6 +16,7 @@ Cutting a recording by its words: remove silences and retakes, add subtitles, ex
    frameshell tx commit
    ```
    Each edge **snaps** into the nearest audio pause within ±0.5 s (`editing.snapWindow` in `frameshell.json`, or `--snap-window 0.5-10`) so no word is clipped. Read `snaps` in the output: `clean: false` means no pause was in reach and speech may be clipped there; check that range, widen `--snap-window`, or move the edge. `--no-snap` cuts at exact times; keep it for material with no speech.
+   A cut of every track carries markers along (`marker list`): those after it move with the material, those inside the range are removed and `warnings` names them; `revert` brings them back. A cut of only some tracks (`cut <track>…`) leaves markers where they are.
    A cut that trims or splits a generated clip (`hyperframes`, `remotion`…) still applies and adds a `warnings` entry naming the clip id, type and `scriptRef`. Edit the audio first, then build visuals; after a late cut, re-place those clips against their script scene.
 6. **Look.** `frameshell timeline show` to confirm the clip count and duration; `frame --at <s>` at a few cut points when the picture matters (a jump in framing, a slide change).
 7. **Export.** `frameshell render --preset youtube-1440p --json` (presets: `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`; default `export.defaultPreset`). The command waits for the render job and prints the output path (`exports/<timeline>-<preset>.mp4` unless `--out`).

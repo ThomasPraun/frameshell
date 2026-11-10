@@ -18,6 +18,10 @@ frameshell transition remove --at 12.5
 - A later `clip move`, `cut` or `clip trim` that leaves a dissolve without a clip before it adds a warning (it plays as a fade in until the clips butt again).
 - `clip split` gives the left part the dissolve and fade in, the right part the fade out; the new cut has none.
 
+## Landing on a moment: markers
+
+A marker names a timeline second the person or you care about: `frameshell marker add --at 12.5 --label hook`. Read them with `frameshell marker list` and use their `at` for a transition or a key (`transition set --at 12.5`, `clip key … --at 12.5`). The person sees them on the lane under the ruler, and clips dragged in the app snap to them.
+
 ## Keyframes
 
 ```sh

@@ -104,6 +104,10 @@ _Avoid_: dip to black (that is two fades), fade transition
 Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip, never an error.
 _Avoid_: tail, overlap, pre-roll
 
+**Marker**:
+A named point on a timeline's clock (`markers` in the timeline file: id, `at`, label, optional colour, ADR 0029): a hook, a beat to land on, a note. It moves with the material when a `cut` of every track ripples it and is deleted when the cut removes the moment it names. Paints and plays nothing.
+_Avoid_: cue (a shoot script's `[LABEL: …]`), keyframe, chapter
+
 **Keyframe**:
 A value of one clip property (`x`, `y`, `scale`, `opacity`, `gain`) at a time on the clip's own clock (the seconds `in` counts), stored in the clip's `keys`; between keyframes the value follows the ease, outside them it holds. "Key" for short.
 _Avoid_: automation point, marker

@@ -1522,7 +1522,7 @@ export class TimelineService {
         await this.#reject(root, id, text, base, error.code === ErrorCode.StaleRevision ? "stale" : "invalid", error.message);
         return structuredClone(base);
       }
-      // Same groups, tracks and clips (formatting, key order): nothing to review.
+      // Same groups, tracks, clips and markers (formatting, key order): nothing to review.
       if (!planned) return (await this.#acceptEdit(root, id, text, base, fps)).timeline;
       await this.#proposeEdit(root, id, book, text, base, planned);
       return structuredClone(base);
@@ -1673,7 +1673,7 @@ export class TimelineService {
     const incoming = checkRevision(id, path, parseIncoming(path, text), base);
     const patch = diffTimelines(base, incoming);
     if (isEmptyPatch(patch)) {
-      // Same groups, tracks and clips (formatting, key order): nothing to journal.
+      // Same groups, tracks, clips and markers (formatting, key order): nothing to journal.
       await writeTextAtomic(path, text);
       this.#known.set(await this.#key(root, id), { text, timeline: base });
       return { timeline: structuredClone(base), result: null };
