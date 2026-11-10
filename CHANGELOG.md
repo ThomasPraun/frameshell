@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cover image and a finished frame 0 (#476, part of #451): `frameshell cover [--text word] [--at s] [--color #rrggbb]`
+  (daemon `cover`, MCP `cover`, protocol 71) writes a cover image: a frame with one big word over it (upper-case,
+  centered, outlined, in the bundled subtitle face, as large as the width allows), rendered by the export compiler like
+  `frame`. `--text` alone picks the frame where the word is first spoken in the transcripts; `--at` picks it; neither
+  uses the first picture. It is checked readable at 180 px wide (capitals at least 12 px tall, sized from the face's
+  own metrics, `export/font-metrics.ts`) and warns when the word is too long. `render --cover-frame [--cover-text]
+  [--cover-at] [--cover-color]` (`render` param `cover`) makes frame 0, the thumbnail platforms show, that same
+  composition as a one-frame segment of its own; the other frames and the length are unchanged. Every render now
+  warns when frame 0 is black (a gap before the first picture, a fade in from black). The cover uses the
+  `big-keyword` subtitle look until the project style guide (#468) holds one; review's frame-0 check (#457) can
+  read the same warning.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

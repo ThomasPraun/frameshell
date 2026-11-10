@@ -149,6 +149,14 @@ export function subtitleWords(timeline: Timeline, trackId: string, transcripts: 
   if (!track || track.kind !== "subtitles") return [];
   const followed = timeline.tracks.find((candidate) => candidate.id === track.follows);
   if (!followed || followed.kind === "subtitles") return [];
+  return trackWords(followed, transcripts, fps);
+}
+
+/**
+ * The words one clip track speaks, mapped to timeline frames: what {@link subtitleWords} shows for a subtitle
+ * track following `followed`, without needing the subtitle track (the cover's hook word search uses it).
+ */
+export function trackWords(followed: Exclude<Timeline["tracks"][number], { kind: "subtitles" }>, transcripts: TranscriptLookup, fps: number): SubtitleWord[] {
   const frame = (seconds: number) => Math.round(seconds * fps);
   const spans = followed.clips
     .filter((clip): clip is Extract<Clip, { type: "media" }> => clip.type === "media" && "asset" in clip)
@@ -168,7 +176,7 @@ export function subtitleWords(timeline: Timeline, trackId: string, transcripts: 
     for (const word of [...transcript.words].sort((a, b) => a.start - b.start)) {
       const middle = (word.start + word.end) / 2;
       if (middle < clip.in || middle >= clip.out) continue;
-      const text = cleanText(transcript.edits[word.id]?.text ?? word.text);
+      const text = cleanSubtitleText(transcript.edits[word.id]?.text ?? word.text);
       const from = at(Math.max(word.start, clip.in));
       if (text === "" || from >= end) continue;
       const to = Math.max(from, at(Math.min(word.end, clip.out)));
@@ -183,7 +191,7 @@ export function subtitleWords(timeline: Timeline, trackId: string, transcripts: 
         end: to,
         sourceStart: word.start,
         sourceEnd: word.end,
-        ...(speaker !== undefined && name !== undefined ? { speaker, speakerName: cleanText(name) } : {}),
+        ...(speaker !== undefined && name !== undefined ? { speaker, speakerName: cleanSubtitleText(name) } : {}),
       });
     }
   }
@@ -333,7 +341,7 @@ export function subtitleTracks(timeline: Timeline, transcripts: TranscriptLookup
 }
 
 /** Braces and backslashes are ASS markup: dropped so export shows what the preview shows. */
-function cleanText(text: string): string {
+export function cleanSubtitleText(text: string): string {
   return text.replace(/[{}\\]/g, "").replace(/\s+/g, " ").trim();
 }
 

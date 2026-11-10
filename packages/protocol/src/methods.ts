@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -432,6 +432,32 @@ const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
 /** `frame` quality when the caller gives none: high, visually lossless for most pictures. */
 export const DEFAULT_FRAME_QUALITY = 92;
 
+/** What the cover word and its frame are chosen by; shared by `cover` and the `cover` option of `render`. */
+const CoverChoiceShape = {
+  text: z
+    .string()
+    .min(1)
+    .max(24)
+    .optional()
+    .describe(
+      "The word drawn big over the frame (up to 24 characters; shown upper-case, one line, as large as the width allows). " +
+        "Absent: the frame alone. Without `at`, the frame is the one where this word is first spoken.",
+    ),
+  at: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Timeline seconds of the frame to use. Default: where `text` is first spoken (in the transcripts of the video and audio tracks), " +
+        "else the start of the first picture.",
+    ),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .describe("Word colour, `#rrggbb`; the outline turns black or white to contrast with it. Default yellow `#ffd426`."),
+};
+
 const PresetParam = z
   .string()
   .min(1)
@@ -804,6 +830,14 @@ export const methods = {
         "Absolute output file, e.g. `/home/ana/videos/launch/exports/launch.mp4`; its folder is created. " +
           "Default `<project>/exports/<timeline>-<preset>.<container>`. An existing file is replaced when the job finishes.",
       ),
+      cover: z
+        .strictObject(CoverChoiceShape)
+        .optional()
+        .describe(
+          "Make frame 0 a finished composition (platforms show it as the thumbnail): the frame chosen like `cover` does, with " +
+            "its word over it, replaces the first frame only; no subtitles on it, nothing else changes. Absent: frame 0 is the " +
+            "timeline's own, and `warnings` says when that is black. Needs the preset's frame rate to equal the project's.",
+        ),
     }),
     result: z.object({
       job: JobSchema,
@@ -853,6 +887,59 @@ export const methods = {
       clip: z.string().nullable().describe("Clip showing on the first video track; null in a gap (black frame)."),
       width: z.int(),
       height: z.int(),
+    }),
+  },
+  cover: {
+    description:
+      "Write a cover image: a frame of the timeline with one big word over it, rendered by the export compiler (as `frame` " +
+      "and `render` do), checked readable at thumbnail size (180 px wide: the capitals must stay 12 px tall or more). With " +
+      "`text` and no `at` the frame is where that word is first spoken; with neither, the first picture. The word is " +
+      "upper-case in the subtitle face, centered, outlined, as large as the width allows; no subtitles are drawn on a " +
+      "cover. Size: the preset's when `preset` is given, else the project resolution. `readability.readable` false " +
+      "means the word is too long to read in a grid: shorten it. The same frame can open the exported video: " +
+      "`render` with `cover`. Fails with InvalidOperation (`at` outside the timeline, text with nothing to draw), " +
+      "ExportUnsupported, PresetNotFound, TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      ...CoverChoiceShape,
+      out: AbsolutePath.optional().describe(
+        "Absolute image path to write, e.g. `/home/ana/videos/launch/exports/cover.png`; its folder is created. " +
+          "Default `<project>/exports/<timeline>-cover.png`.",
+      ),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      format: FrameFormatSchema.optional().describe("Image format. Default: from the extension of `out`, else `png`."),
+      quality: z
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      path: z.string().describe("Absolute image path written."),
+      format: FrameFormatSchema.describe("Format written."),
+      timeline: z.string(),
+      frame: z.int().describe("Timeline frame index used (0-based, project fps)."),
+      at: z.number().describe("Start time of that frame, timeline seconds."),
+      source: z
+        .enum(["at", "word", "default"])
+        .describe("How the frame was chosen: `at` given, `word` where `text` is first spoken, `default` the first picture."),
+      text: z.string().nullable().describe("The word as drawn (upper-case); null when the cover has none."),
+      readability: z
+        .object({
+          thumbnailWidth: z.int().describe("Width the cover is judged at, px."),
+          capHeight: z.number().describe("Height of a capital letter at that width, px."),
+          minCapHeight: z.number().describe("Smallest capital height that reads, px."),
+          readable: z.boolean(),
+        })
+        .nullable()
+        .describe("Thumbnail check of the word; null when the cover has no word."),
+      width: z.int(),
+      height: z.int(),
+      warnings: z.array(z.string()).describe("Things to fix: the word is not spoken anywhere, or too small to read in a grid; empty when none."),
     }),
   },
   "inspect.point": {
@@ -3036,6 +3123,10 @@ export type RenderResult = MethodResult<"render">;
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
 export type FrameResult = MethodResult<"frame">;
+/** `cover` params. */
+export type CoverParams = MethodParams<"cover">;
+/** Result of `cover`. */
+export type CoverResult = MethodResult<"cover">;
 /** Image format `frame` writes; see {@link FrameFormatSchema}. */
 export type FrameFormat = z.output<typeof FrameFormatSchema>;
 /** One export preset as listed by `export.presets`. */

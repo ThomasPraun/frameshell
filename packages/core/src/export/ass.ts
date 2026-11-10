@@ -53,6 +53,11 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
       });
     }
   });
+  return assDocument(frame, styles, events);
+}
+
+/** An ASS script of `styles` and `events` (already formatted lines), coordinates in `frame` pixels. */
+export function assDocument(frame: Size, styles: readonly string[], events: readonly string[]): string {
   return [
     "[Script Info]",
     "ScriptType: v4.00+",
@@ -92,7 +97,7 @@ function time(centiseconds: number): string {
 }
 
 /** `#rrggbb` → ASS `&HBBGGRR&` (opaque). */
-function color(hex: string): string {
+export function color(hex: string): string {
   const [r, g, b] = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)];
   return `&H00${b}${g}${r}&`.toUpperCase();
 }

@@ -87,14 +87,22 @@ Commands:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
+${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
-                               Waits for the render job, printing progress; exit 1 if it fails
+                               Waits for the render job, printing progress; exit 1 if it fails.
+                               --cover-frame makes frame 0 (the thumbnail platforms show) a finished
+                               composition: the frame \`cover\` would pick, with its word over it,
+                               replaces the first frame only; a warning says when frame 0 is black
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, format from the
                                extension of <file> unless --format (project resolution,
                                or the preset's)
+  cover [--text word] [--at s] [--color #rrggbb] [--out file] [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
+                               Write a cover image: a frame with one big word over it, checked readable at
+                               180 px wide (warns when the word is too long). --text alone picks the frame
+                               where the word is first spoken; --at picks the frame; neither: the first
+                               picture. Default file: exports/<timeline>-cover.png
   inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
@@ -133,13 +141,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "cover", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw"] as const;
+const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "text", "color", "cover-frame", "cover-text", "cover-at", "cover-color"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -152,8 +160,9 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin remove": [],
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
-  render: ["preset", "out", "timeline"],
+  render: ["preset", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
+  cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "script check": [],
@@ -204,7 +213,8 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
-  | { kind: "render"; timeline?: string; preset?: string; out?: string }
+  | { kind: "render"; timeline?: string; preset?: string; out?: string; cover?: { text?: string; at?: number; color?: string } }
+  | { kind: "cover"; text?: string; at?: number; color?: string; out?: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
@@ -289,6 +299,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           undo: { type: "boolean", default: false },
           restore: { type: "boolean", default: false },
           dtw: { type: "string" },
+          text: { type: "string" },
+          color: { type: "string" },
+          "cover-frame": { type: "boolean", default: false },
+          "cover-text": { type: "string" },
+          "cover-at": { type: "string" },
+          "cover-color": { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -370,6 +386,21 @@ function checkBuiltinFlags(positionals: string[], values: Record<string, unknown
   if (extra.length > 0) throw new UsageError(`\`frameshell ${key}\` does not take ${extra.map((flag) => `--${flag}`).join(", ")}.`);
 }
 
+/** A `--at`/`--cover-at` value: seconds >= 0, or undefined when the flag is absent. */
+function coverAt(flag: string, value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const at = Number(value);
+  if (value.trim() === "" || !Number.isFinite(at) || at < 0) throw new UsageError(`--${flag}: expected seconds >= 0, e.g. --${flag} 12.5.`);
+  return at;
+}
+
+/** A `--color`/`--cover-color` value: `#rrggbb`, or undefined when the flag is absent. */
+function coverColor(flag: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!/^#[0-9a-fA-F]{6}$/.test(value)) throw new UsageError(`--${flag}: expected a colour like #ffd426.`);
+  return value;
+}
+
 function parseBuiltin(
   positionals: string[],
   options: {
@@ -411,6 +442,12 @@ function parseBuiltin(
     "no-snap"?: boolean | undefined;
     force?: boolean | undefined;
     dtw?: string | undefined;
+    text?: string | undefined;
+    color?: string | undefined;
+    "cover-frame"?: boolean | undefined;
+    "cover-text"?: string | undefined;
+    "cover-at"?: string | undefined;
+    "cover-color"?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -443,11 +480,42 @@ function parseBuiltin(
       segment: options.segment === true,
     };
   }
+  if (command === "cover") {
+    if (rest.length > 0) return null;
+    const { preset, timeline, out, text, format } = options;
+    const at = coverAt("at", options.at);
+    const color = coverColor("color", options.color);
+    if (format !== undefined && format !== "png" && format !== "jpg" && format !== "webp") {
+      throw new UsageError(`--format: expected png, jpg or webp, got "${format}".`);
+    }
+    const quality = options.quality === undefined ? undefined : Number(options.quality);
+    if (quality !== undefined && (!Number.isInteger(quality) || quality < 1 || quality > 100)) {
+      throw new UsageError("--quality: expected an integer from 1 to 100.");
+    }
+    return {
+      kind: "cover",
+      ...(text !== undefined ? { text } : {}),
+      ...(at !== undefined ? { at } : {}),
+      ...(color !== undefined ? { color } : {}),
+      ...(out ? { out } : {}),
+      ...(timeline ? { timeline } : {}),
+      ...(preset ? { preset } : {}),
+      ...(format ? { format } : {}),
+      ...(quality !== undefined ? { quality } : {}),
+    };
+  }
   if (command === "render" || command === "frame") {
     if (rest.length > 0) return null;
     const { preset, timeline, out } = options;
     const common = { ...(timeline ? { timeline } : {}), ...(preset ? { preset } : {}) };
-    if (command === "render") return { kind: "render", ...common, ...(out ? { out } : {}) };
+    if (command === "render") {
+      const parts = { text: options["cover-text"], at: coverAt("cover-at", options["cover-at"]), color: coverColor("cover-color", options["cover-color"]) };
+      if (options["cover-frame"] !== true && Object.values(parts).some((value) => value !== undefined)) {
+        throw new UsageError("`frameshell render` takes --cover-text, --cover-at and --cover-color only with --cover-frame.");
+      }
+      const cover = options["cover-frame"] === true ? Object.fromEntries(Object.entries(parts).filter(([, value]) => value !== undefined)) : null;
+      return { kind: "render", ...common, ...(out ? { out } : {}), ...(cover ? { cover } : {}) };
+    }
     const at = Number(options.at);
     if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
       throw new UsageError("`frameshell frame` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
@@ -723,6 +791,20 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (job.state !== "done") outcome.code = 1;
       if (flags.json) return json({ ...result, job });
       return job.state === "done" ? `Rendered ${result.output}\n` : `Render failed: ${job.error ?? job.state}\n`;
+    }
+    case "cover": {
+      const { kind: _kind, out, ...params } = inv;
+      const result = await conn.request("cover", { cwd, ...params, ...(out ? { out: resolve(cwd, out) } : {}) });
+      if (flags.json) return json(result);
+      const ok = result.readability?.readable !== false;
+      return (
+        `Wrote ${result.path} (frame ${result.frame} at ${result.at} s, ${result.width}x${result.height}` +
+        `${result.text ? `, "${result.text}"` : ""})\n` +
+        (result.readability
+          ? `${ok ? "Readable" : "Not readable"} at ${result.readability.thumbnailWidth} px wide: capitals ${result.readability.capHeight} px tall (least ${result.readability.minCapHeight}).\n`
+          : "") +
+        result.warnings.map((warning) => `warning: ${warning}\n`).join("")
+      );
     }
     case "frame": {
       const { kind: _kind, out, ...params } = inv;

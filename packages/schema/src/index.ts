@@ -248,6 +248,8 @@ export {
   type TranscriptLookup,
   resolveSubtitleStyle,
   subtitleWords,
+  trackWords,
+  cleanSubtitleText,
   subtitleCues,
   cueTokens,
   subtitleAt,

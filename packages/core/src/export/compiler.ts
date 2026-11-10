@@ -39,6 +39,7 @@ import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
 import { assSubtitles } from "./ass.js";
+import { type CoverLayout, assCover } from "./cover.js";
 
 /**
  * Export compiler (SPEC §3.5): timeline → render plan → ffmpeg argument
@@ -91,6 +92,13 @@ export interface RenderInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /**
+   * Makes frame 0 a finished composition: it shows the timeline frame at `at` (timeline seconds), with the
+   * cover word over it when `layout` is set and no subtitles; every other frame is as it is. Needs the
+   * preset's frame rate to equal the project's, else a warning and no change. Absent: frame 0 is the
+   * timeline's own, and a warning says when that is black.
+   */
+  cover?: { at: number; layout: CoverLayout | null };
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -206,6 +214,8 @@ export interface FrameInput {
   format?: FrameFormat;
   /** JPEG and WebP quality, 1 to 100; default {@link DEFAULT_FRAME_QUALITY}. */
   quality?: number;
+  /** Marks a cover composition: its word drawn over the frame (none when null), and no subtitles; see {@link CoverLayout}. */
+  cover?: CoverLayout | null;
 }
 
 /** Single-frame plan (MCP `frame_capture`, `frameshell frame`). */
@@ -243,6 +253,8 @@ export const MIX_FILE = "mix.wv";
 const CONCAT_LIST = "segments.txt";
 /** Burned subtitles, relative to the work directory. */
 export const SUBTITLES_FILE = "subtitles.ass";
+/** The cover word, relative to the work directory. */
+export const COVER_FILE = "cover.ass";
 /** Directory libass loads fonts from, relative to the work directory. */
 export const FONTS_DIR = "fonts";
 
@@ -340,15 +352,28 @@ export function compileRender(input: RenderInput): RenderPlan {
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
-  const bounds = segmentBounds(layout.frames, edges, segmentFrames);
+  const warnings = [...layout.warnings];
+  const cover = input.cover && outFps === fps ? { frame: frameAt(input.timeline.id, input.cover.at, fps, layout.frames), layout: input.cover.layout } : null;
+  if (input.cover && !cover) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
+  if (!input.cover) {
+    const empty = emptyFirstFrame(layout);
+    if (empty) warnings.push(`Frame 0 is ${empty}: platforms use it as the thumbnail. Export with a cover frame (\`frameshell render --cover-frame\`) or start a picture at 0.`);
+  }
+  // The cover is a one-frame segment in place of frame 0; the rest of the first segment follows it.
+  const bounds = segmentBounds(layout.frames, edges, segmentFrames).flatMap(([from, to]): [number, number][] =>
+    cover && from === 0 ? [[0, 1], ...(to > 1 ? ([[1, to]] as [number, number][]) : [])] : [[from, to]],
+  );
   const ext = preset.container;
   const files: Record<string, string> = {};
   if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
+  if (cover?.layout) files[COVER_FILE] = assCover(cover.layout, { width, height });
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
-    const graph = videoGraph(layout, from, to, target);
-    const tail = `${burnSubtitles(layout, from, to, fps)}${outFps === fps ? "" : `,fps=${rate}`}`;
+    const showsCover = cover !== null && index === 0;
+    const graph = showsCover ? videoGraph(layout, cover.frame, cover.frame + 1, target) : videoGraph(layout, from, to, target);
+    const burn = showsCover ? (cover.layout ? burnCover() : "") : burnSubtitles(layout, from, to, fps);
+    const tail = `${burn}${outFps === fps ? "" : `,fps=${rate}`}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
       file: `${name}.${ext}`,
@@ -378,9 +403,9 @@ export function compileRender(input: RenderInput): RenderPlan {
     duration: seconds(layout.frames, fps),
     loudness: input.loudness,
     container: preset.container,
-    warnings: layout.warnings,
+    warnings,
     files,
-    fonts: layout.subtitles.length > 0 ? [SUBTITLE_FONT.file] : [],
+    fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
     segments,
     audio,
   };
@@ -454,24 +479,17 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
   const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
-  const frame = Math.floor((input.at + 0.0005) * fps);
-  if (frame < 0 || frame >= layout.frames) {
-    const last = seconds(layout.frames - 1, fps);
-    throw new RpcError(
-      ErrorCode.InvalidOperation,
-      `at ${input.at} s is outside timeline ${input.timeline.id} (frames start from 0 to ${last} s).`,
-      { op: "frame", reason: "out of range", field: "at", valid: { min: 0, max: last } },
-    );
-  }
+  const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
-  const burn = burnSubtitles(layout, frame, frame + 1, fps);
+  const burn = input.cover !== undefined ? (input.cover ? burnCover() : "") : burnSubtitles(layout, frame, frame + 1, fps);
+  const script = input.cover ? { [COVER_FILE]: assCover(input.cover, { width, height }) } : { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) };
   return {
     frame,
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
-    files: burn ? { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) } : {},
+    files: burn ? script : {},
     fonts: burn ? [SUBTITLE_FONT.file] : [],
     args: [
       ...BASE,
@@ -481,6 +499,35 @@ export function compileFrame(input: FrameInput): FramePlan {
       ...["-f", "image2", "-update", "1", input.output],
     ],
   };
+}
+
+/** Timeline frame showing at `at` seconds; `InvalidOperation` with the valid range when outside the `frames` the timeline has. */
+function frameAt(timeline: string, at: number, fps: number, frames: number): number {
+  const frame = Math.floor((at + 0.0005) * fps);
+  if (frame < 0 || frame >= frames) {
+    const last = seconds(frames - 1, fps);
+    throw new RpcError(ErrorCode.InvalidOperation, `at ${at} s is outside timeline ${timeline} (frames start from 0 to ${last} s).`, {
+      op: "frame",
+      reason: "out of range",
+      field: "at",
+      valid: { min: 0, max: last },
+    });
+  }
+  return frame;
+}
+
+/** What frame 0 shows when it is not a picture: a gap before the first clip, or a clip fading in from black; null when it is one. */
+function emptyFirstFrame(layout: Layout): string | null {
+  const picture = (span: Span) => span.from <= 0 && 0 < span.to && span.placed.source.video !== null;
+  if (layout.overlays.some((layer) => layer.some(picture))) return null;
+  const base = layout.video.find(picture);
+  if (!base) return "black (no picture starts at 0)";
+  return base.placed.start === 0 && (base.placed.edges?.fadeIn ?? 0) > 0 ? "black (the first clip fades in from black)" : null;
+}
+
+/** Filter chain appended to the cover frame's graph: the cover word over the picture. */
+function burnCover(): string {
+  return `,ass=filename=${COVER_FILE}:fontsdir=${FONTS_DIR}`;
 }
 
 /** Pixel format and encoder args of a `frame` image. */
