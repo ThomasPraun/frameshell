@@ -427,7 +427,13 @@ export class ExportService {
         sources.set(asset, {
           path: join(root, ...asset.split("/")),
           video: probe.video
-            ? { codec: probe.video.codec, still: probe.video.still, width: probe.video.width, height: probe.video.height }
+            ? {
+                codec: probe.video.codec,
+                still: probe.video.still,
+                width: probe.video.width,
+                height: probe.video.height,
+                ...(probe.video.alpha ? { alpha: true } : {}),
+              }
             : null,
           audio: probe.audio !== null,
           ...(probe.duration !== null ? { duration: probe.duration } : {}),

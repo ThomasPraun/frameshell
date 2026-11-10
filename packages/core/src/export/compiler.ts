@@ -54,7 +54,7 @@ export interface ExportSource {
   /** Absolute path of the original asset (never the proxy: export uses full quality). */
   path: string;
   /** First video stream (`width`x`height` as probed); null for audio-only files. */
-  video: { codec: string; still: boolean; width: number; height: number } | null;
+  video: { codec: string; still: boolean; width: number; height: number; alpha?: boolean } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
   /** Seconds of material (probed); absent when unknown, then a clip has no handle after its `out` (ADR 0018). */
@@ -288,7 +288,7 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
-  /** Source pixels kept when the clip covers the frame of a non-primary format (ADR 0027): scaled to fill it exactly. */
+  /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
   cover?: LayerRect;
 }
 
@@ -531,7 +531,8 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * `duration`, transformed and stacked by its track like any clip. Muted
  * tracks are silent; hidden tracks add no picture layer but still count
  * for the length and play their sound. In a `variant` that covers, media
- * clips that would fill the frame untransformed are cropped to fill it.
+ * clips that would fill the frame untransformed are cropped to fill it,
+ * except sources with alpha on upper tracks: overlays are fitted whole.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -665,6 +666,8 @@ function layoutTimeline(
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
+  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
+  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.

@@ -35,7 +35,7 @@ const resolution = { width: 1920, height: 1080 };
 
 const sources = new Map<string, ExportSource>([
   ["assets/talk.mp4", { path: "/project/assets/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true }],
-  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false, width: 1920, height: 1080 }, audio: false }],
+  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false, width: 1920, height: 1080, alpha: true }, audio: false }],
   ["assets/logo.png", { path: "/project/assets/logo.png", video: { codec: "png", still: true, width: 500, height: 500 }, audio: false }],
   ["assets/music.wav", { path: "/project/assets/music.wav", video: null, audio: true }],
 ]);
@@ -633,13 +633,39 @@ describe("formats (ADR 0027)", () => {
     // 1920x1080 talk: its centre 608x1080 scaled to 1080x1920, no black bars.
     expect(vertical).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
     expect(vertical).not.toContain("force_original_aspect_ratio=decrease");
-    // The untransformed title on the upper track covers too, overlaid at the corner.
-    expect(vertical).toMatch(/crop=608:1080:656:0,scale=1080:1920,setsar=1,format=rgba.*\[o0\]/);
-    expect(vertical).toContain("[base][o0]overlay=x=0:y=0");
+    // The untransformed title on the upper track has alpha (decision 13 of #469): fitted whole, centred, never cropped.
+    expect(vertical).toMatch(/\[1:v:0\][^;]*scale=1080:608,setsar=1,format=rgba.*\[o0\]/);
+    expect(vertical).toContain("[base][o0]overlay=x=0:y=656");
     // The square: the centre 1080x1080 of the frame at its own size.
     expect(plans["1x1"]!.files["seg-0001.filter"]).toContain("crop=1080:1080:420:0,scale=1080:1080");
     // The transformed logo is still fitted and placed like a 16:9 project's, mapped onto the frame.
     expect(plans["9x16"]!.files["seg-0002.filter"]).toContain("scale=270:270,setsar=1,format=rgba");
+  });
+
+  it("fits an alpha overlay on an upper track whole and still covers with an opaque one (decision 13 of #469)", () => {
+    const stacked = (asset: string): Timeline => ({
+      ...timeline,
+      tracks: [timeline.tracks[0]!, { id: "v2", kind: "video", clips: [{ id: "c_up", type: "media", asset, start: 1, in: 0, out: 1 }] }],
+    });
+    const withSources = new Map<string, ExportSource>([
+      ...sources,
+      ["assets/b-roll.mp4", { path: "/project/assets/b-roll.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: false }],
+      ["assets/frame.png", { path: "/project/assets/frame.png", video: { codec: "png", still: true, width: 1920, height: 1080, alpha: true }, audio: false }],
+    ]);
+    const graph = (asset: string) => {
+      const upper = stacked(asset);
+      const { format } = resolveFormat(upper, project, "9x16")!;
+      const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+      return compileRender({ timeline: upper, fps: 30, preset, loudness: -17, sources: withSources, resolution, segmentSeconds: 4, variant: format }).files["seg-0001.filter"]!;
+    };
+    for (const alpha of ["assets/title.webm", "assets/frame.png"]) {
+      const overlay = graph(alpha).split("\n").find((line) => line.includes("[o0]"))!;
+      expect(overlay).toContain("scale=1080:608");
+      expect(overlay).not.toContain("crop=");
+    }
+    // The base track under it is cropped as before.
+    expect(graph("assets/title.webm")).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
+    expect(graph("assets/b-roll.mp4").split("\n").find((line) => line.includes("[o0]"))).toContain("crop=608:1080:656:0,scale=1080:1920");
   });
 
   it("makes captions 1.3x larger in vertical formats only", () => {

@@ -323,6 +323,13 @@ const ProbeSchema = z.object({
       fps: z.number().nullable().describe("Average frame rate of the source; null for still images."),
       vfr: z.boolean().describe("Variable frame rate source (phones, OBS); the proxy is CFR at project fps anyway."),
       still: z.boolean().describe("Single image, not a moving stream: no proxy is built."),
+      alpha: z
+        .boolean()
+        .optional()
+        .describe(
+          "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
+            "to fill another format's frame (ADR 0027). Absent in probes cached before it existed.",
+        ),
     })
     .nullable()
     .describe("First video stream; null for audio-only files."),

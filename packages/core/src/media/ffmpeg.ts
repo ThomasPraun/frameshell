@@ -141,6 +141,7 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
   // Phones store portrait video as landscape frames plus a rotation, which ffmpeg applies when it decodes: report
   // the size every proxy, frame and export sees (#207).
   const turned = video ? quarterTurned(video) : false;
+  const alpha = video ? alphaOf(video) : null;
   const media: MediaProbe = {
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     format,
@@ -153,13 +154,15 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
           // Containers report the tick rate as r_frame_rate; a lower average means irregular frame intervals.
           vfr: !still && avg !== null && real !== null && Math.abs(avg - real) > 0.01,
           still,
+          alpha: alpha !== null,
         }
       : null,
     audio: audio
       ? { codec: audio.codec_name ?? "unknown", sampleRate: Number(audio.sample_rate) || 0, channels: audio.channels ?? 0 }
       : null,
   };
-  return { media, alpha: video && !still ? alphaOf(video) : null };
+  // A still has an alpha plane too, but no proxy to build with it.
+  return { media, alpha: still ? null : alpha };
 }
 
 function alphaOf(stream: FfprobeStream): SourceAlpha | null {

@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is refused and names that call). While review mode is on, only the person in the app may change formats: agents get
   ProposalState `forbidden`.
   `frameshell render --formats 16x9,9x16` writes one file per format (`<file>-<format>.mp4`) from the same edit:
-  untransformed footage covers the frame (cropped around the centre), generated clips render at the format's size,
+  untransformed footage covers the frame (cropped around the centre; a source with alpha on an upper track, such as a
+  title or lower third, is fitted whole, never cropped), generated clips render at the format's size,
   vertical captions are 1.3x larger; the primary format exports exactly as before. `frameshell frame --format 9x16`
   (wire `projectFormat`) captures a frame in a format. `gc` keeps the clip renders of every declared format.
   Protocol 71.
