@@ -42,7 +42,7 @@ export interface CleanupPlanOptions {
 }
 
 /** A planned cut before it gets an id. */
-type PlannedCut = Omit<CleanupCandidate, "id">;
+export type PlannedCut = Omit<CleanupCandidate, "id">;
 
 type Skipped = CleanupResult["skipped"][number];
 
@@ -58,13 +58,25 @@ const RETAKE_MAX_BETWEEN = 2;
 const RETAKE_WINDOW_S = 2;
 /** Retakes: a gap this long between two attempts reads as a stop before the restart. */
 const RETAKE_STOP_S = 0.25;
-/** Retakes: token similarity at which two spellings are the same word. */
+/**
+ * Retakes: token similarity at which two spellings are the same word. Stricter than `MIN_SIMILARITY` (0.6, `align.ts`,
+ * shared with `shoot/compare.ts`): that one pairs a script word with what was heard, here a false match cuts speech.
+ */
 const TOKEN_SIMILARITY = 0.8;
 /** Retakes: confidence by phrase length (index = words, 1 to 6). */
 const RETAKE_BASE = [0, 0.35, 0.55, 0.7, 0.8, 0.9, 0.9];
 
-/** Pauses and retakes of `words` (timeline order) worth cutting, and the places that were looked at and left. */
-export function planCleanup(words: readonly SpeechWord[], audio: SpeechAudio, options: CleanupPlanOptions): { cuts: PlannedCut[]; skipped: Skipped[] } {
+/**
+ * Pauses and retakes of `words` (timeline order) worth cutting, and the places that were looked at and left.
+ * A retake takes the pauses it overlaps with it: those are not in `cuts` but under their retake in `absorbed`, for a
+ * caller that drops the retake (`skip`) to put them back. Only cuts over the confidence floor ever suppress or are
+ * suppressed.
+ */
+export function planCleanup(
+  words: readonly SpeechWord[],
+  audio: SpeechAudio,
+  options: CleanupPlanOptions,
+): { cuts: PlannedCut[]; skipped: Skipped[]; absorbed: Map<PlannedCut, PlannedCut[]> } {
   const grid = new FrameGrid(options.fps);
   const breath = options.breath ?? CLEANUP_BREATH_DEFAULT_S;
   const floor = options.minConfidence ?? CLEANUP_MIN_CONFIDENCE_DEFAULT;
@@ -72,16 +84,19 @@ export function planCleanup(words: readonly SpeechWord[], audio: SpeechAudio, op
   const skipped: Skipped[] = [];
   const retakes = options.retakes === true ? findRetakes(words, audio, grid, breath, skipped) : [];
   const found = pauses === false ? [] : findPauses(words, audio, grid, breath, pauses, skipped);
-  // A retake takes the pauses around and inside it with it, leaving one breath on each side.
-  const cuts = [...retakes, ...found.filter((pause) => !retakes.some((retake) => pause.start < retake.end && retake.start < pause.end))];
-  const kept = cuts.filter((cut) => {
+  const overFloor = (cut: PlannedCut): boolean => {
     if (cut.confidence >= floor) return true;
     skipped.push({ kind: cut.kind, at: cut.start, reason: `confidence ${cut.confidence} is under the floor of ${floor}: ${cut.reason}` });
     return false;
-  });
+  };
+  const sureRetakes = retakes.filter(overFloor);
+  const surePauses = found.filter(overFloor);
+  const overlaps = (pause: PlannedCut, retake: PlannedCut) => pause.start < retake.end && retake.start < pause.end;
+  const absorbed = new Map<PlannedCut, PlannedCut[]>(sureRetakes.map((retake) => [retake, surePauses.filter((pause) => overlaps(pause, retake))]));
+  const kept = [...sureRetakes, ...surePauses.filter((pause) => !sureRetakes.some((retake) => overlaps(pause, retake)))];
   kept.sort((a, b) => a.start - b.start);
   skipped.sort((a, b) => a.at - b.at);
-  return { cuts: kept, skipped };
+  return { cuts: kept, skipped, absorbed };
 }
 
 /** Where `audio` is quiet around a gap: the longest quiet run in [lo, hi] that touches [gapLo, gapHi]. */
@@ -116,8 +131,11 @@ function runBetween(audio: SpeechAudio, prev: SpeechWord | null, next: SpeechWor
 
 function findPauses(words: readonly SpeechWord[], audio: SpeechAudio, grid: FrameGrid, breath: number, pauses: number, skipped: Skipped[]): PlannedCut[] {
   const cuts: PlannedCut[] = [];
+  // The word that ends last so far: with two speakers talking over each other, the gap starts there.
+  let latest = words[0]!;
   for (let i = 1; i < words.length; i++) {
-    const [prev, next] = [words[i - 1]!, words[i]!];
+    const [prev, next] = [latest, words[i]!];
+    if (next.end > latest.end) latest = next;
     const gap = next.at - prev.end;
     if (gap < pauses - 1e-9) continue;
     const skip = (reason: string) => skipped.push({ kind: "pause", at: prev.end, reason: `${seconds(gap)} s between ${quote(prev)} and ${quote(next)}: ${reason}` });
@@ -201,6 +219,10 @@ function findRetakes(words: readonly SpeechWord[], audio: SpeechAudio, grid: Fra
     const [last, next] = [words[attempt.until - 1]!, words[attempt.until]!];
     const phrase = removed.map((word) => word.text).join(" ");
     const skip = (reason: string) => skipped.push({ kind: "retake", at: first.at, reason: `“${phrase}” said again: ${reason}` });
+    if (removed.some((word) => word.transcript !== first.transcript)) {
+      skip("the attempt runs across two transcripts");
+      continue;
+    }
     if ([prev, ...removed, next].some((word) => word?.speechInside)) {
       skip("a word hides speech the transcript lacks");
       continue;

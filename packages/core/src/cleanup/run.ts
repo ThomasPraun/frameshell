@@ -2,7 +2,7 @@ import { type CleanupCandidate, type CleanupResult, ErrorCode, RpcError } from "
 import { type Timeline, withProgramSound } from "@frameshell/schema";
 import { sourceTranscripts } from "../transcripts/verify.js";
 import { type SpeechSources, gatherSpeech } from "./speech.js";
-import { planCleanup } from "./plan.js";
+import { type PlannedCut, planCleanup } from "./plan.js";
 
 /** What `cleanup` was asked for, defaults filled in. */
 export interface CleanupRequest {
@@ -54,11 +54,20 @@ export async function planTimelineCleanup(projectDir: string, timeline: Timeline
     );
   }
   const warnings = speech.unchecked.map((entry) => `Clip ${entry.clip} (${entry.asset}) is left alone: ${entry.reason}.`);
-  const { cuts, skipped } = planCleanup(speech.words, speech.audio, { fps, ...request });
+  const { cuts, skipped, absorbed } = planCleanup(speech.words, speech.audio, { fps, ...request });
 
-  const count = { pause: 0, retake: 0 };
-  const numbered: CleanupCandidate[] = cuts.map((cut) => ({ id: `${cut.kind === "pause" ? "p" : "r"}${++count[cut.kind]}`, ...cut }));
-  const unknown = (request.skip ?? []).filter((id) => !numbered.some((candidate) => candidate.id === id));
+  // Ids follow a dry run: the pauses it lists first, then, after them, the ones a retake covers. Rejecting that retake
+  // brings those back without renumbering the rest.
+  const shown = cuts.filter((cut) => cut.kind === "pause");
+  const covered = [...new Set([...absorbed.values()].flat())].sort((a, b) => a.start - b.start);
+  const retakeCuts = cuts.filter((cut) => cut.kind === "retake");
+  const idOf = new Map<PlannedCut, string>([
+    ...[...shown, ...covered].map((cut, index) => [cut, `p${index + 1}`] as const),
+    ...retakeCuts.map((cut, index) => [cut, `r${index + 1}`] as const),
+  ]);
+  const numbered: CleanupCandidate[] = cuts.map((cut) => ({ id: idOf.get(cut)!, ...cut }));
+  const skipIds = new Set(request.skip ?? []);
+  const unknown = [...skipIds].filter((id) => !numbered.some((candidate) => candidate.id === id));
   if (unknown.length > 0) {
     throw invalid(`${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not a candidate.`, {
       reason: "skip",
@@ -67,7 +76,16 @@ export async function planTimelineCleanup(projectDir: string, timeline: Timeline
       hint: "Run a dry run with the same options and skip ids from its candidates.",
     });
   }
-  const candidates = numbered.filter((candidate) => !request.skip?.includes(candidate.id));
+  const remaining = cuts.filter((cut) => !skipIds.has(idOf.get(cut)!));
+  // A rejected retake gives back the pauses it covered, unless another retake still covers them.
+  const standing = remaining.filter((cut) => cut.kind === "retake");
+  const restored = retakeCuts
+    .filter((retake) => skipIds.has(idOf.get(retake)!))
+    .flatMap((retake) => absorbed.get(retake) ?? [])
+    .filter((pause, index, all) => all.indexOf(pause) === index && !standing.some((retake) => pause.start < retake.end && retake.start < pause.end));
+  const candidates: CleanupCandidate[] = [...remaining, ...restored]
+    .sort((a, b) => a.start - b.start)
+    .map((cut) => ({ id: idOf.get(cut)!, ...cut }));
   return {
     candidates,
     skipped,

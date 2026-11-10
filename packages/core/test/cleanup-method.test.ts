@@ -142,6 +142,20 @@ describe("cleanup", () => {
     expect(await duration()).toBeCloseTo(before, 3);
   }, MEDIA_TIMEOUT);
 
+  it("lets the person restore one removed word the way the transcript view does", async () => {
+    const { asset, video } = await setup();
+    const result = await conn.request("cleanup", { cwd: root, timeline: "main", retakes: true });
+    const retake = result.candidates.find((c) => c.kind === "retake")!;
+    const clips = async () => (await show()).tracks.flatMap((track) => track.clips) as unknown as { asset: string; in: number; out: number }[];
+    const plays = async (second: number) => (await clips()).some((clip) => clip.asset === asset && clip.in <= second && second < clip.out);
+    expect(await plays(1.15)).toBe(false);
+    // "so" (source 1.0 to 1.3) goes back where the cut was made, with the rest moving right.
+    await conn.request("clip.add", { cwd: root, track: video, asset, start: retake.start, in: 1.0, out: 1.3, ripple: true });
+    expect(await plays(1.15)).toBe(true);
+    expect(await plays(1.45)).toBe(false);
+    expect(await plays(3.45)).toBe(true);
+  }, MEDIA_TIMEOUT);
+
   it("cuts video and audio tracks alike and counts the words once", async () => {
     await setup({ both: true });
     const result = await conn.request("cleanup", { cwd: root, timeline: "main", retakes: true });
@@ -157,8 +171,11 @@ describe("cleanup", () => {
     const dry = await conn.request("cleanup", { cwd: root, timeline: "main", retakes: true, dryRun: true });
     const before = await duration();
     const result = await conn.request("cleanup", { cwd: root, timeline: "main", retakes: true, skip: ["r1"] });
-    expect(result.candidates.map((c) => c.id)).toEqual(["p1"]);
-    expect(await duration()).toBeCloseTo(before - dry.candidates.find((c) => c.id === "p1")!.duration, 2);
+    // The retake is rejected: the pauses it covered come back as candidates, in timeline order.
+    expect(dry.candidates.map((c) => c.id)).toEqual(["r1", "p1"]);
+    expect(result.candidates.map((c) => c.id)).toEqual(["p2", "p3", "p1"]);
+    expect(result.candidates.every((c) => c.kind === "pause")).toBe(true);
+    expect(await duration()).toBeCloseTo(before - result.removed, 2);
     const error = await rejection(conn.request("cleanup", { cwd: root, timeline: "main", skip: ["p9"] }));
     expect(error.code).toBe(ErrorCode.InvalidOperation);
     expect(error.message).toContain("p9");

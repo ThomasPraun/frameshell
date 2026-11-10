@@ -110,7 +110,9 @@ describe("frameshell cleanup", () => {
     const breath = json<CleanupResult>(["cleanup", "--pauses", "1.2", "--breath", "0.3", "--dry-run"]);
     expect(breath.candidates[0]!.duration).toBeLessThan(wide.candidates[0]!.duration);
     const rest = json<CleanupResult>(["cleanup", "--retakes", "--skip", "r1", "--dry-run"]);
-    expect(rest.candidates.map((c) => c.id)).toEqual(["p1"]);
+    // Rejecting the retake gives back the pauses it covered: the same three a run without --retakes finds.
+    expect(rest.candidates.map((c) => c.kind)).toEqual(["pause", "pause", "pause"]);
+    expect(rest.candidates.map((c) => c.id)).toEqual(["p2", "p3", "p1"]);
     const retakes = json<CleanupResult>(["cleanup", "--no-pauses", "--retakes", "--dry-run"]);
     expect(retakes.candidates.map((c) => c.kind)).toEqual(["retake"]);
   });

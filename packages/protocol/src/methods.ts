@@ -2233,7 +2233,7 @@ export const methods = {
       "where transcribed speech covers every instant of it, so it never removes b-roll or other material that is not part of " +
       "the speech; a word with `speechInside` is never cut around. `dryRun: true` changes nothing and returns the candidates: " +
       "show them as a table (kind, start, end, words, reason, confidence), ask, then call again with the same options (the " +
-      "plan is made again from the timeline as it is) and `skip` the ids the person rejected. Without `dryRun` the cuts are " +
+      "plan is made again from the timeline as it is) and `skip` the ids the person rejected (a retake covers the pauses around it: rejecting it brings them back as `p` candidates). Without `dryRun` the cuts are " +
       "one transaction labelled `Cleanup: …` (`revert` undoes it whole; with review mode on it is one proposal); a cut word " +
       "shows struck through in the transcript view and clicking it restores it. Example: `{ pauses: 0.5, retakes: true, " +
       "dryRun: true }`. Fails with InvalidOperation (`breath` too large for `pauses`, a `skip` id that is not a candidate, " +

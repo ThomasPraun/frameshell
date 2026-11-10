@@ -105,7 +105,17 @@ describe("planCleanup pauses", () => {
 
   it("measures a gap from the word that ends last when speakers overlap", () => {
     const { words, audio } = said([word("largo", 1.0, 3.0, { speaker: "s1" }), word("si", 1.2, 1.4, { speaker: "s2" }), word("fin", 3.1, 3.5, { speaker: "s1" })]);
-    expect(planCleanup(words, audio, { fps: FPS }).cuts).toEqual([]);
+    const plan = planCleanup(words, audio, { fps: FPS });
+    expect(plan.cuts).toEqual([]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("cuts after the word that ends last, not the one before the gap", () => {
+    // "largo" runs to 3.0 under "si"; the voice is quiet from 3.0 to 4.0, so the pause starts at 3.0, not at 1.4.
+    const words = [word("largo", 1.0, 3.0, { speaker: "s1" }), word("si", 1.2, 1.4, { speaker: "s2" }), word("fin", 4.0, 4.4, { speaker: "s1" })];
+    const { cuts } = planCleanup(words, audioOf([[1.0, 3.0], [4.0, 4.4]]), { fps: FPS });
+    expect(cuts).toHaveLength(1);
+    expect(cuts[0]!.start).toBeGreaterThanOrEqual(3.0);
   });
 });
 
@@ -147,6 +157,37 @@ describe("planCleanup retakes", () => {
     const { words, audio } = said([...say().words, word("fin", 5.0, 5.4)]);
     const kinds = planCleanup(words, audio, { fps: FPS, retakes: true }).cuts.map((cut) => cut.kind);
     expect(kinds).toEqual(["retake", "pause"]);
+  });
+
+  it("reports the pauses a retake covers under it, for a caller that drops the retake", () => {
+    const { words, audio } = say();
+    const { cuts, absorbed } = planCleanup(words, audio, { fps: FPS, retakes: true });
+    const retake = cuts.find((cut) => cut.kind === "retake")!;
+    expect(absorbed.get(retake)).toHaveLength(2);
+    expect(absorbed.get(retake)!.every((pause) => pause.kind === "pause")).toBe(true);
+  });
+
+  it("keeps the pauses around a retake that is under the confidence floor", () => {
+    // A lone "muy" said again with no stop between: 0.35, under the default floor of 0.5.
+    const { words, audio } = said([word("okay", 0, 0.3), word("muy", 1.0, 1.3), word("muy", 1.4, 1.7), word("bien", 3.0, 3.4)]);
+    const plan = planCleanup(words, audio, { fps: FPS, retakes: true });
+    expect(plan.cuts.map((cut) => cut.kind)).toEqual(["pause", "pause"]);
+    expect(plan.skipped.some((entry) => entry.kind === "retake" && entry.reason.includes("confidence"))).toBe(true);
+    const without = planCleanup(words, audio, { fps: FPS });
+    expect(plan.cuts).toEqual(without.cuts);
+  });
+
+  it("leaves a retake out when its words come from two transcripts", () => {
+    const { words, audio } = said([
+      word("okay", 0, 0.3),
+      word("la", 0.8, 1.0),
+      word("idea", 1.0, 1.4, { transcript: "transcripts/other.words.json" }),
+      word("la", 1.9, 2.1),
+      word("idea", 2.1, 2.5),
+    ]);
+    const plan = planCleanup(words, audio, { fps: FPS, retakes: true, pauses: false });
+    expect(plan.cuts).toEqual([]);
+    expect(plan.skipped[0]!.reason).toContain("two transcripts");
   });
 
   it("can run without pauses", () => {
