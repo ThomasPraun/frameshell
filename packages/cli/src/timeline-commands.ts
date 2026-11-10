@@ -122,11 +122,12 @@ mutations print the new revision):
   duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
-                               --threshold, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
+                               --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
                                Dip --depth dB (default 7), complete as the voice starts (--attack ms, default 40) and
                                gone --release ms after it ends (default 450). The keys are the clip's level minus
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
-                               you set with clip key stay. Edit the curve like any gain key; revert undoes it
+                               you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
+                               like any gain key; a key you set is a level, not a dip. Revert undoes it
   transition set --at s [--kind dissolve|fade] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's

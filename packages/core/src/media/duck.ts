@@ -1,3 +1,4 @@
+import { ErrorCode, RpcError } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
 import { ENERGY_HOP_S, type EnergyProfile } from "./energy.js";
 
@@ -90,10 +91,13 @@ export function dipAt(points: readonly DipPoint[], time: number): number {
   return 0;
 }
 
+const BINARY_ERRORS: readonly number[] = [ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
+
 /**
  * Loud runs of the sound of the media clips on the `under` tracks of `timeline`, on the timeline clock. Muted tracks
- * and clips are not listened to; assets that cannot be decoded (a still image) and clips that carry no media
- * (nested timelines, generated pictures) are named in `warnings`.
+ * and clips are not listened to; assets that cannot be decoded (a still image, a missing file) and nested timelines
+ * are named in `warnings`. A missing or failing ffmpeg (`Binary*` errors) is thrown: nothing was heard, so nothing
+ * may be written. Level of a clip (`audio.gain`, track gain) is not taken into account: its source sound is measured.
  */
 export async function voiceRuns(
   timeline: Timeline,
@@ -102,7 +106,7 @@ export async function voiceRuns(
 ): Promise<{ runs: Span[]; warnings: string[] }> {
   const runs: Span[] = [];
   const warnings: string[] = [];
-  const loud = new Map<string, Promise<Span[] | null>>();
+  const loud = new Map<string, Promise<Span[] | Error>>();
   for (const id of under) {
     const track = timeline.tracks.find((candidate) => candidate.id === id);
     if (!track || (track.kind !== "video" && track.kind !== "audio") || track.muted === true) continue;
@@ -116,12 +120,19 @@ export async function voiceRuns(
       if (!spans) {
         spans = options.profile(clip.asset).then(
           (profile) => loudSpans(profile.db, options.threshold),
-          () => null,
+          (error: unknown) => {
+            if (error instanceof RpcError && BINARY_ERRORS.includes(error.code)) throw error;
+            return error instanceof Error ? error : new Error(String(error));
+          },
         );
         loud.set(clip.asset, spans);
       }
       const found = await spans;
-      if (!found) continue;
+      if (found instanceof Error) {
+        const warning = `${clip.asset} cannot be decoded (${found.message}): its sound is not heard, so the music does not duck under it.`;
+        if (!warnings.includes(warning)) warnings.push(warning);
+        continue;
+      }
       runs.push(...spansOnTimeline(found, { from: clip.in, to: clip.out, start: clip.start, speed: clip.speed ?? 1 }));
     }
   }

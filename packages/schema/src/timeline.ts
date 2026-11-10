@@ -84,6 +84,13 @@ const keyList = (value: z.ZodNumber, unit: string) =>
             "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; " +
               "setting or moving a key by hand (`clip.key`) clears it.",
           ),
+        base: z
+          .number()
+          .optional()
+          .describe(
+            "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. " +
+              "Running the command again puts that level back as the hand key and takes the dip from it.",
+          ),
       }),
     )
     .min(1)

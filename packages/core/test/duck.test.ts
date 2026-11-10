@@ -198,6 +198,49 @@ describe("track.duck", () => {
     expect(parseTimeline(second.timeline).ok).toBe(true);
   });
 
+  it("dips a hand key inside the dip and gives its level back on the next run", async () => {
+    const withHand = bed("m", 0, 0, 8, { keys: { gain: [{ at: 3, value: -1 }] } });
+    const first = await apply(music(withHand), duck(CURVE));
+    const keys = clipOf(first.timeline, "m").keys?.gain ?? [];
+    // The lane is at -1 around the hand key (held back to the start), dipped by 7 where the voice speaks, with no jump at 3 s.
+    expect(keys.map((key) => [key.at, key.value])).toEqual([
+      [0, -1],
+      [1.967, -1],
+      [2, -8],
+      [3, -8],
+      [4, -8],
+      [4.467, -1],
+      [8, -1],
+    ]);
+    expect(keys.find((key) => key.at === 3)).toEqual({ at: 3, value: -8, auto: "duck", base: -1 });
+    expect(parseTimeline(first.timeline).ok).toBe(true);
+    const clip = clipOf(first.timeline, "m");
+    for (const t of [2, 2.5, 3, 3.5, 4]) expect(gainAt(clip, t)).toBe(-8);
+
+    // Again with the voice gone from there: the hand key is the hand key again, nothing else is left.
+    const gone = await apply(first.timeline, duck(dipCurve([{ start: 6, end: 6.5 }], { depth: 7, attack: 0.04, release: 0.45 })));
+    expect(clipOf(gone.timeline, "m").keys?.gain?.find((key) => key.at === 3)).toEqual({ at: 3, value: -1 });
+    // Again with the same voice: same lane, no double dip.
+    const again = await apply(first.timeline, duck(CURVE));
+    expect(clipOf(again.timeline, "m").keys?.gain).toEqual(keys);
+  });
+
+  it("dips a hand key that sits on a point of the curve", async () => {
+    const first = await apply(music(bed("m", 0, 0, 8, { keys: { gain: [{ at: 2, value: -2 }, { at: 6, value: -2 }] } })), duck(CURVE));
+    const keys = clipOf(first.timeline, "m").keys?.gain ?? [];
+    expect(keys.filter((key) => key.at === 2)).toEqual([{ at: 2, value: -9, auto: "duck", base: -2 }]);
+    expect(keys.find((key) => key.at === 6)).toEqual({ at: 6, value: -2 });
+    expect(parseTimeline(first.timeline).ok).toBe(true);
+  });
+
+  it("treats an edited duck key as a level the next run dips", async () => {
+    const first = await apply(music(bed("m", 0, 0, 8)), duck(CURVE));
+    const edited = await applyOperation(first.timeline, { op: "clip.key", args: { clip: "m", prop: "gain", time: 3, value: -4 } }, context());
+    expect(clipOf(edited.timeline, "m").keys?.gain?.find((key) => key.at === 3)).toEqual({ at: 3, value: -4 });
+    const second = await apply(edited.timeline, duck(CURVE));
+    expect(gainAt(clipOf(second.timeline, "m"), 3)).toBe(-11);
+  });
+
   it("removes its keys when no voice is left, keeping hand keys", async () => {
     const first = await apply(music(bed("m", 0, 0, 8)), duck(CURVE));
     const handled = await applyOperation(first.timeline, { op: "clip.key", args: { clip: "m", prop: "gain", time: 6, value: -2 } }, context());
@@ -261,7 +304,40 @@ describe("voice runs", () => {
       ...createTimeline("main"),
       tracks: [{ id: "t_a", kind: "video", clips: [{ id: "v1", type: "media", asset: "assets/still.png", start: 0, in: 0, out: 5 } as Clip] }],
     };
-    const { runs } = await voiceRuns(timeline, ["t_a"], { threshold: -38, profile: async () => Promise.reject(new Error("no audio")) });
+    const { runs, warnings } = await voiceRuns(timeline, ["t_a"], { threshold: -38, profile: async () => Promise.reject(new Error("no audio")) });
     expect(runs).toEqual([]);
+    expect(warnings).toEqual(["assets/still.png cannot be decoded (no audio): its sound is not heard, so the music does not duck under it."]);
+  });
+
+  it("names an undecodable asset once, and still hears the others", async () => {
+    const timeline: Timeline = {
+      ...createTimeline("main"),
+      tracks: [
+        {
+          id: "t_a",
+          kind: "video",
+          clips: [
+            { id: "v1", type: "media", asset: "assets/still.png", start: 0, in: 0, out: 5 } as Clip,
+            { id: "v2", type: "media", asset: "assets/still.png", start: 5, in: 0, out: 5 } as Clip,
+            { id: "v3", type: "media", asset: "assets/talk.mp4", start: 10, in: 2, out: 6 } as Clip,
+          ],
+        },
+      ],
+    };
+    const { runs, warnings } = await voiceRuns(timeline, ["t_a"], {
+      threshold: -38,
+      profile: async (asset) => (asset === "assets/still.png" ? Promise.reject(new Error("no audio")) : loud(3, 4)),
+    });
+    expect(runs).toEqual([{ start: 11, end: 12 }]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("fails when ffmpeg cannot be fetched instead of hearing nothing", async () => {
+    const timeline: Timeline = {
+      ...createTimeline("main"),
+      tracks: [{ id: "t_a", kind: "video", clips: [{ id: "v1", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 5 } as Clip] }],
+    };
+    const profile = async () => Promise.reject(new RpcError(ErrorCode.BinaryInstallFailed, "ffmpeg could not be installed"));
+    await expect(voiceRuns(timeline, ["t_a"], { threshold: -38, profile })).rejects.toMatchObject({ code: ErrorCode.BinaryInstallFailed });
   });
 });

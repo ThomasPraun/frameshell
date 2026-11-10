@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the clips of an audio track that dip while someone speaks. Defaults: 7 dB deep (`--depth`), complete as the voice
   starts (`--attack` 40 ms), gone 450 ms after it ends (`--release`), speech above -38 dBFS (`--threshold`),
   stretches closer than 0.6 s merged (`--gap`). The keys are the clip's level minus the dip, with keys at the clip's
-  start and end, and carry the new key field `auto: "duck"`: running it again replaces them and keeps keys set by hand.
+  start and end, and carry the new key field `auto: "duck"`: running it again replaces them and keeps keys set by hand
+  (a hand key where someone speaks is dipped as well, its level kept in the new key field `base`).
   Preview and export play them like any gain key. History shows it as "Duck music under speech".
 
 ## [0.18.0] - 2026-11-07

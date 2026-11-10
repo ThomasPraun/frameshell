@@ -36,7 +36,7 @@ import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
-import { dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
+import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
@@ -1131,17 +1131,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const attack = attackMs / 1000;
       const release = releaseMs / 1000;
-      const heard = await voiceRuns(loaded, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
-      const stretches = speechStretches(heard.runs, { gap, attack, release });
-      const curve = dipCurve(stretches, { depth, attack, release });
-      const result = await operate("track.duck", { cwd, timeline, track, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] }, caller);
+      let stretches: Span[] = [];
+      let heardWarnings: string[] = [];
+      // Measured against the timeline the operation applies to: a voice edited or a proposal rebased meanwhile is heard as it is then.
+      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+        const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
+        stretches = speechStretches(heard.runs, { gap, attack, release });
+        heardWarnings = heard.warnings;
+        const curve = dipCurve(stretches, { depth, attack, release });
+        return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
+      };
+      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, prepare);
       return {
         ...result,
         track,
         under,
         stretches: stretches.length,
         speechSeconds: Math.round(stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
-        warnings: [...result.warnings, ...heard.warnings],
+        warnings: [...result.warnings, ...heardWarnings],
       };
     },
     cut: (params, caller) => operate("cut", params, caller),

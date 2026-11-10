@@ -2212,7 +2212,8 @@ export const methods = {
       "clip's start and end so the lane never holds a dip by accident. They are marked `auto: \"duck\"`: running it again replaces " +
       "those and keeps the keys you set by hand; clips with no speech over them lose their old ones. The person sees and edits the " +
       "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
-      "or multicam program tracks is not heard (a warning says so). " +
+      "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
+      "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
       "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8 }`. Fails with InvalidOperation (`track` is not an audio " +
       "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
