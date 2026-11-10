@@ -98,6 +98,24 @@ describe("frameshell hyperframes check", () => {
     expect(report.ok).toBe(false);
   });
 
+  it("passes a seeded-PRNG composition and one that inlines GSAP", async () => {
+    const seeded =
+      "      const rng = (a) => () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };\n" +
+      "      const next = rng(7);\n" +
+      '      tl.to("#card", { x: 40 + Math.round(next() * 60), duration: 1 }, 0);';
+    write("seeded", gsapComposition(seeded));
+    const first = await check(["seeded"]);
+    expect(first.report.compositions[0]!.findings.map((f) => f.rule).filter((rule) => rule === "non_deterministic_code" || rule.startsWith("gsap_"))).toEqual([]);
+    expect(first.failed).toBe(false);
+    const banner =
+      '/*! GSAP 3.12.5 | (c) GreenSock, Inc. */\n!function(t,e){"function"==typeof define&&define.amd?define(["exports"],e):e(t)}(this,function(t){var ScrollTrigger,o={delay:1,onComplete:0,overwrite:true};t.gsap={}});';
+    const inlined = gsapComposition('      tl.to("#card", { x: 100, duration: 1 }, 0);').replace('<script src="gsap.min.js"></script>', `<script>${banner}</script>`);
+    write("inlined", inlined);
+    const second = await check(["inlined"]);
+    const own = ["gsap_scrolltrigger", "gsap_delay_chain", "gsap_callback_not_seek_safe", "gsap_overwrite_reads_state"];
+    expect(second.report.compositions[0]!.findings.map((f) => f.rule).filter((rule) => own.includes(rule))).toEqual([]);
+  });
+
   it("checks every composition without an argument, and a directory, a path or a name alike", async () => {
     const a = write("a", gsapComposition('      tl.to("#card", { x: 100, duration: 1 }, 0);'));
     const b = write("b", gsapComposition('      tl.to("#card", { x: 100, duration: 1 }, 0);'));
@@ -132,11 +150,16 @@ describe("frameshell hyperframes check", () => {
 describe("seekSafetyFindings", () => {
   const find = (script: string) => seekSafetyFindings(`<html>\n<script>\n${script}\n</script>\n</html>`).map((f) => `${f.rule}@${f.line}`);
 
-  it("takes seeded randomness and finds each unseeded one with its line", () => {
-    expect(find('gsap.utils.random(0, 100, 1, true);\nconst x = gsap.utils.random(0, 100);\ngsap.to(a, { x: "random(-50, 50)" });')).toEqual([
-      "gsap_random_unseeded@4",
-      "gsap_random_unseeded@5",
-    ]);
+  it("leaves randomness to the linter", () => {
+    expect(find('const x = gsap.utils.random(0, 100);\ngsap.to(a, { x: "random(-50, 50)" });')).toEqual([]);
+  });
+
+  it("skips an inlined GSAP build but still reads the author's own script", () => {
+    const build =
+      '/*! GSAP 3.12.5 | https://gsap.com | (c) 2008-2024 GreenSock, Inc. */\n!function(t,e){"function"==typeof define&&define.amd?define(["exports"],e):e(t)}(this,function(t){var ScrollTrigger={};gsap.to(a,{delay:1,onComplete:f,overwrite:true})});';
+    const html = `<html>\n<script>${build}</script>\n<script>\ntl.to(a, { delay: 1 });\n</script>\n</html>`;
+    expect(seekSafetyFindings(html).map((f) => `${f.rule}@${f.line}`)).toEqual(["gsap_delay_chain@5"]);
+    expect(seekSafetyFindings("<script>/* inlined: gsap@3.12.5/dist/gsap.min.js */ var ScrollTrigger;</script>")).toEqual([]);
   });
 
   it("ignores comments and external scripts", () => {

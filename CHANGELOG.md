@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `frameshell hyperframes check [<composition>] [--strict]` (`@frameshell/hyperframes` 0.5.0, #479, part of #451):
   lints HyperFrames compositions in the daemon with `@hyperframes/lint` (`lintProject`, `shouldBlockRender`; a pure
-  library, no network, no telemetry) plus five GSAP seek-safety rules the linter lacks (`gsap_scrolltrigger`,
-  `gsap_delay_chain`, `gsap_callback_not_seek_safe`, `gsap_overwrite_reads_state`, `gsap_random_unseeded`). Without
+  library, no network, no telemetry) plus four GSAP seek-safety rules the linter lacks (`gsap_scrolltrigger`,
+  `gsap_delay_chain`, `gsap_callback_not_seek_safe`, `gsap_overwrite_reads_state`); inlined GSAP builds are skipped.
+  The other #479 seek rules are the linter's own: `non_deterministic_code` (random), `gsap_infinite_repeat`,
+  `gsap_repeated_fromto_without_baseline`, `gsap_relative_value_second_writer`, `gsap_function_value_hazard`. Without
   an argument it checks every `compositions/hyperframes/<name>/index.html`; an argument is a name, a directory or an
   HTML entry. `--json` carries each finding's `file`, `line`, `column`, `rule`, `severity`, `message` and `fix`;
   errors exit 1, warnings only under `--strict`. The plugin skill now tells the agent to run it after every
