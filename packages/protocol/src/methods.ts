@@ -1,6 +1,12 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { AgentLabelSchema } from "./agents.js";
+import {
+  CLEANUP_BREATH_DEFAULT_S,
+  CLEANUP_MIN_CONFIDENCE_DEFAULT,
+  CLEANUP_PAUSES_DEFAULT_S,
+  CleanupResultSchema,
+} from "./cleanup.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
   ProposalOutcomeSchema,
@@ -54,7 +60,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2212,6 +2218,50 @@ export const methods = {
       "A cut that trims or splits an adapter clip (e.g. `hyperframes`) adds a `warnings` entry naming its id, type and `scriptRef`: edit audio before building visuals.",
     params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  cleanup: {
+    mutating: true,
+    description:
+      "Propose, then make, the cuts that take dead air and false starts out of a talking head. It reads the words of the " +
+      "transcripts of the unmuted media clips (and the sound of multicam program tracks) and the audio energy of their files, " +
+      "and cuts like `cut` does (ripple on every video, audio and program track). `pauses` (seconds, default 0.4; `false` = " +
+      "off): a gap between two kept words longer than that, confirmed by the audio being quiet there (whisper stretches words " +
+      "over silence, so the edges come from the audio, not from the word times); the cut leaves `breath` seconds (default 0.1) " +
+      "of silence on each side and lies on the frame grid. `retakes: true`: a phrase of 1 to 6 words said again right after " +
+      "(a false start, a stop, a restart; spelling variants and a cut-off last word match) cuts the earlier attempt and " +
+      "keeps the last. Only candidates with `confidence` of `minConfidence` or more (default 0.5) count. A cut is made only " +
+      "where transcribed speech covers every instant of it, so it never removes b-roll or other material that is not part of " +
+      "the speech; a word with `speechInside` is never cut around. `dryRun: true` changes nothing and returns the candidates: " +
+      "show them as a table (kind, start, end, words, reason, confidence), ask, then call again with the same options (the " +
+      "plan is made again from the timeline as it is) and `skip` the ids the person rejected. Without `dryRun` the cuts are " +
+      "one transaction labelled `Cleanup: …` (`revert` undoes it whole; with review mode on it is one proposal); a cut word " +
+      "shows struck through in the transcript view and clicking it restores it. Example: `{ pauses: 0.5, retakes: true, " +
+      "dryRun: true }`. Fails with InvalidOperation (`breath` too large for `pauses`, a `skip` id that is not a candidate, " +
+      "no transcript for the speech) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      pauses: z
+        .union([z.number().min(0.15).max(30), z.literal(false)])
+        .default(CLEANUP_PAUSES_DEFAULT_S)
+        .describe(`Shortest gap between two words, in seconds, to cut as a pause; \`false\` leaves pauses alone. Default ${CLEANUP_PAUSES_DEFAULT_S}.`),
+      breath: z
+        .number()
+        .min(0)
+        .max(2)
+        .default(CLEANUP_BREATH_DEFAULT_S)
+        .describe(`Seconds of silence left on each side of a cut. Default ${CLEANUP_BREATH_DEFAULT_S}; must be under half of \`pauses\`.`),
+      retakes: z.boolean().default(false).describe("Also cut the earlier attempts of repeated phrases (false starts). Default false."),
+      minConfidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(CLEANUP_MIN_CONFIDENCE_DEFAULT)
+        .describe(`Drop candidates below this confidence. Default ${CLEANUP_MIN_CONFIDENCE_DEFAULT}.`),
+      dryRun: z.boolean().default(false).describe("Only return the candidates; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Candidate ids (`p1`, `r2`…) from a dry run to leave out."),
+    }),
+    result: CleanupResultSchema,
   },
   "tx.begin": {
     mutating: true,
