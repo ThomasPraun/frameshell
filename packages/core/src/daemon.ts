@@ -45,7 +45,8 @@ import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multi
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
-import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
+import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
+import { parseFrameFormat, planReframe } from "./reframe.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -1344,6 +1345,149 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (wrote) await settle(author, tx);
         return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
       });
+    },
+    "clip.reframe": async ({ cwd, timeline, clip: clipId, format: formatText, person: personRef, anchor }, caller, request) => {
+      const dir = await root(cwd);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.reframe: ${reason}`, { op: "clip.reframe", reason, field });
+      const format = parseFrameFormat(formatText ?? "9x16");
+      if (!format) throw invalid(`format "${formatText}" is not <width>x<height>, e.g. 9x16.`, "format");
+      if (personRef !== undefined && anchor !== undefined) throw invalid("`person` and `anchor` are two ways to place the picture: give one.", "anchor");
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const place = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find(({ clip }) => clip.id === clipId);
+      if (!place) {
+        throw new RpcError(ErrorCode.ClipNotFound, `clip.reframe: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      const clip = place.clip;
+      if (!isMediaClip(clip)) throw invalid(`clip ${clipId} is not a media clip: only footage and photos are reframed.`, "clip");
+      const probe = await media.probe(dir, clip.asset);
+      if (!probe.video) throw invalid(`${clip.asset} has no picture.`, "clip");
+      const still = probe.video.still;
+      const speed = clip.speed ?? 1;
+      const end = clip.start + (clip.out - clip.in) / speed;
+      const toTimeline = (source: number) => clip.start + (source - clip.in) / speed;
+      const range = still ? undefined : { from: clip.in, to: clip.out };
+      const project = (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 };
+      const warnings: string[] = [];
+      let samples = 0;
+      let faces = 0;
+      let follows: "face" | "person" | "anchor" = "face";
+      let points: FacePoint[];
+      if (anchor !== undefined) {
+        follows = "anchor";
+        points = [{ time: clip.in, x: anchor, y: 0.5 }];
+      } else if (personRef !== undefined) {
+        follows = "person";
+        const found = await people.faceTrack(dir, personRef, clip.asset, faceScans(dir), range);
+        if (!found.scanned) {
+          throw invalid(`${clip.asset} has no face scan, so ${found.person.name}'s face is not known there: frameshell people scan ${clip.asset}`, "person");
+        }
+        samples = still ? 1 : Math.max(1, Math.round((clip.out - clip.in) * FACE_SAMPLE_HZ));
+        faces = found.points.length;
+        points = proposeReframeKeys(found.points);
+        if (faces === 0) warnings.push(`${found.person.name} has no face in ${clip.asset} between ${clip.in} and ${clip.out} s, so the clip keeps its framing (link their face: frameshell people link).`);
+      } else {
+        if (!probe.video.width || !probe.video.height) throw invalid(`${clip.asset} has no readable picture size.`, "clip");
+        const tell = (update: Progress) => {
+          try {
+            request.progress(update);
+          } catch {
+            // Connection closed.
+          }
+        };
+        const detected = await inJob({ kind: "faces", project: dir, asset: clip.asset }, async (ctx) => {
+          const projectBins = await projectBinaries(dir);
+          const ffmpeg = await binaries.ensure("ffmpeg", projectBins, { onProgress: tell });
+          const scan =
+            options.faceScanner ??
+            yunetWorkerScanner({
+              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, projectBins, { onProgress: tell }),
+              model: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
+            });
+          ctx.update({ step: "faces", progress: 0 });
+          const message = `Finding faces in ${basename(clip.asset)}`;
+          return scan({
+            ffmpeg,
+            path: join(dir, ...clip.asset.split("/")),
+            width: probe.video!.width,
+            height: probe.video!.height,
+            duration: probe.duration ?? undefined,
+            range,
+            signal: ctx.signal,
+            onProgress: (fraction) => {
+              ctx.update({ progress: fraction });
+              tell({ message, fraction, stage: "faces", values: { angle: basename(clip.asset) } });
+            },
+          });
+        });
+        samples = detected.samples;
+        faces = detected.faces;
+        points = detected.keys;
+        if (faces === 0) warnings.push(`No face found in ${detected.samples} frames of ${clip.id}, so it keeps its framing (look at a frame, then pass --anchor).`);
+        else if (faces < samples / 4) warnings.push(`A face in only ${faces} of ${samples} frames of ${clip.id}; check its keys.`);
+      }
+      const nothing = (): MethodResult<"clip.reframe"> => ({
+        timeline,
+        revision: loaded.revision,
+        clip: clip.id,
+        format: `${format.width}x${format.height}`,
+        follows,
+        samples,
+        faces,
+        placement: null,
+        keys: 0,
+        operations: [],
+        tx: null,
+        warnings,
+      });
+      if (points.length === 0) return nothing();
+      const plan = planReframe({ source: { width: probe.video.width, height: probe.video.height }, project, format }, points, toTimeline);
+      if (Math.abs(project.width / project.height - format.width / format.height) > 0.01) {
+        warnings.push(
+          `The project is ${project.width}x${project.height}: its preview shows the clip zoomed, and an export in ${format.width}:${format.height} (e.g. the vertical-1080x1920 preset) shows the framing.`,
+        );
+      }
+      const had = clip.keys?.x || clip.keys?.y || clip.keys?.scale || clip.transform?.x !== undefined || clip.transform?.y !== undefined || clip.transform?.scale !== undefined;
+      if (had) warnings.push(`${clip.id} had its own x, y or scale (static or keys): replaced.`);
+      // Every write joins one transaction, so one revert undoes the framing even from a sessionless client.
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Reframe ${basename(clip.asset, extname(clip.asset))}` };
+      const author = journalAuthorOf(caller);
+      const written: string[] = [];
+      let revision = loaded.revision;
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        written.push(result.operation.id);
+        revision = result.revision;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        for (const prop of ["x", "y", "scale"] as const) {
+          if (clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true } } as OperationRequest);
+        }
+        await apply({ op: "clip.set", args: { clip: clip.id, transform: { scale: plan.scale, x: plan.x, y: plan.y } } } as OperationRequest);
+        for (const prop of ["x", "y"] as const) {
+          if (!plan.moves[prop]) continue;
+          for (const point of plan.keys) {
+            const time = Math.min(end, Math.max(clip.start, point.time));
+            await apply({ op: "clip.key", args: { clip: clip.id, prop, time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+          }
+        }
+      } catch (error) {
+        // All or nothing: take back what was written, in the same transaction.
+        for (const id of written.reverse()) await timelines.revert({ root: dir, cwd, timeline, author, tx, target: id }).catch(() => undefined);
+        throw error;
+      }
+      await settle(key, tx);
+      return {
+        ...nothing(),
+        revision,
+        placement: { scale: plan.scale, x: plan.x, y: plan.y },
+        keys: plan.moves.x || plan.moves.y ? plan.keys.length : 0,
+        operations: written,
+        tx: tx.id,
+      };
     },
     "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);
