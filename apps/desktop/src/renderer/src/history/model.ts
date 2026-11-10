@@ -50,6 +50,9 @@ const VERBS: Record<string, string> = {
   "multicam.paint": t.history.verbs.multicamPaint,
   "multicam.direct": t.history.verbs.multicamDirect,
   "shot.set": t.history.verbs.changeShot,
+  "marker.add": t.history.verbs.addMarker,
+  "marker.set": t.history.verbs.changeMarker,
+  "marker.remove": t.history.verbs.removeMarker,
   "timeline.patch": t.history.verbs.directEdit,
 };
 

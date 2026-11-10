@@ -1,5 +1,6 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
+import type { MarkerColor } from "@frameshell/schema";
 import { t } from "../i18n.js";
 import type { CueBox } from "../subtitles/model.js";
 import {
@@ -62,6 +63,8 @@ export interface TimelineTheme {
   subtitles: string;
   /** Multicam angles by colour slot (`ShotAngle.color`); at least one. */
   angles: readonly string[];
+  /** Marker colours by name (ADR 0029); a marker without one takes `accent`. */
+  markers: Readonly<Record<MarkerColor, string>>;
   /** History diff marks (see {@link PaintInput.diff}); removed clips use `danger`. */
   diffAdded: string;
   diffMoved: string;
@@ -85,6 +88,7 @@ export const DEFAULT_THEME: TimelineTheme = {
   audio: "#6fae8b",
   subtitles: "#b48acb",
   angles: ["#d9895b", "#5bb5c9", "#c9c25b", "#c97bb4", "#7fc97b", "#8f86d9"],
+  markers: { red: "#e0675f", orange: "#e08a4f", yellow: "#d9c45b", green: "#6fbf73", blue: "#5b9fd9", purple: "#a98ad9" },
   diffAdded: "#79d39a",
   diffMoved: "#66c2e0",
   diffChanged: "#d7a8e8",
@@ -268,6 +272,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   ctx.restore();
 
   paintRuler(ctx, input);
+  if (layout.markers.length > 0) paintMarkers(ctx, input);
   if (layout.scenes.length > 0) paintScenes(ctx, input);
   for (const mark of marks) {
     ctx.fillStyle = theme.accent;
@@ -808,6 +813,58 @@ function paintRuler<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
   }
 }
 
+/** Opacity of a marker's line across the lanes: a guide for the eye, under clips' outlines in weight. */
+const MARKER_LINE_ALPHA = 0.45;
+/** Width of a marker's flag on the marker lane, px. */
+const MARKER_FLAG = 7;
+
+/**
+ * The marker lane under the ruler (ADR 0029): a flag per marker in its colour with its label to the right (cut
+ * where the next marker starts), and a faint line down the lanes so a drag can be aimed at it.
+ */
+function paintMarkers<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
+  const { layout, theme, viewport } = input;
+  const { pxPerSecond, scrollLeft, width, height } = viewport;
+  const top = RULER_HEIGHT;
+  const h = layout.sceneTop - RULER_HEIGHT;
+  ctx.fillStyle = theme.ruler;
+  ctx.fillRect(0, top, width, h);
+  ctx.fillStyle = theme.lineSoft;
+  ctx.fillRect(0, layout.sceneTop - 1, width, 1);
+  ctx.font = `10px ${theme.fontUi}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const xs = layout.markers.map((marker) => Math.round(marker.at * pxPerSecond - scrollLeft));
+  layout.markers.forEach((marker, index) => {
+    const x = xs[index]!;
+    const next = xs.slice(index + 1).find((other) => other > x) ?? Number.POSITIVE_INFINITY;
+    if (x < -MARKER_FLAG && next < 0) return;
+    if (x > width + MARKER_FLAG) return;
+    const color = marker.color ? theme.markers[marker.color] : theme.accent;
+    ctx.globalAlpha = MARKER_LINE_ALPHA;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, layout.head, 1, height - layout.head);
+    ctx.globalAlpha = 1;
+    ctx.fillRect(x, top, 1, h - 1);
+    ctx.beginPath();
+    ctx.moveTo(x + 1, top + 2);
+    ctx.lineTo(x + 1 + MARKER_FLAG, top + 2 + MARKER_FLAG / 2);
+    ctx.lineTo(x + 1, top + 2 + MARKER_FLAG);
+    ctx.closePath();
+    ctx.fill();
+    const textX = x + MARKER_FLAG + 4;
+    const room = Math.min(next, width) - textX - 4;
+    if (room <= 8) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(textX, top, room, h);
+    ctx.clip();
+    ctx.fillStyle = theme.text;
+    ctx.fillText(marker.label, textX, top + h / 2);
+    ctx.restore();
+  });
+}
+
 /** Gap kept between neighbouring scene spans, px. */
 const SCENE_GAP = 1;
 
@@ -819,8 +876,8 @@ const SCENE_GAP = 1;
 function paintScenes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
   const { layout, theme, viewport } = input;
   const { pxPerSecond, scrollLeft, width } = viewport;
-  const top = RULER_HEIGHT;
-  const h = layout.head - RULER_HEIGHT;
+  const top = layout.sceneTop;
+  const h = layout.head - layout.sceneTop;
   ctx.fillStyle = theme.ruler;
   ctx.fillRect(0, top, width, h);
   ctx.fillStyle = theme.lineSoft;
