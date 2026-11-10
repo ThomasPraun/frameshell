@@ -23,12 +23,13 @@ import {
   RpcError,
   type TimelineProblem,
   type TimelineRejection as RejectionInfo,
+  type MarkerListResult,
   type TimelineView,
   type TimelineViewName,
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
 import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
@@ -61,11 +62,12 @@ import {
   type ClipTypeInfo,
   type EditContext,
   type EditPointResolver,
+  type IdPrefix,
   type OperationRequest,
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
-import { applyPatch, diffTimelines, isEmptyPatch } from "./patch.js";
+import { applyPatch, diffTimelines, isEmptyPatch, sortMarkers } from "./patch.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -79,7 +81,7 @@ export interface TimelineServiceOptions {
   /** Clip adapters loaded for the project; see `PluginHost.clipTypes`. */
   clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>>;
   /** Id generator. Default: prefix + 6 random hex digits (`c_1a2b3c`). */
-  newId?: (prefix: "c" | "t" | "g") => string;
+  newId?: (prefix: IdPrefix) => string;
   /** Cut/trim edge adjustment per project and fps (#12 energy snapping). Default: none, edges stay. */
   resolveEditPoint?: (root: string, fps: number) => EditPointResolver | undefined;
   /**
@@ -1263,8 +1265,15 @@ export class TimelineService {
       duration,
       tracks,
       ...(timeline.groups ? { groups: timeline.groups } : {}),
+      ...(timeline.markers ? { markers: sortedMarkers(timeline) } : {}),
       problems,
     };
+  }
+
+  /** Markers by `at` (`marker.list`, ADR 0029); `view` as for {@link TimelineService.show}. */
+  async markers(root: string, id: string, view: TimelineViewName = "current"): Promise<MarkerListResult & Pick<Viewed, "view" | "proposal">> {
+    const { timeline, proposal } = await this.viewTimeline(root, id, view);
+    return { view, proposal, timeline: id, revision: timeline.revision, markers: sortedMarkers(timeline) };
   }
 
   /** Track summaries in stacking order (`track.list`); `view` as for {@link TimelineService.show}. */
@@ -1299,7 +1308,7 @@ export class TimelineService {
 
   #context(root: string, id: string, fps: number, op: string, settings: EditSettings = {}): EditContext {
     const grid = new FrameGrid(fps);
-    const newId = this.#options.newId ?? ((prefix: "c" | "t" | "g") => `${prefix}_${randomBytes(3).toString("hex")}`);
+    const newId = this.#options.newId ?? ((prefix: IdPrefix) => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
     return {
       fps,
@@ -2040,4 +2049,11 @@ function clipTypeInfo(adapter: ClipAdapter): ClipTypeInfo {
         .join("; ");
     },
   };
+}
+
+/** Copy of `timeline`'s markers by `at`, then id; a direct edit may store them in any order. */
+function sortedMarkers(timeline: Timeline): Marker[] {
+  const markers = structuredClone(timeline.markers ?? []);
+  sortMarkers(markers);
+  return markers;
 }

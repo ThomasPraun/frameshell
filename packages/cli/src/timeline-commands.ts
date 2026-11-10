@@ -1,6 +1,7 @@
 import type {
   DaemonConnection,
   HistoryResult,
+  MarkerListResult,
   MulticamCreateResult,
   MulticamDirectResult,
   MulticamFacesResult,
@@ -123,6 +124,14 @@ mutations print the new revision):
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's
                                start or end with nothing butted fades in or out. Short material shortens it, with a warning
   transition remove --at s [--track <track>…]
+  marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
+                               A named point on the timeline clock (a hook, a beat to land on); labels are unique
+                               ignoring case. cut moves markers after the cut with the material and removes markers
+                               inside the cut range when it cuts every track; ripple trims and inserts move them too
+  marker set <marker> [--at s] [--label l] [--color c | --clear-color]
+                               <marker> is the id (m_…) or the label
+  marker remove <marker>
+  marker list                  Markers by time: id, time, label, colour
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
@@ -149,7 +158,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "marker", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -228,6 +237,9 @@ export const TIMELINE_OPTIONS = {
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
   mask: { type: "string" },
+  label: { type: "string" },
+  color: { type: "string" },
+  "clear-color": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -262,6 +274,10 @@ const ALLOWED: Record<string, string[]> = {
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
   "transition set": ["at", "kind", "duration", "track"],
   "transition remove": ["at", "track"],
+  "marker add": ["at", "label", "color"],
+  "marker set": ["at", "label", "color", "clear-color"],
+  "marker remove": [],
+  "marker list": [],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -297,6 +313,10 @@ const ARITY: Record<string, [number, number]> = {
   "clip key": [1, 1],
   "transition set": [0, 0],
   "transition remove": [0, 0],
+  "marker add": [0, 0],
+  "marker set": [1, 1],
+  "marker remove": [1, 1],
+  "marker list": [0, 0],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -511,6 +531,23 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (method === "transition.set") Object.assign(params, { kind: str("kind"), duration: num("duration") });
       break;
     }
+    case "marker add":
+      method = "marker.add";
+      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds> and --label <label>.");
+      Object.assign(params, { at: num("at"), label: str("label"), color: str("color") });
+      break;
+    case "marker set":
+      method = "marker.set";
+      if (str("color") !== undefined && values["clear-color"] === true) throw new UsageError("Pass --color or --clear-color, not both.");
+      Object.assign(params, { marker: args[0], at: num("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color") });
+      break;
+    case "marker remove":
+      method = "marker.remove";
+      params["marker"] = args[0];
+      break;
+    case "marker list":
+      method = "marker.list";
+      break;
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
@@ -715,6 +752,7 @@ export async function executeTimeline(
   }
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
+  if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
   if (inv.method === "history") return formatHistory(result as HistoryResult);
   if (inv.method === "tx.begin") {
     const { tx, label } = result as MethodResult<"tx.begin">;
@@ -863,6 +901,15 @@ function formatTracks(result: { timeline: string; revision: number; tracks: Trac
   return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
 }
 
+function formatMarkers(result: MarkerListResult): string {
+  if (result.markers.length === 0) {
+    return `Timeline ${result.timeline} (revision ${result.revision}) has no markers. Add one: \`frameshell marker add --at 12.5 --label hook\`.\n`;
+  }
+  const lines = [`Timeline ${result.timeline} · revision ${result.revision} · ${result.markers.length} marker${result.markers.length === 1 ? "" : "s"}:`];
+  for (const marker of result.markers) lines.push(`  ${marker.id}  ${marker.at} s  ${marker.label}${marker.color ? `  (${marker.color})` : ""}`);
+  return `${lines.join("\n")}\n`;
+}
+
 /** `  muted`, `  hidden` or both, as a track line ends; empty for a track that plays and shows. */
 function trackState(track: { muted?: true | undefined; hidden?: true | undefined }): string {
   return `${track.muted ? "  muted" : ""}${track.hidden ? "  hidden" : ""}`;
@@ -899,5 +946,6 @@ function formatTimeline(view: TimelineView): string {
       lines.push(`  ${c.id}  ${c.type} ${what}  ${c.start}–${c.end ?? "?"}${source}${speed}`);
     }
   }
+  if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }
