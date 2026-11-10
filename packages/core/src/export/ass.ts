@@ -1,11 +1,24 @@
-import { type ResolvedSubtitleTrack, SUBTITLE_FONT, type Size, cueTokens, subtitleLayout } from "@frameshell/schema";
+import {
+  type ResolvedSubtitleTrack,
+  SUBTITLE_ENTRY,
+  SUBTITLE_FONT,
+  type Size,
+  cueTokens,
+  entryEnd,
+  entryProgress,
+  entryUnits,
+  subtitleLayout,
+} from "@frameshell/schema";
 
 /**
  * ASS script burning subtitle cues into export (SPEC §3.5 step 3), laid out
  * with the same `subtitleLayout` the preview draws with: one style per track
  * (bundled face, size, outline, colours), one event per cue, or per spoken
- * word when the style highlights it. Coordinates are output pixels
- * (`PlayRes` = `frame`). Pure.
+ * word when the style highlights it. A phrase's keyword takes the style's
+ * keyword colour. A cue with an `entry` fades and unblurs its units in (`\t`
+ * with the preview's easing; the keyword also settles from `keywordScale`);
+ * an event that starts mid-entry carries the rest of it through a negative
+ * `\t` start. Coordinates are output pixels (`PlayRes` = `frame`). Pure.
  *
  * Times are timeline seconds. ffmpeg's `ass` filter shows an event at a frame
  * when `start <= t < end`, `t` = the frame's time in whole ms (truncated);
@@ -37,19 +50,49 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
     );
     // \an2: the point is the bottom of the line box, i.e. baseline + descent.
     const anchor = `{\\an2\\pos(${num(layout.centerX)},${num(layout.baseline + layout.fontSize * SUBTITLE_FONT.descent)})}`;
+    const blur = layout.fontSize * SUBTITLE_ENTRY.blur;
+    const base = color(style.color);
     for (const cue of track.cues) {
-      const texts = cueTokens(cue);
-      const lead = texts.length - cue.words.length;
+      const tokens = cueTokens(cue);
+      const lead = tokens.length - cue.words.length;
+      const keyword = cue.keyword === undefined ? -1 : cue.keyword + lead;
+      const units = cue.entry === "none" ? null : entryUnits(cue, fps);
+      const settled = units === null ? 0 : entryEnd(cue, fps);
+      const tint = (token: number, active: number) =>
+        token === keyword && style.keywordColor !== null ? style.keywordColor : token === active && style.highlight !== null ? style.highlight : style.color;
+      /** The cue's text with token `active` highlighted (-1: none), `elapsed` seconds after the cue started. */
+      const line = (active: number, elapsed: number): string =>
+        tokens
+          .map((text, token) => {
+            const shade = tint(token, active);
+            const paint = shade === style.color ? "" : `\\c${color(shade)}`;
+            const mine = units?.filter((unit) => unit.token === token);
+            if (!mine || elapsed >= settled || mine.every((unit) => entryProgress(elapsed, unit.delay) >= 1)) {
+              return paint === "" ? text : `{${paint}}${text}{\\c${base}}`;
+            }
+            return mine
+              .map((unit) => {
+                if (entryProgress(elapsed, unit.delay) >= 1) return paint === "" ? unit.text : `{${paint}}${unit.text}{\\c${base}}`;
+                const grow = unit.keyword ? style.keywordScale : 1;
+                const from = Math.round((unit.delay - elapsed) * 1000);
+                const to = Math.round((unit.delay + SUBTITLE_ENTRY.seconds - elapsed) * 1000);
+                const size = grow === 1 ? "" : `\\fscx${num(grow * 100)}\\fscy${num(grow * 100)}`;
+                const rest = grow === 1 ? "" : "\\fscx100\\fscy100";
+                const open = `${paint}\\alpha&HFF&\\blur${num(blur)}${size}\\t(${from},${to},${SUBTITLE_ENTRY.accel},\\alpha&H00&\\blur0${rest})`;
+                return `{${open}}${unit.text}{${paint === "" ? "" : `\\c${base}`}\\alpha&H00&\\blur0${rest}}`;
+              })
+              .join("");
+          })
+          .join(" ");
       if (!cue.highlight || style.highlight === null) {
-        events.push(dialogue(layer, cue.start, cue.end, name, anchor + texts.join(" "), fps));
+        events.push(dialogue(layer, cue.start, cue.end, name, anchor + line(-1, 0), fps));
         continue;
       }
       cue.words.forEach((word, i) => {
         const from = i === 0 ? cue.start : Math.max(cue.start, word.start);
         const to = i + 1 < cue.words.length ? Math.min(cue.end, cue.words[i + 1]!.start) : cue.end;
         if (to <= from) return;
-        const line = texts.map((text, j) => (j === i + lead ? `{\\c${color(style.highlight!)}}${text}{\\c${color(style.color)}}` : text));
-        events.push(dialogue(layer, from, to, name, anchor + line.join(" "), fps));
+        events.push(dialogue(layer, from, to, name, anchor + line(i + lead, (from - cue.start) / fps), fps));
       });
     }
   });

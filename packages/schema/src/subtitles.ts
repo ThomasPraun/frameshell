@@ -1,7 +1,7 @@
 // Subtitle tracks (SPEC §3.4, §5.3): which words show when, in which style. Pure and shared: the export compiler
 // burns exactly these cues (as ASS), the preview draws exactly these cues over the picture.
 import type { Size } from "./composite.js";
-import type { Clip, SubtitleTrack, Timeline } from "./timeline.js";
+import { type CaptionGap, type CaptionPhrase, type Clip, SUBTITLE_ENTRIES, type SubtitleEntry, type SubtitleTrack, type Timeline } from "./timeline.js";
 import { type Transcript, wordSpeaker } from "./transcript.js";
 
 /** Where a subtitle line sits in the frame. */
@@ -46,6 +46,12 @@ export interface SubtitlePreset {
   maxWords: number;
   /** Most characters (spaces included) on screen at once; a longer single word still shows alone. */
   maxChars: number;
+  /** Colour of a phrase's keyword (`#rrggbb`); null: it keeps the text colour. */
+  keywordColor: string | null;
+  /** Keyword size at the start of its entry as a multiple of its size, settling to 1 (1: none). Needs an `entry`. */
+  keywordScale: number;
+  /** How cues enter; `none`: they just appear. */
+  entry: SubtitleEntry;
 }
 
 /**
@@ -65,6 +71,9 @@ export const SUBTITLE_PRESETS = {
     position: "bottom",
     maxWords: 3,
     maxChars: 18,
+    keywordColor: "#ffd426",
+    keywordScale: 1.12,
+    entry: "none",
   },
   plain: {
     size: 0.045,
@@ -77,6 +86,9 @@ export const SUBTITLE_PRESETS = {
     position: "bottom",
     maxWords: 7,
     maxChars: 42,
+    keywordColor: "#ffd426",
+    keywordScale: 1.12,
+    entry: "none",
   },
 } as const satisfies Record<string, SubtitlePreset>;
 
@@ -98,17 +110,35 @@ export interface SubtitleStyle extends SubtitlePreset {
 
 /**
  * The style a track's `style` field asks for: its preset (default
- * {@link DEFAULT_SUBTITLE_PRESET}) with `position` and `speakerNames` (default false) overridden. An unknown
+ * {@link DEFAULT_SUBTITLE_PRESET}) with `position`, `speakerNames` (default false), `keywordColor`,
+ * `keywordScale` and `entry` overridden. An unknown
  * preset name (hand-edited file) falls back to the default and is returned
- * in `unknownPreset` for a warning.
+ * in `unknownPreset` for a warning; an invalid override is ignored.
  */
 export function resolveSubtitleStyle(style: SubtitleTrack["style"]): { style: SubtitleStyle; unknownPreset: string | null } {
   const asked = style?.preset;
   const known = asked !== undefined && Object.hasOwn(SUBTITLE_PRESETS, asked);
   const preset = known ? (asked as SubtitlePresetId) : DEFAULT_SUBTITLE_PRESET;
   const position = style?.position ?? SUBTITLE_PRESETS[preset].position;
-  return { style: { ...SUBTITLE_PRESETS[preset], preset, position, speakerNames: style?.speakerNames === true }, unknownPreset: asked !== undefined && !known ? asked : null };
+  const base: SubtitlePreset = SUBTITLE_PRESETS[preset];
+  const keywordColor = style?.keywordColor;
+  const keywordScale = style?.keywordScale;
+  const entry = style?.entry;
+  return {
+    style: {
+      ...base,
+      preset,
+      position,
+      speakerNames: style?.speakerNames === true,
+      keywordColor: keywordColor === null || (typeof keywordColor === "string" && HEX.test(keywordColor)) ? keywordColor : base.keywordColor,
+      keywordScale: typeof keywordScale === "number" && keywordScale >= 1 && keywordScale <= 2 ? keywordScale : base.keywordScale,
+      entry: entry !== undefined && SUBTITLE_ENTRIES.includes(entry) ? entry : base.entry,
+    },
+    unknownPreset: asked !== undefined && !known ? asked : null,
+  };
 }
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** One transcript word placed on the timeline by a subtitle track. */
 export interface SubtitleWord {
@@ -200,10 +230,26 @@ export interface SubtitleCue {
   label?: string;
   /** The style highlights the word being spoken. */
   highlight: boolean;
+  /** Index in `words` of the phrase's keyword, when this cue shows it. */
+  keyword?: number;
+  /** How the cue's text enters. */
+  entry: SubtitleEntry;
+}
+
+/** Hand-written captions of a track (#460) that {@link subtitleCues} applies. */
+export interface CaptionRules {
+  /** Chunks and keywords; words no phrase holds are grouped by the style. */
+  phrases?: readonly CaptionPhrase[] | undefined;
+  /** Ranges (timeline seconds) in which no cue shows: a cue overlapping one is hidden. */
+  gaps?: readonly CaptionGap[] | undefined;
 }
 
 /** A pause at least this long (timeline seconds) starts a new cue. */
 const CUE_PAUSE_S = 0.6;
+/** A hand-chunked cue lasts until the next cue starts, at most this long after its last word (timeline seconds)... */
+const CHUNK_TAIL_S = 0.35;
+/** ...and, when nothing follows soon, never under this long. */
+const CHUNK_MIN_S = 0.4;
 const SENTENCE_END = /[.!?…]["»”')]?$/;
 
 /** What a cue shows as space-joined tokens: its label (if any), then its words. */
@@ -218,14 +264,25 @@ export function cueTokens(cue: SubtitleCue): string[] {
  * With `style.speakerNames` a cue never spans two speakers (words of one
  * transcript speaker, or with none), and the first cue of a turn carries the
  * speaker's name as `label`, counted in `maxChars`.
+ *
+ * `rules.phrases` (#460) put the words they hold into the cues they chunk,
+ * whatever the limits above: a chunk lasts until the next cue starts, at
+ * most 0.35 s after its last word and not under 0.4 s (the next cue still
+ * wins). A phrase's keyword is `keyword` of its cue. Words a cut removed
+ * leave their chunk shorter. `rules.gaps` then hide every cue that overlaps one.
  */
-export function subtitleCues(words: readonly SubtitleWord[], style: SubtitleStyle, fps: number): SubtitleCue[] {
+export function subtitleCues(words: readonly SubtitleWord[], style: SubtitleStyle, fps: number, rules: CaptionRules = {}): SubtitleCue[] {
   const pause = Math.round(CUE_PAUSE_S * fps);
   const turn = (word: SubtitleWord) => (word.speaker === undefined ? "" : `${word.asset}\0${word.speaker}`);
+  const chunkOf = chunkIndex(rules.phrases ?? []);
   const cues: SubtitleCue[] = [];
+  const hand: boolean[] = [];
   let current: SubtitleWord[] = [];
   let label: string | undefined;
   let previous: SubtitleWord | undefined;
+  let chunk: string | undefined;
+  let keyword: number | undefined;
+  let entry: SubtitleEntry = style.entry;
   const flush = () => {
     if (current.length === 0) return;
     cues.push({
@@ -234,28 +291,127 @@ export function subtitleCues(words: readonly SubtitleWord[], style: SubtitleStyl
       words: current,
       ...(label === undefined ? {} : { label }),
       highlight: style.highlight !== null,
+      ...(keyword === undefined ? {} : { keyword }),
+      entry,
     });
+    hand.push(chunk !== undefined);
     current = [];
     label = undefined;
+    chunk = undefined;
+    keyword = undefined;
+    entry = style.entry;
   };
   for (const word of words) {
     const shown = { ...word, text: style.uppercase ? word.text.toUpperCase() : word.text };
     const last = current.at(-1);
+    const info = chunkOf.get(`${word.asset}\0${word.id}`);
     const newTurn = style.speakerNames && (previous === undefined || turn(previous) !== turn(shown));
     if (last) {
+      const handMade = info !== undefined || chunk !== undefined;
       const chars = (label === undefined ? 0 : label.length + 1) + current.reduce((sum, w) => sum + w.text.length + 1, 0) + shown.text.length;
-      if (newTurn || current.length >= style.maxWords || chars > style.maxChars || shown.start - last.end >= pause || SENTENCE_END.test(last.text)) flush();
+      const automatic = current.length >= style.maxWords || chars > style.maxChars || shown.start - last.end >= pause || SENTENCE_END.test(last.text);
+      if (newTurn || (handMade ? info?.chunk !== chunk : automatic)) flush();
     }
-    if (current.length === 0 && newTurn && shown.speakerName !== undefined) {
-      const name = `${shown.speakerName}:`;
-      label = style.uppercase ? name.toUpperCase() : name;
+    if (current.length === 0) {
+      chunk = info?.chunk;
+      entry = info?.phrase.entry ?? style.entry;
+      if (newTurn && shown.speakerName !== undefined) {
+        const name = `${shown.speakerName}:`;
+        label = style.uppercase ? name.toUpperCase() : name;
+      }
     }
+    if (info?.keyword) keyword = current.length;
     current.push(shown);
     previous = word;
   }
   flush();
-  for (let i = 1; i < cues.length; i++) cues[i - 1]!.end = Math.max(cues[i - 1]!.start + 1, Math.min(cues[i - 1]!.end, cues[i]!.start));
-  return cues;
+  const tail = Math.round(CHUNK_TAIL_S * fps);
+  const least = Math.round(CHUNK_MIN_S * fps);
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i]!;
+    const next = cues[i + 1]?.start;
+    if (hand[i]) {
+      const lasting = Math.max(Math.min(cue.words.at(-1)!.end + tail, next ?? Number.POSITIVE_INFINITY), cue.start + least);
+      cue.end = Math.max(cue.start + 1, Math.min(lasting, next ?? Number.POSITIVE_INFINITY));
+    } else if (next !== undefined) {
+      cue.end = Math.max(cue.start + 1, Math.min(cue.end, next));
+    }
+  }
+  const hidden = (rules.gaps ?? []).map((gap) => ({ from: Math.round(gap.from * fps), to: Math.round(gap.to * fps) }));
+  return hidden.length === 0 ? cues : cues.filter((cue) => !hidden.some((gap) => cue.start < gap.to && cue.end > gap.from));
+}
+
+/** Where each phrase word sits: its chunk (`phrase:chunk`), its phrase, and whether it is the keyword. Key `asset\0word id`. */
+function chunkIndex(phrases: readonly CaptionPhrase[]): Map<string, { chunk: string; phrase: CaptionPhrase; keyword: boolean }> {
+  const found = new Map<string, { chunk: string; phrase: CaptionPhrase; keyword: boolean }>();
+  phrases.forEach((phrase, p) => {
+    let c = 0;
+    let used = 0;
+    phrase.words.forEach((id, i) => {
+      while (c < phrase.chunks.length - 1 && i >= used + phrase.chunks[c]!) used += phrase.chunks[c++]!;
+      found.set(`${phrase.asset}\0${id}`, { chunk: `${p}:${c}`, phrase, keyword: phrase.keyword === i });
+    });
+  });
+  return found;
+}
+
+/** Entry animation of a cue: the shapes preview and export share. */
+export const SUBTITLE_ENTRY = {
+  /** Seconds one unit takes from invisible to settled (soft: 0.3-0.45 s). */
+  seconds: 0.4,
+  /** Seconds between neighbouring characters in `chars`. */
+  charStagger: 0.03,
+  /** Blur at the start, as a fraction of the font size. */
+  blur: 0.08,
+  /** Easing exponent: progress is `t ** accel` (libass `\t` accel), so the motion eases out and never overshoots. */
+  accel: 0.5,
+} as const;
+
+/** One piece of a cue's text that enters on its own: a token, or a character in `chars`. */
+export interface EntryUnit {
+  text: string;
+  /** Index in {@link cueTokens}. */
+  token: number;
+  /** Seconds after the cue starts at which it begins to enter. */
+  delay: number;
+  /** Part of the phrase's keyword. */
+  keyword: boolean;
+}
+
+/**
+ * Units of `cue` in order, with their entry delays: `line` all at once;
+ * `words` each at its spoken time (the speaker label at once); `chars` one
+ * `SUBTITLE_ENTRY.charStagger` after another. `none` gives the tokens,
+ * undelayed.
+ */
+export function entryUnits(cue: SubtitleCue, fps: number): EntryUnit[] {
+  const tokens = cueTokens(cue);
+  const lead = tokens.length - cue.words.length;
+  const units: EntryUnit[] = [];
+  let ordinal = 0;
+  tokens.forEach((text, token) => {
+    const index = token - lead;
+    const keyword = cue.keyword !== undefined && index === cue.keyword;
+    if (cue.entry === "chars") {
+      for (const char of Array.from(text)) units.push({ text: char, token, delay: ordinal++ * SUBTITLE_ENTRY.charStagger, keyword });
+      return;
+    }
+    const word = cue.words[index];
+    units.push({ text, token, delay: cue.entry === "words" && word ? Math.max(0, (word.start - cue.start) / fps) : 0, keyword });
+  });
+  return units;
+}
+
+/** How far a unit with entry `delay` has entered `elapsed` seconds after its cue started: 0 invisible, 1 settled. */
+export function entryProgress(elapsed: number, delay: number): number {
+  const raw = Math.min(1, Math.max(0, (elapsed - delay) / SUBTITLE_ENTRY.seconds));
+  return raw ** SUBTITLE_ENTRY.accel;
+}
+
+/** Seconds after the cue starts at which its last unit has settled; 0 for `none`. */
+export function entryEnd(cue: SubtitleCue, fps: number): number {
+  if (cue.entry === "none") return 0;
+  return Math.max(...entryUnits(cue, fps).map((unit) => unit.delay)) + SUBTITLE_ENTRY.seconds;
 }
 
 /**
@@ -313,6 +469,8 @@ export interface ResolvedSubtitleTrack {
   /** The track's `style.preset` when it names no built-in preset (the default was used); else null. */
   unknownPreset: string | null;
   cues: SubtitleCue[];
+  /** Frame rate `cues` are counted in. */
+  fps: number;
   /** Assets the followed track plays that have no transcript: their words cannot show. */
   missing: string[];
 }
@@ -326,8 +484,8 @@ export function subtitleTracks(timeline: Timeline, transcripts: TranscriptLookup
     const followed = timeline.tracks.find((candidate) => candidate.id === track.follows);
     const assets = followed && followed.kind !== "subtitles" ? followed.clips.flatMap((clip) => ("asset" in clip && clip.type === "media" ? [clip.asset] : [])) : [];
     const missing = [...new Set(assets)].filter((asset) => transcripts(asset) === null);
-    const cues = subtitleCues(subtitleWords(timeline, track.id, transcripts, fps), style, fps);
-    out.push({ track: track.id, follows: track.follows, style, unknownPreset, cues, missing });
+    const cues = subtitleCues(subtitleWords(timeline, track.id, transcripts, fps), style, fps, { phrases: track.phrases, gaps: track.gaps });
+    out.push({ track: track.id, follows: track.follows, style, unknownPreset, cues, fps, missing });
   }
   return out;
 }

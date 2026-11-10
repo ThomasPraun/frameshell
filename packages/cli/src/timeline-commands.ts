@@ -1,4 +1,5 @@
 import type {
+  CaptionsSetResult,
   DaemonConnection,
   HistoryResult,
   MulticamCreateResult,
@@ -22,11 +23,19 @@ mutations print the new revision):
   timeline show [--json]       Tracks and clips with ids, start/end, in/out (--json: compact dump)
   track list                   Tracks in stacking order (first video track = bottom layer)
   track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n] [--preset p] [--position pos]
+           [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
-           [--muted | --unmuted] [--hidden | --shown]
+           [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
+           [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown]
                                --muted silences a video, audio or program track; --hidden leaves a video or
                                program track's pictures out of export and preview (its sound still plays)
   track remove <track> [--force]
+  captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
+                               Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
+                               split by |, the phrase's one keyword between asterisks, e.g.
+                               'No need to | open any | *editor*'. Covers the words the track shows between --from
+                               and --to, matched by position (a lost or repeated word fails). --replace drops the
+                               track's other phrases (alone: clears them)
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
            [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
@@ -133,7 +142,9 @@ mutations print the new revision):
   --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
   Subtitle tracks (--follows a video or audio track) show the transcript words of that track's clips: cuts
   update them, text corrections go in the transcript. --preset big-keyword (default: few large words, the
-  spoken one highlighted) or plain; --position top, center or bottom. Preview and export look the same.
+  spoken one highlighted) or plain; --position top, center or bottom. --entry fades the text in (chars, words as
+  spoken, or the whole line); --keyword-color/--keyword-scale style the word captions set marks; --gap 12-15.5
+  hides cues in that range (repeatable). Preview and export look the same.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -149,7 +160,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -228,6 +239,13 @@ export const TIMELINE_OPTIONS = {
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
   mask: { type: "string" },
+  text: { type: "string" },
+  file: { type: "string" },
+  entry: { type: "string" },
+  "keyword-color": { type: "string" },
+  "keyword-scale": { type: "string" },
+  gap: { type: "string", multiple: true },
+  "clear-gaps": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -250,8 +268,9 @@ export class UsageError extends Error {
 const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
-  "track add": ["name", "follows", "index", "preset", "position"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "muted", "unmuted", "hidden", "shown"],
+  "track add": ["name", "follows", "index", "preset", "position", "entry", "keyword-color", "keyword-scale"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown"],
+  "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
   "clip move": ["start", "track"],
@@ -288,6 +307,7 @@ const ARITY: Record<string, [number, number]> = {
   "track list": [0, 0],
   "track add": [1, 1],
   "track set": [1, 1],
+  "captions set": [1, 1],
   "track remove": [1, 1],
   "clip add": [1, 2],
   "clip move": [1, 1],
@@ -389,8 +409,24 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return Object.values(t).some((v) => v !== undefined) ? t : undefined;
   };
   const style = () => {
-    const s = { preset: str("preset"), position: str("position") };
-    return s.preset !== undefined || s.position !== undefined ? s : undefined;
+    const color = str("keyword-color");
+    const s = {
+      preset: str("preset"),
+      position: str("position"),
+      entry: str("entry"),
+      keywordColor: color === "none" ? null : color,
+      keywordScale: num("keyword-scale"),
+    };
+    return Object.values(s).some((v) => v !== undefined) ? s : undefined;
+  };
+  const gaps = () => {
+    if (values["clear-gaps"] === true && values["gap"] !== undefined) throw new UsageError("Pass --gap or --clear-gaps, not both.");
+    if (values["clear-gaps"] === true) return [];
+    return list("gap")?.map((range) => {
+      const match = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(range);
+      if (!match) throw new UsageError(`--gap: expected from-to in seconds, e.g. 12-15.5, got "${range}".`);
+      return { from: Number(match[1]), to: Number(match[2]) };
+    });
   };
   const snap = () => {
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
@@ -432,11 +468,20 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         index,
         follows: str("follows"),
         style: style(),
+        gaps: gaps(),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
       });
       break;
     }
+    case "captions set":
+      method = "captions.set";
+      if (str("text") !== undefined && str("file") !== undefined) throw new UsageError("Pass --text or --file, not both.");
+      if (str("text") === undefined && str("file") === undefined && values["replace"] !== true) {
+        throw new UsageError("`frameshell captions set` needs --text <captions> or --file <path> (or --replace alone to clear the phrases).");
+      }
+      Object.assign(params, { track: args[0], text: str("text"), file: str("file"), from: num("from"), to: num("to"), replace: values["replace"] === true ? true : undefined });
+      break;
     case "track remove":
       method = "track.remove";
       Object.assign(params, { track: args[0], force: values["force"] === true });
@@ -739,11 +784,19 @@ export async function executeTimeline(
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+function formatCaptions(result: CaptionsSetResult): string {
+  const lines = [`Captions on ${result.track}: ${result.phrases} phrase${result.phrases === 1 ? "" : "s"}, ${result.words} word${result.words === 1 ? "" : "s"}`];
+  for (const cue of result.cues) lines.push(`  ${cue.start}–${cue.end} s  ${cue.text}${cue.entry === "none" ? "" : `  [${cue.entry}]`}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n${formatOperation(result)}`;
 }
 
 function formatMulticamTurns(result: MulticamTurnsResult): string {

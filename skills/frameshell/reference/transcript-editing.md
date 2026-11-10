@@ -52,6 +52,23 @@ frameshell track add subtitles --follows <video track> --preset big-keyword --po
 
 `--preset big-keyword` (few large words, the spoken one highlighted) or `plain`; `--position top|center|bottom`; change later with `frameshell track set <track> --preset … --position …`. Export burns them in, identical to the preview. Fix a misheard word in the transcript's `edits` (keyed by word id), not in the track.
 
+### Chosen keywords, chunking and soft entries
+
+The automatic grouping reads well for talk; short-form reels read better with your own chunks and one emphasised word per phrase. Write the phrases, do not edit the transcript:
+
+```sh
+frameshell captions set <subtitle track> --from 12 --to 18 --text "No need to | open any | *editor*
+Just ask | and it *edits*"
+```
+
+- One phrase per line; `|` ends a cue (a chunk); the phrase's one keyword goes between asterisks; `[chars]`, `[words]`, `[line]` or `[none]` at the start of a line sets that phrase's entry. `--file <path>` reads the same text from a project file.
+- The text must cover **every word the track shows between `--from` and `--to`**, in order, matched by position: a lost or repeated word fails and the error names the first difference. Words that only differ in spelling (digits, case, punctuation) warn. The result lists the cues it made (keyword starred); check them, then look at frames with `frame` or `inspect`.
+- Phrases are stored as transcript word ids, so cuts and transcript corrections keep them (a removed word just leaves its chunk). Words no phrase holds keep the automatic grouping. Phrases that share a word with new ones are replaced; `--replace` first drops all of the track's phrases (alone, it clears them). One transaction: `revert` undoes it.
+- Timing is fixed: a chunk lasts until the next cue starts, at most 0.35 s after its last word, never under 0.4 s. Chunk by energy: 2-3 words for high energy, 3-5 for conversation, 4-6 for calm; break at pauses.
+- Style (`track set`): `--entry chars|words|line` fades the text in over 0.4 s (ease out, slight blur, no bounce; `words` shows each word as it is spoken); `--keyword-color #rrggbb` (`none` for no colour; default the accent) and `--keyword-scale 1.12` (the keyword settles from that size while it enters). One keyword per phrase, approved by the person before the final render; calm styles use `--keyword-color none`.
+- `--gap 12-15.5` hides every cue that overlaps the range, for when a graphic already says it; `--clear-gaps` removes them.
+- Preview and export draw the same cues; during the 0.4 s entry the keyword's scale is only approximate in the preview.
+
 ## Speed and sound
 
 - `frameshell clip set <clip> --speed 1.1`: faster delivery; the clip's end moves, later clips do not (cut or move to close gaps).

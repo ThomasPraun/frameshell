@@ -1118,9 +1118,116 @@
                   "speakerNames": {
                     "description": "Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false.",
                     "type": "boolean"
+                  },
+                  "keywordColor": {
+                    "description": "Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^#[0-9a-fA-F]{6}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "keywordScale": {
+                    "description": "Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's.",
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 2
+                  },
+                  "entry": {
+                    "description": "How cues enter: `none`, `chars`, `words` or `line`. Default `none`.",
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "chars",
+                      "words",
+                      "line"
+                    ]
                   }
                 },
                 "additionalProperties": {}
+              },
+              "phrases": {
+                "description": "Hand-chunked phrases with their keywords (`captions.set`); words no phrase holds are grouped by the style.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "asset": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Project-relative asset whose transcript holds the words."
+                    },
+                    "words": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Transcript word ids (`w_…`) in spoken order."
+                    },
+                    "chunks": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "description": "Words per cue, in order; sums to the number of `words`."
+                    },
+                    "keyword": {
+                      "description": "Index in `words` of the one emphasised word.",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "entry": {
+                      "description": "Entry of this phrase's cues; default: the track style's.",
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "chars",
+                        "words",
+                        "line"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "asset",
+                    "words",
+                    "chunks"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "gaps": {
+                "description": "Ranges in which no cue shows: a cue overlapping one is hidden.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Timeline seconds."
+                    },
+                    "to": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "description": "Timeline seconds; greater than `from`."
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [

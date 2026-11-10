@@ -24,6 +24,7 @@ import {
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
+  CaptionsSetResultSchema,
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
   MulticamFacesResultSchema,
@@ -54,7 +55,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1775,7 +1776,10 @@ export const methods = {
     description:
       "Change a track: `name` (any track; null clears it), and for subtitle tracks the followed track (`follows`) and " +
       "`style` (`preset`: `big-keyword` or `plain`; `position`: `top`, `center` or `bottom`; `speakerNames`: true shows the " +
-      "speaker's name at each turn; given fields change, others stay). Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" } }`. Preview and export use the same style. " +
+      "speaker's name at each turn; `entry`: `none`, `chars`, `words` or `line` softly fades the text in; `keywordColor` / " +
+      "`keywordScale` style the keyword `captions.set` marks, null colour = none; given fields change, others stay) and `gaps` " +
+      "(timeline-second ranges in which no cue shows, e.g. while a graphic says the same; replaces them, `[]` clears). " +
+      "Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" }, gaps: [{ from: 12, to: 15.5 }] }`. Preview and export use the same style. " +
       "`muted: true` silences a video, audio or program track whatever its clips' own audio; `hidden: true` leaves a video or " +
       "program track's pictures out (the tracks below show through, its sound still plays); false undoes either. " +
       "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, muted on a subtitle track, hidden on an " +
@@ -2113,6 +2117,35 @@ export const methods = {
       replaceHuman: z.boolean().optional().describe("Also replace shots a person chose in the app. Default false."),
     }),
     result: MulticamDirectResultSchema,
+  },
+  "captions.set": {
+    mutating: true,
+    description:
+      "Write hand-chunked captions with chosen keywords on a subtitle track. `text` (or a project file, `file`) holds one phrase per " +
+      "line: chunks (one cue each) separated by `|`, the phrase's ONE emphasised word between asterisks, e.g. " +
+      "`No need to | open any | *editor*`; an optional `[chars]`, `[words]`, `[line]` or `[none]` at the start of a line sets that " +
+      "phrase's entry; blank lines and `#` lines are skipped. The text covers every word the track shows between `from` and `to` " +
+      "(timeline seconds, default the whole track), in order: the words are matched by position, so a text that loses or repeats a " +
+      "word fails (the error names the first difference); typed words that differ from the transcript after case, accents and " +
+      "punctuation only warn. Mapped onto transcript word ids, so cuts and transcript corrections keep the phrases (a word a cut " +
+      "removed just leaves its chunk). Words no phrase holds keep the style's automatic grouping. A chunk lasts until the next cue " +
+      "starts, at most 0.35 s past its last word and never under 0.4 s. The keyword takes the style's `keywordColor` " +
+      "(`track.set` `style`; default the preset's accent) and, with an `entry`, settles from `keywordScale`. Phrases that share a " +
+      "word with the new ones are replaced; `replace: true` drops all the track's other phrases first, and with no text clears them. " +
+      "`cues` lists what the range shows now. Example: `{ track: \"t_4d5e6f\", text: \"No need to | open any | *editor*\", from: 12, to: 15 }`. " +
+      "Fails with TrackNotFound or InvalidOperation (not a subtitle track, no text, a second keyword in a phrase, an empty chunk, a " +
+      "phrase across two assets, word counts that differ).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: z.string().min(1).describe("Subtitle track id from `track.list`, e.g. `t_4d5e6f`."),
+      text: z.string().optional().describe("The captions, one phrase per line. Give this or `file`; neither with `replace: true` clears the phrases."),
+      file: z.string().min(1).optional().describe("Text file inside the project with the same format, absolute or relative to `cwd`."),
+      from: z.number().nonnegative().optional().describe("Timeline seconds where the captioned range starts: words from this frame on. Default 0."),
+      to: z.number().nonnegative().optional().describe("Timeline seconds where it ends: words that start before this frame. Default: the end of the track's words."),
+      replace: z.boolean().optional().describe("Also drop every other phrase of the track. Default false."),
+    }),
+    result: CaptionsSetResultSchema,
   },
   "clip.move": {
     mutating: true,

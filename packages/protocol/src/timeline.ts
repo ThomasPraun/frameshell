@@ -9,6 +9,9 @@ import {
   ReframeKeySchema,
   SHOT_CORNERS,
   SHOT_LAYOUTS,
+  CaptionGapSchema,
+  CaptionPhraseSchema,
+  SUBTITLE_ENTRIES,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
   type SubtitlePosition,
@@ -115,6 +118,27 @@ export const SubtitleStyleArgSchema = z
         "`true`: the first cue of each speaker turn starts with the speaker's transcript name (\"Juan: …\") and a cue never spans " +
           "two speakers; words with no speaker get no name. Default `false`.",
       ),
+    keywordColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional()
+      .describe(
+        "`#rrggbb` colour of the keyword a phrase marks (`captions.set`); null: the keyword keeps the text colour. Default: the preset's accent.",
+      ),
+    keywordScale: z
+      .number()
+      .min(1)
+      .max(2)
+      .optional()
+      .describe("How much larger the keyword starts (1 to 2, e.g. 1.12) before it settles to its size while the cue enters; needs an `entry`."),
+    entry: z
+      .enum(SUBTITLE_ENTRIES)
+      .optional()
+      .describe(
+        "How cues enter: `none` (default, they just appear), `chars` (letter by letter), `words` (each word as it is spoken) " +
+          "or `line` (the whole line at once). Soft: 0.4 s, eases out, from slightly blurred, no bounce.",
+      ),
   })
   .describe("Subtitle tracks only. Preview and export render the same style.");
 
@@ -153,6 +177,13 @@ export const operationArgs = {
       .optional()
       .describe("Subtitle tracks only: id of the video or audio track whose clips' transcript words it shows."),
     style: SubtitleStyleArgSchema.optional().describe("Subtitle tracks only: the fields given change, the others keep their value."),
+    gaps: z
+      .array(CaptionGapSchema)
+      .optional()
+      .describe(
+        "Subtitle tracks only: ranges (timeline seconds, snapped to the frame grid) in which no cue shows, e.g. while a graphic " +
+          "already says it. A cue that overlaps one is hidden whole. Replaces the track's gaps; `[]` clears them.",
+      ),
     muted: z.boolean().optional().describe("Video, audio and program tracks: true silences the whole track in export and preview; false plays it again."),
     hidden: z
       .boolean()
@@ -476,6 +507,16 @@ export const operationArgs = {
       .optional()
       .describe("Angle ids of the track's group to show, in layout order (left to right, then top to bottom). Default: unchanged."),
   }),
+  "captions.set": z.strictObject({
+    track: TrackRef.describe("Subtitle track id."),
+    phrases: z
+      .array(CaptionPhraseSchema)
+      .describe("Resolved phrases (transcript word ids). The `captions.set` method resolves its text into them and passes them here."),
+    replace: z
+      .boolean()
+      .default(false)
+      .describe("True: the track keeps only these phrases. Default false: only the phrases that share a word with these are replaced."),
+  }),
   "multicam.direct": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     from: Seconds("Timeline time where directing starts. Default 0.").optional(),
@@ -779,6 +820,26 @@ export const MulticamDirectResultSchema = OperationResultSchema.extend({
 /** See {@link MulticamDirectResultSchema}. */
 export type MulticamDirectResult = z.output<typeof MulticamDirectResultSchema>;
 
+/** Result of `captions.set`: the operation, and the cues the captioned range now shows. */
+export const CaptionsSetResultSchema = OperationResultSchema.extend({
+  track: z.string().describe("Subtitle track the phrases were written to."),
+  phrases: z.int().describe("Phrases written."),
+  words: z.int().describe("Transcript words they cover."),
+  cues: z
+    .array(
+      z.object({
+        start: z.number().describe("Timeline seconds."),
+        end: z.number().describe("Timeline seconds, after the hold of at most 0.35 s."),
+        text: z.string().describe("As shown, the keyword between asterisks."),
+        entry: z.enum(SUBTITLE_ENTRIES),
+      }),
+    )
+    .describe("Cues overlapping the captioned range, in order. Empty after a clear."),
+});
+
+/** See {@link CaptionsSetResultSchema}. */
+export type CaptionsSetResult = z.output<typeof CaptionsSetResultSchema>;
+
 /** Result of `multicam.faces`: what was found per angle and the operations that wrote the keys. */
 export const MulticamFacesResultSchema = z.object({
   timeline: z.string(),
@@ -876,6 +937,8 @@ export const TimelineViewSchema = z.object({
       style: StoredStyleSchema,
       muted: TrackMutedViewSchema,
       hidden: TrackHiddenViewSchema,
+      phrases: z.array(CaptionPhraseSchema).optional().describe("Subtitle tracks: hand-chunked phrases as stored (`captions.set`); absent when none."),
+      gaps: z.array(CaptionGapSchema).optional().describe("Subtitle tracks: ranges in which no cue shows (`track.set` `gaps`); absent when none."),
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),
