@@ -9,6 +9,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import {
+  type FormatEntry,
   PEOPLE_FILE,
   type ParseResult,
   type ProjectConfig,
@@ -155,6 +156,27 @@ export class ProjectRegistry {
     if (!parsed.ok) throw invalid(configPath, parsed.error);
     await writeJsonAtomic(configPath, next);
     return config.transcription;
+  }
+
+  /**
+   * Replace `formats` of `frameshell.json` (removed when null), keeping every other key as written; `formats`
+   * goes right after `resolution`. Resolves with the one it replaced. Throws `InvalidProjectFile` when the
+   * result would not validate.
+   */
+  async writeFormats(root: string, formats: FormatEntry[] | null): Promise<FormatEntry[] | undefined> {
+    const { raw, config } = await readConfig(root);
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === "formats") continue;
+      next[key] = value;
+      if (key === "resolution" && formats) next["formats"] = formats;
+    }
+    if (formats && !("formats" in next)) next["formats"] = formats;
+    const configPath = join(root, PROJECT_FILE);
+    const parsed = parseProjectConfig(next);
+    if (!parsed.ok) throw invalid(configPath, parsed.error);
+    await writeJsonAtomic(configPath, next);
+    return config.formats;
   }
 
   /**

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type Clip, type ClipTrack, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type Timeline, type Transcript, flattenTimeline, resolveFormat } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -586,5 +586,81 @@ describe("export compiler", () => {
         expect(JSON.stringify(playback)).not.toMatch(/qsin|eval=frame|alpha=1/);
       });
     });
+  });
+});
+
+describe("formats (ADR 0027)", () => {
+  /** A 16:9 project declaring every built-in format. */
+  const project = {
+    resolution,
+    formats: [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+      { id: "1x1", width: 1080, height: 1080 },
+      { id: "4x5", width: 1080, height: 1350 },
+    ],
+  };
+  /** The talk timeline plus an untransformed title and a transformed logo on a second video track. */
+  const layered: Timeline = {
+    ...timeline,
+    tracks: [
+      ...timeline.tracks,
+      {
+        id: "v2",
+        kind: "video",
+        clips: [
+          { id: "c_over", type: "media", asset: "assets/title.webm", start: 1, in: 0, out: 1 },
+          { id: "c_logo2", type: "media", asset: "assets/logo.png", start: 4, in: 0, out: 1, transform: { x: 600, y: -300, scale: 0.25 } },
+        ],
+      },
+    ],
+  };
+  const inFormat = (id: string) => {
+    const { format } = resolveFormat(layered, project, id)!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: format.width, height: format.height } };
+    return compileRender({ timeline: layered, fps: 30, preset, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4, variant: format });
+  };
+
+  it("compiles the primary format exactly as without formats", () => {
+    const plain = compileRender({ timeline: layered, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4 });
+    expect(inFormat("16x9")).toEqual(plain);
+  });
+
+  it("crops untransformed footage to fill 9:16, 1:1 and 4:5 around the centre; transformed layers keep their fit (golden)", () => {
+    const plans = Object.fromEntries(["9x16", "1x1", "4x5"].map((id) => [id, inFormat(id)]));
+    golden("formats-plan", Object.fromEntries(Object.entries(plans).map(([id, plan]) => [id, { width: plan.width, height: plan.height, files: plan.files }])));
+    const vertical = plans["9x16"]!.files["seg-0001.filter"]!;
+    // 1920x1080 talk: its centre 608x1080 scaled to 1080x1920, no black bars.
+    expect(vertical).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
+    expect(vertical).not.toContain("force_original_aspect_ratio=decrease");
+    // The untransformed title on the upper track covers too, overlaid at the corner.
+    expect(vertical).toMatch(/crop=608:1080:656:0,scale=1080:1920,setsar=1,format=rgba.*\[o0\]/);
+    expect(vertical).toContain("[base][o0]overlay=x=0:y=0");
+    // The square: the centre 1080x1080 of the frame at its own size.
+    expect(plans["1x1"]!.files["seg-0001.filter"]).toContain("crop=1080:1080:420:0,scale=1080:1080");
+    // The transformed logo is still fitted and placed like a 16:9 project's, mapped onto the frame.
+    expect(plans["9x16"]!.files["seg-0002.filter"]).toContain("scale=270:270,setsar=1,format=rgba");
+  });
+
+  it("makes captions 1.3x larger in vertical formats only", () => {
+    const fontSize = (plan: ReturnType<typeof compileRender>) => Number(/^Style: t0,[^,]+,([\d.]+),/m.exec(plan.files["subtitles.ass"]!)![1]);
+    const square = fontSize(inFormat("1x1"));
+    expect(fontSize(inFormat("9x16")) / square).toBeCloseTo(1.3, 1);
+    expect(fontSize(inFormat("4x5")) / square).toBeCloseTo(1.3, 1);
+    expect(square).toBe(fontSize(inFormat("16x9")));
+  });
+
+  it("leaves generated renders and multicam tiles to their own layout", () => {
+    const render = new Map([["c_gen", { path: "/project/.frameshell/cache/clips/cccc.webm", hasAlpha: true, width: 1080, height: 1920 }]]);
+    const withRender: Timeline = {
+      ...timeline,
+      tracks: [timeline.tracks[0]!, { id: "v2", kind: "video", clips: [{ id: "c_gen", type: "hyperframes", source: "compositions/t/index.html", start: 0, duration: 2 }] }],
+    };
+    const { format } = resolveFormat(withRender, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const plan = compileRender({ timeline: withRender, fps: 30, preset, loudness: -17, sources, resolution, generated: render, segmentSeconds: 4, variant: format });
+    // Rendered at the format's size: fitted as it is, never cropped.
+    expect(plan.files["seg-0001.filter"]).toContain("scale=1080:1920,setsar=1,format=rgba");
+    expect(plan.files["seg-0001.filter"]).not.toMatch(/crop=[^,]*,scale=1080:1920,setsar=1,format=rgba/);
   });
 });

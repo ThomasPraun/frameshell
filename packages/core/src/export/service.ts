@@ -11,7 +11,21 @@ import {
   type RenderResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type ExportPreset, type MulticamGroup, type Size, type Timeline, type Transcript, programGroup } from "@frameshell/schema";
+import {
+  BUILTIN_FORMATS,
+  BUILTIN_FORMAT_IDS,
+  type ExportPreset,
+  type FormatSource,
+  type MulticamGroup,
+  type ResolvedFormat,
+  type Size,
+  type Timeline,
+  type Transcript,
+  programGroup,
+  resolveFormat,
+  sameAspect,
+} from "@frameshell/schema";
+import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
@@ -139,7 +153,8 @@ export interface ExportServiceOptions {
    */
   clips?: {
     check(root: string, timeline: Timeline): Promise<void>;
-    ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void): Promise<ReadonlyMap<string, GeneratedSource>>;
+    /** `size`: render at that frame size (a format other than the primary, ADR 0027); absent: the project resolution. */
+    ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, size?: Size): Promise<ReadonlyMap<string, GeneratedSource>>;
   };
   /** See {@link ExecuteRenderOptions.parallelism}. */
   parallelism?: number;
@@ -168,55 +183,80 @@ export class ExportService {
     return [...builtins, ...plugins];
   }
 
-  /** Validate and compile, then queue the render job. Returns at once. */
-  async render(root: string, params: { timeline: string; preset?: string | undefined; out?: string | undefined }): Promise<RenderResult> {
+  /**
+   * Validate and compile, then queue one render job per format (`formats`, ADR 0027; default the primary only).
+   * Every format is checked and compiled before any job is queued. Returns at once.
+   */
+  async render(
+    root: string,
+    params: { timeline: string; preset?: string | undefined; out?: string | undefined; formats?: readonly string[] | undefined },
+  ): Promise<RenderResult> {
     const config = (await readEnclosingProject(root))?.config;
+    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
     const { timeline, fps } = await this.#resolved(root, params.timeline);
-    const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
+    const resolution = project.resolution;
+    const formats = (params.formats ? [...new Set(params.formats)] : [undefined]).map((id) => {
+      const found = resolveFormat(timeline, project, id);
+      if (!found) throw formatNotFound(id!, project);
+      return found.format;
+    });
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
-    const input = {
+    const shared = {
       timeline,
       fps,
-      preset,
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
       transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
-    // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
-    const standIn = this.#options.clips
-      ? new Map(layered.map((id) => [id, { path: "", hasAlpha: true, ...resolution }]))
-      : new Map<string, GeneratedSource>();
-    const plan = compileRender({ ...input, generated: standIn });
-    const output = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
-    const job = this.#options.jobs.enqueue({
-      kind: "render",
-      project: root,
-      asset: `timelines/${params.timeline}.json`,
-      output,
-      run: async (ctx) => {
-        let final = plan;
-        if (layered.length > 0 && this.#options.clips) {
-          ctx.update({ step: "clips", progress: 0 });
-          const generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }));
-          final = compileRender({ ...input, generated });
-        }
-        await executeRender(final, {
-          ffmpeg: await this.#options.ffmpeg(root),
-          workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
-          output,
-          signal: ctx.signal,
-          onProgress: (update: JobUpdate) => ctx.update(update),
-          ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
-        });
-      },
+    const base = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
+    const planned = formats.map((format) => {
+      const size = outputSize(preset, format, params.preset !== undefined, "render");
+      const input = { ...shared, preset: { ...preset, video: { ...preset.video, ...size } }, variant: { cover: format.cover, captionScale: format.captionScale } };
+      const renderSize = format.primary ? undefined : { width: format.width, height: format.height };
+      // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
+      const standIn = this.#options.clips
+        ? new Map(layered.map((id) => [id, { path: "", hasAlpha: true, width: format.width, height: format.height }]))
+        : new Map<string, GeneratedSource>();
+      const plan = compileRender({ ...input, generated: standIn });
+      const output = params.formats ? withSuffix(base, format.id) : base;
+      return { format, input, renderSize, plan, output };
     });
+    const renders = planned.map(({ format, input, renderSize, plan, output }) => {
+      const job = this.#options.jobs.enqueue({
+        kind: "render",
+        project: root,
+        asset: `timelines/${params.timeline}.json`,
+        output,
+        run: async (ctx) => {
+          let final = plan;
+          if (layered.length > 0 && this.#options.clips) {
+            ctx.update({ step: "clips", progress: 0 });
+            const generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
+            final = compileRender({ ...input, generated });
+          }
+          await executeRender(final, {
+            ffmpeg: await this.#options.ffmpeg(root),
+            workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
+            output,
+            signal: ctx.signal,
+            onProgress: (update: JobUpdate) => ctx.update(update),
+            ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
+          });
+        },
+      });
+      return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings: plan.warnings };
+    });
+    const first = renders[0]!;
+    const plan = planned[0]!.plan;
     return {
-      job,
-      output,
+      format: first.format,
+      renders,
+      job: first.job,
+      output: first.output,
       preset: preset.id,
       timeline: params.timeline,
       duration: plan.duration,
@@ -235,17 +275,30 @@ export class ExportService {
    */
   async frame(
     root: string,
-    params: { timeline: string; at: number; out: string; preset?: string | undefined; format?: FrameFormat | undefined; quality?: number | undefined },
+    params: {
+      timeline: string;
+      at: number;
+      out: string;
+      preset?: string | undefined;
+      projectFormat?: string | undefined;
+      format?: FrameFormat | undefined;
+      quality?: number | undefined;
+    },
     loaded?: { timeline: Timeline; fps: number },
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
-    const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
-    const size = params.preset ? (await this.#preset(root, params.preset)).video : resolution;
+    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
+    const resolution = project.resolution;
     const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
+    const found = resolveFormat(timeline, project, params.projectFormat);
+    if (!found) throw formatNotFound(params.projectFormat!, project);
+    const shape = found.format;
+    const size = params.preset ? outputSize(await this.#preset(root, params.preset), shape, true, "frame") : { width: shape.width, height: shape.height };
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
+    const renderSize = shape.primary ? undefined : { width: shape.width, height: shape.height };
     const generated =
-      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline) : new Map();
+      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, undefined, renderSize) : new Map();
     const plan = compileFrame({
       timeline,
       fps,
@@ -253,6 +306,7 @@ export class ExportService {
       transcripts: await this.#transcripts(root, timeline),
       resolution,
       generated,
+      variant: { cover: shape.cover, captionScale: shape.captionScale },
       width: size.width,
       height: size.height,
       at: params.at,
@@ -281,6 +335,7 @@ export class ExportService {
       frame: plan.frame,
       at: plan.at,
       clip: plan.clip,
+      projectFormat: shape.id,
       width: size.width,
       height: size.height,
     };
@@ -390,6 +445,34 @@ function generatedClipIds(timeline: Timeline): string[] {
   return timeline.tracks.flatMap((track) =>
     track.kind === "video" ? track.clips.filter((clip) => clip.type !== "media" && clip.type !== "timeline").map((clip) => clip.id) : [],
   );
+}
+
+/**
+ * Output size of `format` with `preset` (ADR 0027 decision 4): the format owns the frame, the preset its codec,
+ * bitrate and loudness. A preset of the format's aspect sets the size when it was asked for (`explicit`) or the
+ * format is the primary one, so exports made before formats existed keep their size. An explicit preset of
+ * another aspect is refused; a default one is then rendered at the format's size.
+ */
+function outputSize(preset: ExportPreset, format: ResolvedFormat, explicit: boolean, op: "render" | "frame"): Size {
+  const presetSize = { width: preset.video.width, height: preset.video.height };
+  if (sameAspect(presetSize, format)) return explicit || format.primary ? presetSize : { width: format.width, height: format.height };
+  if (!explicit) return { width: format.width, height: format.height };
+  const id = BUILTIN_FORMAT_IDS.find((builtin) => sameAspect(BUILTIN_FORMATS[builtin]!, presetSize)) ?? `${presetSize.width}x${presetSize.height}`;
+  const add = BUILTIN_FORMATS[id] ? `frameshell format add ${id}` : `frameshell format add ${id} --size ${id}`;
+  throw new RpcError(
+    ErrorCode.InvalidOperation,
+    `Preset ${preset.id} is ${presetSize.width}x${presetSize.height}, another aspect than format ${format.id} (${format.width}x${format.height}). ` +
+      "The format owns the frame; a preset only gives codec, bitrate and loudness. Leave the preset out, pick one of the " +
+      `format's aspect, or render the format the preset is made for: \`${add}\`, then ` +
+      (op === "render" ? `\`frameshell render --formats ${id}\`.` : `\`frameshell frame --format ${id}\`.`),
+    { op, reason: "preset aspect", field: "preset", hint: `Leave the preset out, or add and render format ${id} (\`format.add\`).` },
+  );
+}
+
+/** `path` with `-<suffix>` before its extension: `exports/main.mp4` → `exports/main-9x16.mp4`. */
+function withSuffix(path: string, suffix: string): string {
+  const ext = extname(path);
+  return `${path.slice(0, path.length - ext.length)}-${suffix}${ext}`;
 }
 
 /** Frame size when `frameshell.json` has none (SPEC §5.2 default). */

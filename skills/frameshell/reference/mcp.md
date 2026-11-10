@@ -16,7 +16,7 @@ Tool results mirror the CLI's `--json`. Mutating tools return `revision` and `op
 
 Look after every change the viewer would see: an overlay, a transform, a title, a subtitle style, a cut in the middle of a gesture.
 
-- `frame_capture { at: 12.5 }`: the composited frame at that timeline second, rendered by the export compiler, so it matches `render` (works with the app closed). `preset` renders at that preset's size.
+- `frame_capture { at: 12.5 }`: the composited frame at that timeline second, rendered by the export compiler, so it matches `render` (works with the app closed). `preset` renders at that preset's size; `projectFormat` (e.g. `9x16`, from `format_list`) shows the frame as that format of the project lays it out.
 - `frames_strip { from: 0, to: 30, count: 9 }`: one contact sheet of evenly spaced frames with each tile's time and clip. Use it to review a whole edit or find where a shot changes.
 - Without MCP: `frameshell frame --at 12.5 --out /tmp/f.png`, then open the PNG with your image-reading tool.
 - `inspect_point { at: 12.5, x: 0.71, y: 0.14 }` (or `unit: "pixel"` with project pixels): the clips under that point, topmost first, the one seen there (`target`), and in a generated clip the DOM element painting it, as the user's Pick tool reports it (`elements[0]`, then its ancestors). CLI: `frameshell inspect --at 12.5 --point 0.71,0.14`. `segment: true` (CLI `--segment`) on a photo of an image project also returns `segment` (see [image-projects.md](image-projects.md)).

@@ -75,10 +75,10 @@ describe("frameshell render and frame", () => {
   it(
     "renders --json with the finished job",
     () => {
-      const result = frameshell(["render", "--preset", "vertical-1080x1920", "--json"]);
+      const result = frameshell(["render", "--preset", "youtube-1440p", "--json"]);
       expect(result.code, result.stderr).toBe(0);
       const parsed = JSON.parse(result.stdout) as { output: string; job: { state: string } };
-      expect(parsed).toMatchObject({ output: join(project, "exports", "main-vertical-1080x1920.mp4"), job: { state: "done" } });
+      expect(parsed).toMatchObject({ output: join(project, "exports", "main-youtube-1440p.mp4"), job: { state: "done" } });
     },
     120_000,
   );
@@ -94,9 +94,45 @@ describe("frameshell render and frame", () => {
     const result = frameshell(["frame", "--at", "0.5", "--out", "shot.img", "--format", "jpg", "--quality", "40"]);
     expect(result.code, result.stderr).toBe(0);
     expect([...readFileSync(join(project, "shot.img")).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
-    expect(frameshell(["frame", "--at", "0", "--out", "x.gif", "--format", "gif"]).stderr).toMatch(/--format: expected png, jpg or webp/);
+    expect(frameshell(["frame", "--at", "0", "--out", "x.gif", "--format", "GIF"]).stderr).toMatch(/--format: expected png, jpg, webp or a format id/);
+    const unknown = frameshell(["frame", "--at", "0", "--out", "x.gif", "--format", "gif"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/The project has no format "gif"\. Its formats: 16x9\..*--format also takes the image types png, jpg and webp\./);
     expect(frameshell(["frame", "--at", "0", "--out", "x.jpg", "--quality", "0"]).stderr).toMatch(/--quality: expected an integer from 1 to 100/);
   });
+
+  it(
+    "adds a format, renders every format with --formats and captures a frame in one with --format (ADR 0027)",
+    () => {
+      const added = frameshell(["format", "add", "9x16"]);
+      expect(added.code, added.stderr).toBe(0);
+      expect(added.stdout).toMatch(/^Added format 9x16 \(op_[0-9a-f]{8}\)\. Formats: 16x9, 9x16\n {2}undo: frameshell format remove 9x16\n$/);
+      expect(frameshell(["format", "add", "web", "--size", "1600"]).stderr).toMatch(/--size takes <width>x<height>/);
+      expect(frameshell(["format", "add", "web", "--size", "1601x900"]).stderr).toMatch(/video encoders need even sizes/);
+      expect(frameshell(["format", "list"]).stdout).toBe("16x9  1920x1080  primary\n9x16  1080x1920\nBuilt-in: 16x9 1920x1080, 1x1 1080x1080, 4x5 1080x1350, 9x16 1080x1920\n");
+
+      const result = frameshell(["render", "--formats", "16x9,9x16"]);
+      expect(result.code, result.stderr).toBe(0);
+      const outputs = ["16x9", "9x16"].map((id) => join(project, "exports", `main-youtube-1080p-${id}.mp4`));
+      expect(result.stdout).toBe(outputs.map((output) => `Rendered ${output}\n`).join(""));
+      expect(result.stderr).toContain("youtube-1080p · 1080x1920");
+      for (const output of outputs) expect(existsSync(output)).toBe(true);
+
+      const shot = frameshell(["frame", "--at", "0.5", "--out", "tall.jpg", "--format", "9x16"]);
+      expect(shot.code, shot.stderr).toBe(0);
+      expect(shot.stdout).toMatch(/^Wrote .*tall\.jpg \(frame 15 at 0\.5 s, c_[0-9a-f]{6}, 1080x1920, format 9x16\)\n$/);
+      expect([...readFileSync(join(project, "tall.jpg")).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+
+      const refused = frameshell(["render", "--preset", "vertical-1080x1920"]);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("another aspect than format 16x9");
+
+      const removed = frameshell(["format", "remove", "9x16", "--json"]);
+      expect(removed.code, removed.stderr).toBe(0);
+      expect(JSON.parse(removed.stdout)).toMatchObject({ undo: { method: "format.add", params: { id: "9x16", index: 1 } } });
+    },
+    120_000,
+  );
 
   it("makes an image project with init --kind image", () => {
     const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-image-"))), "poster");

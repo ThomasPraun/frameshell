@@ -6,6 +6,7 @@ import {
   type ClipTrack,
   type CropPath,
   type ExportPreset,
+  type FormatLayout,
   type LayerRect,
   type MediaClip,
   type MulticamGroup,
@@ -16,6 +17,7 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  coverCrop,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -91,6 +93,8 @@ export interface RenderInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /** Layout of the format rendered (`resolveFormat`, ADR 0027). Absent: the primary format's (letterbox, captions as styled). */
+  variant?: FormatLayout;
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -196,6 +200,8 @@ export interface FrameInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /** See {@link RenderInput.variant}. */
+  variant?: FormatLayout;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -282,6 +288,8 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /** Source pixels kept when the clip covers the frame of a non-primary format (ADR 0027): scaled to fill it exactly. */
+  cover?: LayerRect;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -333,7 +341,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant);
   const outFps = preset.video.fps ?? fps;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
@@ -453,7 +461,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant);
   const frame = Math.floor((input.at + 0.0005) * fps);
   if (frame < 0 || frame >= layout.frames) {
     const last = seconds(layout.frames - 1, fps);
@@ -522,7 +530,8 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * like footage: from its `in` (render time = composition time), for its
  * `duration`, transformed and stacked by its track like any clip. Muted
  * tracks are silent; hidden tracks add no picture layer but still count
- * for the length and play their sound.
+ * for the length and play their sound. In a `variant` that covers, media
+ * clips that would fill the frame untransformed are cropped to fill it.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -531,6 +540,7 @@ function layoutTimeline(
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
+  variant?: FormatLayout,
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -573,6 +583,10 @@ function layoutTimeline(
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
+      const placement = fixedPlacement(clip);
+      // Renders are made at the format's size; only footage is cut to it.
+      const picture = source.video;
+      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
       placed.push({
         clip,
         source,
@@ -580,10 +594,11 @@ function layoutTimeline(
         end,
         in: Math.round(clip.in * fps),
         speed,
-        placement: fixedPlacement(clip),
+        placement,
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(covers ? { cover: coverCrop({ left: 0, top: 0, width: picture.width, height: picture.height }, output) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -630,7 +645,10 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+  const captionScale = variant?.captionScale ?? 1;
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
+    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
+  );
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -850,7 +868,8 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Fades of the bottom track go to black: nothing is under it.
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
-    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fit, ...timed].join(",")}[${label}]`);
+    const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
+    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -870,9 +889,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
   lines.push(`${joined}[base]`);
   let below = "base";
   pieces.forEach(({ placed, start, end }, n) => {
-    const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const rect = placed.tile?.rect ?? (placed.cover ? { left: 0, top: 0, width, height } : layerRect(placed.source.video!, { width, height }, out.project, placed.placement));
     const { opacity } = placed.placement;
-    const crop = placed.tile?.crop;
+    const crop = placed.tile?.crop ?? placed.cover;
     const move = placed.tile?.move;
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
     const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");

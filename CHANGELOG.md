@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Formats of a project, export path (#469, ADR 0027): one edit delivered at several sizes. `frameshell.json` takes
+  `formats` (primary first, equal to `resolution`); built-in `16x9`, `1x1`, `4x5`, `9x16`, or a custom id and size.
+  `frameshell format list|add|remove` (MCP `format_list`, `format_add`, `format_remove`) edits them, journaled in
+  `.frameshell/history/project.config.jsonl`, each change returning the call that undoes it.
+  `frameshell render --formats 16x9,9x16` writes one file per format (`<file>-<format>.mp4`) from the same edit:
+  untransformed footage covers the frame (cropped around the centre), generated clips render at the format's size,
+  vertical captions are 1.3x larger; the primary format exports exactly as before. `frameshell frame --format 9x16`
+  (wire `projectFormat`) captures a frame in a format. `gc` keeps the clip renders of every declared format.
+  Protocol 71.
+
+### Changed
+
+- The format owns the frame (ADR 0027): an export preset given to `render` or `frame` whose aspect differs from the
+  format rendered is refused (`render --preset vertical-1080x1920` in a 16:9 project now asks to add and render the
+  `9x16` format). A vertical project rendered without a preset now exports at its own size, not a letterboxed
+  1920x1080.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

@@ -28,7 +28,17 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type ProjectConfig, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
+import {
+  type MulticamGroup,
+  type ProgramTrack,
+  type ProjectConfig,
+  type ShotClip,
+  type Timeline,
+  createTimeline,
+  findPerson,
+  parseTimeline,
+  projectFormats,
+} from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
@@ -68,6 +78,7 @@ import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
+import { FormatService, builtinFormatInfos, formatInfos } from "./formats.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -293,6 +304,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await settle(key, tx);
     },
   });
+  const formats = new FormatService({
+    readConfig: async (dir) => (await readEnclosingProject(dir))!.config,
+    writeFormats: (dir, list) => projects.writeFormats(dir, list),
+  });
   const plugins = new PluginHost({
     dirs,
     pins: projects,
@@ -426,7 +441,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
-      ensure: (dir, timeline, onProgress) => clips.ensure(clipRoot(dir), timeline, onProgress),
+      ensure: (dir, timeline, onProgress, size) => clips.ensure(clipRoot(dir), timeline, onProgress, size),
     },
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
@@ -445,6 +460,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     format: async (dir) => {
       const config = (await readEnclosingProject(dir))?.config;
       return { fps: config?.fps ?? 30, width: config?.resolution.width ?? 1920, height: config?.resolution.height ?? 1080 };
+    },
+    formatSizes: async (dir) => {
+      const config = (await readEnclosingProject(dir))?.config;
+      return config ? projectFormats(config).slice(1) : [];
     },
     probe: async (dir, file, signal) => {
       const probe = await probeMedia(await binaries.ensure("ffprobe", await projectBinaries(dir)), file, signal);
@@ -882,11 +901,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
-    render: async ({ cwd, timeline, preset, out }) => exports.render(await root(cwd), { timeline, preset, out }),
-    frame: async ({ cwd, timeline, at, out, preset, format, quality, view }, caller) => {
+    "format.list": async ({ cwd }) => {
+      const dir = await root(cwd);
+      const { config } = (await readEnclosingProject(dir))!;
+      return { dir, formats: formatInfos(config), builtins: builtinFormatInfos() };
+    },
+    "format.add": async ({ cwd, id, width, height, index }, caller) => formats.add(await root(cwd), { id, width, height, index }, journalAuthorOf(caller)),
+    "format.remove": async ({ cwd, id }, caller) => formats.remove(await root(cwd), id, journalAuthorOf(caller)),
+    render: async ({ cwd, timeline, preset, out, formats: ids }) => exports.render(await root(cwd), { timeline, preset, out, formats: ids }),
+    frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
-      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, format, quality }, loaded)) };
+      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
