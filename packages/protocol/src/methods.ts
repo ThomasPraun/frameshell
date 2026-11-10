@@ -328,7 +328,7 @@ const ProbeSchema = z.object({
         .optional()
         .describe(
           "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
-            "to fill another format's frame (ADR 0027). Absent in probes cached before it existed.",
+            "on an upper track to fill another format's frame (ADR 0027); the base track still crops it. Absent in probes cached before it existed.",
         ),
     })
     .nullable()

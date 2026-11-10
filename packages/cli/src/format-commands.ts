@@ -6,8 +6,8 @@ export const FORMAT_USAGE = `  format list                  Delivery formats of 
   format add <id> [--size WxH] [--index n]
                                Add a format: built-in 16x9 (1920x1080), 1x1 (1080x1080), 4x5 (1080x1350),
                                9x16 (1080x1920), or a custom id with --size (even), e.g. web-1600x900 --size 1600x900.
-                               Untransformed media fills its frame (cropped around the centre); render --formats
-                               exports it from the same edit. Journaled; prints the command that undoes it
+                               Untransformed media fills its frame (cropped around the centre; alpha sources on upper
+                               tracks are fitted whole); render --formats exports it from the same edit. Journaled; prints the command that undoes it
   format remove <id>           Remove a format (never the primary)
 `;
 

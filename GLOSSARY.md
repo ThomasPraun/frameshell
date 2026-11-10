@@ -133,7 +133,7 @@ The first format, equal to the project `resolution`; its export is laid out as a
 _Avoid_: master, main format, default format
 
 **Cover**:
-How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it.
+How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
 _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 
 ## Photo segmentation (ADR 0022)
