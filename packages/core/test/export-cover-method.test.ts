@@ -172,3 +172,23 @@ describe("render with a cover frame", () => {
     await expect(conn.request("render", { cwd: project, cover: { color: "yellow" } } as never)).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
   });
 });
+
+describe("a first clip that fades in from black", () => {
+  it(
+    "makes the default cover frame the first whole picture, never the black one, and keeps the black-frame warning quiet",
+    async () => {
+      await conn.request("transition.set", { cwd: project, at: 0, kind: "fade", duration: 0.5 });
+      const cover = await conn.request("cover", { cwd: project, out: join(tempDir(), "fade.png") });
+      expect(cover).toMatchObject({ source: "default", at: 0.5, warnings: [] });
+
+      const result = await conn.request("render", { cwd: project, cover: {}, out: join(tempDir(), "fade.mp4") });
+      expect(result.warnings).toEqual([]);
+      await finished(result.job.id);
+
+      const plain = await conn.request("render", { cwd: project, out: join(tempDir(), "plain-fade.mp4") });
+      expect(plain.warnings).toEqual([expect.stringContaining("fades in from black")]);
+      await finished(plain.job.id);
+    },
+    MEDIA_TIMEOUT,
+  );
+});

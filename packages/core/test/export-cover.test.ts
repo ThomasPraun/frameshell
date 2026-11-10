@@ -129,11 +129,13 @@ describe("hook word and default frame", () => {
     expect(hookWordTime(timeline, () => null, "pero", 30)).toBeNull();
   });
 
-  it("starts the default frame where the first picture does", () => {
-    expect(firstPictureTime(timeline)).toBe(0);
+  it("starts the default frame where the first whole picture does: after the first clip's fade in", () => {
+    expect(firstPictureTime(timeline, 30)).toBe(0);
     const late: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c1", type: "media", asset: "assets/talk.mp4", start: 1.5, in: 10, out: 14 }] }] };
-    expect(firstPictureTime(late)).toBe(1.5);
-    expect(firstPictureTime({ ...timeline, tracks: [] })).toBe(0);
+    expect(firstPictureTime(late, 30)).toBe(1.5);
+    const fade: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c1", type: "media", asset: "assets/talk.mp4", start: 1, in: 10, out: 14, fadeIn: 0.5 }] }] };
+    expect(firstPictureTime(fade, 30)).toBe(1.5);
+    expect(firstPictureTime({ ...timeline, tracks: [] }, 30)).toBe(0);
   });
 });
 
@@ -209,5 +211,21 @@ describe("cover in plans", () => {
     expect(render().warnings).toEqual([]);
     // Choosing a cover is the answer to the warning.
     expect(render({ cover: { at: 1, layout } }, gap).warnings).toEqual([]);
+  });
+
+  it("checks the cover frame itself: a fade in at 0 and `cover: {}` defaults past the fade, an explicit frame inside it warns", () => {
+    const fade: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c1", type: "media", asset: "assets/talk.mp4", start: 0, in: 10, out: 14, fadeIn: 0.5 }] }] };
+    // The frame the service picks by default for `render --cover-frame`.
+    const at = firstPictureTime(fade, 30);
+    expect(at).toBe(0.5);
+    const plan = render({ cover: { at, layout: null } }, fade);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.segments[0]!.frames).toBe(1);
+    // Asking for the black frame itself is flagged without sending the user back to --cover-frame.
+    const black = render({ cover: { at: 0.1, layout } }, fade).warnings;
+    expect(black).toEqual([expect.stringMatching(/The cover frame \(0\.1 s\) is black.*fading in or out.*--cover-at/)]);
+    expect(black[0]).not.toContain("--cover-frame");
+    // A cover on frame 0 that changes nothing still gets the check, and its hint names `at`.
+    expect(render({ cover: { at: 0, layout: null } }, fade).warnings).toEqual([expect.stringMatching(/The cover frame \(0 s\) is black \(the first clip fades in from black\).*--cover-at/)]);
   });
 });

@@ -353,11 +353,21 @@ export function compileRender(input: RenderInput): RenderPlan {
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const warnings = [...layout.warnings];
-  const cover = input.cover && outFps === fps ? { frame: frameAt(input.timeline.id, input.cover.at, fps, layout.frames), layout: input.cover.layout } : null;
-  if (input.cover && !cover) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
-  if (!input.cover) {
-    const empty = emptyFirstFrame(layout);
-    if (empty) warnings.push(`Frame 0 is ${empty}: platforms use it as the thumbnail. Export with a cover frame (\`frameshell render --cover-frame\`) or start a picture at 0.`);
+  const requested = input.cover ?? null;
+  const choosable = requested !== null && outFps === fps;
+  const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
+  // A cover with no word on frame 0 itself changes nothing.
+  const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
+  if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
+  const empty = emptyFrame(layout, coverFrame, fps);
+  if (empty) {
+    const hint = !requested
+      ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
+      : choosable
+        ? "Choose another frame with `at` (`--cover-at`)."
+        : "Start a picture at 0.";
+    const subject = choosable ? `The cover frame (${requested.at} s)` : "Frame 0";
+    warnings.push(`${subject} is ${empty}: platforms use it as the thumbnail. ${hint}`);
   }
   // The cover is a one-frame segment in place of frame 0; the rest of the first segment follows it.
   const bounds = segmentBounds(layout.frames, edges, segmentFrames).flatMap(([from, to]): [number, number][] =>
@@ -516,13 +526,21 @@ function frameAt(timeline: string, at: number, fps: number, frames: number): num
   return frame;
 }
 
-/** What frame 0 shows when it is not a picture: a gap before the first clip, or a clip fading in from black; null when it is one. */
-function emptyFirstFrame(layout: Layout): string | null {
-  const picture = (span: Span) => span.from <= 0 && 0 < span.to && span.placed.source.video !== null;
-  if (layout.overlays.some((layer) => layer.some(picture))) return null;
-  const base = layout.video.find(picture);
-  if (!base) return "black (no picture starts at 0)";
-  return base.placed.start === 0 && (base.placed.edges?.fadeIn ?? 0) > 0 ? "black (the first clip fades in from black)" : null;
+/**
+ * Why `frame` shows no whole picture, or null when one is there: no clip draws at it, or every clip that does is
+ * fading in from or out to black (a clip on any track counts, a fade of an upper layer over a visible one does not).
+ */
+function emptyFrame(layout: Layout, frame: number, fps: number): string | null {
+  const drawn = [...layout.video, ...layout.overlays.flat()].filter((span) => span.from <= frame && frame < span.to && span.placed.source.video !== null);
+  const fading = (span: Span) => {
+    const { placed } = span;
+    const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
+    const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
+    return (frame >= placed.start && frame < placed.start + fadeIn) || (fadeOut > 0 && frame >= placed.end - fadeOut && frame < placed.end);
+  };
+  if (drawn.some((span) => !fading(span))) return null;
+  if (drawn.length === 0) return frame === 0 ? "black (no picture starts at 0)" : "black (no picture shows there)";
+  return frame === 0 ? "black (the first clip fades in from black)" : "black (every picture there is fading in or out)";
 }
 
 /** Filter chain appended to the cover frame's graph: the cover word over the picture. */

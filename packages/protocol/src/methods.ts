@@ -432,15 +432,21 @@ const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
 /** `frame` quality when the caller gives none: high, visually lossless for most pictures. */
 export const DEFAULT_FRAME_QUALITY = 92;
 
+/**
+ * Longest cover text, characters. The wire check counts UTF-16 units, so it is never looser than the service's
+ * (code points of the upper-cased text, which stays authoritative: `ExportService` in core).
+ */
+export const COVER_MAX_CHARS = 24;
+
 /** What the cover word and its frame are chosen by; shared by `cover` and the `cover` option of `render`. */
 const CoverChoiceShape = {
   text: z
     .string()
     .min(1)
-    .max(24)
+    .max(COVER_MAX_CHARS)
     .optional()
     .describe(
-      "The word drawn big over the frame (up to 24 characters; shown upper-case, one line, as large as the width allows). " +
+      `The word drawn big over the frame (up to ${COVER_MAX_CHARS} characters; shown upper-case, one line, as large as the width allows). ` +
         "Absent: the frame alone. Without `at`, the frame is the one where this word is first spoken.",
     ),
   at: z
@@ -449,7 +455,7 @@ const CoverChoiceShape = {
     .optional()
     .describe(
       "Timeline seconds of the frame to use. Default: where `text` is first spoken (in the transcripts of the video and audio tracks), " +
-        "else the start of the first picture.",
+        "else the first frame showing a whole picture (after the first clip's fade in).",
     ),
   color: z
     .string()
@@ -893,7 +899,7 @@ export const methods = {
     description:
       "Write a cover image: a frame of the timeline with one big word over it, rendered by the export compiler (as `frame` " +
       "and `render` do), checked readable at thumbnail size (180 px wide: the capitals must stay 12 px tall or more). With " +
-      "`text` and no `at` the frame is where that word is first spoken; with neither, the first picture. The word is " +
+      "`text` and no `at` the frame is where that word is first spoken; with neither, the first whole picture (after a fade in). The word is " +
       "upper-case in the subtitle face, centered, outlined, as large as the width allows; no subtitles are drawn on a " +
       "cover. Size: the preset's when `preset` is given, else the project resolution. `readability.readable` false " +
       "means the word is too long to read in a grid: shorten it. The same frame can open the exported video: " +

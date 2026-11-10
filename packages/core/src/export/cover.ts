@@ -1,3 +1,4 @@
+import { COVER_MAX_CHARS } from "@frameshell/protocol";
 import {
   SUBTITLE_FONT,
   SUBTITLE_PRESETS,
@@ -5,10 +6,11 @@ import {
   type Timeline,
   type TranscriptLookup,
   cleanSubtitleText,
+  edgeTransitions,
   normalizeToken,
   trackWords,
 } from "@frameshell/schema";
-import { assDocument, color } from "./ass.js";
+import { assColor, assDocument } from "./ass.js";
 import type { FontMetrics } from "./font-metrics.js";
 
 /**
@@ -21,8 +23,7 @@ import type { FontMetrics } from "./font-metrics.js";
 export const THUMBNAIL_WIDTH = 180;
 /** Smallest capital letter, px at {@link THUMBNAIL_WIDTH}, that still reads in a grid. */
 export const MIN_THUMBNAIL_CAP_HEIGHT = 12;
-/** Longest cover text, characters. */
-export const COVER_MAX_CHARS = 24;
+export { COVER_MAX_CHARS };
 /** Fraction of the frame width the word may fill, outline included. */
 const MAX_WIDTH_SHARE = 0.84;
 /** Largest em as a fraction of the frame height: a one-letter word must not swallow the picture. */
@@ -42,6 +43,7 @@ export interface CoverLayout {
   outlineColor: string;
   /** Em size. */
   fontSize: number;
+  /** Outline width. */
   outline: number;
   /** The word is centered on this x. */
   centerX: number;
@@ -81,10 +83,13 @@ const LIGHT_FILL = 0.18;
 
 /** Whether the word reads in a platform grid: its capitals at {@link THUMBNAIL_WIDTH} against the smallest that do. */
 export interface CoverReadability {
+  /** Width the cover is scaled to for the check, px. */
   thumbnailWidth: number;
   /** Height of a capital letter once the cover is scaled to `thumbnailWidth`, px. */
   capHeight: number;
+  /** Smallest `capHeight` that reads. */
   minCapHeight: number;
+  /** `capHeight` reaches `minCapHeight`. */
   readable: boolean;
 }
 
@@ -100,10 +105,10 @@ export function assCover(layout: CoverLayout, frame: Size): string {
     "Style: cover",
     SUBTITLE_FONT.family,
     round2(layout.fontSize * (SUBTITLE_FONT.ascent + SUBTITLE_FONT.descent)),
-    color(layout.color),
-    color(layout.color),
-    color(layout.outlineColor),
-    color(layout.outlineColor),
+    assColor(layout.color),
+    assColor(layout.color),
+    assColor(layout.outlineColor),
+    assColor(layout.outlineColor),
     "0,0,0,0,100,100,0,0,1",
     layout.outline,
     "0,2,0,0,0,1",
@@ -116,7 +121,8 @@ export function assCover(layout: CoverLayout, frame: Size): string {
 /**
  * Timeline seconds where the first run of words matching `text` starts, over the speech of every video and
  * audio track (earliest wins); null when nobody says it. Words compare as the aligner does
- * (`normalizeToken`: case, accents and punctuation ignored), a transcript correction counts.
+ * (`normalizeToken`: case, accents and punctuation ignored), a transcript correction counts. Limits: speech that
+ * lives in a multicam group's angles (program tracks) is not searched, and a muted track or clip still counts as spoken.
  */
 export function hookWordTime(timeline: Timeline, transcripts: TranscriptLookup, text: string, fps: number): number | null {
   const wanted = cleanSubtitleText(text).split(" ").map(normalizeToken).filter((token) => token !== "");
@@ -135,10 +141,21 @@ export function hookWordTime(timeline: Timeline, transcripts: TranscriptLookup, 
   return found;
 }
 
-/** Timeline seconds where the first picture starts (the earliest clip of a video or program track); 0 when there is none. */
-export function firstPictureTime(timeline: Timeline): number {
-  const starts = timeline.tracks.flatMap((track) => (track.kind === "video" || track.kind === "program" ? track.clips.map((clip) => clip.start) : []));
-  return starts.length === 0 ? 0 : Math.min(...starts);
+/**
+ * Timeline seconds of the first frame that shows a whole picture: where the earliest clip of a video or program
+ * track starts, plus that clip's effective fade in from black (`edgeTransitions`), so the default cover is never
+ * the black frame a fade-in opens with; 0 when there is no picture.
+ */
+export function firstPictureTime(timeline: Timeline, fps: number): number {
+  let first: { start: number; fadeIn: number } | null = null;
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video" && track.kind !== "program") continue;
+    const edges = track.kind === "video" ? edgeTransitions(track.clips, { fps }) : null;
+    for (const clip of track.clips) {
+      if (first === null || clip.start < first.start) first = { start: clip.start, fadeIn: edges?.get(clip.id)?.fadeIn ?? 0 };
+    }
+  }
+  return first === null ? 0 : round2(first.start + first.fadeIn);
 }
 
 /** WCAG relative luminance of `#rrggbb`. */

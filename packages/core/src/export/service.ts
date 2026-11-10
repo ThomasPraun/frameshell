@@ -124,6 +124,7 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
 
 /** How a cover picks its frame and word; see the `cover` method. */
 export interface CoverChoice {
+  /** The word drawn over the frame; see the `cover` method. */
   text?: string | undefined;
   /** Timeline seconds. */
   at?: number | undefined;
@@ -200,8 +201,6 @@ export class ExportService {
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
     const cover = params.cover ? await this.#coverFrame(root, timeline, fps, preset.video, params.cover) : null;
-    // A cover that adds nothing (no word, the frame already first) leaves frame 0 as it is.
-    const covered = cover && (cover.layout !== null || cover.at > 0) ? cover : null;
     const input = {
       timeline,
       fps,
@@ -210,7 +209,7 @@ export class ExportService {
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
       transcripts: await this.#transcripts(root, timeline),
-      ...(covered ? { cover: { at: covered.at, layout: covered.layout } } : {}),
+      ...(cover ? { cover: { at: cover.at, layout: cover.layout } } : {}),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
     // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
@@ -343,7 +342,7 @@ export class ExportService {
       if (at === undefined) warnings.push(`"${text}" is not spoken in any transcript of timeline ${timeline.id}: the cover uses the first picture. Pass \`at\` to choose the frame.`);
     }
     if (at === undefined) {
-      at = firstPictureTime(timeline);
+      at = firstPictureTime(timeline, fps);
       source = "default";
     }
     if (text === "") return { at, source, layout: null, readability: null, warnings };

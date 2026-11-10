@@ -25,10 +25,10 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
         `Style: ${name}`,
         SUBTITLE_FONT.family,
         num(layout.fontSize * (SUBTITLE_FONT.ascent + SUBTITLE_FONT.descent)),
-        color(style.color),
-        color(style.color),
-        color(style.outlineColor),
-        color(style.outlineColor),
+        assColor(style.color),
+        assColor(style.color),
+        assColor(style.outlineColor),
+        assColor(style.outlineColor),
         // Bold, italic, underline, strike: the face is already black; synthetic bold would widen it.
         "0,0,0,0,100,100,0,0,1",
         num(layout.outline),
@@ -48,7 +48,7 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
         const from = i === 0 ? cue.start : Math.max(cue.start, word.start);
         const to = i + 1 < cue.words.length ? Math.min(cue.end, cue.words[i + 1]!.start) : cue.end;
         if (to <= from) return;
-        const line = texts.map((text, j) => (j === i + lead ? `{\\c${color(style.highlight!)}}${text}{\\c${color(style.color)}}` : text));
+        const line = texts.map((text, j) => (j === i + lead ? `{\\c${assColor(style.highlight!)}}${text}{\\c${assColor(style.color)}}` : text));
         events.push(dialogue(layer, from, to, name, anchor + line.join(" "), fps));
       });
     }
@@ -97,7 +97,7 @@ function time(centiseconds: number): string {
 }
 
 /** `#rrggbb` → ASS `&HBBGGRR&` (opaque). */
-export function color(hex: string): string {
+export function assColor(hex: string): string {
   const [r, g, b] = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)];
   return `&H00${b}${g}${r}&`.toUpperCase();
 }
