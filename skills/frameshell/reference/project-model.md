@@ -7,6 +7,7 @@ frameshell.json          project config
 timelines/main.json      the exported sequence (others: nested timelines)
 assets/                  footage, images, audio, fonts, generated media
 transcripts/*.words.json word-level transcript per asset
+credits.json            optional: source, licence and author of third-party assets (see credits.md)
 scripts/*.md             Markdown scripts
 compositions/            HyperFrames HTML compositions, the Remotion project (compositions/remotion/)
 exports/                 render output

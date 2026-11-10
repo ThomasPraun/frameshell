@@ -111,6 +111,20 @@ export {
   findPerson,
   parsePeopleFile,
 } from "./people.js";
+export {
+  CREDITS_FILE,
+  CREDITS_SCHEMA_URL,
+  CreditEntrySchema,
+  CreditsFileSchema,
+  type CreditEntry,
+  type CreditsFile,
+  type LicenceDuty,
+  type LicenceInfo,
+  createCreditsFile,
+  creditLine,
+  licenceInfo,
+  parseCreditsFile,
+} from "./credits.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {

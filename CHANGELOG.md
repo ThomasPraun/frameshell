@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Asset provenance and credits ledger (#484, part of #451; ADR 0026): optional `credits.json` at the project root
+  records source URL, licence, author, title and content hash of third-party assets. `frameshell import` takes
+  `--source-url`, `--licence`, `--author`, `--title` and `--credit` (`asset.import` params, protocol 71);
+  `frameshell credits set <asset>` (`credits.set`) completes an entry. `frameshell credits` (`credits.check`) judges
+  every asset the timelines place, exits 1 when any is unverified (no entry, no licence, a licence that needs credit
+  without an author, changed content, missing file) and prints the credit text for the video description. `render`
+  warns about placed assets without verified provenance once the ledger holds an entry. Agent skill:
+  `reference/credits.md`.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

@@ -30,6 +30,7 @@ import {
 } from "@frameshell/protocol";
 import { type MulticamGroup, type ProgramTrack, type ProjectConfig, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
+import { CreditsService } from "./credits/service.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
@@ -91,7 +92,7 @@ import {
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
-import { TimelineService, type TxRef, timelinePath } from "./timeline/service.js";
+import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -415,8 +416,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (endsTx) void transactions.drop(transactionKey(change.author), change.tx).catch(() => {});
     },
   });
+  const credits = new CreditsService({ hash: (dir, rel) => media.hash(dir, rel) });
   const exports = new ExportService({
     jobs,
+    provenance: (dir, assets) => credits.warnings(dir, assets),
     ffmpeg: async (dir) => {
       const project = await readEnclosingProject(dir);
       return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
@@ -993,7 +996,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
     "file.uses": ({ path }) => fileUses(path),
-    "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
+    "asset.import": async ({ cwd, files, mode, ...provenance }) => {
+      const dir = await root(cwd);
+      const result = await media.import(dir, files, mode);
+      const recorded = Object.values(provenance).some((value) => value !== undefined);
+      if (recorded) await credits.record(dir, [...new Set(result.imported.map((entry) => entry.asset))], provenance);
+      return { ...result, imported: result.imported.map((entry) => ({ ...entry, provenance: recorded })) };
+    },
+    "credits.set": async ({ cwd, asset, ...provenance }) => {
+      const dir = await root(cwd);
+      const [entry] = await credits.record(dir, [projectPath(dir, cwd, asset, "asset", "credits.set")], provenance);
+      return { dir, entry: entry! };
+    },
+    "credits.check": async ({ cwd }) => credits.check(await root(cwd)),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, assets: await media.list(dir) };

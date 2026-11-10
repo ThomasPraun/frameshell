@@ -110,6 +110,17 @@ While a proposal is open, another author's change, a new `tx_begin`, and its aut
 
 There is no accept, reject or switch tool: `proposal.accept`, `proposal.reject` and `review.set` are internal registry methods (skipped like `handshake`), and the daemon refuses them with `ProposalState` (reason `forbidden`) for any caller but the app (author `ui`). Review exists so the person decides; an agent that could accept its own proposal would make it pointless.
 
+## Asset credits (ADR 0026)
+
+Optional `credits.json`: where third-party assets came from. `asset_import` records it when given `sourceUrl`, `licence`, `author`, `title` or `credit` (one source per call); nothing is written otherwise.
+
+| Tool | Use |
+|---|---|
+| `credits_set(asset, sourceUrl?, licence?, author?, title?, credit?)` | Record or complete an asset's provenance (`licence: "own"` for the person's footage). Fields left out keep their value while the file is unchanged. |
+| `credits_check` | Read-only. Judges every asset the timelines place; `ok` is false when any is unverified (`unrecorded`, `no-licence`, `no-credit`, `changed`, `missing`). Returns the credit lines and `text` for the video description. The CLI `frameshell credits` exits 1 on `ok: false`. |
+
+`render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
+
 ## People (ADR 0020)
 
 Optional `people.json`: who is who across transcripts, multicam angles and faces. Until a tool writes it (`people_add` creates it), the people tools only read (an empty list, suggestions from multicam angles alone): no download, no job, no transcript change.

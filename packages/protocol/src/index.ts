@@ -3,6 +3,7 @@ export * from "./timeline.js";
 export * from "./history.js";
 export * from "./proposals.js";
 export * from "./people.js";
+export * from "./credits.js";
 export * from "./shoot.js";
 export * from "./models.js";
 export * from "./agents.js";

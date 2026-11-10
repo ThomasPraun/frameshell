@@ -69,6 +69,7 @@ When you guide the human through the app, name only these places; do not invent 
 | An image project (`"kind": "image"` in `frameshell.json`): a still picture made of layers, edited by pointing at it, exported as PNG, JPEG or WebP | [image-projects.md](reference/image-projects.md) |
 | Dissolves, fades, zooms and other animated clip properties (`transition set`, `clip key`) | [transitions.md](reference/transitions.md) |
 | Who is who across files: people linked to transcript speakers, angles and faces (`people add`, `people link`, `people list`), voices and faces suggested across files (`people suggest`, `people confirm`), when a person speaks or is on screen (`people ranges`), speaker names in transcripts | [people.md](reference/people.md) |
+| Third-party assets (textures, sounds, fonts, music, logos): fetching them safely, recording source and licence on import, `credits` before export, the credit text for the video description | [credits.md](reference/credits.md) |
 | Any CLI command: what it does, key flags, output | [cli.md](reference/cli.md); `frameshell --help` has every flag |
 | MCP tools, CLI or MCP, frame capture, what the user sees in the app (`ui_state`, `ui_*`) | [mcp.md](reference/mcp.md) |
 | The prompt holds a `[frameshell] …` line, or the user says "this" or "what I sent" from the app while you run outside its terminals (`inbox_take`, `frameshell ask --take`) | [selection.md](reference/selection.md) |

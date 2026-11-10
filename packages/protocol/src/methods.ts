@@ -21,8 +21,9 @@ import {
   InboxTakeResultSchema,
   TargetChangedSchema,
 } from "./targets.js";
+import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -54,7 +55,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -897,7 +898,9 @@ export const methods = {
       "waveform, thumbnails). Returns at once; follow progress with `job.list`, `status`, or the `job.progress` and " +
       "`asset.changed` events (`events.subscribe`). Files already under " +
       "`assets/` are not copied. A name clash with different content gets a `-2`, `-3`… suffix. Unchanged content " +
-      "reuses cached outputs (job `cached: true`). Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
+      "reuses cached outputs (job `cached: true`). Material from an outside source (a stock site, a sound library, a font) " +
+      "needs its provenance: pass `sourceUrl`, `licence`, `author` (and `title`) and each file is recorded in `credits.json` with its " +
+      "content hash (ADR 0026); `credits.check` fails on placed assets without it. Give one source per call. Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
     params: z.strictObject({
       cwd: CwdParam,
       files: z
@@ -908,6 +911,7 @@ export const methods = {
         .enum(["copy", "link"])
         .default("copy")
         .describe("`copy` (default) duplicates the file. `link` hard-links it, or symlinks across volumes: no copy, but the source must stay."),
+      ...ProvenanceParams,
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -917,6 +921,7 @@ export const methods = {
           asset: z.string().describe("Project-relative asset path, e.g. `assets/raw-01.mp4`."),
           copied: z.boolean().describe("False when the file already was in `assets/` (as-is or with identical content)."),
           job: JobSchema,
+          provenance: z.boolean().describe("True when an entry for the file was written to `credits.json` (provenance params were given)."),
         }),
       ),
     }),
@@ -929,6 +934,38 @@ export const methods = {
     result: z.object({
       dir: z.string().describe("Project root."),
       assets: z.array(AssetSchema).describe("Sorted by path."),
+    }),
+  },
+  "credits.set": {
+    mutating: true,
+    description:
+      "Record where an asset already in `assets/` came from (ADR 0026): source URL, licence, author, title, an optional credit line. " +
+      "Written to `credits.json` with the file's current content hash. Fields given replace the entry's; fields left out keep their value " +
+      "while the content is unchanged, and start over when the file changed. Use it for files that were not imported with provenance, and " +
+      "`licence: \"own\"` for the person's own footage. Example: `{ asset: \"assets/rain.ogg\", licence: \"CC-BY-4.0\", author: \"Ana Pérez\", " +
+      "sourceUrl: \"https://openverse.org/audio/9f2c\" }`. Fails with AssetNotFound (no such file under `assets/`), InvalidOperation " +
+      "(`asset` outside `assets/`), InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Asset path: project-relative (`assets/rain.ogg`), absolute, or relative to `cwd`."),
+      ...ProvenanceParams,
+    }),
+    result: z.object({ dir: z.string().describe("Project root."), entry: CreditEntrySchema }),
+  },
+  "credits.check": {
+    description:
+      "Judge the provenance of every asset the project's timelines place (clips, multicam angles and mics) against `credits.json`, " +
+      "and build the credit text for the video description. `ok` is false when any placed asset has no entry, no licence, a licence that " +
+      "needs credit without an author or credit line, content that changed since it was recorded, or is missing: unverified never passes. " +
+      "CC0, public domain and `own` need no credit. Run it before export and publishing; fix each `problem` with `credits.set` or by " +
+      "re-importing with provenance, or remove the asset. The CLI exits 1 when `ok` is false. Fails with InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      ok: z.boolean().describe("True when every placed asset is `ok`."),
+      assets: z.array(CreditAssetSchema).describe("Every placed asset, sorted by path."),
+      credits: z.array(z.string()).describe("Credit lines of the placed assets that need one, without duplicates, sorted."),
+      text: z.string().describe("`credits` as the block to paste into the video description; empty when none is needed."),
     }),
   },
   gc: {
@@ -3064,6 +3101,14 @@ export type AssetInfo = z.output<typeof AssetSchema>;
 export type AssetImportParams = MethodParams<"asset.import">;
 /** Result of `asset.import`. */
 export type AssetImportResult = MethodResult<"asset.import">;
+/** `credits.set` params. */
+export type CreditsSetParams = MethodParams<"credits.set">;
+/** Result of `credits.set`. */
+export type CreditsSetResult = MethodResult<"credits.set">;
+/** `credits.check` params. */
+export type CreditsCheckParams = MethodParams<"credits.check">;
+/** Result of `credits.check`. */
+export type CreditsCheckResult = MethodResult<"credits.check">;
 /** `gc` params. */
 export type GcParams = MethodParams<"gc">;
 /** Result of `gc`. */

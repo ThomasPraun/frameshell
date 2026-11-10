@@ -121,6 +121,11 @@ export interface ExportServiceOptions {
   /** Parsed timeline and project fps; see `TimelineService.load`. */
   loadTimeline(root: string, id: string): Promise<{ timeline: Timeline; fps: number }>;
   /**
+   * Warnings about placed assets (project-relative paths) without usable provenance; see
+   * `CreditsService.warnings`. Default: none.
+   */
+  provenance?(root: string, assets: string[]): Promise<string[]>;
+  /**
    * Parsed nested timeline file (project-relative `source` of a `timeline`
    * clip); null when missing or invalid. Default: read the file.
    */
@@ -176,13 +181,14 @@ export class ExportService {
     const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
+    const sources = await this.#sources(root, timeline);
     const input = {
       timeline,
       fps,
       preset,
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
-      sources: await this.#sources(root, timeline),
+      sources,
       transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
@@ -225,7 +231,7 @@ export class ExportService {
       fps: plan.fps,
       loudness: plan.loudness,
       segments: plan.segments.length,
-      warnings: plan.warnings,
+      warnings: [...plan.warnings, ...((await this.#options.provenance?.(root, [...sources.keys()])) ?? [])],
     };
   }
 
