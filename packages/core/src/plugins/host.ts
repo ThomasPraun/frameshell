@@ -419,13 +419,14 @@ function commandNotFound(command: string, available: string[]): RpcError {
 
 /** Plugin results cross the wire: strings become `output`, `data` must survive JSON. */
 function normalizeResult(result: unknown, command: string, plugin: string): MethodResult<"plugin.run"> {
-  if (result === undefined || result === null) return { output: null, data: null };
-  if (typeof result === "string") return { output: result, data: null };
-  const { output, data } = result as { output?: unknown; data?: unknown };
+  if (result === undefined || result === null) return { output: null, data: null, failed: false };
+  if (typeof result === "string") return { output: result, data: null, failed: false };
+  const { output, data, failed } = result as { output?: unknown; data?: unknown; failed?: unknown };
   try {
     return {
       output: typeof output === "string" ? output : null,
       data: data === undefined ? null : (JSON.parse(JSON.stringify(data)) as unknown),
+      failed: failed === true,
     };
   } catch (error) {
     throw new RpcError(

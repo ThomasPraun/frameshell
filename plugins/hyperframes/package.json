@@ -1,6 +1,6 @@
 {
   "name": "@frameshell/hyperframes",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Official Frameshell clip adapter: HyperFrames HTML compositions rendered headlessly to VP9 WebM with alpha.",
   "license": "Apache-2.0",
   "author": "Frameshell contributors",
@@ -34,8 +34,9 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@hyperframes/core": "0.8.92",
-    "@hyperframes/producer": "0.8.92"
+    "@hyperframes/core": "0.9.30",
+    "@hyperframes/lint": "0.9.30",
+    "@hyperframes/producer": "0.9.30"
   },
   "devDependencies": {
     "@frameshell/core": "workspace:*",

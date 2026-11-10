@@ -743,6 +743,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "plugin.run": {
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.run", { cwd, plugin: inv.plugin, command: inv.command, args: inv.args });
+      if (result.failed) outcome.code = 1;
       if (flags.json) return json(result);
       if (result.output !== null) return result.output.endsWith("\n") ? result.output : `${result.output}\n`;
       return result.data === null || result.data === undefined ? "" : json(result.data);
