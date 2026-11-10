@@ -63,8 +63,11 @@ Commands:
                                (asked first on a terminal; --no-skill: none). --kind image: a still picture,
                                the first frame, exported with \`frame\`; video tracks are its layers
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
-  doctor [--install] [--json]  Check binaries, encoders and the frameshell on PATH; exit 1 on problems.
-                               --install downloads missing managed binaries first
+  doctor [--install] [--reprobe] [--json]
+                               Check binaries, encoders (which H.264 encoder renders use, a speed class
+                               and disk estimate) and the frameshell on PATH; exit 1 on problems.
+                               --install downloads missing managed binaries first; --reprobe tests the
+                               encoders again instead of using the answer cached per machine
   import <file…> [--link] [--wait]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
@@ -87,9 +90,11 @@ Commands:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
+${MODEL_USAGE}  render [--preset p] [--quality draft|final] [--out file] [--timeline id]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
+                               --quality draft: 30 fps at most, fast encode for review rounds; final:
+                               slow, bt709, AAC 320k. Both use the machine's best working encoder
                                Waits for the render job, printing progress; exit 1 if it fails
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, format from the
@@ -139,20 +144,20 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", 
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill", "kind"],
   status: [],
-  doctor: ["install"],
+  doctor: ["install", "reprobe"],
   import: ["link", "wait"],
   gc: ["dry-run"],
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
-  render: ["preset", "out", "timeline"],
+  render: ["preset", "quality", "out", "timeline"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
@@ -194,7 +199,7 @@ export interface CliIo {
 type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
-  | { kind: "doctor"; install: boolean }
+  | { kind: "doctor"; install: boolean; reprobe: boolean }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean }
   | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
@@ -204,7 +209,7 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
-  | { kind: "render"; timeline?: string; preset?: string; out?: string }
+  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; out?: string }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
@@ -258,6 +263,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           json: { type: "boolean", default: false },
           trust: { type: "boolean", default: false },
           install: { type: "boolean", default: false },
+          reprobe: { type: "boolean", default: false },
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           "dry-run": { type: "boolean", default: false },
@@ -379,6 +385,7 @@ function parseBuiltin(
     format?: string | undefined;
     quality?: string | undefined;
     install: boolean;
+    reprobe: boolean;
     link: boolean;
     wait: boolean;
     "dry-run": boolean;
@@ -447,7 +454,13 @@ function parseBuiltin(
     if (rest.length > 0) return null;
     const { preset, timeline, out } = options;
     const common = { ...(timeline ? { timeline } : {}), ...(preset ? { preset } : {}) };
-    if (command === "render") return { kind: "render", ...common, ...(out ? { out } : {}) };
+    if (command === "render") {
+      const { quality } = options;
+      if (quality !== undefined && quality !== "draft" && quality !== "final") {
+        throw new UsageError(`--quality: expected draft or final, got "${quality}".`);
+      }
+      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(out ? { out } : {}) };
+    }
     const at = Number(options.at);
     if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
       throw new UsageError("`frameshell frame` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
@@ -523,7 +536,7 @@ function parseBuiltin(
     return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined, ...(projectKind ? { projectKind } : {}) };
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
-  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
+  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
   if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
   if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
@@ -569,7 +582,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "doctor": {
       if (flags.install && !flags.json) io.stderr("Installing missing managed binaries; first download can take minutes...\n");
-      const report = await conn.request("doctor", { cwd, install: inv.install });
+      const report = await conn.request("doctor", { cwd, install: inv.install, reprobe: inv.reprobe });
       if (report.problems.length > 0) outcome.code = 1;
       // Which `frameshell` this shell runs: only the CLI sees the caller's PATH. Advice, never a problem.
       const command = inspectPathCli(SELF, process.env);
@@ -714,7 +727,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (!flags.json) {
         io.stderr(
           `Rendering timelines/${result.timeline}.json -> ${result.output}\n` +
-            `  ${result.preset} · ${result.width}x${result.height} · ${result.fps} fps · ${result.duration} s · ` +
+            `  ${result.preset}${result.quality ? ` (${result.quality})` : ""} · ${result.encoder} · ${result.width}x${result.height} · ${result.fps} fps · ${result.duration} s · ` +
             `${result.segments} segment(s) · ${result.loudness} LUFS (job ${result.job.id})\n` +
             result.warnings.map((warning) => `  warning: ${warning}\n`).join(""),
         );
@@ -1193,6 +1206,20 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
       lines.push(`  ${`${codec.name} ${codec.kind}`.padEnd(28)} ${codec.label.padEnd(24)} ${state}`);
     }
   }
+  if (report.encoders) {
+    lines.push("", "Video encoder:");
+    for (const candidate of report.encoders.candidates) {
+      const state = !candidate.compiled ? "not in this ffmpeg" : candidate.works ? `works (${candidate.ms} ms)` : "listed but fails a test encode";
+      lines.push(`  ${candidate.name.padEnd(20)} ${state}${candidate.name === report.encoders.picked ? "  <- used for renders" : ""}`);
+    }
+    lines.push(`  tested ${report.encoders.probedAt}${report.encoders.cached ? " (cached; --reprobe tests again)" : ""}`);
+  }
+  const { profile } = report;
+  lines.push(
+    "",
+    `Machine: ${profile.class} (${profile.cpuCores} cores, ${profile.memoryGb} GB). Suggested: proxies ${profile.proxyShortSide}p, drafts ${profile.draftShortSide}p.`,
+    `  A master intermediate at ${profile.resolution.width}x${profile.resolution.height} ${profile.fps} fps takes up to ${profile.masterMbPerMinute} MB per minute.`,
+  );
   if (report.skill) lines.push("", skillLine(report.skill) ?? `Agent skill: ${report.skill.dir} is current.`);
   lines.push("", report.problems.length === 0 ? "No problems found." : "Problems:");
   for (const problem of report.problems) lines.push(`  - ${problem}`);

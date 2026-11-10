@@ -1,4 +1,4 @@
-import { DEFAULT_FRAME_QUALITY, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
+import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
   type Clip,
@@ -35,6 +35,7 @@ import {
   subtitleTracks,
   withTrackMutes,
 } from "@frameshell/schema";
+import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
@@ -91,6 +92,11 @@ export interface RenderInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /**
+   * Encode an H.264 preset at a quality tier with `encoder` instead of the preset's own x264 settings; the
+   * tier also caps the frame rate (draft: 30) and sets AAC 320k (final). Other codecs ignore it, with a warning.
+   */
+  encode?: { encoder: EncoderName; tier: "draft" | "final" };
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -334,9 +340,12 @@ interface GraphTarget {
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
   const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
-  const outFps = preset.video.fps ?? fps;
+  const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
+  const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
+  const warnings =
+    input.encode && !tiered ? [...layout.warnings, `Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`] : layout.warnings;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
@@ -359,7 +368,7 @@ export function compileRender(input: RenderInput): RenderPlan {
         ...BASE,
         ...graph.inputs,
         ...["-/filter_complex", `${name}.filter`, "-map", "[v]", "-an", "-frames:v", String(outFrames), "-r", rate],
-        ...videoCodecArgs(preset),
+        ...(tiered ? tierVideoArgs(tiered.encoder, tiered.tier, { width, height, fps: outFps }) : videoCodecArgs(preset)),
         ...["-map_metadata", "-1", "-f", preset.container, `${name}.${ext}`],
       ],
     };
@@ -367,7 +376,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   files[CONCAT_LIST] = segments.map((segment) => `file '${segment.file}'\n`).join("");
 
   const sampleRate = preset.audio.sampleRate ?? 48_000;
-  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate) };
+  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) };
   return {
     timeline: timeline.id,
     preset: preset.id,
@@ -378,7 +387,7 @@ export function compileRender(input: RenderInput): RenderPlan {
     duration: seconds(layout.frames, fps),
     loudness: input.loudness,
     container: preset.container,
-    warnings: layout.warnings,
+    warnings,
     files,
     fonts: layout.subtitles.length > 0 ? [SUBTITLE_FONT.file] : [],
     segments,
@@ -1278,8 +1287,13 @@ function videoCodecArgs(preset: ExportPreset): string[] {
   }
 }
 
-function audioCodecArgs(preset: ExportPreset, rate: number): string[] {
-  const { codec, bitrateKbps } = preset.audio;
+/** AAC bitrate of a `final` export. */
+const FINAL_AAC_KBPS = 320;
+
+/** `aacKbps` replaces the preset's own AAC bitrate. */
+function audioCodecArgs(preset: ExportPreset, rate: number, aacKbps?: number): string[] {
+  const { codec } = preset.audio;
+  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : preset.audio.bitrateKbps;
   const bitrate = bitrateKbps ? ["-b:a", `${bitrateKbps}k`] : [];
   switch (codec) {
     case "aac":

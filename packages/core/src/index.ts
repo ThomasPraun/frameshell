@@ -168,6 +168,9 @@ export {
   probeVersion,
 } from "./binaries/probe.js";
 export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
+export { ENCODER_CACHE_FILE, EncoderCache, type EncoderProbe, probeEncoders } from "./encoders/probe.js";
+export { type MachineFacts, machineProfile, readMachineFacts } from "./encoders/profile.js";
+export { ENCODER_PREFERENCE, type EncodeTarget, tierFps, tierVideoArgs, videoToolboxKbps } from "./encoders/tiers.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";
 export {
   type TranscribeAssetOptions,
