@@ -22,7 +22,7 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { DIRECTOR_TEMPLATE_IDS, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2411,6 +2411,30 @@ export const methods = {
     params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
     result: z.object({ tx: z.string() }),
   },
+  "style.show": {
+    description:
+      "The project's style guide (ADR 0028): `style.json` at the project root, with measurable values for every " +
+      "visual and sound decision: `brand` (product, hook, CTA, audience; `?` = ask the person), `colors` (hex), " +
+      "`fonts` (family, file under `assets/fonts/`, weight, tracking in em), `type` (px on a frame whose short side " +
+      "is 1080), `motion` (seconds; `personality` playful, premium, corporate, energetic or calm, then the file's " +
+      "overrides), `sound` (dB under the voice, ducking, voice-chain defaults; the loudness target stays " +
+      "`export.loudness`), `platforms`, `notes`, `rules`, `banned`. Every value is `{ value, source }`: `file` " +
+      "(written in style.json), `personality` (from its motion personality) or `default` (Frameshell's; null = not " +
+      "decided, ask the person). `safeZones`: for each platform named, the pixels of a reference frame its app " +
+      "covers (`measured: false` = from editing guides). `style` is null when the project has no style.json: none " +
+      "is required. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      path: z.string().describe("The style file, project-relative: `style.json`."),
+      style: ResolvedStyleSchema.nullable().describe("Every value with its source; null when there is no style.json."),
+      from: z
+        .object({ id: z.string(), sha256: z.string() })
+        .nullable()
+        .describe("User style the file was copied from (id, SHA-256 at copy time); null when none."),
+      safeZones: z.array(SafeZoneSchema).describe("Safe zone of each platform in `platforms`, in that order; empty when none."),
+    }),
+  },
   "people.list": {
     description:
       "The project's people (ADR 0020, `people.json`): who is who across transcripts, multicam angles and faces. Each " +
@@ -2995,6 +3019,8 @@ export type ProposalStatusResult = MethodResult<"proposal.status">;
 /** Result of `proposal.wait`. */
 export type ProposalWaitResult = MethodResult<"proposal.wait">;
 
+/** Result of `style.show`. */
+export type StyleShowResult = MethodResult<"style.show">;
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
 /** Result of `shoot.status`. */

@@ -32,6 +32,7 @@ import { type JobFollower, followJobs } from "./job-follower.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
+import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import {
@@ -106,7 +107,7 @@ ${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}  skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
+${PEOPLE_USAGE}${SHOOT_USAGE}${STYLE_USAGE}  skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
                                version; an edited copy needs --force (files you added stay)
   script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
@@ -133,7 +134,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "style", "skill", "model", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
@@ -163,6 +164,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   ...PEOPLE_FLAGS,
   ...SHOOT_FLAGS,
   ...MODEL_FLAGS,
+  ...STYLE_FLAGS,
   "skill update": ["force"],
   ask: ASK_FLAGS,
   "setup claude-code": SETUP_FLAGS,
@@ -212,6 +214,7 @@ type Invocation =
   | { kind: "proposal.status" }
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
+  | { kind: "style.show" }
   | PeopleInvocation
   | ShootInvocation
   | ModelInvocation
@@ -355,7 +358,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "style" || command === "skill" || command === "model" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -417,6 +420,7 @@ function parseBuiltin(
   if (command === "people") return parsePeople(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
   if (command === "model") return parseModel(rest, options);
+  if (command === "style") return rest.length === 1 && rest[0] === "show" ? { kind: "style.show" } : null;
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -625,6 +629,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "script.check": {
       const result = await conn.request("script.check", { cwd, file: inv.file });
       return flags.json ? json(result) : formatCheck(result);
+    }
+    case "style.show": {
+      const result = await conn.request("style.show", { cwd });
+      return flags.json ? json(result) : formatStyle(result);
     }
     case "proposal.status": {
       const result = await conn.request("proposal.status", { cwd });

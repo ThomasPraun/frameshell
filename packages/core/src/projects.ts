@@ -10,6 +10,7 @@ import {
 } from "@frameshell/protocol";
 import {
   PEOPLE_FILE,
+  STYLE_FILE,
   type ParseResult,
   type ProjectConfig,
   type ProjectKind,
@@ -17,6 +18,7 @@ import {
   createTimeline,
   parsePeopleFile,
   parseProjectConfig,
+  parseStyleFile,
   parseTimeline,
   parseTranscript,
 } from "@frameshell/schema";
@@ -252,6 +254,7 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
   { match: (rel) => /^transcripts\/.+\.words\.json$/.test(rel), parse: parseTranscript },
   { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
+  { match: (rel) => rel === STYLE_FILE, parse: parseStyleFile },
 ];
 
 function notInProject(target: string): RpcError {

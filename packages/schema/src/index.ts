@@ -111,6 +111,37 @@ export {
   findPerson,
   parsePeopleFile,
 } from "./people.js";
+export {
+  STYLE_SCHEMA_URL,
+  STYLE_FILE,
+  MOTION_PERSONALITY_IDS,
+  DEFAULT_MOTION_PERSONALITY,
+  MOTION_PERSONALITIES,
+  STYLE_DEFAULTS,
+  STYLE_SOURCES,
+  StyleFileSchema,
+  StyleValuesSchema,
+  StyleMotionValuesSchema,
+  StyleBrandSchema,
+  StyleColorsSchema,
+  StyleFontSchema,
+  StyleFontsSchema,
+  StyleTypeSchema,
+  StyleSoundSchema,
+  ResolvedStyleSchema,
+  type MotionPersonalityId,
+  type StyleFile,
+  type StyleValues,
+  type StyleMotionValues,
+  type StyleFont,
+  type StyleSource,
+  type Sourced,
+  type SourcedTree,
+  type ResolvedStyle,
+  parseStyleFile,
+  resolveStyle,
+} from "./style.js";
+export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {

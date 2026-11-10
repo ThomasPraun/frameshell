@@ -67,6 +67,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
 | 29 | Shoot scripts and takes | **A shoot script** (`scripts/*.md`, `shoot: true`) written by the agent beside the person's untouched original: `**Name:**` per line, `[LABEL: …]` cues, `[FREE: …]` for unscripted speech, `follow: words\|topics`, stale check by `source_hash`. Each **take** is compared word by word against it; **every deviation is marked, none blocks**; the person accepts or records again. The newest take per scene assembles the first cut as timeline transactions. Takes and decisions in `shoots/<slug>.json` (ADR 0023) | One deterministic comparison that works without an agent; the agent sees takes and deviations and adds judgment; the first cut exists when recording ends | A fixed `frameshell-script.md`, reading the original directly, flagging only big misses, an LLM in Frameshell |
 | 30 | Shoot capture | **Record in the app**: camera, screen or window, microphone, system audio (`getDisplayMedia` + `audio: 'loopback'`); a **continuous shoot session** is one multicam group, takes are ranges in it (keys T/C); per-take transcription for deviations; a resident `whisper-server` (`small-q5_1`) drives a **teleprompter** whose focus line keeps the word being said centered (ADR 0024) | One app from script to finished video; one program track per session; live recognition never writes the project | One file set per take, external recorders only, browser speech recognition, the macOS system picker |
+| 33 | Style guide | **Optional `style.json`** at the project root: brand, colours (hex), fonts (project files under `assets/fonts/` or bundled OFL faces), type sizes, a **motion personality** (playful, premium, corporate, energetic, calm) with field-by-field overrides, sound levels relative to the voice and voice-chain defaults, platforms by name, notes, rules and a banned list. Every value resolves with its source (file, personality, default). User styles are copied in, never inherited; safe zones are core data per platform, named not copied (ADR 0028) | Values are numbers agents and checks can read; a project renders the same on any machine; the loudness target stays `export.loudness` | Live inheritance from a user style, prose notes, a JSON + Markdown pair, safe zones per style |
 
 ### Cross-cutting rules
 
@@ -215,6 +216,7 @@ my-video/
 │   └── raw-01.words.json      # word-level transcript per asset
 ├── director.json              # optional: multicam director rules on top of a template (ADR 0016)
 ├── people.json                # optional: who is who across transcripts, angles and faces (ADR 0020)
+├── style.json                 # optional: style guide (colours, fonts, type, motion, sound, platforms, rules; ADR 0028)
 ├── shoots/<script>.json       # optional: takes, chosen takes, accepted deviations of a shoot script (ADR 0023)
 └── .frameshell/               # gitignored
     ├── cache/clips/           # rendered generated clips (regenerable)
@@ -412,6 +414,31 @@ Optional (ADR 0020). Without it, nothing changes.
 - **Suggestions** (`people suggest`): `speaker` (an unlinked speaker close to a person's voice print), `face-speaker` (the face on screen for most of a speaker's time in one asset), `angle` (person named like a multicam angle, with its voice and face), `face` (an unnamed cluster on screen at least 10 s). Each has a stable `sg_` id, a score and a reason; `people confirm` links, `--reject` dismisses. Nothing is linked without a confirmation by a person or an agent.
 - **Ranges** (`people ranges`): merged timeline spans where a person speaks (their linked speakers' words placed by clips, their angles' turns placed by shots) or is on screen (shots showing their angles, face samples placed by clips showing the asset; occlusion by upper tracks not subtracted).
 
+### 5.8 Style (`style.json`)
+
+Optional (ADR 0028). Without it, nothing changes. Nothing renders from it yet: agents read it.
+
+```json
+{
+  "schemaVersion": 1,
+  "brand": { "product": "Acme", "hook": "Stop editing by hand.", "cta": "?" },
+  "colors": { "bg": "#0b0b0f", "ink": "#f5f5f0", "accent": "#ff5a1f" },
+  "fonts": { "display": { "family": "Archivo Black" }, "ui": { "family": "Inter", "file": "assets/fonts/Inter.ttf", "weight": 500 } },
+  "type": { "minReadable": 30 },
+  "motion": { "personality": "premium", "duration": { "quick": 0.3 } },
+  "sound": { "musicUnderVoice": 14, "duck": { "depth": 9 } },
+  "platforms": ["instagram-reels"],
+  "rules": ["sentence case"],
+  "banned": ["emoji in captions"]
+}
+```
+
+- Sections: `brand` (strings; `?` = ask the person), `colors` (`bg`, `ink`, `ink2`, `accent`, `card`, `keyword`, `highlight`, hex), `fonts` (`display`, `ui`, `captions`, `keyword`: family, optional file under `assets/fonts/`, weight, tracking in em), `type` (px on a frame whose short side is 1080), `motion` (seconds), `sound` (dB under the voice, ducking, voice chain), `platforms`, `notes`, `rules`, `banned`; optional `from` (user style id and SHA-256 when copied). Unknown keys are refused.
+- Resolution (`resolveStyle`, `packages/schema`): Frameshell's defaults, the motion values of the named personality (default `corporate`), then the file; objects merge field by field, lists, colours and fonts replace. Every resolved value carries its source: `file`, `personality` or `default`.
+- The integrated loudness target is `export.loudness` (§5.2), never the style; an effect set on a clip overrides the style's voice-chain default.
+- Safe zones are not in the style: `packages/schema/src/safe-zones.ts` holds one per platform (pixels of a reference frame the platform's app covers, `measured` or from guides); styles, formats and review name the platform.
+- `style.show` resolves it; `file.write` refuses an invalid file. A journaled `style.set`, user styles in `configDir/styles/` (copied in with `from`) and captions, fonts and generated clips taking the style come later (ADR 0028).
+
 ---
 
 ## 6. Core behaviours
@@ -491,6 +518,7 @@ frameshell people confirm <suggestion>… [--reject] [--person <person>]
 frameshell people ranges <person> [--on-screen] [--json]   # timeline spans where the person speaks (default) or is on screen
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
+frameshell style show [--json]                # style.json resolved: each value and its source, safe zones of its platforms (ADR 0028)
 
 frameshell tx begin "<label>" | commit | abort
 frameshell proposal status [--json]           # review mode on/off, the open proposal, last decisions (ADR 0019)
@@ -532,6 +560,7 @@ Design rules:
 - Default project of a call without `cwd`: the project enclosing the server's directory; when that is in no project (one global server, e.g. Claude Desktop), the project of the app window focused last, named in the result. No window: the call fails asking to open a project or pass `cwd` (ADR 0014).
 - CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
 - People (ADR 0020): every `people.*` method is a tool (`people_suggest`, `people_confirm`, `people_ranges`, …); a person picked in the People panel shows in `ui_state`.
+- Style (ADR 0028): `style_show` reads the resolved style guide; agents write `style.json` with `file_write` until a style write tool exists.
 - Review mode (ADR 0019): `proposal_status` and `proposal_wait` are tools; accepting, rejecting and turning review on or off are internal methods only the app calls, never tools.
 
 ## 8. Plugin system

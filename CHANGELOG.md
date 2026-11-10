@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Project style guide, slice 1 of #468 (ADR 0028): an optional `style.json` at the project root holds brand fields,
+  colours (hex), fonts (family, file under `assets/fonts/`, weight, tracking), type sizes (px at a 1080 short side),
+  a motion personality (`playful`, `premium`, `corporate`, `energetic`, `calm`) with field-by-field overrides, sound
+  levels under the voice with ducking and voice-chain defaults (the loudness target stays `export.loudness`),
+  platforms, notes, rules and a banned list. `resolveStyle` (`packages/schema`) gives every value with its source
+  (`file`, `personality`, `default`); safe zones per platform live once in `packages/schema/src/safe-zones.ts`
+  (Instagram Reels measured, the others from guides). New daemon method `style.show` (protocol 71), CLI
+  `frameshell style show [--json]`, MCP `style_show`; `file.write` refuses an invalid `style.json`; JSON Schema
+  `style.json`. The agent skill documents the file. Nothing renders from it yet.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

@@ -124,6 +124,16 @@ Optional `people.json`: who is who across transcripts, multicam angles and faces
 
 People changes are not timeline operations: review mode does not hold them, `history` does not list them. A link an agent makes (`people_link`, `people_confirm`) carries `by` and shows as "Confirmed by agent" in the People panel, where the person can unlink it or undo it with Cmd/Ctrl+Z. Nothing leaves the machine: prints stay in `.frameshell/people/`, never in `people.json`.
 
+## Style (ADR 0028)
+
+Optional `style.json`: the project's style guide as numbers (colours, fonts, type sizes, motion personality and overrides, sound levels under the voice, platforms, rules, banned list).
+
+| Tool | Does |
+|---|---|
+| `style_show` | Every style value as `{ value, source }` (`file`, `personality`, `default`; a null default = not decided, ask the person), `from` (the user style it was copied from) and the safe zones of the platforms it names. `style` is null without a file. Read-only; an invalid file fails with `InvalidProjectFile`. |
+
+There is no style write tool yet: agents write `style.json` with `file_write`, which refuses an invalid file. Nothing renders from the style yet.
+
 ## Resources
 
 Compact JSON, the same as the matching `--json` CLI output:
