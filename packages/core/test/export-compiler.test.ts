@@ -650,7 +650,42 @@ describe("formats (ADR 0027)", () => {
     expect(square).toBe(fontSize(inFormat("16x9")));
   });
 
-  it("leaves generated renders and multicam tiles to their own layout", () => {
+  it("crops a dissolving clip's head, drawn as a layer, exactly as its body on the bottom track", () => {
+    const dissolving: Timeline = {
+      ...timeline,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_a", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 2 },
+            { id: "c_b", type: "media", asset: "assets/talk.mp4", start: 2, in: 4, out: 6, dissolve: 0.5 },
+          ],
+        },
+      ],
+    };
+    const { format } = resolveFormat(dissolving, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    // Probed lengths: c_a's handle after its `out` needs one.
+    const sized = new Map([...sources].map(([asset, source]) => [asset, { ...source, duration: 20 }]));
+    const graph = Object.values(compileRender({ timeline: dissolving, fps: 30, preset, loudness: -17, sources: sized, resolution, variant: format }).files).join("\n");
+    // c_b's head plays over c_a's tail as an overlay, its body joins the base: one crop for both.
+    expect(graph).toMatch(/crop=608:1080:656:0,[^;]*scale=1080:1920,setsar=1,format=rgba,fade=t=in:alpha=1[^;]*\[o0\]/);
+    expect(graph).toMatch(/crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p/);
+    expect([...new Set(graph.match(/crop=[^,]+/g))]).toEqual(["crop=608:1080:656:0"]);
+  });
+
+  it("crops to even sizes and edges, as ffmpeg cuts a 4:2:0 picture", () => {
+    const small: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_s", type: "media", asset: "assets/small.mp4", start: 0, in: 0, out: 1 }] }] };
+    const withSmall = new Map<string, ExportSource>([...sources, ["assets/small.mp4", { path: "/project/assets/small.mp4", video: { codec: "h264", still: false, width: 1280, height: 720 }, audio: false }]]);
+    const { format } = resolveFormat(small, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const plan = compileRender({ timeline: small, fps: 30, preset, loudness: -17, sources: withSmall, resolution, variant: format });
+    // The centred 405x720 of 1280x720, rounded down to even.
+    expect(plan.files["seg-0001.filter"]).toContain("crop=404:720:438:0,scale=1080:1920");
+  });
+
+  it("leaves generated renders to their own layout", () => {
     const render = new Map([["c_gen", { path: "/project/.frameshell/cache/clips/cccc.webm", hasAlpha: true, width: 1080, height: 1920 }]]);
     const withRender: Timeline = {
       ...timeline,

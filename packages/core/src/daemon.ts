@@ -25,6 +25,7 @@ import {
   isMethodName,
   parseRequest,
   readMessages,
+  formatUndoCommand,
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
@@ -78,7 +79,7 @@ import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
-import { FormatService, builtinFormatInfos, formatInfos } from "./formats.js";
+import { FormatService, builtinFormatInfos, findFormatChange, formatInfos } from "./formats.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
@@ -778,6 +779,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       hint: "Only the person decides, in the Frameshell app.",
     });
   };
+  /**
+   * Format changes are not proposals yet (ADR 0027): while review mode is on, only the person, in the app, makes
+   * them, so nothing reaches `frameshell.json` unseen.
+   */
+  const formatsOutsideReview = async (dir: string, caller: Caller) => {
+    if (authorOf(caller) === "ui" || !(await review.enabled(await canonicalPath(dir)))) return;
+    throw new RpcError(ErrorCode.ProposalState, "Review mode is on: format changes cannot wait as proposals yet, so only the person, in the Frameshell app, can make them.", {
+      tx: null,
+      reason: "forbidden",
+      conflicts: [],
+      hint: "Ask the person to change the formats, or to turn review mode off (History view).",
+    });
+  };
   /** Open explicit transactions that changed project `dir` (however its root was spelled) or nothing yet. */
   const openTransactions = async (dir: string): Promise<OpenTransaction[]> => {
     const real = await canonicalPath(dir);
@@ -906,8 +920,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { config } = (await readEnclosingProject(dir))!;
       return { dir, formats: formatInfos(config), builtins: builtinFormatInfos() };
     },
-    "format.add": async ({ cwd, id, width, height, index }, caller) => formats.add(await root(cwd), { id, width, height, index }, journalAuthorOf(caller)),
-    "format.remove": async ({ cwd, id }, caller) => formats.remove(await root(cwd), id, journalAuthorOf(caller)),
+    "format.add": async ({ cwd, id, width, height, index }, caller) => {
+      const dir = await root(cwd);
+      await formatsOutsideReview(dir, caller);
+      return formats.add(dir, { id, width, height, index }, journalAuthorOf(caller));
+    },
+    "format.remove": async ({ cwd, id }, caller) => {
+      const dir = await root(cwd);
+      await formatsOutsideReview(dir, caller);
+      return formats.remove(dir, id, journalAuthorOf(caller));
+    },
     render: async ({ cwd, timeline, preset, out, formats: ids }) => exports.render(await root(cwd), { timeline, preset, out, formats: ids }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
@@ -1463,7 +1485,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
     "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
-    revert: async ({ cwd, timeline, target }, caller) => revert(await root(cwd), cwd, timeline, target, caller),
+    revert: async ({ cwd, timeline, target }, caller) => {
+      const dir = await root(cwd);
+      const change = await findFormatChange(dir, target);
+      if (change) {
+        const undo = formatUndoCommand(change.undo);
+        throw new RpcError(
+          ErrorCode.InvalidOperation,
+          `${target} is a ${change.op} in frameshell.json, not a timeline operation: \`revert\` cannot undo it yet. Run \`${undo}\` instead.`,
+          { op: "revert", reason: "format change", field: "target", hint: `\`${undo}\` (\`${change.undo.method}\`).` },
+        );
+      }
+      return revert(dir, cwd, timeline, target, caller);
+    },
     "review.set": async ({ cwd, enabled }, caller) => {
       onlyUi(caller, "turn review mode on or off");
       const dir = await root(cwd);

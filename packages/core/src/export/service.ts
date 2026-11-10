@@ -223,9 +223,18 @@ export class ExportService {
         : new Map<string, GeneratedSource>();
       const plan = compileRender({ ...input, generated: standIn });
       const output = params.formats ? withSuffix(base, format.id) : base;
-      return { format, input, renderSize, plan, output };
+      // Before formats a configured default preset of another aspect letterboxed the project into its size.
+      const overridden =
+        params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && !sameAspect(preset.video, format)
+          ? [
+              `Default preset ${preset.id} (export.defaultPreset) is ${preset.video.width}x${preset.video.height}, another aspect than format ` +
+                `${format.id}: rendered at ${size.width}x${size.height} with its codec, bitrate and loudness (ADR 0027). For the preset's ` +
+                "size, add and render the format of its aspect (`frameshell format add`).",
+            ]
+          : [];
+      return { format, input, renderSize, plan, output, warnings: [...overridden, ...plan.warnings] };
     });
-    const renders = planned.map(({ format, input, renderSize, plan, output }) => {
+    const renders = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
       const job = this.#options.jobs.enqueue({
         kind: "render",
         project: root,
@@ -248,7 +257,7 @@ export class ExportService {
           });
         },
       });
-      return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings: plan.warnings };
+      return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
     });
     const first = renders[0]!;
     const plan = planned[0]!.plan;
@@ -265,7 +274,7 @@ export class ExportService {
       fps: plan.fps,
       loudness: plan.loudness,
       segments: plan.segments.length,
-      warnings: plan.warnings,
+      warnings: first.warnings,
     };
   }
 

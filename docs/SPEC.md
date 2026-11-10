@@ -257,7 +257,7 @@ my-video/
 
 `kind` is `video` (the default when absent) or `image` (ADR 0017).
 
-`formats` (optional, ADR 0027) lists the delivery formats of the one edit, primary first: the first equals `resolution`; ids are unique, lowercase letters, digits and `-` (not `png`, `jpg`, `jpeg`, `webp`); the built-in ids `16x9` (1920x1080), `1x1` (1080x1080), `4x5` (1080x1350) and `9x16` (1080x1920) keep their canvas; sizes after the first are even. Absent: one format, the resolution, named by its built-in id or `<width>x<height>`. Image projects take none. Edited with `frameshell format add|remove` (journaled in `.frameshell/history/project.config.jsonl`) or by hand. The schema is strict, so hosts older than ADR 0027 refuse a project that has it.
+`formats` (optional, ADR 0027) lists the delivery formats of the one edit, primary first: the first equals `resolution`; ids are unique, lowercase letters, digits and `-` (not `png`, `jpg`, `jpeg`, `webp`); the built-in ids `16x9` (1920x1080), `1x1` (1080x1080), `4x5` (1080x1350) and `9x16` (1080x1920) keep their canvas; sizes after the first are even. Absent: one format, the resolution, named by its built-in id or `<width>x<height>`. Image projects take none. Edited with `frameshell format add|remove` (journaled in `.frameshell/history/project.config.jsonl`, undone by the call each change returns, not `revert`; while review mode is on only the person in the app may) or by hand. The schema is strict, so hosts older than ADR 0027 refuse a project that has it.
 
 ### 5.3 Timeline (`timelines/*.json`)
 

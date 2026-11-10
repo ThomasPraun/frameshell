@@ -9,7 +9,7 @@ import {
   primaryFormatId,
   projectFormats,
 } from "@frameshell/schema";
-import { appendJsonLine } from "./fs-util.js";
+import { appendJsonLine, readJsonLines } from "./fs-util.js";
 
 /**
  * Journal of `frameshell.json` format edits (ADR 0027): one JSON line per change with the list before and
@@ -26,6 +26,8 @@ export interface FormatJournalEntry {
   at: string;
   before: FormatEntry[] | null;
   after: FormatEntry[] | null;
+  /** The call that undoes this change, as `format.add`/`format.remove` returned it. */
+  undo: FormatChange["undo"];
 }
 
 /** What {@link FormatService} needs from the project registry. */
@@ -46,6 +48,15 @@ export function formatInfos(config: FormatSource): FormatInfo[] {
 /** Built-in formats with their canvases. */
 export function builtinFormatInfos(): FormatInfo[] {
   return BUILTIN_FORMAT_IDS.map((id) => info({ id, ...BUILTIN_FORMATS[id]! }, false));
+}
+
+/** The {@link FORMAT_JOURNAL} line with id `op` in the project rooted at `root`, or null. */
+export async function findFormatChange(root: string, op: string): Promise<FormatJournalEntry | null> {
+  for (const value of await readJsonLines(join(root, ...FORMAT_JOURNAL.split("/")))) {
+    const entry = value as Partial<FormatJournalEntry> | null;
+    if (entry?.id === op && entry.undo) return entry as FormatJournalEntry;
+  }
+  return null;
 }
 
 /** `FormatNotFound` for `id`, listing the project's formats. */
@@ -123,7 +134,6 @@ export class FormatService {
     undo: FormatChange["undo"],
   ): Promise<FormatChange> {
     const written = isDefault(next, config) ? null : next;
-    await this.#options.writeFormats(root, written);
     const id = `op_${randomBytes(4).toString("hex")}`;
     const line: FormatJournalEntry = {
       id,
@@ -131,8 +141,11 @@ export class FormatService {
       at: (this.#options.now?.() ?? new Date()).toISOString(),
       before: config.formats ? [...config.formats] : null,
       after: written,
+      undo,
     };
+    // Journal first: a change never reaches frameshell.json without its line.
     await appendJsonLine(join(root, ...FORMAT_JOURNAL.split("/")), line);
+    await this.#options.writeFormats(root, written);
     return { dir: root, formats: formatInfos({ ...config, formats: written ?? undefined }), op: id, undo };
   }
 

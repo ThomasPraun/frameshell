@@ -1,4 +1,4 @@
-import type { DaemonConnection, FormatChange, FormatInfo } from "@frameshell/protocol";
+import { type DaemonConnection, type FormatChange, type FormatInfo, formatUndoCommand } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `format` commands (ADR 0027), in `frameshell --help`. */
@@ -78,10 +78,5 @@ function line(format: FormatInfo): string {
 
 /** What changed, the formats now, and the command that undoes it. */
 function changed(what: string, result: FormatChange): string {
-  const { method, params } = result.undo;
-  const undo =
-    method === "format.remove"
-      ? `frameshell format remove ${String(params["id"])}`
-      : `frameshell format add ${String(params["id"])} --size ${String(params["width"])}x${String(params["height"])} --index ${String(params["index"])}`;
-  return `${what} (${result.op}). Formats: ${result.formats.map((format) => format.id).join(", ")}\n  undo: ${undo}\n`;
+  return `${what} (${result.op}). Formats: ${result.formats.map((format) => format.id).join(", ")}\n  undo: ${formatUndoCommand(result.undo)}\n`;
 }

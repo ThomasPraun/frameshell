@@ -471,7 +471,7 @@ const RenderOutputSchema = z.object({
   width: z.int(),
   height: z.int(),
   segments: z.int().describe("Video segments encoded in parallel."),
-  warnings: z.array(z.string()).describe("Timeline content this export does not render; empty when none."),
+  warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
 });
 
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
@@ -838,8 +838,9 @@ export const methods = {
       "(even), e.g. `{ id: \"web-1600x900\", width: 1600, height: 900 }`. In a format other than the primary, media clips " +
       "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
       "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl`; `undo` " +
-      "names the call that reverses it. Not routed through review mode yet: it applies at once. Fails with " +
-      "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProjectNotFound.",
+      "names the call that reverses it (`revert` takes timeline operations only). It applies at once: while review mode is " +
+      "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
+      "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       id: FormatIdSchema,
@@ -859,7 +860,8 @@ export const methods = {
       "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
       "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
       "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
-      "`undo` re-adds it at the same position. Fails with FormatNotFound, InvalidOperation (the primary), ProjectNotFound.",
+      "`undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
+      "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
     params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
     result: FormatChangeSchema,
   },
@@ -911,7 +913,7 @@ export const methods = {
       fps: z.string().describe("Output frame rate as a rational, e.g. `30/1` or `30000/1001`."),
       loudness: z.number().describe("Integrated loudness target, LUFS."),
       segments: z.int().describe("Video segments encoded in parallel."),
-      warnings: z.array(z.string()).describe("Timeline content this export does not render; empty when none."),
+      warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
     }),
   },
   frame: {
@@ -2415,7 +2417,8 @@ export const methods = {
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
       "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
-      "HistoryNotFound when the id is not in the timeline's journal.",
+      "HistoryNotFound when the id is not in the timeline's journal, InvalidOperation (reason `format change`) for the `op` " +
+      "of a `format.add`/`format.remove`: run its `undo` call instead.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

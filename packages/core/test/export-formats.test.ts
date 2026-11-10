@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
@@ -144,6 +144,30 @@ describe("formats of a project", () => {
       const vertical = await conn.request("render", { cwd: project, preset: "vertical-1080x1920", formats: ["9x16"] });
       expect(vertical.renders[0]).toMatchObject({ output: join(project, "exports", "main-vertical-1080x1920-9x16.mp4"), width: 1080, height: 1920 });
       expect((await finished(vertical.job.id)).state).toBe("done");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "renders the primary at its own size when export.defaultPreset has another aspect, and warns",
+    async () => {
+      const file = join(project, "frameshell.json");
+      const kept = readFileSync(file, "utf8");
+      const config = JSON.parse(kept) as Record<string, unknown>;
+      writeFileSync(file, JSON.stringify({ ...config, export: { ...(config["export"] as object), defaultPreset: "vertical-1080x1920" } }, null, 2));
+      try {
+        const result = await conn.request("render", { cwd: project });
+        expect(result).toMatchObject({ format: "16x9", preset: "vertical-1080x1920", width: 1920, height: 1080 });
+        expect(result.warnings).toEqual([expect.stringContaining("Default preset vertical-1080x1920 (export.defaultPreset) is 1080x1920")]);
+        expect(result.renders[0]!.warnings).toEqual(result.warnings);
+        expect((await finished(result.job.id)).state).toBe("done");
+        // Same aspect as the format: no warning.
+        const vertical = await conn.request("render", { cwd: project, formats: ["9x16"] });
+        expect(vertical.warnings).toEqual([]);
+        expect((await finished(vertical.job.id)).state).toBe("done");
+      } finally {
+        writeFileSync(file, kept);
+      }
     },
     MEDIA_TIMEOUT,
   );

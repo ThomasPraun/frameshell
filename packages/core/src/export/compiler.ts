@@ -598,7 +598,7 @@ function layoutTimeline(
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
-        ...(covers ? { cover: coverCrop({ left: 0, top: 0, width: picture.width, height: picture.height }, output) } : {}),
+        ...(covers ? { cover: formatCover(picture, output) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -985,6 +985,18 @@ function layerMotion(placed: Placed, start: number, end: number, from: number, o
   const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
+}
+
+/**
+ * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
+ * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
+ */
+function formatCover(source: Size, output: Size): LayerRect {
+  const even = (value: number) => value - (value % 2);
+  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
+  const width = Math.max(2, even(crop.width));
+  const height = Math.max(2, even(crop.height));
+  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**

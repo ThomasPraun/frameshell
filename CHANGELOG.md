@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Formats of a project, export path (#469, ADR 0027): one edit delivered at several sizes. `frameshell.json` takes
   `formats` (primary first, equal to `resolution`); built-in `16x9`, `1x1`, `4x5`, `9x16`, or a custom id and size.
   `frameshell format list|add|remove` (MCP `format_list`, `format_add`, `format_remove`) edits them, journaled in
-  `.frameshell/history/project.config.jsonl`, each change returning the call that undoes it.
+  `.frameshell/history/project.config.jsonl`, each change returning the call that undoes it (`revert` of its `op` id
+  is refused and names that call). While review mode is on, only the person in the app may change formats: agents get
+  ProposalState `forbidden`.
   `frameshell render --formats 16x9,9x16` writes one file per format (`<file>-<format>.mp4`) from the same edit:
   untransformed footage covers the frame (cropped around the centre), generated clips render at the format's size,
   vertical captions are 1.3x larger; the primary format exports exactly as before. `frameshell frame --format 9x16`
@@ -24,7 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The format owns the frame (ADR 0027): an export preset given to `render` or `frame` whose aspect differs from the
   format rendered is refused (`render --preset vertical-1080x1920` in a 16:9 project now asks to add and render the
   `9x16` format). A vertical project rendered without a preset now exports at its own size, not a letterboxed
-  1920x1080.
+  1920x1080. Likewise an `export.defaultPreset` of another aspect than the project only gives codec, bitrate and
+  loudness: a 16:9 project with `defaultPreset: vertical-1080x1920` exports at 1920x1080, no longer letterboxed into
+  1080x1920, and the render's `warnings` say so.
+- Edits of `frameshell.json` by the daemon (plugin pins, transcription choice, formats) run one at a time per project,
+  so two at once no longer lose one of them.
 
 ## [0.18.0] - 2026-11-07
 
