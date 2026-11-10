@@ -13,6 +13,21 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Board in Orkestra
+
+GitHub Issues stay the source of truth. A one-way sync mirrors every open issue into the Orkestra project "Frameshell" (org Frameshell); closed issues follow.
+
+| On GitHub | Orkestra column |
+|---|---|
+| no triage label | Ideas |
+| `ready-for-agent` | Para agente |
+| `ready-for-human` (owner work: manual checks, acceptance runs, decisions) | Para ti |
+| closed (completed or not planned) | Hecho |
+
+- New work: open a GitHub issue with the right label. Never create a task in that Orkestra project.
+- Move work: change the label or close the issue. Synced tasks are read-only in Orkestra: never move or edit them through Orkestra MCP.
+- Only issues opened by people with write access to the repo are synced.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
