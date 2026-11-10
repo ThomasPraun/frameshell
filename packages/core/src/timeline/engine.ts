@@ -38,6 +38,7 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
+  keyedValueAt,
   paintStretches,
   placementAt,
   parseTimeline,
@@ -48,6 +49,7 @@ import {
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
+import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
 import { FrameGrid } from "./grid.js";
@@ -233,6 +235,8 @@ class Edit {
         return this.transitionRemove(request.args);
       case "clip.key":
         return this.clipKey(request.args);
+      case "track.duck":
+        return this.trackDuck(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
       case "multicam.gallery":
@@ -1066,6 +1070,62 @@ class Edit {
     else all[prop] = keys as [ClipKey, ...ClipKey[]];
     if (Object.keys(all).length === 0) delete clip.keys;
     else clip.keys = all;
+  }
+
+  /**
+   * `track.duck`: write the dip `curve` into the `gain` keys of every clip of audio track `args.track` (ADR 0018).
+   * Keys marked `auto: "duck"` from an earlier run go; keys without the mark stay and set the level the dip is
+   * taken from. A clip the dip never touches ends with no duck keys.
+   */
+  async trackDuck(args: OperationArgs<"track.duck">): Promise<void> {
+    const track = this.clipTrack(args.track);
+    if (track.kind !== "audio") {
+      throw this.invalid(`${track.id} is a ${track.kind} track; ducking writes gain keys on the clips of an audio track.`, {
+        field: "track",
+        hint: `Audio tracks: ${this.mediaTracks().filter((t) => t.kind === "audio").map((t) => t.id).join(", ") || "none"}.`,
+      });
+    }
+    const curve = args.curve;
+    const g = this.grid;
+    const fps = this.context.fps;
+    let ducked = 0;
+    for (const clip of track.clips.filter((candidate): candidate is Clip => !isShotClip(candidate))) {
+      const hand = (clip.keys?.gain ?? []).filter((key) => key.auto !== "duck");
+      const kept: ClipKeys = { ...clip.keys };
+      delete kept.gain;
+      const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
+      const end = (await this.span(clip)).end;
+      const keys = clip.audio?.muted === true ? [] : this.duckKeys(clip, hand, curve, end, speed, g, fps);
+      if (keys.length > 0) ducked++;
+      const all = [...hand, ...keys].sort((a, b) => a.at - b.at);
+      if (all.length > 0) kept.gain = all as [ClipKey, ...ClipKey[]];
+      if (Object.keys(kept).length === 0) delete clip.keys;
+      else clip.keys = kept;
+    }
+    if (ducked === 0) this.warnings.push(`no clip of ${track.id} lies under speech: no duck keys written.`);
+  }
+
+  /** Duck keys of one clip: its level (`hand` keys, else `audio.gain`) minus the dip at each point of `curve` inside it, plus its start and end. */
+  duckKeys(clip: Clip, hand: readonly ClipKey[], curve: readonly { time: number; dip: number }[], end: number, speed: number, g: FrameGrid, fps: number): ClipKey[] {
+    const dipPoints = curve.map((point) => ({ time: point.time, dip: point.dip }));
+    const inside = dipPoints.filter((point) => point.time > clip.start && point.time < end);
+    const times = [clip.start, ...inside.map((point) => point.time), end];
+    if (times.every((t) => dipAt(dipPoints, t) <= 0)) return [];
+    const keys: ClipKey[] = [];
+    let lastFrame = -1;
+    for (const time of times) {
+      const t = g.snap(time);
+      const at = Math.round(clipTime(clip, t) * 1000) / 1000;
+      const level = keyedValueAt(hand, at) ?? clip.audio?.gain ?? 0;
+      const key: ClipKey = { at, value: round4(level - dipAt(dipPoints, time)), auto: "duck" };
+      // Two points in one frame (a ramp shorter than a frame): the later one wins.
+      if (g.frame(t) === lastFrame) keys[keys.length - 1] = key;
+      else keys.push(key);
+      lastFrame = g.frame(t);
+    }
+    // A hand key within half a frame of a duck key stays; the duck key gives way to it.
+    const half = (0.5 / fps) * speed;
+    return keys.filter((key) => !hand.some((other) => Math.abs(other.at - key.at) < half));
   }
 
   /**

@@ -77,6 +77,13 @@ const keyList = (value: z.ZodNumber, unit: string) =>
           .enum(KEY_EASES)
           .optional()
           .describe("How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`."),
+        auto: z
+          .literal("duck")
+          .optional()
+          .describe(
+            "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; " +
+              "setting or moving a key by hand (`clip.key`) clears it.",
+          ),
       }),
     )
     .min(1)

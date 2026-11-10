@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Duck music under speech as editable gain keys (#456, part of #451): `frameshell duck <track> --under <track>…`
+  (`track.duck`, MCP `track_duck`, protocol 71) listens to the sound of the `--under` tracks and writes `gain` keys
+  on the clips of an audio track that dip while someone speaks. Defaults: 7 dB deep (`--depth`), complete as the voice
+  starts (`--attack` 40 ms), gone 450 ms after it ends (`--release`), speech above -38 dBFS (`--threshold`),
+  stretches closer than 0.6 s merged (`--gap`). The keys are the clip's level minus the dip, with keys at the clip's
+  start and end, and carry the new key field `auto: "duck"`: running it again replaces them and keeps keys set by hand.
+  Preview and export play them like any gain key. History shows it as "Duck music under speech".
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

@@ -29,3 +29,17 @@ frameshell clip key <clip> --prop scale --at 20 --value 1.2
 - Between keys the value moves in a straight line, or by the leaving key's `--ease in|out|in-out`; it holds before the first and after the last. A keyed property ignores its static value (`clip set`).
 - A key in the same frame is replaced. `--remove` deletes the key at `--at`; `--clear` deletes every key of `--prop`.
 - Keys stay on the same frames of the clip's picture through trim, split and cut.
+
+## Music under a voice
+
+```sh
+frameshell duck <music track> --under <voice track>                # 7 dB down while someone speaks
+frameshell duck <music track> --under <voice> --under <other> --depth 9 --release 600
+```
+
+`duck` listens to the sound of the `--under` tracks (video or audio, muted tracks and clips ignored) and writes `gain` keys on every clip of the audio track `<track>`: the clip's level minus the dip, which is complete when the voice starts (`--attack`, ms) and lets go `--release` ms after it ends. Speech is sound above `--threshold` dBFS (default -38); stretches closer than `--gap` seconds (default 0.6) merge, so the music does not pump between words. The MCP tool is `track_duck`.
+
+- The keys are ordinary gain keys marked `auto: "duck"`: the person sees and edits them in the clip, preview and export play them. Run it again after a cut, a move or a retake and it replaces its own keys, keeps the ones set by hand (`clip key` clears the mark of a key it sets), and a clip no voice reaches loses its old ones.
+- A hand-set gain key defines the level the dip is taken from, and a lane holds its first key back to the clip start: one key at 30 s of `-3` makes the whole clip sit at -3 dB first. Set the level of the music with `clip set --gain` (no keys) or key it deliberately.
+- Set the music's level first (about 12 dB under the voice is a common start), then duck: the dip is relative to the level the clip plays at.
+- Voice in nested timeline clips and multicam program tracks is not heard; `warnings` says which.

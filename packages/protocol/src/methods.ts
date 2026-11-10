@@ -36,6 +36,7 @@ import {
   TimelineProblemSchema,
   TimelineRejectionSchema,
   TimelineViewSchema,
+  TrackDuckResultSchema,
   TrackSummarySchema,
   TxIdSchema,
   operationArgs,
@@ -54,7 +55,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2199,6 +2200,33 @@ export const methods = {
       "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots).",
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  "track.duck": {
+    mutating: true,
+    description:
+      "Duck music under speech: write gain keys (ADR 0018, `clip.key` `gain`) on the clips of the audio track `track` so they dip " +
+      "while someone speaks on the `under` tracks. Speech is found from the energy of the `under` tracks' sound (muted clips and " +
+      "tracks are ignored): a stretch is where it stays above `threshold`, stretches closer than `gap` merge. Each stretch " +
+      "gets a dip of `depth` dB that is complete when the voice starts (`attackMs` before) and lets go `releaseMs` after it ends, " +
+      "straight lines in between. The keys are the clip's level (its `audio.gain`, or its own keys) minus the dip, with a key at the " +
+      "clip's start and end so the lane never holds a dip by accident. They are marked `auto: \"duck\"`: running it again replaces " +
+      "those and keeps the keys you set by hand; clips with no speech over them lose their old ones. The person sees and edits the " +
+      "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
+      "or multicam program tracks is not heard (a warning says so). " +
+      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8 }`. Fails with InvalidOperation (`track` is not an audio " +
+      "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: operationArgs["track.duck"].shape.track,
+      under: z.array(z.string().min(1).describe("Track id from `track.list`.")).min(1).describe("Video or audio tracks whose speech the music ducks under."),
+      depth: z.number().positive().max(60).default(7).describe("dB the clips dip below their level while someone speaks. Default 7."),
+      attackMs: z.number().min(1).max(5000).default(40).describe("Milliseconds the dip takes to reach full depth, ending as the voice starts. Default 40."),
+      releaseMs: z.number().min(1).max(10000).default(450).describe("Milliseconds the level takes to come back after the voice stops. Default 450."),
+      threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
+      gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
+    }),
+    result: TrackDuckResultSchema,
   },
   cut: {
     mutating: true,

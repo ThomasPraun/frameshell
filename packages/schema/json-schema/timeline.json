@@ -158,6 +158,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -191,6 +196,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -225,6 +235,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -260,6 +275,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -293,6 +313,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -446,6 +471,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -479,6 +509,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -513,6 +548,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -548,6 +588,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -581,6 +626,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -727,6 +777,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -760,6 +815,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -794,6 +854,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -829,6 +894,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
@@ -862,6 +932,11 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
                                   }
                                 },
                                 "required": [
