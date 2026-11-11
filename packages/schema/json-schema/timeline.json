@@ -158,6 +158,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -191,6 +200,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -225,6 +243,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -260,6 +287,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -293,6 +329,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -446,6 +491,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -479,6 +533,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -513,6 +576,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -548,6 +620,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -581,6 +662,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -727,6 +817,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -760,6 +859,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -794,6 +902,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -829,6 +946,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [
@@ -862,6 +988,15 @@
                                       "out",
                                       "in-out"
                                     ]
+                                  },
+                                  "auto": {
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "type": "string",
+                                    "const": "duck"
+                                  },
+                                  "base": {
+                                    "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                    "type": "number"
                                   }
                                 },
                                 "required": [

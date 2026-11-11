@@ -340,6 +340,21 @@ export const operationArgs = {
     remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
   }),
+  "track.duck": z.strictObject({
+    track: TrackRef.describe("Audio track whose clips get the gain keys: the music or effects that dip under speech."),
+    curve: z
+      .array(
+        z.strictObject({
+          time: Seconds("Timeline time of the point."),
+          dip: z.number().nonnegative().describe("dB the clips sit below their own level at `time`: 0 = full level."),
+        }),
+      )
+      .min(1)
+      .describe(
+        "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
+          "The `track.duck` method measures it from the speech tracks and passes it here.",
+      ),
+  }),
   "multicam.create": z.strictObject({
     angles: z
       .array(
@@ -840,6 +855,17 @@ export const CaptionsSetResultSchema = OperationResultSchema.extend({
 /** See {@link CaptionsSetResultSchema}. */
 export type CaptionsSetResult = z.output<typeof CaptionsSetResultSchema>;
 
+/** Result of `track.duck`: the operation plus what was heard. */
+export const TrackDuckResultSchema = OperationResultSchema.extend({
+  track: z.string().describe("Audio track whose clips got the keys."),
+  under: z.array(z.string()).describe("Tracks listened to for speech."),
+  stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
+  speechSeconds: z.number().describe("Total seconds of those stretches."),
+});
+
+/** See {@link TrackDuckResultSchema}. */
+export type TrackDuckResult = z.output<typeof TrackDuckResultSchema>;
+
 /** Result of `multicam.faces`: what was found per angle and the operations that wrote the keys. */
 export const MulticamFacesResultSchema = z.object({
   timeline: z.string(),
@@ -864,6 +890,32 @@ export const MulticamFacesResultSchema = z.object({
 
 /** See {@link MulticamFacesResultSchema}. */
 export type MulticamFacesResult = z.output<typeof MulticamFacesResultSchema>;
+
+/** Result of `clip.reframe`: what was found and the operations that wrote the framing. */
+export const ClipReframeResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
+  clip: z.string(),
+  format: z.string().describe("Aspect framed for, `<w>x<h>` (`9x16`)."),
+  follows: z.enum(["face", "person", "anchor"]).describe("What placed the picture: the largest face found, the named person's face, or the fixed `anchor`."),
+  samples: z.int().describe("Frames looked at (2 per second of the clip's source); 0 for `anchor`, and for `person` the samples of the cached scan used."),
+  faces: z.int().describe("Of those, frames where the face was found; 0 for `anchor`."),
+  placement: z
+    .object({
+      scale: z.number().describe("Factor on the fitted size that makes the picture cover the frame."),
+      x: z.number().describe("Offset in project pixels at the clip's start."),
+      y: z.number().describe("Offset in project pixels at the clip's start."),
+    })
+    .nullable()
+    .describe("Placement at the clip's first key; null when nothing was written."),
+  keys: z.int().describe("Keys written per moving property (`x`, `y`); 0 when the face holds one place and the placement is static."),
+  operations: z.array(z.string()).describe("Ids of the operations written, in order; empty when none was."),
+  tx: z.string().nullable().describe("Transaction of the writes, revertible as one; null when nothing was written."),
+  warnings: z.array(z.string()).describe("Few or no faces found, the framing replaced, a preview in another aspect. Empty when none."),
+});
+
+/** See {@link ClipReframeResultSchema}. */
+export type ClipReframeResult = z.output<typeof ClipReframeResultSchema>;
 
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z

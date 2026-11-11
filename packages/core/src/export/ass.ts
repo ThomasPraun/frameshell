@@ -38,10 +38,10 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
         `Style: ${name}`,
         SUBTITLE_FONT.family,
         num(layout.fontSize * (SUBTITLE_FONT.ascent + SUBTITLE_FONT.descent)),
-        color(style.color),
-        color(style.color),
-        color(style.outlineColor),
-        color(style.outlineColor),
+        assColor(style.color),
+        assColor(style.color),
+        assColor(style.outlineColor),
+        assColor(style.outlineColor),
         // Bold, italic, underline, strike: the face is already black; synthetic bold would widen it.
         "0,0,0,0,100,100,0,0,1",
         num(layout.outline),
@@ -51,7 +51,7 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
     // \an2: the point is the bottom of the line box, i.e. baseline + descent.
     const anchor = `{\\an2\\pos(${num(layout.centerX)},${num(layout.baseline + layout.fontSize * SUBTITLE_FONT.descent)})}`;
     const blur = layout.fontSize * SUBTITLE_ENTRY.blur;
-    const base = color(style.color);
+    const base = assColor(style.color);
     for (const cue of track.cues) {
       const tokens = cueTokens(cue);
       const lead = tokens.length - cue.words.length;
@@ -65,7 +65,7 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
         tokens
           .map((text, token) => {
             const shade = tint(token, active);
-            const paint = shade === style.color ? "" : `\\c${color(shade)}`;
+            const paint = shade === style.color ? "" : `\\c${assColor(shade)}`;
             const mine = units?.filter((unit) => unit.token === token);
             if (!mine || elapsed >= settled || mine.every((unit) => entryProgress(elapsed, unit.delay) >= 1)) {
               return paint === "" ? text : `{${paint}}${text}{\\c${base}}`;
@@ -96,6 +96,11 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
       });
     }
   });
+  return assDocument(frame, styles, events);
+}
+
+/** An ASS script of `styles` and `events` (already formatted lines), coordinates in `frame` pixels. */
+export function assDocument(frame: Size, styles: readonly string[], events: readonly string[]): string {
   return [
     "[Script Info]",
     "ScriptType: v4.00+",
@@ -135,7 +140,7 @@ function time(centiseconds: number): string {
 }
 
 /** `#rrggbb` → ASS `&HBBGGRR&` (opaque). */
-function color(hex: string): string {
+export function assColor(hex: string): string {
   const [r, g, b] = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)];
   return `&H00${b}${g}${r}&`.toUpperCase();
 }

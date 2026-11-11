@@ -260,6 +260,8 @@ export {
   entryEnd,
   resolveSubtitleStyle,
   subtitleWords,
+  trackWords,
+  cleanSubtitleText,
   subtitleCues,
   cueTokens,
   subtitleAt,
