@@ -2227,10 +2227,12 @@ export const methods = {
     mutating: true,
     description:
       "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
-      "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end. `color`: `red`, `orange`, " +
-      "`yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the material and deletes markers inside the removed " +
-      "range (only when it cuts every video, audio and program track); `ripple` trims and inserts move them the same way. The new id is in " +
-      "`changes.added`. Fails with InvalidOperation (label taken; the message names the marker holding it).",
+      "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
+      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
+      "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
+      "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
+      "the message names the marker holding it).",
     params: operationArgs["marker.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

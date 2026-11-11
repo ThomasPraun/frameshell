@@ -602,7 +602,9 @@ class Edit {
    * move clips of the `rippled` tracks by what the trim added or removed:
    * those starting at or after the old end by the whole change, those
    * starting inside the old clip by the head change only (they stay with its
-   * old first frame). Clips crossing either point stay.
+   * old first frame). Clips crossing either point stay. Markers shift the same
+   * way and, as in `cut`, those strictly inside removed material are deleted
+   * ({@link Edit.trimMarkers}).
    */
   async rippleTrim(clip: AnyClip, before: { start: number; end: number }, rippled: readonly AnyClipTrack[]): Promise<void> {
     const g = this.grid;
@@ -616,7 +618,7 @@ class Edit {
       if (at >= last) other.start = g.snap(other.start + total);
       else if (at >= first) other.start = g.snap(other.start + head);
     }
-    this.rippleMarkers(rippled, (at) => (at >= last ? total : at >= first ? head : 0));
+    this.trimMarkers(rippled, first, last, head, total);
   }
 
   /** Move the edges `args` names; with `ripple` the left edge may pass timeline 0, {@link Edit.rippleTrim} puts it back. */
@@ -1742,6 +1744,14 @@ class Edit {
   }
 
   patch(args: TimelinePatch): void {
+    for (const { marker } of args.markers ?? []) {
+      if (marker && this.grid.snap(marker.at) !== marker.at) {
+        throw this.invalid(`marker ${marker.id} ("${marker.label}") is at ${marker.at} s, off the frame grid (1/${this.context.fps} s).`, {
+          field: "markers",
+          hint: `Use ${this.grid.snap(marker.at)}, or let \`marker.set\` snap it.`,
+        });
+      }
+    }
     let next: Timeline;
     try {
       next = applyPatch(this.draft, args);
@@ -1836,10 +1846,41 @@ class Edit {
       if (at > from && at < to) dropped.push(marker);
       else kept.push(marker);
     }
+    this.dropMarkers(kept, dropped, "cut range");
+  }
+
+  /**
+   * Markers of a ripple `clip.trim` of the clip that spanned frames [`first`, `last`): `head` and `total` are the
+   * seconds the head and the whole clip grew (negative: shrank). Removed material acts like a `cut` ({@link Edit.cutMarkers}):
+   * markers strictly inside it are deleted, one on its first frame stays, later ones shift. Added material shifts
+   * markers at or after its start. Nothing moves unless the ripple covers every clip track.
+   */
+  trimMarkers(tracks: readonly AnyClipTrack[], first: number, last: number, head: number, total: number): void {
+    if (!this.draft.markers || !this.coversClipTracks(tracks)) return;
+    const g = this.grid;
+    const headRemoved = Math.max(0, -g.frame(head));
+    const tailRemoved = Math.max(0, -(g.frame(total) - g.frame(head)));
+    const kept: Marker[] = [];
+    const dropped: Marker[] = [];
+    for (const marker of this.draft.markers) {
+      const at = g.frame(marker.at);
+      if ((at > first && at < first + headRemoved) || (at > last - tailRemoved && at < last)) {
+        dropped.push(marker);
+        continue;
+      }
+      kept.push(marker);
+      const by = at >= last ? total : at >= first && !(headRemoved > 0 && at === first) ? head : 0;
+      if (by !== 0) marker.at = Math.max(0, g.snap(marker.at + by));
+    }
+    this.dropMarkers(kept, dropped, "removed material");
+  }
+
+  /** Keep `kept` as the draft's markers when `dropped` is not empty, and warn naming the dropped ones. */
+  dropMarkers(kept: Marker[], dropped: Marker[], where: string): void {
     if (dropped.length === 0) return;
     this.draft.markers = kept;
     const names = dropped.map((marker) => `"${marker.label}" (${marker.id} at ${marker.at} s)`).join(", ");
-    this.warnings.push(`removed marker${dropped.length === 1 ? "" : "s"} ${names}: inside the cut range. \`revert\` brings ${dropped.length === 1 ? "it" : "them"} back.`);
+    this.warnings.push(`removed marker${dropped.length === 1 ? "" : "s"} ${names}: inside the ${where}. \`revert\` brings ${dropped.length === 1 ? "it" : "them"} back.`);
   }
 
   // Finishing

@@ -126,8 +126,10 @@ mutations print the new revision):
   transition remove --at s [--track <track>…]
   marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
                                A named point on the timeline clock (a hook, a beat to land on); labels are unique
-                               ignoring case. cut moves markers after the cut with the material and removes markers
-                               inside the cut range when it cuts every track; ripple trims and inserts move them too
+                               ignoring case, never shaped like an id (m_…). cut moves markers after the cut with the
+                               material and removes markers strictly inside the range (one on its first frame stays)
+                               when it cuts every track; ripple trims and inserts move them the same way, and a ripple
+                               trim removes markers inside the material it cuts away
   marker set <marker> [--at s] [--label l] [--color c | --clear-color]
                                <marker> is the id (m_…) or the label
   marker remove <marker>

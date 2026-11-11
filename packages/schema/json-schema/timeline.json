@@ -1398,8 +1398,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 80,
-            "pattern": "^\\S(.*\\S)?$",
-            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters."
+            "allOf": [
+              {
+                "pattern": "^\\S(.*\\S)?$"
+              },
+              {
+                "pattern": "^(?!m_[0-9a-f]+$)"
+              }
+            ],
+            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`)."
           },
           "color": {
             "description": "`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour.",

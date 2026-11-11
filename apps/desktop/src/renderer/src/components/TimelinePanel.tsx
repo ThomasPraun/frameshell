@@ -1274,7 +1274,7 @@ function TimelineCanvas({
           </div>
         )}
         {layout && layout.scenes.length > 0 && (
-          <div className="scene-spacer" style={{ height: layout.head - layout.sceneTop }} title={t.timeline.scenesTitle}>
+          <div className="scene-spacer" style={{ height: layout.head - layout.sceneTop }} data-tip={t.timeline.scenesTitle}>
             {t.timeline.scenes}
           </div>
         )}

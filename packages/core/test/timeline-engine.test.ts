@@ -770,8 +770,8 @@ describe("markers (ADR 0029)", () => {
     ]);
   });
 
-  it("ripple inserts and trims move markers like clip starts, only when they ripple every clip track", async () => {
-    let t = await marked();
+  it("ripple inserts move markers like clip starts, only when they ripple every clip track", async () => {
+    const t = await marked();
     t.tracks.push({ id: "t_x", kind: "video", clips: [] });
     const inserted = await apply(t, "clip.add", { track: "t_x", asset: "assets/talk.mp4", start: 4, in: 0, out: 1, ripple: true });
     expect(where(inserted.timeline)).toEqual([
@@ -781,15 +781,91 @@ describe("markers (ADR 0029)", () => {
     ]);
     const scoped = await apply(t, "clip.add", { track: "t_x", asset: "assets/talk.mp4", start: 4, in: 0, out: 1, ripple: true, rippleTracks: ["t_x"] });
     expect(scoped.timeline.markers).toEqual(t.markers);
-    // Shorten c_0001 (0–10) by 2 s at its tail with ripple: a marker at or after its old end moves with what follows, inside it none does.
-    t = (await apply(t, "marker.add", { at: 10.5, label: "tail" })).timeline;
+  });
+
+  it("a ripple trim treats markers like cut: later ones shift, those strictly inside the removed tail are deleted, with a warning and an inverse", async () => {
+    let t = await marked();
+    t = (await apply(t, "marker.add", { at: 8, label: "seam" }, context({ newId: () => "m_d" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 10.5, label: "tail" }, context({ newId: () => "m_e" }))).timeline;
+    // c_0001 (0-10) shortened to 8 s: [8, 10) is removed. The marker on 8 stays, "outro" (9) goes, "tail" (10.5) moves with what follows.
     const trimmed = await apply(t, "clip.trim", { clip: "c_0001", out: 8, ripple: true, snap: false });
     expect(where(trimmed.timeline)).toEqual([
       ["intro", 1],
       ["hook", 4],
-      ["outro", 9],
+      ["seam", 8],
       ["tail", 8.5],
-    ].sort((a, b) => (a[1] as number) - (b[1] as number)));
+    ]);
+    expect(trimmed.changes.removed).toContain("m_c");
+    expect(trimmed.warnings).toEqual([expect.stringMatching(/removed marker "outro" \(m_c at 9 s\): inside the removed material/)]);
+    expect((await apply(trimmed.timeline, "timeline.patch", trimmed.inverse.args)).timeline.markers).toEqual(t.markers);
+  });
+
+  it("a ripple trim of the head deletes markers inside the removed head, keeps one on the old first frame and shifts the rest", async () => {
+    let t = await marked();
+    // Music after the picture, so the head trim has no clip starting inside the removed head.
+    t = (await apply(t, "clip.move", { clip: "c_0002", start: 10 })).timeline;
+    t = (await apply(t, "marker.add", { at: 0, label: "zero" }, context({ newId: () => "m_d" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 2, label: "two" }, context({ newId: () => "m_e" }))).timeline;
+    // c_0001 loses its first 2 s: [0, 2) is removed. "zero" stays on frame 0, "intro" (1) goes, "two" is not inside (it is the first frame after).
+    const trimmed = await apply(t, "clip.trim", { clip: "c_0001", in: 2, ripple: true, snap: false });
+    expect(where(trimmed.timeline)).toEqual([
+      ["zero", 0],
+      ["two", 0],
+      ["hook", 2],
+      ["outro", 7],
+    ]);
+    expect(trimmed.changes.removed).toEqual(expect.arrayContaining(["m_a"]));
+    expect((await apply(trimmed.timeline, "timeline.patch", trimmed.inverse.args)).timeline.markers).toEqual(t.markers);
+    // Growing the head is an insert: markers at or after the old first frame move with the material.
+    const grown = await apply(trimmed.timeline, "clip.trim", { clip: "c_0001", in: 0, ripple: true, snap: false });
+    expect(where(grown.timeline)).toEqual([
+      ["zero", 2],
+      ["two", 2],
+      ["hook", 4],
+      ["outro", 9],
+    ]);
+  });
+
+  it("a ripple trim of only some tracks leaves markers where they are, even over removed material", async () => {
+    const t = await marked();
+    const trimmed = await apply(t, "clip.trim", { clip: "c_0001", out: 8, ripple: true, rippleTracks: ["t_v"], snap: false });
+    expect(trimmed.timeline.markers).toEqual(t.markers);
+    expect(trimmed.warnings).toEqual([]);
+  });
+
+  it("a marker exactly on a cut's first frame stays, and so does every marker when the cut covers only some tracks", async () => {
+    let t = await marked();
+    t = (await apply(t, "marker.add", { at: 6, label: "first" }, context({ newId: () => "m_d" }))).timeline;
+    const cut = await apply(t, "cut", { from: 6, to: 8, snap: false });
+    expect(where(cut.timeline)).toEqual([
+      ["intro", 1],
+      ["hook", 4],
+      ["first", 6],
+      ["outro", 7],
+    ]);
+    expect(cut.warnings).toEqual([]);
+    const partial = await apply(t, "cut", { from: 3, to: 8, snap: false, tracks: ["t_v"] });
+    expect(partial.timeline.markers).toEqual(t.markers);
+  });
+
+  it("a reference that is an existing id resolves as the id; a label shaped like an id is refused on add and set", async () => {
+    const t = await marked();
+    expect((await apply(t, "marker.set", { marker: "m_b", at: 5 })).timeline.markers!.find((m) => m.id === "m_b")!.at).toBe(5);
+    for (const label of ["m_abc123", "M_B", "m_0"]) {
+      expect((await rejection(apply(t, "marker.add", { at: 3, label }))).message, label).toMatch(/must not look like a marker id/);
+      expect((await rejection(apply(t, "marker.set", { marker: "m_b", label }))).message, label).toMatch(/must not look like a marker id/);
+    }
+    // Only an exact id shape counts: these are ordinary labels.
+    expect((await apply(t, "marker.add", { at: 3, label: "m_beat" })).timeline.markers).toHaveLength(4);
+    expect((await apply(t, "marker.add", { at: 3, label: "m_1 drop" })).timeline.markers).toHaveLength(4);
+  });
+
+  it("timeline.patch refuses a marker off the frame grid and accepts one on it", async () => {
+    const t = await marked();
+    const off = await rejection(apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.015, label: "intro" } }] }));
+    expect(off.message).toMatch(/marker m_a \("intro"\) is at 1\.015 s, off the frame grid/);
+    const on = await apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.033, label: "intro" } }] });
+    expect(on.timeline.markers![0]!.at).toBe(1.033);
   });
 
   it("the timeline schema refuses duplicate marker labels (ignoring case), duplicate ids and malformed ones", () => {

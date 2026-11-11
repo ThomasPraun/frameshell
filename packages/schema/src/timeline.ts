@@ -451,7 +451,8 @@ export const MarkerSchema = z.strictObject({
     .min(1)
     .max(MARKER_LABEL_MAX)
     .regex(/^\S(.*\S)?$/, "must not start or end with a space")
-    .describe(`Name, e.g. \`hook\`; unique in the timeline ignoring case, at most ${MARKER_LABEL_MAX} characters.`),
+    .regex(/^(?!m_[0-9a-f]+$)/i, "must not look like a marker id (`m_1a2b3c`): a reference to a marker would be ambiguous")
+    .describe(`Name, e.g. \`hook\`; unique in the timeline ignoring case, at most ${MARKER_LABEL_MAX} characters, never shaped like an id (\`m_1a2b3c\`).`),
   color: z.enum(MARKER_COLORS).optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour."),
 });
 
