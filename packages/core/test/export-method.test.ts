@@ -105,6 +105,35 @@ describe("render and frame methods", () => {
   );
 
   it(
+    "renders a draft and a final with the encoder doctor reports, the final tagged bt709",
+    async () => {
+      const { encoders } = await conn.request("doctor", { cwd: project });
+      expect(encoders?.picked).not.toBeNull();
+      const stream = async (output: string) => {
+        const { streams } = (await ffprobeJson(output, ["-select_streams", "v:0", "-show_entries", "stream=codec_name,color_space,avg_frame_rate"])) as {
+          streams: { codec_name: string; color_space?: string; avg_frame_rate: string }[];
+        };
+        return streams[0]!;
+      };
+      const draft = await conn.request("render", { cwd: project, quality: "draft", out: join(tempDir(), "draft.mp4") });
+      expect(draft).toMatchObject({ quality: "draft", encoder: encoders!.picked, fps: "30/1" });
+      expect((await finished(draft.job.id)).state).toBe("done");
+      expect(await stream(draft.output)).toMatchObject({ codec_name: "h264", avg_frame_rate: "30/1" });
+      const final = await conn.request("render", { cwd: project, quality: "final", out: join(tempDir(), "final.mp4") });
+      expect(final).toMatchObject({ quality: "final", encoder: encoders!.picked });
+      expect((await finished(final.job.id)).state).toBe("done");
+      expect(await stream(final.output)).toMatchObject({ codec_name: "h264", color_space: "bt709" });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it("reports the preset's own encoder when no quality is asked for", async () => {
+    const result = await conn.request("render", { cwd: project, out: join(tempDir(), "plain.mp4") });
+    expect(result).toMatchObject({ quality: null, encoder: "libx264" });
+    await finished(result.job.id);
+  });
+
+  it(
     "captures a frame as PNG at the project resolution",
     async () => {
       const out = join(tempDir(), "shots", "half.png");
