@@ -1,6 +1,10 @@
 import type {
+  CaptionsSetResult,
+  ClipReframeResult,
+  CleanupResult,
   DaemonConnection,
   HistoryResult,
+  MarkerListResult,
   MulticamCreateResult,
   MulticamDirectResult,
   MulticamFacesResult,
@@ -12,6 +16,7 @@ import type {
   Progress,
   TimelineProblem,
   TimelineView,
+  TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
 import { resolveSubtitleStyle } from "@frameshell/schema";
@@ -22,11 +27,19 @@ mutations print the new revision):
   timeline show [--json]       Tracks and clips with ids, start/end, in/out (--json: compact dump)
   track list                   Tracks in stacking order (first video track = bottom layer)
   track add <video|audio|subtitles> [--name n] [--follows <track>] [--index n] [--preset p] [--position pos]
+           [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
-           [--muted | --unmuted] [--hidden | --shown]
+           [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
+           [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown]
                                --muted silences a video, audio or program track; --hidden leaves a video or
                                program track's pictures out of export and preview (its sound still plays)
   track remove <track> [--force]
+  captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
+                               Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
+                               split by |, the phrase's one keyword between asterisks, e.g.
+                               'No need to | open any | *editor*'. Covers the words the track shows between --from
+                               and --to, matched by position (a lost or repeated word fails). --replace drops the
+                               track's other phrases (alone: clears them)
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
            [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
@@ -39,6 +52,16 @@ mutations print the new revision):
   clip key <clip> --prop x|y|scale|opacity|gain --at s [--value v] [--ease linear|in|out|in-out] [--remove] [--clear]
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
+  clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]
+                               Frame a video clip for another aspect (default 9x16, for reels), keeping a face in
+                               it: scales the picture to cover the frame and positions it so the face sits centered,
+                               30 % from the top, never showing outside the picture. Looks at 2 frames per second
+                               of the clip's own stretch (first run downloads the YuNet face detector, about 33 MB),
+                               follows the largest face and writes x/y keys only where it moves (a face that never
+                               moves gives a static placement). --person follows that person's face from the cached
+                               people scan instead; --anchor (0 left edge, 1 right edge) fixes the picture's
+                               horizontal position with no face detection. Replaces the clip's x, y and scale; one
+                               transaction, revert undoes it. Correct the keys with clip key or in the app
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--script-ref ref | --clear-script-ref]
@@ -118,6 +141,15 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
+                               Music under a voice: writes gain keys on the clips of audio track <track> that dip
+                               while someone speaks on the --under tracks (video or audio; speech = sound above
+                               --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
+                               Dip --depth dB (default 7), complete as the voice starts (--attack ms, default 40) and
+                               gone --release ms after it ends (default 450). The keys are the clip's level minus
+                               the dip, marked as the duck's: run it again after an edit and they are replaced, keys
+                               you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
+                               like any gain key; a key you set is a level, not a dip. Revert undoes it
   transition set --at s [--kind dissolve|fade|wipe|push] [--direction left|right|up|down] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
@@ -125,8 +157,26 @@ mutations print the new revision):
                                only. A clip's start or end with nothing butted fades in or out. Short material
                                shortens it, with a warning
   transition remove --at s [--track <track>…]
+  marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
+                               A named point on the timeline clock (a hook, a beat to land on); labels are unique
+                               ignoring case, never shaped like an id (m_…). cut moves markers after the cut with the
+                               material and removes markers strictly inside the range (one on its first frame stays)
+                               when it cuts every track; ripple trims and inserts move them the same way, and a ripple
+                               trim removes markers inside the material it cuts away
+  marker set <marker> [--at s] [--label l] [--color c | --clear-color]
+                               <marker> is the id (m_…) or the label
+  marker remove <marker>
+  marker list                  Markers by time: id, time, label, colour
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
+  cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
+                               Cut dead air and false starts of a talking head: pauses between words longer than
+                               --pauses (default 0.4 s) that the audio confirms are quiet, with --breath (0.1 s)
+                               left on each side; --retakes also cuts the earlier attempt of a phrase said again
+                               (the last take stays). --dry-run lists the candidates (kind, start, end, words,
+                               reason, confidence) and changes nothing; run again without it, --skip dropping the
+                               ids to leave. One transaction (\`revert\` it); candidates under --min-confidence
+                               (default 0.5) are not proposed. Needs a transcript of the speech
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -135,7 +185,9 @@ mutations print the new revision):
   --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
   Subtitle tracks (--follows a video or audio track) show the transcript words of that track's clips: cuts
   update them, text corrections go in the transcript. --preset big-keyword (default: few large words, the
-  spoken one highlighted) or plain; --position top, center or bottom. Preview and export look the same.
+  spoken one highlighted) or plain; --position top, center or bottom. --entry fades the text in (chars, words as
+  spoken, or the whole line); --keyword-color/--keyword-scale style the word captions set marks; --gap 12-15.5
+  hides cues in that range (repeatable). Preview and export look the same.
   Negative values need =, e.g. --gain=-6.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -151,7 +203,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "marker", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -230,7 +282,32 @@ export const TIMELINE_OPTIONS = {
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
+  under: { type: "string", multiple: true },
+  depth: { type: "string" },
+  attack: { type: "string" },
+  release: { type: "string" },
+  threshold: { type: "string" },
   mask: { type: "string" },
+  label: { type: "string" },
+  color: { type: "string" },
+  "clear-color": { type: "boolean" },
+  text: { type: "string" },
+  file: { type: "string" },
+  entry: { type: "string" },
+  "keyword-color": { type: "string" },
+  "keyword-scale": { type: "string" },
+  gap: { type: "string", multiple: true },
+  "clear-gaps": { type: "boolean" },
+  format: { type: "string" },
+  person: { type: "string" },
+  anchor: { type: "string" },
+  pauses: { type: "string" },
+  "no-pauses": { type: "boolean" },
+  breath: { type: "string" },
+  retakes: { type: "boolean" },
+  "min-confidence": { type: "string" },
+  skip: { type: "string", multiple: true },
+  "dry-run": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -253,8 +330,9 @@ export class UsageError extends Error {
 const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
-  "track add": ["name", "follows", "index", "preset", "position"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "muted", "unmuted", "hidden", "shown"],
+  "track add": ["name", "follows", "index", "preset", "position", "entry", "keyword-color", "keyword-scale"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown"],
+  "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
   "clip move": ["start", "track"],
@@ -262,9 +340,14 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
+  "clip reframe": ["format", "person", "anchor"],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
   "transition set": ["at", "kind", "direction", "duration", "track"],
   "transition remove": ["at", "track"],
+  "marker add": ["at", "label", "color"],
+  "marker set": ["at", "label", "color", "clear-color"],
+  "marker remove": [],
+  "marker list": [],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -277,7 +360,9 @@ const ALLOWED: Record<string, string[]> = {
   "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
+  "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
   cut: ["from", "to", "no-snap", "snap-window"],
+  cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -291,6 +376,7 @@ const ARITY: Record<string, [number, number]> = {
   "track list": [0, 0],
   "track add": [1, 1],
   "track set": [1, 1],
+  "captions set": [1, 1],
   "track remove": [1, 1],
   "clip add": [1, 2],
   "clip move": [1, 1],
@@ -300,6 +386,11 @@ const ARITY: Record<string, [number, number]> = {
   "clip key": [1, 1],
   "transition set": [0, 0],
   "transition remove": [0, 0],
+  "marker add": [0, 0],
+  "marker set": [1, 1],
+  "marker remove": [1, 1],
+  "marker list": [0, 0],
+  "clip reframe": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -313,7 +404,9 @@ const ARITY: Record<string, [number, number]> = {
   "image cutout": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
+  "duck ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
+  cleanup: [0, 0],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -337,9 +430,9 @@ export function timelineCommandFlags(): Map<string, string[]> {
  */
 export function parseTimelineCommand(positionals: string[], values: Values): TimelineInvocation | null {
   const [group, ...rest] = positionals;
-  // `history`, `revert` and `direct` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
-  const flat = group === "cut" || group === "history" || group === "revert" || group === "direct";
-  const command = group === "cut" ? "cut" : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
+  // `history`, `revert`, `direct` and `duck` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
+  const flat = group === "cut" || group === "cleanup" || group === "history" || group === "revert" || group === "direct" || group === "duck";
+  const command = group === "cut" || group === "cleanup" ? group : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
   const args = flat ? rest : rest.slice(1);
   const allowed = ALLOWED[command];
   const arity = ARITY[command];
@@ -392,8 +485,24 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return Object.values(t).some((v) => v !== undefined) ? t : undefined;
   };
   const style = () => {
-    const s = { preset: str("preset"), position: str("position") };
-    return s.preset !== undefined || s.position !== undefined ? s : undefined;
+    const color = str("keyword-color");
+    const s = {
+      preset: str("preset"),
+      position: str("position"),
+      entry: str("entry"),
+      keywordColor: color === "none" ? null : color,
+      keywordScale: num("keyword-scale"),
+    };
+    return Object.values(s).some((v) => v !== undefined) ? s : undefined;
+  };
+  const gaps = () => {
+    if (values["clear-gaps"] === true && values["gap"] !== undefined) throw new UsageError("Pass --gap or --clear-gaps, not both.");
+    if (values["clear-gaps"] === true) return [];
+    return list("gap")?.map((range) => {
+      const match = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(range);
+      if (!match) throw new UsageError(`--gap: expected from-to in seconds, e.g. 12-15.5, got "${range}".`);
+      return { from: Number(match[1]), to: Number(match[2]) };
+    });
   };
   const snap = () => {
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
@@ -435,11 +544,20 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         index,
         follows: str("follows"),
         style: style(),
+        gaps: gaps(),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
       });
       break;
     }
+    case "captions set":
+      method = "captions.set";
+      if (str("text") !== undefined && str("file") !== undefined) throw new UsageError("Pass --text or --file, not both.");
+      if (str("text") === undefined && str("file") === undefined && values["replace"] !== true) {
+        throw new UsageError("`frameshell captions set` needs --text <captions> or --file <path> (or --replace alone to clear the phrases).");
+      }
+      Object.assign(params, { track: args[0], text: str("text"), file: str("file"), from: num("from"), to: num("to"), replace: values["replace"] === true ? true : undefined });
+      break;
     case "track remove":
       method = "track.remove";
       Object.assign(params, { track: args[0], force: values["force"] === true });
@@ -514,6 +632,23 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
       break;
     }
+    case "marker add":
+      method = "marker.add";
+      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds> and --label <label>.");
+      Object.assign(params, { at: num("at"), label: str("label"), color: str("color") });
+      break;
+    case "marker set":
+      method = "marker.set";
+      if (str("color") !== undefined && values["clear-color"] === true) throw new UsageError("Pass --color or --clear-color, not both.");
+      Object.assign(params, { marker: args[0], at: num("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color") });
+      break;
+    case "marker remove":
+      method = "marker.remove";
+      params["marker"] = args[0];
+      break;
+    case "marker list":
+      method = "marker.list";
+      break;
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
@@ -661,6 +796,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
+    case "clip reframe":
+      method = "clip.reframe";
+      if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
+      Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
+      break;
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -679,6 +819,40 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         from: num("from"),
         to: num("to"),
         replaceHuman: values["replace-human"] === true ? true : undefined,
+      });
+      break;
+    case "duck ": {
+      method = "track.duck";
+      const duckGap = (): number | undefined => {
+        const raw = list("gap");
+        if (raw === undefined) return undefined;
+        if (raw.length > 1) throw new UsageError("--gap: pass it once for `duck` (seconds).");
+        return seconds(raw[0]!, "--gap");
+      };
+      const under = list("under");
+      if (under === undefined) throw new UsageError("`frameshell duck <track>` needs --under <track>: the track with the voice (repeat it for more).");
+      Object.assign(params, {
+        track: args[0],
+        under,
+        depth: num("depth"),
+        attackMs: num("attack"),
+        releaseMs: num("release"),
+        threshold: num("threshold"),
+        gap: duckGap(),
+      });
+      break;
+    }
+    case "cleanup":
+      method = "cleanup";
+      if (values["no-pauses"] === true && values["pauses"] !== undefined) throw new UsageError("Pass --pauses <s> or --no-pauses, not both.");
+      if (values["no-pauses"] === true && values["retakes"] !== true) throw new UsageError("--no-pauses leaves nothing to look for without --retakes.");
+      Object.assign(params, {
+        pauses: values["no-pauses"] === true ? false : num("pauses"),
+        breath: num("breath"),
+        retakes: values["retakes"] === true ? true : undefined,
+        minConfidence: num("min-confidence"),
+        skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
     case "history ":
@@ -718,6 +892,7 @@ export async function executeTimeline(
   }
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
+  if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
   if (inv.method === "history") return formatHistory(result as HistoryResult);
   if (inv.method === "tx.begin") {
     const { tx, label } = result as MethodResult<"tx.begin">;
@@ -737,16 +912,47 @@ export async function executeTimeline(
         : ", changes undone:";
     return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
+  if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
+  if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+function formatCaptions(result: CaptionsSetResult): string {
+  const lines = [`Captions on ${result.track}: ${result.phrases} phrase${result.phrases === 1 ? "" : "s"}, ${result.words} word${result.words === 1 ? "" : "s"}`];
+  for (const cue of result.cues) lines.push(`  ${cue.start}–${cue.end} s  ${cue.text}${cue.entry === "none" ? "" : `  [${cue.entry}]`}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatCleanup(result: CleanupResult): string {
+  const time = (value: number) => value.toFixed(2);
+  const lines = [`Cleanup of ${result.timeline} · ${result.words} words looked at · ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}`];
+  for (const c of result.candidates) {
+    const words = c.words.length > 0 ? `  “${c.words.map((word) => word.text).join(" ")}”` : "";
+    lines.push(`  ${c.id.padEnd(4)}${c.kind.padEnd(8)}${`${time(c.start)}–${time(c.end)} s`.padEnd(16)}${c.duration.toFixed(2)} s  ${Math.round(c.confidence * 100)}%${c.clean ? "" : "  unclean edge"}${words}`);
+    lines.push(`      ${c.reason}`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push(`Left alone (${result.skipped.length}):`);
+    for (const skip of result.skipped.slice(0, 20)) lines.push(`  ${skip.kind} at ${time(skip.at)} s: ${skip.reason}`);
+    if (result.skipped.length > 20) lines.push(`  … and ${result.skipped.length - 20} more (--json lists all)`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.candidates.length === 0) lines.push("Nothing to cut.");
+  else if (result.dryRun) lines.push(`Dry run: nothing changed. ${time(result.removed)} s would go; run again without --dry-run (--skip <id> leaves candidates out).`);
+  else lines.push(`Cut ${time(result.removed)} s · revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatMulticamTurns(result: MulticamTurnsResult): string {
@@ -766,6 +972,25 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
     lines.push(`  ${shot.clip}  ${shot.start}–${shot.end} s  ${shot.shot} ${shot.angles.join(",")}  ${Math.round(shot.confidence * 100)}%  ${shot.reason}`);
   }
   return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatClipReframe(result: ClipReframeResult): string {
+  const follows = { face: `face in ${result.faces} of ${result.samples} frames`, person: `person's face in ${result.faces} of ${result.samples} frames`, anchor: "fixed anchor" }[result.follows];
+  const lines = [`Reframe ${result.clip} for ${result.format}: ${follows}`];
+  if (result.placement) {
+    const { scale, x, y } = result.placement;
+    const moves = result.keys > 0 ? `${result.keys} keys on x/y` : "static, no keys";
+    lines.push(`  scale ${scale} · x ${x} · y ${y} at the start · ${moves}`);
+  }
+  lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatTrackDuck(result: TrackDuckResult): string {
+  const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
+  const written = result.changes.updated.length;
+  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${formatOperation(result)}`;
 }
 
 function formatMulticamFaces(result: MulticamFacesResult): string {
@@ -866,6 +1091,15 @@ function formatTracks(result: { timeline: string; revision: number; tracks: Trac
   return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
 }
 
+function formatMarkers(result: MarkerListResult): string {
+  if (result.markers.length === 0) {
+    return `Timeline ${result.timeline} (revision ${result.revision}) has no markers. Add one: \`frameshell marker add --at 12.5 --label hook\`.\n`;
+  }
+  const lines = [`Timeline ${result.timeline} · revision ${result.revision} · ${result.markers.length} marker${result.markers.length === 1 ? "" : "s"}:`];
+  for (const marker of result.markers) lines.push(`  ${marker.id}  ${marker.at} s  ${marker.label}${marker.color ? `  (${marker.color})` : ""}`);
+  return `${lines.join("\n")}\n`;
+}
+
 /** `  muted`, `  hidden` or both, as a track line ends; empty for a track that plays and shows. */
 function trackState(track: { muted?: true | undefined; hidden?: true | undefined }): string {
   return `${track.muted ? "  muted" : ""}${track.hidden ? "  hidden" : ""}`;
@@ -902,5 +1136,6 @@ function formatTimeline(view: TimelineView): string {
       lines.push(`  ${c.id}  ${c.type} ${what}  ${c.start}–${c.end ?? "?"}${source}${speed}`);
     }
   }
+  if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }

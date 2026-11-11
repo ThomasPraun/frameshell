@@ -28,7 +28,7 @@ Extends ADR 0018. A transition can move the picture instead of mixing it: a wipe
 
 **Kinds.** `wipe`: a straight edge crosses the frame and uncovers the incoming clip, which shows in the strip the edge has crossed; the outgoing clip stays still under it. `push`: both pictures travel one frame in the direction, the outgoing one out and the incoming one in; they abut. `direction` (`left` default, `right`, `up`, `down`) is the way the incoming picture travels: `left` enters from the right edge.
 
-**Operations.** `transition.set` takes `kind` `wipe` or `push` and `direction`. On the bottom video track it writes `dissolve` and `shape`; audio tracks get a crossfade. The bottom video track is the first shown picture track, as export and preview stack them: a hidden track is passed over, and a program track first leaves none. Any other video track named in `tracks` is refused; without `tracks` it is skipped with a warning. An edge of a nested clip is refused until slice 3. A lone edge fades, with a warning. `dissolve`, `fade`, `transition.remove`, split and cut clear `shape` with the `dissolve`. CLI `transition set --kind wipe|push --direction …`. Protocol 71.
+**Operations.** `transition.set` takes `kind` `wipe` or `push` and `direction`. On the bottom video track it writes `dissolve` and `shape`; audio tracks get a crossfade. The bottom video track is the first shown picture track, as export and preview stack them: a hidden track is passed over, and a program track first leaves none. Any other video track named in `tracks` is refused; without `tracks` it is skipped with a warning. An edge of a nested clip is refused until slice 3. A lone edge fades, with a warning. `dissolve`, `fade`, `transition.remove`, split and cut clear `shape` with the `dissolve`. CLI `transition set --kind wipe|push --direction …`. Protocol 82.
 
 **Export.** A push makes both pieces of the bottom track layers whose `overlay` x/y add `shapeAt`'s offsets as expressions of timeline time; the base is black under them. A wipe keeps the outgoing clip concatenated and adds `geq` to the incoming head: alpha is kept where the pixel centre lies in `shapeAt`'s rectangle. Frames past a handle are `tpad` clones of the edge frame; a head's sound before the source's first sample is padded with `adelay`. Golden plans pin both kinds.
 
@@ -50,7 +50,7 @@ Extends ADR 0018. A transition can move the picture instead of mixing it: a wipe
 ## Consequences
 
 - Schema: optional `shape` on video clips; JSON Schema regenerated. `edgeTransitions` skips the handle cut for shaped dissolves only.
-- Protocol 71: `transition.set` `kind` `wipe`, `push`, and `direction`; registry description rewritten.
+- Protocol 82: `transition.set` `kind` `wipe`, `push`, and `direction`; registry description rewritten.
 - Export of a wipe costs about 34 ms per 1080p frame over the transition; a push costs one more layer for the outgoing tail.
 - A wipe on a bottom clip with keyed scale: the `geq` reads the layer's corner from the keyed expressions; the frame size changing per frame under keyed scale is not tested yet; slice 3 adds that test.
 - In this slice a shape on an upper track (a hand edit) plays as a plain dissolve, with held frames past the handles, in both export and preview. `transition.set` refuses a shape at an edge of a nested clip (slice 3); a hand-edited one plays as a plain dissolve, and `edgeTransitions` (`playedShape`) treats it as one, so warnings and the timeline mark match what plays.

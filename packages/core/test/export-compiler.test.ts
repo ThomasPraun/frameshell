@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type Clip, type ClipTrack, type Timeline, type Transcript, type TransitionShape, flattenTimeline } from "@frameshell/schema";
+import {
+  type Clip,
+  type ClipTrack,
+  type Timeline,
+  type Transcript,
+  type TransitionShape,
+  flattenTimeline,
+  resolveFormat,
+} from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -35,7 +43,7 @@ const resolution = { width: 1920, height: 1080 };
 
 const sources = new Map<string, ExportSource>([
   ["assets/talk.mp4", { path: "/project/assets/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true }],
-  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false, width: 1920, height: 1080 }, audio: false }],
+  ["assets/title.webm", { path: "/project/assets/title.webm", video: { codec: "vp9", still: false, width: 1920, height: 1080, alpha: true }, audio: false }],
   ["assets/logo.png", { path: "/project/assets/logo.png", video: { codec: "png", still: true, width: 500, height: 500 }, audio: false }],
   ["assets/music.wav", { path: "/project/assets/music.wav", video: null, audio: true }],
 ]);
@@ -115,6 +123,54 @@ describe("export compiler", () => {
       expect(track.reduce((sum, item) => sum + item.samples, 0)).toBe(384_000);
     }
     expect(plan.files["segments.txt"]).toBe("file 'seg-0001.mp4'\nfile 'seg-0002.mp4'\nfile 'seg-0003.mp4'\n");
+  });
+
+  describe("quality tiers", () => {
+    const encodeArgs = (p: ReturnType<typeof compileRender>) => p.segments[0]!.args;
+
+    it("encodes a draft with the picked encoder at 30 fps at most, even from a 60 fps project", () => {
+      const draft = compileRender({ timeline, fps: 60, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } });
+      expect(draft.fps).toBe("30/1");
+      const args = encodeArgs(draft);
+      expect(args.slice(args.lastIndexOf("-c:v"), args.lastIndexOf("-c:v") + 8)).toEqual(["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-profile:v", "high"]);
+      expect(args).not.toContain("-maxrate");
+      expect(args).not.toContain("-colorspace");
+      expect(draft.frames).toBe(Math.round(draft.duration * 30));
+    });
+
+    it("keeps a draft below 30 fps as it is", () => {
+      expect(compileRender({ timeline, fps: 24, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } }).fps).toBe("24/1");
+    });
+
+    it("encodes a final slow with bt709 tags and AAC 320k, replacing the preset's rate", () => {
+      const low = { ...youtube1080, audio: { ...youtube1080.audio, bitrateKbps: 128 } };
+      const final = compileRender({ timeline, fps: 30, preset: low, loudness: -17, sources, resolution, encode: { encoder: "h264_nvenc", tier: "final" } });
+      const args = encodeArgs(final).join(" ");
+      expect(args).toContain("-c:v h264_nvenc -preset p6 -rc vbr -cq 17 -b:v 0");
+      expect(args).toContain("-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv");
+      expect(args).not.toContain("-crf 18");
+      expect(final.audio.codec).toEqual(["-c:a", "aac", "-b:a", "320k", "-ar", "48000"]);
+      expect(muxStep(final, null, "/out.mp4").args).toEqual(expect.arrayContaining(["-movflags", "+faststart"]));
+    });
+
+    it("sets the VideoToolbox bitrate from the frame size and rate", () => {
+      const final = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "h264_videotoolbox", tier: "final" } });
+      // 1920 x 1080 x 30 x 0.25 bits per pixel.
+      expect(encodeArgs(final).join(" ")).toContain("-c:v h264_videotoolbox -b:v 15552k");
+    });
+
+    it("leaves a draft's audio as the preset says", () => {
+      const draft = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, bitrateKbps: 128 } }, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } });
+      expect(draft.audio.codec).toContain("128k");
+    });
+
+    it("ignores the tier for a preset that is not H.264, with a warning, and plans nothing else differently", () => {
+      const vp9 = { ...youtube1080, id: "web", container: "webm" as const, video: { ...youtube1080.video, codec: "vp9" as const }, audio: { codec: "opus" as const } };
+      const plain = compileRender({ timeline, fps: 30, preset: vp9, loudness: -17, sources, resolution });
+      const tiered = compileRender({ timeline, fps: 30, preset: vp9, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "final" } });
+      expect(tiered.warnings).toEqual([...plain.warnings, 'Quality "final" only applies to H.264 presets; web renders as written.']);
+      expect(tiered.segments).toEqual(plain.segments);
+    });
   });
 
   it("decodes every VP9 input with libvpx so alpha survives (ADR 0002)", () => {
@@ -649,5 +705,142 @@ describe("export compiler", () => {
       expect(graphs).not.toContain("geq");
       expect(graphs).toContain("fade=t=in:alpha=1:st=2.5:d=1");
     });
+  });
+});
+
+describe("formats (ADR 0027)", () => {
+  /** A 16:9 project declaring every built-in format. */
+  const project = {
+    resolution,
+    formats: [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+      { id: "1x1", width: 1080, height: 1080 },
+      { id: "4x5", width: 1080, height: 1350 },
+    ],
+  };
+  /** The talk timeline plus an untransformed title and a transformed logo on a second video track. */
+  const layered: Timeline = {
+    ...timeline,
+    tracks: [
+      ...timeline.tracks,
+      {
+        id: "v2",
+        kind: "video",
+        clips: [
+          { id: "c_over", type: "media", asset: "assets/title.webm", start: 1, in: 0, out: 1 },
+          { id: "c_logo2", type: "media", asset: "assets/logo.png", start: 4, in: 0, out: 1, transform: { x: 600, y: -300, scale: 0.25 } },
+        ],
+      },
+    ],
+  };
+  const inFormat = (id: string) => {
+    const { format } = resolveFormat(layered, project, id)!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: format.width, height: format.height } };
+    return compileRender({ timeline: layered, fps: 30, preset, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4, variant: format });
+  };
+
+  it("compiles the primary format exactly as without formats", () => {
+    const plain = compileRender({ timeline: layered, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4 });
+    expect(inFormat("16x9")).toEqual(plain);
+  });
+
+  it("crops untransformed footage to fill 9:16, 1:1 and 4:5 around the centre; transformed layers keep their fit (golden)", () => {
+    const plans = Object.fromEntries(["9x16", "1x1", "4x5"].map((id) => [id, inFormat(id)]));
+    golden("formats-plan", Object.fromEntries(Object.entries(plans).map(([id, plan]) => [id, { width: plan.width, height: plan.height, files: plan.files }])));
+    const vertical = plans["9x16"]!.files["seg-0001.filter"]!;
+    // 1920x1080 talk: its centre 608x1080 scaled to 1080x1920, no black bars.
+    expect(vertical).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
+    expect(vertical).not.toContain("force_original_aspect_ratio=decrease");
+    // The untransformed title on the upper track has alpha (decision 13 of #469): fitted whole, centred, never cropped.
+    expect(vertical).toMatch(/\[1:v:0\][^;]*scale=1080:608,setsar=1,format=rgba.*\[o0\]/);
+    expect(vertical).toContain("[base][o0]overlay=x=0:y=656");
+    // The square: the centre 1080x1080 of the frame at its own size.
+    expect(plans["1x1"]!.files["seg-0001.filter"]).toContain("crop=1080:1080:420:0,scale=1080:1080");
+    // The transformed logo is still fitted and placed like a 16:9 project's, mapped onto the frame.
+    expect(plans["9x16"]!.files["seg-0002.filter"]).toContain("scale=270:270,setsar=1,format=rgba");
+  });
+
+  it("fits an alpha overlay on an upper track whole and still covers with an opaque one (decision 13 of #469)", () => {
+    const stacked = (asset: string): Timeline => ({
+      ...timeline,
+      tracks: [timeline.tracks[0]!, { id: "v2", kind: "video", clips: [{ id: "c_up", type: "media", asset, start: 1, in: 0, out: 1 }] }],
+    });
+    const withSources = new Map<string, ExportSource>([
+      ...sources,
+      ["assets/b-roll.mp4", { path: "/project/assets/b-roll.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: false }],
+      ["assets/frame.png", { path: "/project/assets/frame.png", video: { codec: "png", still: true, width: 1920, height: 1080, alpha: true }, audio: false }],
+    ]);
+    const graph = (asset: string) => {
+      const upper = stacked(asset);
+      const { format } = resolveFormat(upper, project, "9x16")!;
+      const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+      return compileRender({ timeline: upper, fps: 30, preset, loudness: -17, sources: withSources, resolution, segmentSeconds: 4, variant: format }).files["seg-0001.filter"]!;
+    };
+    for (const alpha of ["assets/title.webm", "assets/frame.png"]) {
+      const overlay = graph(alpha).split("\n").find((line) => line.includes("[o0]"))!;
+      expect(overlay).toContain("scale=1080:608");
+      expect(overlay).not.toContain("crop=");
+    }
+    // The base track under it is cropped as before.
+    expect(graph("assets/title.webm")).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
+    expect(graph("assets/b-roll.mp4").split("\n").find((line) => line.includes("[o0]"))).toContain("crop=608:1080:656:0,scale=1080:1920");
+  });
+
+  it("makes captions 1.3x larger in vertical formats only", () => {
+    const fontSize = (plan: ReturnType<typeof compileRender>) => Number(/^Style: t0,[^,]+,([\d.]+),/m.exec(plan.files["subtitles.ass"]!)![1]);
+    const square = fontSize(inFormat("1x1"));
+    expect(fontSize(inFormat("9x16")) / square).toBeCloseTo(1.3, 1);
+    expect(fontSize(inFormat("4x5")) / square).toBeCloseTo(1.3, 1);
+    expect(square).toBe(fontSize(inFormat("16x9")));
+  });
+
+  it("crops a dissolving clip's head, drawn as a layer, exactly as its body on the bottom track", () => {
+    const dissolving: Timeline = {
+      ...timeline,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_a", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 2 },
+            { id: "c_b", type: "media", asset: "assets/talk.mp4", start: 2, in: 4, out: 6, dissolve: 0.5 },
+          ],
+        },
+      ],
+    };
+    const { format } = resolveFormat(dissolving, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    // Probed lengths: c_a's handle after its `out` needs one.
+    const sized = new Map([...sources].map(([asset, source]) => [asset, { ...source, duration: 20 }]));
+    const graph = Object.values(compileRender({ timeline: dissolving, fps: 30, preset, loudness: -17, sources: sized, resolution, variant: format }).files).join("\n");
+    // c_b's head plays over c_a's tail as an overlay, its body joins the base: one crop for both.
+    expect(graph).toMatch(/crop=608:1080:656:0,[^;]*scale=1080:1920,setsar=1,format=rgba,fade=t=in:alpha=1[^;]*\[o0\]/);
+    expect(graph).toMatch(/crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p/);
+    expect([...new Set(graph.match(/crop=[^,]+/g))]).toEqual(["crop=608:1080:656:0"]);
+  });
+
+  it("crops to even sizes and edges, as ffmpeg cuts a 4:2:0 picture", () => {
+    const small: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_s", type: "media", asset: "assets/small.mp4", start: 0, in: 0, out: 1 }] }] };
+    const withSmall = new Map<string, ExportSource>([...sources, ["assets/small.mp4", { path: "/project/assets/small.mp4", video: { codec: "h264", still: false, width: 1280, height: 720 }, audio: false }]]);
+    const { format } = resolveFormat(small, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const plan = compileRender({ timeline: small, fps: 30, preset, loudness: -17, sources: withSmall, resolution, variant: format });
+    // The centred 405x720 of 1280x720, rounded down to even.
+    expect(plan.files["seg-0001.filter"]).toContain("crop=404:720:438:0,scale=1080:1920");
+  });
+
+  it("leaves generated renders to their own layout", () => {
+    const render = new Map([["c_gen", { path: "/project/.frameshell/cache/clips/cccc.webm", hasAlpha: true, width: 1080, height: 1920 }]]);
+    const withRender: Timeline = {
+      ...timeline,
+      tracks: [timeline.tracks[0]!, { id: "v2", kind: "video", clips: [{ id: "c_gen", type: "hyperframes", source: "compositions/t/index.html", start: 0, duration: 2 }] }],
+    };
+    const { format } = resolveFormat(withRender, project, "9x16")!;
+    const preset = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const plan = compileRender({ timeline: withRender, fps: 30, preset, loudness: -17, sources, resolution, generated: render, segmentSeconds: 4, variant: format });
+    // Rendered at the format's size: fitted as it is, never cropped.
+    expect(plan.files["seg-0001.filter"]).toContain("scale=1080:1920,setsar=1,format=rgba");
+    expect(plan.files["seg-0001.filter"]).not.toMatch(/crop=[^,]*,scale=1080:1920,setsar=1,format=rgba/);
   });
 });

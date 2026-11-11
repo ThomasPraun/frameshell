@@ -1,6 +1,12 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
-import { type Clip, type ElementAdjust, SHOT_LOW_CONFIDENCE, type TransitionShape } from "@frameshell/schema";
+import {
+  type Clip,
+  type ElementAdjust,
+  type MarkerColor,
+  SHOT_LOW_CONFIDENCE,
+  type TransitionShape,
+} from "@frameshell/schema";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -11,6 +17,12 @@ export const RULER_HEIGHT = 22;
 
 /** Height of the scene band under the ruler, px; the band exists only while a script scene has words on the timeline. */
 export const SCENE_BAND_HEIGHT = 18;
+
+/** Height of the marker lane right under the ruler, px; the lane exists only while the timeline has markers (ADR 0029). */
+export const MARKER_LANE_HEIGHT = 16;
+
+/** A marker within this many px of a point is under it. */
+const MARKER_HIT_PX = 6;
 
 /** Lane height per track kind, px. */
 export const LANE_HEIGHT = { video: 44, program: 44, audio: 44, subtitles: 28 } as const;
@@ -172,11 +184,28 @@ export interface SceneBox {
   clips: string[];
 }
 
+/** A timeline marker (ADR 0029) as the marker lane shows it. */
+export interface MarkerBox {
+  id: string;
+  /** Timeline seconds. */
+  at: number;
+  label: string;
+  /** Null: the accent colour. */
+  color: MarkerColor | null;
+}
+
 /** Everything the panel draws, derived from one `timeline.show` result. */
 export interface TimelineLayout {
+  /** Markers by time; empty draws no marker lane. */
+  markers: MarkerBox[];
   /** Scene spans in start order; empty draws no band. */
   scenes: SceneBox[];
-  /** Height of the fixed top area, px: the ruler plus the scene band when there are scenes. Lanes start here. */
+  /** Top of the scene band, px: under the ruler and the marker lane (when there are markers). */
+  sceneTop: number;
+  /**
+   * Height of the fixed top area, px: the ruler, then the marker lane when there are markers, then the scene band
+   * when there are scenes. Lanes start here.
+   */
   head: number;
   rows: TrackRow[];
   /** Latest clip end, seconds; stand-in ends included. */
@@ -189,8 +218,8 @@ export interface TimelineLayout {
 /**
  * Lay out a timeline the way editors read it: the top picture layer first
  * (the file lists the bottom layer first; program tracks stack among video
- * tracks), then audio, then subtitles. `scenes` add the band under the ruler
- * and push the lanes down; `lanes` open a program track's turn lanes under its shots; `transitions` sizes the
+ * tracks), then audio, then subtitles. The view's markers add the marker lane under the ruler, `scenes` the band
+ * under that; both push the lanes down; `lanes` open a program track's turn lanes under its shots; `transitions` sizes the
  * marks of transitions (without it, material past a clip's edges is unknown, so dissolves read as dips).
  */
 export function layoutTimeline(
@@ -209,7 +238,9 @@ export function layoutTimeline(
   const pictures = view.tracks.filter((track) => track.kind === "video" || track.kind === "program");
   const ordered = [...pictures.reverse(), ...byKind("audio"), ...byKind("subtitles")];
 
-  const head = RULER_HEIGHT + (scenes.length > 0 ? SCENE_BAND_HEIGHT : 0);
+  const markers = (view.markers ?? []).map((marker): MarkerBox => ({ id: marker.id, at: marker.at, label: marker.label, color: marker.color ?? null }));
+  const sceneTop = RULER_HEIGHT + (markers.length > 0 ? MARKER_LANE_HEIGHT : 0);
+  const head = sceneTop + (scenes.length > 0 ? SCENE_BAND_HEIGHT : 0);
   let top = head;
   let duration = view.duration ?? 0;
   let clipCount = 0;
@@ -260,7 +291,7 @@ export function layoutTimeline(
     top += height + lanesHeight;
     return row;
   });
-  return { scenes: [...scenes], head, rows, duration, height: top, clipCount };
+  return { markers, scenes: [...scenes], sceneTop, head, rows, duration, height: top, clipCount };
 }
 
 type ClipView = TimelineView["tracks"][number]["clips"][number];
@@ -499,10 +530,41 @@ export interface LaneViewport {
  * does not move it. Where spans overlap, the one drawn last (latest start) wins.
  */
 export function sceneAt(layout: TimelineLayout, viewport: LaneViewport, x: number, y: number): SceneBox | null {
-  if (y < RULER_HEIGHT || y >= layout.head) return null;
+  if (y < layout.sceneTop || y >= layout.head) return null;
   const time = (x + viewport.scrollLeft) / viewport.pxPerSecond;
   return layout.scenes.findLast((scene) => time >= scene.start && time < scene.end) ?? null;
 }
+
+/** True when `y` (from the canvas top) is on the marker lane; the lane is fixed like the ruler. */
+export function onMarkerLane(layout: TimelineLayout, y: number): boolean {
+  return y >= RULER_HEIGHT && y < layout.sceneTop;
+}
+
+/**
+ * Marker under a point of the canvas on the ruler or the marker lane (`x` from the lanes' left edge, `y` from the
+ * top): the nearest one within a few px; null elsewhere.
+ */
+export function markerAt(layout: TimelineLayout, viewport: LaneViewport, x: number, y: number): MarkerBox | null {
+  if (y < 0 || y >= layout.sceneTop) return null;
+  let best: MarkerBox | null = null;
+  for (const marker of layout.markers) {
+    const distance = Math.abs(marker.at * viewport.pxPerSecond - viewport.scrollLeft - x);
+    if (distance <= MARKER_HIT_PX && (!best || distance < Math.abs(best.at * viewport.pxPerSecond - viewport.scrollLeft - x))) best = marker;
+  }
+  return best;
+}
+
+/** Empty layout, before the first `timeline.show`: the ruler alone. */
+export const EMPTY_LAYOUT: TimelineLayout = {
+  markers: [],
+  scenes: [],
+  sceneTop: RULER_HEIGHT,
+  head: RULER_HEIGHT,
+  rows: [],
+  duration: 0,
+  height: RULER_HEIGHT,
+  clipCount: 0,
+};
 
 /**
  * Clip under a point of the canvas (`x` from the lanes' left edge, `y` from

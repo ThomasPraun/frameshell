@@ -19,6 +19,7 @@ import {
   type Clip,
   type ElementAdjust,
   type ClipKey,
+  type Marker,
   type ClipKeys,
   type ClipTrack,
   type MediaClip,
@@ -39,6 +40,8 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
+  markerLabelKey,
+  keyedValueAt,
   paintStretches,
   placementAt,
   parseTimeline,
@@ -51,10 +54,11 @@ import {
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
+import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
 import { FrameGrid } from "./grid.js";
-import { applyPatch, diffTimelines, sortClips } from "./patch.js";
+import { applyPatch, diffTimelines, sortClips, sortMarkers } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
 
 const round4 = (value: number) => Math.round(value * 10000) / 10000;
@@ -128,8 +132,8 @@ export interface EditContext {
   nestedDuration(source: string): Promise<number>;
   /** Adapter clip types loaded for the project; empty when plugins are untrusted. */
   clipTypes(): Promise<ReadonlyMap<string, ClipTypeInfo>>;
-  /** Fresh id with prefix `c` (clip), `t` (track) or `g` (multicam group); the engine retries on collision. */
-  newId(prefix: "c" | "t" | "g"): string;
+  /** Fresh id with prefix `c` (clip), `t` (track), `g` (multicam group) or `m` (marker); the engine retries on collision. */
+  newId(prefix: IdPrefix): string;
   /** Edge adjustment seam for `cut` and `clip.trim` (#12). Absent: edges stay. */
   resolveEditPoint?: EditPointResolver;
   /** Project default snap half-width, seconds (`editing.snapWindow`); an op's `snapWindow` overrides it. */
@@ -140,6 +144,9 @@ export interface EditContext {
    */
   defaultStillDuration?: number;
 }
+
+/** Prefix of a core-generated id: `c` clip, `t` track, `g` multicam group, `m` marker. */
+export type IdPrefix = "c" | "t" | "g" | "m";
 
 /** Args of a public operation after param validation. */
 export type OperationArgs<K extends OperationName> = z.output<(typeof operationArgs)[K]>;
@@ -180,6 +187,7 @@ export async function applyOperation(
 ): Promise<AppliedOperation> {
   const before = structuredClone(timeline);
   for (const track of before.tracks) if (track.kind !== "subtitles") sortClips(track);
+  if (before.markers) sortMarkers(before.markers);
   const edit = new Edit(before, request.op, context);
   await edit.run(request);
   return edit.finish();
@@ -236,6 +244,8 @@ class Edit {
         return this.transitionRemove(request.args);
       case "clip.key":
         return this.clipKey(request.args);
+      case "track.duck":
+        return this.trackDuck(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
       case "multicam.gallery":
@@ -254,6 +264,14 @@ class Edit {
         return this.shotSet(request.args);
       case "multicam.direct":
         return this.multicamDirect(request.args);
+      case "marker.add":
+        return this.markerAdd(request.args);
+      case "marker.set":
+        return this.markerSet(request.args);
+      case "marker.remove":
+        return this.markerRemove(request.args);
+      case "captions.set":
+        return this.captionsSet(request.args);
       case "timeline.patch":
         return this.patch(request.args);
     }
@@ -288,10 +306,10 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
-    const { name, follows, style, index, muted, hidden } = args;
-    if (name === undefined && follows === undefined && style === undefined && index === undefined && muted === undefined && hidden === undefined) {
+    const { name, follows, style, gaps, index, muted, hidden } = args;
+    if (name === undefined && follows === undefined && style === undefined && gaps === undefined && index === undefined && muted === undefined && hidden === undefined) {
       throw this.invalid("nothing to change.", {
-        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows` or `style`.",
+        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows`, `style` or `gaps`.",
       });
     }
     if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
@@ -325,6 +343,29 @@ class Edit {
       const merged = { ...track.style, ...Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined)) };
       if (Object.keys(merged).length > 0) track.style = merged;
     }
+    if (gaps !== undefined) {
+      const snapped = gaps.map((gap) => ({ from: this.grid.snap(gap.from), to: this.grid.snap(gap.to) }));
+      const empty = snapped.find((gap) => gap.to <= gap.from);
+      if (empty) throw this.invalid(`gap ${empty.from}-${empty.to} s is empty on the frame grid.`, { field: "gaps", hint: "`to` must be at least one frame after `from`." });
+      if (snapped.length > 0) track.gaps = snapped.sort((a, b) => a.from - b.from);
+      else delete track.gaps;
+    }
+  }
+
+  /**
+   * `captions.set`: the resolved phrases replace the track's phrases that share a word with them (all of the
+   * track's with `replace`). Word ids are checked by the daemon method that resolves them, against the transcript.
+   */
+  captionsSet(args: OperationArgs<"captions.set">): void {
+    const track = this.track(args.track);
+    if (track.kind !== "subtitles") {
+      throw this.invalid(`${track.id} is a ${track.kind} track; phrases belong on a subtitle track.`, { field: "track" });
+    }
+    const taken = new Set(args.phrases.flatMap((phrase) => phrase.words.map((id) => `${phrase.asset}\0${id}`)));
+    const kept = args.replace ? [] : (track.phrases ?? []).filter((phrase) => !phrase.words.some((id) => taken.has(`${phrase.asset}\0${id}`)));
+    const phrases = [...kept, ...args.phrases];
+    if (phrases.length > 0) track.phrases = phrases;
+    else delete track.phrases;
   }
 
   /** `follows` must name an existing video or audio track. */
@@ -337,9 +378,10 @@ class Edit {
     }
   }
 
-  refuseSubtitleFields(args: { follows?: string | undefined; style?: object | undefined }): void {
+  refuseSubtitleFields(args: { follows?: string | undefined; style?: object | undefined; gaps?: object | undefined }): void {
     if (args.follows !== undefined) throw this.invalid("only subtitle tracks take `follows`.", { field: "follows" });
     if (args.style !== undefined) throw this.invalid("only subtitle tracks take `style`.", { field: "style" });
+    if (args.gaps !== undefined) throw this.invalid("only subtitle tracks take `gaps`.", { field: "gaps" });
   }
 
   trackRemove(args: OperationArgs<"track.remove">): void {
@@ -473,6 +515,7 @@ class Edit {
       for (const other of rippled.flatMap(clipsOf)) {
         if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
       }
+      this.rippleMarkers(rippled, (at) => (at >= from ? length : 0));
     }
     track.clips.push(clip);
   }
@@ -503,6 +546,7 @@ class Edit {
       const length = out - clipIn;
       const from = this.grid.frame(start);
       for (const other of track.clips) if (this.grid.frame(other.start) >= from) other.start = this.grid.snap(other.start + length);
+      this.rippleMarkers([track], (at) => (at >= from ? length : 0));
     }
     const clip: ShotClip = {
       id: this.newId("c"),
@@ -591,7 +635,9 @@ class Edit {
    * move clips of the `rippled` tracks by what the trim added or removed:
    * those starting at or after the old end by the whole change, those
    * starting inside the old clip by the head change only (they stay with its
-   * old first frame). Clips crossing either point stay.
+   * old first frame). Clips crossing either point stay. Markers shift the same
+   * way and, as in `cut`, those strictly inside removed material are deleted
+   * ({@link Edit.trimMarkers}).
    */
   async rippleTrim(clip: AnyClip, before: { start: number; end: number }, rippled: readonly AnyClipTrack[]): Promise<void> {
     const g = this.grid;
@@ -605,6 +651,7 @@ class Edit {
       if (at >= last) other.start = g.snap(other.start + total);
       else if (at >= first) other.start = g.snap(other.start + head);
     }
+    this.trimMarkers(rippled, first, last, head, total);
   }
 
   /** Move the edges `args` names; with `ripple` the left edge may pass timeline 0, {@link Edit.rippleTrim} puts it back. */
@@ -857,6 +904,7 @@ class Edit {
     }
     const [F, T] = [g.frame(from), g.frame(to)];
     const shift = to - from;
+    if (this.coversClipTracks(tracks)) this.cutMarkers(F, T, shift);
     for (const track of tracks) {
       const kept: AnyClip[] = [];
       for (const clip of clipsOf(track)) {
@@ -1154,6 +1202,73 @@ class Edit {
     else all[prop] = keys as [ClipKey, ...ClipKey[]];
     if (Object.keys(all).length === 0) delete clip.keys;
     else clip.keys = all;
+  }
+
+  /**
+   * `track.duck`: write the dip `curve` into the `gain` keys of every clip of audio track `args.track` (ADR 0018).
+   * Keys marked `auto: "duck"` from an earlier run go; keys without the mark stay and set the level the dip is
+   * taken from, and a hand key inside a dip is dipped too (it keeps its level in `base` for the next run). A clip the
+   * dip never touches ends with no duck keys.
+   */
+  async trackDuck(args: OperationArgs<"track.duck">): Promise<void> {
+    const track = this.clipTrack(args.track);
+    if (track.kind !== "audio") {
+      throw this.invalid(`${track.id} is a ${track.kind} track; ducking writes gain keys on the clips of an audio track.`, {
+        field: "track",
+        hint: `Audio tracks: ${this.mediaTracks().filter((t) => t.kind === "audio").map((t) => t.id).join(", ") || "none"}.`,
+      });
+    }
+    const curve = args.curve;
+    let ducked = 0;
+    for (const clip of track.clips.filter((candidate): candidate is Clip => !isShotClip(candidate))) {
+      // A duck key that stands in for a hand key goes back to being that key.
+      const hand = (clip.keys?.gain ?? [])
+        .filter((key) => key.auto !== "duck" || key.base !== undefined)
+        .map((key): ClipKey => (key.auto === "duck" ? { at: key.at, value: key.base!, ...(key.ease ? { ease: key.ease } : {}) } : key));
+      const kept: ClipKeys = { ...clip.keys };
+      delete kept.gain;
+      const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
+      const end = (await this.span(clip)).end;
+      const lane = clip.audio?.muted === true ? hand : this.duckLane(clip, hand, curve, end, speed);
+      if (lane.some((key) => key.auto === "duck")) ducked++;
+      if (lane.length > 0) kept.gain = lane as [ClipKey, ...ClipKey[]];
+      if (Object.keys(kept).length === 0) delete clip.keys;
+      else clip.keys = kept;
+    }
+    if (ducked === 0) this.warnings.push(`no clip of ${track.id} lies under speech: no duck keys written.`);
+  }
+
+  /**
+   * Gain lane of one clip after ducking: its level (`hand` keys, else `audio.gain`) minus the dip at each point of
+   * `curve` inside it, at its start and end, and at every hand key. A hand key where the dip is on comes back dipped
+   * (`auto: "duck"`, level in `base`); one outside any dip stays as it is. The hand keys alone when no dip touches the clip.
+   */
+  duckLane(clip: Clip, hand: readonly ClipKey[], curve: readonly { time: number; dip: number }[], end: number, speed: number): ClipKey[] {
+    const g = this.grid;
+    const dipPoints = curve.map((point) => ({ time: point.time, dip: point.dip }));
+    const timeOf = (at: number) => clip.start + (at - (clip.in ?? 0)) / speed;
+    const times = [clip.start, ...dipPoints.filter((point) => point.time > clip.start && point.time < end).map((point) => point.time), end];
+    if (times.every((t) => dipAt(dipPoints, t) <= 0) && hand.every((key) => dipAt(dipPoints, timeOf(key.at)) <= 0)) return [...hand];
+    // A hand key within half a frame of a curve point takes that point's place.
+    const half = (0.5 / this.context.fps) * speed;
+    const keys: ClipKey[] = [];
+    let lastFrame = -1;
+    for (const time of times) {
+      const t = g.snap(time);
+      const at = Math.round(clipTime(clip, t) * 1000) / 1000;
+      if (hand.some((other) => Math.abs(other.at - at) < half)) continue;
+      const level = keyedValueAt(hand, at) ?? clip.audio?.gain ?? 0;
+      const key: ClipKey = { at, value: round4(level - dipAt(dipPoints, time)), auto: "duck" };
+      // Two points in one frame (a ramp shorter than a frame): the later one wins.
+      if (g.frame(t) === lastFrame) keys[keys.length - 1] = key;
+      else keys.push(key);
+      lastFrame = g.frame(t);
+    }
+    for (const key of hand) {
+      const dip = dipAt(dipPoints, timeOf(key.at));
+      keys.push(dip > 0 ? { at: key.at, value: round4(key.value - dip), ...(key.ease ? { ease: key.ease } : {}), auto: "duck", base: key.value } : key);
+    }
+    return keys.sort((a, b) => a.at - b.at);
   }
 
   /**
@@ -1814,6 +1929,14 @@ class Edit {
   }
 
   patch(args: TimelinePatch): void {
+    for (const { marker } of args.markers ?? []) {
+      if (marker && this.grid.snap(marker.at) !== marker.at) {
+        throw this.invalid(`marker ${marker.id} ("${marker.label}") is at ${marker.at} s, off the frame grid (1/${this.context.fps} s).`, {
+          field: "markers",
+          hint: `Use ${this.grid.snap(marker.at)}, or let \`marker.set\` snap it.`,
+        });
+      }
+    }
     let next: Timeline;
     try {
       next = applyPatch(this.draft, args);
@@ -1823,6 +1946,126 @@ class Edit {
     this.draft.tracks = next.tracks;
     if (next.groups) this.draft.groups = next.groups;
     else delete this.draft.groups;
+    if (next.markers) this.draft.markers = next.markers;
+    else delete this.draft.markers;
+  }
+
+  // Markers (ADR 0029)
+
+  markerAdd(args: OperationArgs<"marker.add">): void {
+    this.claimLabel(args.label, null);
+    const marker: Marker = { id: this.newId("m"), at: this.grid.snap(args.at), label: args.label, ...(args.color ? { color: args.color } : {}) };
+    this.draft.markers = [...(this.draft.markers ?? []), marker];
+  }
+
+  markerSet(args: OperationArgs<"marker.set">): void {
+    const marker = this.marker(args.marker);
+    if (args.at === undefined && args.label === undefined && args.color === undefined) {
+      throw this.invalid(`nothing to change on marker ${marker.id} ("${marker.label}").`, { hint: "Pass `at`, `label` or `color` (null clears it)." });
+    }
+    if (args.at !== undefined) marker.at = this.grid.snap(args.at);
+    if (args.label !== undefined) {
+      this.claimLabel(args.label, marker.id);
+      marker.label = args.label;
+    }
+    if (args.color === null) delete marker.color;
+    else if (args.color !== undefined) marker.color = args.color;
+  }
+
+  markerRemove(args: OperationArgs<"marker.remove">): void {
+    const marker = this.marker(args.marker);
+    this.draft.markers = this.draft.markers!.filter((other) => other !== marker);
+  }
+
+  /** The draft's marker with id `ref`, else with label `ref` ignoring case; InvalidOperation listing the markers when none. */
+  marker(ref: string): Marker {
+    const markers = this.draft.markers ?? [];
+    const found = markers.find((marker) => marker.id === ref) ?? markers.find((marker) => markerLabelKey(marker.label) === markerLabelKey(ref));
+    if (found) return found;
+    const known = markers.map((marker) => `${marker.id} "${marker.label}" at ${marker.at}`).join(", ");
+    throw this.invalid(`no marker "${ref}" in timeline ${this.draft.id}.`, {
+      field: "marker",
+      hint: known ? `Markers: ${known}.` : "It has no markers: add one with `marker.add`.",
+    });
+  }
+
+  /** Refuse `label` when another marker than `self` holds it, ignoring case. */
+  claimLabel(label: string, self: string | null): void {
+    const holder = this.draft.markers?.find((marker) => marker.id !== self && markerLabelKey(marker.label) === markerLabelKey(label));
+    if (!holder) return;
+    throw this.invalid(`label "${label}" is already marker ${holder.id} ("${holder.label}" at ${holder.at} s); labels are unique ignoring case.`, {
+      field: "label",
+      hint: `Pick another label, or move that marker with \`marker.set\` { marker: "${holder.id}", at }.`,
+    });
+  }
+
+  /** True when `tracks` are every video, audio and program track: only then do markers ripple with them. */
+  coversClipTracks(tracks: readonly AnyClipTrack[]): boolean {
+    const named = new Set(tracks);
+    return this.clipTracks().every((track) => named.has(track));
+  }
+
+  /**
+   * Move markers like clip starts of a ripple over `tracks`, by `shift(frame)` seconds; nothing moves unless the
+   * ripple covers every clip track. A marker never goes before timeline 0.
+   */
+  rippleMarkers(tracks: readonly AnyClipTrack[], shift: (frame: number) => number): void {
+    if (!this.draft.markers || !this.coversClipTracks(tracks)) return;
+    for (const marker of this.draft.markers) {
+      const by = shift(this.grid.frame(marker.at));
+      if (by !== 0) marker.at = Math.max(0, this.grid.snap(marker.at + by));
+    }
+  }
+
+  /**
+   * `cut` of frames [`from`, `to`) on every clip track: markers after it move left by `shift`, markers strictly inside
+   * are deleted (with a warning naming them). A marker on the first cut frame stays: it marks the new edit point.
+   */
+  cutMarkers(from: number, to: number, shift: number): void {
+    if (!this.draft.markers) return;
+    const kept: Marker[] = [];
+    const dropped: Marker[] = [];
+    for (const marker of this.draft.markers) {
+      const at = this.grid.frame(marker.at);
+      if (at >= to) marker.at = this.grid.snap(marker.at - shift);
+      if (at > from && at < to) dropped.push(marker);
+      else kept.push(marker);
+    }
+    this.dropMarkers(kept, dropped, "cut range");
+  }
+
+  /**
+   * Markers of a ripple `clip.trim` of the clip that spanned frames [`first`, `last`): `head` and `total` are the
+   * seconds the head and the whole clip grew (negative: shrank). Removed material acts like a `cut` ({@link Edit.cutMarkers}):
+   * markers strictly inside it are deleted, one on its first frame stays, later ones shift. Added material shifts
+   * markers at or after its start. Nothing moves unless the ripple covers every clip track.
+   */
+  trimMarkers(tracks: readonly AnyClipTrack[], first: number, last: number, head: number, total: number): void {
+    if (!this.draft.markers || !this.coversClipTracks(tracks)) return;
+    const g = this.grid;
+    const headRemoved = Math.max(0, -g.frame(head));
+    const tailRemoved = Math.max(0, -(g.frame(total) - g.frame(head)));
+    const kept: Marker[] = [];
+    const dropped: Marker[] = [];
+    for (const marker of this.draft.markers) {
+      const at = g.frame(marker.at);
+      if ((at > first && at < first + headRemoved) || (at > last - tailRemoved && at < last)) {
+        dropped.push(marker);
+        continue;
+      }
+      kept.push(marker);
+      const by = at >= last ? total : at >= first && !(headRemoved > 0 && at === first) ? head : 0;
+      if (by !== 0) marker.at = Math.max(0, g.snap(marker.at + by));
+    }
+    this.dropMarkers(kept, dropped, "removed material");
+  }
+
+  /** Keep `kept` as the draft's markers when `dropped` is not empty, and warn naming the dropped ones. */
+  dropMarkers(kept: Marker[], dropped: Marker[], where: string): void {
+    if (dropped.length === 0) return;
+    this.draft.markers = kept;
+    const names = dropped.map((marker) => `"${marker.label}" (${marker.id} at ${marker.at} s)`).join(", ");
+    this.warnings.push(`removed marker${dropped.length === 1 ? "" : "s"} ${names}: inside the ${where}. \`revert\` brings ${dropped.length === 1 ? "it" : "them"} back.`);
   }
 
   // Finishing
@@ -1830,6 +2073,8 @@ class Edit {
   /** Check rules on what changed, then build the result. */
   async finish(): Promise<AppliedOperation> {
     for (const track of this.draft.tracks) if (track.kind !== "subtitles") sortClips(track);
+    if (this.draft.markers) sortMarkers(this.draft.markers);
+    if (this.draft.markers?.length === 0) delete this.draft.markers;
     const forward = diffTimelines(this.before, this.draft);
     const changedGroups = new Set((forward.groups ?? []).map((entry) => entry.id));
     const changedTracks = new Set([
@@ -1943,6 +2188,8 @@ class Edit {
       else if (!existsAfter) removed.push(id);
       else updated.push(id);
     };
+    // Markers paint nothing and play nothing: they leave `range` alone.
+    for (const { id } of forward.markers ?? []) sort(id, before.markers.has(id), after.markers.has(id));
     for (const { id } of forward.groups ?? []) {
       sort(id, before.groups.has(id), after.groups.has(id));
       // A group's angles are the sound and pictures of its shots.
@@ -2262,12 +2509,12 @@ class Edit {
     );
   }
 
-  newId(prefix: "c" | "t" | "g"): string {
+  newId(prefix: IdPrefix): string {
     // Ids removed by this same operation stay taken: one id never names two things in one change.
     const taken = [indexIds(this.draft), indexIds(this.before)];
     for (let attempt = 0; attempt < 100; attempt++) {
       const id = this.context.newId(prefix);
-      if (taken.every(({ tracks, clips, groups }) => !tracks.has(id) && !clips.has(id) && !groups.has(id))) return id;
+      if (taken.every(({ tracks, clips, groups, markers }) => !tracks.has(id) && !clips.has(id) && !groups.has(id) && !markers.has(id))) return id;
     }
     throw new Error(`could not generate a free ${prefix}_ id`);
   }
@@ -2374,12 +2621,17 @@ function clipsOf(track: AnyClipTrack): AnyClip[] {
   return track.clips;
 }
 
-function indexIds(timeline: Timeline): { tracks: Map<string, Track>; clips: Map<string, AnyClip>; groups: Set<string> } {
+function indexIds(timeline: Timeline): { tracks: Map<string, Track>; clips: Map<string, AnyClip>; groups: Set<string>; markers: Set<string> } {
   const tracks = new Map<string, Track>();
   const clips = new Map<string, AnyClip>();
   for (const track of timeline.tracks) {
     tracks.set(track.id, track);
     if (track.kind !== "subtitles") for (const clip of track.clips) clips.set(clip.id, clip);
   }
-  return { tracks, clips, groups: new Set((timeline.groups ?? []).map((group) => group.id)) };
+  return {
+    tracks,
+    clips,
+    groups: new Set((timeline.groups ?? []).map((group) => group.id)),
+    markers: new Set((timeline.markers ?? []).map((marker) => marker.id)),
+  };
 }

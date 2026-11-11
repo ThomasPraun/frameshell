@@ -141,6 +141,9 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
   // Phones store portrait video as landscape frames plus a rotation, which ffmpeg applies when it decodes: report
   // the size every proxy, frame and export sees (#207).
   const turned = video ? quarterTurned(video) : false;
+  const alpha = video ? alphaOf(video) : null;
+  // Palettized stills (PNG/GIF with tRNS) report `pal8`: transparency is possible, so treat them as alpha. Opaque ones are fitted whole too.
+  const hasAlpha = alpha !== null || (still && video?.pix_fmt === "pal8");
   const media: MediaProbe = {
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     format,
@@ -153,16 +156,19 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
           // Containers report the tick rate as r_frame_rate; a lower average means irregular frame intervals.
           vfr: !still && avg !== null && real !== null && Math.abs(avg - real) > 0.01,
           still,
+          alpha: hasAlpha,
         }
       : null,
     audio: audio
       ? { codec: audio.codec_name ?? "unknown", sampleRate: Number(audio.sample_rate) || 0, channels: audio.channels ?? 0 }
       : null,
   };
-  return { media, alpha: video && !still ? alphaOf(video) : null };
+  // A still has an alpha plane too, but no proxy to build with it.
+  return { media, alpha: still ? null : alpha };
 }
 
-function alphaOf(stream: FfprobeStream): SourceAlpha | null {
+/** Alpha of a stream by pix_fmt or the VP8/VP9 `alpha_mode` tag; null when opaque. */
+export function alphaOf(stream: FfprobeStream): SourceAlpha | null {
   const tagged = Object.entries(stream.tags ?? {}).some(([key, value]) => key.toLowerCase() === "alpha_mode" && value === "1");
   if (tagged && stream.codec_name === "vp9") return { decoder: "libvpx-vp9" };
   if (tagged && stream.codec_name === "vp8") return { decoder: "libvpx" };

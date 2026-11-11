@@ -4,6 +4,7 @@ export function activate(api) {
     description: "Greet someone from inside the daemon",
     run({ args, project }) {
       if (args[0] === "--fail") throw new Error("greeting refused");
+      if (args[0] === "--refuse") return { output: "greeting declined", data: { declined: true }, failed: true };
       const name = args[0] ?? "world";
       return { output: `Hello, ${name}!`, data: { greeted: name, project: project.dir } };
     },

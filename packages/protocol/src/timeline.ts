@@ -9,11 +9,16 @@ import {
   ReframeKeySchema,
   SHOT_CORNERS,
   SHOT_LAYOUTS,
+  CaptionGapSchema,
+  CaptionPhraseSchema,
+  SUBTITLE_ENTRIES,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
   type SubtitlePosition,
   type SubtitlePresetId,
   KEY_EASES,
+  MARKER_COLORS,
+  MarkerSchema,
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
@@ -33,6 +38,12 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
 const CropSide = z.number().min(0).lt(1).optional();
+const MarkerRef = z
+  .string()
+  .min(1)
+  .describe("Marker id from `marker.list` (`m_1a2b3c`) or its label (ignoring case), e.g. `hook`.");
+const MarkerLabel = MarkerSchema.shape.label;
+const MarkerColor = z.enum(MARKER_COLORS);
 
 /** Snapping args shared by `cut` and `clip.trim` (ADR 0003). */
 const snapArgs = {
@@ -117,6 +128,27 @@ export const SubtitleStyleArgSchema = z
         "`true`: the first cue of each speaker turn starts with the speaker's transcript name (\"Juan: …\") and a cue never spans " +
           "two speakers; words with no speaker get no name. Default `false`.",
       ),
+    keywordColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional()
+      .describe(
+        "`#rrggbb` colour of the keyword a phrase marks (`captions.set`); null: the keyword keeps the text colour. Default: the preset's accent.",
+      ),
+    keywordScale: z
+      .number()
+      .min(1)
+      .max(2)
+      .optional()
+      .describe("How much larger the keyword starts (1 to 2, e.g. 1.12) before it settles to its size while the cue enters; needs an `entry`."),
+    entry: z
+      .enum(SUBTITLE_ENTRIES)
+      .optional()
+      .describe(
+        "How cues enter: `none` (default, they just appear), `chars` (letter by letter), `words` (each word as it is spoken) " +
+          "or `line` (the whole line at once). Soft: 0.4 s, eases out, from slightly blurred, no bounce.",
+      ),
   })
   .describe("Subtitle tracks only. Preview and export render the same style.");
 
@@ -155,6 +187,13 @@ export const operationArgs = {
       .optional()
       .describe("Subtitle tracks only: id of the video or audio track whose clips' transcript words it shows."),
     style: SubtitleStyleArgSchema.optional().describe("Subtitle tracks only: the fields given change, the others keep their value."),
+    gaps: z
+      .array(CaptionGapSchema)
+      .optional()
+      .describe(
+        "Subtitle tracks only: ranges (timeline seconds, snapped to the frame grid) in which no cue shows, e.g. while a graphic " +
+          "already says it. A cue that overlaps one is hidden whole. Replaces the track's gaps; `[]` clears them.",
+      ),
     muted: z.boolean().optional().describe("Video, audio and program tracks: true silences the whole track in export and preview; false plays it again."),
     hidden: z
       .boolean()
@@ -319,6 +358,21 @@ export const operationArgs = {
     ease: z.enum(KEY_EASES).optional().describe("How the value moves from this key to the next: `linear` (default), `in`, `out` or `in-out`."),
     remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
+  }),
+  "track.duck": z.strictObject({
+    track: TrackRef.describe("Audio track whose clips get the gain keys: the music or effects that dip under speech."),
+    curve: z
+      .array(
+        z.strictObject({
+          time: Seconds("Timeline time of the point."),
+          dip: z.number().nonnegative().describe("dB the clips sit below their own level at `time`: 0 = full level."),
+        }),
+      )
+      .min(1)
+      .describe(
+        "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
+          "The `track.duck` method measures it from the speech tracks and passes it here.",
+      ),
   }),
   "multicam.create": z.strictObject({
     angles: z
@@ -487,6 +541,16 @@ export const operationArgs = {
       .optional()
       .describe("Angle ids of the track's group to show, in layout order (left to right, then top to bottom). Default: unchanged."),
   }),
+  "captions.set": z.strictObject({
+    track: TrackRef.describe("Subtitle track id."),
+    phrases: z
+      .array(CaptionPhraseSchema)
+      .describe("Resolved phrases (transcript word ids). The `captions.set` method resolves its text into them and passes them here."),
+    replace: z
+      .boolean()
+      .default(false)
+      .describe("True: the track keeps only these phrases. Default false: only the phrases that share a word with these are replaced."),
+  }),
   "multicam.direct": z.strictObject({
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     from: Seconds("Timeline time where directing starts. Default 0.").optional(),
@@ -513,6 +577,20 @@ export const operationArgs = {
     rules: DirectorRulesSchema.describe("Resolved rules: a template with `director.json` on top."),
     keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
   }),
+  "marker.add": z.strictObject({
+    at: Seconds("Timeline second of the marker."),
+    label: MarkerLabel,
+    color: MarkerColor.optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Default: none (the app's accent colour)."),
+  }),
+  "marker.set": z.strictObject({
+    marker: MarkerRef,
+    at: Seconds("New timeline second (absolute, not a nudge).").optional(),
+    label: MarkerLabel.optional().describe("New label; unique in the timeline ignoring case."),
+    color: MarkerColor.nullable().optional().describe("New colour; null clears it (the app's accent colour)."),
+  }),
+  "marker.remove": z.strictObject({
+    marker: MarkerRef,
+  }),
 } as const;
 
 /** Name of a public timeline operation. */
@@ -523,9 +601,13 @@ export type OperationName = keyof typeof operationArgs;
  * inverse is a patch, so one `apply` undoes any operation.
  * Applied in order: `groups` (replace, insert or delete whole multicam
  * groups), `tracks` (replace, insert or delete whole tracks), then `clips`
- * (upsert or delete one clip in a track), then `order`.
+ * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
+ * delete one marker) touch nothing else.
  */
 export const TimelinePatchSchema = z.strictObject({
+  markers: z
+    .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
+    .optional(),
   groups: z
     .array(z.strictObject({ id: z.string().min(1), group: MulticamGroupSchema.nullable().describe("Full group; null deletes it.") }))
     .optional(),
@@ -616,9 +698,9 @@ export const OperationResultSchema = z.object({
   operation: OperationRecordSchema,
   changes: z
     .object({
-      added: z.array(z.string()).describe("Ids of multicam groups, tracks and clips created."),
-      updated: z.array(z.string()).describe("Ids of multicam groups, tracks and clips changed."),
-      removed: z.array(z.string()).describe("Ids of multicam groups, tracks and clips deleted."),
+      added: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers created."),
+      updated: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers changed."),
+      removed: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers deleted."),
       range: z
         .object({
           from: z.number(),
@@ -790,6 +872,37 @@ export const MulticamDirectResultSchema = OperationResultSchema.extend({
 /** See {@link MulticamDirectResultSchema}. */
 export type MulticamDirectResult = z.output<typeof MulticamDirectResultSchema>;
 
+/** Result of `captions.set`: the operation, and the cues the captioned range now shows. */
+export const CaptionsSetResultSchema = OperationResultSchema.extend({
+  track: z.string().describe("Subtitle track the phrases were written to."),
+  phrases: z.int().describe("Phrases written."),
+  words: z.int().describe("Transcript words they cover."),
+  cues: z
+    .array(
+      z.object({
+        start: z.number().describe("Timeline seconds."),
+        end: z.number().describe("Timeline seconds, after the hold of at most 0.35 s."),
+        text: z.string().describe("As shown, the keyword between asterisks."),
+        entry: z.enum(SUBTITLE_ENTRIES),
+      }),
+    )
+    .describe("Cues overlapping the captioned range, in order. Empty after a clear."),
+});
+
+/** See {@link CaptionsSetResultSchema}. */
+export type CaptionsSetResult = z.output<typeof CaptionsSetResultSchema>;
+
+/** Result of `track.duck`: the operation plus what was heard. */
+export const TrackDuckResultSchema = OperationResultSchema.extend({
+  track: z.string().describe("Audio track whose clips got the keys."),
+  under: z.array(z.string()).describe("Tracks listened to for speech."),
+  stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
+  speechSeconds: z.number().describe("Total seconds of those stretches."),
+});
+
+/** See {@link TrackDuckResultSchema}. */
+export type TrackDuckResult = z.output<typeof TrackDuckResultSchema>;
+
 /** Result of `multicam.faces`: what was found per angle and the operations that wrote the keys. */
 export const MulticamFacesResultSchema = z.object({
   timeline: z.string(),
@@ -814,6 +927,32 @@ export const MulticamFacesResultSchema = z.object({
 
 /** See {@link MulticamFacesResultSchema}. */
 export type MulticamFacesResult = z.output<typeof MulticamFacesResultSchema>;
+
+/** Result of `clip.reframe`: what was found and the operations that wrote the framing. */
+export const ClipReframeResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
+  clip: z.string(),
+  format: z.string().describe("Aspect framed for, `<w>x<h>` (`9x16`)."),
+  follows: z.enum(["face", "person", "anchor"]).describe("What placed the picture: the largest face found, the named person's face, or the fixed `anchor`."),
+  samples: z.int().describe("Frames looked at (2 per second of the clip's source); 0 for `anchor`, and for `person` the samples of the cached scan used."),
+  faces: z.int().describe("Of those, frames where the face was found; 0 for `anchor`."),
+  placement: z
+    .object({
+      scale: z.number().describe("Factor on the fitted size that makes the picture cover the frame."),
+      x: z.number().describe("Offset in project pixels at the clip's start."),
+      y: z.number().describe("Offset in project pixels at the clip's start."),
+    })
+    .nullable()
+    .describe("Placement at the clip's first key; null when nothing was written."),
+  keys: z.int().describe("Keys written per moving property (`x`, `y`); 0 when the face holds one place and the placement is static."),
+  operations: z.array(z.string()).describe("Ids of the operations written, in order; empty when none was."),
+  tx: z.string().nullable().describe("Transaction of the writes, revertible as one; null when nothing was written."),
+  warnings: z.array(z.string()).describe("Few or no faces found, the framing replaced, a preview in another aspect. Empty when none."),
+});
+
+/** See {@link ClipReframeResultSchema}. */
+export type ClipReframeResult = z.output<typeof ClipReframeResultSchema>;
 
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z
@@ -887,6 +1026,8 @@ export const TimelineViewSchema = z.object({
       style: StoredStyleSchema,
       muted: TrackMutedViewSchema,
       hidden: TrackHiddenViewSchema,
+      phrases: z.array(CaptionPhraseSchema).optional().describe("Subtitle tracks: hand-chunked phrases as stored (`captions.set`); absent when none."),
+      gaps: z.array(CaptionGapSchema).optional().describe("Subtitle tracks: ranges in which no cue shows (`track.set` `gaps`); absent when none."),
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),
@@ -894,6 +1035,10 @@ export const TimelineViewSchema = z.object({
     .array(MulticamGroupSchema)
     .optional()
     .describe("Multicam groups as stored (angles with asset, offset, crop, audio); absent when the timeline has none."),
+  markers: z
+    .array(MarkerSchema)
+    .optional()
+    .describe("Markers as stored (ADR 0029): id, timeline second `at`, label, colour; sorted by `at`; absent when the timeline has none."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),
 });
 
@@ -950,3 +1095,13 @@ export const RejectionRecordSchema = TimelineRejectionSchema.extend({
 
 /** See {@link RejectionRecordSchema}. */
 export type RejectionRecord = z.output<typeof RejectionRecordSchema>;
+
+/** Result of `marker.list`. */
+export const MarkerListResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int(),
+  markers: z.array(MarkerSchema).describe("Sorted by `at`, then id; empty when the timeline has none."),
+});
+
+/** See {@link MarkerListResultSchema}. */
+export type MarkerListResult = z.output<typeof MarkerListResultSchema>;

@@ -77,6 +77,12 @@ describe("multicam plan", () => {
     golden("multicam-plan", { plan, mix: mixStep(plan), loudnessAnalysis: loudnessAnalysis(plan) });
   });
 
+  it("lays shots out by their tiles in a covering format (ADR 0027), never by the format's cover", () => {
+    const vertical = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const input = { timeline, fps: 30, preset: vertical, loudness: -17, sources, resolution, segmentSeconds: 2 };
+    expect(compileRender({ ...input, variant: { cover: true, captionScale: 1 } })).toEqual(compileRender(input));
+  });
+
   it("lasts as long as the last shot and splits segments on shot edges", () => {
     expect(plan).toMatchObject({ frames: 150, duration: 5, warnings: [] });
     expect(plan.segments.map((s) => [s.from, s.to])).toEqual([

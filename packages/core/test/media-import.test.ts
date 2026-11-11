@@ -202,6 +202,29 @@ describe("asset import", () => {
   );
 
   it(
+    "records whether the picture has alpha: VP9 alpha WebM, a PNG with alpha, not an opaque clip or PNG (ADR 0027)",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      const dir = tempDir();
+      const png = (name: string, format: string) =>
+        run(ffmpeg, [...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=red@0.25:s=64x36:d=1,format=${format}`, "-frames:v", "1"], join(dir, name)]);
+      await png("see-through.png", "rgba");
+      await png("solid.png", "rgb24");
+      await makeVp9Clip(join(dir, "title.webm"), { alpha: true });
+      await makeVp9Clip(join(dir, "plain.webm"), { alpha: false });
+      const alphaOf = async (name: string) => {
+        const { asset } = await importOne(join(dir, name));
+        return (await assetInfo(asset)).media?.video?.alpha;
+      };
+      expect(await alphaOf("see-through.png")).toBe(true);
+      expect(await alphaOf("solid.png")).toBe(false);
+      expect(await alphaOf("title.webm")).toBe(true);
+      expect(await alphaOf("plain.webm")).toBe(false);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "builds the usual H.264 MP4 proxy for an opaque VP9 source",
     async () => {
       const source = join(tempDir(), "opaque.webm");

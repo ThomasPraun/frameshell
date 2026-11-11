@@ -557,7 +557,14 @@ function nestedResolver(nested: ReadonlyMap<string, TimelineView> | undefined): 
 function asTimeline(view: TimelineView, root: boolean): Timeline {
   const tracks = view.tracks.map((track): Track => {
     if (track.kind === "subtitles") {
-      return { id: track.id, kind: "subtitles", follows: track.follows ?? "", ...(track.style ? { style: track.style } : {}) };
+      return {
+        id: track.id,
+        kind: "subtitles",
+        follows: track.follows ?? "",
+        ...(track.style ? { style: track.style } : {}),
+        ...(track.phrases ? { phrases: track.phrases } : {}),
+        ...(track.gaps ? { gaps: track.gaps } : {}),
+      };
     }
     const clips = track.clips.map((clip) => {
       if (root) return clip as unknown as Clip;

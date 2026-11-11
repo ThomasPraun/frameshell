@@ -9,23 +9,25 @@ import { readTimelineFile } from "./timeline/service.js";
 /** One place a timeline names a project file. */
 export type FileUse = MethodResult<"file.uses">["uses"][number];
 
-/** Every clip, angle and mic of `timeline` (id `id`) naming `rel` or a path under it. */
-export function timelineUses(id: string, timeline: Timeline, rel: string): FileUse[] {
-  const names = (ref: string | undefined) => ref !== undefined && (ref === rel || ref.startsWith(`${rel}/`));
+/** Every file `timeline` (id `id`) names: each clip's `asset` or `source`, and each multicam angle and mic. */
+export function timelineRefs(id: string, timeline: Timeline): FileUse[] {
   const uses: FileUse[] = [];
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     for (const clip of track.clips) {
       const ref = "asset" in clip ? clip.asset : "source" in clip ? clip.source : undefined;
-      if (names(ref)) uses.push({ timeline: id, id: clip.id, ref: ref! });
+      if (ref !== undefined) uses.push({ timeline: id, id: clip.id, ref });
     }
   }
   for (const group of timeline.groups ?? []) {
-    for (const part of [...group.angles, ...(group.mics ?? [])]) {
-      if (names(part.asset)) uses.push({ timeline: id, id: group.id, ref: part.asset });
-    }
+    for (const part of [...group.angles, ...(group.mics ?? [])]) uses.push({ timeline: id, id: group.id, ref: part.asset });
   }
   return uses;
+}
+
+/** Every clip, angle and mic of `timeline` (id `id`) naming `rel` or a path under it. */
+export function timelineUses(id: string, timeline: Timeline, rel: string): FileUse[] {
+  return timelineRefs(id, timeline).filter(({ ref }) => ref === rel || ref.startsWith(`${rel}/`));
 }
 
 /**

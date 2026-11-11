@@ -71,7 +71,7 @@ const CODECS: readonly CodecSpec[] = [
 const VAAPI_DEVICE = "/dev/dri/renderD128";
 
 /**
- * Probe an ffmpeg binary: version, compiled-in codecs, and a one-frame test
+ * Probe an ffmpeg binary: version, compiled-in codecs, and a 0.2 s test
  * encode per compiled hardware encoder (compiled ≠ usable: NVENC needs an
  * NVIDIA GPU, VAAPI a render node). Never throws: an unrunnable binary is a problem.
  */
@@ -130,7 +130,7 @@ function parseVersion(output: string): string | null {
 }
 
 /** Names from `-encoders` / `-decoders`: ` V....D libx264   description`. */
-function codecNames(listing: string): Set<string> {
+export function codecNames(listing: string): Set<string> {
   const names = new Set<string>();
   for (const line of listing.split(/\r?\n/)) {
     const match = /^ [VAS][A-Z.]{5} (\S+)/.exec(line);
@@ -139,7 +139,11 @@ function codecNames(listing: string): Set<string> {
   return names;
 }
 
-async function testEncode(path: string, encoder: string, exec: Exec): Promise<boolean> {
+/**
+ * Whether `encoder` really encodes here: 0.2 s of lavfi colour (compiled in is no proof: NVENC needs an
+ * NVIDIA GPU, VAAPI a render node). The one test shared by the codec list and the encoder probe.
+ */
+export async function testEncode(path: string, encoder: string, exec: Exec = execProcess): Promise<boolean> {
   const vaapi = encoder.endsWith("_vaapi");
   const args = [
     "-hide_banner",
@@ -149,10 +153,8 @@ async function testEncode(path: string, encoder: string, exec: Exec): Promise<bo
     "-f",
     "lavfi",
     "-i",
-    "testsrc2=size=256x256:rate=1",
+    "color=c=0x336699:size=256x256:rate=30:duration=0.2",
     ...(vaapi ? ["-vf", "format=nv12,hwupload"] : []),
-    "-frames:v",
-    "1",
     "-c:v",
     encoder,
     "-f",

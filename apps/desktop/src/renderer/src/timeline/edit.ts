@@ -34,15 +34,13 @@ export function grabAt(layout: TimelineLayout, viewport: LaneViewport, x: number
   return { row, clip, part };
 }
 
-/** A time edges snap to: another clip's edge or the playhead. */
-export interface SnapPoint {
-  time: number;
-  kind: "clip" | "playhead";
-}
+/** A time edges snap to: another clip's edge, the playhead or a marker (ADR 0029). */
+export type SnapPoint = { time: number; kind: "clip" | "playhead" } | { time: number; kind: "marker"; label: string };
 
-/** Snap targets for a drag: every clip edge but those of `exclude`, and the playhead. Sorted by time. */
+/** Snap targets for a drag: every clip edge but those of `exclude`, the playhead and every marker. Sorted by time. */
 export function snapPoints(layout: TimelineLayout, playhead: number, exclude: ReadonlySet<string>): SnapPoint[] {
   const points: SnapPoint[] = [{ time: playhead, kind: "playhead" }];
+  for (const marker of layout.markers) points.push({ time: marker.at, kind: "marker", label: marker.label });
   for (const row of layout.rows) {
     for (const clip of row.clips) {
       if (exclude.has(clip.id) || clip.problem) continue;
@@ -211,8 +209,8 @@ function rowAt(layout: TimelineLayout, y: number): TrackRow | null {
  * so the panel says why instead of sending it. A group move is a `clip.move`
  * per clip, the leading one first so clips of one track never collide midway. Trims keep the daemon's energy
  * snapping (ADR 0003, as in the CLI), except an edge put on another clip's
- * edge: a pause-snapped edge there would leave a gap or an overlap, so it
- * goes exactly. A ripple trim adds `ripple`.
+ * edge or a marker: a pause-snapped edge there would leave a gap or an overlap,
+ * or miss the marker, so it goes exactly. A ripple trim adds `ripple`.
  */
 export function dragEdits(preview: DragPreview): TimelineEdit[] {
   const { clip, part } = preview;
@@ -232,7 +230,7 @@ export function dragEdits(preview: DragPreview): TimelineEdit[] {
       .sort((a, b) => (later ? b.clip.start - a.clip.start : a.clip.start - b.clip.start))
       .map((member) => ({ op: "clip.move", args: { clip: member.clip.id, start: seconds(member.start) } }));
   }
-  const exact = preview.snapped?.kind === "clip" ? { snap: false } : {};
+  const exact = preview.snapped?.kind === "clip" || preview.snapped?.kind === "marker" ? { snap: false } : {};
   const ripple = preview.ripple ? { ripple: true } : {};
   if (part === "head") {
     const start = seconds(preview.edge);

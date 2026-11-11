@@ -2,6 +2,28 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Style (ADR 0028)
+
+**Style guide**:
+The project's `style.json`: brand, colours, fonts, type sizes, motion, sound levels, platforms, rules and banned list, as numbers.
+_Avoid_: style notes, brand kit, theme
+
+**User style**:
+A style guide kept per machine for reuse, copied into a project (never linked to it).
+_Avoid_: global style, template
+
+**Motion personality**:
+A named set of motion values (playful, premium, corporate, energetic, calm) a style starts from and overrides field by field.
+_Avoid_: motion preset, animation style
+
+**Token**:
+One named style value a consumer reads (a colour role, a duration, a dip in dB), never an inline number.
+_Avoid_: variable, setting
+
+**Safe zone**:
+The part of the frame a platform's app covers (buttons, captions, profile), in pixels of a reference frame; held once per platform, named by styles and formats.
+_Avoid_: safe area (alone), margin
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
@@ -112,6 +134,10 @@ _Avoid_: dip to black (that is two fades), fade transition
 Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip (a shaped transition: a hold), never an error.
 _Avoid_: tail, overlap, pre-roll
 
+**Marker**:
+A named point on a timeline's clock (`markers` in the timeline file: id, `at`, label, optional colour, ADR 0029): a hook, a beat to land on, a note. It moves with the material when a `cut` of every track ripples it and is deleted when the cut removes the moment it names. Paints and plays nothing.
+_Avoid_: cue (a shoot script's `[LABEL: …]`), keyframe, chapter
+
 **Keyframe**:
 A value of one clip property (`x`, `y`, `scale`, `opacity`, `gain`) at a time on the clip's own clock (the seconds `in` counts), stored in the clip's `keys`; between keyframes the value follows the ease, outside them it holds. "Key" for short.
 _Avoid_: automation point, marker
@@ -129,6 +155,20 @@ _Avoid_: still project, photo project
 **Layer**:
 A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
 _Avoid_: level, sheet
+
+## Formats (ADR 0027)
+
+**Format**:
+One delivery size of a project's single edit (`formats` in `frameshell.json`: an id such as `9x16` and a frame size); every format plays the same cuts, captions and audio.
+_Avoid_: variant, aspect, version, cutdown (a shorter edit is another timeline)
+
+**Primary format**:
+The first format, equal to the project `resolution`; its export is laid out as a project without formats is.
+_Avoid_: master, main format, default format
+
+**Cover**:
+How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
+_Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 
 ## Photo segmentation (ADR 0022)
 
