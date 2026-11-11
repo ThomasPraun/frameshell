@@ -192,6 +192,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
+  `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
+  `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.
 - `@frameshell/hyperframes` 0.5.0 renders with `@hyperframes/core` and `@hyperframes/producer` 0.9.30 (was 0.8.92).
   The 0.9 breaking changes touch only distributed rendering (Lambda, Cloud Run), which the plugin does not use.
   Clip render caches are keyed by plugin version, so existing `hyperframes` clips render again once.

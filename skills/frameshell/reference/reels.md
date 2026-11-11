@@ -8,7 +8,7 @@ Ask once, in at most two rounds of up to four questions, each with options and y
 
 1. **Which take:** the newest video in `assets/`, or the file they name.
 2. **Platform:** Instagram Reels, TikTok, YouTube Shorts, or all. It changes the safe zones and the length, little else.
-3. **Style:** their style notes if the project has them (a `scripts/style.md` or what they said before), reference images they give, or your defaults below.
+3. **Style:** `frameshell style show` when the project has a `style.json` (colours, fonts, type sizes, motion, sound levels, platforms, banned list; see [project-model.md](project-model.md#style)); otherwise reference images they give, or your defaults below. Ask only for values it marks `not set`.
 4. **Review:** *guided* (they watch after every pass) or *quick* (they only approve word fixes, caption keywords and the graphics plan). Both keep the three fixed stops: after the cut, after the graphics plan, before export.
 5. **Graphics:** few (captions + 2–3 cards), balanced (captions + 4–6 cards and logos, recommended), many (also one full-screen scene).
 6. **Music:** a file they give, one you make with your own tools, or none.
@@ -19,21 +19,23 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 - **Vertical canvas.** A reel project is 1080×1920: set `resolution` in `frameshell.json` (see [project-model.md](project-model.md)) before placing clips, and export with `--preset vertical-1080x1920`.
 - **Loudness.** Set `export.loudness` to `-14` in `frameshell.json`: the level Instagram, TikTok and Shorts normalize to. Export keeps true peak under −1 dBTP.
-- **Horizontal footage.** A 16:9 take is fitted (letterboxed) into the vertical frame. Look at a frame first (`frameshell frame --at 1 --out <file.png>`): if the person lies on their side, the phone was held sideways and Frameshell cannot rotate a clip yet: tell them. If they stand upright, fill the frame with `frameshell clip set <clip> --scale <s> --x <px>`: `s` = (1920 × source width) / (1080 × source height), 3.16 for 16:9; `x` moves the picture sideways in project pixels, so centre the face and keep the edges covered (|x| at most half of the scaled width minus 1080).
+- **Horizontal footage.** A 16:9 take is fitted (letterboxed) into the vertical frame. Look at a frame first (`frameshell frame --at 1 --out <file.png>`): if the person lies on their side, the phone was held sideways and Frameshell cannot rotate a clip yet: tell them. If they stand upright, `frameshell clip reframe <clip> --json` fills the frame and follows their face (see [transitions.md](transitions.md)); `--anchor 0-1` fixes the position when no face is found. Do it before the zooms: it replaces the clip's `x`, `y` and `scale`.
+- **More formats.** The same edit can also go out as 16:9, 4:5 or 1:1: `frameshell format add 4x5`, then `render --formats <ids>` with the ids `format list` prints. Check each format's frames: captions and cards placed for 9:16 may sit differently.
+- **Voice.** A phone or laptop recording gets `frameshell clip set <clip> --voice` (high-pass, light denoise, gentle compression), before any music goes under it.
 
 ## Passes
 
 1. **Words.** `frameshell transcribe assets/<take> --language <code> --json`. Show the person the transcript with the names, brands and numbers it contains, and ask which are misspelled; fix them in the transcript's `edits` (see [project-model.md](project-model.md#transcript)). Proofread before cutting: captions show these words.
-2. **Cut.** Long pauses and retakes as in [transcript-editing.md](transcript-editing.md#choosing-cuts), in one transaction. Reels are tighter than talks: cut pauses over about 0.4 s and leave about 0.1 s of air each side. Show the list of cuts (time, words around it, why) before applying it in *quick* mode; in *guided* mode apply, then let them watch.
+2. **Cut.** `frameshell cleanup --retakes --dry-run --json` lists the long pauses and false starts with their words, reason and confidence (its defaults, pauses over 0.4 s with 0.1 s of air each side, are reel-tight). Show them as a table before applying in *quick* mode, then run it again without `--dry-run` and with `--skip <id>` for each rejected one: one transaction. In *guided* mode apply, then let them watch. Cut by hand what it does not cover, as in [transcript-editing.md](transcript-editing.md#choosing-cuts).
 3. **Captions.** `frameshell track add subtitles --follows <video track> --preset big-keyword --position bottom --json`. The caption sits at chest height, never over the face: check with a frame where the face is lowest. Show the person the key words you would stress and wait for their OK: they are what a muted viewer reads.
-4. **Graphics plan, then graphics.** First a table, no clips yet: what is said · time · what appears · why. One graphic per idea, triggered on its word (take the time from the transcript word, mapped to timeline time), roughly one every 3–5 s in a reel under a minute. Real logos and screenshots the person gives you, never redrawn ones. Wait for the OK, then build each graphic with the `hyperframes` or `remotion` skill on a video track above the footage, one transaction per graphic.
-5. **Zooms.** Keys on the footage clip (see [transitions.md](transitions.md#keyframes)), never a cut: `frameshell clip key <clip> --prop scale --at <s> --value <v> --ease in-out`. Push in toward an idea and back out, at most 5–10 % over the fill scale; start the hook slightly pushed in (about 1.08 times the fill scale) and settle in the first 1.5 s so frame 0 already moves. Every zoom needs a reason (a key phrase, a reveal).
-6. **Sound.** Frameshell makes no music or effects: make them with your own tools (or use the person's files), `frameshell import` them and place them on audio tracks. Effects sit 20–25 dB under the voice and land 20–40 ms before their visual: a hit on the hook, a whoosh on a scene change, a click on a check, one riser before the biggest moment. Music sits about 12 dB under the voice; dip it a further 6–7 dB while someone speaks with `clip key <music clip> --prop gain` keys at each phrase start and end.
-7. **Export and verify.** `frameshell render --preset vertical-1080x1920 --json`, then `frameshell transcribe --verify exports/<file>.mp4 --json` as in [transcript-editing.md](transcript-editing.md). Give them a cover too: `frameshell frame --at <s> --out exports/cover.png` at the frame with the strongest word.
+4. **Graphics plan, then graphics.** First a table, no clips yet: what is said · time · what appears · why. One graphic per idea, triggered on its word (take the time from the transcript word, mapped to timeline time), roughly one every 3–5 s in a reel under a minute. Mark each trigger with `frameshell marker add --at <s> --label <idea>`: the person sees the plan on the timeline, and graphics, zooms and transitions land on `marker list` times. Real logos and screenshots the person gives you, never redrawn ones. Wait for the OK, then build each graphic with the `hyperframes` or `remotion` skill on a video track above the footage, one transaction per graphic.
+5. **Zooms.** Keys on the footage clip (see [transitions.md](transitions.md#keyframes)), never a cut: `frameshell clip key <clip> --prop scale --at <s> --value <v> --ease in-out`. Push in toward an idea and back out, at most 5–10 % over the fill scale; start the hook slightly pushed in (about 1.08 times the fill scale) and settle in the first 1.5 s so frame 0 already moves. Every zoom needs a reason (a key phrase, a reveal). A topic change can take a `push` or `wipe` instead of a zoom ([transitions.md](transitions.md)); never a transition on every cut.
+6. **Sound.** Frameshell makes no music or effects: make them with your own tools (or use the person's files), `frameshell import` them and place them on audio tracks. Effects sit 20–25 dB under the voice and land 20–40 ms before their visual: a hit on the hook, a whoosh on a scene change, a click on a check, one riser before the biggest moment. Music sits about 12 dB under the voice (`style.json` `sound` when set); then `frameshell duck <music track> --under <voice track>` dips it while someone speaks. Run `duck` again after any later cut.
+7. **Export and verify.** Review rounds use `frameshell render --preset vertical-1080x1920 --quality draft --json`; the delivery is `--quality final`, then `frameshell transcribe --verify exports/<file>.mp4 --json` as in [transcript-editing.md](transcript-editing.md). Platforms show frame 0 as the thumbnail: when `render` warns it is black, add `--cover-frame --cover-text <word>`. Give them a cover image too: `frameshell cover --text <strongest word> --json`, which picks the frame where the word is spoken and checks it reads at thumbnail size.
 
 ## Layout rules (1080×1920)
 
-- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption). Check each graphic in a frame, not in its file.
+- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. Check each graphic in a frame, not in its file.
 - **Face first:** nothing covers the face or chin, also at the deepest zoom: cards start below the chin at the zoom they appear in.
 - **One idea on screen:** when a graphic says what the caption says, the caption is noise; leave the caption and drop the graphic, or move the graphic to a moment the caption does not cover.
 - **Text:** no caption on screen under 0.4 s; type at least 28 px at 1080 wide; one display face and one text face; one accent colour, on the key word only.
@@ -42,7 +44,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 - **A note is a rule for the whole video**, not one moment: "it covers my chin" means check every graphic at its deepest zoom; "the effects are loud" means lower all of them.
 - **Redo only what they name:** "redo 0:04 to 0:07" changes that range and leaves the rest exactly as it was.
-- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `scripts/style.md` once they agree; read it at the next intake.
+- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake.
 
 ## Before you hand it over
 
@@ -52,6 +54,7 @@ Run the [critique loop](critique.md) on a draft export until every score is 8 or
 - [ ] No caption shorter than 0.4 s; every misspelled word fixed.
 - [ ] Graphics follow their plan and the person's style; one idea at a time.
 - [ ] `transcribe --verify` reports nothing `lost`.
-- [ ] The cover shows one big word readable as a thumbnail.
+- [ ] `cover` reports the word readable, and frame 0 is not black.
+- [ ] Music ducked after the last cut; loudness at −14 LUFS.
 
 Then ask them to watch it twice on their phone, with and without sound.
