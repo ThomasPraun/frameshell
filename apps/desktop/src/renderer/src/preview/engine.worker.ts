@@ -2,6 +2,7 @@
 // video layer into an OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one
 // AudioWorklet mixer. Runs in a Worker: main-thread (React) stalls must not freeze the picture.
 import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
+import type { ShapePart } from "@frameshell/schema/transitions";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
@@ -23,7 +24,9 @@ import {
   firstAudioDifference,
   firstVideoDifference,
   programAt,
+  shapedRect,
   spanPlacement,
+  spanShape,
 } from "./program.js";
 import { mediaSrc } from "./media-src.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
@@ -439,6 +442,8 @@ interface Part {
   angle: AngleSpan | null;
   /** Program frame shown: a reframed angle's cut depends on it. */
   frame: number;
+  /** Offset and frame rectangle of a shaped dissolve it plays in (ADR 0030); null outside one. */
+  shape?: ShapePart | null;
 }
 
 class Engine implements LayerHost {
@@ -675,12 +680,13 @@ class Engine implements LayerHost {
       if (!span || span.kind === "placeholder" || (span.kind === "generated" && span.clip === this.#hidden)) continue;
       // Keys and transitions (ADR 0018) move or fade a picture from frame to frame, even one that holds.
       const placement = span.kind === "angle" ? IDENTITY_PLACEMENT : spanPlacement(span, want, program.fps);
+      const shape = span.kind === "angle" ? null : spanShape(span, want, program.fps);
       if (span.kind !== "angle" && span.motion) key += `|m${pipeline.layer}@${want}`;
       if (span.kind === "still") {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -695,7 +701,7 @@ class Engine implements LayerHost {
           // Shots fill opaque tiles: an angle's alpha plane is not used.
           parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span, frame: want });
         } else {
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -764,7 +770,16 @@ class Engine implements LayerHost {
         continue;
       }
       if (part.placement.opacity <= 0) continue;
-      const rect = layerRect(part.size, output, project, part.placement);
+      const placed = layerRect(part.size, output, project, part.placement);
+      // A shaped dissolve (ADR 0030) moves the picture and cuts it to a frame rectangle; its own alpha still applies.
+      const shaped = part.shape ? shapedRect(part.shape, placed, output) : null;
+      const rect = shaped ? { ...placed, left: shaped.left, top: shaped.top } : placed;
+      if (shaped?.clip) {
+        context.save();
+        context.beginPath();
+        context.rect(shaped.clip.left, shaped.clip.top, shaped.clip.width, shaped.clip.height);
+        context.clip();
+      }
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
         const masked = this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
@@ -772,6 +787,7 @@ class Engine implements LayerHost {
       } else {
         context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
       }
+      if (shaped?.clip) context.restore();
     }
     context.globalAlpha = 1;
   }

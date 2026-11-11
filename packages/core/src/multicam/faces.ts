@@ -1,7 +1,7 @@
 // Face-driven reframe keys (ADR 0016): sample frames with ffmpeg, find faces with YuNet on ONNX Runtime Web
 // (WebAssembly, in a worker thread), follow the main face, then keep only the keys where it moves.
-import { spawn } from "node:child_process";
 import type { AngleCrop } from "@frameshell/schema";
+import { readRawFrames } from "../media/raw-frames.js";
 import { loadOnnxModel } from "../onnx-web.js";
 import { runWorkerTask } from "../worker-task.js";
 
@@ -26,6 +26,12 @@ export interface BgrFrame {
 /** Faces found in one frame. */
 export type FaceDetector = (frame: BgrFrame) => Promise<Face[]>;
 
+/** A stretch of a file, source seconds. */
+export interface SourceRange {
+  from: number;
+  to: number;
+}
+
 /** Frames looked at per second of an angle's file. */
 export const FACE_SAMPLE_HZ = 2;
 
@@ -47,58 +53,20 @@ export function faceFrameSize(width: number, height: number): { width: number; h
 /**
  * Frames of the first video stream of absolute `path`, {@link FACE_SAMPLE_HZ}
  * per second scaled to `size`, with their source time. Reading waits for the
- * consumer, so a slow detector never piles frames up in memory. Throws when
- * ffmpeg cannot decode the file.
+ * consumer, so a slow detector never piles frames up in memory. With
+ * `range`, only that stretch of the file is decoded. Throws when ffmpeg cannot
+ * decode the file.
  */
 export async function* sampleFaceFrames(
   ffmpeg: string,
   path: string,
   size: { width: number; height: number },
+  range?: SourceRange,
 ): AsyncGenerator<{ time: number; frame: BgrFrame }> {
-  const frameBytes = size.width * size.height * 3;
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-nostdin",
-    "-i",
-    path,
-    "-map",
-    "0:v:0",
-    "-an",
-    "-vf",
-    `fps=${FACE_SAMPLE_HZ},scale=${size.width}:${size.height}:flags=area,format=bgr24`,
-    "-f",
-    "rawvideo",
-    "-",
-  ];
-  const child = spawn(ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-4000)));
-  const exited = new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
-  let pending: Buffer = Buffer.alloc(0);
+  const filter = `fps=${FACE_SAMPLE_HZ},scale=${size.width}:${size.height}:flags=area,format=bgr24`;
   let index = 0;
-  let finished = false;
-  try {
-    for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
-      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
-      let at = 0;
-      for (; at + frameBytes <= pending.length; at += frameBytes) {
-        const data = Uint8Array.from(pending.subarray(at, at + frameBytes));
-        yield { time: Math.round((index++ / FACE_SAMPLE_HZ) * 1000) / 1000, frame: { ...size, data } };
-      }
-      pending = pending.subarray(at);
-    }
-    const code = await exited;
-    finished = true;
-    if (code !== 0) throw new Error(`ffmpeg could not read the picture of ${path} (exit ${code}): ${stderr.trim()}`);
-  } finally {
-    // The consumer stopped early (an error, a closed connection): do not leave ffmpeg decoding.
-    if (!finished) child.kill();
+  for await (const data of readRawFrames(ffmpeg, path, filter, size.width * size.height * 3, range)) {
+    yield { time: Math.round(((range?.from ?? 0) + index++ / FACE_SAMPLE_HZ) * 1000) / 1000, frame: { ...size, data } };
   }
 }
 
@@ -340,6 +308,8 @@ export interface FaceScanRequest {
   /** Seconds of the file, for progress; unknown: no fraction. */
   duration?: number | undefined;
   crop?: AngleCrop | undefined;
+  /** Look only at this stretch of the file (key times stay source seconds of the whole file). Default: all of it. */
+  range?: SourceRange | undefined;
   /** 0..1 of the file looked at. */
   onProgress?: ((fraction: number) => void) | undefined;
   /** Stops the scan; it then rejects. */
@@ -368,10 +338,11 @@ export interface AngleFaces {
 export async function angleFaceKeys(options: AngleFaceOptions): Promise<AngleFaces> {
   const size = faceFrameSize(options.width, options.height);
   const samples: FaceSample[] = [];
-  for await (const { time, frame } of sampleFaceFrames(options.ffmpeg, options.path, size)) {
+  for await (const { time, frame } of sampleFaceFrames(options.ffmpeg, options.path, size, options.range)) {
     options.signal?.throwIfAborted();
     samples.push({ time, faces: await options.detect(frame) });
-    if (options.duration && options.duration > 0) options.onProgress?.(Math.min(1, time / options.duration));
+    const span = options.range ? options.range.to - options.range.from : options.duration;
+    if (span && span > 0) options.onProgress?.(Math.min(1, (time - (options.range?.from ?? 0)) / span));
   }
   const track = mainFaceTrack(samples, options.crop);
   return { samples: samples.length, faces: track.length, keys: proposeReframeKeys(track) };

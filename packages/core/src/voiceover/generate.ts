@@ -4,9 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import type { SpeechOptions, SpeechProvider } from "@frameshell/plugin-api";
-import { type AssetImportResult, ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
+import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
 import { type VoiceoverLine, parseVoiceoverScript, shootSlug } from "@frameshell/schema";
 import { writeTextAtomic } from "../fs-util.js";
+import type { MediaImportResult } from "../media/service.js";
 import { locateScript } from "../scripts/outline.js";
 import { type Pcm16, pcmOfWav, readPcmWav } from "../transcripts/window.js";
 import { type TakeFile, type TakeMark, VOICEOVER_DIR, readTakes, takeKey, takeWavBytes } from "./takes.js";
@@ -29,7 +30,7 @@ export interface VoiceoverRequest {
   speechProviders(): Promise<string[]>;
   ensureBinary(name: string): Promise<string>;
   /** Import project files already under `assets/` and queue their ingest. */
-  importAssets(files: string[]): Promise<AssetImportResult>;
+  importAssets(files: string[]): Promise<MediaImportResult>;
   progress(update: Progress): void;
   /** Aborted when the daemon stops. */
   signal: AbortSignal;

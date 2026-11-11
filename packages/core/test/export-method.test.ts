@@ -72,15 +72,15 @@ describe("render and frame methods", () => {
   it(
     "renders the main timeline as a job to exports/<timeline>-<preset>.mp4",
     async () => {
-      const result = await conn.request("render", { cwd: project, preset: "vertical-1080x1920" });
-      const output = join(project, "exports", "main-vertical-1080x1920.mp4");
+      const result = await conn.request("render", { cwd: project, preset: "youtube-1440p" });
+      const output = join(project, "exports", "main-youtube-1440p.mp4");
       expect(result).toMatchObject({
         output,
-        preset: "vertical-1080x1920",
+        preset: "youtube-1440p",
         timeline: "main",
         duration: 1,
-        width: 1080,
-        height: 1920,
+        width: 2560,
+        height: 1440,
         fps: "30/1",
         loudness: -17,
         warnings: [],
@@ -95,7 +95,7 @@ describe("render and frame methods", () => {
         ["video", "h264"],
         ["audio", "aac"],
       ]);
-      expect(streams[0]).toMatchObject({ width: 1080, height: 1920 });
+      expect(streams[0]).toMatchObject({ width: 2560, height: 1440 });
       expect(Number(streams[0]!.duration)).toBeCloseTo(1, 2);
       // No scratch files left behind.
       const scratch = join(project, ".frameshell", "cache", "render");
@@ -103,6 +103,35 @@ describe("render and frame methods", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it(
+    "renders a draft and a final with the encoder doctor reports, the final tagged bt709",
+    async () => {
+      const { encoders } = await conn.request("doctor", { cwd: project });
+      expect(encoders?.picked).not.toBeNull();
+      const stream = async (output: string) => {
+        const { streams } = (await ffprobeJson(output, ["-select_streams", "v:0", "-show_entries", "stream=codec_name,color_space,avg_frame_rate"])) as {
+          streams: { codec_name: string; color_space?: string; avg_frame_rate: string }[];
+        };
+        return streams[0]!;
+      };
+      const draft = await conn.request("render", { cwd: project, quality: "draft", out: join(tempDir(), "draft.mp4") });
+      expect(draft).toMatchObject({ quality: "draft", encoder: encoders!.picked, fps: "30/1" });
+      expect((await finished(draft.job.id)).state).toBe("done");
+      expect(await stream(draft.output)).toMatchObject({ codec_name: "h264", avg_frame_rate: "30/1" });
+      const final = await conn.request("render", { cwd: project, quality: "final", out: join(tempDir(), "final.mp4") });
+      expect(final).toMatchObject({ quality: "final", encoder: encoders!.picked });
+      expect((await finished(final.job.id)).state).toBe("done");
+      expect(await stream(final.output)).toMatchObject({ codec_name: "h264", color_space: "bt709" });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it("reports the preset's own encoder when no quality is asked for", async () => {
+    const result = await conn.request("render", { cwd: project, out: join(tempDir(), "plain.mp4") });
+    expect(result).toMatchObject({ quality: null, encoder: "libx264" });
+    await finished(result.job.id);
+  });
 
   it(
     "captures a frame as PNG at the project resolution",

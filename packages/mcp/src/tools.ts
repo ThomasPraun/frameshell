@@ -42,7 +42,12 @@ export const FramesStripParams = z
       .nonnegative()
       .describe("Timeline seconds of the last frame, e.g. `20`; greater than `from` and before the timeline's end."),
     count: z.int().min(2).max(16).default(6).describe("Frames to sample, evenly spaced from `from` to `to` inclusive. Default 6."),
-    preset: z.string().min(1).optional().describe("Export preset whose frame size to render at. Default: project resolution."),
+    preset: z.string().min(1).optional().describe("Export preset whose frame size to render at. Default: the format's size."),
+    projectFormat: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Format of the project to lay the frames out in (`format_list`), e.g. `9x16`. Default: the primary format."),
   })
   .refine((params) => params.to > params.from, { message: "`to` must be greater than `from`", path: ["to"] });
 

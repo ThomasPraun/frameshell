@@ -19,7 +19,7 @@ export type VoiceoverInvocation = { kind: "voiceover.generate"; script: string; 
 /** Parse `voiceover <sub> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
 export function parseVoiceover(
   rest: string[],
-  options: { lines?: string | undefined; provider?: string | undefined; voice?: string | undefined; yes?: boolean | undefined },
+  options: { lines?: string | undefined; provider?: string | undefined; voice?: string | boolean | undefined; yes?: boolean | undefined },
 ): VoiceoverInvocation | null {
   const [sub, ...args] = rest;
   if (sub !== "generate" || args.length !== 1) return null;
@@ -33,7 +33,7 @@ export function parseVoiceover(
     script: args[0]!,
     ...(lines ? { lines } : {}),
     ...(options.provider !== undefined ? { provider: options.provider } : {}),
-    ...(options.voice !== undefined ? { voice: options.voice } : {}),
+    ...(typeof options.voice === "string" ? { voice: options.voice } : {}),
     yes: options.yes === true,
   };
 }

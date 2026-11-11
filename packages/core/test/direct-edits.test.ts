@@ -208,6 +208,52 @@ describe("direct edit with invalid content", () => {
   });
 });
 
+describe("direct edit of markers (ADR 0029)", () => {
+  const marker = (id: string, at: number, label: string) => ({ id, at, label });
+
+  it("is journaled as a `timeline.patch`, written back sorted by `at`, and revert undoes it", async () => {
+    const { root, timelines, read, edit } = setup();
+    await timelines.reconcile(root, "main");
+    edit((timeline) => {
+      timeline.markers = [marker("m_b", 4, "hook"), marker("m_a", 1, "intro")];
+    });
+    await timelines.reconcile(root, "main");
+    expect(read()).toMatchObject({ revision: 1, markers: [marker("m_a", 1, "intro"), marker("m_b", 4, "hook")] });
+
+    // Moving one is a second journaled edit.
+    edit((timeline) => {
+      timeline.markers[1].at = 0.5;
+    });
+    await timelines.reconcile(root, "main");
+    expect(read()).toMatchObject({ revision: 2, markers: [marker("m_b", 0.5, "hook"), marker("m_a", 1, "intro")] });
+    const history = await timelines.history(root, "main", {});
+    const moved = history.transactions.at(-1)!;
+    expect(moved).toMatchObject({ author: "file", operations: [{ op: "timeline.patch", author: "file", touched: ["m_b"] }] });
+
+    await timelines.revert({ root, cwd: root, timeline: "main", author: "ui", tx: { id: "tx_000000f1", label: null }, target: moved.tx });
+    expect(read().markers).toEqual([marker("m_a", 1, "intro"), marker("m_b", 4, "hook")]);
+  });
+
+  it.each([
+    ["a duplicate label, ignoring case", [marker("m_a", 1, "Hook"), marker("m_b", 2, "hook")], /markers\.1\.label.*already marker m_a/],
+    ["a duplicate id", [marker("m_a", 1, "intro"), marker("m_a", 2, "hook")], /m_a/],
+    ["an id that a clip or track already has", [marker("t_v", 1, "intro")], /t_v/],
+    ["a label shaped like a marker id", [marker("m_a", 1, "m_abc123")], /markers\.0\.label.*marker id/],
+    ["a time off the frame grid", [marker("m_a", 1.015, "intro")], /m_a \("intro"\) is at 1\.015 s, off the frame grid/],
+  ])("rejects %s into .frameshell/rejected/ and restores the daemon's file", async (_name, markers, message) => {
+    const { root, path, timelines, edit, rejected } = setup();
+    await timelines.reconcile(root, "main");
+    const daemonVersion = readFileSync(path, "utf8");
+    edit((timeline) => {
+      timeline.markers = markers;
+    });
+    await timelines.reconcile(root, "main");
+    expect(readFileSync(path, "utf8")).toBe(daemonVersion);
+    expect(rejected).toMatchObject([{ reason: "invalid", message: expect.stringMatching(message) }]);
+    expect(existsSync(join(root, rejected[0]!.preserved))).toBe(true);
+  });
+});
+
 describe("rejections listed for status", () => {
   const staleEdit = async (project: ReturnType<typeof setup>) => {
     const { root, timelines, edit, addClip } = project;

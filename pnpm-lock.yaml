@@ -166,6 +166,16 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/motion:
+    dependencies:
+      '@frameshell/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+
   packages/plugin-api:
     dependencies:
       '@frameshell/schema':
@@ -193,11 +203,14 @@ importers:
   plugins/hyperframes:
     dependencies:
       '@hyperframes/core':
-        specifier: 0.8.92
-        version: 0.8.92(@types/node@22.20.4)
+        specifier: 0.9.30
+        version: 0.9.30(@types/node@22.20.4)
+      '@hyperframes/lint':
+        specifier: 0.9.30
+        version: 0.9.30
       '@hyperframes/producer':
-        specifier: 0.8.92
-        version: 0.8.92(@types/node@22.20.4)
+        specifier: 0.9.30
+        version: 0.9.30(@types/node@22.20.4)
     devDependencies:
       '@frameshell/core':
         specifier: workspace:*
@@ -936,39 +949,6 @@ packages:
   '@fontsource-variable/jetbrains-mono@5.3.0':
     resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
 
-  '@fontsource/archivo-black@5.3.0':
-    resolution: {integrity: sha512-7EsTIQ+Blf96ktpzTUpI7msi+u9/AJxM/GZxOSkEubVd1jSTrFSTNxMgfpX/8rQsjZ+19a+qvRbtcTEp5J/72g==}
-
-  '@fontsource/eb-garamond@5.3.0':
-    resolution: {integrity: sha512-VplwHpB8FLuzl+4G5LDci1b3Z4SghiuXH8XEgaxjnOb5aue5mEt1njmDKeO6iyLeGa73LffU7PC7hzncLRx0ZA==}
-
-  '@fontsource/ibm-plex-mono@5.3.0':
-    resolution: {integrity: sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==}
-
-  '@fontsource/inter@5.3.0':
-    resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
-
-  '@fontsource/jetbrains-mono@5.3.0':
-    resolution: {integrity: sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==}
-
-  '@fontsource/league-gothic@5.3.0':
-    resolution: {integrity: sha512-gqedetX+UlaiJgLiPnOzWGB1sY3OtNhS8YMjTy2D73AcsagIqpdIizssr1MStcUYf3D/zzanECuXawIgMGZxDg==}
-
-  '@fontsource/montserrat@5.3.0':
-    resolution: {integrity: sha512-iQPDtZOnmM5ih4JBGaMSXisRap0ixb9bAUw2hDtY7EjVfaqiiNlKtVuJl9XclxUwtwMMHNcWXfQR6zI9x05+Tg==}
-
-  '@fontsource/nunito@5.3.0':
-    resolution: {integrity: sha512-vw9TaTQJ/zpEpKrsODuPmOvaVjXgdda6B+xXA4YqjrdeJ62MLgVoDerdRXFQHyBnSCt2yQ2nHKCHPP/Pv7Xq4Q==}
-
-  '@fontsource/oswald@5.3.0':
-    resolution: {integrity: sha512-16r2aHActe0pH+9FLdk/74/YxXM7HpGak05kAzx3RvSToiJwGvyhv6GvckPz+YuZmvL1nxWbEop2jAXRcXYPRg==}
-
-  '@fontsource/outfit@5.3.0':
-    resolution: {integrity: sha512-0AVHzTTVJSxWDOxPKSfMeHhZeBFDU3cmgrcOb76ZEyhGo0+xgyG3GsLF3h9+X8w0IX7G4jzjJgFQEBiWdX6VgA==}
-
-  '@fontsource/space-mono@5.3.0':
-    resolution: {integrity: sha512-FrpBMOVWn3PRdRHlrZWC55X3kZG/2BTH7SM5ZyS/bky3iKya2BturI5lk+t0RoDQL2JyHzURsVq/EisCsxpI5A==}
-
   '@hono/node-server@2.1.2':
     resolution: {integrity: sha512-w0tqJ/ilmggKokOSvbp9y+F91Y4ROTyCTL/8EKj9B4qOhOZzNm/tyKElzxrz+9+4fJKQrBSaahIuCGRye5RJYg==}
     engines: {node: '>=20'}
@@ -995,25 +975,25 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@hyperframes/core@0.8.92':
-    resolution: {integrity: sha512-pNRcCYOUtnseNtgSiAP6rwnCFvBCKP5iwerc4Fzy9JoCAAsmciHW+Eq+bLX4pp0d7AxvdNgiK2mn4T1thGbwJQ==}
+  '@hyperframes/core@0.9.30':
+    resolution: {integrity: sha512-4U24NEPkOrtYvGnTHOxizP8Deyt4s3Y0m7cOLNyxHud7dQ811I3kcKp8ozNepKLUzl1lSotxXdVVUB5yVeAJVA==}
 
-  '@hyperframes/engine@0.8.92':
-    resolution: {integrity: sha512-43qHzA1d/XNQOoyI367HpGUjHj4rCB627EY1iXDU91b6B804V7PV5bsQ2GDQ6k7rQxEQMiuNqBTwVAjLvUEtIA==}
+  '@hyperframes/engine@0.9.30':
+    resolution: {integrity: sha512-9JdiOFjzclZzrg9m4eoU+n5WTOpONqjuD5X0M6ODf6TUuxBhIIi8qvu06S+GBzwuo+vd8LTNIrCU21VQ++pqiA==}
     engines: {node: '>=22'}
 
-  '@hyperframes/lint@0.8.92':
-    resolution: {integrity: sha512-8BGkcNckiYBn/3BqsDl4MglSdOwHSdhxO6L1ZgwiZarnK6zDTg6dA0uaWzGW8YBhY7HglgVSkxL2rEqEVRDJUg==}
+  '@hyperframes/lint@0.9.30':
+    resolution: {integrity: sha512-1COM1R+GTDO1JtDAdw67fOHFRiS2S3iFmB0KUW6Ltzjx3V5Nb7fqifxh9LkxUblOLY7hXn/vo/Qoan6QsW+rWg==}
 
-  '@hyperframes/parsers@0.8.92':
-    resolution: {integrity: sha512-4q+AgFVUI/DZk1qe9J2JlNkr3rCDet2GIxvrCyc7QyViJrABrphdrtjwK/9YPfR/g1y9cKfx6t/KOHXctGzF8Q==}
+  '@hyperframes/parsers@0.9.30':
+    resolution: {integrity: sha512-Of4RglLZ2GdG7cYPmlg18U5fN+WLh9vULeEP12a6PGJcSn8VLme2a3Hy9QtEefVB8bvSseVidSLIXPTrVfBhAA==}
 
-  '@hyperframes/producer@0.8.92':
-    resolution: {integrity: sha512-dRMJsIEOaAfJ8C6IlrCkXf7cRj8sw3UUSYns90dwORRW3PzOcpRbrXjhBRX8NYxvme7nzuMqc1h8P1D/mC6BNw==}
+  '@hyperframes/producer@0.9.30':
+    resolution: {integrity: sha512-zCI464BtJJfLZrSeJFRSaBxK86sxXv9sXnAZoPzN7lihzUAVTaX/3ImWKCFaSLLFDX5bIOixOqDITA2l1IOTRA==}
     engines: {node: '>=22'}
 
-  '@hyperframes/studio-server@0.8.92':
-    resolution: {integrity: sha512-9Sdfaqqozpr0GpXOAjn86aTTtWlkXQE2cuhw5hcygniabJEUHr4oKyxOKL7i2J208GJVwx7+RrjGL0kqLET4DQ==}
+  '@hyperframes/studio-server@0.9.30':
+    resolution: {integrity: sha512-iHpAhGLRofofCCzFizxY3dzHFacvejH+e6m4mGQ0ic+akJOy0diRZAS7sn5AO/AUGPy2dFByICnXLWoBNuaptA==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -1296,6 +1276,19 @@ packages:
     resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
     engines: {node: '>=20'}
     hasBin: true
+
+  '@puppeteer/browsers@3.2.2':
+    resolution: {integrity: sha512-q2BU4YfO9h/Wt7IcWPcggpOOqLk2Tbs1hDwolvKZrweRjy751OJBKMN9zO5bfD0pzU7X/tvKw/exQds4pM/LOg==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
+    peerDependencies:
+      proxy-agent: '>=8.0.1'
+      yauzl: ^2.10.0 || ^3.4.0
+    peerDependenciesMeta:
+      proxy-agent:
+        optional: true
+      yauzl:
+        optional: true
 
   '@puppeteer/browsers@3.2.3':
     resolution: {integrity: sha512-2Bt3m6dDAJqmZehn0wiXSYyQmuhyiHHZ7FjvrVaS1W2RoFGV6eCK71UvKYkNJjkwC1Q9nobjhvTMhLQztFVINA==}
@@ -2308,9 +2301,6 @@ packages:
     resolution: {integrity: sha512-d0II/GO9uf9lfUHH2BQsjxzRJZBdsjgsBiW4BvhWk/3qoKwQFjIDVN19PfX8F2D/r9PCMTtLWjYVCFrpeYUzsw==}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
-  bpm-detective@2.0.5:
-    resolution: {integrity: sha512-FaHFT5WDCR5zwtjVTqxk01o2MDaf22ORHityX1lxMamBcVNX6NWXB6hw7nx4fmlEseRMv0xfuSybINZylljLfA==}
-
   brace-expansion@1.1.21:
     resolution: {integrity: sha512-9zeA+KLZNNzglF2TPKRQEDyx6Yby7daAkuy8MiPzpXPsYDWi/DRM8jmwUDxokQjYqBpv5DgPiwD4h4ZZSy1Ujw==}
 
@@ -2579,6 +2569,9 @@ packages:
 
   detect-node@2.1.0:
     resolution: {integrity: sha512-T0NIuQpnTvFDATNuHN5roPwSBG83rFsuO+MXXH9/3N1eFbn4wcPjttvjMLEPWJ0RGUYgQE7cGgS3tNxbqCGM7g==}
+
+  devtools-protocol@0.0.1680125:
+    resolution: {integrity: sha512-rVARKAvOFJCFkvgX01VLvYqKIvt+cRCqvUxIhB2oAqVGPalxk3w3sb5TUGDagpow/EFblBpm/Zl/29QA2dd+jA==}
 
   devtools-protocol@0.0.1687809:
     resolution: {integrity: sha512-t7kSb+UKYdyxcmqy98U2P86ne6rCve3DIJ4+lp54i/hhClgFuG35JrLj23rO14Jw3sWDsp7i+22QhNU0+/qk8g==}
@@ -3912,12 +3905,16 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
+  puppeteer-core@25.11.0:
+    resolution: {integrity: sha512-Ujym7JbxoAqanaxGcHgmTomfhC01HfDCSuGZ8Hs9boHrDjzbNVMnFRJo2KtbDT9LCRgeJoFnkn9JQZ41eEUrLw==}
+    engines: {node: '>=22.12.0'}
+
   puppeteer-core@25.12.0:
     resolution: {integrity: sha512-z6LQUt5SH7jwGtGA+nMtJuEjZIsqPiwQ+EFHCYuVDQrJpvifNmmGuyDvTzAKPyFzihxgHc5f3aMzu2kn8Ps37A==}
     engines: {node: '>=22.12.0'}
 
-  puppeteer@25.12.0:
-    resolution: {integrity: sha512-agM9cYcxbvmU17w9qtF17s7/Vv7Dhbyig6AWwIgvQQLR2dKZdPqNvRPanac7xH4iMPcNYOCfyCkwqCnR4nVOcA==}
+  puppeteer@25.11.0:
+    resolution: {integrity: sha512-n+psxZFH/qlJ3gwTZMxTLUZoE98FAOEjT/BSxHXvPmNCGAfN/kq0UnIZ8m9RB4rAVvJr7zRHUnKKg98GLMUyyQ==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -4384,6 +4381,10 @@ packages:
   undici@6.29.0:
     resolution: {integrity: sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==}
     engines: {node: '>=18.17'}
+
+  undici@7.25.0:
+    resolution: {integrity: sha512-xXnp4kTyor2Zq+J1FfPI6Eq3ew5h6Vl0F/8d9XU5zZQf1tX9s2Su1/3PiMmUANFULpmksxkClamIZcaUqryHsQ==}
+    engines: {node: '>=20.18.1'}
 
   undici@7.30.0:
     resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
@@ -5218,28 +5219,6 @@ snapshots:
 
   '@fontsource-variable/jetbrains-mono@5.3.0': {}
 
-  '@fontsource/archivo-black@5.3.0': {}
-
-  '@fontsource/eb-garamond@5.3.0': {}
-
-  '@fontsource/ibm-plex-mono@5.3.0': {}
-
-  '@fontsource/inter@5.3.0': {}
-
-  '@fontsource/jetbrains-mono@5.3.0': {}
-
-  '@fontsource/league-gothic@5.3.0': {}
-
-  '@fontsource/montserrat@5.3.0': {}
-
-  '@fontsource/nunito@5.3.0': {}
-
-  '@fontsource/oswald@5.3.0': {}
-
-  '@fontsource/outfit@5.3.0': {}
-
-  '@fontsource/space-mono@5.3.0': {}
-
   '@hono/node-server@2.1.2(hono@4.13.10)':
     dependencies:
       hono: 4.13.10
@@ -5260,30 +5239,32 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@hyperframes/core@0.8.92(@types/node@22.20.4)':
+  '@hyperframes/core@0.9.30(@types/node@22.20.4)':
     dependencies:
       '@chenglou/pretext': 0.0.5
-      '@hyperframes/lint': 0.8.92
-      '@hyperframes/parsers': 0.8.92
-      '@hyperframes/studio-server': 0.8.92(@types/node@22.20.4)
-      bpm-detective: 2.0.5
+      '@hyperframes/lint': 0.9.30
+      '@hyperframes/parsers': 0.9.30
+      '@hyperframes/studio-server': 0.9.30(@types/node@22.20.4)
+      acorn: 8.18.0
       linkedom: 0.18.13
       postcss: 8.5.28
+      wawoff2: 2.0.1
     optionalDependencies:
-      esbuild: 0.25.12
+      esbuild: 0.28.2
     transitivePeerDependencies:
       - '@types/node'
       - canvas
 
-  '@hyperframes/engine@0.8.92':
+  '@hyperframes/engine@0.9.30':
     dependencies:
       '@hono/node-server': 2.1.2(hono@4.13.10)
-      '@hyperframes/core': 0.8.92(@types/node@22.20.4)
-      '@hyperframes/parsers': 0.8.92
+      '@hyperframes/core': 0.9.30(@types/node@22.20.4)
+      '@hyperframes/parsers': 0.9.30
       hono: 4.13.10
       linkedom: 0.18.13
-      puppeteer: 25.12.0
+      puppeteer: 25.11.0
       puppeteer-core: 25.12.0
+      undici: 7.25.0
     transitivePeerDependencies:
       - bufferutil
       - canvas
@@ -5291,54 +5272,44 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  '@hyperframes/lint@0.8.92':
+  '@hyperframes/lint@0.9.30':
     dependencies:
-      '@hyperframes/parsers': 0.8.92
+      '@hyperframes/parsers': 0.9.30
       acorn: 8.18.0
       acorn-walk: 8.3.5
       htmlparser2: 10.1.0
+      ignore: 5.3.2
       linkedom: 0.18.13
       postcss: 8.5.28
       postcss-selector-parser: 7.1.6
     transitivePeerDependencies:
       - canvas
 
-  '@hyperframes/parsers@0.8.92':
+  '@hyperframes/parsers@0.9.30':
     dependencies:
       '@babel/parser': 7.29.9
       acorn: 8.18.0
       acorn-walk: 8.3.5
+      entities: 7.0.1
       linkedom: 0.18.13
       magic-string: 0.30.21
       recast: 0.23.21
     transitivePeerDependencies:
       - canvas
 
-  '@hyperframes/producer@0.8.92(@types/node@22.20.4)':
+  '@hyperframes/producer@0.9.30(@types/node@22.20.4)':
     dependencies:
-      '@fontsource/archivo-black': 5.3.0
-      '@fontsource/eb-garamond': 5.3.0
-      '@fontsource/ibm-plex-mono': 5.3.0
-      '@fontsource/inter': 5.3.0
-      '@fontsource/jetbrains-mono': 5.3.0
-      '@fontsource/league-gothic': 5.3.0
-      '@fontsource/montserrat': 5.3.0
-      '@fontsource/nunito': 5.3.0
-      '@fontsource/oswald': 5.3.0
-      '@fontsource/outfit': 5.3.0
-      '@fontsource/space-mono': 5.3.0
       '@hono/node-server': 2.1.2(hono@4.13.10)
-      '@hyperframes/core': 0.8.92(@types/node@22.20.4)
-      '@hyperframes/engine': 0.8.92
-      '@hyperframes/lint': 0.8.92
-      '@hyperframes/parsers': 0.8.92
-      '@hyperframes/studio-server': 0.8.92(@types/node@22.20.4)
+      '@hyperframes/core': 0.9.30(@types/node@22.20.4)
+      '@hyperframes/engine': 0.9.30
+      '@hyperframes/lint': 0.9.30
+      '@hyperframes/parsers': 0.9.30
+      '@hyperframes/studio-server': 0.9.30(@types/node@22.20.4)
       hono: 4.13.10
       linkedom: 0.18.13
       postcss: 8.5.28
-      puppeteer: 25.12.0
+      puppeteer: 25.11.0
       puppeteer-core: 25.12.0
-      wawoff2: 2.0.1
     transitivePeerDependencies:
       - '@types/node'
       - bufferutil
@@ -5347,20 +5318,22 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  '@hyperframes/studio-server@0.8.92(@types/node@22.20.4)':
+  '@hyperframes/studio-server@0.9.30(@types/node@22.20.4)':
     dependencies:
-      '@hyperframes/core': 0.8.92(@types/node@22.20.4)
-      '@hyperframes/parsers': 0.8.92
+      '@hyperframes/core': 0.9.30(@types/node@22.20.4)
+      '@hyperframes/parsers': 0.9.30
       hono: 4.13.10
       linkedom: 0.18.13
       postcss: 8.5.28
       postcss-selector-parser: 7.1.6
+    optionalDependencies:
       sharp: 0.35.5(@types/node@22.20.4)
     transitivePeerDependencies:
       - '@types/node'
       - canvas
 
-  '@img/colour@1.1.0': {}
+  '@img/colour@1.1.0':
+    optional: true
 
   '@img/sharp-darwin-arm64@0.35.5':
     optionalDependencies:
@@ -5613,6 +5586,11 @@ snapshots:
   '@playwright/test@1.63.0':
     dependencies:
       playwright: 1.63.0
+
+  '@puppeteer/browsers@3.2.2':
+    dependencies:
+      modern-tar: 0.8.5
+      yargs: 18.2.0
 
   '@puppeteer/browsers@3.2.3':
     dependencies:
@@ -6706,8 +6684,6 @@ snapshots:
   boolean@3.2.0:
     optional: true
 
-  bpm-detective@2.0.5: {}
-
   brace-expansion@1.1.21:
     dependencies:
       balanced-match: 1.0.2
@@ -6813,6 +6789,12 @@ snapshots:
   chownr@3.0.0: {}
 
   chrome-trace-event@1.0.4: {}
+
+  chromium-bidi@17.0.2(devtools-protocol@0.0.1680125):
+    dependencies:
+      devtools-protocol: 0.0.1680125
+      mitt: 3.0.1
+      zod: 3.25.76
 
   chromium-bidi@17.0.2(devtools-protocol@0.0.1687809):
     dependencies:
@@ -6966,6 +6948,8 @@ snapshots:
 
   detect-node@2.1.0:
     optional: true
+
+  devtools-protocol@0.0.1680125: {}
 
   devtools-protocol@0.0.1687809: {}
 
@@ -8289,6 +8273,20 @@ snapshots:
 
   punycode@2.3.1: {}
 
+  puppeteer-core@25.11.0:
+    dependencies:
+      '@puppeteer/browsers': 3.2.2
+      chromium-bidi: 17.0.2(devtools-protocol@0.0.1680125)
+      devtools-protocol: 0.0.1680125
+      typed-query-selector: 2.12.3
+      webdriver-bidi-protocol: 0.4.3
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - bufferutil
+      - proxy-agent
+      - utf-8-validate
+      - yauzl
+
   puppeteer-core@25.12.0:
     dependencies:
       '@puppeteer/browsers': 3.2.3
@@ -8303,13 +8301,13 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  puppeteer@25.12.0:
+  puppeteer@25.11.0:
     dependencies:
-      '@puppeteer/browsers': 3.2.3
-      chromium-bidi: 17.0.2(devtools-protocol@0.0.1687809)
-      devtools-protocol: 0.0.1687809
+      '@puppeteer/browsers': 3.2.2
+      chromium-bidi: 17.0.2(devtools-protocol@0.0.1680125)
+      devtools-protocol: 0.0.1680125
       lilconfig: 3.1.3
-      puppeteer-core: 25.12.0
+      puppeteer-core: 25.11.0
       typed-query-selector: 2.12.3
     transitivePeerDependencies:
       - bufferutil
@@ -8585,6 +8583,7 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 22.20.4
+    optional: true
 
   shebang-command@2.0.0:
     dependencies:
@@ -8829,6 +8828,8 @@ snapshots:
   undici-types@7.24.6: {}
 
   undici@6.29.0: {}
+
+  undici@7.25.0: {}
 
   undici@7.30.0:
     optional: true

@@ -1,8 +1,9 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { Clip } from "@frameshell/schema";
-import { composePlacement, fadeWeight, gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
+import { composePlacement, dissolveProgress, fadeWeight, gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
+import { shapeAt } from "@frameshell/schema/transitions";
 import { describe, expect, it } from "vitest";
-import { envelopeGain, renderRead } from "../src/renderer/src/preview/audio-plan.js";
+import { envelopeGain, renderRead, sourceWindow } from "../src/renderer/src/preview/audio-plan.js";
 import { decodeSteps, syncTable } from "../src/renderer/src/preview/decode-plan.js";
 import {
   type AudioSpan,
@@ -11,8 +12,10 @@ import {
   compileProgram,
   firstAudioDifference,
   programAt,
+  shapedRect,
   sourceSeconds,
   spanPlacement,
+  spanShape,
 } from "../src/renderer/src/preview/program.js";
 
 // Seam under test: transitions and keys in the preview program (ADR 0018 decisions 9 and 10), against the shared evaluator.
@@ -158,6 +161,69 @@ describe("compileProgram with transitions", () => {
     expect(opacityAt(program, 15, 0)).toBeCloseTo(0.5, 9);
     expect(opacityAt(program, 60, 0)).toBe(1);
     expect(opacityAt(program, 111, 0)).toBeCloseTo(0.6, 9);
+  });
+
+  it("moves both pieces of a push by shapeAt on the bottom track, opaque, abutting", () => {
+    const shape = { kind: "push", direction: "left" } as const;
+    const program = compileProgram(view([video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+    expect(program.layers.map(brief)).toEqual([
+      ["c1@0-75<300", "c2@75-150<615"],
+      ["c2@45-75<585"],
+    ]);
+    const output = { width: 1920, height: 1080 };
+    const full = { left: 0, top: 0, width: 1920, height: 1080 };
+    for (const frame of [45, 50, 54, 60, 66, 74]) {
+      const expected = shapeAt(shape, dissolveProgress(2, 0.5, frame / 30));
+      const outgoing = spanShape(programAt(program, frame, 0) as PlacedSpan, frame, 30);
+      const incoming = spanShape(programAt(program, frame, 1) as PlacedSpan, frame, 30);
+      expect([outgoing, incoming], `frame ${frame}`).toEqual([expected.outgoing, expected.incoming]);
+      expect(opacityAt(program, frame, 1)).toBe(1);
+      expect(shapedRect(incoming!, full, output).left - shapedRect(outgoing!, full, output).left).toBe(1920);
+    }
+    // Outside the push the pictures sit still.
+    expect(spanShape(programAt(program, 40, 0) as PlacedSpan, 40, 30)).toBeNull();
+    expect(spanShape(programAt(program, 75, 0) as PlacedSpan, 75, 30)).toBeNull();
+  });
+
+  it("cuts the incoming picture of a wipe to shapeAt's frame rectangle, the outgoing one untouched", () => {
+    const shape = { kind: "wipe", direction: "up" } as const;
+    const program = compileProgram(view([video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+    const incoming = spanShape(programAt(program, 54, 1) as PlacedSpan, 54, 30)!;
+    expect(incoming).toEqual(shapeAt(shape, dissolveProgress(2, 0.5, 54 / 30)).incoming);
+    expect(spanShape(programAt(program, 54, 0) as PlacedSpan, 54, 30)).toEqual({ dx: 0, dy: 0, clip: null });
+    const [, y0] = incoming.clip!;
+    expect(shapedRect(incoming, { left: 0, top: 0, width: 1920, height: 1080 }, { width: 640, height: 360 })).toEqual({
+      left: 0,
+      top: 0,
+      clip: { left: 0, top: y0 * 360, width: 640, height: (1 - y0) * 360 },
+    });
+  });
+
+  it("plays a shaped dissolve with no handle at full length, the edge frames held, never a dip", () => {
+    const program = compileProgram(view([video("v1", [clip("c1", 0, 0, 2), clip("c2", 2, 0, 3, { dissolve: 1, shape: { kind: "push" } })])]), A);
+    // c2's head shows source frames before 0, which the decoder holds at its first frame.
+    expect(program.layers.map(brief)).toEqual([
+      ["c1@0-75<0", "c2@75-150<15"],
+      ["c2@45-75<-15"],
+    ]);
+    expect(opacityAt(program, 52, 0)).toBe(1);
+    const table = syncTable(Array.from({ length: 100 }, (_, i) => i % 15 === 0));
+    const shown = [...decodeSteps({ start: 45, end: 75, in: -15, speed: 1 }, 45, table)].filter((s) => s.from < s.to);
+    expect(shown[0]).toMatchObject({ sample: 0, from: 45, to: 61 });
+    // Its sound crossfades over the whole push; before the source's first sample it is silence, never read.
+    const sound = program.audio.find((span) => span.clip === "c2")!;
+    expect([sound.start, sound.in]).toEqual([72_000, -24_000]);
+    expect(sourceWindow({ span: sound, from: sound.start, to: sound.start + 100 })).toEqual({ first: 0, count: 0 });
+    expect(renderRead({ span: sound, from: sound.start, to: sound.start + 4 }, new Int16Array(0), 0)).toEqual(new Float32Array(4));
+  });
+
+  it("mixes a shaped dissolve on an upper track, as export does", () => {
+    const program = compileProgram(
+      view([video("v1", [clip("bg", 0, 0, 5)]), video("v2", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape: { kind: "wipe" } })])]),
+      A,
+    );
+    expect(opacityAt(program, 54, 2)).toBeCloseTo(0.3, 9);
+    expect(spanShape(programAt(program, 54, 2) as PlacedSpan, 54, 30)).toBeNull();
   });
 
   it("evaluates picture keys per frame with placementAt, keys on the clip's own clock", () => {

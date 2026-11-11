@@ -13,7 +13,8 @@
     "test": "tsc -b && vitest run",
     "test:e2e": "tsc -b && pnpm --filter @frameshell/desktop test:e2e",
     "gen:json-schema": "tsc -b && node packages/schema/scripts/generate-json-schema.mjs",
-    "gen:skill": "node packages/core/scripts/generate-core-skill.mjs"
+    "gen:skill": "node packages/core/scripts/generate-core-skill.mjs",
+    "gen:motion": "tsc -b packages/motion && node packages/motion/scripts/build-runtime.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
