@@ -29,6 +29,7 @@ import { ASK_FLAGS, runAsk } from "./ask-command.js";
 import { SETUP_FLAGS, runSetup } from "./setup-command.js";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
+import { CREDITS_FLAGS, CREDITS_USAGE, type CreditsInvocation, PROVENANCE_FLAGS, type ProvenanceInput, formatCreditsCheck, formatCreditsSet, parseCredits, provenanceOf } from "./credits-commands.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
@@ -68,14 +69,16 @@ Commands:
                                and disk estimate) and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first; --reprobe tests the
                                encoders again instead of using the answer cached per machine
-  import <file…> [--link] [--wait]
+  import <file…> [--link] [--wait] [--source-url u --licence id --author name --title t --credit line]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
-                               (exit 1 if any failed). Progress: \`frameshell status\`
+                               (exit 1 if any failed). Progress: \`frameshell status\`. A file from an outside
+                               source takes --source-url, --licence and --author (one source per call): they are
+                               recorded in credits.json, see \`credits\` below
   gc [--dry-run]               Delete regenerable files under .frameshell/ nothing uses any more (derived media
                                of deleted or changed assets, unused clip renders, stale temps).
                                --dry-run lists them without deleting
-  plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
+${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
                                an npm name[@version], or a local tarball from npm pack (./name-1.0.0.tgz)
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
@@ -146,20 +149,21 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "cover", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "text", "color", "cover-frame", "cover-text", "cover-at", "cover-color"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", ...PROVENANCE_FLAGS, "text", "color", "cover-frame", "cover-text", "cover-at", "cover-color"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill", "kind"],
   status: [],
   doctor: ["install", "reprobe"],
-  import: ["link", "wait"],
+  import: ["link", "wait", ...PROVENANCE_FLAGS],
+  ...CREDITS_FLAGS,
   gc: ["dry-run"],
   "plugin install": [],
   "plugin remove": [],
@@ -209,7 +213,7 @@ type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean; reprobe: boolean }
-  | { kind: "import"; files: string[]; link: boolean; wait: boolean }
+  | { kind: "import"; files: string[]; link: boolean; wait: boolean; provenance: ProvenanceInput }
   | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
@@ -228,6 +232,7 @@ type Invocation =
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
   | PeopleInvocation
+  | CreditsInvocation
   | ShootInvocation
   | ModelInvocation
   | { kind: "skill.update"; force: boolean }
@@ -305,6 +310,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           undo: { type: "boolean", default: false },
           restore: { type: "boolean", default: false },
           dtw: { type: "string" },
+          "source-url": { type: "string" },
+          licence: { type: "string" },
+          author: { type: "string" },
+          title: { type: "string" },
+          credit: { type: "string" },
           text: { type: "string" },
           color: { type: "string" },
           "cover-frame": { type: "boolean", default: false },
@@ -377,7 +387,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" ? `${command} ${sub ?? ""}` : command!;
+  // `credits` alone checks; `credits set` records.
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -449,6 +460,11 @@ function parseBuiltin(
     "no-snap"?: boolean | undefined;
     force?: boolean | undefined;
     dtw?: string | undefined;
+    "source-url"?: string | undefined;
+    licence?: string | undefined;
+    author?: string | undefined;
+    title?: string | undefined;
+    credit?: string | undefined;
     text?: string | undefined;
     color?: string | undefined;
     "cover-frame"?: boolean | undefined;
@@ -459,6 +475,7 @@ function parseBuiltin(
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "people") return parsePeople(rest, options);
+  if (command === "credits") return parseCredits(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
   if (command === "model") return parseModel(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
@@ -603,7 +620,7 @@ function parseBuiltin(
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
   if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
-  if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
+  if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait, provenance: provenanceOf(options) };
   if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
   const [sub, arg, ...extra] = rest;
@@ -657,12 +674,21 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
       const follower = inv.wait ? await followJobs(conn, cwd) : undefined;
-      const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy" });
+      const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy", ...inv.provenance });
       if (!follower) return flags.json ? json(result) : formatImport(result);
       const jobs = await waitForJobs(follower, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
       const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));
       if (imported.some((entry) => entry.job.state !== "done")) outcome.code = 1;
       return flags.json ? json({ ...result, imported }) : formatImport({ ...result, imported });
+    }
+    case "credits.check": {
+      const result = await conn.request("credits.check", { cwd });
+      if (!result.ok) outcome.code = 1;
+      return flags.json ? json(result) : formatCreditsCheck(result);
+    }
+    case "credits.set": {
+      const result = await conn.request("credits.set", { cwd, asset: inv.asset, ...inv.provenance });
+      return flags.json ? json(result) : formatCreditsSet(result);
     }
     case "gc": {
       const result = await conn.request("gc", { cwd, dryRun: inv.dryRun });
@@ -962,9 +988,9 @@ function formatBytes(bytes: number): string {
 
 function formatImport(result: AssetImportResult): string {
   return result.imported
-    .map(({ source, asset, copied, job }) => {
+    .map(({ source, asset, copied, job, provenance }) => {
       const how = copied ? `imported from ${source}` : "already in assets/";
-      return `${asset}  ${how}\n  ${formatJob(job)}\n`;
+      return `${asset}  ${how}\n  ${formatJob(job)}\n${provenance ? "  provenance recorded in credits.json\n" : ""}`;
     })
     .join("");
 }
