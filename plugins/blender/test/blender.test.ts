@@ -7,7 +7,7 @@ import { parsePluginManifest } from "@frameshell/schema";
 import { SUPPORTED_BLENDER, activate, frameCount, frameRate, insideProject, listingPath, parseBlenderVersion, propsSchema, scriptPath, sourceOf, supportedBlender } from "../src/index.js";
 
 /** A checked-out text file with LF endings (Windows checkouts may turn them into CRLF). */
-const readText = (path: string): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+const readText = (path: string | URL): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 
 const here = (path: string) => new URL(path, import.meta.url);
 
