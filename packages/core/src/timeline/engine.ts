@@ -38,6 +38,7 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
+  keyedValueAt,
   paintStretches,
   placementAt,
   parseTimeline,
@@ -48,6 +49,7 @@ import {
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
+import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
 import { FrameGrid } from "./grid.js";
@@ -233,6 +235,8 @@ class Edit {
         return this.transitionRemove(request.args);
       case "clip.key":
         return this.clipKey(request.args);
+      case "track.duck":
+        return this.trackDuck(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
       case "multicam.gallery":
@@ -1066,6 +1070,73 @@ class Edit {
     else all[prop] = keys as [ClipKey, ...ClipKey[]];
     if (Object.keys(all).length === 0) delete clip.keys;
     else clip.keys = all;
+  }
+
+  /**
+   * `track.duck`: write the dip `curve` into the `gain` keys of every clip of audio track `args.track` (ADR 0018).
+   * Keys marked `auto: "duck"` from an earlier run go; keys without the mark stay and set the level the dip is
+   * taken from, and a hand key inside a dip is dipped too (it keeps its level in `base` for the next run). A clip the
+   * dip never touches ends with no duck keys.
+   */
+  async trackDuck(args: OperationArgs<"track.duck">): Promise<void> {
+    const track = this.clipTrack(args.track);
+    if (track.kind !== "audio") {
+      throw this.invalid(`${track.id} is a ${track.kind} track; ducking writes gain keys on the clips of an audio track.`, {
+        field: "track",
+        hint: `Audio tracks: ${this.mediaTracks().filter((t) => t.kind === "audio").map((t) => t.id).join(", ") || "none"}.`,
+      });
+    }
+    const curve = args.curve;
+    let ducked = 0;
+    for (const clip of track.clips.filter((candidate): candidate is Clip => !isShotClip(candidate))) {
+      // A duck key that stands in for a hand key goes back to being that key.
+      const hand = (clip.keys?.gain ?? [])
+        .filter((key) => key.auto !== "duck" || key.base !== undefined)
+        .map((key): ClipKey => (key.auto === "duck" ? { at: key.at, value: key.base!, ...(key.ease ? { ease: key.ease } : {}) } : key));
+      const kept: ClipKeys = { ...clip.keys };
+      delete kept.gain;
+      const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
+      const end = (await this.span(clip)).end;
+      const lane = clip.audio?.muted === true ? hand : this.duckLane(clip, hand, curve, end, speed);
+      if (lane.some((key) => key.auto === "duck")) ducked++;
+      if (lane.length > 0) kept.gain = lane as [ClipKey, ...ClipKey[]];
+      if (Object.keys(kept).length === 0) delete clip.keys;
+      else clip.keys = kept;
+    }
+    if (ducked === 0) this.warnings.push(`no clip of ${track.id} lies under speech: no duck keys written.`);
+  }
+
+  /**
+   * Gain lane of one clip after ducking: its level (`hand` keys, else `audio.gain`) minus the dip at each point of
+   * `curve` inside it, at its start and end, and at every hand key. A hand key where the dip is on comes back dipped
+   * (`auto: "duck"`, level in `base`); one outside any dip stays as it is. The hand keys alone when no dip touches the clip.
+   */
+  duckLane(clip: Clip, hand: readonly ClipKey[], curve: readonly { time: number; dip: number }[], end: number, speed: number): ClipKey[] {
+    const g = this.grid;
+    const dipPoints = curve.map((point) => ({ time: point.time, dip: point.dip }));
+    const timeOf = (at: number) => clip.start + (at - (clip.in ?? 0)) / speed;
+    const times = [clip.start, ...dipPoints.filter((point) => point.time > clip.start && point.time < end).map((point) => point.time), end];
+    if (times.every((t) => dipAt(dipPoints, t) <= 0) && hand.every((key) => dipAt(dipPoints, timeOf(key.at)) <= 0)) return [...hand];
+    // A hand key within half a frame of a curve point takes that point's place.
+    const half = (0.5 / this.context.fps) * speed;
+    const keys: ClipKey[] = [];
+    let lastFrame = -1;
+    for (const time of times) {
+      const t = g.snap(time);
+      const at = Math.round(clipTime(clip, t) * 1000) / 1000;
+      if (hand.some((other) => Math.abs(other.at - at) < half)) continue;
+      const level = keyedValueAt(hand, at) ?? clip.audio?.gain ?? 0;
+      const key: ClipKey = { at, value: round4(level - dipAt(dipPoints, time)), auto: "duck" };
+      // Two points in one frame (a ramp shorter than a frame): the later one wins.
+      if (g.frame(t) === lastFrame) keys[keys.length - 1] = key;
+      else keys.push(key);
+      lastFrame = g.frame(t);
+    }
+    for (const key of hand) {
+      const dip = dipAt(dipPoints, timeOf(key.at));
+      keys.push(dip > 0 ? { at: key.at, value: round4(key.value - dip), ...(key.ease ? { ease: key.ease } : {}), auto: "duck", base: key.value } : key);
+    }
+    return keys.sort((a, b) => a.at - b.at);
   }
 
   /**

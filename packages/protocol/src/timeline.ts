@@ -309,6 +309,21 @@ export const operationArgs = {
     remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
   }),
+  "track.duck": z.strictObject({
+    track: TrackRef.describe("Audio track whose clips get the gain keys: the music or effects that dip under speech."),
+    curve: z
+      .array(
+        z.strictObject({
+          time: Seconds("Timeline time of the point."),
+          dip: z.number().nonnegative().describe("dB the clips sit below their own level at `time`: 0 = full level."),
+        }),
+      )
+      .min(1)
+      .describe(
+        "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
+          "The `track.duck` method measures it from the speech tracks and passes it here.",
+      ),
+  }),
   "multicam.create": z.strictObject({
     angles: z
       .array(
@@ -778,6 +793,17 @@ export const MulticamDirectResultSchema = OperationResultSchema.extend({
 
 /** See {@link MulticamDirectResultSchema}. */
 export type MulticamDirectResult = z.output<typeof MulticamDirectResultSchema>;
+
+/** Result of `track.duck`: the operation plus what was heard. */
+export const TrackDuckResultSchema = OperationResultSchema.extend({
+  track: z.string().describe("Audio track whose clips got the keys."),
+  under: z.array(z.string()).describe("Tracks listened to for speech."),
+  stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
+  speechSeconds: z.number().describe("Total seconds of those stretches."),
+});
+
+/** See {@link TrackDuckResultSchema}. */
+export type TrackDuckResult = z.output<typeof TrackDuckResultSchema>;
 
 /** Result of `multicam.faces`: what was found per angle and the operations that wrote the keys. */
 export const MulticamFacesResultSchema = z.object({

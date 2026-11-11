@@ -1,5 +1,6 @@
 import type {
   ClipReframeResult,
+  CleanupResult,
   DaemonConnection,
   HistoryResult,
   MulticamCreateResult,
@@ -13,6 +14,7 @@ import type {
   Progress,
   TimelineProblem,
   TimelineView,
+  TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
 import { resolveSubtitleStyle } from "@frameshell/schema";
@@ -129,6 +131,15 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
+                               Music under a voice: writes gain keys on the clips of audio track <track> that dip
+                               while someone speaks on the --under tracks (video or audio; speech = sound above
+                               --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
+                               Dip --depth dB (default 7), complete as the voice starts (--attack ms, default 40) and
+                               gone --release ms after it ends (default 450). The keys are the clip's level minus
+                               the dip, marked as the duck's: run it again after an edit and they are replaced, keys
+                               you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
+                               like any gain key; a key you set is a level, not a dip. Revert undoes it
   transition set --at s [--kind dissolve|fade] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's
@@ -136,6 +147,14 @@ mutations print the new revision):
   transition remove --at s [--track <track>…]
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
+  cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
+                               Cut dead air and false starts of a talking head: pauses between words longer than
+                               --pauses (default 0.4 s) that the audio confirms are quiet, with --breath (0.1 s)
+                               left on each side; --retakes also cuts the earlier attempt of a phrase said again
+                               (the last take stays). --dry-run lists the candidates (kind, start, end, words,
+                               reason, confidence) and changes nothing; run again without it, --skip dropping the
+                               ids to leave. One transaction (\`revert\` it); candidates under --min-confidence
+                               (default 0.5) are not proposed. Needs a transcript of the speech
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -160,7 +179,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -238,10 +257,23 @@ export const TIMELINE_OPTIONS = {
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
+  under: { type: "string", multiple: true },
+  depth: { type: "string" },
+  attack: { type: "string" },
+  release: { type: "string" },
+  threshold: { type: "string" },
+  gap: { type: "string" },
   mask: { type: "string" },
   format: { type: "string" },
   person: { type: "string" },
   anchor: { type: "string" },
+  pauses: { type: "string" },
+  "no-pauses": { type: "boolean" },
+  breath: { type: "string" },
+  retakes: { type: "boolean" },
+  "min-confidence": { type: "string" },
+  skip: { type: "string", multiple: true },
+  "dry-run": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -289,7 +321,9 @@ const ALLOWED: Record<string, string[]> = {
   "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
+  "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
   cut: ["from", "to", "no-snap", "snap-window"],
+  cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -326,7 +360,9 @@ const ARITY: Record<string, [number, number]> = {
   "image cutout": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
+  "duck ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
+  cleanup: [0, 0],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -350,9 +386,9 @@ export function timelineCommandFlags(): Map<string, string[]> {
  */
 export function parseTimelineCommand(positionals: string[], values: Values): TimelineInvocation | null {
   const [group, ...rest] = positionals;
-  // `history`, `revert` and `direct` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
-  const flat = group === "cut" || group === "history" || group === "revert" || group === "direct";
-  const command = group === "cut" ? "cut" : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
+  // `history`, `revert`, `direct` and `duck` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
+  const flat = group === "cut" || group === "cleanup" || group === "history" || group === "revert" || group === "direct" || group === "duck";
+  const command = group === "cut" || group === "cleanup" ? group : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
   const args = flat ? rest : rest.slice(1);
   const allowed = ALLOWED[command];
   const arity = ARITY[command];
@@ -699,6 +735,34 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         replaceHuman: values["replace-human"] === true ? true : undefined,
       });
       break;
+    case "duck ": {
+      method = "track.duck";
+      const under = list("under");
+      if (under === undefined) throw new UsageError("`frameshell duck <track>` needs --under <track>: the track with the voice (repeat it for more).");
+      Object.assign(params, {
+        track: args[0],
+        under,
+        depth: num("depth"),
+        attackMs: num("attack"),
+        releaseMs: num("release"),
+        threshold: num("threshold"),
+        gap: num("gap"),
+      });
+      break;
+    }
+    case "cleanup":
+      method = "cleanup";
+      if (values["no-pauses"] === true && values["pauses"] !== undefined) throw new UsageError("Pass --pauses <s> or --no-pauses, not both.");
+      if (values["no-pauses"] === true && values["retakes"] !== true) throw new UsageError("--no-pauses leaves nothing to look for without --retakes.");
+      Object.assign(params, {
+        pauses: values["no-pauses"] === true ? false : num("pauses"),
+        breath: num("breath"),
+        retakes: values["retakes"] === true ? true : undefined,
+        minConfidence: num("min-confidence"),
+        skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -755,17 +819,39 @@ export async function executeTimeline(
         : ", changes undone:";
     return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
+  if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+function formatCleanup(result: CleanupResult): string {
+  const time = (value: number) => value.toFixed(2);
+  const lines = [`Cleanup of ${result.timeline} · ${result.words} words looked at · ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}`];
+  for (const c of result.candidates) {
+    const words = c.words.length > 0 ? `  “${c.words.map((word) => word.text).join(" ")}”` : "";
+    lines.push(`  ${c.id.padEnd(4)}${c.kind.padEnd(8)}${`${time(c.start)}–${time(c.end)} s`.padEnd(16)}${c.duration.toFixed(2)} s  ${Math.round(c.confidence * 100)}%${c.clean ? "" : "  unclean edge"}${words}`);
+    lines.push(`      ${c.reason}`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push(`Left alone (${result.skipped.length}):`);
+    for (const skip of result.skipped.slice(0, 20)) lines.push(`  ${skip.kind} at ${time(skip.at)} s: ${skip.reason}`);
+    if (result.skipped.length > 20) lines.push(`  … and ${result.skipped.length - 20} more (--json lists all)`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.candidates.length === 0) lines.push("Nothing to cut.");
+  else if (result.dryRun) lines.push(`Dry run: nothing changed. ${time(result.removed)} s would go; run again without --dry-run (--skip <id> leaves candidates out).`);
+  else lines.push(`Cut ${time(result.removed)} s · revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatMulticamTurns(result: MulticamTurnsResult): string {
@@ -798,6 +884,12 @@ function formatClipReframe(result: ClipReframeResult): string {
   lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
+}
+
+function formatTrackDuck(result: TrackDuckResult): string {
+  const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
+  const written = result.changes.updated.length;
+  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${formatOperation(result)}`;
 }
 
 function formatMulticamFaces(result: MulticamFacesResult): string {
