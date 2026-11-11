@@ -10,13 +10,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Duck music under speech as editable gain keys (#456, part of #451): `frameshell duck <track> --under <track>…`
-  (`track.duck`, MCP `track_duck`, protocol 71) listens to the sound of the `--under` tracks and writes `gain` keys
+  (`track.duck`, MCP `track_duck`, protocol 74) listens to the sound of the `--under` tracks and writes `gain` keys
   on the clips of an audio track that dip while someone speaks. Defaults: 7 dB deep (`--depth`), complete as the voice
   starts (`--attack` 40 ms), gone 450 ms after it ends (`--release`), speech above -38 dBFS (`--threshold`),
   stretches closer than 0.6 s merged (`--gap`). The keys are the clip's level minus the dip, with keys at the clip's
   start and end, and carry the new key field `auto: "duck"`: running it again replaces them and keeps keys set by hand
   (a hand key where someone speaks is dipped as well, its level kept in the new key field `base`).
   Preview and export play them like any gain key. History shows it as "Duck music under speech".
+- Cover image and a finished frame 0 (#476, part of #451): `frameshell cover [--text word] [--at s] [--color #rrggbb]`
+  (daemon `cover`, MCP `cover`, protocol 72) writes a cover image: a frame with one big word over it (upper-case,
+  centered, outlined, in the bundled subtitle face, as large as the width allows), rendered by the export compiler like
+  `frame`. `--text` alone picks the frame where the word is first spoken in the transcripts; `--at` picks it; neither
+  uses the first whole picture (past the first clip's fade in, never the black frame). It is checked readable at 180 px wide (capitals at least 12 px tall, sized from the face's
+  own metrics, `export/font-metrics.ts`) and warns when the word is too long. `render --cover-frame [--cover-text]
+  [--cover-at] [--cover-color]` (`render` param `cover`) makes frame 0, the thumbnail platforms show, that same
+  composition as a one-frame segment of its own; the other frames and the length are unchanged. Every render now
+  warns when frame 0, or the chosen cover frame, is black (a gap before the first picture, a fade). The cover uses the
+  `big-keyword` subtitle look until the project style guide (#468) holds one; review's frame-0 check (#457) can
+  read the same warning.
+- Hardware encoder probe and quality tiers (#475, part of #451). Frameshell test-encodes 0.2 s of colour with each H.264
+  candidate (VideoToolbox, NVENC, then x264) and uses the first that works, because `ffmpeg -encoders` lists encoders
+  that fail on the machine. The answer is cached per ffmpeg build in `encoders.json` in the data dir
+  (`packages/core/src/encoders/`). `render` takes `quality` (`draft` or `final`; protocol 71, CLI `--quality`): a draft
+  is at most 30 fps at x264 CRF 22 veryfast (NVENC p5, VideoToolbox bitrate from frame size), a final is CRF 16 slow
+  (NVENC p6 cq 17, VideoToolbox 0.25 bits per pixel, about 62 Mb/s at 4K30) with bt709 tags, faststart and AAC 320k.
+  Without `quality` a render is the preset as written. The `render` result names the `encoder`. `doctor` reports the
+  encoder in use, a speed class (fast, medium, slow) with the proxy and draft sizes it suits, and the disk a master
+  intermediate takes per minute; `doctor --reprobe` tests the encoders again. The codec list's hardware test encode
+  is now the same 0.2 s test.
+- Agent skill: a playbook for short-form reels from a talking-head take (#452), `skills/frameshell/reference/reels.md`.
+  It covers a one-round intake, the vertical canvas and −14 LUFS loudness, passes (words, cut, captions, graphics
+  plan, zooms, sound), 9:16 safe zones, notes as rules for the whole video, and checks before handing over.
+- Agent skill: a critique loop for reels and generated videos (#454), `skills/frameshell/reference/critique.md`:
+  contact, phone and loudness checks on the export, a fresh critic that describes before judging, a scoring rubric
+  with automatic caps or pairwise comparison, scoped fix notes, a round log and when to stop.
+- `frameshell cleanup` (and the MCP tool `cleanup`, daemon method `cleanup`, protocol 73; #455, part of #451): proposes
+  and makes the cuts that remove dead air and false starts of a talking head. Pauses: a gap between two kept words
+  longer than `--pauses` (default 0.4 s) that the audio energy shows quiet, cut inside the quiet leaving `--breath`
+  (0.1 s) on each side, on the frame grid. `--retakes`: a phrase of 1 to 6 words said again (spelling variants and a
+  cut-off last word match, same speaker) cuts the earlier attempt and keeps the last. `--dry-run --json` lists every
+  candidate with its range, the words removed, reason and confidence (`--min-confidence`, `--skip <id>` for the ones
+  a person rejected). Applying is one transaction labelled `Cleanup: …`, one proposal in review mode; cut words show
+  struck through in the transcript view. Words come from the transcripts of the unmuted media clips and the sound of
+  multicam program tracks, placed by the clip that plays most of each word; a cut is made only where transcribed
+  speech covers it. Export and preview already fade the audio 2 ms at every cut (SPEC §3.4), so splices made in
+  quiet audio do not click.
 
 ## [0.18.0] - 2026-11-07
 

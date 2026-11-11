@@ -69,6 +69,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
         const hardware = codec.hardware ? `, hardware ${codec.works === null ? "untested" : codec.works ? "works" : "fails"}` : "";
         return `${codec.kind} ${codec.name}: ${codec.compiled ? "compiled" : "absent"}${hardware}`;
       }),
+      `Render encoder: ${doctor.encoders ? (doctor.encoders.picked ?? "none works") : "unknown"}, machine ${doctor.profile.class}`,
       doctor.problems.length === 0 ? "Problems: none" : `Problems (${doctor.problems.length}):`,
       ...doctor.problems.map((problem) => `- ${problem}`),
     ]);
