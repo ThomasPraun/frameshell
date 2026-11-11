@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent skill: a critique loop for reels and generated videos (#454), `skills/frameshell/reference/critique.md`:
   contact, phone and loudness checks on the export, a fresh critic that describes before judging, a scoring rubric
   with automatic caps or pairwise comparison, scoped fix notes, a round log and when to stop.
+- `frameshell cleanup` (and the MCP tool `cleanup`, daemon method `cleanup`, protocol 73; #455, part of #451): proposes
+  and makes the cuts that remove dead air and false starts of a talking head. Pauses: a gap between two kept words
+  longer than `--pauses` (default 0.4 s) that the audio energy shows quiet, cut inside the quiet leaving `--breath`
+  (0.1 s) on each side, on the frame grid. `--retakes`: a phrase of 1 to 6 words said again (spelling variants and a
+  cut-off last word match, same speaker) cuts the earlier attempt and keeps the last. `--dry-run --json` lists every
+  candidate with its range, the words removed, reason and confidence (`--min-confidence`, `--skip <id>` for the ones
+  a person rejected). Applying is one transaction labelled `Cleanup: …`, one proposal in review mode; cut words show
+  struck through in the transcript view. Words come from the transcripts of the unmuted media clips and the sound of
+  multicam program tracks, placed by the clip that plays most of each word; a cut is made only where transcribed
+  speech covers it. Export and preview already fade the audio 2 ms at every cut (SPEC §3.4), so splices made in
+  quiet audio do not click.
 
 ## [0.18.0] - 2026-11-07
 

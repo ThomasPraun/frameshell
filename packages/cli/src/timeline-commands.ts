@@ -1,4 +1,5 @@
 import type {
+  CleanupResult,
   DaemonConnection,
   HistoryResult,
   MulticamCreateResult,
@@ -125,6 +126,14 @@ mutations print the new revision):
   transition remove --at s [--track <track>…]
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
+  cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
+                               Cut dead air and false starts of a talking head: pauses between words longer than
+                               --pauses (default 0.4 s) that the audio confirms are quiet, with --breath (0.1 s)
+                               left on each side; --retakes also cuts the earlier attempt of a phrase said again
+                               (the last take stays). --dry-run lists the candidates (kind, start, end, words,
+                               reason, confidence) and changes nothing; run again without it, --skip dropping the
+                               ids to leave. One transaction (\`revert\` it); candidates under --min-confidence
+                               (default 0.5) are not proposed. Needs a transcript of the speech
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -149,7 +158,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "cleanup", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -228,6 +237,13 @@ export const TIMELINE_OPTIONS = {
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
   mask: { type: "string" },
+  pauses: { type: "string" },
+  "no-pauses": { type: "boolean" },
+  breath: { type: "string" },
+  retakes: { type: "boolean" },
+  "min-confidence": { type: "string" },
+  skip: { type: "string", multiple: true },
+  "dry-run": { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -275,6 +291,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   cut: ["from", "to", "no-snap", "snap-window"],
+  cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -311,6 +328,7 @@ const ARITY: Record<string, [number, number]> = {
   "multicam turns": [1, 1],
   "direct ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
+  cleanup: [0, 0],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -335,8 +353,8 @@ export function timelineCommandFlags(): Map<string, string[]> {
 export function parseTimelineCommand(positionals: string[], values: Values): TimelineInvocation | null {
   const [group, ...rest] = positionals;
   // `history`, `revert` and `direct` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
-  const flat = group === "cut" || group === "history" || group === "revert" || group === "direct";
-  const command = group === "cut" ? "cut" : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
+  const flat = group === "cut" || group === "cleanup" || group === "history" || group === "revert" || group === "direct";
+  const command = group === "cut" || group === "cleanup" ? group : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
   const args = flat ? rest : rest.slice(1);
   const allowed = ALLOWED[command];
   const arity = ARITY[command];
@@ -678,6 +696,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         replaceHuman: values["replace-human"] === true ? true : undefined,
       });
       break;
+    case "cleanup":
+      method = "cleanup";
+      if (values["no-pauses"] === true && values["pauses"] !== undefined) throw new UsageError("Pass --pauses <s> or --no-pauses, not both.");
+      if (values["no-pauses"] === true && values["retakes"] !== true) throw new UsageError("--no-pauses leaves nothing to look for without --retakes.");
+      Object.assign(params, {
+        pauses: values["no-pauses"] === true ? false : num("pauses"),
+        breath: num("breath"),
+        retakes: values["retakes"] === true ? true : undefined,
+        minConfidence: num("min-confidence"),
+        skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -734,6 +765,7 @@ export async function executeTimeline(
         : ", changes undone:";
     return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
   }
+  if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -744,6 +776,26 @@ export async function executeTimeline(
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+function formatCleanup(result: CleanupResult): string {
+  const time = (value: number) => value.toFixed(2);
+  const lines = [`Cleanup of ${result.timeline} · ${result.words} words looked at · ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}`];
+  for (const c of result.candidates) {
+    const words = c.words.length > 0 ? `  “${c.words.map((word) => word.text).join(" ")}”` : "";
+    lines.push(`  ${c.id.padEnd(4)}${c.kind.padEnd(8)}${`${time(c.start)}–${time(c.end)} s`.padEnd(16)}${c.duration.toFixed(2)} s  ${Math.round(c.confidence * 100)}%${c.clean ? "" : "  unclean edge"}${words}`);
+    lines.push(`      ${c.reason}`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push(`Left alone (${result.skipped.length}):`);
+    for (const skip of result.skipped.slice(0, 20)) lines.push(`  ${skip.kind} at ${time(skip.at)} s: ${skip.reason}`);
+    if (result.skipped.length > 20) lines.push(`  … and ${result.skipped.length - 20} more (--json lists all)`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.candidates.length === 0) lines.push("Nothing to cut.");
+  else if (result.dryRun) lines.push(`Dry run: nothing changed. ${time(result.removed)} s would go; run again without --dry-run (--skip <id> leaves candidates out).`);
+  else lines.push(`Cut ${time(result.removed)} s · revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatMulticamTurns(result: MulticamTurnsResult): string {

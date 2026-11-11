@@ -37,6 +37,7 @@ import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
+import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
@@ -1120,6 +1121,51 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "transition.remove": (params, caller) => operate("transition.remove", params, caller),
     "clip.key": (params, caller) => operate("clip.key", params, caller),
     cut: (params, caller) => operate("cut", params, caller),
+    cleanup: async ({ cwd, timeline, pauses, breath, retakes, minConfidence, dryRun, skip }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const plan = await planTimelineCleanup(
+        dir,
+        loaded,
+        fps,
+        { pauses, breath, retakes, minConfidence, skip },
+        {
+          assetHash: async (rel) => (await media.derivedAudio(dir, rel)).hash,
+          profile: (asset) => energy.profile(dir, asset),
+          hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
+        },
+      );
+      if (dryRun || plan.candidates.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...plan };
+      // The plan can take seconds (first energy profile): cuts at the times of an older timeline would cut the wrong audio.
+      const fresh = (await loadFor(dir, timeline, caller)).timeline.revision;
+      if (fresh !== loaded.revision) {
+        throw new RpcError(ErrorCode.StaleRevision, `cleanup: timeline ${timeline} changed from revision ${loaded.revision} to ${fresh} while the cuts were planned. Nothing was cut; run it again.`, {
+          op: "cleanup",
+          timeline,
+          revision: loaded.revision,
+          current: fresh,
+        });
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: cleanupLabel(plan.candidates) };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const warnings = new Set(plan.warnings);
+      let revision = loaded.revision;
+      try {
+        // Last cut first: a cut moves everything after it, so the earlier ones keep their times.
+        for (const candidate of [...plan.candidates].sort((a, b) => b.start - a.start)) {
+          const request = { op: "cut", args: { from: candidate.start, to: candidate.end, snap: false } } as const;
+          const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx });
+          await transactions.applied(key, tx);
+          revision = result.revision;
+          for (const warning of result.warnings) warnings.add(warning);
+        }
+      } finally {
+        await settle(key, tx);
+      }
+      return { timeline, revision, dryRun, applied: true, tx: tx.id, ...plan, warnings: [...warnings] };
+    },
     "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {
       const dir = await root(cwd);

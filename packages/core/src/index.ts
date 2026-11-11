@@ -211,6 +211,8 @@ export {
 } from "./timeline/engine.js";
 export { applyPatch, diffTimelines } from "./timeline/patch.js";
 export { FrameGrid } from "./timeline/grid.js";
+export { type CleanupPlanOptions, type SpeechAudio, type SpeechWord, planCleanup } from "./cleanup/plan.js";
+export { type CleanupDeps, type CleanupPlan, type CleanupRequest, cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 export { NestedTimelineError } from "./timeline/timing.js";
 export {
   type AudioItem,
