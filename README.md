@@ -28,6 +28,7 @@ Official plugins, installed per project:
 frameshell plugin install @frameshell/whisper-cpp   # transcription
 frameshell plugin install @frameshell/hyperframes   # HTML motion graphics
 frameshell plugin install @frameshell/remotion      # Remotion (React) compositions
+frameshell plugin install @frameshell/blender       # Blender scenes (your own Blender)
 ```
 
 To run from source: `pnpm install && pnpm build && pnpm --filter @frameshell/desktop start` (Node >= 22).
@@ -39,7 +40,7 @@ To run from source: `pnpm install && pnpm build && pnpm --filter @frameshell/des
 - **Multitrack timeline**: move, trim and split clips; overlays; audio; subtitles.
 - **Transcript view**: word-level transcript synced with the timeline; restore a cut by clicking a word.
 - **Declarative project**: the timeline is a JSON file with a published schema, edited by you, the agent and the `frameshell` CLI alike.
-- **Any video engine**: clips can come from footage, [HyperFrames](https://github.com/heygen-com/hyperframes) HTML compositions, [Remotion](https://www.remotion.dev) components (including your own app's React code) or other engines through plugins.
+- **Any video engine**: clips can come from footage, [HyperFrames](https://github.com/heygen-com/hyperframes) HTML compositions, [Remotion](https://www.remotion.dev) components (including your own app's React code), [Blender](https://www.blender.org) scenes (your own install) or other engines through plugins.
 - **Fast export**: the timeline compiles to ffmpeg.
 - **Agent history**: agent changes are grouped into transactions you can review and revert.
 

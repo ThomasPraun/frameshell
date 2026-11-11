@@ -2,8 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BLENDER_PACKAGE,
   BinaryManager,
   CHROME_HEADLESS_SHELL_PACKAGE,
+  DEFAULT_PACKAGES,
   DIARIZATION_MODELS,
   DIARIZATION_TOOL,
   SEGMENTATION_MODEL,
@@ -289,6 +291,30 @@ describe("pinned sherpa-onnx diarization manifest", () => {
       expect(model.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(model.urls[0]).toMatch(/^https:\/\/huggingface\.co\/csukuangfj\/[^/]+\/resolve\/[0-9a-f]{40}\//);
     }
+  });
+});
+
+describe("Blender manifest entry (ADR 0035)", () => {
+  it("is the person's own install: no builds, never mirrored, on demand, last in the default packages", () => {
+    expect(BLENDER_PACKAGE).toMatchObject({ name: "blender", tools: ["blender"], builds: {}, onDemand: true });
+    expect(BLENDER_PACKAGE.mirror).toBeUndefined();
+    expect(DEFAULT_PACKAGES.at(-1)).toBe(BLENDER_PACKAGE);
+    for (const platform of ["darwin-arm64", "linux-x64", "win32-x64"] as const) expect(buildCandidates(BLENDER_PACKAGE, platform)).toEqual([]);
+  });
+
+  it("reads the version from the first line of `blender --version`", () => {
+    const { args, pattern } = BLENDER_PACKAGE.versionProbe!;
+    expect(args).toEqual(["--version"]);
+    const version = (output: string) => pattern.exec(output)?.[1];
+    expect(version("Blender 4.5.3 LTS\n\tbuild date: 2026-01-01\n\tbuild hash: abc\n")).toBe("4.5.3");
+    expect(version("Blender 5.0.0\n")).toBe("5.0.0");
+    expect(version("blender: command not found")).toBeUndefined();
+  });
+
+  it("supports the 4.5 LTS and every 5.x, nothing else", () => {
+    const supports = BLENDER_PACKAGE.userInstall!.supports;
+    expect(["4.5.0", "4.5.8", "5.0.0", "5.2.1", "5.9"].filter((v) => !supports(v))).toEqual([]);
+    expect(["3.6.0", "4.0.2", "4.2.9", "4.4.3", "6.0.0", "garbage"].filter(supports)).toEqual([]);
   });
 });
 

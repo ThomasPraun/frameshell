@@ -207,3 +207,17 @@ _Avoid_: built-in model, bundled model
 **Registered model**:
 A model file the user registered on one machine under an id (`frameshell model add`), kept with its SHA-256 in `models.json` in the config dir. Projects name only the id, so the same project uses whichever file each machine registered.
 _Avoid_: custom model path, local model
+
+## Blender clips (ADR 0035)
+
+**Blender clip**:
+A generated clip (`type: "blender"`) whose `source` is a `.blend` in the project: the `@frameshell/blender` adapter renders its scene from the first frame up to the clip's end into the clip cache, as VP9 with alpha.
+_Avoid_: 3D clip, Blender layer, Blender asset
+
+**User install**:
+A tool Frameshell uses but never downloads, because it belongs to the person (Blender): a package with no pinned builds, found only through a `binaries` override.
+_Avoid_: system binary, external binary, unmanaged tool
+
+**Draft**:
+The quality of a Blender render in this version: EEVEE or Workbench with a transparent film, fast and not final art. `quality: "final"` (Cycles) comes in a later slice.
+_Avoid_: preview render, low quality, proxy

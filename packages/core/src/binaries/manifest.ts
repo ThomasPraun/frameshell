@@ -118,6 +118,26 @@ export interface BinaryPackage {
   readonly module?: boolean;
   /** Fallback copy of every archive. Each archive then lists its mirror URL after the canonical one. */
   readonly mirror?: BinaryMirror;
+  /**
+   * The person's own install, never downloaded or redistributed (Blender, ADR 0035): no builds, found only through
+   * a `binaries` override. Messages name `label` instead of a missing managed build, and `doctor` checks the
+   * version `versionProbe` finds against `supports`.
+   */
+  readonly userInstall?: UserInstall;
+}
+
+/** How a {@link BinaryPackage.userInstall} package is described and checked. */
+export interface UserInstall {
+  /** Product name in messages, e.g. `Blender`. */
+  readonly label: string;
+  /** Supported versions in words, e.g. `4.5 LTS and 5.x`. */
+  readonly supported: string;
+  /** Where to get it, shown when it is not installed. */
+  readonly download: string;
+  /** Typical executable path per platform family, for the `binaries` hint. */
+  readonly examplePath: Readonly<Record<"darwin" | "linux" | "win32", string>>;
+  /** True when `version`, as `versionProbe` captured it, is in `supported`. */
+  supports(version: string): boolean;
 }
 
 /** Data file (ML model) downloaded on first use, same for every platform. */
@@ -883,6 +903,38 @@ export const PHOTO_SEGMENTATION_MODELS: readonly ManagedModel[] = [
   },
 ];
 
+/** Executable of {@link BLENDER_PACKAGE}. */
+export const BLENDER_TOOL = "blender";
+
+/**
+ * Blender, the person's own install (ADR 0035): GPL and about 300 MB, so never downloaded or shipped. It has no
+ * builds: `binaries.blender` in `frameshell.json` or the global config names the executable. Supported: the
+ * current LTS (4.5) and every 5.x release. `supportedBlender` in `plugins/blender/src/blender.ts` repeats the
+ * rule; `plugins/blender/test/blender.test.ts` checks that they agree.
+ */
+export const BLENDER_PACKAGE: BinaryPackage = {
+  name: "blender",
+  tools: [BLENDER_TOOL],
+  builds: {},
+  onDemand: true,
+  // First line: `Blender 4.5.3 LTS`; build details follow.
+  versionProbe: { args: ["--version"], pattern: /^Blender (\d+\.\d+(?:\.\d+)?)/m },
+  userInstall: {
+    label: "Blender",
+    supported: "4.5 LTS and 5.x",
+    download: "https://www.blender.org/download/",
+    examplePath: {
+      darwin: "/Applications/Blender.app/Contents/MacOS/Blender",
+      linux: "/usr/bin/blender",
+      win32: "C:\\Program Files\\Blender Foundation\\Blender 4.5\\blender.exe",
+    },
+    supports(version) {
+      const [major = 0, minor = 0] = version.split(".").map(Number);
+      return major === 5 || (major === 4 && minor >= 5);
+    },
+  },
+};
+
 /** Every package the daemon manages. */
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   FFMPEG_PACKAGE,
@@ -891,6 +943,7 @@ export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   CHROME_HEADLESS_SHELL_PACKAGE,
   SHERPA_ONNX_PACKAGE,
   ONNX_RUNTIME_WEB_PACKAGE,
+  BLENDER_PACKAGE,
 ];
 
 /** Every model the daemon manages. */

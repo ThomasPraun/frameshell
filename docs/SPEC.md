@@ -67,6 +67,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
 | 29 | Shoot scripts and takes | **A shoot script** (`scripts/*.md`, `shoot: true`) written by the agent beside the person's untouched original: `**Name:**` per line, `[LABEL: …]` cues, `[FREE: …]` for unscripted speech, `follow: words\|topics`, stale check by `source_hash`. Each **take** is compared word by word against it; **every deviation is marked, none blocks**; the person accepts or records again. The newest take per scene assembles the first cut as timeline transactions. Takes and decisions in `shoots/<slug>.json` (ADR 0023) | One deterministic comparison that works without an agent; the agent sees takes and deviations and adds judgment; the first cut exists when recording ends | A fixed `frameshell-script.md`, reading the original directly, flagging only big misses, an LLM in Frameshell |
 | 30 | Shoot capture | **Record in the app**: camera, screen or window, microphone, system audio (`getDisplayMedia` + `audio: 'loopback'`); a **continuous shoot session** is one multicam group, takes are ranges in it (keys T/C); per-take transcription for deviations; a resident `whisper-server` (`small-q5_1`) drives a **teleprompter** whose focus line keeps the word being said centered (ADR 0024) | One app from script to finished video; one program track per session; live recognition never writes the project | One file set per take, external recorders only, browser speech recognition, the macOS system picker |
+| 31 | Blender clips | **An official `@frameshell/blender` adapter** renders a frame range of a `.blend` (clip `source`) with **the person's own Blender**, never downloaded or shipped, into the clip cache as VP9 alpha WebM (ADR 0035): drafts (EEVEE or Workbench) by default, finals only with `quality: "final"`; Blender 4.5 LTS and 5.x; scene fps must equal the project's; props are `scene`, `camera`, `quality` and no agent Python; the Blender version is in the render key | The timeline stays the source of truth: only the edited clip re-renders, history and review work as for any generated clip, and preview and export need nothing new; no GPL code ships | A managed Blender download (dmg extraction, version skew with the person's saves), a skill-only playbook with renders imported as media, a community plugin |
 
 ### Cross-cutting rules
 
@@ -446,7 +447,7 @@ The watcher sees a timeline file change that the daemon did not write:
 
 ### 6.5 Clip render cache
 
-Cache key = hash(adapter name + adapter version + clip `props` + clip `elements` when present (ADR 0021; absent leaves existing keys unchanged) + content hash of the adapter's declared input files + project fps/resolution). Changing a composition file triggers a background re-render of affected clips.
+Cache key = hash(adapter name + adapter version + clip `props` + clip `elements` when present (ADR 0021; absent leaves existing keys unchanged) + content hash of the adapter's declared input files + project fps/resolution). Changing a composition file triggers a background re-render of affected clips. Placement never re-renders; the `blender` adapter is the exception, because a Blender render covers only the part the clip plays: its declared inputs include the length rendered, so changing a clip's `in` or `duration` re-renders it (ADR 0035).
 
 ### 6.6 Project trust
 
@@ -558,7 +559,7 @@ Design rules:
 
 | Point | v0.1 | Contract (sketch) |
 |---|---|---|
-| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip, ctx?)` (`ctx`: project dir, `ensureBinary`, additive: ADR 0035) → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
 | Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |
@@ -597,6 +598,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - Face recognition for people (ADR 0020, `people scan`): OpenCV zoo's SFace model (Apache-2.0, 38.7 MB, pinned at the YuNet commit), run by the same ONNX Runtime Web pin; voice prints reuse the diarization's CAM++ model. Downloaded on first scan; not mirrored.
 - Photo segmentation (ADR 0022, Pick in image projects, `image.cutout`): MobileSAM's encoder and decoder (Apache-2.0, ONNX export pinned by revision on Hugging Face), about 45 MB, run on the same ONNX Runtime Web pin by a daemon worker; downloaded on first use, not mirrored.
 - whisper.cpp: pinned version, prebuilt per platform. macOS (Metal) and Linux builds are compiled reproducibly by Frameshell CI and published once on a Frameshell GitHub Release (MIT licence; bytes must match the pin); Windows uses upstream prebuilt assets. v0.1 ships CPU builds on Linux and Windows; GPU builds (CUDA/Vulkan) come from a user override (`binaries.whisper-cli`). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
+- Blender (ADR 0035): the person's own install, never managed, downloaded or mirrored. Found through `binaries.blender`; `doctor` reports its version, and a version outside 4.5 LTS and 5.x as a problem.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
 
 ---
@@ -685,6 +687,7 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 | **v0.15** | People (ADR 0020): `people.json`, voice suggestions across files, face recognition scan and clusters, voice↔face by co-occurrence, people from multicam angles, ranges per person, speaker names in subtitles, People panel |
 | **v0.16** | Drag to edit composition elements (ADR 0021): double-click a generated clip, move or scale an element inside it, saved as clip `elements` (CSS selector → move, scale) applied over the source in live preview and render; HyperFrames first, then Remotion |
 | **v0.17** | Photo segmentation (ADR 0022): Pick names parts inside a photo in image projects (MobileSAM masks), cut-out layer, background removal as cut-out plus hiding the photo. |
+| **v0.18+** | Blender clips (ADR 0035): `@frameshell/blender` renders a `.blend` range with the person's own Blender to VP9 alpha; finals, export warning for drafts, skill playbook and look sheet, fps remap and libraries outside the project follow in later slices of #482 |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
 
@@ -700,11 +703,12 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 | VP9 alpha is 4:2:0 and lossy | Soft coloured text in overlays | Optional ProRes master render for export only (~+22 s per 8 s clip, ADR 0002) |
 | ffmpeg graph size with hundreds of cuts | Slow or failing exports | Segmented video render + concat; continuous separate audio pass; golden tests |
 | VFR sources drifting from transcript/cut times | A/V desync in long videos | CFR proxies at import; transcripts measured on proxies; export maps times on the same clock |
-| Scope for a solo developer | MVP slips | Scenario-defined MVP; explicit cut list (§11); official plugins limited to two |
+| Scope for a solo developer | MVP slips | Scenario-defined MVP; explicit cut list (§11); official plugins limited to the ones that ship today (`whisper-cpp`, `hyperframes`, `remotion`), Blender (ADR 0035) and `packages/motion` (ADR 0033): any other goes to a community plugin |
 | Daemon lifecycle (stale sockets, version skew after update) | "App won't connect" | Version handshake, socket cleanup on start, `frameshell doctor` |
 | Plugin security (projects declaring plugins) | Code execution from untrusted projects | Project trust prompt; plugins pinned; docs guidance; sandboxing evaluated post-v1 |
 | HyperFrames maturity / API churn | Adapter breakage | Pin version per project; adapter isolated behind plugin API |
 | Remotion licence (paid for companies > 3 people) | User confusion | Optional adapter, documented licence notice; never a core dependency |
+| Blender API churn between 4.x and 5.x; long final renders hold the single clip queue (ADR 0035) | Broken scripts; other renders and exports wait | Supported range 4.5 LTS and 5.x checked at start, version in the render key, opt-in real test; one clip queue in v1, a second queue or priorities get their own ticket |
 | Binary download sources disappearing | First run broken | Mirror on GitHub Releases; checksums; system override |
 | Windows ConPTY quirks with agent CLIs; path quoting in ffmpeg | Windows bugs | Beta label; CI on Windows from day one; args passed as arrays, never shell strings |
 | Schema evolution breaking projects and agents | Data loss / agent confusion | `schemaVersion`, migrations with backup, published JSON Schema per version |

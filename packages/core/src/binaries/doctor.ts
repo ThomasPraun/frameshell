@@ -15,7 +15,10 @@ export interface DoctorOptions {
  * Diagnose every managed tool: source, path, version, pin, and ffmpeg codecs.
  * Report-only by default: never downloads unless `install` is set. On-demand
  * packages (whisper.cpp) are reported, never flagged missing and never
- * installed here: their feature installs them on first use.
+ * installed here: their feature installs them on first use. A user install
+ * (Blender, ADR 0035) is never downloaded: without a `binaries` override it
+ * is reported as not installed, and one that runs outside its supported
+ * versions is a problem.
  */
 export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<Omit<DoctorResult, "skill">> {
   const { project, install = false, exec = execProcess } = options;
@@ -51,6 +54,9 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
       if (version === null) {
         const args = (pkg.versionProbe?.args ?? ["-version"]).join(" ");
         problems.push(`${location.path} does not run or prints no version (\`${tool} ${args}\`).`);
+      } else if (pkg.userInstall && !pkg.userInstall.supports(version)) {
+        const { label, supported } = pkg.userInstall;
+        problems.push(`${label} ${version} at ${location.path} is outside the supported range (${supported}). Install a supported ${label} and point \`binaries.${tool}\` at it.`);
       }
     } else if (location.source !== "managed") {
       problems.push(

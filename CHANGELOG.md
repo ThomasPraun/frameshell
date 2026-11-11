@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
+  `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
+  `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench
+  on a transparent film, the only one for now). The range is the clip's own `in` and duration from the scene's first
+  frame; a scene at another frame rate than the project is refused with how to fix it. The key covers the `.blend`,
+  the in-project files it links (listed by Blender once per file), the Blender version (an upgrade re-renders) and the
+  length rendered. Blender runs as `blender -b --factory-startup -Y` with the plugin's own scripts only; progress comes
+  from its `Fra:` lines and cancel kills it.
+- `binaries.blender` names your Blender in `frameshell.json` or the global config. `frameshell doctor` lists it with
+  its version (`not installed, set binaries.blender` when there is none), and reports a Blender outside the supported
+  range as a problem; without an override, using it fails with how to set one instead of "no managed build".
+- Plugin API: `ClipAdapter.inputs(clip, context?)` receives the project directory and `ensureBinary`, so an adapter can
+  put a tool's version in its render key. Additive: the API version stays 1.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

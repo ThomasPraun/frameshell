@@ -354,6 +354,7 @@ export class PluginHost {
 const OFFICIAL_ADAPTERS: Readonly<Record<string, string>> = {
   hyperframes: "@frameshell/hyperframes",
   remotion: "@frameshell/remotion",
+  blender: "@frameshell/blender",
 };
 
 /** Link the skills of the plugins that loaded; a failure to link is a warning, never a failed load. */

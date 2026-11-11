@@ -189,6 +189,12 @@ export class BinaryManager {
       );
     }
     const pkg = this.#packageOf(tool);
+    if (pkg.userInstall) {
+      throw new RpcError(ErrorCode.BinaryUnavailable, notInstalledMessage(pkg, tool, this.platform, join(this.#configDir, GLOBAL_CONFIG_FILE)), {
+        binary: tool,
+        platform: this.platform,
+      });
+    }
     if (!location.pinned || !location.path) {
       throw new RpcError(
         ErrorCode.BinaryUnavailable,
@@ -441,6 +447,17 @@ export class BinaryManager {
       await rmdir(dirname(staging)).catch(() => {});
     }
   }
+}
+
+/** What to do when the person's own install of `tool` is not named by any `binaries` override. */
+function notInstalledMessage(pkg: BinaryPackage, tool: string, platform: PlatformKey, globalConfig: string): string {
+  const install = pkg.userInstall!;
+  const family = platform.startsWith("darwin") ? "darwin" : platform.startsWith("win32") ? "win32" : "linux";
+  return (
+    `${install.label} is not installed, or Frameshell was not told where it is. Frameshell uses your own ${install.label} ` +
+    `(${install.supported}; ${install.download}) and never downloads it. Set ` +
+    `\`"binaries": { "${tool}": ${JSON.stringify(install.examplePath[family])} }\` in frameshell.json or ${globalConfig}.`
+  );
 }
 
 function megabytes(bytes: number): number {

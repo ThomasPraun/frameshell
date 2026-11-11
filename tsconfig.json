@@ -9,6 +9,7 @@
     { "path": "packages/cli" },
     { "path": "plugins/whisper-cpp" },
     { "path": "plugins/hyperframes" },
-    { "path": "plugins/remotion" }
+    { "path": "plugins/remotion" },
+    { "path": "plugins/blender" }
   ]
 }

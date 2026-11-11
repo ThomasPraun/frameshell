@@ -278,7 +278,7 @@ describe("frameshell doctor", () => {
     FRAMESHELL_CONFIG_DIR: configDir,
   });
 
-  it("--json lists managed ffmpeg, ffprobe, whisper-cli, whisper-server, headless Chrome, the diarization tool and ONNX Runtime Web as not installed, without downloading, and exits 1", () => {
+  it("--json lists managed ffmpeg, ffprobe, whisper-cli, whisper-server, headless Chrome, the diarization tool, ONNX Runtime Web and the user-installed Blender as not installed, without downloading, and exits 1", () => {
     // A PATH without frameshell, whatever the machine has installed.
     const env = { ...isolated(), PATH: tempDir() };
     const result = frameshell(["doctor", "--json"], tempDir(), env);
@@ -294,12 +294,15 @@ describe("frameshell doctor", () => {
       ["chrome-headless-shell", "managed", false],
       ["sherpa-onnx-offline-speaker-diarization", "managed", false],
       ["onnxruntime-web", "managed", false],
+      ["blender", "managed", false],
     ]);
     expect(report.problems.join("\n")).toMatch(/doctor --install|No managed ffmpeg build/);
     // whisper.cpp installs on first transcription (whisper-server when the Shoot view is told to), headless Chrome
     // on first HyperFrames render, sherpa-onnx on first speaker diarization, ONNX Runtime Web on first face
-    // detection: never a problem here.
-    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome|sherpa|onnxruntime/);
+    // detection: never a problem here. Blender is the person's own install: reported, never a problem.
+    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome|sherpa|onnxruntime|blender/i);
+    const text = frameshell(["doctor"], tempDir(), env).stdout;
+    expect(text).toMatch(/blender {2}not installed, set binaries\.blender · managed/);
     // Which frameshell PATH runs is advice, never a problem: an empty PATH adds a note and no problem.
     expect(report.command).toMatchObject({ path: null, self: { entry: realpathSync(cliBin), app: false } });
     expect(report.command.notes).toEqual([expect.stringContaining("File → Install 'frameshell' Command in PATH")]);

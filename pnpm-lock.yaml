@@ -190,6 +190,18 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  plugins/blender:
+    devDependencies:
+      '@frameshell/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@frameshell/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@frameshell/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
+
   plugins/hyperframes:
     dependencies:
       '@hyperframes/core':

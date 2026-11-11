@@ -231,6 +231,50 @@ describe("BinaryManager overrides", () => {
   });
 });
 
+describe("BinaryManager user install (Blender, ADR 0035)", () => {
+  function blenderManager(config?: unknown) {
+    const dirs = { dataDir: tempDir(), configDir: tempDir() };
+    if (config) writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify(config));
+    return { dirs, binaries: new BinaryManager(dirs) };
+  }
+
+  it("takes the executable from a project or global `binaries.blender` override, without downloading", async () => {
+    const system = tempDir();
+    const blender = join(system, `blender${exe}`);
+    writeFileSync(blender, "stub");
+    const global = blenderManager({ binaries: { blender } });
+    expect(await global.binaries.locate("blender")).toMatchObject({ source: "global", path: blender, installed: true, pinned: null });
+    expect(await global.binaries.ensure("blender")).toBe(blender);
+    const project = { dir: system, binaries: { blender: `blender${exe}` } };
+    expect(await blenderManager().binaries.ensure("blender", project)).toBe(blender);
+  });
+
+  it("without an override says where Blender comes from and how to name it, never that a build is missing", async () => {
+    const { dirs, binaries } = blenderManager();
+    expect(await binaries.locate("blender")).toMatchObject({ source: "managed", path: null, installed: false, pinned: null });
+    const error = await binaries.ensure("blender").catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: ErrorCode.BinaryUnavailable, data: { binary: "blender" } });
+    const message = (error as Error).message;
+    expect(message).toMatch(/your own Blender \(4\.5 LTS and 5\.x; https:\/\/www\.blender\.org\/download\/\) and never downloads it/);
+    expect(message).toContain('"binaries": { "blender": ');
+    expect(message).toContain(join(dirs.configDir, "config.json"));
+    expect(message).not.toMatch(/managed blender build/);
+  });
+
+  it("names an override that points at nothing, as for any tool", async () => {
+    const missing = join(tempDir(), `blender${exe}`);
+    await expect(blenderManager({ binaries: { blender: missing } }).binaries.ensure("blender")).rejects.toMatchObject({
+      code: ErrorCode.BinaryNotFound,
+      data: { binary: "blender", path: missing },
+    });
+  });
+
+  it("still throws for a tool no package ships, override or not", async () => {
+    const { binaries } = blenderManager({ binaries: { godot: "/opt/godot" } });
+    await expect(binaries.locate("godot")).rejects.toThrow(/Unknown binary: godot/);
+  });
+});
+
 describe("BinaryManager support files", () => {
   it("places pinned libraries and licences next to the tools under their install names", async () => {
     const archive = tarGz({
