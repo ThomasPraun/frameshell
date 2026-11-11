@@ -269,9 +269,18 @@ export {
   type ShootMeta,
   type ShootScene,
   type ShootScript,
+  VOICEOVER_WORDS_PER_SECOND,
+  VoiceoverLineSchema,
+  VoiceoverMetaSchema,
+  VoiceoverSceneSchema,
+  type VoiceoverLine,
+  type VoiceoverMeta,
+  type VoiceoverScene,
+  type VoiceoverScript,
   isScriptPath,
   parseScript,
   parseShootScript,
+  parseVoiceoverScript,
   scriptRefPathProblem,
   scriptSlug,
   splitScriptRef,
@@ -382,7 +391,7 @@ export {
 } from "./transitions.js";
 
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";
-export { type NumberLanguage, numberLanguage, spellNumber } from "./numbers.js";
+export { type NumberLanguage, numberLanguage, spellNumber, spellNumbersIn } from "./numbers.js";
 export { editDistance, normalizeToken, similarity, spokenTokens } from "./spoken.js";
 export {
   type SpringParams,

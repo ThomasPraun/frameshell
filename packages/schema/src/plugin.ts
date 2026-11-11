@@ -13,7 +13,7 @@ export const PLUGIN_MANIFEST_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHE
  */
 export const BUILTIN_COMMANDS: readonly string[] = [
   "init", "status", "doctor", "import", "track", "clip", "cut", "timeline", "transcribe", "script",
-  "tx", "history", "revert", "render", "frame", "mcp", "plugin", "help", "version",
+  "tx", "history", "revert", "render", "frame", "mcp", "plugin", "help", "version", "voiceover",
 ];
 
 /** npm package name, scoped or not. */
@@ -55,12 +55,14 @@ export const PluginManifestSchema = z.strictObject({
     .strictObject({
       clipTypes: z.array(Id).default([]),
       transcriptionProviders: z.array(Id).default([]),
+      /** Text-to-speech providers for `voiceover generate` (ADR 0034). Hosts before it reject the key. */
+      speechProviders: z.array(Id).default([]),
       commands: z.array(CommandName).default([]),
       exportPresets: z.array(Id).default([]),
       /** Markdown agent skills shipped with the plugin. */
       skills: z.array(RelativePath).default([]),
     })
-    .default({ clipTypes: [], transcriptionProviders: [], commands: [], exportPresets: [], skills: [] }),
+    .default({ clipTypes: [], transcriptionProviders: [], speechProviders: [], commands: [], exportPresets: [], skills: [] }),
 });
 
 /** Validated `frameshell-plugin.json` content. */

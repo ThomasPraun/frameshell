@@ -24,6 +24,24 @@ _Avoid_: variable, setting
 The part of the frame a platform's app covers (buttons, captions, profile), in pixels of a reference frame; held once per platform, named by styles and formats.
 _Avoid_: safe area (alone), margin
 
+## Voiceover (ADR 0034)
+
+**Voiceover**:
+Narration generated from text by a speech provider, one take per line of a voiceover script.
+_Avoid_: TTS (the technique, not the feature), narration track, dubbing
+
+**Speech provider**:
+What turns one line of text into spoken audio for `voiceover generate`: built into the daemon, or contributed by a plugin (`contributes.speechProviders`). Paid when its cost estimate is above 0.
+_Avoid_: TTS engine, voice (a voice is one of a provider's voices)
+
+**Voiceover script**:
+A script in `scripts/` marked `voiceover: true`, read line by line like a shoot script; each line has a display form (captions) and a spoken form (what the voice says).
+_Avoid_: narration script, TTS script
+
+**Voiceover take**:
+The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
+_Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover from text, slice 1 of #470 (ADR 0034, changes SPEC decision 10, adds decision 31): a `SpeechProvider`
+  contract in the plugin API (`registerSpeechProvider`, manifest `contributes.speechProviders`; plugin API stays v1,
+  but hosts before this release reject manifests that declare it) and `frameshell voiceover generate <script>
+  [--lines] [--provider] [--voice] [--yes]` (daemon `voiceover.generate`, MCP `voiceover_generate`, protocol 85). A
+  voiceover script is a script with `voiceover: true`, read with the shoot-script line rules; each line has a display
+  form and a spoken form (respellings `{display|spoken}`, numbers spelled out in `language` `es`/`en`). Each line
+  becomes `assets/voiceover/<script slug>/<line id>.wav`: cached by a key stored inside the WAV (unchanged lines are
+  not said again, moved lines are copied, hand-made files are never overwritten), head and tail silence trimmed,
+  imported together. A paid provider fails with `ConfirmationRequired` and its cost until called with `--yes`; a
+  retried request with the same idempotency key never charges twice. No voice ships yet: a test-only stand-in
+  (`FRAMESHELL_SPEECH_STAND_IN=1`) says words as tones. New error codes `SpeechProviderNotFound`, `SpeechFailed`,
+  `ConfirmationRequired`; `plugin list` shows speech providers.
 - Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 84), CLI `frameshell matte <asset>`
   and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
   MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on

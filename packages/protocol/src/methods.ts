@@ -29,7 +29,7 @@ import {
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { AudioEffectSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 84;
+export const PROTOCOL_VERSION = 85;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -269,6 +269,7 @@ const PluginInfoSchema = z.object({
     .object({
       clipTypes: z.array(z.string()),
       transcriptionProviders: z.array(z.string()),
+      speechProviders: z.array(z.string()).describe("Speech providers for `voiceover.generate` (ADR 0034)."),
       commands: z.array(z.string()).describe("`<group> <command>`, run as `frameshell <group> <command>`."),
       exportPresets: z.array(z.string()),
       skills: z.array(z.string()).describe("Absolute paths of the plugin's agent skill files."),
@@ -1885,6 +1886,80 @@ export const methods = {
         .array(ShootSceneSchema.extend({ ref: z.string().describe("`scriptRef` value for this scene: `<path>#<slug>`.") }))
         .describe("In file order."),
       warnings: z.array(z.string()).describe("Everything to fix before recording; empty when the script is clean."),
+    }),
+  },
+  "voiceover.generate": {
+    mutating: true,
+    description:
+      "Generate the voiceover of a voiceover script (ADR 0034): one spoken take per line, written to " +
+      "`assets/voiceover/<script slug>/<line id>.wav` and imported (ingest queued) with one `asset.import`. A voiceover " +
+      "script is a script in `scripts/` with `voiceover: true` in its frontmatter (also `language`, `provider`, `voice`), " +
+      "read like a shoot script: one line per non-blank text line, `## ` scenes, `[LABEL: …]` cues never read. A " +
+      "respelling `{display|spoken}` shows `display` and says `spoken` (`{Frameshell|freim shel}`); with `language: es` or " +
+      "`en`, numbers with digits are spelled out for the voice and kept as digits in `display`. Line ids are " +
+      "`<scene slug>-<n>` (`hook-1`). Each take is cached by its spoken text, provider (and its version), voice and " +
+      "language: a line whose take is current is not generated again (`cached`), and one whose text moved to another " +
+      "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Nothing is placed on a " +
+      "timeline. A paid provider (its cost estimate is above 0) generates nothing without `yes: true` and fails with " +
+      "ConfirmationRequired, whose data carries the cost: show it to the person and pass `yes` only after they " +
+      "confirm it, never on your own. A second charge is prevented by the takes marked on disk and one run at a time per " +
+      "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
+      "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
+      "SpeechProviderNotFound (data lists the providers there are), ProjectNotTrusted (a plugin provider in an untrusted " +
+      "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
+      "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +
+      "SpeechFailed (the provider failed; takes finished before it are kept, imported and reused by the next call).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      script: z
+        .string()
+        .min(1)
+        .describe("Voiceover script inside the project, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch-vo.md`."),
+      lines: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Line ids to generate (`hook-1`, `problem-2`); default every line of the script."),
+      provider: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Speech provider id. Default: the script's frontmatter `provider`."),
+      voice: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Voice id of the provider. Default: the script's frontmatter `voice`, else the provider's default voice."),
+      yes: z
+        .boolean()
+        .default(false)
+        .describe("The person confirmed the cost of a paid provider. Never set it without their explicit confirmation."),
+    }),
+    result: z.object({
+      script: z.string().describe("Script file, project-relative and `/`-separated."),
+      dir: z.string().describe("Folder of the takes, project-relative: `assets/voiceover/<script slug>`."),
+      provider: z.string().describe("Speech provider used."),
+      voice: z.string().describe("Voice used."),
+      lines: z
+        .array(
+          VoiceoverLineSchema.omit({ cues: true, speaker: true, words: true }).extend({
+            file: z.string().describe("The take, project-relative: `assets/voiceover/<script slug>/<id>.wav`."),
+            state: z
+              .enum(["generated", "cached", "copied"])
+              .describe("`generated`: the provider said it now. `cached`: the file already held this take. `copied`: taken from the file of another line id with the same take."),
+            duration: z.number().describe("Seconds of the take after trimming."),
+            trimmed: z.object({ head: z.number(), tail: z.number() }).describe("Seconds of silence removed from the start and the end; 0 for `cached` and `copied`."),
+          }),
+        )
+        .describe("The lines asked for, in script order."),
+      imported: z
+        .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
+        .describe("Takes this call wrote (`generated`, `copied`), imported together; follow their ingest with `job.list`."),
+      cost: z
+        .object({ amount: z.number(), currency: z.string() })
+        .nullable()
+        .describe("Estimated cost of the takes generated by this call; null when the provider is free or nothing was generated."),
+      warnings: z.array(z.string()).describe("Script problems (budget over a scene's timing, digits without `language`…) and provider notes."),
     }),
   },
   "shoot.status": {
@@ -3602,6 +3677,8 @@ export type ScriptOutlineResult = MethodResult<"script.outline">;
 export type ShootStatusResult = MethodResult<"shoot.status">;
 /** Result of `script.check`. */
 export type ScriptCheckResult = MethodResult<"script.check">;
+/** Result of `voiceover.generate`. */
+export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -3900,6 +3977,15 @@ export const ErrorCode = {
   UnsupportedModelFormat: -32044,
   /** data: `{ format, available: string[] }`: the project has no such format (ADR 0027); `available` lists its formats. */
   FormatNotFound: -32045,
+  /** data: `{ provider, available: string[] }`: no built-in or loaded plugin speech provider has this id (ADR 0034). */
+  SpeechProviderNotFound: -32046,
+  /** data: `{ provider, line, details, written: string[] }`: the provider failed on line `line`; `written` lists the takes kept. */
+  SpeechFailed: -32047,
+  /**
+   * data: `{ provider, voice, lines: string[], cost: { amount, currency }, characters }`: a paid generation waits for the
+   * person to confirm its cost; call again with `yes` (CLI `--yes`) only once they did.
+   */
+  ConfirmationRequired: -32048,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

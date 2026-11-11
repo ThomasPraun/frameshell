@@ -134,6 +134,8 @@ import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
+import type { SpeechProvider } from "@frameshell/plugin-api";
+import { generateVoiceover } from "./voiceover/generate.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -175,6 +177,11 @@ export interface DaemonOptions {
    * ({@link standInWords}) instead of being transcribed. Default false.
    */
   shootStandIn?: boolean;
+  /**
+   * Speech providers built into this daemon (ADR 0034), usable in every project, trusted or not; looked up before
+   * plugin providers. `frameshelld` adds the stand-in under `FRAMESHELL_SPEECH_STAND_IN=1`. Default none.
+   */
+  speechProviders?: readonly SpeechProvider[];
   /**
    * Tests only: `matte.prepare` takes whatever is brighter than mid-gray as the subject (`standInMatte`) and
    * names the model `stand-in`, so nothing is downloaded. Default false.
@@ -379,6 +386,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const people = new PeopleService({
     onChanged: (dir, change, person) => publishFor("people.changed", dir, { project: dir, change, ...(person !== undefined ? { person } : {}) }),
   });
+  /** Running `voiceover.generate` calls, by canonical project root: one at a time per project. */
+  const voiceoverRuns = new Map<string, Promise<void>>();
+  /** Aborts provider calls when the daemon stops. */
+  const voiceoverAbort = new AbortController();
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
   const takeRuns = new Map<string, Promise<void>>();
   /** Why the last transcription of such a take failed, by the same key; gone once it runs again. */
@@ -1206,6 +1217,58 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         (error: unknown) => ({ people: [], warning: `people.json could not be read, speakers not matched: ${(error as Error).message.split("\n")[0]}` }),
       );
       return checkScript(dir, cwd, file, names);
+    },
+    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes }, _caller, request) => {
+      const dir = await root(cwd);
+      const builtIn = new Map((options.speechProviders ?? []).map((speech) => [speech.id, speech] as const));
+      const speechProvider = async (id: string): Promise<SpeechProvider> => {
+        const own = builtIn.get(id);
+        if (own) return own;
+        try {
+          return await plugins.speechProvider(dir, id);
+        } catch (error) {
+          if (!(error instanceof RpcError) || error.code !== ErrorCode.SpeechProviderNotFound || builtIn.size === 0) throw error;
+          const available = [...builtIn.keys(), ...((error.data as { available?: string[] } | undefined)?.available ?? [])];
+          throw new RpcError(ErrorCode.SpeechProviderNotFound, `${error.message} Built in: ${[...builtIn.keys()].join(", ")}.`, { provider: id, available });
+        }
+      };
+      const work = () =>
+        generateVoiceover({
+          root: dir,
+          cwd,
+          script,
+          ...(lines ? { lines } : {}),
+          ...(provider ? { provider } : {}),
+          ...(voice ? { voice } : {}),
+          yes,
+          speechProvider,
+          speechProviders: async () => [
+            ...builtIn.keys(),
+            ...(await plugins.speechProviders(dir).then((found) => found.map((speech) => speech.id), () => [])),
+          ],
+          ensureBinary: async (name) => binaries.ensure(name, await projectBinaries(dir)),
+          importAssets: (files) => media.import(dir, files, "copy"),
+          progress: (update) => {
+            try {
+              request.progress(update);
+            } catch {
+              // Connection closed.
+            }
+          },
+          signal: voiceoverAbort.signal,
+        });
+      // One run per project at a time: two runs over one script would write the same takes.
+      const key = canonicalPathSync(dir);
+      const run = (voiceoverRuns.get(key) ?? Promise.resolve()).then(work);
+      const settled = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      voiceoverRuns.set(key, settled);
+      void settled.then(() => {
+        if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
+      });
+      return run;
     },
     "timeline.show": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
@@ -2211,6 +2274,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         server.close(() => resolve());
       });
       // Canceled jobs are found again from disk when the project next opens.
+      voiceoverAbort.abort();
       await media.close();
       await segmentation.close();
       await timelineWatcher.close();

@@ -438,3 +438,6 @@ export {
   correlateProfiles,
   planSync,
 } from "./multicam/sync.js";
+export { STAND_IN_SPEECH_PROVIDER, standInSpeechProvider } from "./voiceover/stand-in.js";
+export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
+export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";

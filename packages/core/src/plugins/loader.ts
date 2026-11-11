@@ -8,6 +8,7 @@ import {
   type PluginApi,
   type PluginCommand,
   type PluginManifest,
+  type SpeechProvider,
   type TranscriptionProvider,
 } from "@frameshell/plugin-api";
 import { PLUGIN_MANIFEST_FILE, parseExportPreset, parsePluginManifest } from "@frameshell/schema";
@@ -25,7 +26,8 @@ export interface LoadedPlugin {
   commands: Map<string, PluginCommand>;
   presets: ExportPreset[];
   clipTypes: Map<string, ClipAdapter>;
-  providers: Map<string, TranscriptionProvider>;
+  transcriptionProviders: Map<string, TranscriptionProvider>;
+  speechProviders: Map<string, SpeechProvider>;
 }
 
 /**
@@ -80,7 +82,8 @@ export async function loadPlugin(dir: string, name: string, pin: string, project
     commands: new Map(),
     presets: [],
     clipTypes: new Map(),
-    providers: new Map(),
+    transcriptionProviders: new Map(),
+    speechProviders: new Map(),
   };
   try {
     const manifest = await readManifest(dir, name);
@@ -98,7 +101,8 @@ export async function loadPlugin(dir: string, name: string, pin: string, project
     plugin.commands.clear();
     plugin.presets = [];
     plugin.clipTypes.clear();
-    plugin.providers.clear();
+    plugin.transcriptionProviders.clear();
+    plugin.speechProviders.clear();
   }
   return plugin;
 }
@@ -143,8 +147,15 @@ async function activate(plugin: LoadedPlugin, manifest: PluginManifest, dir: str
       plugin.clipTypes.set(adapter.type, adapter);
     },
     registerTranscriptionProvider(provider) {
-      guard("transcription provider", provider?.id, declared.transcriptionProviders, plugin.providers);
-      plugin.providers.set(provider.id, provider);
+      guard("transcription provider", provider?.id, declared.transcriptionProviders, plugin.transcriptionProviders);
+      plugin.transcriptionProviders.set(provider.id, provider);
+    },
+    registerSpeechProvider(provider) {
+      guard("speech provider", provider?.id, declared.speechProviders, plugin.speechProviders);
+      if (typeof provider.synthesize !== "function" || typeof provider.voices !== "function") {
+        throw new PluginLoadError(`speech provider "${provider.id}" needs synthesize() and voices() functions`);
+      }
+      plugin.speechProviders.set(provider.id, provider);
     },
     refreshRenders() {
       // Never throws into the plugin: a refresh is a hint, and its failures surface as render states.
@@ -164,7 +175,8 @@ async function activate(plugin: LoadedPlugin, manifest: PluginManifest, dir: str
     ...declared.commands.filter((id) => !plugin.commands.has(id)).map((id) => `command "${id}"`),
     ...declared.exportPresets.filter((id) => !presetIds.has(id)).map((id) => `export preset "${id}"`),
     ...declared.clipTypes.filter((id) => !plugin.clipTypes.has(id)).map((id) => `clip type "${id}"`),
-    ...declared.transcriptionProviders.filter((id) => !plugin.providers.has(id)).map((id) => `transcription provider "${id}"`),
+    ...declared.transcriptionProviders.filter((id) => !plugin.transcriptionProviders.has(id)).map((id) => `transcription provider "${id}"`),
+    ...declared.speechProviders.filter((id) => !plugin.speechProviders.has(id)).map((id) => `speech provider "${id}"`),
   ];
   if (missing.length > 0) throw new PluginLoadError(`declares but never registered: ${missing.join(", ")}`);
 }
