@@ -8,8 +8,8 @@ import { type AssetImportResult, ErrorCode, type Progress, RpcError, type Voiceo
 import { type VoiceoverLine, parseVoiceoverScript, shootSlug } from "@frameshell/schema";
 import { writeTextAtomic } from "../fs-util.js";
 import { locateScript } from "../scripts/outline.js";
-import { pcmOfWav, readPcmWav } from "../transcripts/window.js";
-import { type TakeFile, VOICEOVER_DIR, readTakes, takeKey, takeWavBytes } from "./takes.js";
+import { type Pcm16, pcmOfWav, readPcmWav } from "../transcripts/window.js";
+import { type TakeFile, type TakeMark, VOICEOVER_DIR, readTakes, takeKey, takeWavBytes } from "./takes.js";
 import { trimSilence } from "./trim.js";
 
 /** Input of {@link generateVoiceover}: the call's params plus the daemon services it needs. */
@@ -45,6 +45,10 @@ interface Plan {
   file: string;
   /** Bytes to write without asking the provider (`copied`), or null. */
   copy: Buffer | null;
+  /** The take file already at `file` (any letter case), or null. */
+  existing: TakeFile | null;
+  /** Same key as an earlier line of this run that is said once: this one gets a copy of that take. */
+  duplicateOf: Plan | null;
   state: ResultLine["state"];
 }
 
@@ -70,7 +74,7 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
     throw invalid("provider", `Name a speech provider: \`--provider <id>\` or \`provider:\` in ${path}'s frontmatter (available: ${available.join(", ") || "none"}).`);
   }
   const provider = await request.speechProvider(providerId);
-  const voices = await provider.voices();
+  const voices = await providerCall(provider, null, () => provider.voices());
   const voice = request.voice ?? script.voiceover.voice ?? provider.defaultVoice;
   if (!voice) throw invalid("voice", `Speech provider ${providerId} has no default voice: name one (voices: ${voices.map((v) => v.id).join(", ") || "none listed"}).`);
   if (voices.length > 0 && !voices.some((known) => known.id === voice)) {
@@ -83,19 +87,28 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   const takes = await readTakes(absDir);
   const byKey = new Map<string, TakeFile>();
   for (const take of takes.values()) if (take.mark) byKey.set(take.mark.key, take);
+  const byName = new Map<string, TakeFile>();
+  for (const take of takes.values()) byName.set(take.name.toLowerCase(), take);
+  const firstOfKey = new Map<string, Plan>();
   const plans: Plan[] = lines.map((line) => {
     const key = takeKey({ provider: provider.id, providerVersion: provider.version ?? "1", voice, options, text: line.spoken });
     const name = `${line.id}.wav`;
     const file = `${dir}/${name}`;
-    const current = takes.get(name);
-    if (current?.mark?.key === key) return { line, key, file, copy: null, state: "cached" };
+    // Case-folded: on a case-insensitive filesystem `hook-1.WAV` is the file `hook-1.wav` would replace.
+    const existing = byName.get(name.toLowerCase()) ?? null;
+    const base = { line, key, file, existing };
+    if (existing?.mark?.key === key) return { ...base, copy: null, duplicateOf: null, state: "cached" };
     const same = byKey.get(key);
-    if (same) return { line, key, file, copy: same.bytes, state: "copied" };
-    return { line, key, file, copy: null, state: "generated" };
+    if (same) return { ...base, copy: same.bytes, duplicateOf: null, state: "copied" };
+    const first = firstOfKey.get(key);
+    if (first) return { ...base, copy: null, duplicateOf: first, state: "copied" };
+    const plan: Plan = { ...base, copy: null, duplicateOf: null, state: "generated" };
+    firstOfKey.set(key, plan);
+    return plan;
   });
-  const foreign = plans.filter((plan) => plan.state !== "cached" && takes.has(`${plan.line.id}.wav`) && takes.get(`${plan.line.id}.wav`)!.mark === null);
+  const foreign = plans.filter((plan) => plan.state !== "cached" && plan.existing !== null && plan.existing.mark === null);
   if (foreign.length > 0) {
-    const files = foreign.map((plan) => plan.file);
+    const files = foreign.map((plan) => `${dir}/${plan.existing!.name}`);
     throw new RpcError(
       ErrorCode.InvalidOperation,
       `${files.join(", ")} ${files.length === 1 ? "was" : "were"} not written by voiceover generate (made or edited by hand) and ${files.length === 1 ? "is" : "are"} never overwritten. ` +
@@ -105,7 +118,7 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   }
 
   const toSay = plans.filter((plan) => plan.state === "generated");
-  const cost = await estimate(provider, toSay, voice, options);
+  const cost = await providerCall(provider, null, () => estimate(provider, toSay, voice, options));
   if (cost && cost.amount > 0 && !request.yes) {
     const characters = toSay.reduce((total, plan) => total + plan.line.spoken.length, 0);
     throw new RpcError(
@@ -126,8 +139,8 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
       trimmed: { head: take.head, tail: take.tail },
     });
   for (const plan of plans) {
-    if (plan.state === "generated") continue;
-    const bytes = plan.copy ?? takes.get(`${plan.line.id}.wav`)!.bytes;
+    if (plan.state === "generated" || plan.duplicateOf) continue;
+    const bytes = plan.copy ?? plan.existing!.bytes;
     const pcm = pcmOf(bytes);
     if (plan.copy) {
       await writeTextAtomic(join(root, ...plan.file.split("/")), plan.copy);
@@ -136,6 +149,7 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
     finish(plan, { pcm, head: 0, tail: 0 });
   }
 
+  const said = new Map<string, { take: { pcm: Pcm16 }; mark: TakeMark }>();
   for (const [index, plan] of toSay.entries()) {
     request.signal.throwIfAborted();
     request.progress({ message: `Saying ${plan.line.id} (${index + 1}/${toSay.length})`, fraction: index / toSay.length, stage: "speak", values: { line: plan.line.id } });
@@ -158,6 +172,15 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
     await writeTextAtomic(join(root, ...plan.file.split("/")), takeWavBytes(take.pcm, mark));
     written.push(plan.file);
     finish(plan, take);
+    said.set(plan.key, { take, mark });
+  }
+
+  for (const plan of plans) {
+    if (!plan.duplicateOf) continue;
+    const first = said.get(plan.key)!;
+    await writeTextAtomic(join(root, ...plan.file.split("/")), takeWavBytes(first.take.pcm, first.mark));
+    written.push(plan.file);
+    finish(plan, { pcm: first.take.pcm, head: 0, tail: 0 });
   }
 
   const imported = written.length > 0 ? (await request.importAssets(written.map((file) => join(root, ...file.split("/"))))).imported : [];
@@ -200,6 +223,17 @@ async function estimate(provider: SpeechProvider, plans: Plan[], voice: string, 
     amount += Math.max(0, one.cost);
   }
   return currency === null ? null : { amount, currency };
+}
+
+/** Runs a provider call that is not a line's synthesis; its failure reaches the caller as `SpeechFailed`, not an internal error. */
+async function providerCall<T>(provider: SpeechProvider, line: string | null, call: () => Promise<T> | T): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof RpcError) throw error;
+    const details = (error as Error)?.message ?? String(error);
+    throw new RpcError(ErrorCode.SpeechFailed, `${provider.id} failed: ${details}`, { provider: provider.id, line, details, written: [] });
+  }
 }
 
 /** One provider call: WAV in a fresh temp dir, read, trimmed. Throws with a user-facing message. */

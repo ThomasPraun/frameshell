@@ -1551,7 +1551,9 @@ export const methods = {
       "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Nothing is placed on a " +
       "timeline. A paid provider (its cost estimate is above 0) generates nothing without `yes: true` and fails with " +
       "ConfirmationRequired, whose data carries the cost: show it to the person and pass `yes` only after they " +
-      "confirm it, never on your own. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
+      "confirm it, never on your own. A second charge is prevented by the takes marked on disk and one run at a time per " +
+      "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
+      "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
       "SpeechProviderNotFound (data lists the providers there are), ProjectNotTrusted (a plugin provider in an untrusted " +
       "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +

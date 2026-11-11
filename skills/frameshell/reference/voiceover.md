@@ -41,5 +41,6 @@ frameshell voiceover generate scripts/launch-vo.md --lines hook-1 --voice em_ale
 - Each line's `state`: `generated` (said now), `cached` (its take is current, nothing done), `copied` (same text moved to another line id). Edit a line and only that line is said again.
 - A take file you or the person made or edited by hand is never overwritten: the call fails with `InvalidOperation` naming it.
 - **Paid providers.** When the provider charges, the call generates nothing and fails with `ConfirmationRequired`; `error.data.cost` holds the estimate. Tell the person the cost and pass `--yes` only after they confirm it. Never confirm on your own.
+- A line repeated in one call is said once and copied (`copied`). Ctrl+C or a dropped connection does not stop a running generation: finished takes are kept and a paid run keeps going, so confirm the cost before `--yes`. Run it again to reuse them.
 - `SpeechProviderNotFound`: no such provider here; `error.data.available` lists the ones there are. `SpeechFailed`: the provider failed on one line; the lines finished before it are kept and reused by the next call.
 - MCP: `voiceover_generate` with `yes` under the same rule.

@@ -124,6 +124,25 @@ describe("voiceover.generate", () => {
     expect(said).toEqual([]);
   });
 
+  it("says a line repeated in one call once and copies the take to the others", async () => {
+    writeFileSync(join(root, "scripts", "launch-vo.md"), script(["## Hook", "Hola a todos.", "## Fix", "Hola a todos.", "Hola a todos."]));
+    const result = await generate();
+    expect(result.lines.map((line) => line.state)).toEqual(["generated", "copied", "copied"]);
+    expect(said).toEqual(["Hola a todos."]);
+    expect(readFileSync(take("fix-2")).equals(readFileSync(take("hook-1")))).toBe(true);
+    expect((await generate()).lines.map((line) => line.state)).toEqual(["cached", "cached", "cached"]);
+  });
+
+  it("treats a hand-made take whose file name differs in letter case as the person's file", async () => {
+    mkdirSync(join(root, "assets", "voiceover", "launch-vo"), { recursive: true });
+    writeFileSync(join(root, "assets", "voiceover", "launch-vo", "hook-1.WAV"), "edited by hand");
+    await expect(generate()).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      data: expect.objectContaining({ reason: "not a voiceover take", files: ["assets/voiceover/launch-vo/hook-1.WAV"] }),
+    });
+    expect(said).toEqual([]);
+  });
+
   it("refuses scripts without `voiceover: true`, unknown providers and unknown voices", async () => {
     writeFileSync(join(root, "scripts", "plain.md"), "## Intro\nHola.");
     await expect(generate({ script: "scripts/plain.md", provider: "stand-in" })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
@@ -177,5 +196,36 @@ describe("voiceover.generate with a paid plugin provider", () => {
     expect(statSync(take("fix-1")).isFile()).toBe(true);
     const assets = await conn.request("asset.list", { cwd: root });
     expect(assets.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining(["assets/voiceover/launch-vo/fix-1.wav", "assets/voiceover/launch-vo/hook-1.wav"]));
+  });
+});
+
+describe("voiceover.generate with a provider that fails outside synthesis", () => {
+  it("reports voices() and estimate() failures, and mixed currencies, as SpeechFailed", async () => {
+    const standIn = standInSpeechProvider();
+    const noVoices: SpeechProvider = { ...standIn, id: "no-voices", voices: () => Promise.reject(new Error("voice list unreachable")) };
+    const noEstimate: SpeechProvider = { ...standIn, id: "no-estimate", estimate: () => Promise.reject(new Error("pricing unreachable")) };
+    let n = 0;
+    const mixed: SpeechProvider = { ...standIn, id: "mixed", estimate: () => ({ cost: 1, currency: n++ % 2 === 0 ? "USD" : "EUR" }) };
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [noVoices, noEstimate, mixed],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const client = await connectToDaemon(local.socketPath, { client: "test" });
+    try {
+      const dir = join(tempDir(), "fail");
+      await client.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, []));
+      const call = (provider: string) => client.request("voiceover.generate", { cwd: dir, script: "scripts/vo.md", provider });
+      await expect(call("no-voices")).rejects.toMatchObject({ code: ErrorCode.SpeechFailed, data: { provider: "no-voices", line: null, details: "voice list unreachable" } });
+      await expect(call("no-estimate")).rejects.toMatchObject({ code: ErrorCode.SpeechFailed, data: { provider: "no-estimate", line: null, details: "pricing unreachable" } });
+      await expect(call("mixed")).rejects.toMatchObject({ code: ErrorCode.SpeechFailed, data: { provider: "mixed", line: null, details: expect.stringContaining("both USD and EUR") } });
+    } finally {
+      client.close();
+      await local.close();
+    }
   });
 });

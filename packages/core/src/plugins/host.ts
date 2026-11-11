@@ -365,7 +365,6 @@ export class PluginHost {
   }
 }
 
-/** Official plugin of each official clip type, for install hints. */
 /** One kind of provider plugins contribute, for the lookup transcription and speech share. */
 interface ProviderKind<T> {
   /** Lowercase, for messages: `transcription provider`. */
@@ -396,6 +395,7 @@ const SPEECH: ProviderKind<SpeechProvider> = {
   hint: () => INSTALL_HINT,
 };
 
+/** Official plugin of each official clip type, for install hints. */
 const OFFICIAL_ADAPTERS: Readonly<Record<string, string>> = {
   hyperframes: "@frameshell/hyperframes",
   remotion: "@frameshell/remotion",
