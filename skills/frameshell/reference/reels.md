@@ -46,7 +46,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 ## Before you hand it over
 
-Look at the export, not the project: `frames_strip` (MCP) over the whole reel, plus `frame --at` at every graphic's entrance and at each zoom peak. Check, and fix what fails:
+Run the [critique loop](critique.md) on a draft export until every score is 8 or more. Then check, and fix what fails:
 
 - [ ] Nothing important in the safe zones; nothing over the face, at any zoom.
 - [ ] No caption shorter than 0.4 s; every misspelled word fixed.
