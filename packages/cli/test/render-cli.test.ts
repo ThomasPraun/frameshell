@@ -112,6 +112,35 @@ describe("frameshell render and frame", () => {
     expect(frameshell(["frame", "--at", "0", "--out", "x.jpg", "--quality", "0"]).stderr).toMatch(/--quality: expected an integer from 1 to 100/);
   });
 
+  it("writes a cover with a word over a frame, and says whether it reads at thumbnail size", () => {
+    const result = frameshell(["cover", "--text", "hook", "--at", "0.5", "--out", "cover.png"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/^Wrote .*cover\.png \(frame 15 at 0\.5 s, 1920x1080, "HOOK"\)\nReadable at 180 px wide: capitals [\d.]+ px tall \(least 12\)\.\n$/);
+    expect(readFileSync(join(project, "cover.png")).subarray(1, 4).toString("latin1")).toBe("PNG");
+    const json = JSON.parse(frameshell(["cover", "--text", "hook", "--json"]).stdout) as { path: string; source: string; readability: { readable: boolean } };
+    expect(json).toMatchObject({ path: join(project, "exports", "main-cover.png"), source: "default", readability: { readable: true } });
+    const long = frameshell(["cover", "--text", "la verdad sobre tiempo", "--at", "0.5", "--out", "long.png"]);
+    expect(long.stdout).toContain("Not readable at 180 px wide");
+    expect(long.stdout).toContain("warning: ");
+  });
+
+  it("refuses bad cover flags", () => {
+    expect(frameshell(["cover", "--at", "soon"]).stderr).toMatch(/--at: expected seconds >= 0/);
+    expect(frameshell(["cover", "--color", "yellow"]).stderr).toMatch(/--color: expected a colour like #ffd426/);
+    expect(frameshell(["render", "--cover-text", "hook"]).stderr).toMatch(/only with --cover-frame/);
+    expect(frameshell(["frame", "--at", "0", "--out", "x.png", "--text", "hook"]).stderr).toMatch(/does not take --text/);
+  });
+
+  it(
+    "renders with --cover-frame: frame 0 becomes the cover",
+    () => {
+      const result = frameshell(["render", "--cover-frame", "--cover-text", "hook", "--cover-at", "0.5", "--out", "out/covered.mp4"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(existsSync(join(project, "out", "covered.mp4"))).toBe(true);
+    },
+    120_000,
+  );
+
   it("makes an image project with init --kind image", () => {
     const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-image-"))), "poster");
     const result = frameshell(["init", dir, "--kind", "image", "--no-skill"], tmpdir());

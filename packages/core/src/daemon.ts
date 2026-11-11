@@ -886,11 +886,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
-    render: async ({ cwd, timeline, preset, quality, out }) => exports.render(await root(cwd), { timeline, preset, quality, out }),
+    render: async ({ cwd, timeline, preset, quality, out, cover }) => exports.render(await root(cwd), { timeline, preset, quality, out, cover }),
     frame: async ({ cwd, timeline, at, out, preset, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, format, quality }, loaded)) };
+    },
+    cover: async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.cover(dir, { timeline, ...choice }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
