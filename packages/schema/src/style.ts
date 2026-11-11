@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { EASE_CURVES, SPRING_PRESETS } from "./motion.js";
 import { PLATFORM_IDS } from "./safe-zones.js";
 
 /** Canonical `$schema` URL for a project's `style.json`. */
@@ -239,9 +240,9 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   /** 150-300 ms, a visible bounce. */
   playful: {
     duration: { quick: 0.15, standard: 0.225, slow: 0.3 },
-    ease: [0.34, 1.56, 0.64, 1],
+    ease: [...EASE_CURVES["out-back"]],
     overshoot: 0.2,
-    spring: { response: 0.5, damping: 0.45 },
+    spring: { ...SPRING_PRESETS.playful },
     stagger: 0.06,
     exit: 0.7,
     highlight: true,
@@ -249,9 +250,9 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   /** 350-600 ms, no overshoot, long settling tails. */
   premium: {
     duration: { quick: 0.35, standard: 0.5, slow: 0.8 },
-    ease: [0.22, 1, 0.36, 1],
+    ease: [...EASE_CURVES["out-quint"]],
     overshoot: 0,
-    spring: { response: 0.5, damping: 1 },
+    spring: { ...SPRING_PRESETS.heavy },
     stagger: 0.08,
     exit: 0.7,
     highlight: true,
@@ -259,9 +260,9 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   /** 200-400 ms, at most 3 % overshoot. */
   corporate: {
     duration: { quick: 0.2, standard: 0.3, slow: 0.4 },
-    ease: [0.16, 1, 0.3, 1],
+    ease: [...EASE_CURVES["out-expo"]],
     overshoot: 0.03,
-    spring: { response: 0.4, damping: 0.86 },
+    spring: { ...SPRING_PRESETS.default },
     stagger: 0.05,
     exit: 0.7,
     highlight: true,
@@ -269,8 +270,9 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   /** 100-250 ms snaps, 15-30 % overshoot. */
   energetic: {
     duration: { quick: 0.1, standard: 0.175, slow: 0.25 },
-    ease: [0.16, 1, 0.3, 1],
+    ease: [...EASE_CURVES["out-expo"]],
     overshoot: 0.3,
+    // Snappy's response with playful's bounce: no preset has this pair.
     spring: { response: 0.22, damping: 0.45 },
     stagger: 0.03,
     exit: 0.7,
@@ -279,9 +281,9 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   /** Premium's timing with no bounce and no keyword highlight, for those who find both machine-made. */
   calm: {
     duration: { quick: 0.35, standard: 0.5, slow: 0.8 },
-    ease: [0.22, 1, 0.36, 1],
+    ease: [...EASE_CURVES["out-quint"]],
     overshoot: 0,
-    spring: { response: 0.5, damping: 1 },
+    spring: { ...SPRING_PRESETS.heavy },
     stagger: 0.1,
     exit: 0.7,
     highlight: false,

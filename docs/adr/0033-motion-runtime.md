@@ -54,5 +54,5 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 - **Coupling to HyperFrames internals.** The binding relies on the `__timelines` duck typing (`play`, `pause`, `seek`) and on `hf-seek`. `plugins/hyperframes/test/motion-real.test.ts` must pass on every HyperFrames bump; a break freezes motion compositions on frame 0.
 - **Slow fixes.** A frozen runtime copy fixes an old clip only through `update` (slice 2).
 - **Authoring rules for the skill (slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.
-- **Personalities.** Once PR #497 merges, the springs in `MOTION_PERSONALITIES` should point at `SPRING_PRESETS` and its eases at `EASE_CURVES`, rather than repeat the numbers.
+- **Personalities.** The springs in `MOTION_PERSONALITIES` (ADR 0028) point at `SPRING_PRESETS` and its eases at `EASE_CURVES`, so the numbers have one source. `energetic` (response 0.22, damping 0.45) has no preset and stays inline.
 - **Unblocks** #466 (templates), #453 (motion-film playbook), the `pick` part of #469, #458 (beats as runtime input) and #468 (tokens read by templates).
