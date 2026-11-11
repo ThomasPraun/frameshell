@@ -1181,6 +1181,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return timelines.tracks(dir, timeline, await viewOf(dir, caller, view));
     },
+    "marker.list": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      return timelines.markers(dir, timeline, await viewOf(dir, caller, view));
+    },
+    "marker.add": (params, caller) => operate("marker.add", params, caller),
+    "marker.set": (params, caller) => operate("marker.set", params, caller),
+    "marker.remove": (params, caller) => operate("marker.remove", params, caller),
     "track.add": (params, caller) => operate("track.add", params, caller),
     "track.remove": (params, caller) => operate("track.remove", params, caller),
     "track.set": (params, caller) => operate("track.set", params, caller),

@@ -154,7 +154,7 @@ export type AssetChange = { path: string; asset: AssetInfo | null } | { path: nu
  * clip inspector and the preview's handles; subtitle tracks added from the
  * timeline and styled from their inspector; shots and multicam angles from
  * the shot inspector, who speaks painted on the timeline's turn lanes; transitions from a clip edge's menu and
- * the clip inspector, which also keys properties.
+ * the clip inspector, which also keys properties; markers from the ruler's menu.
  */
 export const TIMELINE_EDIT_OPS = [
   "clip.move",
@@ -175,6 +175,9 @@ export const TIMELINE_EDIT_OPS = [
   "multicam.offset",
   "multicam.reframe",
   "multicam.paint",
+  "marker.add",
+  "marker.set",
+  "marker.remove",
 ] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */

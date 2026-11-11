@@ -15,7 +15,7 @@ import { timelineHash } from "./hash.js";
 /**
  * Pure history logic over a journal (SPEC §6.2): what `revert` restores and
  * when it must refuse, and the grouped `history` view. Entity keys are `group:<id>`,
- * `track:<id>`, `clip:<id>` and `order` (track stacking order).
+ * `track:<id>`, `clip:<id>`, `marker:<id>` and `order` (track stacking order).
  */
 
 /**
@@ -64,7 +64,7 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
       const blamed = segment.filter((other) => relates(other, key, state, current));
       for (const other of blamed.length > 0 ? blamed : segment.slice(0, 1)) {
         const conflict = conflicts.get(other.id) ?? { entry: other, ids: new Set<string>() };
-        conflict.ids.add(key.replace(/^(clip|track|group):/, ""));
+        conflict.ids.add(entityId(key));
         conflicts.set(other.id, conflict);
       }
     }
@@ -82,12 +82,13 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
   return restored;
 }
 
-/** Ids of the multicam groups, tracks and clips a patch changes (each named once; groups, then tracks, then clips). */
+/** Ids of the multicam groups, tracks, clips and markers a patch changes (each named once, in that order). */
 export function touchedIds(patch: TimelinePatch): string[] {
   const ids = [
     ...(patch.groups ?? []).map((entry) => entry.id),
     ...(patch.tracks ?? []).map((entry) => entry.id),
     ...(patch.clips ?? []).map((entry) => entry.id),
+    ...(patch.markers ?? []).map((entry) => entry.id),
   ];
   return [...new Set(ids)];
 }
@@ -168,8 +169,14 @@ function patchKeys(patch: TimelinePatch): string[] {
     ...(patch.groups ?? []).map((entry) => `group:${entry.id}`),
     ...(patch.tracks ?? []).map((entry) => `track:${entry.id}`),
     ...(patch.clips ?? []).map((entry) => `clip:${entry.id}`),
+    ...(patch.markers ?? []).map((entry) => `marker:${entry.id}`),
     ...(patch.order ? ["order"] : []),
   ];
+}
+
+/** The id an entity key names; `order` stands for itself. */
+function entityId(key: string): string {
+  return key.replace(/^(clip|track|group|marker):/, "");
 }
 
 /** Tracks a patch writes into: whole tracks and the tracks of its clip entries. */
@@ -196,6 +203,7 @@ function value(timeline: Timeline, key: string): unknown {
   const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   if (kind === "track") return timeline.tracks.find((track) => track.id === id) ?? null;
   if (kind === "group") return timeline.groups?.find((group) => group.id === id) ?? null;
+  if (kind === "marker") return timeline.markers?.find((marker) => marker.id === id) ?? null;
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     const clip = track.clips.find((candidate) => candidate.id === id);
@@ -218,7 +226,7 @@ function patchRelates(patch: TimelinePatch, key: string, states: Timeline[]): bo
   if (patchKeys(patch).includes(key)) return true;
   if (key === "order") return (patch.tracks ?? []).length > 0;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
-  if (key.startsWith("group:")) return false;
+  if (key.startsWith("group:") || key.startsWith("marker:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);
   return holders.some((track) => (patch.tracks ?? []).some((entry) => entry.id === track));
 }
@@ -233,7 +241,7 @@ export function overlappingIds(ours: TimelinePatch[], theirs: TimelinePatch[], s
   const hits = new Set<string>();
   const check = (side: TimelinePatch[], other: TimelinePatch[]) => {
     for (const key of new Set(side.flatMap(patchKeys))) {
-      if (other.some((patch) => patchRelates(patch, key, states))) hits.add(key.replace(/^(clip|track|group):/, ""));
+      if (other.some((patch) => patchRelates(patch, key, states))) hits.add(entityId(key));
     }
   };
   check(ours, theirs);

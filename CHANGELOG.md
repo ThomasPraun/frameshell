@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Timeline markers (#458, slice 1 of ADR 0029): named points on the timeline clock, `markers: [{ id, at, label,
+  color? }]` in the timeline file, labels unique ignoring case. Operations `marker.add`, `marker.set`,
+  `marker.remove` (journaled, revertible, idempotent) and `marker.list`; `timeline.show` lists them; CLI
+  `frameshell marker add --at s --label l [--color c] | set | remove | list`, MCP tools from the registry
+  (protocol 81). A `cut` of every track moves markers after it with the material and removes those inside the
+  range (with a warning, a marker on the cut's first frame stays); ripple inserts and trims move them too, and a
+  ripple trim removes markers inside the material it cuts away. A cut or ripple of only some tracks leaves markers
+  where they are. Labels never look like an id (`m_1a2b3c`); a hand edit with a duplicate id or label, an id-shaped
+  label or an off-grid time is rejected into `.frameshell/rejected/`. Review mode counts marker ids as touched. In the
+  app, markers show on a lane under the ruler, the ruler's right-click menu adds, renames and deletes them, and
+  dragged clip edges snap to them. A timeline with `markers` is refused by older Frameshell versions.
 - Project style guide, slice 1 of #468 (ADR 0028): an optional `style.json` at the project root holds brand fields,
   colours (hex), fonts (family, file under `assets/fonts/`, weight, tracking), type sizes (px at a 1080 short side),
   a motion personality (`playful`, `premium`, `corporate`, `energetic`, `calm`) with field-by-field overrides, sound

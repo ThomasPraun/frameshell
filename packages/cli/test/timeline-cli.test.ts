@@ -369,6 +369,14 @@ describe("subtitle tracks", () => {
     expect(frameshell(["captions", "set", "t_x", "--text", "a", "--file", "b.txt", "--timeline", "subs"]).code).toBe(2);
     expect(frameshell(["clip", "add", "v1", "--text", "x"]).code).toBe(2);
   });
+
+  it("captions set takes --text, which cover also uses", () => {
+    const track = JSON.parse(readFileSync(join(project, "timelines", "subs.json"), "utf8")).tracks[1].id as string;
+    const set = frameshell(["captions", "set", track, "--text", "No need to | *editor*", "--timeline", "subs"]);
+    // Reaches the daemon (no words to caption here) instead of failing as a usage error.
+    expect(set.stderr).toMatch(/shows no words/);
+    expect(set.code).toBe(1);
+  });
 });
 
 describe("track mute and hide", () => {
@@ -422,5 +430,42 @@ describe("transitions and keyframes", () => {
     expect(frameshell(["clip", "key", first, "--prop", "x", "--clear", "--at", "1"]).stderr).toMatch(/--clear removes every key/);
     expect(frameshell(["transition", "set", "--at", "1", "--prop", "x"]).code).toBe(2);
     expect(frameshell(["transition", "set", "--at", "20.7"]).stderr).toMatch(/no clip edge at 20.7 s/);
+  });
+});
+
+describe("markers (ADR 0029)", () => {
+  it("marker add, set, list and remove; cut ripples them and removes those inside; bad flags exit 2", () => {
+    writeFileSync(
+      join(project, "timelines", "marked.json"),
+      JSON.stringify({ schemaVersion: 1, id: "marked", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }] }),
+    );
+    const on = ["--timeline", "marked"];
+    const list = () => json<{ markers: { id: string; at: number; label: string; color?: string }[] }>(["marker", "list", ...on]).markers;
+    expect(frameshell(["clip", "add", "v1", "assets/take.mp4", "--start", "0", ...on]).code).toBe(0);
+
+    const added = frameshell(["marker", "add", "--at", "1.51", "--label", "hook", "--color", "red", ...on]);
+    expect(added.code).toBe(0);
+    expect(added.stdout).toMatch(/^marker\.add: added m_[0-9a-f]{6}\n/);
+    const hook = list()[0]!.id;
+    expect(frameshell(["marker", "add", "--at", "0.5", "--label", "intro", ...on]).code).toBe(0);
+    const intro = list()[0]!.id;
+    expect(frameshell(["marker", "list", ...on]).stdout).toBe(
+      `Timeline marked · revision 3 · 2 markers:\n  ${intro}  0.5 s  intro\n  ${hook}  1.5 s  hook  (red)\n`,
+    );
+    expect(frameshell(["timeline", "show", ...on]).stdout).toContain(`Markers: ${intro} 0.5 "intro", ${hook} 1.5 "hook"`);
+
+    expect(frameshell(["marker", "set", "HOOK", "--at", "1.8", "--label", "cta", "--clear-color", ...on]).code).toBe(0);
+    expect(list()[1]).toEqual({ id: hook, at: 1.8, label: "cta" });
+    const cut = frameshell(["cut", "--from", "0.2", "--to", "0.8", "--no-snap", ...on]);
+    expect(cut.code).toBe(0);
+    expect(cut.stdout).toMatch(/warning: removed marker "intro"/);
+    expect(list()).toEqual([{ id: hook, at: 1.2, label: "cta" }]);
+    expect(frameshell(["marker", "remove", hook, ...on]).code).toBe(0);
+    expect(frameshell(["marker", "list", ...on]).stdout).toMatch(/has no markers/);
+
+    expect(frameshell(["marker", "add", "--label", "x", ...on]).stderr).toMatch(/needs --at <seconds> and --label <label>/);
+    expect(frameshell(["marker", "set", "x", "--color", "red", "--clear-color", ...on]).code).toBe(2);
+    expect(frameshell(["marker", "remove", ...on]).code).toBe(2);
+    expect(frameshell(["marker", "set", "nope", "--at", "1", ...on]).stderr).toMatch(/no marker "nope"/);
   });
 });

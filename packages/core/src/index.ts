@@ -205,6 +205,7 @@ export {
   type EditPoint,
   type EditPointResolution,
   type EditPointResolver,
+  type IdPrefix,
   type OperationArgs,
   type OperationRequest,
   type SourceInfo,

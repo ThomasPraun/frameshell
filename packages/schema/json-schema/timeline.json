@@ -1619,6 +1619,57 @@
         ],
         "additionalProperties": false
       }
+    },
+    "markers": {
+      "description": "Named points on the timeline clock (ADR 0029), sorted by `at`; labels unique ignoring case. Absent when none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^m_[0-9a-f]+$",
+            "description": "Stable, core-generated (`m_…`); reference markers by it or by their label."
+          },
+          "at": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Timeline seconds of the marker, snapped by the core to the frame grid."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "allOf": [
+              {
+                "pattern": "^\\S(.*\\S)?$"
+              },
+              {
+                "pattern": "^(?!m_[0-9a-f]+$)"
+              }
+            ],
+            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`)."
+          },
+          "color": {
+            "description": "`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour.",
+            "type": "string",
+            "enum": [
+              "red",
+              "orange",
+              "yellow",
+              "green",
+              "blue",
+              "purple"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "label"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

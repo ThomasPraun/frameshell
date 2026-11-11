@@ -107,9 +107,23 @@ describe("idempotency keys", () => {
 
   it("flags every method that changes a project or daemon state, and no read", () => {
     expect(mutating).toEqual(
-      expect.arrayContaining(["file.write", "clip.move", "clip.trim", "clip.split", "clip.remove", "cut", "revert", "tx.begin", "tx.commit", "tx.abort"]),
+      expect.arrayContaining([
+        "file.write",
+        "clip.move",
+        "clip.trim",
+        "clip.split",
+        "clip.remove",
+        "cut",
+        "marker.add",
+        "marker.set",
+        "marker.remove",
+        "revert",
+        "tx.begin",
+        "tx.commit",
+        "tx.abort",
+      ]),
     );
-    for (const read of ["status", "timeline.show", "track.list", "history", "asset.list", "job.list", "script.outline", "handshake"]) {
+    for (const read of ["status", "timeline.show", "track.list", "marker.list", "history", "asset.list", "job.list", "script.outline", "handshake"]) {
       expect(mutating).not.toContain(read);
     }
   });

@@ -31,6 +31,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
+  MarkerListResultSchema,
   CaptionsSetResultSchema,
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -64,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 80;
+export const PROTOCOL_VERSION = 81;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2617,6 +2618,45 @@ export const methods = {
       "`clean: false` when no pause was in reach (speech may be clipped there). `snap: false` cuts exactly. " +
       "A cut that trims or splits an adapter clip (e.g. `hyperframes`) adds a `warnings` entry naming its id, type and `scriptRef`: edit audio before building visuals.",
     params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "marker.list": {
+    description:
+      "List a timeline's markers (ADR 0029): named points on the timeline clock, each with id (`m_…`), timeline second `at`, " +
+      "label and optional colour, sorted by `at`. Markers paint nothing and play nothing; they name moments (a hook, a beat to land on) " +
+      "for the person and the agent. `timeline.show` lists them too. In review mode, `view` picks the file or the open proposal's version. " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: MarkerListResultSchema.extend(ViewedShape),
+  },
+  "marker.add": {
+    mutating: true,
+    description:
+      "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
+      "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
+      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
+      "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
+      "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
+      "the message names the marker holding it).",
+    params: operationArgs["marker.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "marker.set": {
+    mutating: true,
+    description:
+      "Move, rename or recolour a marker (ADR 0029): `{ marker: \"hook\", at: 14 }`, `{ marker: \"m_1a2b3c\", label: \"cta\" }`; " +
+      "`color: null` clears its colour. `marker` is the id or the label (ignoring case). Fields left out keep their value. Fails with " +
+      "InvalidOperation (no such marker, the message lists them; label taken; nothing to change).",
+    params: operationArgs["marker.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "marker.remove": {
+    mutating: true,
+    description:
+      "Delete a marker (ADR 0029): `{ marker: \"hook\" }`, by id or label (ignoring case). Fails with InvalidOperation when there is no " +
+      "such marker (the message lists them).",
+    params: operationArgs["marker.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   cleanup: {

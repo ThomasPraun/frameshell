@@ -17,6 +17,8 @@ import {
   type SubtitlePosition,
   type SubtitlePresetId,
   KEY_EASES,
+  MARKER_COLORS,
+  MarkerSchema,
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
@@ -34,6 +36,12 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
 const CropSide = z.number().min(0).lt(1).optional();
+const MarkerRef = z
+  .string()
+  .min(1)
+  .describe("Marker id from `marker.list` (`m_1a2b3c`) or its label (ignoring case), e.g. `hook`.");
+const MarkerLabel = MarkerSchema.shape.label;
+const MarkerColor = z.enum(MARKER_COLORS);
 
 /** Snapping args shared by `cut` and `clip.trim` (ADR 0003). */
 const snapArgs = {
@@ -558,6 +566,20 @@ export const operationArgs = {
     rules: DirectorRulesSchema.describe("Resolved rules: a template with `director.json` on top."),
     keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
   }),
+  "marker.add": z.strictObject({
+    at: Seconds("Timeline second of the marker."),
+    label: MarkerLabel,
+    color: MarkerColor.optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Default: none (the app's accent colour)."),
+  }),
+  "marker.set": z.strictObject({
+    marker: MarkerRef,
+    at: Seconds("New timeline second (absolute, not a nudge).").optional(),
+    label: MarkerLabel.optional().describe("New label; unique in the timeline ignoring case."),
+    color: MarkerColor.nullable().optional().describe("New colour; null clears it (the app's accent colour)."),
+  }),
+  "marker.remove": z.strictObject({
+    marker: MarkerRef,
+  }),
 } as const;
 
 /** Name of a public timeline operation. */
@@ -568,9 +590,13 @@ export type OperationName = keyof typeof operationArgs;
  * inverse is a patch, so one `apply` undoes any operation.
  * Applied in order: `groups` (replace, insert or delete whole multicam
  * groups), `tracks` (replace, insert or delete whole tracks), then `clips`
- * (upsert or delete one clip in a track), then `order`.
+ * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
+ * delete one marker) touch nothing else.
  */
 export const TimelinePatchSchema = z.strictObject({
+  markers: z
+    .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
+    .optional(),
   groups: z
     .array(z.strictObject({ id: z.string().min(1), group: MulticamGroupSchema.nullable().describe("Full group; null deletes it.") }))
     .optional(),
@@ -661,9 +687,9 @@ export const OperationResultSchema = z.object({
   operation: OperationRecordSchema,
   changes: z
     .object({
-      added: z.array(z.string()).describe("Ids of multicam groups, tracks and clips created."),
-      updated: z.array(z.string()).describe("Ids of multicam groups, tracks and clips changed."),
-      removed: z.array(z.string()).describe("Ids of multicam groups, tracks and clips deleted."),
+      added: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers created."),
+      updated: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers changed."),
+      removed: z.array(z.string()).describe("Ids of multicam groups, tracks, clips and markers deleted."),
       range: z
         .object({
           from: z.number(),
@@ -998,6 +1024,10 @@ export const TimelineViewSchema = z.object({
     .array(MulticamGroupSchema)
     .optional()
     .describe("Multicam groups as stored (angles with asset, offset, crop, audio); absent when the timeline has none."),
+  markers: z
+    .array(MarkerSchema)
+    .optional()
+    .describe("Markers as stored (ADR 0029): id, timeline second `at`, label, colour; sorted by `at`; absent when the timeline has none."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),
 });
 
@@ -1054,3 +1084,13 @@ export const RejectionRecordSchema = TimelineRejectionSchema.extend({
 
 /** See {@link RejectionRecordSchema}. */
 export type RejectionRecord = z.output<typeof RejectionRecordSchema>;
+
+/** Result of `marker.list`. */
+export const MarkerListResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int(),
+  markers: z.array(MarkerSchema).describe("Sorted by `at`, then id; empty when the timeline has none."),
+});
+
+/** See {@link MarkerListResultSchema}. */
+export type MarkerListResult = z.output<typeof MarkerListResultSchema>;

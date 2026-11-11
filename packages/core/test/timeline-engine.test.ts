@@ -667,6 +667,221 @@ describe("ripple trim and insert (restoring cut material)", () => {
   });
 });
 
+describe("markers (ADR 0029)", () => {
+  /** base() with markers "intro" at 1, "hook" at 4 (red) and "outro" at 9, and media clips on t_v 0–10 and t_a 0–10. */
+  async function marked(): Promise<Timeline> {
+    let t = base();
+    t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline; // c_0001
+    t = (await apply(t, "clip.add", { track: "t_a", asset: "assets/music.wav", start: 0, out: 10 })).timeline; // c_0002
+    t = (await apply(t, "marker.add", { at: 9, label: "outro" }, context({ newId: () => "m_c" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 1, label: "intro" }, context({ newId: () => "m_a" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 4, label: "hook", color: "red" }, context({ newId: () => "m_b" }))).timeline;
+    return t;
+  }
+  const where = (timeline: Timeline) => (timeline.markers ?? []).map((marker) => [marker.label, marker.at]);
+
+  it("marker.add snaps to the frame grid, keeps markers sorted by time and reports the new id; the inverse removes it", async () => {
+    const t = base();
+    const added = await apply(t, "marker.add", { at: 2.01, label: "hook", color: "blue" }, context({ newId: () => "m_1a2b3c" }));
+    expect(added.timeline.markers).toEqual([{ id: "m_1a2b3c", at: 2, label: "hook", color: "blue" }]);
+    expect(added.changes).toEqual({ added: ["m_1a2b3c"], updated: [], removed: [], range: null });
+    const undone = await apply(added.timeline, "timeline.patch", added.inverse.args);
+    expect(undone.timeline).not.toHaveProperty("markers");
+    expect(where(await marked())).toEqual([
+      ["intro", 1],
+      ["hook", 4],
+      ["outro", 9],
+    ]);
+  });
+
+  it("marker.add refuses a label another marker holds, ignoring case, and names that marker", async () => {
+    const error = await rejection(apply(await marked(), "marker.add", { at: 3, label: "HOOK" }));
+    expect(error.code).toBe(ErrorCode.InvalidOperation);
+    expect(error.message).toMatch(/label "HOOK" is already marker m_b \("hook" at 4 s\)/);
+    expect(error.data).toMatchObject({ field: "label" });
+  });
+
+  it("marker.set moves, renames and recolours a marker found by id or label; the inverse restores it", async () => {
+    const t = await marked();
+    const moved = await apply(t, "marker.set", { marker: "Hook", at: 6.01, label: "cta", color: null });
+    expect(moved.timeline.markers).toEqual([
+      { id: "m_a", at: 1, label: "intro" },
+      { id: "m_b", at: 6, label: "cta" },
+      { id: "m_c", at: 9, label: "outro" },
+    ]);
+    expect(moved.changes).toEqual({ added: [], updated: ["m_b"], removed: [], range: null });
+    expect((await apply(moved.timeline, "timeline.patch", moved.inverse.args)).timeline.markers).toEqual(t.markers);
+    const recoloured = await apply(t, "marker.set", { marker: "m_a", color: "green" });
+    expect(recoloured.timeline.markers![0]).toEqual({ id: "m_a", at: 1, label: "intro", color: "green" });
+    // Its own label in another case is no clash.
+    expect((await apply(t, "marker.set", { marker: "m_b", label: "HOOK" })).timeline.markers![1]!.label).toBe("HOOK");
+  });
+
+  it("marker.set and marker.remove refuse an unknown marker listing the markers, and marker.set with nothing to change", async () => {
+    const t = await marked();
+    const unknown = await rejection(apply(t, "marker.set", { marker: "nope", at: 1 }));
+    expect(unknown.code).toBe(ErrorCode.InvalidOperation);
+    expect(unknown.message).toMatch(/no marker "nope" in timeline main\. Markers: m_a "intro" at 1, m_b "hook" at 4, m_c "outro" at 9\./);
+    expect((await rejection(apply(base(), "marker.remove", { marker: "hook" }))).message).toMatch(/It has no markers/);
+    expect((await rejection(apply(t, "marker.set", { marker: "hook" }))).message).toMatch(/nothing to change on marker m_b/);
+    expect((await rejection(apply(t, "marker.set", { marker: "hook", label: "Outro" }))).message).toMatch(/already marker m_c/);
+  });
+
+  it("marker.remove deletes by id or label; removing the last drops `markers`; the inverse restores it", async () => {
+    const t = await marked();
+    const removed = await apply(t, "marker.remove", { marker: "HOOK" });
+    expect(where(removed.timeline)).toEqual([
+      ["intro", 1],
+      ["outro", 9],
+    ]);
+    expect(removed.changes.removed).toEqual(["m_b"]);
+    expect((await apply(removed.timeline, "timeline.patch", removed.inverse.args)).timeline.markers).toEqual(t.markers);
+    let one = (await apply(base(), "marker.add", { at: 1, label: "only" })).timeline;
+    one = (await apply(one, "marker.remove", { marker: "only" })).timeline;
+    expect(one).not.toHaveProperty("markers");
+  });
+
+  it("cut on every track moves markers after it left, keeps the one on its first frame and removes those inside, with a warning", async () => {
+    let t = await marked();
+    t = (await apply(t, "marker.add", { at: 3, label: "edge" }, context({ newId: () => "m_d" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 5, label: "end" }, context({ newId: () => "m_e" }))).timeline;
+    const cut = await apply(t, "cut", { from: 3, to: 5, snap: false });
+    expect(where(cut.timeline)).toEqual([
+      ["intro", 1],
+      ["edge", 3],
+      ["end", 3],
+      ["outro", 7],
+    ]);
+    expect(cut.changes.removed).toContain("m_b");
+    expect(cut.changes.updated).toEqual(expect.arrayContaining(["m_c", "m_e"]));
+    expect(cut.warnings).toEqual([expect.stringMatching(/removed marker "hook" \(m_b at 4 s\): inside the cut range/)]);
+    expect((await apply(cut.timeline, "timeline.patch", cut.inverse.args)).timeline.markers).toEqual(t.markers);
+  });
+
+  it("cut of only some tracks leaves markers where they are", async () => {
+    const t = await marked();
+    const cut = await apply(t, "cut", { from: 3, to: 5, snap: false, tracks: ["t_a"] });
+    expect(cut.timeline.markers).toEqual(t.markers);
+    expect(cut.warnings).toEqual([]);
+    // Naming every clip track is the same as naming none.
+    expect(where((await apply(t, "cut", { from: 3, to: 5, snap: false, tracks: ["t_v", "t_a"] })).timeline)).toEqual([
+      ["intro", 1],
+      ["outro", 7],
+    ]);
+  });
+
+  it("ripple inserts move markers like clip starts, only when they ripple every clip track", async () => {
+    const t = await marked();
+    t.tracks.push({ id: "t_x", kind: "video", clips: [] });
+    const inserted = await apply(t, "clip.add", { track: "t_x", asset: "assets/talk.mp4", start: 4, in: 0, out: 1, ripple: true });
+    expect(where(inserted.timeline)).toEqual([
+      ["intro", 1],
+      ["hook", 5],
+      ["outro", 10],
+    ]);
+    const scoped = await apply(t, "clip.add", { track: "t_x", asset: "assets/talk.mp4", start: 4, in: 0, out: 1, ripple: true, rippleTracks: ["t_x"] });
+    expect(scoped.timeline.markers).toEqual(t.markers);
+  });
+
+  it("a ripple trim treats markers like cut: later ones shift, those strictly inside the removed tail are deleted, with a warning and an inverse", async () => {
+    let t = await marked();
+    t = (await apply(t, "marker.add", { at: 8, label: "seam" }, context({ newId: () => "m_d" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 10.5, label: "tail" }, context({ newId: () => "m_e" }))).timeline;
+    // c_0001 (0-10) shortened to 8 s: [8, 10) is removed. The marker on 8 stays, "outro" (9) goes, "tail" (10.5) moves with what follows.
+    const trimmed = await apply(t, "clip.trim", { clip: "c_0001", out: 8, ripple: true, snap: false });
+    expect(where(trimmed.timeline)).toEqual([
+      ["intro", 1],
+      ["hook", 4],
+      ["seam", 8],
+      ["tail", 8.5],
+    ]);
+    expect(trimmed.changes.removed).toContain("m_c");
+    expect(trimmed.warnings).toEqual([expect.stringMatching(/removed marker "outro" \(m_c at 9 s\): inside the removed material/)]);
+    expect((await apply(trimmed.timeline, "timeline.patch", trimmed.inverse.args)).timeline.markers).toEqual(t.markers);
+  });
+
+  it("a ripple trim of the head deletes markers inside the removed head, keeps one on the old first frame and shifts the rest", async () => {
+    let t = await marked();
+    // Music after the picture, so the head trim has no clip starting inside the removed head.
+    t = (await apply(t, "clip.move", { clip: "c_0002", start: 10 })).timeline;
+    t = (await apply(t, "marker.add", { at: 0, label: "zero" }, context({ newId: () => "m_d" }))).timeline;
+    t = (await apply(t, "marker.add", { at: 2, label: "two" }, context({ newId: () => "m_e" }))).timeline;
+    // c_0001 loses its first 2 s: [0, 2) is removed. "zero" stays on frame 0, "intro" (1) goes, "two" is not inside (it is the first frame after).
+    const trimmed = await apply(t, "clip.trim", { clip: "c_0001", in: 2, ripple: true, snap: false });
+    expect(where(trimmed.timeline)).toEqual([
+      ["zero", 0],
+      ["two", 0],
+      ["hook", 2],
+      ["outro", 7],
+    ]);
+    expect(trimmed.changes.removed).toEqual(expect.arrayContaining(["m_a"]));
+    expect((await apply(trimmed.timeline, "timeline.patch", trimmed.inverse.args)).timeline.markers).toEqual(t.markers);
+    // Growing the head is an insert: markers at or after the old first frame move with the material.
+    const grown = await apply(trimmed.timeline, "clip.trim", { clip: "c_0001", in: 0, ripple: true, snap: false });
+    expect(where(grown.timeline)).toEqual([
+      ["zero", 2],
+      ["two", 2],
+      ["hook", 4],
+      ["outro", 9],
+    ]);
+  });
+
+  it("a ripple trim of only some tracks leaves markers where they are, even over removed material", async () => {
+    const t = await marked();
+    const trimmed = await apply(t, "clip.trim", { clip: "c_0001", out: 8, ripple: true, rippleTracks: ["t_v"], snap: false });
+    expect(trimmed.timeline.markers).toEqual(t.markers);
+    expect(trimmed.warnings).toEqual([]);
+  });
+
+  it("a marker exactly on a cut's first frame stays, and so does every marker when the cut covers only some tracks", async () => {
+    let t = await marked();
+    t = (await apply(t, "marker.add", { at: 6, label: "first" }, context({ newId: () => "m_d" }))).timeline;
+    const cut = await apply(t, "cut", { from: 6, to: 8, snap: false });
+    expect(where(cut.timeline)).toEqual([
+      ["intro", 1],
+      ["hook", 4],
+      ["first", 6],
+      ["outro", 7],
+    ]);
+    expect(cut.warnings).toEqual([]);
+    const partial = await apply(t, "cut", { from: 3, to: 8, snap: false, tracks: ["t_v"] });
+    expect(partial.timeline.markers).toEqual(t.markers);
+  });
+
+  it("a reference that is an existing id resolves as the id; a label shaped like an id is refused on add and set", async () => {
+    const t = await marked();
+    expect((await apply(t, "marker.set", { marker: "m_b", at: 5 })).timeline.markers!.find((m) => m.id === "m_b")!.at).toBe(5);
+    for (const label of ["m_abc123", "M_B", "m_0"]) {
+      expect((await rejection(apply(t, "marker.add", { at: 3, label }))).message, label).toMatch(/must not look like a marker id/);
+      expect((await rejection(apply(t, "marker.set", { marker: "m_b", label }))).message, label).toMatch(/must not look like a marker id/);
+    }
+    // Only an exact id shape counts: these are ordinary labels.
+    expect((await apply(t, "marker.add", { at: 3, label: "m_beat" })).timeline.markers).toHaveLength(4);
+    expect((await apply(t, "marker.add", { at: 3, label: "m_1 drop" })).timeline.markers).toHaveLength(4);
+  });
+
+  it("timeline.patch refuses a marker off the frame grid and accepts one on it", async () => {
+    const t = await marked();
+    const off = await rejection(apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.015, label: "intro" } }] }));
+    expect(off.message).toMatch(/marker m_a \("intro"\) is at 1\.015 s, off the frame grid/);
+    const on = await apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.033, label: "intro" } }] });
+    expect(on.timeline.markers![0]!.at).toBe(1.033);
+  });
+
+  it("the timeline schema refuses duplicate marker labels (ignoring case), duplicate ids and malformed ones", () => {
+    const timeline = (markers: unknown[]) => ({ ...base(), markers });
+    expect(parseTimeline(timeline([{ id: "m_a", at: 1, label: "Hook" }, { id: "m_b", at: 2, label: "hook" }]))).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/markers\.1\.label.*already marker m_a/),
+    });
+    expect(parseTimeline(timeline([{ id: "m_a", at: 1, label: "a" }, { id: "m_a", at: 2, label: "b" }]))).toMatchObject({ ok: false });
+    expect(parseTimeline(timeline([{ id: "hook", at: 1, label: "a" }]))).toMatchObject({ ok: false });
+    expect(parseTimeline(timeline([{ id: "m_a", at: 1, label: " a" }]))).toMatchObject({ ok: false });
+    expect(parseTimeline(timeline([{ id: "m_a", at: 1, label: "a", color: "pink" }]))).toMatchObject({ ok: false });
+    expect(parseTimeline(timeline([{ id: "m_a", at: 1, label: "Hook", color: "red" }]))).toMatchObject({ ok: true });
+  });
+});
+
 // Property-style: random operation sequences from a seeded PRNG (no dependency).
 
 function prng(seed: number) {
@@ -694,7 +909,10 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
   const clipTrackId = () => (clipTracks.length > 0 ? rand.pick(clipTracks).id : "t_none");
   const clipId = () => (clips.length > 0 ? rand.pick(clips).id : "c_none");
   const time = () => rand.float(40);
-  switch (rand.int(11)) {
+  const markers = timeline.markers ?? [];
+  const markerRef = () => (markers.length > 0 ? (rand.chance(0.5) ? rand.pick(markers).id : rand.pick(markers).label) : "m_none");
+  const label = () => rand.pick(["hook", "intro", "cta", "beat", "Hook"]);
+  switch (rand.int(13)) {
     case 0:
       return { name: "track.add", args: { kind: rand.pick(["video", "audio", "subtitles"] as const), follows: clipTrackId(), ...(rand.chance(0.3) ? { index: rand.int(tracks.length + 1) } : {}) } };
     case 1:
@@ -737,6 +955,12 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
       const from = time();
       return { name: "cut", args: { from, to: from + rand.float(5), ...(rand.chance(0.3) ? { tracks: [clipTrackId()] } : {}) } };
     }
+    case 10:
+      return { name: "marker.add", args: { at: time(), label: label(), ...(rand.chance(0.3) ? { color: rand.pick(["red", "blue"]) } : {}) } };
+    case 11:
+      return rand.chance(0.5)
+        ? { name: "marker.set", args: { marker: markerRef(), ...(rand.chance(0.6) ? { at: time() } : {}), ...(rand.chance(0.4) ? { label: label() } : {}) } }
+        : { name: "marker.remove", args: { marker: markerRef() } };
     default:
       return { name: "track.add", args: { kind: rand.pick(["video", "audio"] as const) } };
   }
@@ -749,6 +973,8 @@ function assertInvariants(timeline: Timeline, fps: number): void {
     expect(Math.abs(t * fps - Math.round(t * fps))).toBeLessThan(0.05);
     expect(Math.round(t * 1000) / 1000).toBe(t);
   };
+  for (const marker of timeline.markers ?? []) onGrid(marker.at);
+  expect(timeline.markers?.length).not.toBe(0);
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     let previousEnd = -Infinity;
@@ -902,11 +1128,13 @@ describe("operation properties", () => {
 
       const undone = await applyOperation(result.timeline, result.inverse, ctx);
       expect(undone.timeline.tracks, `inverse of ${name} ${JSON.stringify(args)}`).toEqual(timeline.tracks);
+      expect(undone.timeline.markers, `inverse of ${name} ${JSON.stringify(args)}`).toEqual(timeline.markers);
       const redone = await applyOperation(undone.timeline, undone.inverse, ctx);
       expect(redone.timeline.tracks).toEqual(result.timeline.tracks);
+      expect(redone.timeline.markers).toEqual(result.timeline.markers);
       timeline = result.timeline;
     }
-    expect(applied.size).toBeGreaterThanOrEqual(8);
+    expect(applied.size).toBeGreaterThanOrEqual(10);
   });
 });
 
