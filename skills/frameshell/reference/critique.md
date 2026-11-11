@@ -4,7 +4,7 @@ Look at what you built before the person does. A reel or a motion film is judged
 
 ## 1. Make the evidence
 
-Judge the **export**, never the project files or your memory of the code. Render a draft (`frameshell render --preset <preset> --out exports/draft.mp4 --json`), then build the sheets with the managed ffmpeg (`$FRAMESHELL_FFMPEG` in an app terminal) into a `review/` folder at the project root:
+Judge the **export**, never the project files or your memory of the code. Render a draft (`frameshell render --preset <preset> --quality draft --out exports/draft.mp4 --json`; a project with several formats: `--formats <id,id>` without `--preset`, and one set of sheets per file), then build the sheets with the managed ffmpeg (`$FRAMESHELL_FFMPEG` in an app terminal) into a `review/` folder at the project root:
 
 ```sh
 # whole film at 2 fps (pick fps and tile so every frame fits; several sheets for long films)
@@ -18,6 +18,7 @@ Judge the **export**, never the project files or your memory of the code. Render
 - **Fast moments:** `frames_strip` (MCP) over the 0.5 s around each fast move, entrance and cut, with about 12 tiles: pops, overlaps and blank frames only show up in consecutive frames.
 - **Critical stills:** `frameshell frame --at <s> --out <file.png>` at frame 0, every graphic's entrance, each zoom peak, and the end card.
 - **Words:** `frameshell transcribe --verify exports/draft.mp4 --json` when speech was cut.
+- **Thumbnail:** a `warning:` from `render` that frame 0 is black is a hook problem; `frameshell cover --text <word> --json` reports whether the cover word reads at 180 px.
 - **Delivery:** `"$FRAMESHELL_FFPROBE" -v error -select_streams v:0 -show_entries stream=width,height,avg_frame_rate,duration -of json exports/draft.mp4` matches the planned size, frame rate and length.
 
 ## 2. A fresh critic
@@ -61,7 +62,7 @@ Go through these one by one, on the sheets and strips:
 - Banned looks: a centred title on a gradient, corner labels, frame borders, glow on UI, generic particles, crossfades between every shot, a whoosh on every cut, the same sound machine-gunned.
 - Numbers or claims on screen the person or a source did not give.
 
-Add every default you catch the video falling into to the project's banned list (the person's style notes), so the next round and the next video avoid it.
+Add every default you catch the video falling into to `banned` in the project's `style.json` (with the person's agreement), so the next round and the next video avoid it. Judge brand, type sizes, motion and sound levels against `frameshell style show`, not your taste.
 
 ## 5. Notes, then fixes
 
@@ -74,7 +75,7 @@ CHANGE   start the card 6 frames earlier; nothing else
 KEEP     the zoom, the caption timing, every other graphic
 ```
 
-Fix the three worst, each in its own transaction, then check each fix with a still or a strip of its range before re-rendering the whole film. Append the round to `review/log.md`: the scores table (or the comparison), the three problems with their timestamps, what changed, and whether last round's fixes landed.
+Fix the three worst, each in its own transaction, then check each fix with a still or a strip of its range before re-rendering the whole film. Re-render drafts with `--quality draft`; only the delivery is `--quality final`. Append the round to `review/log.md`: the scores table (or the comparison), the three problems with their timestamps, what changed, and whether last round's fixes landed.
 
 ## 6. Stop
 
