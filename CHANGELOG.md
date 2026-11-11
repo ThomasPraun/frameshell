@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Cover image and a finished frame 0 (#476, part of #451): `frameshell cover [--text word] [--at s] [--color #rrggbb]`
-  (daemon `cover`, MCP `cover`, protocol 71) writes a cover image: a frame with one big word over it (upper-case,
+  (daemon `cover`, MCP `cover`, protocol 72) writes a cover image: a frame with one big word over it (upper-case,
   centered, outlined, in the bundled subtitle face, as large as the width allows), rendered by the export compiler like
   `frame`. `--text` alone picks the frame where the word is first spoken in the transcripts; `--at` picks it; neither
   uses the first whole picture (past the first clip's fade in, never the black frame). It is checked readable at 180 px wide (capitals at least 12 px tall, sized from the face's
@@ -20,6 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warns when frame 0, or the chosen cover frame, is black (a gap before the first picture, a fade). The cover uses the
   `big-keyword` subtitle look until the project style guide (#468) holds one; review's frame-0 check (#457) can
   read the same warning.
+- Hardware encoder probe and quality tiers (#475, part of #451). Frameshell test-encodes 0.2 s of colour with each H.264
+  candidate (VideoToolbox, NVENC, then x264) and uses the first that works, because `ffmpeg -encoders` lists encoders
+  that fail on the machine. The answer is cached per ffmpeg build in `encoders.json` in the data dir
+  (`packages/core/src/encoders/`). `render` takes `quality` (`draft` or `final`; protocol 71, CLI `--quality`): a draft
+  is at most 30 fps at x264 CRF 22 veryfast (NVENC p5, VideoToolbox bitrate from frame size), a final is CRF 16 slow
+  (NVENC p6 cq 17, VideoToolbox 0.25 bits per pixel, about 62 Mb/s at 4K30) with bt709 tags, faststart and AAC 320k.
+  Without `quality` a render is the preset as written. The `render` result names the `encoder`. `doctor` reports the
+  encoder in use, a speed class (fast, medium, slow) with the proxy and draft sizes it suits, and the disk a master
+  intermediate takes per minute; `doctor --reprobe` tests the encoders again. The codec list's hardware test encode
+  is now the same 0.2 s test.
+- Agent skill: a playbook for short-form reels from a talking-head take (#452), `skills/frameshell/reference/reels.md`.
+  It covers a one-round intake, the vertical canvas and −14 LUFS loudness, passes (words, cut, captions, graphics
+  plan, zooms, sound), 9:16 safe zones, notes as rules for the whole video, and checks before handing over.
+- Agent skill: a critique loop for reels and generated videos (#454), `skills/frameshell/reference/critique.md`:
+  contact, phone and loudness checks on the export, a fresh critic that describes before judging, a scoring rubric
+  with automatic caps or pairwise comparison, scoped fix notes, a round log and when to stop.
 
 ## [0.18.0] - 2026-11-07
 

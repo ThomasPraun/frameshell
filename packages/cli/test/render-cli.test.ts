@@ -65,7 +65,7 @@ describe("frameshell render and frame", () => {
       const output = join(project, "out", "talk.mp4");
       expect(result.stdout).toBe(`Rendered ${output}\n`);
       expect(result.stderr).toContain(`Rendering timelines/main.json -> ${output}`);
-      expect(result.stderr).toContain("youtube-1080p · 1920x1080 · 30/1 fps · 1 s");
+      expect(result.stderr).toContain("youtube-1080p · libx264 · 1920x1080 · 30/1 fps · 1 s");
       expect(result.stderr).toMatch(/render timelines\/main\.json: done/);
       expect(existsSync(output)).toBe(true);
     },
@@ -79,6 +79,20 @@ describe("frameshell render and frame", () => {
       expect(result.code, result.stderr).toBe(0);
       const parsed = JSON.parse(result.stdout) as { output: string; job: { state: string } };
       expect(parsed).toMatchObject({ output: join(project, "exports", "main-vertical-1080x1920.mp4"), job: { state: "done" } });
+    },
+    120_000,
+  );
+
+  it(
+    "renders a draft with the machine's encoder and names it, and refuses an unknown quality",
+    () => {
+      const result = frameshell(["render", "--quality", "draft", "--out", "out/draft.mp4"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stderr).toMatch(/youtube-1080p \(draft\) · (libx264|h264_videotoolbox|h264_nvenc) · 1920x1080 · 30\/1 fps/);
+      expect(existsSync(join(project, "out", "draft.mp4"))).toBe(true);
+      const bad = frameshell(["render", "--quality", "80"]);
+      expect(bad.code).toBe(2);
+      expect(bad.stderr).toMatch(/--quality: expected draft or final, got "80"/);
     },
     120_000,
   );
