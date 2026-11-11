@@ -166,6 +166,16 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/motion:
+    dependencies:
+      '@frameshell/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+
   packages/plugin-api:
     dependencies:
       '@frameshell/schema':

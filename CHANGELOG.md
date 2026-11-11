@@ -154,6 +154,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vertical captions are 1.3x larger; the primary format exports exactly as before. `frameshell frame --format 9x16`
   (wire `projectFormat`) captures a frame in a format. `gc` keeps the clip renders of every declared format.
   Protocol 79.
+- Motion runtime, slice 1 of #465 (ADR 0033, part of #451): spring math in `@frameshell/schema` (`spring`,
+  `springStep`, `settle`, `track`, `ease`, `stagger`, `durationFromDistance`; presets snappy, default, heavy,
+  playful; role eases), closed form and free of clocks and random sources. The private `@frameshell/motion` package
+  adds `bind(compositionId, paint)`, which drives a paint function from the HyperFrames clock through a seek-only
+  `window.__timelines` entry (with `hf-seek` as fallback), and `write`, which sets only a 2D `transform` and
+  `opacity` so element adjustments still apply. `pnpm gen:motion` bundles it into `@frameshell/hyperframes`
+  (`motion-runtime.ts`); compositions do not use it until templates land (slice 2). Spike:
+  `docs/research/motion-runtime.md`.
 
 ### Changed
 
