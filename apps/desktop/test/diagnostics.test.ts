@@ -14,6 +14,22 @@ const doctor: DoctorResult = {
     { name: "whisper", package: "whisper", source: "managed", path: null, installed: false, version: null, pinned: null },
   ],
   codecs: [{ name: "libx264", kind: "encoder", label: "H.264", hardware: false, compiled: true, works: null }],
+  encoders: {
+    picked: "libx264",
+    cached: true,
+    probedAt: "2026-11-10T10:00:00.000Z",
+    candidates: [{ name: "libx264", label: "H.264 (x264)", compiled: true, works: true, ms: 120 }],
+  },
+  profile: {
+    class: "medium",
+    cpuCores: 8,
+    memoryGb: 16,
+    proxyShortSide: 540,
+    draftShortSide: 720,
+    resolution: { width: 1920, height: 1080 },
+    fps: 30,
+    masterMbPerMinute: 466,
+  },
   problems: [`ffmpeg failed to run at ${home}/x/ffmpeg`],
 } as DoctorResult;
 
@@ -47,6 +63,7 @@ describe("buildDiagnostics", () => {
     expect(report).toContain("Jobs: 3, 2 done, 1 failed");
     expect(report).toContain("Synced folder: Dropbox");
     expect(report).toContain("whisper: missing (managed)");
+    expect(report).toContain("Render encoder: libx264, machine medium");
   });
 
   it("shows paths under home as ~/ and leaves no home prefix", () => {

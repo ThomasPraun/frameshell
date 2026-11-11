@@ -4,6 +4,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import {
   ErrorCode,
+  type EncoderName,
   type ExportPresetInfo,
   type FrameFormat,
   type FrameResult,
@@ -141,6 +142,8 @@ export interface ExportServiceOptions {
     check(root: string, timeline: Timeline): Promise<void>;
     ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void): Promise<ReadonlyMap<string, GeneratedSource>>;
   };
+  /** H.264 encoder for renders that ask for a quality tier: the first that works on this machine. Absent: x264. */
+  encoder?(ffmpeg: string): Promise<EncoderName>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
   parallelism?: number;
   /** Video segment length in seconds; see {@link RenderInput.segmentSeconds}. */
@@ -169,17 +172,22 @@ export class ExportService {
   }
 
   /** Validate and compile, then queue the render job. Returns at once. */
-  async render(root: string, params: { timeline: string; preset?: string | undefined; out?: string | undefined }): Promise<RenderResult> {
+  async render(
+    root: string,
+    params: { timeline: string; preset?: string | undefined; quality?: "draft" | "final" | undefined; out?: string | undefined },
+  ): Promise<RenderResult> {
     const config = (await readEnclosingProject(root))?.config;
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
     const { timeline, fps } = await this.#resolved(root, params.timeline);
     const resolution = config?.resolution ?? DEFAULT_RESOLUTION;
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
+    const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
     const input = {
       timeline,
       fps,
       preset,
+      ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources: await this.#sources(root, timeline),
@@ -218,6 +226,8 @@ export class ExportService {
       job,
       output,
       preset: preset.id,
+      quality: params.quality ?? null,
+      encoder: encoder && preset.video.codec === "h264" ? encoder : presetEncoder(preset),
       timeline: params.timeline,
       duration: plan.duration,
       width: plan.width,
@@ -372,6 +382,11 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */
+function presetEncoder(preset: ExportPreset): string {
+  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks" }[preset.video.codec];
 }
 
 /** Files of a multicam group: the cameras and the separate mics. */
