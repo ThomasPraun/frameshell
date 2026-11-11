@@ -30,6 +30,7 @@ import {
 } from "@frameshell/protocol";
 import { type MulticamGroup, type ProgramTrack, type ProjectConfig, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
 import { runDoctor } from "./binaries/doctor.js";
+import { EncoderCache } from "./encoders/probe.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
@@ -204,6 +205,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const clients = new Set<Socket>();
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
+  const encoderCache = new EncoderCache(binaries.dataDir);
   const models = new ModelRegistry(dirs.configDir);
   /** Binaries, pinned models and this machine's registered models for a transcription provider. */
   const transcriberTools = (overrides: ProjectBinaries): TranscriberTools => ({
@@ -425,6 +427,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
     loadTimeline: (dir, id) => timelines.load(dir, id),
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
+    encoder: (ffmpeg) => encoderCache.pick(ffmpeg),
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
       ensure: (dir, timeline, onProgress) => clips.ensure(clipRoot(dir), timeline, onProgress),
@@ -858,10 +861,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (params.resolution) format = { ...format, resolution: params.resolution };
       return projects.init(params.dir, params.name, params.agentSkill, format, params.kind);
     },
-    doctor: async ({ cwd, install }) => {
+    doctor: async ({ cwd, install, reprobe }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
-      return { ...(await runDoctor(binaries, { project, install })), skill: found ? await coreSkillState(found.dir) : null };
+      const format = found ? { resolution: found.config.resolution, fps: found.config.fps } : undefined;
+      return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
     },
     "skill.update": async ({ cwd, force }) => {
       const dir = await root(cwd);
@@ -883,11 +887,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
-    render: async ({ cwd, timeline, preset, out }) => exports.render(await root(cwd), { timeline, preset, out }),
+    render: async ({ cwd, timeline, preset, quality, out, cover }) => exports.render(await root(cwd), { timeline, preset, quality, out, cover }),
     frame: async ({ cwd, timeline, at, out, preset, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, format, quality }, loaded)) };
+    },
+    cover: async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.cover(dir, { timeline, ...choice }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.

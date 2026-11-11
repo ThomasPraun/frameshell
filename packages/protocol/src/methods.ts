@@ -60,7 +60,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 71;
+export const PROTOCOL_VERSION = 73;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -156,6 +156,46 @@ const CodecReportSchema = z.object({
     .boolean()
     .nullable()
     .describe("Hardware encoders only: a one-frame test encode succeeded on this machine. Null when not tested."),
+});
+
+const EncoderNameSchema = z
+  .enum(["h264_videotoolbox", "h264_nvenc", "libx264"])
+  .describe("H.264 encoder, in the order tried: VideoToolbox (macOS), NVENC (NVIDIA), x264 (software, always the last resort).");
+
+const QualityTierSchema = z
+  .enum(["master", "preview", "draft", "final"])
+  .describe(
+    "Encode quality tier. `master`: intermediates kept for later passes (x264 CRF 16 medium). `preview`: throwaway " +
+      "looks (CRF 26 veryfast). `draft`: review rounds (30 fps at most, CRF 22 veryfast). `final`: the delivery " +
+      "(CRF 16 slow, bt709 tags, faststart). Hardware encoders use their own equivalent settings.",
+  );
+
+const EncoderReportSchema = z.object({
+  picked: EncoderNameSchema.nullable().describe("The encoder renders use: the first candidate that encoded; null when none did."),
+  cached: z.boolean().describe("The answer came from the per-machine cache (`encoders.json` in the data dir) instead of fresh test encodes."),
+  probedAt: z.string().describe("ISO timestamp of the test encodes."),
+  candidates: z
+    .array(
+      z.object({
+        name: EncoderNameSchema,
+        label: z.string(),
+        compiled: z.boolean().describe("Listed by `ffmpeg -encoders`."),
+        works: z.boolean().describe("A 0.2 s test encode of lavfi colour succeeded on this machine."),
+        ms: z.number().nullable().describe("Wall time of the test encode; null when not run (not compiled in)."),
+      }),
+    )
+    .describe("Every candidate in preference order."),
+});
+
+const MachineProfileSchema = z.object({
+  class: z.enum(["fast", "medium", "slow"]).describe("Machine speed class from CPU cores, memory and whether a hardware encoder works."),
+  cpuCores: z.int(),
+  memoryGb: z.number(),
+  proxyShortSide: z.int().describe("Recommended short side in px for preview proxies on this machine."),
+  draftShortSide: z.int().describe("Recommended short side in px for draft renders (review rounds); pick a preset of about that size."),
+  resolution: z.object({ width: z.int(), height: z.int() }).describe("Project resolution the disk estimate is for."),
+  fps: z.number().describe("Project frame rate the disk estimate is for."),
+  masterMbPerMinute: z.int().describe("Disk a `master` intermediate takes per minute of video at the project resolution and fps (upper bound, megabytes)."),
 });
 
 /**
@@ -438,6 +478,38 @@ const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
 /** `frame` quality when the caller gives none: high, visually lossless for most pictures. */
 export const DEFAULT_FRAME_QUALITY = 92;
 
+/**
+ * Longest cover text, characters. The wire check counts UTF-16 units, so it is never looser than the service's
+ * (code points of the upper-cased text, which stays authoritative: `ExportService` in core).
+ */
+export const COVER_MAX_CHARS = 24;
+
+/** What the cover word and its frame are chosen by; shared by `cover` and the `cover` option of `render`. */
+const CoverChoiceShape = {
+  text: z
+    .string()
+    .min(1)
+    .max(COVER_MAX_CHARS)
+    .optional()
+    .describe(
+      `The word drawn big over the frame (up to ${COVER_MAX_CHARS} characters; shown upper-case, one line, as large as the width allows). ` +
+        "Absent: the frame alone. Without `at`, the frame is the one where this word is first spoken.",
+    ),
+  at: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Timeline seconds of the frame to use. Default: where `text` is first spoken (in the transcripts of the video and audio tracks), " +
+        "else the first frame showing a whole picture (after the first clip's fade in).",
+    ),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .describe("Word colour, `#rrggbb`; the outline turns black or white to contrast with it. Default yellow `#ffd426`."),
+};
+
 const PresetParam = z
   .string()
   .min(1)
@@ -445,6 +517,17 @@ const PresetParam = z
   .describe(
     "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
       "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`.",
+  );
+
+/** Quality tiers a `render` can ask for; the other tiers (`master`, `preview`) are for intermediates. */
+const RenderQualityParam = QualityTierSchema.extract(["draft", "final"])
+  .optional()
+  .describe(
+    "Quality tier. `draft`: for review rounds, at most 30 fps, x264 CRF 22 veryfast (or the machine's hardware " +
+      "encoder), much faster than a final. `final`: CRF 16 slow, bt709 tags, faststart, the delivery. Both use the " +
+      "encoder `doctor` reports (first of VideoToolbox, NVENC, x264 that works on this machine) and replace the " +
+      "preset's own `crf`/`bitrateKbps`; only H.264 presets take a tier (others render as the preset says, with a " +
+      "warning). Default: the preset as written (x264, its own CRF).",
   );
 
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
@@ -652,7 +735,10 @@ export const methods = {
       "Diagnose native binaries: which ffmpeg/ffprobe will be used (managed download or a `binaries` override " +
       "from the project enclosing `cwd` or the global config), their versions, and which encoders and decoders " +
       "ffmpeg provides (x264, libvpx VP9 encode and decode, VideoToolbox, NVENC, VAAPI; hardware ones are " +
-      "test-encoded). `problems` lists what blocks rendering, each with a fix. With `install: true`, missing " +
+      "test-encoded). `encoders` says which H.264 encoder renders use (VideoToolbox, NVENC or x264: the first " +
+      "that encodes 0.2 s of test video here; probed once per machine and cached), and `profile` the machine's " +
+      "speed class with the proxy and draft sizes it suits and the disk a master intermediate takes. " +
+      "`problems` lists what blocks rendering, each with a fix. With `install: true`, missing " +
       "managed binaries are downloaded and checksum-verified first (tens of MB, may take minutes).",
     params: z.strictObject({
       cwd: AbsolutePath.describe("Absolute directory whose enclosing project's `binaries` overrides apply."),
@@ -660,6 +746,10 @@ export const methods = {
         .boolean()
         .default(false)
         .describe("Download missing managed binaries before diagnosing. Default false: report only."),
+      reprobe: z
+        .boolean()
+        .default(false)
+        .describe("Run the encoder test encodes again instead of using the cached answer (after a driver or GPU change)."),
     }),
     result: z.object({
       platform: z.string().describe("`<os>-<arch>` key used to pick pinned builds, e.g. `darwin-arm64`."),
@@ -668,6 +758,8 @@ export const methods = {
       codecs: z
         .array(CodecReportSchema)
         .describe("Empty when ffmpeg is not installed or not runnable."),
+      encoders: EncoderReportSchema.nullable().describe("H.264 encoder choice; null when ffmpeg is not installed or not runnable."),
+      profile: MachineProfileSchema.describe("Speed class and recommended sizes of this machine."),
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
       skill: CoreSkillStateSchema.nullable().describe("The project's copy of the agent skill; null when `cwd` is in no project."),
     }),
@@ -806,15 +898,26 @@ export const methods = {
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       preset: PresetParam,
+      quality: RenderQualityParam,
       out: AbsolutePath.optional().describe(
         "Absolute output file, e.g. `/home/ana/videos/launch/exports/launch.mp4`; its folder is created. " +
           "Default `<project>/exports/<timeline>-<preset>.<container>`. An existing file is replaced when the job finishes.",
       ),
+      cover: z
+        .strictObject(CoverChoiceShape)
+        .optional()
+        .describe(
+          "Make frame 0 a finished composition (platforms show it as the thumbnail): the frame chosen like `cover` does, with " +
+            "its word over it, replaces the first frame only; no subtitles on it, nothing else changes. Absent: frame 0 is the " +
+            "timeline's own, and `warnings` says when that is black. Needs the preset's frame rate to equal the project's.",
+        ),
     }),
     result: z.object({
       job: JobSchema,
       output: z.string().describe("Absolute path the file is written to."),
       preset: z.string().describe("Preset id used."),
+      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written."),
+      encoder: z.string().describe("ffmpeg video encoder of the segments, e.g. `libx264`, `h264_videotoolbox`."),
       timeline: z.string(),
       duration: z.number().describe("Seconds rendered (timeline duration)."),
       width: z.int(),
@@ -859,6 +962,59 @@ export const methods = {
       clip: z.string().nullable().describe("Clip showing on the first video track; null in a gap (black frame)."),
       width: z.int(),
       height: z.int(),
+    }),
+  },
+  cover: {
+    description:
+      "Write a cover image: a frame of the timeline with one big word over it, rendered by the export compiler (as `frame` " +
+      "and `render` do), checked readable at thumbnail size (180 px wide: the capitals must stay 12 px tall or more). With " +
+      "`text` and no `at` the frame is where that word is first spoken; with neither, the first whole picture (after a fade in). The word is " +
+      "upper-case in the subtitle face, centered, outlined, as large as the width allows; no subtitles are drawn on a " +
+      "cover. Size: the preset's when `preset` is given, else the project resolution. `readability.readable` false " +
+      "means the word is too long to read in a grid: shorten it. The same frame can open the exported video: " +
+      "`render` with `cover`. Fails with InvalidOperation (`at` outside the timeline, text with nothing to draw), " +
+      "ExportUnsupported, PresetNotFound, TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      ...CoverChoiceShape,
+      out: AbsolutePath.optional().describe(
+        "Absolute image path to write, e.g. `/home/ana/videos/launch/exports/cover.png`; its folder is created. " +
+          "Default `<project>/exports/<timeline>-cover.png`.",
+      ),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      format: FrameFormatSchema.optional().describe("Image format. Default: from the extension of `out`, else `png`."),
+      quality: z
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      path: z.string().describe("Absolute image path written."),
+      format: FrameFormatSchema.describe("Format written."),
+      timeline: z.string(),
+      frame: z.int().describe("Timeline frame index used (0-based, project fps)."),
+      at: z.number().describe("Start time of that frame, timeline seconds."),
+      source: z
+        .enum(["at", "word", "default"])
+        .describe("How the frame was chosen: `at` given, `word` where `text` is first spoken, `default` the first picture."),
+      text: z.string().nullable().describe("The word as drawn (upper-case); null when the cover has none."),
+      readability: z
+        .object({
+          thumbnailWidth: z.int().describe("Width the cover is judged at, px."),
+          capHeight: z.number().describe("Height of a capital letter at that width, px."),
+          minCapHeight: z.number().describe("Smallest capital height that reads, px."),
+          readable: z.boolean(),
+        })
+        .nullable()
+        .describe("Thumbnail check of the word; null when the cover has no word."),
+      width: z.int(),
+      height: z.int(),
+      warnings: z.array(z.string()).describe("Things to fix: the word is not spoken anywhere, or too small to read in a grid; empty when none."),
     }),
   },
   "inspect.point": {
@@ -3068,6 +3224,14 @@ export type ProjectInitResult = MethodResult<"project.init">;
 export type DoctorParams = MethodParams<"doctor">;
 /** Result of `doctor`. */
 export type DoctorResult = MethodResult<"doctor">;
+/** H.264 encoder ranking in a {@link DoctorResult}: what renders use and what was tried. */
+export type EncoderReport = z.output<typeof EncoderReportSchema>;
+/** One H.264 encoder Frameshell can pick, in the order tried. */
+export type EncoderName = z.output<typeof EncoderNameSchema>;
+/** Encode quality tier. */
+export type QualityTier = z.output<typeof QualityTierSchema>;
+/** Speed class and recommended sizes of a machine in a {@link DoctorResult}. */
+export type MachineProfile = z.output<typeof MachineProfileSchema>;
 /** One binary in a {@link DoctorResult}. */
 export type BinaryReport = z.output<typeof BinaryReportSchema>;
 /** One encoder or decoder in a {@link DoctorResult}. */
@@ -3086,6 +3250,10 @@ export type RenderResult = MethodResult<"render">;
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
 export type FrameResult = MethodResult<"frame">;
+/** `cover` params. */
+export type CoverParams = MethodParams<"cover">;
+/** Result of `cover`. */
+export type CoverResult = MethodResult<"cover">;
 /** Image format `frame` writes; see {@link FrameFormatSchema}. */
 export type FrameFormat = z.output<typeof FrameFormatSchema>;
 /** One export preset as listed by `export.presets`. */
