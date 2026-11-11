@@ -272,3 +272,28 @@ export {
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";
 export { type NumberLanguage, numberLanguage, spellNumber } from "./numbers.js";
 export { editDistance, normalizeToken, similarity, spokenTokens } from "./spoken.js";
+export {
+  type SpringParams,
+  type SpringPresetId,
+  type SpringLike,
+  type MotionSample,
+  type TrackMove,
+  type CubicBezier,
+  type EaseCurveId,
+  type EaseRole,
+  type EaseLike,
+  type StaggerOptions,
+  SPRING_PRESETS,
+  EASE_CURVES,
+  ROLE_EASES,
+  STAGGER_STEPS,
+  STAGGER_MAX_TOTAL,
+  DISTANCE_WEIGHTS,
+  springStep,
+  spring,
+  settle,
+  track,
+  ease,
+  stagger,
+  durationFromDistance,
+} from "./motion.js";

@@ -76,6 +76,16 @@ _Avoid_: proposal (review mode's word), match, guess, auto-assignment
 A span of timeline time where a person speaks or is on screen, as `people ranges` returns it.
 _Avoid_: segment, turn (a turn is an angle's speaking stretch on the group clock), occurrence
 
+## Motion (ADR 0033)
+
+**Motion runtime**:
+The page script (`frameshell-motion.js`, `window.FrameshellMotion`) that a HyperFrames composition loads from its own directory to paint every frame as a pure function of time: it binds one paint function to the composition clock and writes only 2D `transform` and `opacity`.
+_Avoid_: animation library, motion engine, timeline (a timeline is the project's `timeline.json`)
+
+**Spring**:
+A closed-form damped oscillator that carries a value to a target, set by `response` (period, seconds) and `damping` (ratio ζ: 1 never overshoots, lower bounces); the presets are snappy, default, heavy and playful.
+_Avoid_: bounce, elastic ease, physics animation
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:

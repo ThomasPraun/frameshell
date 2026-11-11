@@ -1,0 +1,58 @@
+---
+status: accepted
+---
+
+# Motion runtime: seek(t) springs on the HyperFrames clock, templates as scaffolded compositions
+
+Motion clips whose picture is a pure function of time ([#465](https://github.com/ThomasPraun/frameshell/issues/465)) and brand-aware templates built on them ([#466](https://github.com/ThomasPraun/frameshell/issues/466)), part of #451. Decided by the owner on 2026-11-10: option B of the proposal on #465, with all its recommendations. The binding spike is in [`docs/research/motion-runtime.md`](../research/motion-runtime.md).
+
+## Context (verified in the tree)
+
+- **Adapters (ADR 0002, 0010).** A clip adapter renders one file that preview and export both play, so parity holds for any adapter. Live preview is the only second path: it loads the composition page with `window.frameshellLive.seek(seconds)`.
+- **HyperFrames adapter.** `plugins/hyperframes/src/adapter.ts` renders in-process with `@hyperframes/producer` 0.9.30 (#479, PR #492) and the managed ffmpeg and Chrome. Every file of the composition directory is a cache input. Size comes from the composition's `data-width` and `data-height`. `plugins/hyperframes/src/scaffold.ts` (`hyperframes new`) writes one CSS-animated template, and its stage carries `data-no-timeline`.
+- **HyperFrames page runtime.** It drives the root timeline registered in `window.__timelines[<composition id>]`, and on every seek it dispatches an undocumented `hf-seek` event.
+- **Element mode (ADR 0021).** It writes `translate` and `scale` with `!important`. These compose with an animated `transform`, so a runtime that writes only a 2D `transform` and `opacity` keeps element mode working. Pick (ADR 0011) needs a DOM page, so a canvas-only engine would lose Pick and element mode.
+- **Keyframe eases (ADR 0018).** `easeFraction` in `packages/schema/src/composite.ts` places whole clips: `in` is f², `out` is f(2−f), and `in-out` is f²(3−2f), a cubic smoothstep (not quadratic). That is clip-level placement, not motion inside a composition.
+- **Motion personalities (ADR 0028, PR #497).** They carry a spring as `{ response, damping }` and an ease as cubic-bezier control points.
+- **GSAP licence.** The "no charge" licence of `gsap` 3.15 prohibits use in tools that let people build visual animations without code (read 2026-11-10).
+
+## Decision
+
+1. **HyperFrames is the only host in v1.** The runtime is a dependency-free page script bound to the HyperFrames clock. The page stays a DOM HyperFrames composition, so render, live preview, Pick and element mode keep working. A Remotion binding (`useCurrentFrame()` → seek) comes later, only if needed.
+2. **Runtime delivery: copied into each composition directory on scaffold.** The copy is frozen per clip and hashed with the composition's inputs, so a plugin upgrade never changes an existing clip's pixels. An `update` command applies runtime fixes on request.
+3. **No GSAP in Frameshell templates**, because of its "Prohibited Uses" clause. The skill may still recommend GSAP for compositions the agent writes for the user.
+4. **Command:** `frameshell hyperframes new --template <t>` in the plugin. No core change.
+5. **One source for spring math and presets: `packages/schema`** (`src/motion.ts`), next to the motion personalities of ADR 0028. The runtime bundles it. A `spring` ease for ADR 0018 keys will use the same file later.
+6. **Determinism verify is a core command** for any adapter with `livePreview` (fits #457 and #478). It probes frames cold and after a reseek, and fails above 2/255.
+7. **Motion blur** gets its own ticket, after #475.
+8. **`packages/motion` is a private workspace package**, bundled into the plugin. Publishing it to npm comes later.
+9. **HyperFrames version:** built on #479 / PR #492 (0.9.30), not 0.8.92.
+
+### Settled in slice 1
+
+- **Binding.** `bind(compositionId, paint)` calls `paint(0)` at once and registers a seek-only object (`play`, `pause`, `seek`, `time`, `duration`) in `window.__timelines[compositionId]`. It must be called synchronously from the composition's script, and the stage must not carry `data-no-timeline`. Until the timeline is first driven, the `hf-seek` event paints instead. On 0.9.30 both paths render frame-exact (spike).
+- **Spring model.** The spring is the closed-form step response of a damped oscillator. `response` is the period of the undamped oscillation in seconds; `damping` is the ratio ζ. Under-, critically and over-damped springs are solved analytically.
+  - **Presets:** snappy {0.22 s, ζ 0.80} overshoots about 1.5 %, default {0.40, 0.86} about 0.5 %, heavy {0.50, 1.0} not at all, playful {0.50, 0.45} about 20 %.
+  - **`settle(preset, eps)`** gives the lead-in time a spring needs before the next beat.
+  - **`track()`** retargets by superposition: each retarget adds a step of the target change, so position and velocity stay continuous.
+  - **Role eases:** enter out-quint, snap out-expo, pop out-back, camera and colour in-out-quart, exit in-expo, progress linear.
+  - **`stagger`** with a 0.5 s budget, and **`durationFromDistance`**: (9 + 1.15·√px) frames at 60 fps, times a weight.
+- **What the runtime writes.** `write(element, pose)` sets a 2D `transform` (translate, rotate, scale) and `opacity`, every field on every frame, with opacity clamped to 0..1. It never writes `translate`, `scale` or `rotate` (element adjustments own them), and never 3D transforms or `will-change`. Opacity and colour never spring.
+- **Packaging.** `pnpm gen:motion` bundles `packages/motion` (with `@frameshell/schema/motion`) into `plugins/hyperframes/src/motion-runtime.ts` as a string, so the plugin's own files carry it (ADR 0008). A test fails when the bundle drifts from its sources.
+- **Format injection.** `pick()` per format follows the formats ADR (0027), which owns the meaning of `RenderContext` width and height.
+
+### Slices
+
+1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).
+2. Templates, `hyperframes new --template`, and `update`.
+3. Core determinism verify.
+4. Format injection and style tokens into compositions.
+
+## Consequences
+
+- **Unchanged:** schema files and JSON Schema (motion clips are `type: hyperframes`), protocol (no `PROTOCOL_VERSION` bump in slice 1), plugin API (`apiVersion` "1"), cache layout (the runtime copy is an ordinary input file).
+- **Coupling to HyperFrames internals.** The binding relies on the `__timelines` duck typing (`play`, `pause`, `seek`) and on `hf-seek`. `plugins/hyperframes/test/motion-real.test.ts` must pass on every HyperFrames bump; a break freezes motion compositions on frame 0.
+- **Slow fixes.** A frozen runtime copy fixes an old clip only through `update` (slice 2).
+- **Authoring rules for the skill (slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.
+- **Personalities.** Once PR #497 merges, the springs in `MOTION_PERSONALITIES` should point at `SPRING_PRESETS` and its eases at `EASE_CURVES`, rather than repeat the numbers.
+- **Unblocks** #466 (templates), #453 (motion-film playbook), the `pick` part of #469, #458 (beats as runtime input) and #468 (tokens read by templates).

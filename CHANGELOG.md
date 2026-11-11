@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperFrames (Apache-2.0). Frameshell never depends on the `hyperframes` CLI (#478).
 - Plugin commands can report failure without throwing: `CommandResult` takes `failed: true`, `plugin.run` results
   carry `failed` (protocol 71), and the CLI exits 1 after printing the command's output or `--json` data.
+- Motion runtime, slice 1 of #465 (ADR 0033, part of #451): spring math in `@frameshell/schema` (`spring`,
+  `springStep`, `settle`, `track`, `ease`, `stagger`, `durationFromDistance`; presets snappy, default, heavy,
+  playful; role eases), closed form and free of clocks and random sources. The private `@frameshell/motion` package
+  adds `bind(compositionId, paint)`, which drives a paint function from the HyperFrames clock through a seek-only
+  `window.__timelines` entry (with `hf-seek` as fallback), and `write`, which sets only a 2D `transform` and
+  `opacity` so element adjustments still apply. `pnpm gen:motion` bundles it into `@frameshell/hyperframes`
+  (`motion-runtime.ts`); compositions do not use it until templates land (slice 2). Spike:
+  `docs/research/motion-runtime.md`.
 
 ### Changed
 

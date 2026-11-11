@@ -42,6 +42,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Timeline panel (canvas layout, paint, live updates, scene band from `script.outline` spans) | `apps/desktop/src/renderer/src/timeline/` (`scenes.ts` = band data); ADR 0015 |
 | Transitions + keyframes (effective lengths, evaluators, ops, export, preview, timeline marks, inspector; none in image projects) | ADR 0018; `packages/schema/src/transitions.ts` (`edgeTransitions` = one truth for lengths), `composite.ts` (`placementAt`, `gainAt`, `fadeWeight`, `dissolveWeights`); engine `transitionSet`/`clipKey`; `packages/core/src/export/animation.ts` (ffmpeg twins); `renderer/src/preview/program.ts` (`pictureLayers`, `spanPlacement`); `renderer/src/timeline/transitions.ts`, `components/ClipInspector.tsx` |
 | Layer placement + nested flattening (shared by export and preview) | `packages/schema/src/composite.ts` |
+| Motion runtime (springs, presets, role eases, `track`: one source; page `bind` via `__timelines` + `hf-seek`, `write` only 2D `transform`/`opacity`; bundle shipped in plugin) | `packages/schema/src/motion.ts`, `packages/motion/src/index.ts`, `plugins/hyperframes/src/motion-runtime.ts` (generated); real test `plugins/hyperframes/test/motion-real.test.ts`; ADR 0033, spike `docs/research/motion-runtime.md` |
 | Multicam model (groups, angles, program track, shots: invariants, shot layout + sound) | `packages/schema/src/timeline.ts`, `composite.ts` (`shotLayers`, `shotSound`); engine `checkShots`; SPEC §5.3; ADR 0016 |
 | Face reframe (`multicam faces`: YuNet keys, worker thread, `faces` job; ONNX Runtime Web = binary manager `module` kind) | `packages/core/src/multicam/faces.ts`, `faces-worker.ts`; `binaries/manifest.ts`; `docs/binaries.md` |
 | People face scan (`people scan`: YuNet landmarks, SFace prints, face tracks, `people` job, cache `.frameshell/people/`, gc) | `packages/core/src/people/scan.ts` (models + tracker, worker `scan-worker.ts`), `scan-run.ts` (job body), `scan-cache.ts` (cache format); ADR 0020 |
@@ -96,6 +97,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
 - Wire change: bump `PROTOCOL_VERSION`.
 - `skills/frameshell/` changed: run `pnpm gen:skill`, commit `packages/core/src/skills/core-skill.ts`. Drift test fails otherwise.
+- `packages/motion/` or `packages/schema/src/motion.ts` changed: run `pnpm gen:motion`, commit `plugins/hyperframes/src/motion-runtime.ts`. Drift test fails otherwise.
 - CLI command, flag or MCP tool added or renamed: update skill. `skill-docs.test.ts` fails on names that do not exist or commands skill misses.
 - Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*` or `website/` (own npm + lockfile, Node >= 22.22).
 - User-level storage: only via `resolveAppDirs()` (`packages/protocol/src/app-dirs.ts`). Downloads, caches, app state = `dataDir`; user decisions, global config = `configDir`. Overrides: `FRAMESHELL_DATA_DIR`, `FRAMESHELL_CONFIG_DIR` only.
