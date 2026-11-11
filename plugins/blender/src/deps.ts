@@ -18,9 +18,19 @@ export interface BlendInfo {
 }
 
 /**
+ * Project-relative `/` path of the listing file of the .blend `rel` with content `info`. Named by the content hash
+ * and the path, because relative links resolve against where the .blend sits: two identical copies must not share
+ * (and overwrite) one file.
+ */
+export function listingPath(rel: string, info: BlendInfo): string {
+  const where = createHash("sha256").update(rel).digest("hex").slice(0, 8);
+  return posix.join(STATE_DIR, `${info.hash}-${where}`, "deps.json");
+}
+
+/**
  * Hashes .blend files and lists the files each one loads from inside the project (ADR 0035). Both are
  * remembered, so a refresh of unchanged clips starts no Blender: the hash while the file's size and mtime stay,
- * the listing for as long as the hash does (`.frameshell/blender/<hash>/deps.json`, which survives restarts).
+ * the listing for as long as the hash does (`.frameshell/blender/<hash>-<path hash>/deps.json`, which survives restarts).
  */
 export class BlendDeps {
   readonly #projectDir: string;
@@ -52,7 +62,7 @@ export class BlendDeps {
    * inside the project, from `bpy.utils.blend_paths`. Files outside the project are not tracked (ADR 0035).
    */
   async list(rel: string, blender: string, info: BlendInfo): Promise<string[]> {
-    const file = join(this.#projectDir, ...STATE_DIR.split("/"), info.hash, "deps.json");
+    const file = join(this.#projectDir, ...listingPath(rel, info).split("/"));
     // Relative links resolve against where the .blend sits, so a copy elsewhere in the project lists again.
     const id = `${info.hash}\0${rel}`;
     let listing = this.#listings.get(id);

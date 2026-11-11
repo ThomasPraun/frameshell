@@ -24,12 +24,19 @@ export interface StubConfig {
   hangAfter?: number;
 }
 
+/** Options of {@link stubBlender} that are not the stub's own behaviour. */
+export interface StubLauncher {
+  /** Wrap the stub the way a snap or flatpak launcher does: the wrapper stays alive as the parent of the real process. */
+  keepWrapper?: boolean;
+}
+
 /** Fake `blender` executable (a POSIX shell wrapper over `fixtures/stub-blender.mjs`), with its call log. */
-export function stubBlender(config: StubConfig = {}) {
+export function stubBlender(config: StubConfig = {}, launcher: StubLauncher = {}) {
   const dir = tempDir();
   copyFileSync(fileURLToPath(new URL("./fixtures/stub-blender.mjs", import.meta.url)), join(dir, "stub.mjs"));
   const path = join(dir, "blender");
-  writeFileSync(path, `#!/bin/sh\nexec "${process.execPath}" "${join(dir, "stub.mjs")}" "$@"\n`);
+  const run = `"${process.execPath}" "${join(dir, "stub.mjs")}" "$@"`;
+  writeFileSync(path, launcher.keepWrapper ? `#!/bin/sh\n${run}\nstatus=$?\nexit $status\n` : `#!/bin/sh\nexec ${run}\n`);
   chmodSync(path, 0o755);
   const stub = {
     path,

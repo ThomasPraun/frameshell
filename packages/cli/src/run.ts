@@ -1174,7 +1174,7 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
   for (const note of command.notes) lines.push(`  note: ${note}`);
   lines.push("", "Binaries:");
   for (const binary of report.binaries) {
-    // Managed with no pin: a tool only the person can install (Blender), found through `binaries`.
+    // Managed package with no build for this platform (today Blender, the person's own install): found through `binaries`.
     const notInstalled = binary.source === "managed" && !binary.pinned ? `not installed, set binaries.${binary.name}` : "not installed";
     const state = binary.installed ? (binary.version ?? "not runnable") : notInstalled;
     const pinned = binary.pinned;

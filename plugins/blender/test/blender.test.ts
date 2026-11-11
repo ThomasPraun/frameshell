@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { BLENDER_PACKAGE } from "@frameshell/core";
 import type { ClipAdapter, PluginApi } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
-import { SUPPORTED_BLENDER, activate, frameCount, insideProject, parseBlenderVersion, propsSchema, scriptPath, sourceOf, supportedBlender } from "../src/index.js";
+import { SUPPORTED_BLENDER, activate, frameCount, frameRate, insideProject, listingPath, parseBlenderVersion, propsSchema, scriptPath, sourceOf, supportedBlender } from "../src/index.js";
 
 const here = (path: string) => new URL(path, import.meta.url);
 
@@ -68,6 +68,32 @@ describe("source and range", () => {
     expect(frameCount({ id: "c", in: 2, duration: 4 }, 30)).toBe(180);
     expect(frameCount({ id: "c", duration: 1 / 30 }, 30)).toBe(1);
     expect(frameCount({ id: "c", duration: 0.5 }, 25)).toBe(13);
+  });
+
+  it("frameCount does not add a frame to ends snapped to the frame grid, which are not whole milliseconds", () => {
+    expect(frameCount({ id: "c", duration: 2 / 30 }, 30)).toBe(2);
+    expect(frameCount({ id: "c", duration: 92 / 30 }, 30)).toBe(92);
+    expect(frameCount({ id: "c", duration: 121 / 60 }, 60)).toBe(121);
+    expect(frameCount({ id: "c", duration: 1 / 24 }, 24)).toBe(1);
+    expect(frameCount({ id: "c", in: 7 / 30, duration: 5 / 30 }, 30)).toBe(12);
+    expect(frameCount({ id: "c", duration: 5 / 30 + 0.01 }, 30)).toBe(6);
+  });
+
+  it("frameRate sends NTSC rates as exact fractions and the rest as they are", () => {
+    expect(frameRate(30000 / 1001)).toBe("30000/1001");
+    expect(frameRate(29.97)).toBe("30000/1001");
+    expect(frameRate(24000 / 1001)).toBe("24000/1001");
+    expect(frameRate(23.976)).toBe("24000/1001");
+    expect(frameRate(30)).toBe("30");
+    expect(frameRate(25)).toBe("25");
+  });
+
+  it("listingPath names the listing by content and path, so identical copies elsewhere do not share one", () => {
+    const info = { hash: "0123456789abcdef" };
+    const a = listingPath("scenes/a.blend", info);
+    expect(a).toMatch(/^\.frameshell\/blender\/0123456789abcdef-[0-9a-f]{8}\/deps\.json$/);
+    expect(listingPath("scenes/a.blend", info)).toBe(a);
+    expect(listingPath("copy/a.blend", info)).not.toBe(a);
   });
 
   it("insideProject keeps what sits in the project, relative and sorted, minus the .blend and .frameshell", () => {

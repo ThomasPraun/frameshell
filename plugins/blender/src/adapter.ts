@@ -4,7 +4,7 @@ import { availableParallelism } from "node:os";
 import { join, posix, win32 } from "node:path";
 import type { ClipAdapter, InputsContext, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
 import { type BlenderEvent, SUPPORTED_BLENDER, VersionProbe, runBlender, scriptPath } from "./blender.js";
-import { BlendDeps, STATE_DIR, marker } from "./deps.js";
+import { BlendDeps, STATE_DIR, listingPath, marker } from "./deps.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "blender";
@@ -99,7 +99,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
         // The key hashes files, so the version and the length rendered travel as files named by them.
         await marker(projectDir, `${STATE_DIR}/version/${version}.json`, `${JSON.stringify({ blender: version })}\n`),
         await marker(projectDir, `${STATE_DIR}/range/${endMs(clip as BlenderClip)}ms.json`, `${JSON.stringify({ endMs: endMs(clip as BlenderClip) })}\n`),
-        posix.join(STATE_DIR, info.hash, "deps.json"),
+        listingPath(source, info),
         ...linked,
       ];
     },
@@ -163,14 +163,26 @@ export function sourceOf(clip: BlenderClip): string {
   return normal;
 }
 
-/** Composition time of the clip's last frame, in whole milliseconds: what has to be rendered (the render starts at 0). */
+/** Composition time of the clip's last frame in whole milliseconds, only to name the key's range file (frames come from {@link frameCount}). */
 function endMs(clip: BlenderClip): number {
   return Math.round(((clip.in ?? 0) + clip.duration) * 1000);
 }
 
-/** Frames of the scene to render, from its first, so file time t shows composition time t: up to the clip's end at `fps`. */
+/**
+ * Frames of the scene to render, from its first, so file time t shows composition time t: up to the clip's end at `fps`.
+ * Counted from the unrounded end; 1e-3 of a frame absorbs the float error of ends snapped to the frame grid
+ * (92/30 s * 30 is 92.00000000000001), which must not ask for one frame more.
+ */
 export function frameCount(clip: BlenderClip, fps: number): number {
-  return Math.max(1, Math.ceil((endMs(clip) / 1000) * fps - 1e-6));
+  return Math.max(1, Math.ceil(((clip.in ?? 0) + clip.duration) * fps - 1e-3));
+}
+
+/** `-framerate` value for the PNG sequence: NTSC rates as the exact fraction (29.97 is 30000/1001), others as they are. */
+export function frameRate(fps: number): string {
+  for (const whole of [24, 30, 60, 120]) {
+    if (Math.abs(fps - (whole * 1000) / 1001) < 0.002) return `${whole * 1000}/1001`;
+  }
+  return String(fps);
 }
 
 /** The fix-it message for a refusal of the shipped script. */
@@ -206,14 +218,15 @@ export function describeRefusal(clip: string, source: string, error: Extract<Ble
 }
 
 /**
- * PNG frames to VP9 with alpha, multithreaded libvpx (`-auto-alt-ref 0` is what keeps alpha). The flags are
- * ADR 0009's, which `fastVp9` in `plugins/remotion/src/adapter.ts` applies to Remotion's stitcher.
+ * PNG frames to VP9 with alpha, multithreaded libvpx (`-auto-alt-ref 0` is what keeps alpha). The speed flags are
+ * ADR 0009's, which `fastVp9` in `plugins/remotion/src/adapter.ts` applies to Remotion's stitcher; `-crf 20` is
+ * this adapter's own choice (ADR 0035), not Remotion's.
  */
 async function encode(ffmpeg: string, framesDir: string, output: string, fps: number, signal: AbortSignal): Promise<void> {
   const threads = String(Math.min(16, Math.max(1, availableParallelism())));
   const args = [
     "-hide_banner", "-loglevel", "error", "-y",
-    "-framerate", String(fps), "-start_number", "0", "-i", join(framesDir, "frame_%06d.png"),
+    "-framerate", frameRate(fps), "-start_number", "0", "-i", join(framesDir, "frame_%06d.png"),
     "-an", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-b:v", "0", "-crf", "20",
     "-row-mt", "1", "-threads", threads, "-deadline", "good", "-cpu-used", "4",
     output,

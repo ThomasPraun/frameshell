@@ -26,7 +26,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       const inputs = await adapter().inputs!(clip(), inputsContext(project, stub.path));
       expect(inputs.slice(0, 2)).toEqual([SOURCE, ".frameshell/blender/version/4.5.3.json"]);
       expect(inputs[2]).toBe(".frameshell/blender/range/500ms.json");
-      expect(inputs[3]).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}\/deps\.json$/);
+      expect(inputs[3]).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/deps\.json$/);
       expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png"]);
       expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"] });
       expect(JSON.parse(readFileSync(join(project, inputs[1]!), "utf8"))).toEqual({ blender: "4.5.3" });
@@ -50,6 +50,25 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect((await blender.inputs!(clip(), inputsContext(project, stub.path))).slice(4)).toEqual(["a.png"]);
       writeBlend(project, SOURCE, { links: ["//../a.png", "//../b.png"] });
       expect((await blender.inputs!(clip(), inputsContext(project, stub.path))).slice(4)).toEqual(["a.png", "b.png"]);
+      expect(stub.runs("deps.py")).toHaveLength(2);
+    });
+
+    it("keep one listing file per .blend path: an identical copy elsewhere neither shares nor rewrites it, so no clip re-renders for it", async () => {
+      const copy = "copy/intro.blend";
+      writeFileSync(join(project, "tex.png"), "png");
+      writeBlend(project, SOURCE, { fps: 10, links: ["//../tex.png"] });
+      writeBlend(project, copy, { fps: 10, links: ["//../tex.png"] });
+      // Same bytes? The model is the same, so the hash is too; the links resolve against each file's own folder.
+      const blender = adapter();
+      const first = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      const second = await blender.inputs!(clip({ source: copy }), inputsContext(project, stub.path));
+      expect(second[3]).not.toBe(first[3]);
+      const firstText = readFileSync(join(project, first[3]!), "utf8");
+      await blender.inputs!(clip({ source: copy }), inputsContext(project, stub.path));
+      await adapter().inputs!(clip({ source: copy }), inputsContext(project, stub.path));
+      expect(readFileSync(join(project, first[3]!), "utf8")).toBe(firstText);
+      expect(JSON.parse(firstText)).toMatchObject({ blend: SOURCE });
+      expect(JSON.parse(readFileSync(join(project, second[3]!), "utf8"))).toMatchObject({ blend: copy });
       expect(stub.runs("deps.py")).toHaveLength(2);
     });
 
@@ -143,6 +162,28 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(frames).toBe(15);
     });
 
+    it("asks for exactly the frames of an end snapped to the frame grid, and a scene whose last frame is the clip's end renders", async () => {
+      // 2/30 s at 30 fps is 2 frames, from frame 1 to frame 2: the scene's own last frame.
+      writeBlend(project, SOURCE, { fps: 30, frameStart: 1, frameEnd: 2 });
+      const { ctx } = renderContext(project, stub.path, { fps: 30 });
+      await adapter().render(clip({ duration: 2 / 30 }), ctx);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 30, frames: 2 });
+      expect((await decodeRgba(join(ctx.outDir, "render.webm"))).length / (64 * 36 * 4)).toBe(2);
+
+      writeBlend(project, SOURCE, { fps: 60, frameStart: 1, frameEnd: 121 });
+      const sixty = renderContext(project, stub.path, { fps: 60 });
+      await adapter().render(clip({ duration: 121 / 60 }), sixty.ctx);
+      expect(JSON.parse(stub.runs("render.py")[1]![9]!)).toMatchObject({ fps: 60, frames: 121 });
+    });
+
+    it("accepts a scene at 29.97 fps for a project at 30000/1001, and encodes it at the exact rate", async () => {
+      writeBlend(project, SOURCE, { fps: 29.97003, frameStart: 1, frameEnd: 100 });
+      const { ctx } = renderContext(project, stub.path, { fps: 30000 / 1001 });
+      const result = await adapter().render(clip({ duration: 0.2 }), ctx);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ frames: 6 });
+      expect((await decodeRgba(result.file)).length / (64 * 36 * 4)).toBe(6);
+    });
+
     it("reports progress from Blender's `Fra:` lines too", async () => {
       const { ctx, progress } = renderContext(project, stub.path);
       await adapter().render(clip(), ctx);
@@ -202,6 +243,31 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
         await new Promise((r) => setTimeout(r, 50));
       }
       throw new Error(`Blender process ${pid} still runs after the render was canceled`);
+    });
+
+    it("kills Blender itself, not just a launcher script that started it, when the render is canceled", async () => {
+      stub = stubBlender({ hangAfter: 1 }, { keepWrapper: true });
+      const { ctx, controller, progress } = renderContext(project, stub.path);
+      const settled = adapter()
+        .render(clip(), ctx)
+        .then(
+          () => "resolved",
+          (error: Error) => error.name,
+        );
+      for (let waited = 0; !progress.some((update) => update.message === "Rendering") && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      const pid = stub.pid();
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      controller.abort();
+      expect(await settled).toBe("AbortError");
+      for (let waited = 0; waited < 3000; waited += 50) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(`Blender process ${pid} still runs after its launcher was killed`);
     });
 
     it("does not start Blender for a render already canceled", async () => {

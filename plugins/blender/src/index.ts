@@ -6,9 +6,9 @@
 import type { PluginApi } from "@frameshell/plugin-api";
 import { createBlenderAdapter } from "./adapter.js";
 
-export { type BlenderAdapterOptions, type BlenderProps, CLIP_TYPE, createBlenderAdapter, describeRefusal, frameCount, propsSchema, sourceOf } from "./adapter.js";
+export { type BlenderAdapterOptions, type BlenderProps, CLIP_TYPE, createBlenderAdapter, describeRefusal, frameCount, frameRate, propsSchema, sourceOf } from "./adapter.js";
 export { type BlenderEvent, SUPPORTED_BLENDER, VersionProbe, parseBlenderVersion, runBlender, scriptPath, supportedBlender } from "./blender.js";
-export { BlendDeps, STATE_DIR, insideProject } from "./deps.js";
+export { BlendDeps, STATE_DIR, insideProject, listingPath } from "./deps.js";
 
 /** Plugin entry point: registers the `blender` clip type. */
 export function activate(api: PluginApi): void {

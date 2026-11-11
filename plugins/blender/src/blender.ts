@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -57,7 +57,7 @@ export async function runBlender(blender: string, blend: string, script: string,
   const args = ["-b", "--factory-startup", "-Y", blend, "--python-exit-code", "1", "-P", script, "--", JSON.stringify(request)];
   const { signal } = options;
   signal?.throwIfAborted();
-  const child = spawn(blender, args, { cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  const child = spawn(blender, args, { cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
   const tail: string[] = [];
   let error: RunResult["error"] = null;
   const line = (text: string) => {
@@ -90,9 +90,9 @@ export async function runBlender(blender: string, blend: string, script: string,
   }
   let killer: NodeJS.Timeout | undefined;
   const stop = () => {
-    child.kill("SIGTERM");
+    killTree(child, "SIGTERM");
     // A Blender that ignores SIGTERM would keep the GPU: escalate.
-    killer ??= setTimeout(() => child.kill("SIGKILL"), 5000);
+    killer ??= setTimeout(() => killTree(child, "SIGKILL"), 5000);
     killer.unref();
   };
   signal?.addEventListener("abort", stop, { once: true });
@@ -111,6 +111,25 @@ export async function runBlender(blender: string, blend: string, script: string,
     signal?.removeEventListener("abort", stop);
     clearTimeout(timer);
     clearTimeout(killer);
+  }
+}
+
+/**
+ * Ends `child` and what it started, so a `binaries.blender` that points at a launcher script (snap, flatpak, a
+ * shell wrapper) does not leave Blender itself running. POSIX: the child leads its own process group (the
+ * `detached` spawn) and the group is signalled. Windows: `taskkill /T`, which has no graceful form.
+ */
+function killTree(child: ChildProcess, signal: "SIGTERM" | "SIGKILL"): void {
+  const { pid } = child;
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    child.kill(signal);
   }
 }
 

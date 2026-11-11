@@ -52,7 +52,7 @@ def main():
 
     camera_name = request.get("camera")
     if camera_name is not None:
-        camera = bpy.data.objects.get(camera_name)
+        camera = scene.objects.get(camera_name)
         if camera is None or camera.type != "CAMERA":
             refuse("camera", camera=camera_name, cameras=sorted(o.name for o in scene.objects if o.type == "CAMERA"))
         scene.camera = camera
