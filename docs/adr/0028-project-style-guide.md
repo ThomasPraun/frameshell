@@ -41,7 +41,7 @@ Every visual and sound decision of a video (colours, fonts, text sizes, how thin
 - Schema: `packages/schema/src/style.ts` (`StyleFileSchema`, `MOTION_PERSONALITIES`, `STYLE_DEFAULTS`, pure `resolveStyle`: every value as `{ value, source }`, source `file`, `personality` or `default`), `packages/schema/src/safe-zones.ts` (`SAFE_ZONES`), JSON Schema `style.json`.
 - Units are checked: hex colours, seconds (maxima catch milliseconds), dB, px on a 1080 short side, font files under `assets/fonts/`. Unknown keys are refused so typos surface.
 - Personality numbers: the duration ranges, premium's palette and the overshoot ceilings are the measured ones; the other palettes take each range's ends and middle, and eases, springs and staggers are picked from #465's curves, presets and budgets as starting points. Defaults: no colour, font or brand value (null = not decided, ask the person); type floors and sound levels from the sources above; personality `corporate`.
-- Daemon method `style.show { cwd }` (read-only; `style` null without a file; `InvalidProjectFile` on a bad file) with the safe zones of the named platforms, `PROTOCOL_VERSION` 71; CLI `frameshell style show [--json]`; MCP `style_show` from the registry. `file.write` refuses an invalid `style.json`.
+- Daemon method `style.show { cwd }` (read-only; `style` null without a file; `InvalidProjectFile` on a bad file) with the safe zones of the named platforms, `PROTOCOL_VERSION` 80; CLI `frameshell style show [--json]`; MCP `style_show` from the registry. `file.write` refuses an invalid `style.json`.
 - Nothing renders from the style yet; no existing output changes.
 
 ## Consequences
