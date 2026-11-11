@@ -4,7 +4,7 @@ status: accepted
 
 # Effects on clips: voice chain, backdrop blur, colour grade
 
-Epic #451 asks for three effects that SPEC §8.2 left as "Effects / filters, v0.3": a **voice chain** on clip sound (#464), a **backdrop blur** under generated layers for glass cards (#462), and a **colour grade** with LUTs (#384). No clip carried any effect before. Decided by the owner on 2026-11-10 (option A of the draft in #462, every recommendation accepted). SPEC decision 31. Slice 1 (audio effects, #464) ships with this ADR; backdrop and grade follow.
+Epic #451 asks for three effects that SPEC §8.2 left as "Effects / filters, v0.3": a **voice chain** on clip sound (#464), a **backdrop blur** under generated layers for glass cards (#462), and a **colour grade** with LUTs (#384). No clip carried any effect before. Decided by the owner on 2026-11-10 (option A of the draft in #462, every recommendation accepted). SPEC decision 36. Slice 1 (audio effects, #464) ships with this ADR; backdrop and grade follow.
 
 ## Context (verified in the tree)
 

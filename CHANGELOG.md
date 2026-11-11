@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   range as a problem; without an override, using it fails with how to set one instead of "no managed build".
 - Plugin API: `ClipAdapter.inputs(clip, context?)` receives the project directory and `ensureBinary`, so an adapter can
   put a tool's version in its render key. Additive: the API version stays 1.
-- Voiceover from text, slice 1 of #470 (ADR 0034, changes SPEC decision 10, adds decision 31): a `SpeechProvider`
+- Voiceover from text, slice 1 of #470 (ADR 0034, changes SPEC decision 10, adds decision 39): a `SpeechProvider`
   contract in the plugin API (`registerSpeechProvider`, manifest `contributes.speechProviders`; plugin API stays v1,
   but hosts before this release reject manifests that declare it) and `frameshell voiceover generate <script>
   [--lines] [--provider] [--voice] [--yes]` (daemon `voiceover.generate`, MCP `voiceover_generate`, protocol 85). A

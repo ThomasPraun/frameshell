@@ -24,6 +24,6 @@ A video made with an agent pulls in third-party material (textures, sounds, font
 
 ## Consequences
 
-- New daemon methods `credits.set` and `credits.check` and new optional params and a `provenance` result field on `asset.import`: protocol 71. MCP tools `credits_set`, `credits_check` follow from the registry; the CLI gains `credits`, `credits set` and the `import` flags; the skill gets `reference/credits.md`.
+- New daemon methods `credits.set` and `credits.check` and new optional params and a `provenance` result field on `asset.import`: protocol 78. MCP tools `credits_set`, `credits_check` follow from the registry; the CLI gains `credits`, `credits set` and the `import` flags; the skill gets `reference/credits.md`.
 - `credits.json` is a new published schema (`packages/schema/json-schema/credits.json`).
 - Not done here: asset-fetching plugins calling `credits.set` themselves, the review (#457) warning, fonts and files that generated clips read from `compositions/` (the ledger covers what timelines place from `assets/`).
