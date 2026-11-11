@@ -2170,8 +2170,9 @@ export const methods = {
       "instead (transparent on upper tracks, silence for sound). `kind: \"wipe\"` (a straight edge uncovers the incoming clip) and " +
       "`kind: \"push\"` (the incoming clip slides in and pushes the outgoing one out) move the picture instead of mixing it; `direction` " +
       "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
-      "They play on the bottom video track only: an upper video track named in `tracks` is refused, and without `tracks` upper video tracks " +
-      "are skipped with a warning; audio tracks crossfade. Pick the kind by why the picture changes (see the skill's transitions reference); " +
+      "They play on the bottom video track only (the first shown picture track; a video track over a multicam program track is not it): " +
+      "any other video track named in `tracks` is refused, and without `tracks` the others are skipped with a warning; audio tracks " +
+      "crossfade. They are refused at an edge of a nested timeline clip. Pick the kind by why the picture changes (see the skill's transitions reference); " +
       "a `warnings` entry flags three transitions of one kind in a row, or more than a third hard cuts, on the bottom track. " +
       "`duration` is the total seconds; `tracks` limits it. The clips stay where they are and the timeline length never changes: a " +
       "transition is centered on the cut and borrows source from before the incoming clip's `in` and after the outgoing clip's `out`. " +
@@ -2179,8 +2180,8 @@ export const methods = {
       "fades the last clip out. Replaces any transition already on that edge. Multicam program tracks are skipped with a warning (hard " +
       "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
       "entry says so; a wipe or push with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
-      "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), or `direction` comes " +
-      "with `dissolve` or `fade`; TrackNotFound.",
+      "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
+      "with `dissolve` or `fade`, or a wipe or push finds the edge only on video tracks that are not the bottom one; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

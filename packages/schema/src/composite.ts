@@ -368,7 +368,7 @@ interface Window {
 /**
  * `part` (nested seconds) cut to the window and moved to the nested clip's
  * timeline position; null when nothing of it plays. A cut edge drops the
- * part's transition fields there, and its dissolve when it starts the window
+ * part's transition fields there, and its dissolve and shape when it starts the window
  * (the clip it dissolves from is outside). Hosts it already records move with it.
  */
 function window(part: Clip, { from, to, duration, host, playback }: Window): Pick<Windowed, "placed" | "part" | "atStart"> | null {
@@ -389,7 +389,10 @@ function window(part: Clip, { from, to, duration, host, playback }: Window): Pic
     placed = { ...part, id, start } as Clip;
   }
   const atStart = part.start <= from;
-  if (atStart) delete placed.dissolve;
+  if (atStart) {
+    delete placed.dissolve;
+    delete placed.shape;
+  }
   if (part.start < from) delete placed.fadeIn;
   if (end > to) delete placed.fadeOut;
   const nesting = nestingOf(part);

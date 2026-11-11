@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offsets for a push, a `geq` alpha step for a wipe) and to the preview (Canvas 2D clip paths). With no spare source
   around the cut a shaped transition holds the outgoing clip's last frame or the incoming clip's first instead of
   dipping through black. `transition.set` now warns when the bottom track has three transitions of one kind in a row
-  or more than a third hard cuts (jump cuts inside one take do not count). Upper video tracks refuse shapes for now.
+  or more than a third hard cuts (jump cuts inside one take do not count). Shapes play on the first shown picture
+  track only, so not over a multicam program track; other video tracks and edges of nested clips refuse them for now.
   The skill's transitions reference gains a table of kinds by cause and the variety rules.
 
 ### Changed

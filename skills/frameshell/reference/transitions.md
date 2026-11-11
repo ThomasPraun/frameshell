@@ -37,7 +37,8 @@ frameshell transition set --at 30 --kind wipe --direction down    # the incoming
 
 - `--direction` is the way the incoming picture travels: `left` (default, it enters from the right edge), `right`, `up` (enters from the bottom), `down`. Keep one dominant direction per film.
 - 0.45 to 0.6 s fits most cuts; the default 0.5 s is fine.
-- Shapes play on the bottom video track only for now: naming an upper video track in `--track` fails, and without `--track` upper tracks are skipped with a warning. Audio tracks crossfade.
+- Shapes play on the bottom video track only for now: the first shown picture track, so none when a multicam program track is first. Naming another video track in `--track` fails, and without `--track` the others are skipped with a warning. Audio tracks crossfade.
+- A shape at an edge of a nested timeline clip fails for now: use a dissolve or a fade there.
 - With no spare source around the cut, a shaped transition holds the outgoing clip's last frame or the incoming clip's first (a warning says so) instead of dipping through black. Trim the neighbours less to keep the motion.
 - `--kind dissolve` or `fade`, `transition remove`, `clip split` and `cut` on that edge drop the shape.
 

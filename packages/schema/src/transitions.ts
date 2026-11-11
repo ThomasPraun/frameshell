@@ -130,7 +130,7 @@ function ownHandles(clip: Clip, context: TransitionContext): ClipHandles {
  * Effective edge transitions of the clips of one track, by clip id. `clips` are the track's clips in any order.
  * Each half of a dissolve is cut to the handle both clips have and to half of each clip, in whole frames; with no
  * such room it plays as a dip through black, and a dissolve with no clip ending where it starts as a fade in.
- * A shaped dissolve (`shape`) is cut by the clips only: past a handle its edge frame holds.
+ * A shaped dissolve ({@link playedShape}) is cut by the clips only: past a handle its edge frame holds.
  */
 export function edgeTransitions(clips: readonly Clip[], context: TransitionContext): Map<string, ClipEdges> {
   const frame = 1 / context.fps;
@@ -160,8 +160,8 @@ export function edgeTransitions(clips: readonly Clip[], context: TransitionConte
       own.dissolveLength = length;
       return;
     }
-    // A shaped dissolve never dips: where a handle runs out, its edge frame holds (ADR 0030 decisions 1 and 2).
-    const handles = clip.shape
+    // A shaped dissolve never dips: where a handle runs out, its edge frame holds (ADR 0030 decision 3).
+    const handles = playedShape(clip)
       ? Number.POSITIVE_INFINITY
       : Math.min(floorFrames(clipHandles(previous, context).after), floorFrames(clipHandles(clip, context).before));
     const half = Math.min(requested, handles, floorFrames(lengths[i - 1]! / 2), room);
@@ -215,13 +215,22 @@ export function nestedFades(clip: Clip, track: readonly Clip[], context: Transit
   return { fadeIn: fade(clip.fadeIn), fadeOut: fade(clip.fadeOut), dissolveIn };
 }
 
+/**
+ * The shape `clip`'s dissolve plays as (ADR 0030). None on a nested clip: flattening does not carry a shape into
+ * its clips yet (slice 3), so it plays as a plain dissolve.
+ */
+export function playedShape(clip: Clip): TransitionShape | undefined {
+  return clip.type === "timeline" ? undefined : clip.shape;
+}
+
 /** Rectangle in fractions of the frame being rendered: left, top, right, bottom (0 to 1). */
 export type FrameRect = readonly [x0: number, y0: number, x1: number, y1: number];
 
 /** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip`. */
 export interface ShapePart {
-  /** Offset from its own placement, fractions of the frame width and height. */
+  /** Horizontal offset from its own placement, fraction of the frame width (positive: right). */
   dx: number;
+  /** Vertical offset from its own placement, fraction of the frame height (positive: down). */
   dy: number;
   /** The part of the frame it shows in; null: wherever it lands. */
   clip: FrameRect | null;
@@ -229,7 +238,9 @@ export interface ShapePart {
 
 /** Both pictures of a shaped dissolve at one moment. Their opacity is their own: a shape replaces the mix. */
 export interface ShapeFrame {
+  /** The clip that carries the shaped `dissolve`. */
   incoming: ShapePart;
+  /** The clip that ends where the incoming one starts. */
   outgoing: ShapePart;
 }
 

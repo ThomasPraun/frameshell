@@ -42,10 +42,12 @@ import {
   paintStretches,
   placementAt,
   parseTimeline,
+  playedShape,
   programGroup,
   reframePointAt,
   scriptRefPathProblem,
   shotSound,
+  showsPicture,
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
@@ -987,22 +989,38 @@ class Edit {
       throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; a ${kind} has none.`, { field: "direction" });
     }
     const at = g.snap(args.at);
-    // ADR 0030 slice 1: shapes play on the bottom video track only.
-    const bottom = this.draft.tracks.find((track) => track.kind === "video");
-    const isUpper = (track: ClipTrack) => track.kind === "video" && track !== bottom;
-    const onlyBottom = { field: "tracks", hint: `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom?.id ?? "the bottom video track"} and audio tracks.` };
+    // ADR 0030 slice 1: shapes play on the bottom picture layer only, picked as export and preview pick it: the first
+    // shown picture track, when it is a video track (a program track there leaves none).
+    const first = this.draft.tracks.find(showsPicture);
+    const bottom = first?.kind === "video" ? first : undefined;
+    const notBottom = (track: ClipTrack) => track.kind === "video" && track !== bottom;
+    const bottomNote = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
+    const onlyBottom = {
+      field: "tracks",
+      hint: bottom ? `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom.id} and audio tracks.` : "Use kind dissolve or fade there.",
+    };
+    const listed = (tracks: readonly string[]) => `video track${tracks.length === 1 ? "" : "s"} ${tracks.join(", ")}`;
     if (shaped) {
-      const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && isUpper(track));
+      const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && notBottom(track));
       if (named.length > 0) {
-        throw this.invalid(`a ${kind} plays on the bottom video track only for now; ${named.map((t) => t.id).join(", ")} ${named.length === 1 ? "is an upper video track" : "are upper video tracks"}.`, onlyBottom);
+        const ids = named.map((t) => t.id);
+        throw this.invalid(`a ${kind} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
       }
     }
     const skipped: string[] = [];
     let applied = false;
     await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
-      if (shaped && isUpper(track)) {
+      if (shaped && notBottom(track)) {
         skipped.push(track.id);
         return;
+      }
+      // Flattening does not carry a shape into a nested clip's own clips yet (ADR 0030 slice 3).
+      const nested = shaped && incoming && outgoing ? [outgoing, incoming].find(isNested) : undefined;
+      if (nested) {
+        throw this.invalid(`a ${kind} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
+          field: "kind",
+          hint: "Use kind dissolve or fade at this edge.",
+        });
       }
       applied = true;
       for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
@@ -1025,14 +1043,14 @@ class Edit {
       }
     });
     if (!applied) {
-      throw this.invalid(`a ${kind} plays on the bottom video track only for now; the edge at ${at} s is only on upper video track${skipped.length === 1 ? "" : "s"} ${skipped.join(", ")}.`, onlyBottom);
+      throw this.invalid(`a ${kind} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
     }
     if (skipped.length > 0) {
       this.warnings.push(
-        `skipped upper video track${skipped.length === 1 ? "" : "s"} ${skipped.join(", ")}: a ${kind} plays on the bottom video track only for now; set a dissolve or fade there with \`tracks\`.`,
+        `skipped ${listed(skipped)}: a ${kind} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
       );
     }
-    if (bottom?.kind === "video") await this.warnVariety(bottom);
+    if (bottom) await this.warnVariety(bottom);
   }
 
   /**
@@ -2295,7 +2313,8 @@ function transitionIssues(clips: readonly Clip[], context: TransitionContext): M
     const edge = edges.get(clip.id);
     if (!edge) continue;
     const found: string[] = [];
-    if (clip.shape && edge.mode === "dissolve") {
+    const shape = playedShape(clip);
+    if (shape && edge.mode === "dissolve") {
       // ADR 0030 decision 1: past a handle the edge frame holds.
       const previous = sorted[sorted.indexOf(clip) - 1]!;
       const held = [
@@ -2303,7 +2322,7 @@ function transitionIssues(clips: readonly Clip[], context: TransitionContext): M
         ...(clipHandles(clip, context).before < edge.dissolve - frame / 2 ? ["its own first frame"] : []),
       ];
       if (held.length > 0) {
-        found.push(`${clip.id}: ${clip.shape.kind} holds ${held.join(" and ")} for part of it: no spare source around the cut. Trim the neighbours less to play motion there.`);
+        found.push(`${clip.id}: ${shape.kind} holds ${held.join(" and ")} for part of it: no spare source around the cut. Trim the neighbours less to play motion there.`);
       }
     }
     if (clip.dissolve !== undefined) {

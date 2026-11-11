@@ -59,6 +59,13 @@ describe("edgeTransitions", () => {
     expect(edges.get("a")).toMatchObject({ fadeOut: 0, mode: null });
   });
 
+  it("plays a shape on a nested clip as a plain dissolve, cut to the handles", () => {
+    const nested = (extra: Partial<Clip>) => ({ id: "n", type: "timeline", source: "timelines/n.json", start: 25, in: 0, duration: 10, dissolve: 1, ...extra }) as Clip;
+    const plain = edgesOf([media("a", 0, 5, 30), nested({})]);
+    expect(edgesOf([media("a", 0, 5, 30), nested({ shape: { kind: "push" } })])).toEqual(plain);
+    expect(plain.get("n")!.mode).toBe("dip");
+  });
+
   it("still cuts a shaped dissolve to half of each clip", () => {
     const edges = edgesOf([media("a", 0, 5, 5.4), media("b", 0.4, 0, 10, { dissolve: 2, shape: { kind: "wipe" } })]);
     expect(edges.get("b")).toMatchObject({ mode: "dissolve", dissolve: 0.2 });

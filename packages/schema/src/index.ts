@@ -276,6 +276,7 @@ export {
   type FrameRect,
   type ShapePart,
   type ShapeFrame,
+  playedShape,
   shapeProgress,
   shapeStep,
   shapeAt,

@@ -315,7 +315,44 @@ describe("shaped transitions (ADR 0030)", () => {
     const { timeline, warnings } = await apply(layered(), "transition.set", { at: 4, kind: "push" });
     expect(clip(timeline, "v2")).toHaveProperty("shape");
     expect(clip(timeline, "u2")).not.toHaveProperty("dissolve");
-    expect(warnings).toEqual([expect.stringContaining("skipped upper video track t_u")]);
+    expect(warnings).toEqual([expect.stringContaining("skipped video track t_u: a push plays on the bottom video track only for now (the bottom one is t_v)")]);
+  });
+
+  it("takes the bottom track as export and preview do: a program track first leaves none, a hidden track is passed over", async () => {
+    const base = butted();
+    const shot = { id: "s1", type: "shot" as const, start: 0, in: 0, out: 8, shot: "solo" as const, angles: ["ana"] };
+    const multicam: Timeline = {
+      ...base,
+      groups: [{ id: "g_talk", angles: [{ id: "ana", name: "Ana", asset: "assets/talk.mp4", offset: 0 }] }],
+      tracks: [{ id: "t_p", kind: "program", group: "g_talk", clips: [shot] }, ...base.tracks],
+    };
+    const named = await rejection(apply(multicam, "transition.set", { at: 4, kind: "push", tracks: ["t_v"] }));
+    expect(named.message).toContain("video track t_v is not it: program track t_p is the bottom picture layer");
+    const { timeline, warnings } = await apply(multicam, "transition.set", { at: 4, kind: "push" });
+    expect(clip(timeline, "v2")).not.toHaveProperty("dissolve");
+    expect(clip(timeline, "a2")).toMatchObject({ dissolve: 0.5 });
+    expect(warnings).toContain(
+      "skipped video track t_v: a push plays on the bottom video track only for now (program track t_p is the bottom picture layer); set a dissolve or fade there with `tracks`.",
+    );
+
+    const hidden: Timeline = { ...base, tracks: [{ id: "t_h", kind: "video", hidden: true, clips: [media("h1", 0, 2, 6), media("h2", 4, 2, 6)] }, ...base.tracks] };
+    const passed = await apply(hidden, "transition.set", { at: 4, kind: "wipe" });
+    expect(clip(passed.timeline, "v2")).toHaveProperty("shape");
+    expect(clip(passed.timeline, "h2")).not.toHaveProperty("dissolve");
+  });
+
+  it("refuses a shape at an edge of a nested clip", async () => {
+    const nested = (id: string, start: number): Clip => ({ id, type: "timeline", source: "timelines/inner.json", start, in: 0, duration: 4 });
+    for (const clips of [
+      [media("v1", 0, 2, 6), nested("n1", 4)],
+      [nested("n1", 0), media("v2", 4, 2, 6)],
+    ]) {
+      const timeline: Timeline = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video", clips }] };
+      const error = await rejection(apply(timeline, "transition.set", { at: 4, kind: "push" }));
+      expect(error.code).toBe(ErrorCode.InvalidOperation);
+      expect(error.message).toContain("cannot play at an edge of nested clip n1 yet");
+      expect((await apply(timeline, "transition.set", { at: 4 })).timeline.tracks).not.toEqual(timeline.tracks);
+    }
   });
 
   it("refuses when the edge is only on upper video tracks", async () => {
@@ -327,7 +364,7 @@ describe("shaped transitions (ADR 0030)", () => {
       ],
     };
     const error = await rejection(apply(timeline, "transition.set", { at: 4, kind: "wipe" }));
-    expect(error.message).toContain("only on upper video track t_u");
+    expect(error.message).toContain("only on video track t_u: the bottom one is t_v");
   });
 
   it("a lone edge fades, with a warning", async () => {
