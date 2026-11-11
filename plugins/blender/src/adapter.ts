@@ -229,6 +229,8 @@ async function encode(ffmpeg: string, framesDir: string, output: string, fps: nu
     "-framerate", frameRate(fps), "-start_number", "0", "-i", join(framesDir, "frame_%06d.png"),
     "-an", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-b:v", "0", "-crf", "20",
     "-row-mt", "1", "-threads", threads, "-deadline", "good", "-cpu-used", "4",
+    // Without these the WebM muxer writes random UIDs: two encodes of the same frames would differ in bytes.
+    "-fflags", "+bitexact", "-flags:v", "+bitexact",
     output,
   ];
   signal.throwIfAborted();

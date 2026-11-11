@@ -909,7 +909,7 @@ export const BLENDER_TOOL = "blender";
 /**
  * Blender, the person's own install (ADR 0035): GPL and about 300 MB, so never downloaded or shipped. It has no
  * builds: `binaries.blender` in `frameshell.json` or the global config names the executable. Supported: the
- * current LTS (4.5) and every 5.x release. `supportedBlender` in `plugins/blender/src/blender.ts` repeats the
+ * 4.5 LTS and every 5.x release (5.2 is the current LTS). `supportedBlender` in `plugins/blender/src/blender.ts` repeats the
  * rule; `plugins/blender/test/blender.test.ts` checks that they agree.
  */
 export const BLENDER_PACKAGE: BinaryPackage = {

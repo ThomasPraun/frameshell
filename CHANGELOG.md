@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame; a scene at another frame rate than the project is refused with how to fix it. The key covers the `.blend`,
   the in-project files it links (listed by Blender once per file), the Blender version (an upgrade re-renders) and the
   length rendered. Blender runs as `blender -b --factory-startup -Y` with the plugin's own scripts only; progress comes
-  from its `Fra:` lines and cancel kills it, launcher scripts included (the whole process group).
+  from the script's per-frame reports and cancel kills it, launcher scripts included (the whole process group).
+  Stamps are off and the encode is bitexact, so a rerun writes the same bytes. Run on Blender 5.2.3 LTS (macOS);
+  4.5 LTS is supported but untested.
 - `binaries.blender` names your Blender in `frameshell.json` or the global config. `frameshell doctor` lists it with
   its version (`not installed, set binaries.blender` when there is none), and reports a Blender outside the supported
   range as a problem; without an override, using it fails with how to set one instead of "no managed build".

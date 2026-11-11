@@ -37,7 +37,7 @@ export interface RunOptions {
   /** Give up after this long; default none (a render has no cap, ADR 0035 decision 5). */
   timeoutMs?: number | undefined;
   onEvent?: ((event: BlenderEvent) => void) | undefined;
-  /** Frame number of each `Fra:` line Blender prints while rendering. */
+  /** Frame number of each `Fra:` line Blender prints while rendering (none in 5.2 background renders). */
   onFrame?: ((frame: number) => void) | undefined;
 }
 

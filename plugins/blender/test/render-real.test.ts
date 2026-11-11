@@ -7,7 +7,7 @@ import { alphaAt, decodeRgba, inputsContext, renderContext, tempDir } from "./st
 
 // Opt-in: renders a scene made on the spot with a real Blender (4.5 LTS or 5.x) and the managed ffmpeg. Run with
 // FRAMESHELL_TEST_BLENDER=/path/to/blender pnpm test. Blender is never downloaded: without the variable, skipped.
-// ADR 0035's Evidence section lists what the spike still has to measure with it.
+// ADR 0035's Evidence section has what it measured (Blender 5.2.3 LTS, macOS).
 const BLENDER = process.env["FRAMESHELL_TEST_BLENDER"];
 
 /** Ortho camera over a 4-unit-wide frame: a 60 % white panel left of centre, an opaque red dot right of it, nothing in the corners. */
@@ -54,7 +54,7 @@ def plane(name, x, half, color, alpha):
         material.node_tree.links.new(mix.outputs[0], output.inputs["Surface"])
     else:
         material.node_tree.links.new(emission.outputs[0], output.inputs["Surface"])
-    # Blended, not dithered: the spike settles which property each Blender calls it.
+    # Blended, not dithered (dithered is noisy at 16 samples). 5.2 takes both; the legacy one maps to BLENDED.
     for attribute, value in (("surface_render_method", "BLENDED"), ("blend_method", "BLEND")):
         try:
             setattr(material, attribute, value)
@@ -69,7 +69,7 @@ bpy.ops.wm.save_as_mainfile(filepath=out)
 `;
 
 describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
-  it("renders a transparent scene to VP9 with alpha: 0 / ~153 / 255 at corner, panel and dot, one frame per project frame", async () => {
+  it("renders a transparent scene to VP9 with alpha: 0 / ~153 / 255 at corner, panel and dot, one frame per project frame, same bytes on a rerun", async () => {
     const project = tempDir();
     writeFileSync(join(project, "make-scene.py"), SCENE);
     execFileSync(BLENDER!, ["-b", "--factory-startup", "-P", join(project, "make-scene.py"), "--", join(project, "scene.blend")], { stdio: "pipe" });
@@ -92,5 +92,8 @@ describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
       expect(Math.abs(alphaAt(rgba, size, frame, 96, 90) - 153)).toBeLessThanOrEqual(12);
       expect(alphaAt(rgba, size, frame, 256, 90)).toBeGreaterThanOrEqual(250);
     }
-  }, 180_000);
+
+    const again = await adapter.render(clip, renderContext(project, BLENDER!, { fps: 10, ...size }).ctx);
+    expect(readFileSync(again.file).equals(readFileSync(result.file))).toBe(true);
+  }, 240_000);
 });

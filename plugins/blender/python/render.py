@@ -7,6 +7,7 @@
 # (draft quality: EEVEE, or Workbench). It reads only the JSON request, prints `FRAMESHELL <json>` lines the
 # adapter parses, and never saves the .blend. Apache-2.0 is GPL-3.0-compatible, as blender.org asks of bpy scripts.
 # Written against Blender 4.5 LTS and 5.x (ADR 0035); the checks below are what changed between them.
+# Run on 5.2.3 LTS (macOS, headless EEVEE); 4.5 untested.
 
 import json
 import os
@@ -25,7 +26,10 @@ def refuse(code, **detail):
 
 
 def choose_engine(scene):
-    """EEVEE under whichever id this Blender has (`BLENDER_EEVEE_NEXT` in 4.2-4.x, `BLENDER_EEVEE` from 5.0), else Workbench."""
+    """EEVEE under whichever id this Blender has (`BLENDER_EEVEE_NEXT` in 4.2-4.x, `BLENDER_EEVEE` from 5.0), else Workbench.
+
+    An unknown id raises TypeError (5.2.3: `BLENDER_EEVEE_NEXT` not found in BLENDER_EEVEE, BLENDER_WORKBENCH, CYCLES).
+    """
     for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
         try:
             scene.render.engine = engine
@@ -75,6 +79,10 @@ def main():
     render.image_settings.color_depth = "8"
     render.use_file_extension = True
     render.use_overwrite = True
+    # No burn-in and no PNG metadata (Date, RenderTime, file path): a rerun then writes the same bytes.
+    for name in dir(render):
+        if name.startswith("use_stamp") and isinstance(getattr(render, name), bool):
+            setattr(render, name, False)
     if engine != "BLENDER_WORKBENCH":
         scene.eevee.taa_render_samples = 16
 
