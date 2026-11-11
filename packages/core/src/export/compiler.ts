@@ -1,4 +1,4 @@
-import { DEFAULT_FRAME_QUALITY, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
+import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
   type Clip,
@@ -6,6 +6,7 @@ import {
   type ClipTrack,
   type CropPath,
   type ExportPreset,
+  type FormatLayout,
   type LayerRect,
   type MediaClip,
   type MulticamGroup,
@@ -16,6 +17,7 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  coverCrop,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -35,10 +37,12 @@ import {
   subtitleTracks,
   withTrackMutes,
 } from "@frameshell/schema";
+import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
 import { assSubtitles } from "./ass.js";
+import { type CoverLayout, assCover } from "./cover.js";
 
 /**
  * Export compiler (SPEC §3.5): timeline → render plan → ffmpeg argument
@@ -52,7 +56,7 @@ export interface ExportSource {
   /** Absolute path of the original asset (never the proxy: export uses full quality). */
   path: string;
   /** First video stream (`width`x`height` as probed); null for audio-only files. */
-  video: { codec: string; still: boolean; width: number; height: number } | null;
+  video: { codec: string; still: boolean; width: number; height: number; alpha?: boolean } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
   /** Seconds of material (probed); absent when unknown, then a clip has no handle after its `out` (ADR 0018). */
@@ -91,6 +95,20 @@ export interface RenderInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /** Layout of the format rendered (`resolveFormat`, ADR 0027). Absent: the primary format's (letterbox, captions as styled). */
+  variant?: FormatLayout;
+  /**
+   * Makes frame 0 a finished composition: it shows the timeline frame at `at` (timeline seconds), with the
+   * cover word over it when `layout` is set and no subtitles; every other frame is as it is. Needs the
+   * preset's frame rate to equal the project's, else a warning and no change. Absent: frame 0 is the
+   * timeline's own, and a warning says when that is black.
+   */
+  cover?: { at: number; layout: CoverLayout | null };
+  /**
+   * Encode an H.264 preset at a quality tier with `encoder` instead of the preset's own x264 settings; the
+   * tier also caps the frame rate (draft: 30) and sets AAC 320k (final). Other codecs ignore it, with a warning.
+   */
+  encode?: { encoder: EncoderName; tier: "draft" | "final" };
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -196,6 +214,8 @@ export interface FrameInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /** See {@link RenderInput.variant}. */
+  variant?: FormatLayout;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -206,6 +226,8 @@ export interface FrameInput {
   format?: FrameFormat;
   /** JPEG and WebP quality, 1 to 100; default {@link DEFAULT_FRAME_QUALITY}. */
   quality?: number;
+  /** Marks a cover composition: its word drawn over the frame (none when null), and no subtitles; see {@link CoverLayout}. */
+  cover?: CoverLayout | null;
 }
 
 /** Single-frame plan (MCP `frame_capture`, `frameshell frame`). */
@@ -243,6 +265,8 @@ export const MIX_FILE = "mix.wv";
 const CONCAT_LIST = "segments.txt";
 /** Burned subtitles, relative to the work directory. */
 export const SUBTITLES_FILE = "subtitles.ass";
+/** The cover word, relative to the work directory. */
+export const COVER_FILE = "cover.ass";
 /** Directory libass loads fonts from, relative to the work directory. */
 export const FONTS_DIR = "fonts";
 
@@ -282,6 +306,8 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
+  cover?: LayerRect;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -333,22 +359,47 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
-  const outFps = preset.video.fps ?? fps;
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant);
+  const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
+  const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
-  const bounds = segmentBounds(layout.frames, edges, segmentFrames);
+  const warnings = [...layout.warnings];
+  if (input.encode && !tiered) warnings.push(`Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`);
+  const requested = input.cover ?? null;
+  const choosable = requested !== null && outFps === fps;
+  const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
+  // A cover with no word on frame 0 itself changes nothing.
+  const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
+  if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
+  const empty = emptyFrame(layout, coverFrame, fps);
+  if (empty) {
+    const hint = !requested
+      ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
+      : choosable
+        ? "Choose another frame with `at` (`--cover-at`)."
+        : "Start a picture at 0.";
+    const subject = choosable ? `The cover frame (${requested.at} s)` : "Frame 0";
+    warnings.push(`${subject} is ${empty}: platforms use it as the thumbnail. ${hint}`);
+  }
+  // The cover is a one-frame segment in place of frame 0; the rest of the first segment follows it.
+  const bounds = segmentBounds(layout.frames, edges, segmentFrames).flatMap(([from, to]): [number, number][] =>
+    cover && from === 0 ? [[0, 1], ...(to > 1 ? ([[1, to]] as [number, number][]) : [])] : [[from, to]],
+  );
   const ext = preset.container;
   const files: Record<string, string> = {};
   if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
+  if (cover?.layout) files[COVER_FILE] = assCover(cover.layout, { width, height });
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
-    const graph = videoGraph(layout, from, to, target);
-    const tail = `${burnSubtitles(layout, from, to, fps)}${outFps === fps ? "" : `,fps=${rate}`}`;
+    const showsCover = cover !== null && index === 0;
+    const graph = showsCover ? videoGraph(layout, cover.frame, cover.frame + 1, target) : videoGraph(layout, from, to, target);
+    const burn = showsCover ? (cover.layout ? burnCover() : "") : burnSubtitles(layout, from, to, fps);
+    const tail = `${burn}${outFps === fps ? "" : `,fps=${rate}`}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
       file: `${name}.${ext}`,
@@ -359,7 +410,7 @@ export function compileRender(input: RenderInput): RenderPlan {
         ...BASE,
         ...graph.inputs,
         ...["-/filter_complex", `${name}.filter`, "-map", "[v]", "-an", "-frames:v", String(outFrames), "-r", rate],
-        ...videoCodecArgs(preset),
+        ...(tiered ? tierVideoArgs(tiered.encoder, tiered.tier, { width, height, fps: outFps }) : videoCodecArgs(preset)),
         ...["-map_metadata", "-1", "-f", preset.container, `${name}.${ext}`],
       ],
     };
@@ -367,7 +418,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   files[CONCAT_LIST] = segments.map((segment) => `file '${segment.file}'\n`).join("");
 
   const sampleRate = preset.audio.sampleRate ?? 48_000;
-  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate) };
+  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) };
   return {
     timeline: timeline.id,
     preset: preset.id,
@@ -378,9 +429,9 @@ export function compileRender(input: RenderInput): RenderPlan {
     duration: seconds(layout.frames, fps),
     loudness: input.loudness,
     container: preset.container,
-    warnings: layout.warnings,
+    warnings,
     files,
-    fonts: layout.subtitles.length > 0 ? [SUBTITLE_FONT.file] : [],
+    fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
     segments,
     audio,
   };
@@ -453,25 +504,18 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
-  const frame = Math.floor((input.at + 0.0005) * fps);
-  if (frame < 0 || frame >= layout.frames) {
-    const last = seconds(layout.frames - 1, fps);
-    throw new RpcError(
-      ErrorCode.InvalidOperation,
-      `at ${input.at} s is outside timeline ${input.timeline.id} (frames start from 0 to ${last} s).`,
-      { op: "frame", reason: "out of range", field: "at", valid: { min: 0, max: last } },
-    );
-  }
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant);
+  const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
-  const burn = burnSubtitles(layout, frame, frame + 1, fps);
+  const burn = input.cover !== undefined ? (input.cover ? burnCover() : "") : burnSubtitles(layout, frame, frame + 1, fps);
+  const script = input.cover ? { [COVER_FILE]: assCover(input.cover, { width, height }) } : { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) };
   return {
     frame,
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
-    files: burn ? { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) } : {},
+    files: burn ? script : {},
     fonts: burn ? [SUBTITLE_FONT.file] : [],
     args: [
       ...BASE,
@@ -481,6 +525,43 @@ export function compileFrame(input: FrameInput): FramePlan {
       ...["-f", "image2", "-update", "1", input.output],
     ],
   };
+}
+
+/** Timeline frame showing at `at` seconds; `InvalidOperation` with the valid range when outside the `frames` the timeline has. */
+function frameAt(timeline: string, at: number, fps: number, frames: number): number {
+  const frame = Math.floor((at + 0.0005) * fps);
+  if (frame < 0 || frame >= frames) {
+    const last = seconds(frames - 1, fps);
+    throw new RpcError(ErrorCode.InvalidOperation, `at ${at} s is outside timeline ${timeline} (frames start from 0 to ${last} s).`, {
+      op: "frame",
+      reason: "out of range",
+      field: "at",
+      valid: { min: 0, max: last },
+    });
+  }
+  return frame;
+}
+
+/**
+ * Why `frame` shows no whole picture, or null when one is there: no clip draws at it, or every clip that does is
+ * fading in from or out to black (a clip on any track counts, a fade of an upper layer over a visible one does not).
+ */
+function emptyFrame(layout: Layout, frame: number, fps: number): string | null {
+  const drawn = [...layout.video, ...layout.overlays.flat()].filter((span) => span.from <= frame && frame < span.to && span.placed.source.video !== null);
+  const fading = (span: Span) => {
+    const { placed } = span;
+    const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
+    const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
+    return (frame >= placed.start && frame < placed.start + fadeIn) || (fadeOut > 0 && frame >= placed.end - fadeOut && frame < placed.end);
+  };
+  if (drawn.some((span) => !fading(span))) return null;
+  if (drawn.length === 0) return frame === 0 ? "black (no picture starts at 0)" : "black (no picture shows there)";
+  return frame === 0 ? "black (the first clip fades in from black)" : "black (every picture there is fading in or out)";
+}
+
+/** Filter chain appended to the cover frame's graph: the cover word over the picture. */
+function burnCover(): string {
+  return `,ass=filename=${COVER_FILE}:fontsdir=${FONTS_DIR}`;
 }
 
 /** Pixel format and encoder args of a `frame` image. */
@@ -522,7 +603,9 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * like footage: from its `in` (render time = composition time), for its
  * `duration`, transformed and stacked by its track like any clip. Muted
  * tracks are silent; hidden tracks add no picture layer but still count
- * for the length and play their sound.
+ * for the length and play their sound. In a `variant` that covers, media
+ * clips that would fill the frame untransformed are cropped to fill it,
+ * except sources with alpha on upper tracks: overlays are fitted whole.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -531,6 +614,7 @@ function layoutTimeline(
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
+  variant?: FormatLayout,
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -573,6 +657,10 @@ function layoutTimeline(
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
+      const placement = fixedPlacement(clip);
+      // Renders are made at the format's size; only footage is cut to it.
+      const picture = source.video;
+      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
       placed.push({
         clip,
         source,
@@ -580,10 +668,11 @@ function layoutTimeline(
         end,
         in: Math.round(clip.in * fps),
         speed,
-        placement: fixedPlacement(clip),
+        placement,
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(covers ? { cover: formatCover(picture, output) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -630,7 +719,10 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+  const captionScale = variant?.captionScale ?? 1;
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
+    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
+  );
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -647,6 +739,8 @@ function layoutTimeline(
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
+  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
+  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
@@ -850,7 +944,8 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Fades of the bottom track go to black: nothing is under it.
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
-    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fit, ...timed].join(",")}[${label}]`);
+    const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
+    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -870,9 +965,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
   lines.push(`${joined}[base]`);
   let below = "base";
   pieces.forEach(({ placed, start, end }, n) => {
-    const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const rect = placed.tile?.rect ?? (placed.cover ? { left: 0, top: 0, width, height } : layerRect(placed.source.video!, { width, height }, out.project, placed.placement));
     const { opacity } = placed.placement;
-    const crop = placed.tile?.crop;
+    const crop = placed.tile?.crop ?? placed.cover;
     const move = placed.tile?.move;
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
     const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");
@@ -966,6 +1061,18 @@ function layerMotion(placed: Placed, start: number, end: number, from: number, o
   const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
+}
+
+/**
+ * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
+ * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
+ */
+function formatCover(source: Size, output: Size): LayerRect {
+  const even = (value: number) => value - (value % 2);
+  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
+  const width = Math.max(2, even(crop.width));
+  const height = Math.max(2, even(crop.height));
+  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**
@@ -1278,8 +1385,13 @@ function videoCodecArgs(preset: ExportPreset): string[] {
   }
 }
 
-function audioCodecArgs(preset: ExportPreset, rate: number): string[] {
-  const { codec, bitrateKbps } = preset.audio;
+/** AAC bitrate of a `final` export. */
+const FINAL_AAC_KBPS = 320;
+
+/** `aacKbps` replaces the preset's own AAC bitrate. */
+function audioCodecArgs(preset: ExportPreset, rate: number, aacKbps?: number): string[] {
+  const { codec } = preset.audio;
+  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : preset.audio.bitrateKbps;
   const bitrate = bitrateKbps ? ["-b:a", `${bitrateKbps}k`] : [];
   switch (codec) {
     case "aac":

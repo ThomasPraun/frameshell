@@ -351,6 +351,24 @@ describe("subtitle tracks", () => {
     expect(bad.stderr).toMatch(/position.*top.*center.*bottom/);
     expect(frameshell(["track", "set", track, "--name", "x", "--clear-name", "--timeline", "subs"]).code).toBe(2);
   });
+
+  it("sets entry and keyword tokens and gaps; --keyword-color none and --clear-gaps undo them", () => {
+    const subs = () => JSON.parse(readFileSync(join(project, "timelines", "subs.json"), "utf8"));
+    const track = subs().tracks[1].id as string;
+    expect(frameshell(["track", "set", track, "--entry", "words", "--keyword-color", "#ff8800", "--keyword-scale", "1.2", "--gap", "1-2.5", "--gap", "4-5", "--timeline", "subs"]).code).toBe(0);
+    expect(subs().tracks[1]).toMatchObject({ style: { entry: "words", keywordColor: "#ff8800", keywordScale: 1.2 }, gaps: [{ from: 1, to: 2.5 }, { from: 4, to: 5 }] });
+    expect(frameshell(["track", "set", track, "--keyword-color", "none", "--clear-gaps", "--timeline", "subs"]).code).toBe(0);
+    expect(subs().tracks[1].style.keywordColor).toBeNull();
+    expect(subs().tracks[1].gaps).toBeUndefined();
+    expect(frameshell(["track", "set", track, "--gap", "soon", "--timeline", "subs"]).code).toBe(2);
+    expect(frameshell(["track", "set", track, "--entry", "wobble", "--timeline", "subs"]).code).toBe(1);
+  });
+
+  it("captions set needs its text, and not both text and file", () => {
+    expect(frameshell(["captions", "set", "t_x", "--timeline", "subs"]).code).toBe(2);
+    expect(frameshell(["captions", "set", "t_x", "--text", "a", "--file", "b.txt", "--timeline", "subs"]).code).toBe(2);
+    expect(frameshell(["clip", "add", "v1", "--text", "x"]).code).toBe(2);
+  });
 });
 
 describe("track mute and hide", () => {

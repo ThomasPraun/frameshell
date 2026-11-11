@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { FormatEntrySchema, formatProblems } from "./formats.js";
 
 /** Canonical `$schema` URL for `frameshell.json`, matching the generated JSON Schema `$id`. */
 export const PROJECT_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/project.json`;
@@ -42,6 +43,15 @@ export const ProjectConfigSchema = z
       width: z.int().positive(),
       height: z.int().positive(),
     }),
+    formats: z
+      .array(FormatEntrySchema)
+      .min(1)
+      .optional()
+      .describe(
+        "Delivery formats of one edit (ADR 0027), primary first. The first must equal `resolution`; ids are unique; " +
+          "built-in ids keep their canvas; later sizes are even; not allowed in image projects. Absent: one format, " +
+          "the resolution. Hosts older than ADR 0027 refuse a project that has this field.",
+      ),
     sampleRate: z.int().positive(),
     /** Project-relative path of the exported sequence. */
     main: z.string().min(1),
@@ -82,7 +92,10 @@ export const ProjectConfigSchema = z
       })
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((config, ctx) => {
+    for (const { path, message } of formatProblems(config)) ctx.addIssue({ code: "custom", path, message });
+  });
 
 /** Validated `frameshell.json` content. */
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

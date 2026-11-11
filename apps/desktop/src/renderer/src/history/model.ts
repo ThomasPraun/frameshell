@@ -37,6 +37,7 @@ const VERBS: Record<string, string> = {
   "transition.set": t.history.verbs.setTransition,
   "transition.remove": t.history.verbs.removeTransition,
   "clip.key": t.history.verbs.keyframe,
+  "track.duck": t.history.verbs.duckTrack,
   cut: t.history.verbs.rippleDelete,
   "track.add": t.history.verbs.addTrack,
   "track.remove": t.history.verbs.removeTrack,

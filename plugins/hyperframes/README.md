@@ -5,7 +5,10 @@ Official [Frameshell](https://github.com/ThomasPraun/frameshell) clip adapter. I
 ```sh
 frameshell plugin install @frameshell/hyperframes
 frameshell hyperframes new title --duration 4
+frameshell hyperframes check            # lint every composition; exit 1 on errors
 ```
+
+`check [<composition>] [--strict] [--json]` runs the HyperFrames linter ([`@hyperframes/lint`](https://www.npmjs.com/package/@hyperframes/lint)) in the daemon, with no network and no telemetry, plus Frameshell's GSAP seek-safety rules. It prints `file:line:column severity rule message` and a fix per finding; errors exit 1, warnings only with `--strict`. The plugin never uses the `hyperframes` CLI.
 
 While a clip renders, the Frameshell desktop preview plays its composition live at the playhead (ADR 0010); export always uses the render. When the user picks an element of a clip with the Pick tool (ADR 0011), the live page names the file it comes from, the composition or one of its `data-composition-src` sub-compositions.
 
@@ -13,4 +16,4 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 The plugin runs inside the Frameshell daemon with full Node access, like every plugin: a project's plugins load only after you trust the project.
 
-Licence: Apache-2.0.
+Licence: Apache-2.0. The composition authoring rules in the skill follow the guidance of [HyperFrames](https://github.com/heygen-com/hyperframes) (Apache-2.0).

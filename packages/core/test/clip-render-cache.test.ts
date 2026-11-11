@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ClipRenderInfo, type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
@@ -49,6 +49,18 @@ async function until(id: string, check: (info: ClipRenderInfo) => boolean): Prom
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`clip ${id} never reached the expected state; last: ${JSON.stringify(last)}`);
+}
+
+/** Keys of the cached renders made at the `tall` format's 36x64. */
+function tallKeys(): Set<string> {
+  const dir = join(project, ".frameshell", "cache", "clips");
+  const metas = readdirSync(dir).filter((name) => /^[0-9a-f]{32}\.json$/.test(name));
+  return new Set(
+    metas.flatMap((name) => {
+      const meta = JSON.parse(readFileSync(join(dir, name), "utf8")) as { width?: number; height?: number };
+      return meta.width === 36 && meta.height === 64 ? [name.slice(0, 32)] : [];
+    }),
+  );
 }
 
 const clipJobs = async () => (await conn.request("job.list", { cwd: project })).jobs.filter((job) => job.kind === "clip");
@@ -181,9 +193,11 @@ describe("clip render cache", () => {
       expect(pixel[1]).toBeLessThan(20);
 
       // A card added just before the export: the render job waits for it (step `clips`), then overlays it.
+      // Exported in a vertical format (ADR 0027): every card renders again at that size first.
       writeCard("late", { color: "white", seconds: 1, delayMs: 300 });
       await addCard("late", 6);
-      const { job, output } = await conn.request("render", { cwd: project, timeline: "main", preset: "vertical-1080x1920" });
+      await conn.request("format.add", { cwd: project, id: "tall", width: 36, height: 64 });
+      const { job, output } = await conn.request("render", { cwd: project, timeline: "main", formats: ["tall"] });
       let final: JobInfo | undefined;
       for (const deadline = Date.now() + 120_000; Date.now() < deadline && !final; ) {
         const found = (await conn.request("job.list", { cwd: project })).jobs.find((j) => j.id === job.id);
@@ -193,6 +207,7 @@ describe("clip render cache", () => {
       expect(final).toMatchObject({ state: "done" });
       expect(jobEvents.some((event) => event.id === job.id && event.step === "clips")).toBe(true);
       expect(existsSync(output)).toBe(true);
+      expect(tallKeys().size).toBeGreaterThan(0);
     },
     TIMEOUT,
   );
@@ -235,10 +250,17 @@ describe("clip render cache", () => {
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.webm`), "x");
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.json`), "{}");
 
+      const tall = tallKeys();
       const { removed, skipped } = await conn.request("gc", { cwd: project });
       expect(skipped).toEqual([]);
-      const keys = new Set(removed.filter((entry) => entry.kind === "clip").map((entry) => entry.path.split("/").at(-1)!.split(".")[0]!));
+      const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
+      const keys = new Set(removed.filter((entry) => entry.kind === "clip").map((entry) => keyOf(entry.path)));
       expect(keys).toContain(orphan);
+      // Renders of a declared format stay (background renders never make them again); once it is removed they go.
+      for (const key of tall) expect(keys).not.toContain(key);
+      await conn.request("format.remove", { cwd: project, id: "tall" });
+      const unused = (await conn.request("gc", { cwd: project, dryRun: true })).removed.map((entry) => keyOf(entry.path));
+      for (const key of tall) expect(unused).toContain(key);
       // Earlier edits left renders of old keys behind.
       expect(keys.size).toBeGreaterThan(1);
       for (const key of current) expect(keys).not.toContain(key);

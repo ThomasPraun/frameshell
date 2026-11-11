@@ -29,6 +29,9 @@ import { VOICES_DIR, classifyVoiceCache } from "../people/voices.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
 import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
 
+/** What {@link MediaService.import} reports; the daemon adds whether provenance was recorded. */
+export type MediaImportResult = { dir: string; imported: Omit<AssetImportResult["imported"][number], "provenance">[] };
+
 /** Project-relative directory the watcher and import own. */
 const ASSETS_DIR = "assets";
 
@@ -164,7 +167,7 @@ export class MediaService {
    * Bring `files` into `assets/` and queue their ingest. Every source is
    * checked before anything is copied. Throws `AssetNotFound`.
    */
-  async import(root: string, files: string[], mode: "copy" | "link"): Promise<AssetImportResult> {
+  async import(root: string, files: string[], mode: "copy" | "link"): Promise<MediaImportResult> {
     const attached = this.#attached(root);
     for (const file of files) {
       const info = await stat(file).catch(() => null);
@@ -177,7 +180,7 @@ export class MediaService {
     const assetsDir = join(root, ASSETS_DIR);
     await mkdir(assetsDir, { recursive: true });
     const realAssets = await realpath(assetsDir);
-    const imported: AssetImportResult["imported"] = [];
+    const imported: MediaImportResult["imported"] = [];
     for (const source of files) {
       const real = await realpath(source);
       const inside = relative(realAssets, real);
@@ -246,7 +249,8 @@ export class MediaService {
     const project = await readEnclosingProject(root);
     const hash = await store.knownHash(rel);
     const manifest = hash ? await store.manifest(store.key(hash, project?.config.fps ?? 30)) : null;
-    if (manifest) return manifest.media;
+    // A manifest from before probes recorded `alpha` is probed again: export needs the fact.
+    if (manifest && (!manifest.media.video || manifest.media.video.alpha !== undefined)) return manifest.media;
     const key = `${root}\0${rel}\0${current.size}\0${current.mtimeMs}`;
     let probed = this.#probes.get(key);
     if (!probed) {

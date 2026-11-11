@@ -30,7 +30,7 @@ export interface RegisteredClipType {
   plugin: { name: string; version: string };
 }
 
-/** Project format a render is made for. */
+/** Frame rate and size a render is made for: the project's, or a format's (ADR 0027). */
 export interface ClipFormat {
   fps: number;
   width: number;
@@ -79,6 +79,11 @@ export interface ClipRendererOptions {
   readNested?: NestedReader;
   /** Project fps and resolution from `frameshell.json`. */
   format(root: string): Promise<ClipFormat>;
+  /**
+   * Frame sizes of the project's formats other than the primary one (ADR 0027): `gc` keeps their renders.
+   * Background renders stay at the project resolution. Default: none.
+   */
+  formatSizes?(root: string): Promise<{ width: number; height: number }[]>;
   /** Size and length of a finished render (ffprobe). */
   probe(root: string, file: string, signal: AbortSignal): Promise<RenderProbe>;
   /** Managed or overridden native tool for adapters; see `RenderContext.ensureBinary`. */
@@ -315,13 +320,21 @@ export class ClipRenderer {
    * by clip id, rendering missing ones first (SPEC §3.5 step 2). Retries
    * failed keys. Throws `ClipRenderFailed` for the first clip that cannot be
    * rendered, or has no adapter. `onProgress` gets the share of clips done.
+   * `size`: render at that frame size instead of the project resolution (a
+   * format of the project, ADR 0027); the size is part of the key.
    */
-  async ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void): Promise<Map<string, RenderedClip>> {
+  async ensure(
+    root: string,
+    timeline: Timeline,
+    onProgress?: (fraction: number) => void,
+    size?: { width: number; height: number },
+  ): Promise<Map<string, RenderedClip>> {
     const placed = generatedClips(timeline);
     const rendered = new Map<string, RenderedClip>();
     if (placed.length === 0) return rendered;
     const adapters = await this.#options.adapters(root);
-    const format = await this.#options.format(root);
+    const project = await this.#options.format(root);
+    const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const waits: { clip: AdapterClip; done: Promise<RenderedClip> }[] = [];
     for (const { clip } of placed) {
       const keyed = await this.#keyOf(root, clip, adapters, format);
@@ -391,7 +404,7 @@ export class ClipRenderer {
     return { removed, skipped };
   }
 
-  /** Keys of every generated clip on every timeline of `root`, or why they cannot all be known. */
+  /** Keys of every generated clip on every timeline of `root`, at every format size, or why they cannot all be known. */
   async #currentKeys(root: string): Promise<Set<string> | string> {
     const placed: Placed[] = [];
     for (const id of await this.#options.timelines(root)) {
@@ -407,11 +420,15 @@ export class ClipRenderer {
     // No generated clips: never load plugins (an untrusted project stays untouched).
     if (placed.length === 0) return keys;
     const adapters = await this.#options.adapters(root);
-    const format = await this.#options.format(root);
+    const project = await this.#options.format(root);
+    const sizes = (await this.#options.formatSizes?.(root)) ?? [];
+    const formats = [project, ...sizes.map((size) => ({ fps: project.fps, width: size.width, height: size.height }))];
     for (const { clip } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format);
-      if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
-      keys.add(keyed.key);
+      for (const format of formats) {
+        const keyed = await this.#keyOf(root, clip, adapters, format);
+        if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
+        keys.add(keyed.key);
+      }
     }
     return keys;
   }

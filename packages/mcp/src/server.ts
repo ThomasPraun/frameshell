@@ -335,7 +335,7 @@ async function strip(conn: DaemonConnection, args: Record<string, unknown>): Pro
     const lines = parsed.error.issues.map(({ path, message }) => `  ${["params", ...path.map(String)].join(".")}: ${message}`);
     throw new RpcError(ErrorCode.InvalidParams, `Invalid params for \`frames_strip\`:\n${lines.join("\n")}`);
   }
-  const { cwd, timeline, from, to, count, preset } = parsed.data;
+  const { cwd, timeline, from, to, count, preset, projectFormat } = parsed.data;
   const temp = await mkdtemp(join(tmpdir(), "frameshell-mcp-"));
   try {
     const shots: FrameResult[] = [];
@@ -343,7 +343,7 @@ async function strip(conn: DaemonConnection, args: Record<string, unknown>): Pro
     for (let i = 0; i < count; i++) {
       const at = Math.round((from + ((to - from) * i) / (count - 1)) * 1000) / 1000;
       const out = join(temp, `${i}.png`);
-      shots.push(await conn.request("frame", { cwd: cwd!, timeline, at, out, ...(preset ? { preset } : {}) }));
+      shots.push(await conn.request("frame", { cwd: cwd!, timeline, at, out, ...(preset ? { preset } : {}), ...(projectFormat ? { projectFormat } : {}) }));
       frames.push(decodePng(await readFile(out)));
     }
     const sheet = contactSheet(frames, STRIP_MAX_WIDTH);

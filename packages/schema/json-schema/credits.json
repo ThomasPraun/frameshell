@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "assets": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "pattern": "^assets\\/[^\\\\]+$",
+            "description": "Project-relative asset path, e.g. `assets/rain.ogg`."
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Content the entry was written for. An asset whose content changed since is unverified."
+          },
+          "sourceUrl": {
+            "description": "Page the file was fetched from (http or https).",
+            "type": "string",
+            "maxLength": 2048
+          },
+          "licence": {
+            "description": "SPDX-style id such as `CC0-1.0`, `CC-BY-4.0`, or `own` for the person's own work. Absent or `unknown`: unverified.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "author": {
+            "description": "Who made it, as the credit should name them.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "title": {
+            "description": "Name of the work, for the credit line.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "credit": {
+            "description": "Credit line to use as written, instead of the one built from title, author, licence and source.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Day (UTC, `YYYY-MM-DD`) the entry was last written."
+          }
+        },
+        "required": [
+          "asset",
+          "hash",
+          "addedAt"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/credits.json"
+}
