@@ -117,6 +117,54 @@ describe("export compiler", () => {
     expect(plan.files["segments.txt"]).toBe("file 'seg-0001.mp4'\nfile 'seg-0002.mp4'\nfile 'seg-0003.mp4'\n");
   });
 
+  describe("quality tiers", () => {
+    const encodeArgs = (p: ReturnType<typeof compileRender>) => p.segments[0]!.args;
+
+    it("encodes a draft with the picked encoder at 30 fps at most, even from a 60 fps project", () => {
+      const draft = compileRender({ timeline, fps: 60, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } });
+      expect(draft.fps).toBe("30/1");
+      const args = encodeArgs(draft);
+      expect(args.slice(args.lastIndexOf("-c:v"), args.lastIndexOf("-c:v") + 8)).toEqual(["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-profile:v", "high"]);
+      expect(args).not.toContain("-maxrate");
+      expect(args).not.toContain("-colorspace");
+      expect(draft.frames).toBe(Math.round(draft.duration * 30));
+    });
+
+    it("keeps a draft below 30 fps as it is", () => {
+      expect(compileRender({ timeline, fps: 24, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } }).fps).toBe("24/1");
+    });
+
+    it("encodes a final slow with bt709 tags and AAC 320k, replacing the preset's rate", () => {
+      const low = { ...youtube1080, audio: { ...youtube1080.audio, bitrateKbps: 128 } };
+      const final = compileRender({ timeline, fps: 30, preset: low, loudness: -17, sources, resolution, encode: { encoder: "h264_nvenc", tier: "final" } });
+      const args = encodeArgs(final).join(" ");
+      expect(args).toContain("-c:v h264_nvenc -preset p6 -rc vbr -cq 17 -b:v 0");
+      expect(args).toContain("-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv");
+      expect(args).not.toContain("-crf 18");
+      expect(final.audio.codec).toEqual(["-c:a", "aac", "-b:a", "320k", "-ar", "48000"]);
+      expect(muxStep(final, null, "/out.mp4").args).toEqual(expect.arrayContaining(["-movflags", "+faststart"]));
+    });
+
+    it("sets the VideoToolbox bitrate from the frame size and rate", () => {
+      const final = compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, encode: { encoder: "h264_videotoolbox", tier: "final" } });
+      // 1920 x 1080 x 30 x 0.25 bits per pixel.
+      expect(encodeArgs(final).join(" ")).toContain("-c:v h264_videotoolbox -b:v 15552k");
+    });
+
+    it("leaves a draft's audio as the preset says", () => {
+      const draft = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, bitrateKbps: 128 } }, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "draft" } });
+      expect(draft.audio.codec).toContain("128k");
+    });
+
+    it("ignores the tier for a preset that is not H.264, with a warning, and plans nothing else differently", () => {
+      const vp9 = { ...youtube1080, id: "web", container: "webm" as const, video: { ...youtube1080.video, codec: "vp9" as const }, audio: { codec: "opus" as const } };
+      const plain = compileRender({ timeline, fps: 30, preset: vp9, loudness: -17, sources, resolution });
+      const tiered = compileRender({ timeline, fps: 30, preset: vp9, loudness: -17, sources, resolution, encode: { encoder: "libx264", tier: "final" } });
+      expect(tiered.warnings).toEqual([...plain.warnings, 'Quality "final" only applies to H.264 presets; web renders as written.']);
+      expect(tiered.segments).toEqual(plain.segments);
+    });
+  });
+
   it("decodes every VP9 input with libvpx so alpha survives (ADR 0002)", () => {
     const args = plan.segments[1]!.args;
     const input = args.indexOf("/project/assets/title.webm");

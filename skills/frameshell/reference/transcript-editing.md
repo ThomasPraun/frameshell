@@ -7,7 +7,7 @@ Cutting a recording by its words: remove silences and retakes, add subtitles, ex
 1. **Import.** `frameshell import <file…> --wait` copies the footage into `assets/` and blocks until its proxy, audio sidecar and waveform exist (exit 1 if one failed). `--link` avoids copying a large file (the source must stay). Done = every file shows `done`.
 2. **Place it.** `frameshell track add video --name Camera --json`, then `frameshell clip add <track> assets/<file> --json` (whole asset at the track's end). Audio-only material goes on `track add audio`.
 3. **Transcribe.** `frameshell transcribe assets/<file> --language <code> --json` writes `transcripts/<file minus extension>.words.json`; the output names the file. Needs a transcription plugin: when it fails with `TranscriptionProviderNotFound`, run the install command its message gives. The first run downloads the engine and a 574 MB model (minutes, once). The model is the project's `transcription.model`, else this machine's default, else the provider's; see *Choosing the model*.
-4. **Find what to remove** (see *Choosing cuts*). Write the ranges down in timeline seconds before cutting anything.
+4. **Find what to remove.** For silences and retakes start with `frameshell cleanup --retakes --dry-run --json` (see *Cleanup*): it lists the cuts with their words, reason and confidence. Anything else (intro chatter, off-topic passages): see *Choosing cuts*, and write the ranges down in timeline seconds before cutting anything.
 5. **Cut** inside one transaction, **last range first**: a cut shifts everything after it left, so cutting from the end keeps the earlier ranges valid.
    ```sh
    frameshell tx begin "remove silences"
@@ -32,7 +32,25 @@ Done = `lost` is empty, every `uncertain` word reviewed, and the user has the ex
 - The project names only the id, so it stays portable: on a machine where that id is not registered, `transcribe` fails with `ModelNotRegistered` and says how to register it. Never switch to another model on your own; ask the user for the file.
 - A transcript made with a registered model records its `modelHash`. `transcribe` warns (`warnings`) when the file changed since it was registered.
 
+## Cleanup
+
+`frameshell cleanup` finds the dead air and false starts and cuts them; the edges come from the audio (whisper stretches words over silences), the words only say where to look.
+
+```sh
+frameshell cleanup --retakes --dry-run --json      # candidates, nothing changed
+frameshell cleanup --retakes --skip r2 --json      # the same plan, without r2: one transaction
+```
+
+- **Show the table first.** Each candidate: `id` (`p1` pause, `r1` retake), `start`/`end` (timeline seconds), `words` removed, `reason`, `confidence` (0 to 1), `clean` (false: an edge found no pause and may clip speech). Ask the person which to drop, then run again with the same flags and `--skip` for those: the plan is made again from the timeline as it is, so ids match only while it has not changed.
+- **Pauses:** gaps between kept words over `--pauses` seconds (default 0.4) that the audio confirms quiet, cut leaving `--breath` seconds (default 0.1) on each side. A pause after a punchline or a laugh is content: look at the gaps whose `reason` follows a joke before accepting them. `--no-pauses --retakes` looks only for false starts.
+- **Retakes:** `--retakes` cuts the earlier attempt of a phrase said again and keeps the last. One repeated word ("very, very") is weak (low confidence, below `--min-confidence 0.5` unless a stop separates the attempts): `skipped` lists what was left. Check a retake by ear when it is a list or an emphasis.
+- Only speech covered by transcripts is cut; `warnings` names clips left alone (no transcript, an older transcript than the file, no audio). Transcribe first.
+- The result is a normal transcript edit: cut words show struck through in the transcript view and one click restores them; `frameshell revert <tx>` undoes the run. With review mode on it waits as one proposal.
+- Run `transcribe --verify` after exporting, as for any cut.
+
 ## Choosing cuts
+
+By hand: what `cleanup` does not cover (intro and outro chatter, passages the person names, silence hidden inside a long word) or when its candidates need other edges.
 
 Transcript words carry `id`, `text`, `start`, `end` in source seconds (see [project-model.md](project-model.md#transcript)). Word `start` lags real speech by ~140 ms; `end` comes from audio energy. Neither is a safe cut point by itself: cut in the pause between words and let snapping place the edge.
 
@@ -51,6 +69,23 @@ frameshell track add subtitles --follows <video track> --preset big-keyword --po
 ```
 
 `--preset big-keyword` (few large words, the spoken one highlighted) or `plain`; `--position top|center|bottom`; change later with `frameshell track set <track> --preset … --position …`. Export burns them in, identical to the preview. Fix a misheard word in the transcript's `edits` (keyed by word id), not in the track.
+
+### Chosen keywords, chunking and soft entries
+
+The automatic grouping reads well for talk; short-form reels read better with your own chunks and one emphasised word per phrase. Write the phrases, do not edit the transcript:
+
+```sh
+frameshell captions set <subtitle track> --from 12 --to 18 --text "No need to | open any | *editor*
+Just ask | and it *edits*"
+```
+
+- One phrase per line; `|` ends a cue (a chunk); the phrase's one keyword goes between asterisks; `[chars]`, `[words]`, `[line]` or `[none]` at the start of a line sets that phrase's entry. `--file <path>` reads the same text from a project file.
+- The text must cover **every word the track shows between `--from` and `--to`**, in order, matched by position: a lost or repeated word fails and the error names the first difference. Words that only differ in spelling (digits, case, punctuation) warn. The result lists the cues it made (keyword starred); check them, then look at frames with `frame` or `inspect`.
+- Phrases are stored as transcript word ids, so cuts and transcript corrections keep them (a removed word just leaves its chunk). Words no phrase holds keep the automatic grouping. Phrases that share a word with new ones are replaced; `--replace` first drops all of the track's phrases (alone, it clears them). One transaction: `revert` undoes it.
+- Timing is fixed: a chunk lasts until the next cue starts, at most 0.35 s after its last word, never under 0.4 s. Chunk by energy: 2-3 words for high energy, 3-5 for conversation, 4-6 for calm; break at pauses.
+- Style (`track set`): `--entry chars|words|line` fades the text in over 0.4 s (ease out, slight blur, no bounce; `words` shows each word as it is spoken); `--keyword-color #rrggbb` (`none` for no colour; default the accent) and `--keyword-scale 1.12` (the keyword settles from that size while it enters). One keyword per phrase, approved by the person before the final render; calm styles use `--keyword-color none`.
+- `--gap 12-15.5` hides every cue that overlaps the range, for when a graphic already says it; `--clear-gaps` removes them.
+- Preview and export draw the same cues; during the 0.4 s entry the keyword's scale is only approximate in the preview.
 
 ## Speed and sound
 

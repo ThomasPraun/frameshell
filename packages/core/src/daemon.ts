@@ -30,23 +30,33 @@ import {
   writeMessage,
 } from "@frameshell/protocol";
 import {
+  type CaptionPhrase,
   type MulticamGroup,
   type ProgramTrack,
   type ProjectConfig,
   type ShotClip,
   type Timeline,
+  type Transcript,
   createTimeline,
+  cueTokens,
   findPerson,
   parseTimeline,
   projectFormats,
+  subtitleTracks,
+  subtitleWords,
 } from "@frameshell/schema";
+import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/captions.js";
 import { runDoctor } from "./binaries/doctor.js";
+import { CreditsService } from "./credits/service.js";
+import { EncoderCache } from "./encoders/probe.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
+import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
+import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
@@ -56,7 +66,8 @@ import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multi
 import { readJournal } from "./history/journal.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
-import { type FaceScanner, yunetWorkerScanner } from "./multicam/faces.js";
+import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
+import { parseFrameFormat, planReframe } from "./reframe.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -103,7 +114,7 @@ import {
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
 import type { OperationRequest } from "./timeline/engine.js";
-import { TimelineService, type TxRef, timelinePath } from "./timeline/service.js";
+import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
@@ -215,6 +226,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const clients = new Set<Socket>();
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
+  const encoderCache = new EncoderCache(binaries.dataDir);
   const models = new ModelRegistry(dirs.configDir);
   /** Binaries, pinned models and this machine's registered models for a transcription provider. */
   const transcriberTools = (overrides: ProjectBinaries): TranscriberTools => ({
@@ -431,8 +443,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (endsTx) void transactions.drop(transactionKey(change.author), change.tx).catch(() => {});
     },
   });
+  const credits = new CreditsService({ hash: (dir, rel) => media.hash(dir, rel) });
   const exports = new ExportService({
     jobs,
+    provenance: (dir, assets) => credits.warnings(dir, assets),
     ffmpeg: async (dir) => {
       const project = await readEnclosingProject(dir);
       return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
@@ -440,6 +454,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
     loadTimeline: (dir, id) => timelines.load(dir, id),
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
+    encoder: (ffmpeg) => encoderCache.pick(ffmpeg),
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
       ensure: (dir, timeline, onProgress, size) => clips.ensure(clipRoot(dir), timeline, onProgress, size),
@@ -890,10 +905,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (params.resolution) format = { ...format, resolution: params.resolution };
       return projects.init(params.dir, params.name, params.agentSkill, format, params.kind);
     },
-    doctor: async ({ cwd, install }) => {
+    doctor: async ({ cwd, install, reprobe }) => {
       const found = await readEnclosingProject(cwd);
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
-      return { ...(await runDoctor(binaries, { project, install })), skill: found ? await coreSkillState(found.dir) : null };
+      const format = found ? { resolution: found.config.resolution, fps: found.config.fps } : undefined;
+      return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
     },
     "skill.update": async ({ cwd, force }) => {
       const dir = await root(cwd);
@@ -930,11 +946,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await formatsOutsideReview(dir, caller);
       return formats.remove(dir, id, journalAuthorOf(caller));
     },
-    render: async ({ cwd, timeline, preset, out, formats: ids }) => exports.render(await root(cwd), { timeline, preset, out, formats: ids }),
+    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
+      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
+    },
+    cover: async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.cover(dir, { timeline, ...choice }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
@@ -1041,7 +1063,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "file.write": ({ path, content }, caller) => projects.writeFile(path, content, journalAuthorOf(caller)),
     "file.uses": ({ path }) => fileUses(path),
-    "asset.import": async ({ cwd, files, mode }) => media.import(await root(cwd), files, mode),
+    "asset.import": async ({ cwd, files, mode, ...provenance }) => {
+      const dir = await root(cwd);
+      const result = await media.import(dir, files, mode);
+      const recorded = Object.values(provenance).some((value) => value !== undefined);
+      if (recorded) await credits.record(dir, [...new Set(result.imported.map((entry) => entry.asset))], provenance);
+      return { ...result, imported: result.imported.map((entry) => ({ ...entry, provenance: recorded })) };
+    },
+    "credits.set": async ({ cwd, asset, ...provenance }) => {
+      const dir = await root(cwd);
+      const [entry] = await credits.record(dir, [projectPath(dir, cwd, asset, "asset", "credits.set")], provenance);
+      return { dir, entry: entry! };
+    },
+    "credits.check": async ({ cwd }) => credits.check(await root(cwd)),
     "asset.list": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, assets: await media.list(dir) };
@@ -1158,7 +1192,92 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "transition.set": (params, caller) => operate("transition.set", params, caller),
     "transition.remove": (params, caller) => operate("transition.remove", params, caller),
     "clip.key": (params, caller) => operate("clip.key", params, caller),
+    "track.duck": async ({ cwd, timeline, track, under, depth, attackMs, releaseMs, threshold, gap }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `track.duck: ${reason}`, { op: "track.duck", reason, field });
+      const known = (id: string) => {
+        const found = loaded.tracks.find((candidate) => candidate.id === id);
+        if (!found) throw new RpcError(ErrorCode.TrackNotFound, `track.duck: no track "${id}" in timeline ${timeline}.`, { track: id, available: loaded.tracks.map((t) => t.id) });
+        return found;
+      };
+      const music = known(track);
+      if (music.kind !== "audio") throw invalid(`${track} is a ${music.kind} track; ducking writes gain keys on the clips of an audio track.`, "track");
+      for (const id of under) {
+        const voice = known(id);
+        if (id === track) throw invalid(`${id} is the track being ducked; name the tracks with the voice in \`under\`.`, "under");
+        if (voice.kind !== "video" && voice.kind !== "audio") {
+          throw invalid(`${id} is a ${voice.kind} track; \`under\` takes video and audio tracks (a multicam program track has no sound of its own).`, "under");
+        }
+      }
+      const attack = attackMs / 1000;
+      const release = releaseMs / 1000;
+      let stretches: Span[] = [];
+      let heardWarnings: string[] = [];
+      // Measured against the timeline the operation applies to: a voice edited or a proposal rebased meanwhile is heard as it is then.
+      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+        const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
+        stretches = speechStretches(heard.runs, { gap, attack, release });
+        heardWarnings = heard.warnings;
+        const curve = dipCurve(stretches, { depth, attack, release });
+        return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
+      };
+      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, prepare);
+      return {
+        ...result,
+        track,
+        under,
+        stretches: stretches.length,
+        speechSeconds: Math.round(stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
+        warnings: [...result.warnings, ...heardWarnings],
+      };
+    },
     cut: (params, caller) => operate("cut", params, caller),
+    cleanup: async ({ cwd, timeline, pauses, breath, retakes, minConfidence, dryRun, skip }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const plan = await planTimelineCleanup(
+        dir,
+        loaded,
+        fps,
+        { pauses, breath, retakes, minConfidence, skip },
+        {
+          assetHash: async (rel) => (await media.derivedAudio(dir, rel)).hash,
+          profile: (asset) => energy.profile(dir, asset),
+          hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
+        },
+      );
+      if (dryRun || plan.candidates.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...plan };
+      // The plan can take seconds (first energy profile): cuts at the times of an older timeline would cut the wrong audio.
+      const fresh = (await loadFor(dir, timeline, caller)).timeline.revision;
+      if (fresh !== loaded.revision) {
+        throw new RpcError(ErrorCode.StaleRevision, `cleanup: timeline ${timeline} changed from revision ${loaded.revision} to ${fresh} while the cuts were planned. Nothing was cut; run it again.`, {
+          op: "cleanup",
+          timeline,
+          revision: loaded.revision,
+          current: fresh,
+        });
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: cleanupLabel(plan.candidates) };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const warnings = new Set(plan.warnings);
+      let revision = loaded.revision;
+      try {
+        // Last cut first: a cut moves everything after it, so the earlier ones keep their times.
+        for (const candidate of [...plan.candidates].sort((a, b) => b.start - a.start)) {
+          const request = { op: "cut", args: { from: candidate.start, to: candidate.end, snap: false } } as const;
+          const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx });
+          await transactions.applied(key, tx);
+          revision = result.revision;
+          for (const warning of result.warnings) warnings.add(warning);
+        }
+      } finally {
+        await settle(key, tx);
+      }
+      return { timeline, revision, dryRun, applied: true, tx: tx.id, ...plan, warnings: [...warnings] };
+    },
     "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {
       const dir = await root(cwd);
@@ -1393,12 +1512,213 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         return { timeline, revision, group, angles: report, kept, tx: wrote ? tx.id : null, warnings };
       });
     },
+    "clip.reframe": async ({ cwd, timeline, clip: clipId, format: formatText, person: personRef, anchor }, caller, request) => {
+      const dir = await root(cwd);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.reframe: ${reason}`, { op: "clip.reframe", reason, field });
+      const format = parseFrameFormat(formatText ?? "9x16");
+      if (!format) throw invalid(`format "${formatText}" is not <width>x<height>, e.g. 9x16.`, "format");
+      if (personRef !== undefined && anchor !== undefined) throw invalid("`person` and `anchor` are two ways to place the picture: give one.", "anchor");
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const place = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find(({ clip }) => clip.id === clipId);
+      if (!place) {
+        throw new RpcError(ErrorCode.ClipNotFound, `clip.reframe: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      const clip = place.clip;
+      if (!isMediaClip(clip)) throw invalid(`clip ${clipId} is not a media clip: only footage and photos are reframed.`, "clip");
+      const probe = await media.probe(dir, clip.asset);
+      if (!probe.video) throw invalid(`${clip.asset} has no picture.`, "clip");
+      const still = probe.video.still;
+      const speed = clip.speed ?? 1;
+      const end = clip.start + (clip.out - clip.in) / speed;
+      const toTimeline = (source: number) => clip.start + (source - clip.in) / speed;
+      const range = still ? undefined : { from: clip.in, to: clip.out };
+      const project = (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 };
+      const warnings: string[] = [];
+      let samples = 0;
+      let faces = 0;
+      let follows: "face" | "person" | "anchor" = "face";
+      let points: FacePoint[];
+      if (anchor !== undefined) {
+        follows = "anchor";
+        points = [{ time: clip.in, x: anchor, y: 0.5 }];
+      } else if (personRef !== undefined) {
+        follows = "person";
+        const found = await people.faceTrack(dir, personRef, clip.asset, faceScans(dir), range);
+        if (!found.scanned) {
+          throw invalid(`${clip.asset} has no face scan, so ${found.person.name}'s face is not known there: frameshell people scan ${clip.asset}`, "person");
+        }
+        samples = still ? 1 : Math.max(1, Math.round((clip.out - clip.in) * FACE_SAMPLE_HZ));
+        faces = found.points.length;
+        points = proposeReframeKeys(found.points);
+        if (faces === 0) warnings.push(`${found.person.name} has no face in ${clip.asset} between ${clip.in} and ${clip.out} s, so the clip keeps its framing (link their face: frameshell people link).`);
+      } else {
+        if (!probe.video.width || !probe.video.height) throw invalid(`${clip.asset} has no readable picture size.`, "clip");
+        const tell = (update: Progress) => {
+          try {
+            request.progress(update);
+          } catch {
+            // Connection closed.
+          }
+        };
+        const detected = await inJob({ kind: "faces", project: dir, asset: clip.asset }, async (ctx) => {
+          const projectBins = await projectBinaries(dir);
+          const ffmpeg = await binaries.ensure("ffmpeg", projectBins, { onProgress: tell });
+          const scan =
+            options.faceScanner ??
+            yunetWorkerScanner({
+              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, projectBins, { onProgress: tell }),
+              model: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
+            });
+          ctx.update({ step: "faces", progress: 0 });
+          const message = `Finding faces in ${basename(clip.asset)}`;
+          return scan({
+            ffmpeg,
+            path: join(dir, ...clip.asset.split("/")),
+            width: probe.video!.width,
+            height: probe.video!.height,
+            duration: probe.duration ?? undefined,
+            range,
+            signal: ctx.signal,
+            onProgress: (fraction) => {
+              ctx.update({ progress: fraction });
+              tell({ message, fraction, stage: "faces", values: { angle: basename(clip.asset) } });
+            },
+          });
+        });
+        samples = detected.samples;
+        faces = detected.faces;
+        points = detected.keys;
+        if (faces === 0) warnings.push(`No face found in ${detected.samples} frames of ${clip.id}, so it keeps its framing (look at a frame, then pass --anchor).`);
+        else if (faces < samples / 4) warnings.push(`A face in only ${faces} of ${samples} frames of ${clip.id}; check its keys.`);
+      }
+      const nothing = (): MethodResult<"clip.reframe"> => ({
+        timeline,
+        revision: loaded.revision,
+        clip: clip.id,
+        format: `${format.width}x${format.height}`,
+        follows,
+        samples,
+        faces,
+        placement: null,
+        keys: 0,
+        operations: [],
+        tx: null,
+        warnings,
+      });
+      if (points.length === 0) return nothing();
+      const plan = planReframe({ source: { width: probe.video.width, height: probe.video.height }, project, format }, points, toTimeline);
+      if (Math.abs(project.width / project.height - format.width / format.height) > 0.01) {
+        warnings.push(
+          `The project is ${project.width}x${project.height}: its preview shows the clip zoomed, and an export in ${format.width}:${format.height} (e.g. the vertical-1080x1920 preset) shows the framing.`,
+        );
+      }
+      const had = clip.keys?.x || clip.keys?.y || clip.keys?.scale || clip.transform?.x !== undefined || clip.transform?.y !== undefined || clip.transform?.scale !== undefined;
+      if (had) warnings.push(`${clip.id} had its own x, y or scale (static or keys): replaced.`);
+      // Every write joins one transaction, so one revert undoes the framing even from a sessionless client.
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Reframe ${basename(clip.asset, extname(clip.asset))}` };
+      const author = journalAuthorOf(caller);
+      const written: string[] = [];
+      let revision = loaded.revision;
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        written.push(result.operation.id);
+        revision = result.revision;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        for (const prop of ["x", "y", "scale"] as const) {
+          if (clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true } } as OperationRequest);
+        }
+        await apply({ op: "clip.set", args: { clip: clip.id, transform: { scale: plan.scale, x: plan.x, y: plan.y } } } as OperationRequest);
+        for (const prop of ["x", "y"] as const) {
+          if (!plan.moves[prop]) continue;
+          for (const point of plan.keys) {
+            const time = Math.min(end, Math.max(clip.start, point.time));
+            await apply({ op: "clip.key", args: { clip: clip.id, prop, time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+          }
+        }
+      } catch (error) {
+        // All or nothing: take back what was written, in the same transaction.
+        for (const id of written.reverse()) await timelines.revert({ root: dir, cwd, timeline, author, tx, target: id }).catch(() => undefined);
+        throw error;
+      }
+      await settle(key, tx);
+      return {
+        ...nothing(),
+        revision,
+        placement: { scale: plan.scale, x: plan.x, y: plan.y },
+        keys: plan.moves.x || plan.moves.y ? plan.keys.length : 0,
+        operations: written,
+        tx: tx.id,
+      };
+    },
     "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
       const found = groupOf(loaded, group, "multicam.turns");
       const result = await groupTurns(turnsSource, dir, found);
       return { timeline, revision: loaded.revision, group, ...result };
+    },
+    "captions.set": async ({ cwd, timeline, track: trackId, text, file, from, to, replace }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const track = loaded.tracks.find((candidate) => candidate.id === trackId);
+      const invalid = (message: string, field: string) =>
+        new RpcError(ErrorCode.InvalidOperation, `captions.set: ${message}`, { op: "captions.set", reason: field, field });
+      if (!track || track.kind !== "subtitles") {
+        // The engine names what is wrong with the track.
+        await operate("captions.set", { cwd, timeline, track: trackId, phrases: [], replace: false }, caller);
+        throw new Error("captions.set: the operation accepted a track that is not a subtitle track");
+      }
+      if (text !== undefined && file !== undefined) throw invalid("give `text` or `file`, not both.", "file");
+      const source = text ?? (file === undefined ? undefined : await readCaptionFile(dir, cwd, file));
+      if (source === undefined && replace !== true) {
+        throw invalid("give `text` or `file` (the captions, one phrase per line), or `replace: true` alone to clear the phrases.", "text");
+      }
+      const grid = new FrameGrid(fps);
+      const first = from === undefined ? 0 : grid.frame(from);
+      const last = to === undefined ? Number.POSITIVE_INFINITY : grid.frame(to);
+      const transcripts = new Map<string, Transcript>();
+      let phrases: CaptionPhrase[] = [];
+      let covered = 0;
+      let warnings: string[] = [];
+      if (source !== undefined) {
+        const followed = loaded.tracks.find((candidate) => candidate.id === track.follows);
+        const assets = followed && followed.kind !== "subtitles" ? followed.clips.flatMap((clip) => (clip.type === "media" && "asset" in clip ? [clip.asset] : [])) : [];
+        for (const asset of new Set(assets)) {
+          const found = await resolveTranscript(dir, asset).then((resolved) => resolved.previous, () => null);
+          if (found) transcripts.set(asset, found);
+        }
+        const shown = subtitleWords(loaded, track.id, (asset) => transcripts.get(asset) ?? null, fps).filter((word) => word.start >= first && word.start < last);
+        if (shown.length === 0) {
+          throw invalid(
+            `track ${track.id} shows no words in that range. Transcribe the assets of ${track.follows} first (\`frameshell transcribe\`), or check \`from\` and \`to\`.`,
+            "text",
+          );
+        }
+        const resolved = resolveCaptions(parseCaptionText(source), shown, (word) => word.start / fps);
+        phrases = resolved.phrases;
+        covered = resolved.words;
+        warnings = resolved.warnings;
+      }
+      let written: Timeline | undefined;
+      const result = await operate("captions.set", { cwd, timeline, track: trackId, phrases, replace: replace === true }, caller, (after) => {
+        written = after;
+      });
+      const shown = written ? subtitleTracks(written, (asset) => transcripts.get(asset) ?? null, fps).find((candidate) => candidate.track === trackId) : undefined;
+      const cues = (shown?.cues ?? [])
+        .filter((cue) => cue.start >= first && cue.start < last)
+        .map((cue) => {
+          const lead = cueTokens(cue).length - cue.words.length;
+          const text = cueTokens(cue)
+            .map((token, i) => (cue.keyword !== undefined && i === cue.keyword + lead ? `*${token}*` : token))
+            .join(" ");
+          return { start: grid.seconds(cue.start), end: grid.seconds(cue.end), text, entry: cue.entry };
+        });
+      return { ...result, track: trackId, phrases: phrases.length, words: covered, cues: source === undefined ? [] : cues, warnings: [...result.warnings, ...warnings] };
     },
     "multicam.direct": async ({ cwd, timeline, group, template, rules, from, to, replaceHuman }, caller) => {
       const dir = await root(cwd);

@@ -3,7 +3,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import {
+  type CoverResult,
   ErrorCode,
+  type EncoderName,
   type ExportPresetInfo,
   type FrameFormat,
   type FrameResult,
@@ -43,6 +45,16 @@ import {
   muxStep,
   parseLoudnessStats,
 } from "./compiler.js";
+import {
+  type CoverLayout,
+  COVER_MAX_CHARS,
+  coverReadability,
+  coverText,
+  firstPictureTime,
+  hookWordTime,
+  layoutCover,
+} from "./cover.js";
+import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
@@ -125,6 +137,16 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
   }
 }
 
+/** How a cover picks its frame and word; see the `cover` method. */
+export interface CoverChoice {
+  /** The word drawn over the frame; see the `cover` method. */
+  text?: string | undefined;
+  /** Timeline seconds. */
+  at?: number | undefined;
+  /** `#rrggbb`. */
+  color?: string | undefined;
+}
+
 /** Options for {@link ExportService}. */
 export interface ExportServiceOptions {
   jobs: JobQueue;
@@ -134,6 +156,11 @@ export interface ExportServiceOptions {
   probe(root: string, asset: string): Promise<MediaProbe>;
   /** Parsed timeline and project fps; see `TimelineService.load`. */
   loadTimeline(root: string, id: string): Promise<{ timeline: Timeline; fps: number }>;
+  /**
+   * Warnings about placed assets (project-relative paths) without usable provenance; see
+   * `CreditsService.warnings`. Default: none.
+   */
+  provenance?(root: string, assets: string[]): Promise<string[]>;
   /**
    * Parsed nested timeline file (project-relative `source` of a `timeline`
    * clip); null when missing or invalid. Default: read the file.
@@ -156,6 +183,8 @@ export interface ExportServiceOptions {
     /** `size`: render at that frame size (a format other than the primary, ADR 0027); absent: the project resolution. */
     ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, size?: Size): Promise<ReadonlyMap<string, GeneratedSource>>;
   };
+  /** H.264 encoder for renders that ask for a quality tier: the first that works on this machine. Absent: x264. */
+  encoder?(ffmpeg: string): Promise<EncoderName>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
   parallelism?: number;
   /** Video segment length in seconds; see {@link RenderInput.segmentSeconds}. */
@@ -189,7 +218,14 @@ export class ExportService {
    */
   async render(
     root: string,
-    params: { timeline: string; preset?: string | undefined; out?: string | undefined; formats?: readonly string[] | undefined },
+    params: {
+      timeline: string;
+      preset?: string | undefined;
+      quality?: "draft" | "final" | undefined;
+      out?: string | undefined;
+      cover?: CoverChoice | undefined;
+      formats?: readonly string[] | undefined;
+    },
   ): Promise<RenderResult> {
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
@@ -203,19 +239,28 @@ export class ExportService {
     });
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
+    const sources = await this.#sources(root, timeline);
+    const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
     const shared = {
       timeline,
       fps,
+      ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
-      sources: await this.#sources(root, timeline),
+      sources,
       transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
     const base = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
-    const planned = formats.map((format) => {
+    const planned = await Promise.all(formats.map(async (format) => {
       const size = outputSize(preset, format, params.preset !== undefined, "render");
-      const input = { ...shared, preset: { ...preset, video: { ...preset.video, ...size } }, variant: { cover: format.cover, captionScale: format.captionScale } };
+      const cover = params.cover ? await this.#coverFrame(root, timeline, fps, size, params.cover) : null;
+      const input = {
+        ...shared,
+        preset: { ...preset, video: { ...preset.video, ...size } },
+        variant: { cover: format.cover, captionScale: format.captionScale },
+        ...(cover ? { cover: { at: cover.at, layout: cover.layout } } : {}),
+      };
       const renderSize = format.primary ? undefined : { width: format.width, height: format.height };
       // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
       const standIn = this.#options.clips
@@ -232,8 +277,8 @@ export class ExportService {
                 "size, add and render the format of its aspect (`frameshell format add`).",
             ]
           : [];
-      return { format, input, renderSize, plan, output, warnings: [...overridden, ...plan.warnings] };
-    });
+      return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...plan.warnings] };
+    }));
     const renders = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
       const job = this.#options.jobs.enqueue({
         kind: "render",
@@ -267,6 +312,8 @@ export class ExportService {
       job: first.job,
       output: first.output,
       preset: preset.id,
+      quality: params.quality ?? null,
+      encoder: encoder && preset.video.codec === "h264" ? encoder : presetEncoder(preset),
       timeline: params.timeline,
       duration: plan.duration,
       width: plan.width,
@@ -274,7 +321,7 @@ export class ExportService {
       fps: plan.fps,
       loudness: plan.loudness,
       segments: plan.segments.length,
-      warnings: first.warnings,
+      warnings: [...first.warnings, ...((await this.#options.provenance?.(root, [...sources.keys()])) ?? [])],
     };
   }
 
@@ -295,11 +342,119 @@ export class ExportService {
     },
     loaded?: { timeline: Timeline; fps: number },
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
+    return this.#capture(root, params, await this.#resolved(root, params.timeline, loaded));
+  }
+
+  /**
+   * Write a cover image (see the `cover` method): the frame chosen by `at`, else by where `text` is first spoken,
+   * else the first picture, with `text` drawn over it. `loaded`: see {@link ExportService.frame}.
+   */
+  async cover(
+    root: string,
+    params: CoverChoice & {
+      timeline: string;
+      out?: string | undefined;
+      preset?: string | undefined;
+      format?: FrameFormat | undefined;
+      quality?: number | undefined;
+    },
+    loaded?: { timeline: Timeline; fps: number },
+  ): Promise<Omit<CoverResult, "view" | "proposal">> {
+    const size = params.preset ? (await this.#preset(root, params.preset)).video : ((await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION);
+    const resolved = await this.#resolved(root, params.timeline, loaded);
+    const cover = await this.#coverFrame(root, resolved.timeline, resolved.fps, size, params);
+    const out = params.out ?? join(root, "exports", `${params.timeline}-cover.png`);
+    const shot = await this.#capture(
+      root,
+      { timeline: params.timeline, at: cover.at, out, preset: params.preset, format: params.format, quality: params.quality },
+      resolved,
+      cover.layout,
+    );
+    return {
+      path: shot.path,
+      format: shot.format,
+      timeline: shot.timeline,
+      frame: shot.frame,
+      at: shot.at,
+      source: cover.source,
+      text: cover.layout?.text ?? null,
+      readability: cover.readability,
+      width: shot.width,
+      height: shot.height,
+      warnings: cover.warnings,
+    };
+  }
+
+  /**
+   * Which frame a cover shows and how its word is laid out in a `size` picture: `at` as given, else where `text` is
+   * first spoken, else the first picture. A word nobody speaks falls back to the first picture with a warning.
+   */
+  async #coverFrame(
+    root: string,
+    timeline: Timeline,
+    fps: number,
+    size: Size,
+    choice: CoverChoice,
+  ): Promise<{
+    at: number;
+    source: CoverResult["source"];
+    layout: CoverLayout | null;
+    readability: CoverResult["readability"];
+    warnings: string[];
+  }> {
+    const text = choice.text === undefined ? "" : coverText(choice.text);
+    if (choice.text !== undefined && (text === "" || [...text].length > COVER_MAX_CHARS)) {
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        text === "" ? "The cover text has nothing to draw." : `The cover text is ${[...text].length} characters; at most ${COVER_MAX_CHARS}.`,
+        { op: "cover", field: "text" },
+      );
+    }
+    const warnings: string[] = [];
+    let at = choice.at;
+    let source: CoverResult["source"] = "at";
+    if (at === undefined && text !== "") {
+      const transcripts = await this.#transcripts(root, timeline, "all");
+      at = hookWordTime(timeline, (asset) => transcripts.get(asset) ?? null, text, fps) ?? undefined;
+      source = "word";
+      if (at === undefined) warnings.push(`"${text}" is not spoken in any transcript of timeline ${timeline.id}: the cover uses the first picture. Pass \`at\` to choose the frame.`);
+    }
+    if (at === undefined) {
+      at = firstPictureTime(timeline, fps);
+      source = "default";
+    }
+    if (text === "") return { at, source, layout: null, readability: null, warnings };
+    const metrics = await bundledFontMetrics();
+    const layout = layoutCover(text, size, metrics, choice.color?.toLowerCase());
+    const readability = coverReadability(layout, size, metrics);
+    if (!readability.readable) {
+      warnings.push(
+        `"${text}" is ${readability.capHeight} px tall at ${readability.thumbnailWidth} px wide; ${readability.minCapHeight} px is the least that reads in a grid. Use a shorter word.`,
+      );
+    }
+    return { at, source, layout, readability, warnings };
+  }
+
+  /** The `frame` capture of an already resolved timeline; `cover` (even null) marks a cover composition: no subtitles, its word over the picture. */
+  async #capture(
+    root: string,
+    params: {
+      timeline: string;
+      at: number;
+      out: string;
+      preset?: string | undefined;
+      projectFormat?: string | undefined;
+      format?: FrameFormat | undefined;
+      quality?: number | undefined;
+    },
+    resolved: { timeline: Timeline; fps: number },
+    cover?: CoverLayout | null,
+  ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const resolution = project.resolution;
-    const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
+    const { timeline, fps } = resolved;
     const found = resolveFormat(timeline, project, params.projectFormat);
     if (!found) throw formatNotFound(params.projectFormat!, project);
     const shape = found.format;
@@ -322,6 +477,7 @@ export class ExportService {
       output: partial,
       format,
       ...(params.quality !== undefined ? { quality: params.quality } : {}),
+      ...(cover !== undefined ? { cover } : {}),
     });
     const ffmpeg = await this.#options.ffmpeg(root);
     // Scratch cwd for the subtitle script and fonts the args name relatively.
@@ -398,13 +554,16 @@ export class ExportService {
     return { timeline: flat, fps };
   }
 
-  /** Transcripts of the assets subtitle tracks follow, by asset; assets without one are absent. */
-  async #transcripts(root: string, timeline: Timeline): Promise<Map<string, Transcript>> {
+  /**
+   * Transcripts of the assets subtitle tracks follow (`"followed"`) or of every media clip (`"all"`), by asset;
+   * assets without one are absent.
+   */
+  async #transcripts(root: string, timeline: Timeline, which: "followed" | "all" = "followed"): Promise<Map<string, Transcript>> {
     const read = this.#options.readTranscript ?? readTranscriptFile;
     const found = new Map<string, Transcript>();
     const followed = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [track.follows] : [])));
     for (const track of timeline.tracks) {
-      if (track.kind === "subtitles" || !followed.has(track.id)) continue;
+      if (track.kind === "subtitles" || (which === "followed" && !followed.has(track.id))) continue;
       for (const clip of track.clips) {
         if (clip.type !== "media" || !("asset" in clip) || found.has(clip.asset)) continue;
         const transcript = await read(root, clip.asset);
@@ -442,6 +601,11 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */
+function presetEncoder(preset: ExportPreset): string {
+  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks" }[preset.video.codec];
 }
 
 /** Files of a multicam group: the cameras and the separate mics. */

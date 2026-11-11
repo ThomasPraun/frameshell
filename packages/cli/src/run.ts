@@ -29,6 +29,7 @@ import { ASK_FLAGS, runAsk } from "./ask-command.js";
 import { SETUP_FLAGS, runSetup } from "./setup-command.js";
 import { connectOrStartDaemon } from "./daemon-client.js";
 import { type JobFollower, followJobs } from "./job-follower.js";
+import { CREDITS_FLAGS, CREDITS_USAGE, type CreditsInvocation, PROVENANCE_FLAGS, type ProvenanceInput, formatCreditsCheck, formatCreditsSet, parseCredits, provenanceOf } from "./credits-commands.js";
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
@@ -65,16 +66,21 @@ Commands:
                                (asked first on a terminal; --no-skill: none). --kind image: a still picture,
                                the first frame, exported with \`frame\`; video tracks are its layers
   status [--json]              Show daemon, the enclosing project, jobs, rejected edits, open transactions
-  doctor [--install] [--json]  Check binaries, encoders and the frameshell on PATH; exit 1 on problems.
-                               --install downloads missing managed binaries first
-  import <file…> [--link] [--wait]
+  doctor [--install] [--reprobe] [--json]
+                               Check binaries, encoders (which H.264 encoder renders use, a speed class
+                               and disk estimate) and the frameshell on PATH; exit 1 on problems.
+                               --install downloads missing managed binaries first; --reprobe tests the
+                               encoders again instead of using the answer cached per machine
+  import <file…> [--link] [--wait] [--source-url u --licence id --author name --title t --credit line]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
-                               (exit 1 if any failed). Progress: \`frameshell status\`
+                               (exit 1 if any failed). Progress: \`frameshell status\`. A file from an outside
+                               source takes --source-url, --licence and --author (one source per call): they are
+                               recorded in credits.json, see \`credits\` below
   gc [--dry-run]               Delete regenerable files under .frameshell/ nothing uses any more (derived media
                                of deleted or changed assets, unused clip renders, stale temps).
                                --dry-run lists them without deleting
-  plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
+${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:<user>/<repo>[#ref], git+<url>[#ref],
                                an npm name[@version], or a local tarball from npm pack (./name-1.0.0.tgz)
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
@@ -89,16 +95,26 @@ Commands:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--formats id,id] [--out file] [--timeline id]
+${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
+                               --quality draft: 30 fps at most, fast encode for review rounds; final:
+                               slow, bt709, AAC 320k. Both use the machine's best working encoder.
                                --formats: one file per format of the project (format list), named
-                               <file>-<format>.mp4. Waits for the render jobs, printing progress; exit 1 if one fails
+                               <file>-<format>.mp4. Waits for the render jobs, printing progress; exit 1 if one fails.
+                               --cover-frame makes frame 0 (the thumbnail platforms show) a finished
+                               composition: the frame \`cover\` would pick, with its word over it,
+                               replaces the first frame only; a warning says when frame 0 is black
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.
                                9x16): lay the frame out as that format of the project. Size: the format's
                                (default the project resolution), or the preset's
+  cover [--text word] [--at s] [--color #rrggbb] [--out file] [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
+                               Write a cover image: a frame with one big word over it, checked readable at
+                               180 px wide (warns when the word is too long). --text alone picks the frame
+                               where the word is first spoken; --at picks the frame; neither: the first
+                               picture. Default file: exports/<timeline>-cover.png
   inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
@@ -137,27 +153,29 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "inspect", "script", "proposal", "people", "shoot", "skill", "model", "format", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "link", "wait", "dry-run", "no-skill", "format", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "person", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "formats", "size"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "formats", "size", ...PROVENANCE_FLAGS, "text", "color", "cover-frame", "cover-text", "cover-at", "cover-color"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill", "kind"],
   status: [],
-  doctor: ["install"],
-  import: ["link", "wait"],
+  doctor: ["install", "reprobe"],
+  import: ["link", "wait", ...PROVENANCE_FLAGS],
+  ...CREDITS_FLAGS,
   gc: ["dry-run"],
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
-  render: ["preset", "formats", "out", "timeline"],
+  render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
+  cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "script check": [],
@@ -199,8 +217,8 @@ export interface CliIo {
 type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
-  | { kind: "doctor"; install: boolean }
-  | { kind: "import"; files: string[]; link: boolean; wait: boolean }
+  | { kind: "doctor"; install: boolean; reprobe: boolean }
+  | { kind: "import"; files: string[]; link: boolean; wait: boolean; provenance: ProvenanceInput }
   | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
@@ -209,7 +227,8 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
-  | { kind: "render"; timeline?: string; preset?: string; formats?: string[]; out?: string }
+  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string } }
+  | { kind: "cover"; text?: string; at?: number; color?: string; out?: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; projectFormat?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
@@ -218,6 +237,7 @@ type Invocation =
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
   | PeopleInvocation
+  | CreditsInvocation
   | ShootInvocation
   | ModelInvocation
   | FormatInvocation
@@ -264,6 +284,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           json: { type: "boolean", default: false },
           trust: { type: "boolean", default: false },
           install: { type: "boolean", default: false },
+          reprobe: { type: "boolean", default: false },
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           "dry-run": { type: "boolean", default: false },
@@ -297,6 +318,17 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           dtw: { type: "string" },
           formats: { type: "string" },
           size: { type: "string" },
+          "source-url": { type: "string" },
+          licence: { type: "string" },
+          author: { type: "string" },
+          title: { type: "string" },
+          credit: { type: "string" },
+          text: { type: "string" },
+          color: { type: "string" },
+          "cover-frame": { type: "boolean", default: false },
+          "cover-text": { type: "string" },
+          "cover-at": { type: "string" },
+          "cover-color": { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -363,7 +395,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 /** Reject flags a built-in command does not take, instead of ignoring them. Timeline commands: only the flags of other commands here, their own per command in `parseTimelineCommand`. */
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
-  const key = command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  // `credits` alone checks; `credits set` records.
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -378,6 +411,21 @@ function checkBuiltinFlags(positionals: string[], values: Record<string, unknown
   if (extra.length > 0) throw new UsageError(`\`frameshell ${key}\` does not take ${extra.map((flag) => `--${flag}`).join(", ")}.`);
 }
 
+/** A `--at`/`--cover-at` value: seconds >= 0, or undefined when the flag is absent. */
+function coverAt(flag: string, value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const at = Number(value);
+  if (value.trim() === "" || !Number.isFinite(at) || at < 0) throw new UsageError(`--${flag}: expected seconds >= 0, e.g. --${flag} 12.5.`);
+  return at;
+}
+
+/** A `--color`/`--cover-color` value: `#rrggbb`, or undefined when the flag is absent. */
+function coverColor(flag: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!/^#[0-9a-fA-F]{6}$/.test(value)) throw new UsageError(`--${flag}: expected a colour like #ffd426.`);
+  return value;
+}
+
 function parseBuiltin(
   positionals: string[],
   options: {
@@ -387,6 +435,7 @@ function parseBuiltin(
     format?: string | undefined;
     quality?: string | undefined;
     install: boolean;
+    reprobe: boolean;
     link: boolean;
     wait: boolean;
     "dry-run": boolean;
@@ -422,10 +471,22 @@ function parseBuiltin(
     formats?: string | undefined;
     size?: string | undefined;
     index?: string | undefined;
+    "source-url"?: string | undefined;
+    licence?: string | undefined;
+    author?: string | undefined;
+    title?: string | undefined;
+    credit?: string | undefined;
+    text?: string | undefined;
+    color?: string | undefined;
+    "cover-frame"?: boolean | undefined;
+    "cover-text"?: string | undefined;
+    "cover-at"?: string | undefined;
+    "cover-color"?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "people") return parsePeople(rest, options);
+  if (command === "credits") return parseCredits(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
   if (command === "model") return parseModel(rest, options);
   if (command === "format") return parseFormat(rest, options);
@@ -455,14 +516,47 @@ function parseBuiltin(
       segment: options.segment === true,
     };
   }
+  if (command === "cover") {
+    if (rest.length > 0) return null;
+    const { preset, timeline, out, text, format } = options;
+    const at = coverAt("at", options.at);
+    const color = coverColor("color", options.color);
+    if (format !== undefined && format !== "png" && format !== "jpg" && format !== "webp") {
+      throw new UsageError(`--format: expected png, jpg or webp, got "${format}".`);
+    }
+    const quality = options.quality === undefined ? undefined : Number(options.quality);
+    if (quality !== undefined && (!Number.isInteger(quality) || quality < 1 || quality > 100)) {
+      throw new UsageError("--quality: expected an integer from 1 to 100.");
+    }
+    return {
+      kind: "cover",
+      ...(text !== undefined ? { text } : {}),
+      ...(at !== undefined ? { at } : {}),
+      ...(color !== undefined ? { color } : {}),
+      ...(out ? { out } : {}),
+      ...(timeline ? { timeline } : {}),
+      ...(preset ? { preset } : {}),
+      ...(format ? { format } : {}),
+      ...(quality !== undefined ? { quality } : {}),
+    };
+  }
   if (command === "render" || command === "frame") {
     if (rest.length > 0) return null;
     const { preset, timeline, out } = options;
     const common = { ...(timeline ? { timeline } : {}), ...(preset ? { preset } : {}) };
     if (command === "render") {
+      const parts = { text: options["cover-text"], at: coverAt("cover-at", options["cover-at"]), color: coverColor("cover-color", options["cover-color"]) };
+      if (options["cover-frame"] !== true && Object.values(parts).some((value) => value !== undefined)) {
+        throw new UsageError("`frameshell render` takes --cover-text, --cover-at and --cover-color only with --cover-frame.");
+      }
+      const cover = options["cover-frame"] === true ? Object.fromEntries(Object.entries(parts).filter(([, value]) => value !== undefined)) : null;
       const formats = options.formats?.split(",").map((id) => id.trim()).filter((id) => id !== "");
       if (formats !== undefined && formats.length === 0) throw new UsageError("--formats takes format ids separated by commas, e.g. --formats 16x9,9x16.");
-      return { kind: "render", ...common, ...(formats ? { formats } : {}), ...(out ? { out } : {}) };
+      const { quality } = options;
+      if (quality !== undefined && quality !== "draft" && quality !== "final") {
+        throw new UsageError(`--quality: expected draft or final, got "${quality}".`);
+      }
+      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(formats ? { formats } : {}), ...(out ? { out } : {}), ...(cover ? { cover } : {}) };
     }
     const at = Number(options.at);
     if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
@@ -550,8 +644,8 @@ function parseBuiltin(
     return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined, ...(projectKind ? { projectKind } : {}) };
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
-  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install };
-  if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait };
+  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
+  if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait, provenance: provenanceOf(options) };
   if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
   const [sub, arg, ...extra] = rest;
@@ -596,7 +690,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "doctor": {
       if (flags.install && !flags.json) io.stderr("Installing missing managed binaries; first download can take minutes...\n");
-      const report = await conn.request("doctor", { cwd, install: inv.install });
+      const report = await conn.request("doctor", { cwd, install: inv.install, reprobe: inv.reprobe });
       if (report.problems.length > 0) outcome.code = 1;
       // Which `frameshell` this shell runs: only the CLI sees the caller's PATH. Advice, never a problem.
       const command = inspectPathCli(SELF, process.env);
@@ -605,12 +699,21 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
       const follower = inv.wait ? await followJobs(conn, cwd) : undefined;
-      const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy" });
+      const result = await conn.request("asset.import", { cwd, files, mode: inv.link ? "link" : "copy", ...inv.provenance });
       if (!follower) return flags.json ? json(result) : formatImport(result);
       const jobs = await waitForJobs(follower, result.imported.map((entry) => entry.job.id), flags.json ? undefined : io);
       const imported = result.imported.map((entry) => ({ ...entry, job: jobs.get(entry.job.id) ?? entry.job }));
       if (imported.some((entry) => entry.job.state !== "done")) outcome.code = 1;
       return flags.json ? json({ ...result, imported }) : formatImport({ ...result, imported });
+    }
+    case "credits.check": {
+      const result = await conn.request("credits.check", { cwd });
+      if (!result.ok) outcome.code = 1;
+      return flags.json ? json(result) : formatCreditsCheck(result);
+    }
+    case "credits.set": {
+      const result = await conn.request("credits.set", { cwd, asset: inv.asset, ...inv.provenance });
+      return flags.json ? json(result) : formatCreditsSet(result);
     }
     case "gc": {
       const result = await conn.request("gc", { cwd, dryRun: inv.dryRun });
@@ -733,7 +836,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
         await settleTrust(conn, flags, io);
       }
-      const long = inv.method === "multicam.faces" && !flags.json;
+      const long = (inv.method === "multicam.faces" || inv.method === "clip.reframe") && !flags.json;
       return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined);
     }
     case "render": {
@@ -743,13 +846,13 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const follower = await followJobs(conn, cwd);
       const result = await conn.request("render", { cwd, ...params, ...(out ? { out: resolve(cwd, out) } : {}) });
       if (!flags.json) {
-        for (const render of result.renders) {
+        for (const [index, render] of result.renders.entries()) {
           const format = params.formats ? ` [${render.format}]` : "";
           io.stderr(
             `Rendering timelines/${result.timeline}.json${format} -> ${render.output}\n` +
-              `  ${render.preset} · ${render.width}x${render.height} · ${result.fps} fps · ${result.duration} s · ` +
+              `  ${render.preset}${result.quality ? ` (${result.quality})` : ""} · ${result.encoder} · ${render.width}x${render.height} · ${result.fps} fps · ${result.duration} s · ` +
               `${render.segments} segment(s) · ${result.loudness} LUFS (job ${render.job.id})\n` +
-              render.warnings.map((warning) => `  warning: ${warning}\n`).join(""),
+              (index === 0 ? result.warnings : render.warnings).map((warning) => `  warning: ${warning}\n`).join(""),
           );
         }
       }
@@ -761,6 +864,20 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return renders
         .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
         .join("");
+    }
+    case "cover": {
+      const { kind: _kind, out, ...params } = inv;
+      const result = await conn.request("cover", { cwd, ...params, ...(out ? { out: resolve(cwd, out) } : {}) });
+      if (flags.json) return json(result);
+      const ok = result.readability?.readable !== false;
+      return (
+        `Wrote ${result.path} (frame ${result.frame} at ${result.at} s, ${result.width}x${result.height}` +
+        `${result.text ? `, "${result.text}"` : ""})\n` +
+        (result.readability
+          ? `${ok ? "Readable" : "Not readable"} at ${result.readability.thumbnailWidth} px wide: capitals ${result.readability.capHeight} px tall (least ${result.readability.minCapHeight}).\n`
+          : "") +
+        result.warnings.map((warning) => `warning: ${warning}\n`).join("")
+      );
     }
     case "frame": {
       const { kind: _kind, out, ...params } = inv;
@@ -788,6 +905,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "plugin.run": {
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.run", { cwd, plugin: inv.plugin, command: inv.command, args: inv.args });
+      if (result.failed) outcome.code = 1;
       if (flags.json) return json(result);
       if (result.output !== null) return result.output.endsWith("\n") ? result.output : `${result.output}\n`;
       return result.data === null || result.data === undefined ? "" : json(result.data);
@@ -913,9 +1031,9 @@ function formatBytes(bytes: number): string {
 
 function formatImport(result: AssetImportResult): string {
   return result.imported
-    .map(({ source, asset, copied, job }) => {
+    .map(({ source, asset, copied, job, provenance }) => {
       const how = copied ? `imported from ${source}` : "already in assets/";
-      return `${asset}  ${how}\n  ${formatJob(job)}\n`;
+      return `${asset}  ${how}\n  ${formatJob(job)}\n${provenance ? "  provenance recorded in credits.json\n" : ""}`;
     })
     .join("");
 }
@@ -1238,6 +1356,20 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
       lines.push(`  ${`${codec.name} ${codec.kind}`.padEnd(28)} ${codec.label.padEnd(24)} ${state}`);
     }
   }
+  if (report.encoders) {
+    lines.push("", "Video encoder:");
+    for (const candidate of report.encoders.candidates) {
+      const state = !candidate.compiled ? "not in this ffmpeg" : candidate.works ? `works (${candidate.ms} ms)` : "listed but fails a test encode";
+      lines.push(`  ${candidate.name.padEnd(20)} ${state}${candidate.name === report.encoders.picked ? "  <- used for renders" : ""}`);
+    }
+    lines.push(`  tested ${report.encoders.probedAt}${report.encoders.cached ? " (cached; --reprobe tests again)" : ""}`);
+  }
+  const { profile } = report;
+  lines.push(
+    "",
+    `Machine: ${profile.class} (${profile.cpuCores} cores, ${profile.memoryGb} GB). Suggested: proxies ${profile.proxyShortSide}p, drafts ${profile.draftShortSide}p.`,
+    `  A master intermediate at ${profile.resolution.width}x${profile.resolution.height} ${profile.fps} fps takes up to ${profile.masterMbPerMinute} MB per minute.`,
+  );
   if (report.skill) lines.push("", skillLine(report.skill) ?? `Agent skill: ${report.skill.dir} is current.`);
   lines.push("", report.problems.length === 0 ? "No problems found." : "Problems:");
   for (const problem of report.problems) lines.push(`  - ${problem}`);

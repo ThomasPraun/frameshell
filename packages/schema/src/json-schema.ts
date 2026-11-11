@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CREDITS_SCHEMA_URL, CreditsFileSchema } from "./credits.js";
 import { DIRECTOR_SCHEMA_URL, DirectorFileSchema } from "./director.js";
 import { PEOPLE_SCHEMA_URL, PeopleFileSchema } from "./people.js";
 import { PLUGIN_MANIFEST_SCHEMA_URL, PluginManifestSchema } from "./plugin.js";
@@ -25,5 +26,6 @@ export function generateJsonSchemas(): Record<string, object> {
     "director.json": toJson(DirectorFileSchema, DIRECTOR_SCHEMA_URL),
     "people.json": toJson(PeopleFileSchema, PEOPLE_SCHEMA_URL),
     "shoot.json": toJson(ShootFileSchema, SHOOT_SCHEMA_URL),
+    "credits.json": toJson(CreditsFileSchema, CREDITS_SCHEMA_URL),
   };
 }
