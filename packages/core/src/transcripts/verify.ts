@@ -86,7 +86,7 @@ interface KeptWord extends Omit<LostWord, "confidence"> {
 }
 
 /** Transcript lookup outcome of one asset. */
-type SourceTranscript = { rel: string; transcript: Transcript } | { unchecked: "no-transcript" | "stale-transcript" };
+export type SourceTranscript = { rel: string; transcript: Transcript } | { unchecked: "no-transcript" | "stale-transcript" };
 
 /**
  * `transcribe --verify` (SPEC §3.5 step 6): re-transcribe an export and
@@ -214,7 +214,7 @@ export async function verifyExport(options: VerifyExportOptions): Promise<Transc
 }
 
 /** Transcript of every asset an unmuted media clip plays, or why it cannot be checked. */
-async function sourceTranscripts(
+export async function sourceTranscripts(
   projectDir: string,
   timeline: Timeline,
   assetHash: VerifyExportOptions["assetHash"],
@@ -241,7 +241,8 @@ async function sourceTranscripts(
   return sources;
 }
 
-function mediaClips(timeline: Timeline): MediaClip[] {
+/** Unmuted media clips of every track but subtitles, in track order. */
+export function mediaClips(timeline: Timeline): MediaClip[] {
   return timeline.tracks.flatMap((track) =>
     track.kind === "subtitles" ? [] : track.clips.filter((clip): clip is MediaClip => clip.type === "media" && clip.audio?.muted !== true),
   );

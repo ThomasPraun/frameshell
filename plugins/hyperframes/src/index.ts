@@ -6,6 +6,7 @@
  */
 import type { PluginApi } from "@frameshell/plugin-api";
 import { createHyperframesAdapter } from "./adapter.js";
+import { checkCompositions } from "./check.js";
 import { newComposition } from "./scaffold.js";
 
 export {
@@ -15,10 +16,12 @@ export {
   createHyperframesAdapter,
   propsSchema,
 } from "./adapter.js";
+export { type CheckFinding, type CheckReport, type CheckedComposition, checkCompositions } from "./check.js";
 export { newComposition } from "./scaffold.js";
 
-/** Plugin entry point: registers the `hyperframes` clip type and `frameshell hyperframes new`. */
+/** Plugin entry point: registers the `hyperframes` clip type, `frameshell hyperframes new` and `frameshell hyperframes check`. */
 export function activate(api: PluginApi): void {
   api.registerClipType(createHyperframesAdapter({ projectDir: api.project.dir }));
   api.registerCommand("hyperframes new", newComposition);
+  api.registerCommand("hyperframes check", checkCompositions);
 }

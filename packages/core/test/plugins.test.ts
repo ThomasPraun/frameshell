@@ -206,7 +206,12 @@ describe("plugin contributions", () => {
       command: "greet",
       args: ["Ana"],
     });
-    expect(result).toEqual({ output: "Hello, Ana!", data: { greeted: "Ana", project: dir } });
+    expect(result).toEqual({ output: "Hello, Ana!", data: { greeted: "Ana", project: dir }, failed: false });
+  });
+
+  it("returns the output and data of a command that reports failure, with failed true", async () => {
+    const result = await conn.request("plugin.run", { cwd: dir, plugin: "hello", command: "greet", args: ["--refuse"] });
+    expect(result).toEqual({ output: "greeting declined", data: { declined: true }, failed: true });
   });
 
   it("reports a command that throws as PluginCommandFailed with its message", async () => {

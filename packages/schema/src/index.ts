@@ -12,6 +12,23 @@ export {
   createProjectConfig,
 } from "./project.js";
 export {
+  BUILTIN_FORMATS,
+  BUILTIN_FORMAT_IDS,
+  RESERVED_FORMAT_IDS,
+  VERTICAL_CAPTION_SCALE,
+  FormatIdSchema,
+  FormatEntrySchema,
+  type FormatEntry,
+  type FormatSource,
+  type FormatLayout,
+  type ResolvedFormat,
+  primaryFormatId,
+  projectFormats,
+  resolveFormat,
+  sameAspect,
+  formatProblems,
+} from "./formats.js";
+export {
   TIMELINE_SCHEMA_URL,
   CORE_CLIP_TYPES,
   ADAPTER_CLIP_TYPE_PATTERN,
@@ -67,6 +84,12 @@ export {
   type PaintedTurn,
   type Transform,
   type ClipAudio,
+  type CaptionPhrase,
+  type CaptionGap,
+  type SubtitleEntry,
+  SUBTITLE_ENTRIES,
+  CaptionPhraseSchema,
+  CaptionGapSchema,
   isShotClip,
   parseTimeline,
   createTimeline,
@@ -142,6 +165,20 @@ export {
   resolveStyle,
 } from "./style.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
+export {
+  CREDITS_FILE,
+  CREDITS_SCHEMA_URL,
+  CreditEntrySchema,
+  CreditsFileSchema,
+  type CreditEntry,
+  type CreditsFile,
+  type LicenceDuty,
+  type LicenceInfo,
+  createCreditsFile,
+  creditLine,
+  licenceInfo,
+  parseCreditsFile,
+} from "./credits.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
@@ -277,8 +314,16 @@ export {
   type SubtitleLayout,
   type ResolvedSubtitleTrack,
   type TranscriptLookup,
+  type CaptionRules,
+  type EntryUnit,
+  SUBTITLE_ENTRY,
+  entryUnits,
+  entryProgress,
+  entryEnd,
   resolveSubtitleStyle,
   subtitleWords,
+  trackWords,
+  cleanSubtitleText,
   subtitleCues,
   cueTokens,
   subtitleAt,

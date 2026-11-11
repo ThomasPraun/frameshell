@@ -6,6 +6,7 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
+export { FORMAT_JOURNAL, type FormatJournalEntry, FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound } from "./formats.js";
 export {
   type FaceScans,
   type NameWrites,
@@ -168,6 +169,9 @@ export {
   probeVersion,
 } from "./binaries/probe.js";
 export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
+export { ENCODER_CACHE_FILE, EncoderCache, type EncoderProbe, probeEncoders } from "./encoders/probe.js";
+export { type MachineFacts, machineProfile, readMachineFacts } from "./encoders/profile.js";
+export { ENCODER_PREFERENCE, type EncodeTarget, tierFps, tierVideoArgs, videoToolboxKbps } from "./encoders/tiers.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";
 export {
   type TranscribeAssetOptions,
@@ -208,6 +212,8 @@ export {
 } from "./timeline/engine.js";
 export { applyPatch, diffTimelines } from "./timeline/patch.js";
 export { FrameGrid } from "./timeline/grid.js";
+export { type CleanupPlanOptions, type SpeechAudio, type SpeechWord, planCleanup } from "./cleanup/plan.js";
+export { type CleanupDeps, type CleanupPlan, type CleanupRequest, cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 export { NestedTimelineError } from "./timeline/timing.js";
 export {
   type AudioItem,
@@ -226,6 +232,7 @@ export {
   compileRender,
   MIX_FILE,
   SUBTITLES_FILE,
+  COVER_FILE,
   FONTS_DIR,
   loudnessAnalysis,
   mixStep,
@@ -234,8 +241,23 @@ export {
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
+export { type FontMetrics, bundledFontMetrics, parseFontMetrics } from "./export/font-metrics.js";
+export {
+  COVER_MAX_CHARS,
+  type CoverLayout,
+  type CoverReadability,
+  DEFAULT_COVER_COLOR,
+  MIN_THUMBNAIL_CAP_HEIGHT,
+  THUMBNAIL_WIDTH,
+  assCover,
+  coverReadability,
+  coverText,
+  firstPictureTime,
+  hookWordTime,
+  layoutCover,
+} from "./export/cover.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
-export { type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
   ENERGY_HOP_S,
@@ -317,6 +339,7 @@ export {
   type YunetFiles,
   yunetWorkerScanner,
   type ReframeKeyOptions,
+  type SourceRange,
   angleFaceKeys,
   decodeYunet,
   faceFrameSize,
@@ -325,6 +348,18 @@ export {
   proposeReframeKeys,
   sampleFaceFrames,
 } from "./multicam/faces.js";
+export {
+  type FrameFormat,
+  REFRAME_FACE_AT,
+  type ReframeGeometry,
+  type ReframeKey,
+  type ReframePlacement,
+  type ReframePlan,
+  parseFrameFormat,
+  planReframe,
+  reframeBounds,
+  reframePlacement,
+} from "./reframe.js";
 export {
   type DecoderOutput,
   type PhotoInput,

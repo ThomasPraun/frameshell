@@ -7,6 +7,7 @@ frameshell.json          project config
 timelines/main.json      the exported sequence (others: nested timelines)
 assets/                  footage, images, audio, fonts, generated media
 transcripts/*.words.json word-level transcript per asset
+credits.json            optional: source, licence and author of third-party assets (see credits.md)
 scripts/*.md             Markdown scripts
 compositions/            HyperFrames HTML compositions, the Remotion project (compositions/remotion/)
 style.json               optional style guide: colours, fonts, type, motion, sound, platforms, rules
@@ -16,13 +17,13 @@ exports/                 render output
 
 ## `frameshell.json`
 
-`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `kind` (`image` for an image project, see [image-projects.md](image-projects.md); absent = video), `transcription` (`provider`, `model`, `language`; `model` is an id, never a path: a model file is registered per machine with `frameshell model add`), `export` (`defaultPreset`, `loudness`), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
+`fps`, `resolution` (`width`, `height`), `sampleRate`, `main` (the main timeline file), `plugins` (package → pinned spec), and optional `kind` (`image` for an image project, see [image-projects.md](image-projects.md); absent = video), `transcription` (`provider`, `model`, `language`; `model` is an id, never a path: a model file is registered per machine with `frameshell model add`), `export` (`defaultPreset`, `loudness`), `formats` (delivery formats `{ id, width, height }`, primary first and equal to `resolution`; change them with `frameshell format add` and `frameshell format remove`, absent = one format), `editing.snapWindow` (seconds), `binaries` (paths overriding the managed ffmpeg/whisper builds). Edit it with your file tools; the daemon re-reads it.
 
 ## Timeline
 
 `timelines/<id>.json`: `id`, `revision` (bumped by every change), `tracks` in stacking order (first video track = bottom layer).
 
-- **Track:** `id` (`t_…`), `kind` (`video`, `audio`, `program`, `subtitles`), `name`, `clips`, optional `muted: true` (no sound from the whole track; not on subtitle tracks) and `hidden: true` (video and program tracks: no picture, the tracks below show through, its sound still plays); set both with `track set`. A subtitle track has no clips: it `follows` a video or audio track and carries `style` (`preset`, `position`).
+- **Track:** `id` (`t_…`), `kind` (`video`, `audio`, `program`, `subtitles`), `name`, `clips`, optional `muted: true` (no sound from the whole track; not on subtitle tracks) and `hidden: true` (video and program tracks: no picture, the tracks below show through, its sound still plays); set both with `track set`. A subtitle track has no clips: it `follows` a video or audio track and carries `style` (`preset`, `position`, `speakerNames`, `entry`, `keywordColor`, `keywordScale`), optional `phrases` (hand-chunked captions as transcript word ids, written by `captions set`) and `gaps` (`{ from, to }` ranges with no cue).
 - **Clip:** `id` (`c_…`), `type`, `start` (timeline seconds).
   - `media`: `asset`, `in`/`out` (source seconds), `speed`; length `(out - in) / speed`.
   - `timeline`: `source` is another timeline file, embedded as one clip.

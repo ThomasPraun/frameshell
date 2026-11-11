@@ -28,9 +28,9 @@ describe("method registry JSON Schema", () => {
     });
   });
 
-  it("lets doctor callers omit install, which defaults to report-only", () => {
-    expect(schemas.doctor.params).toMatchObject({ required: ["cwd"], properties: { install: { type: "boolean" } } });
-    expect(parseParams("doctor", { cwd: process.cwd() })).toEqual({ cwd: process.cwd(), install: false });
+  it("lets doctor callers omit install and reprobe, which default to report-only and the cached encoder answer", () => {
+    expect(schemas.doctor.params).toMatchObject({ required: ["cwd"], properties: { install: { type: "boolean" }, reprobe: { type: "boolean" } } });
+    expect(parseParams("doctor", { cwd: process.cwd() })).toEqual({ cwd: process.cwd(), install: false, reprobe: false });
   });
 
   it("defaults asset.import to copying and job.list to every job", () => {
