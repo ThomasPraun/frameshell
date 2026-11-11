@@ -4,7 +4,7 @@ status: accepted
 
 # Video subject matte: text and graphics behind the person
 
-A video track can be put **behind the subject** of a lower track: a big word or a logo sits between the background and the person, in preview and in export. The person is lifted by a **matte**, a grayscale video computed once per asset and cached as derived media; the timeline never stores it. SPEC decision 31. Decided by the owner on 2026-11-10 in #461 (epic #451), from a draft with four options (track flag desugared on read, duplicate clip with a matte field, baked subject asset, and the same flag with MODNet) and the spike in [`docs/research/video-subject-matte.md`](../research/video-subject-matte.md).
+A video track can be put **behind the subject** of a lower track: a big word or a logo sits between the background and the person, in preview and in export. The person is lifted by a **matte**, a grayscale video computed once per asset and cached as derived media; the timeline never stores it. SPEC decision 37. Decided by the owner on 2026-11-10 in #461 (epic #451), from a draft with four options (track flag desugared on read, duplicate clip with a matte field, baked subject asset, and the same flag with MODNet) and the spike in [`docs/research/video-subject-matte.md`](../research/video-subject-matte.md).
 
 ## Context (verified in the tree)
 

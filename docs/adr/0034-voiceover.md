@@ -4,7 +4,7 @@ status: accepted
 
 # Voiceover from text: a speech provider contract and a provider-agnostic pipeline in core
 
-Films made from a brief often want narration (#470, epic #451). SPEC decision 10 said text-to-speech was an asset the agent produces with its own tools. This ADR takes speech generation into Frameshell through our own provider contract, as #478 chose (our contract, not HyperFrames' `tts`), with the deterministic work in core and no voice shipped. Decided by the owner on 2026-11-10 (option D of the proposal on #470, all recommendations accepted); it changes SPEC decision 10 and adds decision 31.
+Films made from a brief often want narration (#470, epic #451). SPEC decision 10 said text-to-speech was an asset the agent produces with its own tools. This ADR takes speech generation into Frameshell through our own provider contract, as #478 chose (our contract, not HyperFrames' `tts`), with the deterministic work in core and no voice shipped. Decided by the owner on 2026-11-10 (option D of the proposal on #470, all recommendations accepted); it changes SPEC decision 10 and adds decision 39.
 
 ## Context (verified)
 
@@ -46,7 +46,7 @@ Films made from a brief often want narration (#470, epic #451). SPEC decision 10
 
 ## Consequences
 
-- SPEC: decision 10 changed, decision 31 added; §5.1 layout, §5.5 scripts, §7 CLI, §8.1 manifest, §8.2 extension points, §12 roadmap.
+- SPEC: decision 10 changed, decision 39 added; §5.1 layout, §5.5 scripts, §7 CLI, §8.1 manifest, §8.2 extension points, §12 roadmap.
 - Protocol: `voiceover.generate`, error codes `SpeechProviderNotFound`, `SpeechFailed`, `ConfirmationRequired`, `contributes.speechProviders` in `plugin.list`; `PROTOCOL_VERSION` bump.
 - Schema: `contributes.speechProviders` (JSON Schema regenerated), `voiceover` added to the built-in command groups a plugin may not shadow, `parseVoiceoverScript` and `spellNumbersIn`.
 - The speech provider sees only the spoken text and the options; it never sees project files, so a cloud plugin can send nothing else.
