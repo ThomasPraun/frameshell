@@ -349,7 +349,7 @@ describe("paintTimeline", () => {
     const view = longTimeline(2);
     view.tracks.push({ id: "t_s", kind: "subtitles", name: null, follows: "t_v", clips: [] });
     const layout = layoutTimeline(view);
-    const cue = (start: number, end: number, text: string) => ({ start, end, text, cue: { start: 0, end: 1, words: [], highlight: true } });
+    const cue = (start: number, end: number, text: string) => ({ start, end, text, cue: { start: 0, end: 1, words: [], highlight: true, entry: "none" as const } });
     const paint = (subtitles?: Map<string, ReturnType<typeof cue>[]>, selectedTrack?: string) => {
       const ctx = recorder();
       const frames: string[] = [];

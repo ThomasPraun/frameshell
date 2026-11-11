@@ -10,12 +10,46 @@ A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha,
 ## Steps
 
 1. Scaffold: `frameshell hyperframes new <name> [--duration <s>]` writes `compositions/hyperframes/<name>/index.html` at the project resolution. Edit that file.
-2. Add the clip on a video track above the footage:
+2. Check it: `frameshell hyperframes check [<composition>]` (see [Check](#check)). Run it after every edit of a composition and before you wait for a render: a lint error found here costs a second, the same mistake found by a failed render costs minutes.
+3. Add the clip on a video track above the footage:
    `frameshell clip add <track> --type hyperframes --source compositions/hyperframes/<name>/index.html --start <s> --duration <s> [--props '{"title":"Launch"}']`
-3. Wait for the render: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. `failed` carries the render error in `error`: fix the composition and check again. A 1440p clip renders in about 2x its real length.
-4. Check the result with `frame_capture` / `frameshell frame --at <s>` at a time the clip covers.
+4. Wait for the render: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. `failed` carries the render error in `error`: fix the composition, run `check` again. A 1440p clip renders in about 2x its real length.
+5. Check the result with `frame_capture` / `frameshell frame --at <s>` at a time the clip covers.
 
-Done = every hyperframes clip is `ready` and a captured frame shows it where intended.
+Done = `check` passes, every hyperframes clip is `ready` and a captured frame shows it where intended.
+
+## Check
+
+`frameshell hyperframes check [<composition>] [--strict] [--json]` lints compositions in the daemon, offline, with the HyperFrames linter (`@hyperframes/lint`) plus the seek-safety rules below. `<composition>` is a name from `hyperframes new` (`intro`), a composition directory, or an HTML entry such as `compositions/hyperframes/intro/index.html`; with none it checks every `compositions/hyperframes/<name>/index.html` (pass the path for a clip `source` kept elsewhere).
+
+- Each finding is `file:line:column  severity  rule  message`, with a `fix:` line. `--json` returns `{ output, data, failed }`: `data.findings` per composition carry `file`, `line`, `column`, `rule`, `severity`, `message`, `fix`.
+- Errors block: exit 1 (`failed: true`). Warnings do not, unless you run `check --strict`. Fix every error; read each warning and fix it unless you meant it.
+- Use `check`, never `npx hyperframes`: the HyperFrames CLI renders and previews on its own, outside Frameshell's cache, ffmpeg and Chrome.
+
+## Authoring rules
+
+These are the rules that make a composition render the same on every frame and every worker. They follow the guidance of HyperFrames (Apache-2.0, github.com/heygen-com/hyperframes) in our own words; `check` enforces most of them.
+
+- **One root.** The entry is one `index.html` with one `data-composition-id` root. Further scenes live in their own files, each wrapped in a `<template>`, and the root mounts them with `data-composition-src`. A file with timed content outside a `<template>` is a second root.
+- **No selectors built from template literals.** `` gsap.to(`#${id}`, …) `` and the like hide the target from the checker and from the Pick tool: write the selector out, one tween per target (or a plain loop over a literal array).
+- **Never animate layout.** `margin`, `padding`, `width`, `height`, `top` and `left` snap to whole pixels and stutter under a frame-by-frame seek. Animate `x`, `y`, `scale`, `rotation` and `opacity`.
+- **Fonts are local.** (The `hyperframes new` scaffold uses a system font stack as a placeholder: replace it.) Declare each family with `@font-face` pointing at a file inside the composition directory. A system or web font changes between machines and between the live page and the render.
+- **`fromTo` over a CSS start state.** Do not set a start transform in CSS and then tween to the end: a seek to the middle reads the CSS, not the tween. Write both ends in the tween: `tl.fromTo(el, { y: 40, opacity: 0 }, { y: 0, opacity: 1 }, 0)`.
+- **No CSS `transition`, no `requestAnimationFrame`, no wall time.** The clock is HyperFrames', not the browser's.
+
+### GSAP is sought, not played
+
+The render and the live page set the paused timeline to a time (`tl.totalTime(t)`) instead of playing it. Write timelines that give the right frame wherever they are set:
+
+1. One timeline, tweens placed with position parameters (`"<"`, `"<0.2"`, `"label+=0.3"`). No `delay` chains.
+2. No ScrollTrigger: a clip does not scroll.
+3. Stacked `from` / `fromTo` tweens on one property need `immediateRender: false` on the later ones, or a seek shows the wrong first frame.
+4. Function-based values are evaluated at the first render, and each render worker starts fresh: never `Math.random()` or `gsap.utils.random()` (not even `gsap.utils.random(min, max, snap, true)`, which only returns a generator; the linter blocks all of them). Use fixed values, a hash of the element index, or a small seeded PRNG such as mulberry32 with a constant seed.
+5. Never `repeat: -1`: give a finite repeat or an explicit duration.
+6. No `onComplete`, `onUpdate`, `onStart` or DOM-reading callbacks: put the change in a tween.
+7. Relative values (`"+=20"`) and `overwrite: "auto"` read state at the first render: prefer absolute values or `fromTo`.
+
+Two judgement checks the linter cannot make: do not tween more than a third of the animated elements at once, and give a tween that travels more than a third of the frame an intermediate key so the motion reads.
 
 ## Composition rules
 

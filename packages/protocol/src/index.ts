@@ -1,5 +1,6 @@
 export * from "./methods.js";
 export * from "./timeline.js";
+export * from "./cleanup.js";
 export * from "./history.js";
 export * from "./proposals.js";
 export * from "./people.js";

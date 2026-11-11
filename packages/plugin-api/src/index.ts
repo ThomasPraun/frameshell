@@ -68,9 +68,11 @@ export interface CommandContext {
 
 /**
  * Command outcome. A string is human output. `data` must be JSON-serializable:
- * it is what `--json` prints.
+ * it is what `--json` prints. `failed: true` reports a command that ran to
+ * completion but found a problem (a linter with errors): the CLI exits 1 and
+ * still prints `output` and `data`. Throw instead when the command could not run.
  */
-export type CommandResult = string | void | { output?: string; data?: unknown };
+export type CommandResult = string | void | { output?: string; data?: unknown; failed?: boolean };
 
 /**
  * Clip adapter contract (SPEC §8.2). The host renders adapter clips in the
