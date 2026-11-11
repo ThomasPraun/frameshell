@@ -1,0 +1,47 @@
+{
+  "name": "@frameshell/blender",
+  "version": "0.1.0",
+  "description": "Official Frameshell clip adapter: .blend scenes rendered with your own Blender to VP9 WebM with alpha.",
+  "license": "Apache-2.0",
+  "author": "Frameshell contributors",
+  "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/blender#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasPraun/frameshell.git",
+    "directory": "plugins/blender"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasPraun/frameshell/issues"
+  },
+  "keywords": [
+    "frameshell",
+    "frameshell-plugin",
+    "blender"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "python",
+    "frameshell-plugin.json",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@frameshell/core": "workspace:*",
+    "@frameshell/plugin-api": "workspace:*",
+    "@frameshell/schema": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

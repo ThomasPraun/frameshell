@@ -273,6 +273,16 @@ describe("clip render cache", () => {
     TIMEOUT,
   );
 
+  it(
+    "gives the adapter's inputs() the project and ensureBinary, so a key can depend on a tool's version",
+    async () => {
+      writeCard("context", { color: "green", seconds: 1, needsContext: true });
+      const id = await addCard("context", 9);
+      expect(await until(id, (info) => info.state === "ready" || info.state === "failed")).toMatchObject({ state: "ready", error: null });
+    },
+    TIMEOUT,
+  );
+
   it("reports clips no loaded plugin renders as unavailable, and refuses to export them", async () => {
     const other = tempDir();
     await conn.request("project.init", { dir: other });

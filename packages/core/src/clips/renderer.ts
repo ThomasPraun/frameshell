@@ -484,7 +484,9 @@ export class ClipRenderer {
     }
     let paths: string[];
     try {
-      paths = registered.adapter.inputs ? await registered.adapter.inputs(structuredClone(clip)) : [];
+      paths = registered.adapter.inputs
+        ? await registered.adapter.inputs(structuredClone(clip), { projectDir: root, ensureBinary: (name) => this.#options.ensureBinary(root, name) })
+        : [];
     } catch (error) {
       return { key: null, error: `${registered.plugin.name} could not list the inputs of ${clip.id}: ${(error as Error)?.message ?? error}` };
     }

@@ -95,8 +95,10 @@ export interface ClipAdapter {
    * Project-relative, `/`-separated files whose content feeds the render
    * cache key: editing one re-renders the clip. A missing file counts too
    * (creating it re-renders). Absent: only `source` and `props` count.
+   * `context` (additive, ADR 0035) lets the adapter ask a tool that decides
+   * the key, such as the version of the user's Blender, without rendering.
    */
-  inputs?(clip: unknown): string[] | Promise<string[]>;
+  inputs?(clip: unknown, context?: InputsContext): string[] | Promise<string[]>;
   /**
    * Render one clip (the timeline clip object, `props` validated) into a
    * file under `context.outDir`; the host moves it into the cache. File time
@@ -120,6 +122,16 @@ export interface ClipAdapter {
    * so the preview never shows what the render ignores.
    */
   readonly elementStyles?: boolean;
+}
+
+/**
+ * What {@link ClipAdapter.inputs} receives next to the clip. Absent on hosts older than this addition: an adapter
+ * that needs it fails with a message asking for a newer Frameshell.
+ */
+export interface InputsContext {
+  readonly projectDir: string;
+  /** See {@link RenderContext.ensureBinary}. Called on every key check, so ask only for tools whose answer is cheap. */
+  ensureBinary(name: string): Promise<string>;
 }
 
 /** What {@link ClipAdapter.livePreview} receives: the project facts of {@link RenderContext}, without output or progress. */

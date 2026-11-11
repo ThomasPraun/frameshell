@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type BinaryPackage, BinaryManager, type Exec, currentPlatform, runDoctor } from "../src/index.js";
+import { BLENDER_PACKAGE, type BinaryPackage, BinaryManager, type Exec, currentPlatform, runDoctor } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 
 const exe = process.platform === "win32" ? ".exe" : "";
@@ -158,5 +158,50 @@ describe("runDoctor with an on-demand package (whisper.cpp)", () => {
     const report = await runDoctor(binaries, { exec: whisperExec, project });
     expect(report.binaries.at(-1)).toMatchObject({ name: "whisper-cli", source: "project", version: "1.9.4" });
     expect(report.problems).toEqual([]);
+  });
+});
+
+describe("runDoctor with a user install (Blender, ADR 0035)", () => {
+  const blenderExec = (output: string): Exec => async (file, args) =>
+    file.includes("blender") && args.includes("--version") ? { code: 0, stdout: output, stderr: "" } : exec(file, args);
+
+  function setupBlender(output: string, install = true) {
+    const system = systemFfmpeg();
+    const blender = join(system.dir, `blender${exe}`);
+    if (install) writeFileSync(blender, "");
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [ffmpegLike(), BLENDER_PACKAGE] });
+    const project = { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}`, blender: `blender${exe}` } };
+    return { blender, run: () => runDoctor(binaries, { exec: blenderExec(output), project }) };
+  }
+
+  it.each([
+    ["Blender 4.5.3 LTS\n\tbuild date: 2026-01-01\n", "4.5.3"],
+    ["Blender 5.0.1\n", "5.0.1"],
+    ["Blender 5.2\n", "5.2"],
+  ])("reports the version of %j from `blender --version`", async (output, version) => {
+    const { run, blender } = setupBlender(output);
+    const report = await run();
+    expect(report.binaries.at(-1)).toMatchObject({ name: "blender", source: "project", path: blender, installed: true, version, pinned: null });
+    expect(report.problems).toEqual([]);
+  });
+
+  it.each(["Blender 4.2.9 LTS\n", "Blender 3.6.0\n", "Blender 6.0.0\n"])("flags %j as outside 4.5 LTS and 5.x, naming the override", async (output) => {
+    const report = await setupBlender(output).run();
+    expect(report.problems).toEqual([expect.stringMatching(/Blender \d\.\d\.\d at .*blender.* is outside the supported range \(4\.5 LTS and 5\.x\).*binaries\.blender/)]);
+  });
+
+  it("lists it as not installed without a problem and without trying to download it", async () => {
+    const system = systemFfmpeg();
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [ffmpegLike(), BLENDER_PACKAGE] });
+    const project = { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}` } };
+    // `install` would throw if doctor tried to fetch Blender: there is nothing to fetch.
+    const report = await runDoctor(binaries, { exec, project, install: true });
+    expect(report.binaries.at(-1)).toMatchObject({ name: "blender", source: "managed", path: null, installed: false, version: null, pinned: null });
+    expect(report.problems).toEqual([]);
+  });
+
+  it("names an override that points at a missing file", async () => {
+    const report = await setupBlender("", false).run();
+    expect(report.problems).toEqual([expect.stringMatching(/blender not found at .*blender/)]);
   });
 });

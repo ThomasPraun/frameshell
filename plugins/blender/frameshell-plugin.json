@@ -1,0 +1,12 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/plugin.json",
+  "name": "@frameshell/blender",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "dist/index.js",
+  "description": "Blender scenes as timeline clips, rendered with your own Blender to VP9 WebM with alpha (ADR 0035).",
+  "contributes": {
+    "clipTypes": ["blender"],
+    "skills": ["skills/blender/SKILL.md"]
+  }
+}

@@ -25,7 +25,16 @@ export function activate(api) {
   const still = {
     type: "still",
     propsSchema,
-    inputs: (clip) => (clip.source ? [clip.source] : []),
+    // A card with `needsContext` proves the host gives `inputs` the project and `ensureBinary` (ADR 0035).
+    async inputs(clip, context) {
+      if (!clip.source) return [];
+      const card = await readCard(clip).catch(() => ({}));
+      if (card.needsContext) {
+        if (context?.projectDir !== project) throw new Error("inputs got no project context");
+        await context.ensureBinary("ffmpeg");
+      }
+      return [clip.source];
+    },
     async render(clip, ctx) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);

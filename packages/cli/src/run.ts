@@ -1372,7 +1372,9 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
   for (const note of command.notes) lines.push(`  note: ${note}`);
   lines.push("", "Binaries:");
   for (const binary of report.binaries) {
-    const state = binary.installed ? (binary.version ?? "not runnable") : "not installed";
+    // Managed package with no build for this platform (today Blender, the person's own install): found through `binaries`.
+    const notInstalled = binary.source === "managed" && !binary.pinned ? `not installed, set binaries.${binary.name}` : "not installed";
+    const state = binary.installed ? (binary.version ?? "not runnable") : notInstalled;
     const pinned = binary.pinned;
     const gpu = pinned?.accelerator ? `, ${pinned.accelerator}` : "";
     const pin = pinned ? ` · pinned ${pinned.version} (${pinned.license}, ${pinned.origin}${gpu})` : "";
