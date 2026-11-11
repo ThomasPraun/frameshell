@@ -6,6 +6,9 @@ import type { ClipAdapter, PluginApi } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
 import { SUPPORTED_BLENDER, activate, frameCount, frameRate, insideProject, listingPath, parseBlenderVersion, propsSchema, scriptPath, sourceOf, supportedBlender } from "../src/index.js";
 
+/** A checked-out text file with LF endings (Windows checkouts may turn them into CRLF). */
+const readText = (path: string): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+
 const here = (path: string) => new URL(path, import.meta.url);
 
 describe("supported Blender versions", () => {
@@ -114,7 +117,7 @@ describe("the plugin package", () => {
     expect(manifest.contributes.clipTypes).toEqual(["blender"]);
     expect(manifest.contributes.skills).toEqual(["skills/blender/SKILL.md"]);
     expect(pkg.files).toContain("python");
-    expect(readFileSync(here("../skills/blender/SKILL.md"), "utf8")).toMatch(/^---\nname: blender\n/);
+    expect(readText(here("../skills/blender/SKILL.md"))).toMatch(/^---\nname: blender\n/);
     const registered: ClipAdapter[] = [];
     activate({ project: { dir: "/p" }, registerClipType: (adapter: ClipAdapter) => registered.push(adapter) } as unknown as PluginApi);
     expect(registered.map((adapter) => adapter.type)).toEqual(["blender"]);
@@ -125,7 +128,7 @@ describe("the plugin package", () => {
 describe("scripts that run inside Blender", () => {
   for (const name of ["render.py", "deps.py"] as const) {
     it(`${name} is Apache-2.0, as the licence note says, and parses`, () => {
-      const text = readFileSync(scriptPath(name), "utf8");
+      const text = readText(scriptPath(name));
       expect(text.split("\n").slice(0, 2)).toEqual(["# Copyright 2026 Frameshell contributors", "# SPDX-License-Identifier: Apache-2.0"]);
       // `bpy` exists only inside Blender: syntax is all a machine without it can check.
       try {
@@ -137,7 +140,7 @@ describe("scripts that run inside Blender", () => {
   }
 
   it("never accept code from a clip: the render script reads only its JSON request", () => {
-    const text = readFileSync(scriptPath("render.py"), "utf8");
+    const text = readText(scriptPath("render.py"));
     expect(text).not.toMatch(/\b(exec|eval|compile|__import__|subprocess|socket)\b/);
     expect(text).not.toMatch(/bpy\.ops\.(wm|script)\./);
   });
