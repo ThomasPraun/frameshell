@@ -34,6 +34,7 @@ import {
   type TransitionContext,
   type Timeline,
   type Track,
+  clipHandles,
   clipTime,
   edgeTransitions,
   elementStyles,
@@ -44,10 +45,12 @@ import {
   paintStretches,
   placementAt,
   parseTimeline,
+  playedShape,
   programGroup,
   reframePointAt,
   scriptRefPathProblem,
   shotSound,
+  showsPicture,
   splitScriptRef,
 } from "@frameshell/schema";
 import type { z } from "zod";
@@ -944,14 +947,14 @@ class Edit {
     }
   }
 
-  /** A split or cut makes a new edge: a clip's new tail loses its `fadeOut`, its new head its `dissolve` and `fadeIn`. Keys stay. */
+  /**
+   * A split or cut makes a new edge: a clip's new tail loses its `fadeOut`, its new head its `dissolve`, `shape` and
+   * `fadeIn`. Keys stay.
+   */
   dropCutEdgeFields(clip: AnyClip, edge: "head" | "tail"): void {
     if (isShotClip(clip)) return;
     if (edge === "tail") delete clip.fadeOut;
-    else {
-      delete clip.dissolve;
-      delete clip.fadeIn;
-    }
+    else clearIncoming(clip);
   }
 
   // Transitions and keyframes (ADR 0018)
@@ -1000,14 +1003,18 @@ class Edit {
   }
 
   /** Visit the edge at `at` of every targeted track that has one; throws when none has. */
-  async eachEdge(at: number, names: readonly string[] | undefined, visit: (edge: { incoming?: Clip; outgoing?: Clip }) => void): Promise<void> {
+  async eachEdge(
+    at: number,
+    names: readonly string[] | undefined,
+    visit: (edge: { incoming?: Clip; outgoing?: Clip }, track: ClipTrack) => void,
+  ): Promise<void> {
     const tracks = this.transitionTargets(names);
     let found = false;
     for (const track of tracks) {
       const edge = await this.edgeAt(track, at);
       if (!edge.incoming && !edge.outgoing) continue;
       found = true;
-      visit(edge);
+      visit(edge, track);
     }
     if (!found) {
       throw this.invalid(`no clip edge at ${at} s on ${tracks.length === 0 ? "any video or audio track" : tracks.map((t) => t.id).join(", ")}.`, {
@@ -1024,34 +1031,115 @@ class Edit {
     // A fade at a cut is two halves that sum to `length` in whole frames; the incoming one takes an odd frame.
     const frames = g.frame(length);
     const outgoingHalf = Math.floor(frames / 2);
-    await this.eachEdge(g.snap(args.at), args.tracks, ({ incoming, outgoing }) => {
-      for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
-      if (incoming) {
-        delete incoming.dissolve;
-        delete incoming.fadeIn;
+    const { kind } = args;
+    const shaped = kind === "wipe" || kind === "push";
+    if (!shaped && args.direction !== undefined) {
+      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; a ${kind} has none.`, { field: "direction" });
+    }
+    const at = g.snap(args.at);
+    // ADR 0030 slice 1: shapes play on the bottom picture layer only, picked as export and preview pick it: the first
+    // shown picture track, when it is a video track (a program track there leaves none).
+    const first = this.draft.tracks.find(showsPicture);
+    const bottom = first?.kind === "video" ? first : undefined;
+    const notBottom = (track: ClipTrack) => track.kind === "video" && track !== bottom;
+    const bottomNote = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
+    const onlyBottom = {
+      field: "tracks",
+      hint: bottom ? `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom.id} and audio tracks.` : "Use kind dissolve or fade there.",
+    };
+    const listed = (tracks: readonly string[]) => `video track${tracks.length === 1 ? "" : "s"} ${tracks.join(", ")}`;
+    if (shaped) {
+      const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && notBottom(track));
+      if (named.length > 0) {
+        const ids = named.map((t) => t.id);
+        throw this.invalid(`a ${kind} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
       }
+    }
+    const skipped: string[] = [];
+    let applied = false;
+    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
+      if (shaped && notBottom(track)) {
+        skipped.push(track.id);
+        return;
+      }
+      // Flattening does not carry a shape into a nested clip's own clips yet (ADR 0030 slice 3).
+      const nested = shaped && incoming && outgoing ? [outgoing, incoming].find(isNested) : undefined;
+      if (nested) {
+        throw this.invalid(`a ${kind} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
+          field: "kind",
+          hint: "Use kind dissolve or fade at this edge.",
+        });
+      }
+      applied = true;
+      for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
+      if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
       if (incoming && outgoing) {
-        if (args.kind === "dissolve") incoming.dissolve = length;
-        else {
+        if (kind === "fade") {
           if (outgoingHalf > 0) outgoing.fadeOut = g.seconds(outgoingHalf);
           incoming.fadeIn = g.seconds(frames - outgoingHalf);
+        } else {
+          incoming.dissolve = length;
+          if (shaped && track.kind === "video") incoming.shape = { kind, direction: args.direction ?? "left" };
         }
-      } else if (incoming) incoming.fadeIn = length;
+        return;
+      }
+      if (incoming) incoming.fadeIn = length;
       else outgoing!.fadeOut = length;
+      if (shaped && track.kind === "video") {
+        this.warnings.push(`${kind} at ${at} s on ${track.id}: no clip is butted there, so it fades ${incoming ? "in" : "out"} instead.`);
+      }
     });
+    if (!applied) {
+      throw this.invalid(`a ${kind} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
+    }
+    if (skipped.length > 0) {
+      this.warnings.push(
+        `skipped ${listed(skipped)}: a ${kind} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
+      );
+    }
+    if (bottom) await this.warnVariety(bottom);
+  }
+
+  /**
+   * ADR 0030 decision 8: warn when the bottom track's scene cuts break a variety rule: three transitions of one kind in
+   * a row, or more than a third hard cuts. A cut between two clips of one asset (a jump cut in one take) is no scene cut.
+   */
+  async warnVariety(track: ClipTrack): Promise<void> {
+    const g = this.grid;
+    const sorted = [...track.clips].sort((a, b) => a.start - b.start);
+    const cuts: { at: number; kind: string }[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      const before = sorted[i - 1]!;
+      const clip = sorted[i]!;
+      const end = await this.end(before);
+      if (end === null || g.frame(end) !== g.frame(clip.start)) continue;
+      if ("asset" in before && "asset" in clip && before.asset === clip.asset) continue;
+      const kind = clip.shape?.kind ?? (clip.dissolve !== undefined ? "dissolve" : clip.fadeIn !== undefined || before.fadeOut !== undefined ? "fade" : "cut");
+      cuts.push({ at: clip.start, kind });
+    }
+    for (let i = 2; i < cuts.length; i++) {
+      const run = cuts.slice(i - 2, i + 1);
+      if (run[0]!.kind === "cut" || !run.every((cut) => cut.kind === run[0]!.kind)) continue;
+      this.warnings.push(
+        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${run[0]!.kind === "push" ? "pushes" : `${run[0]!.kind}s`}; ` +
+          "never three of a kind in a row. Pick each by why the picture changes.",
+      );
+      break;
+    }
+    const hard = cuts.filter((cut) => cut.kind === "cut").length;
+    if (cuts.length >= 3 && hard * 3 > cuts.length) {
+      this.warnings.push(`variety: ${hard} of ${cuts.length} scene cuts on ${track.id} are hard cuts; at most a third should be.`);
+    }
   }
 
   async transitionRemove(args: OperationArgs<"transition.remove">): Promise<void> {
     const at = this.grid.snap(args.at);
     let cleared = false;
     await this.eachEdge(at, args.tracks, ({ incoming, outgoing }) => {
-      if (incoming && (incoming.dissolve !== undefined || incoming.fadeIn !== undefined)) cleared = true;
+      if (incoming && (incoming.dissolve !== undefined || incoming.fadeIn !== undefined || incoming.shape !== undefined)) cleared = true;
       if (outgoing && outgoing.fadeOut !== undefined) cleared = true;
-      if (incoming) {
-        delete incoming.dissolve;
-        delete incoming.fadeIn;
-      }
+      if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
     });
     if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
@@ -2467,10 +2555,23 @@ function transitionIssues(clips: readonly Clip[], context: TransitionContext): M
   const asRequested = (seconds: number) => Math.round(seconds * context.fps) * frame;
   const round3 = (seconds: number) => Math.round(seconds * 1000) / 1000;
   const issues = new Map<string, string[]>();
+  const sorted = [...clips].sort((a, b) => a.start - b.start);
   for (const clip of clips) {
     const edge = edges.get(clip.id);
     if (!edge) continue;
     const found: string[] = [];
+    const shape = playedShape(clip);
+    if (shape && edge.mode === "dissolve") {
+      // ADR 0030 decision 1: past a handle the edge frame holds.
+      const previous = sorted[sorted.indexOf(clip) - 1]!;
+      const held = [
+        ...(clipHandles(previous, context).after < edge.dissolve - frame / 2 ? [`${previous.id}'s last frame`] : []),
+        ...(clipHandles(clip, context).before < edge.dissolve - frame / 2 ? ["its own first frame"] : []),
+      ];
+      if (held.length > 0) {
+        found.push(`${clip.id}: ${shape.kind} holds ${held.join(" and ")} for part of it: no spare source around the cut. Trim the neighbours less to play motion there.`);
+      }
+    }
     if (clip.dissolve !== undefined) {
       if (edge.mode === "dip") {
         found.push(`${clip.id}: dissolve of ${clip.dissolve} s plays as a dip through black: no spare source around the cut, or a clip too short. Trim the neighbours less, or shorten it.`);
@@ -2489,6 +2590,13 @@ function transitionIssues(clips: readonly Clip[], context: TransitionContext): M
     if (found.length > 0) issues.set(clip.id, found);
   }
   return issues;
+}
+
+/** Clear what a clip comes in by: its `dissolve`, the dissolve's `shape`, its `fadeIn`. */
+function clearIncoming(clip: Clip): void {
+  delete clip.dissolve;
+  delete clip.shape;
+  delete clip.fadeIn;
 }
 
 /** Adapter `type` is any string, so `clip.type === "media"` alone does not narrow. */

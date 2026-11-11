@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shaped transitions, first slice (ADR 0030, #483): `transition set --kind wipe|push [--direction left|right|up|down]`
+  (`transition.set` `kind` and `direction`, protocol 82) puts a wipe or a push on a cut of the bottom video track.
+  It is stored as the incoming clip's `dissolve` plus an optional `shape: { kind, direction }`; sound still
+  crossfades equal-power. `shapeAt` (`packages/schema/src/transitions.ts`) gives the geometry to export (`overlay`
+  offsets for a push, a `geq` alpha step for a wipe) and to the preview (Canvas 2D clip paths). With no spare source
+  around the cut a shaped transition holds the outgoing clip's last frame or the incoming clip's first instead of
+  dipping through black. `transition.set` now warns when the bottom track has three transitions of one kind in a row
+  or more than a third hard cuts (jump cuts inside one take do not count). Shapes play on the first shown picture
+  track only, so not over a multicam program track; other video tracks and edges of nested clips refuse them for now.
+  The skill's transitions reference gains a table of kinds by cause and the variety rules.
 - Timeline markers (#458, slice 1 of ADR 0029): named points on the timeline clock, `markers: [{ id, at, label,
   color? }]` in the timeline file, labels unique ignoring case. Operations `marker.add`, `marker.set`,
   `marker.remove` (journaled, revertible, idempotent) and `marker.list`; `timeline.show` lists them; CLI
@@ -139,6 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1080x1920, and the render's `warnings` say so.
 - Edits of `frameshell.json` by the daemon (plugin pins, transcription choice, formats) run one at a time per project,
   so two at once no longer lose one of them.
+- Timeline files: a clip's `shape` without a `dissolve`, or on an audio track, is rejected. Files without `shape`
+  are unchanged and export byte for byte as before; hosts older than this release reject files that carry `shape`.
 
 ## [0.18.0] - 2026-11-07
 

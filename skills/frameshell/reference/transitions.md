@@ -18,6 +18,39 @@ frameshell transition remove --at 12.5
 - A later `clip move`, `cut` or `clip trim` that leaves a dissolve without a clip before it adds a warning (it plays as a fade in until the clips butt again).
 - `clip split` gives the left part the dissolve and fade in, the right part the fade out; the new cut has none.
 
+## Shaped transitions: pick by cause
+
+A wipe or a push moves the picture instead of mixing it. It is stored as the incoming clip's `dissolve` plus `shape`, so everything above holds; sound still crossfades.
+
+```sh
+frameshell transition set --at 12.5 --kind push                  # the next topic slides in from the right, 0.5 s
+frameshell transition set --at 30 --kind wipe --direction down    # the incoming shot is uncovered from the top
+```
+
+| Why the picture changes | Kind |
+|---|---|
+| A new topic at the same level, nothing else added | `push`, in the film's one dominant direction |
+| A scan or sweep is already moving on screen | `wipe`, the way it moves |
+| Time passes, a mood or a place changes softly | `dissolve` |
+| A section opens or closes | `fade` |
+| A chapter slam, an impact | hard cut (no transition) |
+
+- `--direction` is the way the incoming picture travels: `left` (default, it enters from the right edge), `right`, `up` (enters from the bottom), `down`. Keep one dominant direction per film.
+- 0.45 to 0.6 s fits most cuts; the default 0.5 s is fine.
+- Shapes play on the bottom video track only for now: the first shown picture track, so none when a multicam program track is first. Naming another video track in `--track` fails, and without `--track` the others are skipped with a warning. Audio tracks crossfade.
+- A shape at an edge of a nested timeline clip fails for now: use a dissolve or a fade there.
+- With no spare source around the cut, a shaped transition holds the outgoing clip's last frame or the incoming clip's first (a warning says so) instead of dipping through black. Trim the neighbours less to keep the motion.
+- `--kind dissolve` or `fade`, `transition remove`, `clip split` and `cut` on that edge drop the shape.
+
+### Variety rules
+
+- Never three transitions of one kind in a row.
+- At most a third of the scene cuts are hard cuts.
+- Use 3 to 5 kinds in a film.
+- Jump cuts inside one take are not scene cuts: leave them hard.
+
+`transition set` adds a `variety:` warning when the bottom track breaks the first two rules. Read it and change a kind; it never blocks.
+
 ## Landing on a moment: markers
 
 A marker names a timeline second the person or you care about: `frameshell marker add --at 12.5 --label hook`. Read them with `frameshell marker list` and use their `at` for a transition or a key (`transition set --at 12.5`, `clip key … --at 12.5`). The person sees them on the lane under the ruler, and clips dragged in the app snap to them.

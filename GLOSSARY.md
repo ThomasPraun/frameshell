@@ -108,11 +108,19 @@ _Avoid_: override, patch, element transform (a clip's `transform` places the who
 The preview state entered by double-clicking a generated clip, where handles move and scale the element under the cursor instead of the clip; Escape leaves it.
 _Avoid_: edit mode, isolation mode
 
-## Transitions and keyframes (ADR 0018)
+## Transitions and keyframes (ADR 0018, ADR 0030)
 
 **Transition**:
-A dissolve or a fade at a clip edge, stored on the clip (`dissolve`, `fadeIn`, `fadeOut`) and centered on the cut; the timeline length never changes.
-_Avoid_: effect, wipe (a shaped transition, not supported)
+A dissolve (plain or shaped) or a fade at a clip edge, stored on the clip (`dissolve`, `shape`, `fadeIn`, `fadeOut`) and centered on the cut; the timeline length never changes.
+_Avoid_: effect
+
+**Shaped transition**:
+A dissolve whose `shape` moves the pictures instead of mixing them: a wipe (a straight edge uncovers the incoming clip) or a push (the incoming clip slides in and pushes the outgoing one out), in a `direction`; `shapeAt` gives its geometry. Picked by why the picture changes.
+_Avoid_: slide, transition effect, xfade
+
+**Hold** (of a shaped transition):
+Where a shaped transition runs past a clip's handle, the clip's edge frame (the outgoing clip's last, the incoming clip's first) shows still instead of a dip through black.
+_Avoid_: freeze frame (a separate edit), still
 
 **Dissolve**:
 A mix from the clip that ends at a clip's start into that clip, over the handles of both; for sound, an equal-power crossfade.
@@ -123,7 +131,7 @@ A ramp from or to nothing inside one clip: black under the bottom track, transpa
 _Avoid_: dip to black (that is two fades), fade transition
 
 **Handle**:
-Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip, never an error.
+Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip (a shaped transition: a hold), never an error.
 _Avoid_: tail, overlap, pre-roll
 
 **Marker**:

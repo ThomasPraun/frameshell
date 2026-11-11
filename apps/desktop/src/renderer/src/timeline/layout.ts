@@ -1,6 +1,12 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
-import { type Clip, type ElementAdjust, type MarkerColor, SHOT_LOW_CONFIDENCE } from "@frameshell/schema";
+import {
+  type Clip,
+  type ElementAdjust,
+  type MarkerColor,
+  SHOT_LOW_CONFIDENCE,
+  type TransitionShape,
+} from "@frameshell/schema";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -73,6 +79,8 @@ export interface ClipBox {
   shot: ShotBox | null;
   /** Stored `dissolve`, seconds; null when unset. */
   dissolve: number | null;
+  /** Stored `shape` of its dissolve (ADR 0030); null when unset. */
+  shape: TransitionShape | null;
   /** Stored `fadeIn`, seconds; null when unset. */
   fadeIn: number | null;
   /** Stored `fadeOut`, seconds; null when unset. */
@@ -347,6 +355,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
     shot,
     dissolve: stored("dissolve"),
+    shape: typeof fields["shape"] === "object" && fields["shape"] !== null ? (fields["shape"] as TransitionShape) : null,
     fadeIn: stored("fadeIn"),
     fadeOut: stored("fadeOut"),
     marks,

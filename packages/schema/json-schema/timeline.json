@@ -121,6 +121,34 @@
                           "type": "number",
                           "exclusiveMinimum": 0
                         },
+                        "shape": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "wipe",
+                                "push"
+                              ],
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                            },
+                            "direction": {
+                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "type": "string",
+                              "enum": [
+                                "left",
+                                "right",
+                                "up",
+                                "down"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
+                        },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
                           "type": "number",
@@ -454,6 +482,34 @@
                           "type": "number",
                           "exclusiveMinimum": 0
                         },
+                        "shape": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "wipe",
+                                "push"
+                              ],
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                            },
+                            "direction": {
+                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "type": "string",
+                              "enum": [
+                                "left",
+                                "right",
+                                "up",
+                                "down"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
+                        },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
                           "type": "number",
@@ -779,6 +835,34 @@
                           "description": "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). Short material shortens it; with no clip butted before, it plays as a fade in.",
                           "type": "number",
                           "exclusiveMinimum": 0
+                        },
+                        "shape": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "wipe",
+                                "push"
+                              ],
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                            },
+                            "direction": {
+                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "type": "string",
+                              "enum": [
+                                "left",
+                                "right",
+                                "up",
+                                "down"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
                         },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",

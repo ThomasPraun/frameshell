@@ -117,6 +117,31 @@ export const ClipKeysSchema = z
 
 const TransitionSeconds = z.number().positive();
 
+/** Shapes a dissolve can take instead of mixing the pictures (ADR 0030). */
+export const TRANSITION_SHAPE_KINDS = ["wipe", "push"] as const;
+
+/** Name of a shape in {@link TRANSITION_SHAPE_KINDS}. */
+export type TransitionShapeKind = (typeof TRANSITION_SHAPE_KINDS)[number];
+
+/** Ways a shape travels: the way the incoming picture moves across the frame. */
+export const TRANSITION_DIRECTIONS = ["left", "right", "up", "down"] as const;
+
+/** Name of a direction in {@link TRANSITION_DIRECTIONS}. */
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
+
+/** How a clip's `dissolve` moves the pictures instead of mixing them (ADR 0030); `shapeAt` evaluates it. */
+export const TransitionShapeSchema = z
+  .strictObject({
+    kind: z
+      .enum(TRANSITION_SHAPE_KINDS)
+      .describe("`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."),
+    direction: z
+      .enum(TRANSITION_DIRECTIONS)
+      .optional()
+      .describe("Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
+  })
+  .describe("Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades.");
+
 const ClipIdSchema = Id.describe("Stable, core-generated (`c_…`); reference clips by it.");
 const ClipStartSchema = Seconds.describe("Timeline seconds of the first frame.");
 const ScriptRefSchema = z
@@ -139,6 +164,7 @@ const clipBase = {
     "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). " +
       "Short material shortens it; with no clip butted before, it plays as a fade in.",
   ),
+  shape: TransitionShapeSchema.optional(),
   fadeIn: TransitionSeconds.optional().describe("Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start."),
   fadeOut: TransitionSeconds.optional().describe("Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end."),
   keys: ClipKeysSchema.optional(),
@@ -534,6 +560,14 @@ export const TimelineSchema = z
     timeline.tracks.forEach((track, t) => {
       claim(track.id, ["tracks", t, "id"]);
       if (track.kind !== "subtitles") track.clips.forEach((clip, c) => claim(clip.id, ["tracks", t, "clips", c, "id"]));
+      if (track.kind === "video" || track.kind === "audio") {
+        track.clips.forEach((clip, c) => {
+          if (clip.shape === undefined) return;
+          const path = ["tracks", t, "clips", c, "shape"];
+          if (track.kind === "audio") ctx.addIssue({ code: "custom", message: "audio tracks have no picture to shape: `shape` is for video tracks", path });
+          else if (clip.dissolve === undefined) ctx.addIssue({ code: "custom", message: "`shape` shapes a dissolve: give the clip a `dissolve` too, or remove `shape`", path });
+        });
+      }
       if (track.kind !== "audio") return;
       if (track.hidden !== undefined) ctx.addIssue({ code: "custom", message: "audio tracks have no picture to hide: `hidden` is for video and program tracks", path: ["tracks", t, "hidden"] });
       track.clips.forEach((clip, c) => {
@@ -691,6 +725,8 @@ export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 export type ClipKeys = z.infer<typeof ClipKeysSchema>;
 /** One key of a clip property. */
 export type ClipKey = NonNullable<ClipKeys["x"]>[number];
+/** Shape of a clip's dissolve; see {@link TransitionShapeSchema}. */
+export type TransitionShape = z.infer<typeof TransitionShapeSchema>;
 /** Clip overlay placement. */
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */
