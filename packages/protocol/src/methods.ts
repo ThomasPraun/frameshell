@@ -22,7 +22,7 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { AudioEffectSchema, DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -170,10 +170,11 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "shoot", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `audio-fx`: baked " +
+        "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
@@ -186,8 +187,8 @@ const GcEntrySchema = z.object({
 
 const GcSkipSchema = z.object({
   area: z
-    .enum(["media", "clips", "audio", "temp"])
-    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, or job temp files."),
+    .enum(["media", "clips", "audio", "audio-fx", "temp"])
+    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, baked audio effects, or job temp files."),
   reason: z.string(),
 });
 
@@ -227,9 +228,10 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
+        "`audio-fx`: bake one asset through a clip's audio effects into `.frameshell/audio-fx/` (ADR 0031). " +
         "`render`: export a timeline to a video file (`render` method). " +
         "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
         "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
@@ -242,24 +244,26 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated).",
+        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`.",
     ),
   output: z
     .string()
     .nullable()
     .describe(
       "`render`: absolute path of the file being written. `clip`: absolute cache entry without extension, " +
-        "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). Null for `ingest`.",
+        "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). `audio-fx`: absolute bake " +
+        "file `.frameshell/audio-fx/<key>.pcm`. Null for `ingest`.",
     ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people", "transcribe"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
-        "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
+        "order. `render`: clips (waits for generated clips to finish rendering into the cache), audio-fx (bakes clip audio " +
+        "effects not baked yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
         "`shoot`: transcribe.",
@@ -273,6 +277,21 @@ const JobSchema = z.object({
   createdAt: z.string().describe("ISO 8601 time the job was queued."),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
+});
+
+/** Baked sound of one asset through one audio effect chain (ADR 0031). */
+const AudioBakeSchema = z.object({
+  asset: z.string().describe("Project-relative asset baked."),
+  effects: z.array(AudioEffectSchema).describe("The chain, every parameter given (`normalizeAudioEffects`)."),
+  clips: z.array(z.string()).describe("Clips playing this bake (flattened ids `<nested clip>/<clip>` inside nested timelines)."),
+  state: z
+    .enum(["ready", "queued", "baking", "failed"])
+    .describe("`ready`: `file` holds the bake. `queued` / `baking`: an `audio-fx` job is on it (`job`). `failed`: see `error`."),
+  file: z.string().nullable().describe("Project-relative raw s16le PCM on the sidecar clock, e.g. `.frameshell/audio-fx/<key>.pcm`; null unless ready."),
+  sampleRate: z.int().describe("Samples per second of `file`, the sidecar's."),
+  channels: z.int().describe("Interleaved channels of `file`, the sidecar's."),
+  job: z.string().nullable().describe("Queued or running `audio-fx` job; null otherwise."),
+  error: z.string().nullable().describe("Why the bake failed; null otherwise."),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */
@@ -936,7 +955,7 @@ export const methods = {
     description:
       "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
       "thumbnails, energy envelopes, transcription WAVs and voice prints of assets deleted or changed since (or built for an older " +
-      "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
+      "recipe or another fps), clip renders no timeline's generated clip keys, baked audio effects no clip plays, and temp files of interrupted jobs. " +
       "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
       "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
       "and temp files are skipped while jobs or transcriptions run (`skipped` says why). Deleted outputs rebuild on " +
@@ -985,6 +1004,20 @@ export const methods = {
       clips: z
         .array(ClipRenderSchema)
         .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
+    }),
+  },
+  "audio.bakes": {
+    // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
+    internal: true,
+    description:
+      "Baked sound (ADR 0031) of every media clip with audio effects on a timeline, nested timelines flattened: one entry per asset and " +
+      "chain. Bakes neither ready nor failed are queued as background `audio-fx` jobs; the preview plays the dry sidecar until `ready`. " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int().describe("Revision of the timeline read (the proposal's with `view: proposal`)."),
+      bakes: z.array(AudioBakeSchema).describe("In track then time order of their first clip."),
     }),
   },
   "clip.live": {
@@ -2152,12 +2185,17 @@ export const methods = {
   "clip.set": {
     mutating: true,
     description:
-      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
+      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
+      "`null` clears; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
       "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
       "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
+      "`audioEffects` (ADR 0031) process the clip's sound in order before gain and fades: the voice chain is " +
+      "`[{ kind: \"highpass\", frequency: 85 }, { kind: \"denoise\", floor: -30, reduction: 8 }, { kind: \"compressor\", threshold: -20, ratio: 2.5, " +
+      "attack: 8, release: 140, makeup: 2 }]`. The asset is baked once per chain in the background; export waits for it, the preview plays " +
+      "dry until it is ready. Energy snapping and transcription keep the dry sound. Integrated loudness stays the export's (`export.loudness`). " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3056,6 +3094,10 @@ export type ClipLiveParams = MethodParams<"clip.live">;
 export type ClipLiveResult = MethodResult<"clip.live">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
+/** One entry of `audio.bakes`. */
+export type AudioBakeInfo = z.output<typeof AudioBakeSchema>;
+/** Result of `audio.bakes`. */
+export type AudioBakesResult = MethodResult<"audio.bakes">;
 /** ffprobe summary of an asset. */
 export type MediaProbe = z.output<typeof ProbeSchema>;
 /** One asset as reported by `asset.list`. */

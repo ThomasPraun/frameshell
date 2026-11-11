@@ -38,6 +38,7 @@ import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
+import { AudioFxService } from "./media/audio-fx.js";
 import { probeMedia } from "./media/ffmpeg.js";
 import { type TurnsSource, groupTurns } from "./multicam/group-turns.js";
 import { MotionStore, groupMotion } from "./multicam/motion.js";
@@ -253,6 +254,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     jobs,
     onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
   });
+  const audioFx = new AudioFxService({
+    jobs,
+    hash: (dir, asset) => media.hash(dir, asset),
+    hasAudio: async (dir, asset) => (await media.probe(dir, asset)).audio !== null,
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    timelines: (dir) => listTimelineIds(dir),
+    flattened: async (dir, id) => {
+      const parsed = parseTimeline(JSON.parse(await readFile(join(dir, "timelines", `${id}.json`), "utf8")));
+      if (!parsed.ok) throw new Error(parsed.error);
+      return resolveNested(dir, parsed.value);
+    },
+  });
   const segmentModel = options.segmentEngine?.model ?? SEGMENT_MODEL_PIN;
   const segmentation = new SegmentService({
     probe: (dir, asset) => media.probe(dir, asset),
@@ -428,6 +441,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
       ensure: (dir, timeline, onProgress) => clips.ensure(clipRoot(dir), timeline, onProgress),
     },
+    audioFx,
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
@@ -1008,14 +1022,23 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
       const proposals = await timelines.gcProposals(dir, dryRun);
       const shootCache = await shoots.gc(dir, { dryRun, temps });
-      const removed = [...derived.removed, ...cache.removed, ...proposals, ...shootCache].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      const skipped = [...derived.skipped, ...cache.skipped];
+      const baked = await audioFx.gc(dir, { dryRun, temps, busy: active.some((job) => job.kind === "render") });
+      const removed = [...derived.removed, ...cache.removed, ...proposals, ...shootCache, ...baked.removed].sort((a, b) =>
+        a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+      );
+      const skipped = [...derived.skipped, ...cache.skipped, ...baked.skipped];
       if (!temps) skipped.push({ area: "temp", reason: "jobs of this project are running; temp files may be theirs." });
       const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
       return { dir, dryRun, removed, bytes, forgotten: derived.forgotten, skipped };
     },
     "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
+    "audio.bakes": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const flat = await resolveNested(dir, shown.timeline, undefined, shown.fps);
+      return { timeline, revision: shown.timeline.revision, bakes: await audioFx.status(dir, flat, true) };
+    },
     "context.write": async ({ cwd, name, content }) => writeContext(await root(cwd), name, content),
     "inspect.point": async ({ cwd, timeline, at, x, y, unit, segment, view }, caller, request) => {
       const dir = await root(cwd);

@@ -250,6 +250,18 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export {
+  AUDIO_FX_DIR,
+  AUDIO_FX_VERSION,
+  type AudioBakeNeed,
+  AudioFxService,
+  type AudioFxServiceOptions,
+  DENOISE_LATENCY_SAMPLES,
+  audioFxArgs,
+  audioFxCacheKey,
+  audioFxFilter,
+  classifyAudioFx,
+} from "./media/audio-fx.js";
 export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";

@@ -16,6 +16,8 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  audioEffectsOf,
+  bakeRef,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -35,7 +37,7 @@ import {
   subtitleTracks,
   withTrackMutes,
 } from "@frameshell/schema";
-import { fpsRational } from "../media/recipe.js";
+import { SIDECAR_CHANNELS, SIDECAR_SAMPLE_RATE, fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
 import { assSubtitles } from "./ass.js";
@@ -89,6 +91,11 @@ export interface RenderInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** Render of every generated clip on a video track, by clip id; they composite like footage (SPEC §3.5 step 2). */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /**
+   * Absolute bake (`AudioFxService.ensure`) of every media clip with audio effects, by `bakeRef` of asset and chain
+   * (ADR 0031): the clip's sound is read from it instead of the asset. A clip whose bake is missing plays dry, with a warning.
+   */
+  audioFx?: ReadonlyMap<string, string>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
 }
@@ -158,7 +165,10 @@ export interface RenderPlan {
     sampleRate: number;
     /** Output samples; equals the video length exactly. */
     samples: number;
-    /** Absolute paths of the audio inputs; items refer to them by index. */
+    /**
+     * Absolute paths of the audio inputs; items refer to them by index. A `.pcm` input is an audio effects bake:
+     * raw s16le at the sidecar's rate and channels, on the source clock (ADR 0031).
+     */
     inputs: string[];
     /**
      * One sequence per audible track, each exactly `samples` long; a track whose clips crossfade takes one more
@@ -282,6 +292,8 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /** Absolute bake of the clip's audio effects: its sound is read from it, not from `source` (ADR 0031). */
+  sound?: string;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -333,7 +345,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.audioFx);
   const outFps = preset.video.fps ?? fps;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
@@ -531,6 +543,7 @@ function layoutTimeline(
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
+  audioFx: ReadonlyMap<string, string> = new Map(),
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -573,6 +586,11 @@ function layoutTimeline(
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
+      const effects = audioEffectsOf(clip);
+      const sound = effects && source.audio && clip.audio?.muted !== true ? audioFx.get(bakeRef(clip.asset, effects)) : undefined;
+      if (effects && source.audio && clip.audio?.muted !== true && sound === undefined) {
+        warnings.push(`Clip ${clip.id} has audio effects that are not baked; its sound was exported without them.`);
+      }
       placed.push({
         clip,
         source,
@@ -584,6 +602,7 @@ function layoutTimeline(
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(sound !== undefined ? { sound } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -1097,8 +1116,9 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
       const sourceSamples = exact
         ? end - start
         : Math.round(((placed.end + trail - placed.start) / fps) * placed.speed * sampleRate) + head - Math.round(skipped * placed.speed);
-      let input = inputs.indexOf(placed.source.path);
-      if (input === -1) input = inputs.push(placed.source.path) - 1;
+      const path = placed.sound ?? placed.source.path;
+      let input = inputs.indexOf(path);
+      if (input === -1) input = inputs.push(path) - 1;
       const previous = lane.joinable;
       // A sound running on across a shot change stays one item: shots switch pictures, the edge fade belongs to real cuts (as in the preview).
       if (
@@ -1182,9 +1202,9 @@ function soundRamps(placed: Placed, first: number, fps: number, at: (frame: numb
 
 /**
  * One continuous audio graph (SPEC §3.5 step 4) ending in `[mix]`: every
- * input decoded once on the source clock (same filter as the PCM sidecar),
- * split per clip, `atrim` to the clip's source samples, `atempo` for speed,
- * padded or cut to its exact timeline length, a short fade at both edges so
+ * input decoded once on the source clock (same filter as the PCM sidecar;
+ * a mono bake is spread to both channels at full level), split per clip,
+ * `atrim` to the clip's source samples, `atempo` for speed, padded or cut to its exact timeline length, a short fade at both edges so
  * no cut clicks, tracks concatenated and mixed.
  */
 function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: string[] } {
@@ -1192,9 +1212,10 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
   const format = `aformat=sample_fmts=fltp:sample_rates=${rate}:channel_layouts=stereo`;
   const uses = audio.inputs.map(() => 0);
   for (const item of audio.tracks.flat()) if (item.kind === "clip") uses[item.input]!++;
-  const lines = audio.inputs.map((_, input) => {
+  const lines = audio.inputs.map((path, input) => {
     const outs = Array.from({ length: uses[input]! }, (_, n) => `[i${input}c${n}]`).join("");
-    return `[${input}:a:0]aresample=${rate}:async=1:first_pts=0,${format},asplit=${uses[input]}${outs}`;
+    const spread = isBake(path) && SIDECAR_CHANNELS === 1 ? "pan=stereo|c0=c0|c1=c0," : "";
+    return `[${input}:a:0]${spread}aresample=${rate}:async=1:first_pts=0,${format},asplit=${uses[input]}${outs}`;
   });
   const taken = audio.inputs.map(() => 0);
   const trackLabels = audio.tracks.map((items, t) => {
@@ -1236,8 +1257,14 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
   } else {
     lines.push(`${trackLabels.map((l) => `[${l}]`).join("")}amix=inputs=${trackLabels.length}:duration=longest:normalize=0[mix]`);
   }
-  const inputs = audio.inputs.flatMap((path) => ["-vn", "-i", path]);
+  const raw = ["-f", "s16le", "-ar", String(SIDECAR_SAMPLE_RATE), "-ac", String(SIDECAR_CHANNELS)];
+  const inputs = audio.inputs.flatMap((path) => (isBake(path) ? [...raw, "-i", path] : ["-vn", "-i", path]));
   return { inputs, lines };
+}
+
+/** True for an audio effects bake input (`AUDIO_FX_DIR`): raw PCM, which ffmpeg cannot probe. */
+function isBake(path: string): boolean {
+  return path.endsWith(".pcm");
 }
 
 /** `atempo` chain for `speed`; each stage accepts 0.5 to 100. */

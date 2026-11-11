@@ -754,11 +754,16 @@ class Edit {
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
     const { track, clip } = this.clip(args.clip);
-    const { speed, gain, muted, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, transform, props, elements, scriptRef].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, transform, props, elements, scriptRef." });
+    const { speed, gain, muted, audioEffects, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, audioEffects, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, audioEffects, transform, props, elements, scriptRef." });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
+    if (isShotClip(clip) && audioEffects !== undefined) {
+      // ADR 0031 decision 5: no effects on shots or angles in v1, skipped like transitions on program tracks.
+      this.warnings.push(`${clip.id} is a multicam shot: shots take no audio effects in this version; audioEffects skipped.`);
+      if ([speed, gain, muted, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
+    }
     if (isShotClip(clip)) {
       const given = (["speed", "gain", "muted", "transform", "props", "elements"] as const).filter((field) => args[field] !== undefined);
       if (given.length > 0) {
@@ -778,6 +783,18 @@ class Edit {
     }
     if (gain !== undefined || muted !== undefined) {
       clip.audio = { ...clip.audio, ...(gain !== undefined ? { gain } : {}), ...(muted !== undefined ? { muted } : {}) };
+    }
+    if (audioEffects !== undefined) {
+      if (!isMedia(clip)) {
+        throw this.invalid(`only media clips take \`audioEffects\`; ${clip.id} is ${clip.type}.`, {
+          field: "audioEffects",
+          hint: "Set them on the media clips inside a nested timeline; generated clips have no sound of their own.",
+        });
+      }
+      const { effects: _old, ...rest } = clip.audio ?? {};
+      const audio = audioEffects === null ? rest : { ...rest, effects: audioEffects };
+      if (Object.keys(audio).length === 0) delete clip.audio;
+      else clip.audio = audio;
     }
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });

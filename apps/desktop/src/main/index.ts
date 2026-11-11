@@ -1606,6 +1606,12 @@ function registerIpc(): void {
       return (await daemon.request("asset.list", { cwd: project.dir })).assets;
     }),
   );
+  ipcMain.handle(Channel.mediaBakes, (event, timeline: string, view?: TimelineViewName) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      return daemon.request("audio.bakes", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
+    }),
+  );
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
     outcome(async () => daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
   );

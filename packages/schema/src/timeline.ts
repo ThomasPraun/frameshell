@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { AUDIO_EFFECT_LIMITS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
 import { TakeIdSchema } from "./shoot.js";
 
@@ -59,6 +60,48 @@ export const TransformSchema = z
 export const ClipAudioSchema = z.strictObject({
   gain: z.number().optional().describe("Gain in dB; 0 = unchanged, negative = quieter. Default 0."),
   muted: z.boolean().optional().describe("Default false."),
+});
+
+const effectParam = (limit: { min: number; max: number; default: number }, what: string) =>
+  z.number().min(limit.min).max(limit.max).optional().describe(`${what}, ${limit.min} to ${limit.max}. Default ${limit.default}.`);
+
+const { highpass: HPF, denoise: DENOISE, compressor: COMP } = AUDIO_EFFECT_LIMITS;
+
+/** One audio effect of a media clip (ADR 0031); `kind` selects it, omitted parameters take the voice chain's number. */
+export const AudioEffectSchema = z.discriminatedUnion("kind", [
+  z
+    .strictObject({ kind: z.literal("highpass"), frequency: effectParam(HPF.frequency, "Cutoff in Hz: rumble below it is removed") })
+    .describe("High-pass filter: removes rumble and handling noise below `frequency`."),
+  z
+    .strictObject({
+      kind: z.literal("denoise"),
+      floor: effectParam(DENOISE.floor, "Noise floor in dB"),
+      reduction: effectParam(DENOISE.reduction, "Noise reduction in dB"),
+    })
+    .describe("FFT noise reduction of steady background noise (hiss, hum, room tone)."),
+  z
+    .strictObject({
+      kind: z.literal("compressor"),
+      threshold: effectParam(COMP.threshold, "Level in dB above which the sound is compressed"),
+      ratio: effectParam(COMP.ratio, "Compression ratio, e.g. 2.5 = 2.5:1"),
+      attack: effectParam(COMP.attack, "Attack in ms"),
+      release: effectParam(COMP.release, "Release in ms"),
+      makeup: effectParam(COMP.makeup, "Gain in dB added after compression"),
+    })
+    .describe("Compressor: evens out loud and quiet passages."),
+]);
+
+/** Sound of a media clip: {@link ClipAudioSchema} plus its audio effects (ADR 0031). */
+export const MediaClipAudioSchema = ClipAudioSchema.extend({
+  effects: z
+    .array(AudioEffectSchema)
+    .min(1)
+    .max(MAX_AUDIO_EFFECTS)
+    .optional()
+    .describe(
+      `Audio effects applied in order (at most ${MAX_AUDIO_EFFECTS}), e.g. the voice chain highpass, denoise, compressor. ` +
+        "Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
+    ),
 });
 
 /** Eases between two keys (ADR 0018): the value follows the leaving key's ease. */
@@ -134,6 +177,7 @@ const clipBase = {
 export const MediaClipSchema = z
   .strictObject({
     ...clipBase,
+    audio: MediaClipAudioSchema.optional(),
     type: z.literal("media"),
     asset: z.string().min(1).describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
     in: Seconds.describe("Source seconds of the first frame."),
@@ -568,6 +612,10 @@ export type ClipKey = NonNullable<ClipKeys["x"]>[number];
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */
 export type ClipAudio = z.infer<typeof ClipAudioSchema>;
+/** Sound settings of a media clip, audio effects included. */
+export type MediaClipAudio = z.infer<typeof MediaClipAudioSchema>;
+/** One audio effect of a media clip; see {@link AudioEffectSchema}. */
+export type AudioEffect = z.infer<typeof AudioEffectSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {

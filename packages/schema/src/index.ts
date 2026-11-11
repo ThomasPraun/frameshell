@@ -42,6 +42,8 @@ export {
   PaintedTurnSchema,
   TransformSchema,
   ClipAudioSchema,
+  MediaClipAudioSchema,
+  AudioEffectSchema,
   type Timeline,
   type Track,
   type ClipTrack,
@@ -67,6 +69,8 @@ export {
   type PaintedTurn,
   type Transform,
   type ClipAudio,
+  type MediaClipAudio,
+  type AudioEffect,
   isShotClip,
   parseTimeline,
   createTimeline,
@@ -112,6 +116,18 @@ export {
   parsePeopleFile,
 } from "./people.js";
 export { type PaintChange, paintStretches } from "./painted.js";
+export {
+  AUDIO_EFFECT_KINDS,
+  AUDIO_EFFECT_LIMITS,
+  MAX_AUDIO_EFFECTS,
+  VOICE_CHAIN,
+  type EffectParamLimit,
+  type NormalizedAudioEffect,
+  audioEffectsKey,
+  audioEffectsOf,
+  bakeRef,
+  normalizeAudioEffects,
+} from "./effects.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   SHOOT_SCHEMA_URL,

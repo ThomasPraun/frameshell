@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AnyClipSchema,
+  AudioEffectSchema,
   DirectorRulesSchema,
   ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
@@ -256,6 +257,16 @@ export const operationArgs = {
     speed: z.number().positive().optional().describe("`media` only: playback rate; the start stays, the end moves."),
     gain: z.number().optional().describe("Audio gain in dB."),
     muted: z.boolean().optional(),
+    audioEffects: z
+      .array(AudioEffectSchema)
+      .min(1)
+      .nullable()
+      .optional()
+      .describe(
+        "`media` only (ADR 0031): replaces the clip's audio effect list, applied in order; `null` clears it. Kinds: `highpass { frequency }` (Hz), " +
+          "`denoise { floor, reduction }` (dB), `compressor { threshold, ratio, attack, release, makeup }` (dB, ratio, ms, ms, dB); omitted numbers " +
+          "take the voice chain's. Shots are skipped with a warning.",
+      ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
     elements: z

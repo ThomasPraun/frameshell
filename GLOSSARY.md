@@ -86,6 +86,20 @@ _Avoid_: override, patch, element transform (a clip's `transform` places the who
 The preview state entered by double-clicking a generated clip, where handles move and scale the element under the cursor instead of the clip; Escape leaves it.
 _Avoid_: edit mode, isolation mode
 
+## Effects (ADR 0031)
+
+**Audio effect**:
+One step that processes a media clip's sound, in list order: high-pass, denoise or compressor.
+_Avoid_: filter, plugin, preset
+
+**Voice chain**:
+The audio effects that make a phone or laptop voice sound finished: high-pass at 85 Hz, light denoise, gentle 2.5:1 compression. Written into a clip as explicit entries, never as a name.
+_Avoid_: voice preset, voice polish, mastering
+
+**Bake**:
+An asset's sound processed once through one chain of audio effects and cached in `.frameshell/audio-fx/`; preview and export both play it. One bake serves every clip of that asset and chain.
+_Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry sound)
+
 ## Transitions and keyframes (ADR 0018)
 
 **Transition**:

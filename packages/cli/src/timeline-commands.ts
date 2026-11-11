@@ -14,7 +14,7 @@ import type {
   TimelineView,
   TrackSummary,
 } from "@frameshell/protocol";
-import { resolveSubtitleStyle } from "@frameshell/schema";
+import { VOICE_CHAIN, resolveSubtitleStyle } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -41,7 +41,11 @@ mutations print the new revision):
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
-           [--script-ref ref | --clear-script-ref]
+           [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
+                               --voice writes the voice chain as explicit audio effects (high-pass 85 Hz, denoise
+                               floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms release 140 ms
+                               makeup +2 dB); --audio-effects replaces the list, e.g.
+                               '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -188,6 +192,9 @@ export const TIMELINE_OPTIONS = {
   props: { type: "string" },
   elements: { type: "string" },
   "clear-elements": { type: "boolean" },
+  voice: { type: "boolean" },
+  "audio-effects": { type: "string" },
+  "clear-audio-effects": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -259,7 +266,24 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
-  "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
+  "clip set": [
+    "speed",
+    "gain",
+    "muted",
+    "unmuted",
+    "x",
+    "y",
+    "scale",
+    "opacity",
+    "props",
+    "elements",
+    "clear-elements",
+    "voice",
+    "audio-effects",
+    "clear-audio-effects",
+    "script-ref",
+    "clear-script-ref",
+  ],
   "transition set": ["at", "kind", "duration", "track"],
   "transition remove": ["at", "track"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
@@ -383,6 +407,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       // Reported below.
     }
     throw new UsageError(`--${flag}: expected a JSON object, e.g. '{"title":"Hola"}'.`);
+  };
+  const jsonList = (flag: string): unknown[] | undefined => {
+    const raw = str(flag);
+    if (raw === undefined) return undefined;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Reported below.
+    }
+    throw new UsageError(`--${flag}: expected a JSON array, e.g. '[{"kind":"highpass","frequency":85}]'.`);
   };
   const transform = () => {
     const t = { x: num("x"), y: num("y"), scale: num("scale"), opacity: num("opacity") };
@@ -520,11 +555,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("elements") !== undefined && values["clear-elements"] === true) {
         throw new UsageError("Pass --elements or --clear-elements, not both.");
       }
+      const effectFlags = [values["voice"] === true, str("audio-effects") !== undefined, values["clear-audio-effects"] === true].filter(Boolean);
+      if (effectFlags.length > 1) throw new UsageError("Pass one of --voice, --audio-effects or --clear-audio-effects.");
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+        audioEffects:
+          values["voice"] === true
+            ? VOICE_CHAIN.map((effect) => ({ ...effect }))
+            : values["clear-audio-effects"] === true
+              ? null
+              : jsonList("audio-effects"),
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
