@@ -12,6 +12,7 @@ import {
   hostFades,
   layerRect,
   placementAt,
+  shapeAt,
 } from "@frameshell/schema";
 import { type ExportSource, compileRender, executeRender } from "../src/index.js";
 import { tempDir } from "./helpers.js";
@@ -405,6 +406,57 @@ describe("export transitions and keys (real ffmpeg)", () => {
       for (const t of [0.4, 0.5, 0.55, 1.7, 1.8, 1.9]) {
         const weight = hostFades(tone).reduce((w, host) => w * fadeWeight(host, host.start, host.end, t, true), 1);
         expect(Math.abs(amplitude(samples, t, 440) / full - weight), `440 Hz at ${t}`).toBeLessThan(0.05);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "wipes and pushes on the bottom track where shapeAt puts the edge, the incoming clip's missing handle held (ADR 0030)",
+    async () => {
+      const flat = async (name: string, colour: string): Promise<ExportSource> => {
+        const path = join(dir, name);
+        await run(ffmpeg, [
+          ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=${colour}:s=64x64:r=30:d=3`],
+          ...["-f", "lavfi", "-i", "sine=f=440:r=48000:d=3"],
+          ...["-c:v", "libx264", "-crf", "4", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+        ]);
+        return { path, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: true, duration: 3 };
+      };
+      const sources = new Map([
+        ["assets/dark.mp4", await flat("dark.mp4", "0x303030")],
+        ["assets/bright.mp4", await flat("bright.mp4", "0xd0d0d0")],
+      ]);
+      for (const kind of ["wipe", "push"] as const) {
+        // bright starts at its source's first frame: its push head holds that frame.
+        const timeline = timelineOf([
+          {
+            id: "v1",
+            kind: "video",
+            clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape: { kind, direction: "left" } })],
+          },
+        ]);
+        const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 });
+        const output = join(dir, `shaped-${kind}.mp4`);
+        await executeRender(plan, { ffmpeg, workDir: join(dir, `work-${kind}`), output });
+        const shown = await frames(output);
+        expect(shown).toHaveLength(60);
+        // Frames 27 and 30 of the 12-frame dissolve centered on frame 30: the incoming picture from column 64 * (1 - p).
+        for (const frame of [27, 30, 33]) {
+          const { incoming } = shapeAt({ kind: "wipe" }, dissolveProgress(1, 0.2, frame / 30));
+          const edge = Math.round(64 * incoming.clip![0]);
+          const row = shown[frame]!.subarray(32 * 64, 33 * 64);
+          for (let x = 0; x < 64; x++) {
+            if (Math.abs(x + 0.5 - edge) < 3) continue;
+            expect(row[x]! > 128, `${kind} frame ${frame} column ${x} (edge ${edge}): ${row[x]}`).toBe(x >= edge);
+          }
+        }
+        expect(shown[20]![32 * 64 + 60]!, `${kind} before`).toBeLessThan(100);
+        expect(shown[40]![32 * 64 + 4]!, `${kind} after`).toBeGreaterThan(150);
+        // bright's sound reaches before its source's first sample: the mix pads it with silence (`adelay`).
+        const samples = await audioSamples(output);
+        expect(amplitude(samples, 0.5, 440)).toBeGreaterThan(0.2);
+        expect(amplitude(samples, 1.5, 440)).toBeGreaterThan(0.2);
       }
     },
     MEDIA_TIMEOUT,

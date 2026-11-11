@@ -25,6 +25,10 @@
       "types": "./dist/transitions.d.ts",
       "default": "./dist/transitions.js"
     },
+    "./effects": {
+      "types": "./dist/effects.d.ts",
+      "default": "./dist/effects.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

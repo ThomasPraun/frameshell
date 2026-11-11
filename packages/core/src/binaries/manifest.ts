@@ -883,6 +883,28 @@ export const PHOTO_SEGMENTATION_MODELS: readonly ManagedModel[] = [
   },
 ];
 
+/** Model id of the video subject matte (`matte.prepare`): MediaPipe's selfie segmenter, general 256×256 model. */
+export const VIDEO_MATTE_MODEL = "mediapipe-selfie";
+
+const MEDIAPIPE_SELFIE_REVISION = "be49485c8e027524be38591817fc5cd31bd9d00e";
+
+/**
+ * MediaPipe selfie segmenter (Apache-2.0 per Google's model card) as converted to ONNX by onnx-community,
+ * fp32, pinned by Hugging Face revision (ADR 0032). No mirror.
+ */
+export const VIDEO_MATTE_MODELS: readonly ManagedModel[] = [
+  {
+    id: VIDEO_MATTE_MODEL,
+    version: MEDIAPIPE_SELFIE_REVISION.slice(0, 12),
+    origin: "https://huggingface.co/onnx-community/mediapipe_selfie_segmentation",
+    license: "Apache-2.0",
+    urls: [`https://huggingface.co/onnx-community/mediapipe_selfie_segmentation/resolve/${MEDIAPIPE_SELFIE_REVISION}/onnx/model.onnx`],
+    sha256: "3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad",
+    size: 462_352,
+    file: "mediapipe_selfie_segmentation.onnx",
+  },
+];
+
 /** Every package the daemon manages. */
 export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
   FFMPEG_PACKAGE,
@@ -894,4 +916,4 @@ export const DEFAULT_PACKAGES: readonly BinaryPackage[] = [
 ];
 
 /** Every model the daemon manages. */
-export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...LIVE_WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS, ...PHOTO_SEGMENTATION_MODELS];
+export const DEFAULT_MODELS: readonly ManagedModel[] = [...WHISPER_MODELS, ...LIVE_WHISPER_MODELS, ...DIARIZATION_MODELS, ...FACE_DETECTION_MODELS, ...FACE_RECOGNITION_MODELS, ...PHOTO_SEGMENTATION_MODELS, ...VIDEO_MATTE_MODELS];

@@ -1,6 +1,17 @@
-// Keys and transition ramps (ADR 0018) as ffmpeg expressions and filters: the twins of `keyedValueAt`, `placementAt`,
-// `gainAt`, `fadeWeight` and `dissolveWeights` in `@frameshell/schema`, pinned by test/export-animation.test.ts.
-import { type Clip, type ClipKey, type ClipKeys, type NestHost, nestingOf, placementAt, placementOf } from "@frameshell/schema";
+// Keys, transition ramps (ADR 0018) and transition shapes (ADR 0030) as ffmpeg expressions and filters: the twins of
+// `keyedValueAt`, `placementAt`, `gainAt`, `fadeWeight`, `dissolveWeights` and `shapeAt` in `@frameshell/schema`,
+// pinned by test/export-animation.test.ts.
+import {
+  type Clip,
+  type ClipKey,
+  type ClipKeys,
+  type NestHost,
+  type TransitionShape,
+  nestingOf,
+  placementAt,
+  placementOf,
+  shapeStep,
+} from "@frameshell/schema";
 
 /** Stable decimal text for args: at most 6 decimals, no trailing zeros. */
 export function num(value: number): string {
@@ -165,3 +176,44 @@ export function gainVolume(decibels: string, factor?: string): string {
 
 /** Output samples per audio frame under keyed gain: `volume` evaluates once per frame, so 64 samples keep steps under 1.4 ms. */
 export const GAIN_FRAME_SAMPLES = 64;
+
+/**
+ * ffmpeg expression of `shapeProgress(dissolveProgress(...))` at timeline second `time` (an expression) for a
+ * dissolve of `half` seconds each side of timeline second `cut`.
+ */
+export function shapeProgressExpression(cut: number, half: number, time: string): string {
+  const f = `max(0,min(1,(${time}-${num(cut - half)})/${num(2 * half)}))`;
+  return `${f}*${f}*(3-2*${f})`;
+}
+
+/**
+ * Pixel offsets in a `width` x `height` frame of one side of a `push` at shape progress `p` (an expression): `shapeAt`'s
+ * `dx` and `dy` times the frame size, rounded. Null on an axis the push does not move along.
+ */
+export function shapeOffsets(shape: TransitionShape, side: "incoming" | "outgoing", p: string, width: number, height: number): { x: string | null; y: string | null } {
+  const [ux, uy] = shapeStep(shape);
+  const travelled = side === "incoming" ? `(${p}-1)` : `(${p})`;
+  const axis = (step: number, size: number) => (step === 0 ? null : `floor(${num(step * size)}*${travelled}+0.5)`);
+  return { x: axis(ux, width), y: axis(uy, height) };
+}
+
+/**
+ * `geq` filter keeping a `wipe`'s incoming layer (RGBA, its top-left corner at `left`, `top` in a `width` x `height`
+ * frame: numbers or expressions) only where `shapeAt`'s clip rectangle holds the pixel centre, at shape progress `p`
+ * (an expression of the frame time `T`); the alpha it has there is kept. About 34 ms per 1080p frame (ADR 0030).
+ */
+export function wipeAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number): string {
+  const [ux, uy] = shapeStep(shape);
+  const x = `X+${left}+0.5`;
+  const y = `Y+${top}+0.5`;
+  const keep = "alpha(X,Y)";
+  const alpha =
+    ux < 0
+      ? `if(lt(${x},${num(width)}*(1-(${p}))),0,${keep})`
+      : ux > 0
+        ? `if(lt(${x},${num(width)}*(${p})),${keep},0)`
+        : uy < 0
+          ? `if(lt(${y},${num(height)}*(1-(${p}))),0,${keep})`
+          : `if(lt(${y},${num(height)}*(${p})),${keep},0)`;
+  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${alpha}'`;
+}

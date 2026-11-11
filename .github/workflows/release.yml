@@ -80,6 +80,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           deb=$(ls apps/desktop/release/*.deb)
+          # The runner image's package index can be stale: refresh it so the .deb's dependencies resolve.
+          sudo apt-get update
           sudo apt-get install -y "$PWD/$deb"
           # Debian writes a semver prerelease dash as `~` (0.0.0-ci.1 -> 0.0.0~ci.1).
           version=$(frameshell --version) && echo "frameshell --version: $version"

@@ -67,6 +67,36 @@ describe("runDoctor", () => {
     expect(report.problems).toEqual([]);
   });
 
+  it("reports the encoder renders use, cached per machine, and a speed profile for the project format", async () => {
+    const system = systemFfmpeg();
+    const binaries = setup({ binaries: { ffmpeg: system.ffmpeg } });
+    const first = await runDoctor(binaries, { exec, format: { resolution: { width: 3840, height: 2160 }, fps: 30 } });
+    expect(first.encoders).toMatchObject({ picked: "h264_videotoolbox", cached: false });
+    expect(first.encoders?.candidates.map((c) => [c.name, c.compiled, c.works])).toEqual([
+      ["h264_videotoolbox", true, true],
+      ["h264_nvenc", false, false],
+      ["libx264", true, true],
+    ]);
+    expect(first.profile).toMatchObject({ resolution: { width: 3840, height: 2160 }, fps: 30, masterMbPerMinute: 467 });
+    expect(readFileSync(join(binaries.dataDir, "encoders.json"), "utf8")).toContain("h264_videotoolbox");
+    expect((await runDoctor(binaries, { exec })).encoders?.cached).toBe(true);
+    expect((await runDoctor(binaries, { exec, reprobe: true })).encoders?.cached).toBe(false);
+  });
+
+  it("has no encoder answer when ffmpeg is not installed, but still a profile", async () => {
+    const report = await runDoctor(setup(), { exec });
+    expect(report.encoders).toBeNull();
+    expect(report.profile).toMatchObject({ resolution: { width: 1920, height: 1080 }, fps: 30 });
+  });
+
+  it("flags a machine where no H.264 encoder works", async () => {
+    const system = systemFfmpeg();
+    const failing: Exec = async (file, args) => (args.includes("-c:v") ? { code: 1, stdout: "", stderr: "nope" } : exec(file, args));
+    const report = await runDoctor(setup({ binaries: { ffmpeg: system.ffmpeg } }), { exec: failing });
+    expect(report.encoders?.picked).toBeNull();
+    expect(report.problems).toContainEqual(expect.stringMatching(/No H\.264 encoder/));
+  });
+
   it("applies the enclosing project's overrides", async () => {
     const system = systemFfmpeg();
     const report = await runDoctor(setup(), { exec, project: { dir: system.dir, binaries: { ffmpeg: `ffmpeg${exe}` } } });

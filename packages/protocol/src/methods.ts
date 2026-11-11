@@ -1,6 +1,12 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { AgentLabelSchema } from "./agents.js";
+import {
+  CLEANUP_BREATH_DEFAULT_S,
+  CLEANUP_MIN_CONFIDENCE_DEFAULT,
+  CLEANUP_PAUSES_DEFAULT_S,
+  CleanupResultSchema,
+} from "./cleanup.js";
 import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
   ProposalOutcomeSchema,
@@ -21,11 +27,15 @@ import {
   InboxTakeResultSchema,
   TargetChangedSchema,
 } from "./targets.js";
+import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { AudioEffectSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
+  MarkerListResultSchema,
+  CaptionsSetResultSchema,
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
+  ClipReframeResultSchema,
   MulticamFacesResultSchema,
   MulticamGalleryResultSchema,
   MulticamTurnsResultSchema,
@@ -36,6 +46,7 @@ import {
   TimelineProblemSchema,
   TimelineRejectionSchema,
   TimelineViewSchema,
+  TrackDuckResultSchema,
   TrackSummarySchema,
   TxIdSchema,
   operationArgs,
@@ -54,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 71;
+export const PROTOCOL_VERSION = 84;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -152,6 +163,46 @@ const CodecReportSchema = z.object({
     .describe("Hardware encoders only: a one-frame test encode succeeded on this machine. Null when not tested."),
 });
 
+const EncoderNameSchema = z
+  .enum(["h264_videotoolbox", "h264_nvenc", "libx264"])
+  .describe("H.264 encoder, in the order tried: VideoToolbox (macOS), NVENC (NVIDIA), x264 (software, always the last resort).");
+
+const QualityTierSchema = z
+  .enum(["master", "preview", "draft", "final"])
+  .describe(
+    "Encode quality tier. `master`: intermediates kept for later passes (x264 CRF 16 medium). `preview`: throwaway " +
+      "looks (CRF 26 veryfast). `draft`: review rounds (30 fps at most, CRF 22 veryfast). `final`: the delivery " +
+      "(CRF 16 slow, bt709 tags, faststart). Hardware encoders use their own equivalent settings.",
+  );
+
+const EncoderReportSchema = z.object({
+  picked: EncoderNameSchema.nullable().describe("The encoder renders use: the first candidate that encoded; null when none did."),
+  cached: z.boolean().describe("The answer came from the per-machine cache (`encoders.json` in the data dir) instead of fresh test encodes."),
+  probedAt: z.string().describe("ISO timestamp of the test encodes."),
+  candidates: z
+    .array(
+      z.object({
+        name: EncoderNameSchema,
+        label: z.string(),
+        compiled: z.boolean().describe("Listed by `ffmpeg -encoders`."),
+        works: z.boolean().describe("A 0.2 s test encode of lavfi colour succeeded on this machine."),
+        ms: z.number().nullable().describe("Wall time of the test encode; null when not run (not compiled in)."),
+      }),
+    )
+    .describe("Every candidate in preference order."),
+});
+
+const MachineProfileSchema = z.object({
+  class: z.enum(["fast", "medium", "slow"]).describe("Machine speed class from CPU cores, memory and whether a hardware encoder works."),
+  cpuCores: z.int(),
+  memoryGb: z.number(),
+  proxyShortSide: z.int().describe("Recommended short side in px for preview proxies on this machine."),
+  draftShortSide: z.int().describe("Recommended short side in px for draft renders (review rounds); pick a preset of about that size."),
+  resolution: z.object({ width: z.int(), height: z.int() }).describe("Project resolution the disk estimate is for."),
+  fps: z.number().describe("Project frame rate the disk estimate is for."),
+  masterMbPerMinute: z.int().describe("Disk a `master` intermediate takes per minute of video at the project resolution and fps (upper bound, megabytes)."),
+});
+
 /**
  * Whether a project's declared plugins may load (SPEC §6.6). `not-required`:
  * no plugins declared. `unknown`: never decided for this exact plugin list.
@@ -170,24 +221,26 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "shoot", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `audio-fx`: baked " +
+        "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
-        "`.frameshell/shoot/`. `temp`: leftover of an interrupted job or transcription.",
+        "`.frameshell/shoot/`. `matte`: subject matte in `.frameshell/cache/mattes/` of content no asset has now (or of " +
+        "another model, fps or matte version). `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
 
 const GcSkipSchema = z.object({
   area: z
-    .enum(["media", "clips", "audio", "temp"])
-    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, or job temp files."),
+    .enum(["media", "clips", "audio", "audio-fx", "temp"])
+    .describe("What was left alone: derived media, the clip render cache, transcription WAVs, baked audio effects, or job temp files."),
   reason: z.string(),
 });
 
@@ -227,14 +280,16 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
+        "`audio-fx`: bake one asset through a clip's audio effects into `.frameshell/audio-fx/` (ADR 0031). " +
         "`render`: export a timeline to a video file (`render` method). " +
         "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
         "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
         "`people`: find, follow and embed the faces of video assets (`people.scan`). " +
-        "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024).",
+        "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
+        "`matte`: compute the subject matte of one video asset (`matte.prepare`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -242,27 +297,29 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated).",
+        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`.",
     ),
   output: z
     .string()
     .nullable()
     .describe(
       "`render`: absolute path of the file being written. `clip`: absolute cache entry without extension, " +
-        "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). Null for `ingest`.",
+        "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). `audio-fx`: absolute bake " +
+        "file `.frameshell/audio-fx/<key>.pcm`. Null for `ingest`.",
     ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people", "transcribe"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
-        "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
+        "order. `render`: clips (waits for generated clips to finish rendering into the cache), audio-fx (bakes clip audio " +
+        "effects not baked yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe.",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -273,6 +330,21 @@ const JobSchema = z.object({
   createdAt: z.string().describe("ISO 8601 time the job was queued."),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
+});
+
+/** Baked sound of one asset through one audio effect chain (ADR 0031). */
+const AudioBakeSchema = z.object({
+  asset: z.string().describe("Project-relative asset baked."),
+  effects: z.array(AudioEffectSchema).describe("The chain, every parameter given (`normalizeAudioEffects`)."),
+  clips: z.array(z.string()).describe("Clips playing this bake (flattened ids `<nested clip>/<clip>` inside nested timelines)."),
+  state: z
+    .enum(["ready", "queued", "baking", "failed"])
+    .describe("`ready`: `file` holds the bake. `queued` / `baking`: an `audio-fx` job is on it (`job`). `failed`: see `error`."),
+  file: z.string().nullable().describe("Project-relative raw s16le PCM on the sidecar clock, e.g. `.frameshell/audio-fx/<key>.pcm`; null unless ready."),
+  sampleRate: z.int().describe("Samples per second of `file`, the sidecar's."),
+  channels: z.int().describe("Interleaved channels of `file`, the sidecar's."),
+  job: z.string().nullable().describe("Queued or running `audio-fx` job; null otherwise."),
+  error: z.string().nullable().describe("Why the bake failed; null otherwise."),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */
@@ -323,6 +395,13 @@ const ProbeSchema = z.object({
       fps: z.number().nullable().describe("Average frame rate of the source; null for still images."),
       vfr: z.boolean().describe("Variable frame rate source (phones, OBS); the proxy is CFR at project fps anyway."),
       still: z.boolean().describe("Single image, not a moving stream: no proxy is built."),
+      alpha: z
+        .boolean()
+        .optional()
+        .describe(
+          "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
+            "on an upper track to fill another format's frame (ADR 0027); the base track still crops it. Absent in probes cached before it existed.",
+        ),
     })
     .nullable()
     .describe("First video stream; null for audio-only files."),
@@ -432,14 +511,90 @@ const FrameFormatSchema = z.enum(["png", "jpg", "webp"]);
 /** `frame` quality when the caller gives none: high, visually lossless for most pictures. */
 export const DEFAULT_FRAME_QUALITY = 92;
 
+/**
+ * Longest cover text, characters. The wire check counts UTF-16 units, so it is never looser than the service's
+ * (code points of the upper-cased text, which stays authoritative: `ExportService` in core).
+ */
+export const COVER_MAX_CHARS = 24;
+
+/** What the cover word and its frame are chosen by; shared by `cover` and the `cover` option of `render`. */
+const CoverChoiceShape = {
+  text: z
+    .string()
+    .min(1)
+    .max(COVER_MAX_CHARS)
+    .optional()
+    .describe(
+      `The word drawn big over the frame (up to ${COVER_MAX_CHARS} characters; shown upper-case, one line, as large as the width allows). ` +
+        "Absent: the frame alone. Without `at`, the frame is the one where this word is first spoken.",
+    ),
+  at: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Timeline seconds of the frame to use. Default: where `text` is first spoken (in the transcripts of the video and audio tracks), " +
+        "else the first frame showing a whole picture (after the first clip's fade in).",
+    ),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .describe("Word colour, `#rrggbb`; the outline turns black or white to contrast with it. Default yellow `#ffd426`."),
+};
+
 const PresetParam = z
   .string()
   .min(1)
   .optional()
   .describe(
     "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
-      "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`.",
+      "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`. A preset given here must have the " +
+      "aspect of every format rendered and sets the output size; a default preset only gives codec, bitrate and loudness " +
+      "when its aspect differs (ADR 0027).",
   );
+
+/** Quality tiers a `render` can ask for; the other tiers (`master`, `preview`) are for intermediates. */
+const RenderQualityParam = QualityTierSchema.extract(["draft", "final"])
+  .optional()
+  .describe(
+    "Quality tier. `draft`: for review rounds, at most 30 fps, x264 CRF 22 veryfast (or the machine's hardware " +
+      "encoder), much faster than a final. `final`: CRF 16 slow, bt709 tags, faststart, the delivery. Both use the " +
+      "encoder `doctor` reports (first of VideoToolbox, NVENC, x264 that works on this machine) and replace the " +
+      "preset's own `crf`/`bitrateKbps`; only H.264 presets take a tier (others render as the preset says, with a " +
+      "warning). Default: the preset as written (x264, its own CRF).",
+  );
+
+/** One format of a project as `format.*` report it (ADR 0027). */
+const FormatInfoSchema = z.object({
+  id: z.string().describe("Format id, e.g. `16x9`, `9x16`, `web-1600x900`."),
+  width: z.int(),
+  height: z.int(),
+  primary: z.boolean().describe("The first format: equals `resolution`, rendered when `render` gets no `formats`."),
+  builtin: z.boolean().describe("A built-in id (`16x9`, `1x1`, `4x5`, `9x16`) with its fixed canvas."),
+});
+
+/** What a `format.add` or `format.remove` changed, and how to undo it. */
+const FormatChangeSchema = z.object({
+  dir: z.string().describe("Project root."),
+  formats: z.array(FormatInfoSchema).describe("The project's formats after the change, primary first."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`."),
+  undo: z
+    .object({ method: z.enum(["format.add", "format.remove"]), params: z.record(z.string(), z.unknown()) })
+    .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
+});
+
+/** One file `render` writes: the export of one format. */
+const RenderOutputSchema = z.object({
+  format: z.string().describe("Format id rendered, e.g. `9x16`."),
+  job: JobSchema,
+  output: z.string().describe("Absolute path the file is written to."),
+  preset: z.string().describe("Preset id used: its codec, bitrate and loudness, and its size when it has the format's aspect."),
+  width: z.int(),
+  height: z.int(),
+  segments: z.int().describe("Video segments encoded in parallel."),
+  warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
+});
 
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
 const VerifiedWordSchema = z.object({
@@ -646,7 +801,10 @@ export const methods = {
       "Diagnose native binaries: which ffmpeg/ffprobe will be used (managed download or a `binaries` override " +
       "from the project enclosing `cwd` or the global config), their versions, and which encoders and decoders " +
       "ffmpeg provides (x264, libvpx VP9 encode and decode, VideoToolbox, NVENC, VAAPI; hardware ones are " +
-      "test-encoded). `problems` lists what blocks rendering, each with a fix. With `install: true`, missing " +
+      "test-encoded). `encoders` says which H.264 encoder renders use (VideoToolbox, NVENC or x264: the first " +
+      "that encodes 0.2 s of test video here; probed once per machine and cached), and `profile` the machine's " +
+      "speed class with the proxy and draft sizes it suits and the disk a master intermediate takes. " +
+      "`problems` lists what blocks rendering, each with a fix. With `install: true`, missing " +
       "managed binaries are downloaded and checksum-verified first (tens of MB, may take minutes).",
     params: z.strictObject({
       cwd: AbsolutePath.describe("Absolute directory whose enclosing project's `binaries` overrides apply."),
@@ -654,6 +812,10 @@ export const methods = {
         .boolean()
         .default(false)
         .describe("Download missing managed binaries before diagnosing. Default false: report only."),
+      reprobe: z
+        .boolean()
+        .default(false)
+        .describe("Run the encoder test encodes again instead of using the cached answer (after a driver or GPU change)."),
     }),
     result: z.object({
       platform: z.string().describe("`<os>-<arch>` key used to pick pinned builds, e.g. `darwin-arm64`."),
@@ -662,6 +824,8 @@ export const methods = {
       codecs: z
         .array(CodecReportSchema)
         .describe("Empty when ffmpeg is not installed or not runnable."),
+      encoders: EncoderReportSchema.nullable().describe("H.264 encoder choice; null when ffmpeg is not installed or not runnable."),
+      profile: MachineProfileSchema.describe("Speed class and recommended sizes of this machine."),
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
       skill: CoreSkillStateSchema.nullable().describe("The project's copy of the agent skill; null when `cwd` is in no project."),
     }),
@@ -787,6 +951,54 @@ export const methods = {
         .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
     }),
   },
+  "format.list": {
+    description:
+      "List the delivery formats of the enclosing project (ADR 0027), primary first: one edit renders at each size. " +
+      "A project without `formats` in `frameshell.json` has one, its `resolution`. `builtins` lists the ids `format.add` " +
+      "takes without a size.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      formats: z.array(FormatInfoSchema).describe("Primary first."),
+      builtins: z.array(FormatInfoSchema).describe("Built-in formats `16x9`, `1x1`, `4x5`, `9x16` with their canvases."),
+    }),
+  },
+  "format.add": {
+    mutating: true,
+    description:
+      "Add a delivery format to the enclosing project's `formats` in `frameshell.json` (ADR 0027), e.g. `{ id: \"9x16\" }`, " +
+      "then `render` with `formats: [\"16x9\", \"9x16\"]` exports every one from the same edit. Built-in ids (`16x9` " +
+      "1920x1080, `1x1` 1080x1080, `4x5` 1080x1350, `9x16` 1080x1920) take no size; a custom id needs `width` and `height` " +
+      "(even), e.g. `{ id: \"web-1600x900\", width: 1600, height: 900 }`. In a format other than the primary, media clips " +
+      "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
+      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl`; `undo` " +
+      "names the call that reverses it (`revert` takes timeline operations only). It applies at once: while review mode is " +
+      "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
+      "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      id: FormatIdSchema,
+      width: z.int().positive().optional().describe("Frame width in pixels, even. Only for a custom id; a built-in id has its own."),
+      height: z.int().positive().optional().describe("Frame height in pixels, even. Only for a custom id."),
+      index: z
+        .int()
+        .min(1)
+        .optional()
+        .describe("Position in the list, 1 = right after the primary (which always stays first). Default: last."),
+    }),
+    result: FormatChangeSchema,
+  },
+  "format.remove": {
+    mutating: true,
+    description:
+      "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
+      "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
+      "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
+      "`undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
+      "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
+    params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
+    result: FormatChangeSchema,
+  },
   render: {
     mutating: true,
     description:
@@ -798,20 +1010,47 @@ export const methods = {
       "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black), multicam " +
       "program tracks (every shot's angles in their tiles) and the sound of every video, audio and program track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
       "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
-      "clips, a multicam group missing, a program track nested under a transformed clip), TimelineNotFound, AssetNotFound.",
+      "clips, a multicam group missing, a program track nested under a transformed clip), TimelineNotFound, AssetNotFound. " +
+      "Formats (ADR 0027): `formats` renders the edit once per listed format of the project (`format.list`), one job each, " +
+      "the file of each named `<name>-<format>.<container>`; `renders` lists them, and the top-level fields describe the first. " +
+      "In a format other than the primary, untransformed media fills the frame (crop around the centre), generated clips " +
+      "render at that size first, and vertical captions are 1.3x larger. A `preset` whose aspect differs from a format " +
+      "rendered fails with InvalidOperation; FormatNotFound names the project's formats.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       preset: PresetParam,
+      formats: z
+        .array(FormatIdSchema)
+        .min(1)
+        .optional()
+        .describe(
+          "Format ids to render, e.g. `[\"16x9\", \"9x16\"]`; each must be in `format.list`. Each file gets the format id " +
+            "as suffix. Default: the primary format only, file named as before.",
+        ),
+      quality: RenderQualityParam,
       out: AbsolutePath.optional().describe(
         "Absolute output file, e.g. `/home/ana/videos/launch/exports/launch.mp4`; its folder is created. " +
-          "Default `<project>/exports/<timeline>-<preset>.<container>`. An existing file is replaced when the job finishes.",
+          "Default `<project>/exports/<timeline>-<preset>.<container>`. With `formats`, `-<format>` is added before the " +
+          "extension of each file. An existing file is replaced when the job finishes.",
       ),
+      cover: z
+        .strictObject(CoverChoiceShape)
+        .optional()
+        .describe(
+          "Make frame 0 a finished composition (platforms show it as the thumbnail): the frame chosen like `cover` does, with " +
+            "its word over it, replaces the first frame only; no subtitles on it, nothing else changes. Absent: frame 0 is the " +
+            "timeline's own, and `warnings` says when that is black. Needs the preset's frame rate to equal the project's.",
+        ),
     }),
     result: z.object({
+      format: z.string().describe("Format id of the first render, which the fields below describe."),
+      renders: z.array(RenderOutputSchema).describe("One per format rendered, in the order asked; the first is the one above."),
       job: JobSchema,
       output: z.string().describe("Absolute path the file is written to."),
       preset: z.string().describe("Preset id used."),
+      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written."),
+      encoder: z.string().describe("ffmpeg video encoder of the segments, e.g. `libx264`, `h264_videotoolbox`."),
       timeline: z.string(),
       duration: z.number().describe("Seconds rendered (timeline duration)."),
       width: z.int(),
@@ -819,22 +1058,27 @@ export const methods = {
       fps: z.string().describe("Output frame rate as a rational, e.g. `30/1` or `30000/1001`."),
       loudness: z.number().describe("Integrated loudness target, LUFS."),
       segments: z.int().describe("Video segments encoded in parallel."),
-      warnings: z.array(z.string()).describe("Timeline content this export does not render; empty when none."),
+      warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
     }),
   },
   frame: {
     description:
       "Capture the composited frame showing at timeline time `at` as a PNG, JPEG or WebP image, rendered by the export " +
       "compiler (single-frame plan), so it matches `render` and works with the app closed. This is how an image project " +
-      "(ADR 0017) is exported: `at: 0`. Size: the preset's when `preset` is given, else the project resolution. Fails " +
-      "with InvalidOperation (`at` outside the timeline; data.valid has the range), ExportUnsupported, PresetNotFound, " +
-      "TimelineNotFound.",
+      "(ADR 0017) is exported: `at: 0`. `projectFormat` captures the frame as that format of the project lays it out " +
+      "(ADR 0027), e.g. `9x16`. Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
+      "format's (default: the primary, i.e. the project resolution). Fails with InvalidOperation (`at` outside the " +
+      "timeline, data.valid has the range; a preset of another aspect), ExportUnsupported, PresetNotFound, " +
+      "FormatNotFound, TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`; the frame whose time span holds it is captured."),
       out: AbsolutePath.describe("Absolute image path to write, e.g. `/tmp/frame.png`; its folder is created."),
-      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: the format's size."),
+      projectFormat: FormatIdSchema.optional().describe(
+        "Format of the project to capture in (`format.list`), e.g. `9x16`. Default: the primary format. Not the image type: that is `format`.",
+      ),
       format: FrameFormatSchema.optional().describe(
         "Image format. Default: from the extension of `out` (`.jpg`/`.jpeg` JPEG, `.webp` WebP), else `png`.",
       ),
@@ -854,8 +1098,62 @@ export const methods = {
       frame: z.int().describe("Timeline frame index captured (0-based, project fps)."),
       at: z.number().describe("Start time of that frame, timeline seconds."),
       clip: z.string().nullable().describe("Clip showing on the first video track; null in a gap (black frame)."),
+      projectFormat: z.string().describe("Format of the project the frame was laid out in."),
       width: z.int(),
       height: z.int(),
+    }),
+  },
+  cover: {
+    description:
+      "Write a cover image: a frame of the timeline with one big word over it, rendered by the export compiler (as `frame` " +
+      "and `render` do), checked readable at thumbnail size (180 px wide: the capitals must stay 12 px tall or more). With " +
+      "`text` and no `at` the frame is where that word is first spoken; with neither, the first whole picture (after a fade in). The word is " +
+      "upper-case in the subtitle face, centered, outlined, as large as the width allows; no subtitles are drawn on a " +
+      "cover. Size: the preset's when `preset` is given, else the project resolution. `readability.readable` false " +
+      "means the word is too long to read in a grid: shorten it. The same frame can open the exported video: " +
+      "`render` with `cover`. Fails with InvalidOperation (`at` outside the timeline, text with nothing to draw), " +
+      "ExportUnsupported, PresetNotFound, TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      ...CoverChoiceShape,
+      out: AbsolutePath.optional().describe(
+        "Absolute image path to write, e.g. `/home/ana/videos/launch/exports/cover.png`; its folder is created. " +
+          "Default `<project>/exports/<timeline>-cover.png`.",
+      ),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      format: FrameFormatSchema.optional().describe("Image format. Default: from the extension of `out`, else `png`."),
+      quality: z
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      path: z.string().describe("Absolute image path written."),
+      format: FrameFormatSchema.describe("Format written."),
+      timeline: z.string(),
+      frame: z.int().describe("Timeline frame index used (0-based, project fps)."),
+      at: z.number().describe("Start time of that frame, timeline seconds."),
+      source: z
+        .enum(["at", "word", "default"])
+        .describe("How the frame was chosen: `at` given, `word` where `text` is first spoken, `default` the first picture."),
+      text: z.string().nullable().describe("The word as drawn (upper-case); null when the cover has none."),
+      readability: z
+        .object({
+          thumbnailWidth: z.int().describe("Width the cover is judged at, px."),
+          capHeight: z.number().describe("Height of a capital letter at that width, px."),
+          minCapHeight: z.number().describe("Smallest capital height that reads, px."),
+          readable: z.boolean(),
+        })
+        .nullable()
+        .describe("Thumbnail check of the word; null when the cover has no word."),
+      width: z.int(),
+      height: z.int(),
+      warnings: z.array(z.string()).describe("Things to fix: the word is not spoken anywhere, or too small to read in a grid; empty when none."),
     }),
   },
   "inspect.point": {
@@ -900,7 +1198,9 @@ export const methods = {
       "waveform, thumbnails). Returns at once; follow progress with `job.list`, `status`, or the `job.progress` and " +
       "`asset.changed` events (`events.subscribe`). Files already under " +
       "`assets/` are not copied. A name clash with different content gets a `-2`, `-3`… suffix. Unchanged content " +
-      "reuses cached outputs (job `cached: true`). Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
+      "reuses cached outputs (job `cached: true`). Material from an outside source (a stock site, a sound library, a font) " +
+      "needs its provenance: pass `sourceUrl`, `licence`, `author` (and `title`) and each file is recorded in `credits.json` with its " +
+      "content hash (ADR 0026); `credits.check` fails on placed assets without it. Give one source per call. Fails with ProjectNotFound, or AssetNotFound when a source is not a file.",
     params: z.strictObject({
       cwd: CwdParam,
       files: z
@@ -911,6 +1211,7 @@ export const methods = {
         .enum(["copy", "link"])
         .default("copy")
         .describe("`copy` (default) duplicates the file. `link` hard-links it, or symlinks across volumes: no copy, but the source must stay."),
+      ...ProvenanceParams,
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -920,6 +1221,7 @@ export const methods = {
           asset: z.string().describe("Project-relative asset path, e.g. `assets/raw-01.mp4`."),
           copied: z.boolean().describe("False when the file already was in `assets/` (as-is or with identical content)."),
           job: JobSchema,
+          provenance: z.boolean().describe("True when an entry for the file was written to `credits.json` (provenance params were given)."),
         }),
       ),
     }),
@@ -934,12 +1236,44 @@ export const methods = {
       assets: z.array(AssetSchema).describe("Sorted by path."),
     }),
   },
+  "credits.set": {
+    mutating: true,
+    description:
+      "Record where an asset already in `assets/` came from (ADR 0026): source URL, licence, author, title, an optional credit line. " +
+      "Written to `credits.json` with the file's current content hash. Fields given replace the entry's; fields left out keep their value " +
+      "while the content is unchanged, and start over when the file changed. Use it for files that were not imported with provenance, and " +
+      "`licence: \"own\"` for the person's own footage. Example: `{ asset: \"assets/rain.ogg\", licence: \"CC-BY-4.0\", author: \"Ana Pérez\", " +
+      "sourceUrl: \"https://openverse.org/audio/9f2c\" }`. Fails with AssetNotFound (no such file under `assets/`), InvalidOperation " +
+      "(`asset` outside `assets/`), InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Asset path: project-relative (`assets/rain.ogg`), absolute, or relative to `cwd`."),
+      ...ProvenanceParams,
+    }),
+    result: z.object({ dir: z.string().describe("Project root."), entry: CreditEntrySchema }),
+  },
+  "credits.check": {
+    description:
+      "Judge the provenance of every asset the project's timelines place (clips, multicam angles and mics) against `credits.json`, " +
+      "and build the credit text for the video description. `ok` is false when any placed asset has no entry, no licence, a licence that " +
+      "needs credit without an author or credit line, content that changed since it was recorded, or is missing: unverified never passes. " +
+      "CC0, public domain and `own` need no credit. Run it before export and publishing; fix each `problem` with `credits.set` or by " +
+      "re-importing with provenance, or remove the asset. The CLI exits 1 when `ok` is false. Fails with InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      ok: z.boolean().describe("True when every placed asset is `ok`."),
+      assets: z.array(CreditAssetSchema).describe("Every placed asset, sorted by path."),
+      credits: z.array(z.string()).describe("Credit lines of the placed assets that need one, without duplicates, sorted."),
+      text: z.string().describe("`credits` as the block to paste into the video description; empty when none is needed."),
+    }),
+  },
   gc: {
     mutating: true,
     description:
       "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
-      "thumbnails, energy envelopes, transcription WAVs and voice prints of assets deleted or changed since (or built for an older " +
-      "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
+      "thumbnails, energy envelopes, transcription WAVs, voice prints and subject mattes of assets deleted or changed since (or built for an older " +
+      "recipe or another fps), clip renders no timeline's generated clip keys, baked audio effects no clip plays, and temp files of interrupted jobs. " +
       "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
       "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
       "and temp files are skipped while jobs or transcriptions run (`skipped` says why). Deleted outputs rebuild on " +
@@ -988,6 +1322,20 @@ export const methods = {
       clips: z
         .array(ClipRenderSchema)
         .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
+    }),
+  },
+  "audio.bakes": {
+    // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
+    internal: true,
+    description:
+      "Baked sound (ADR 0031) of every media clip with audio effects on a timeline, nested timelines flattened: one entry per asset and " +
+      "chain. Bakes neither ready nor failed are queued as background `audio-fx` jobs; the preview plays the dry sidecar until `ready`. " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int().describe("Revision of the timeline read (the proposal's with `view: proposal`)."),
+      bakes: z.array(AudioBakeSchema).describe("In track then time order of their first clip."),
     }),
   },
   "clip.live": {
@@ -1778,7 +2126,10 @@ export const methods = {
     description:
       "Change a track: `name` (any track; null clears it), and for subtitle tracks the followed track (`follows`) and " +
       "`style` (`preset`: `big-keyword` or `plain`; `position`: `top`, `center` or `bottom`; `speakerNames`: true shows the " +
-      "speaker's name at each turn; given fields change, others stay). Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" } }`. Preview and export use the same style. " +
+      "speaker's name at each turn; `entry`: `none`, `chars`, `words` or `line` softly fades the text in; `keywordColor` / " +
+      "`keywordScale` style the keyword `captions.set` marks, null colour = none; given fields change, others stay) and `gaps` " +
+      "(timeline-second ranges in which no cue shows, e.g. while a graphic says the same; replaces them, `[]` clears). " +
+      "Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" }, gaps: [{ from: 12, to: 15.5 }] }`. Preview and export use the same style. " +
       "`muted: true` silences a video, audio or program track whatever its clips' own audio; `hidden: true` leaves a video or " +
       "program track's pictures out (the tracks below show through, its sound still plays); false undoes either. " +
       "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, muted on a subtitle track, hidden on an " +
@@ -1979,6 +2330,37 @@ export const methods = {
     }),
     result: MulticamFacesResultSchema,
   },
+  "clip.reframe": {
+    mutating: true,
+    description:
+      "Frame one video clip for another aspect, vertical (`9x16`) by default, keeping a face in it (epic #451, reels). The picture is " +
+      "scaled to cover the frame (`transform.scale`) and positioned so the face center sits at the middle and 30 % from the top, " +
+      "never showing outside the picture. Without `person` or `anchor` it looks at 2 frames per second of the clip's own stretch " +
+      "of its file (locally, on CPU: YuNet face detection; the first run downloads it, about 33 MB), follows the largest face, " +
+      "and writes `x`/`y` keys only where the face moves: a still stretch holds, a move glides with ease in-out; a face that never " +
+      "moves gives a static `transform` and no keys. `person` (id or name) follows that person's face from the cached face scan " +
+      "(`people scan`, with the person's face linked) instead, with no detection. `anchor` (0 to 1) skips faces: a fixed " +
+      "horizontal position of the picture (0 left edge, 1 right edge) in the middle of the frame, for footage with no face. " +
+      "Rotation metadata is applied to the picture first. One transaction labelled `Reframe <file name>` (yours when one is open): " +
+      "`revert` undoes it, the person edits the keys in the inspector or with `clip.key`, and in review mode it is one proposal. " +
+      "It replaces the clip's `x`, `y` and `scale` (static and keys; a warning says so) and leaves its other fields. The frame is " +
+      "the export's: with a project not in `format`, the preview shows the project frame and an export with a matching preset " +
+      "(`vertical-1080x1920`) shows the framing; a warning says so. For landscape footage with no face, look at a frame " +
+      "(`frame.capture`) and pick `anchor`. A clip with no face found is left as it was, with a warning. Runs as a background " +
+      "job of kind `faces` (`job.list`) with `progress` notifications. " +
+      "Example: `{ clip: \"c_0003\", format: \"9x16\" }`. Fails with InvalidOperation (not a media clip on a video track, " +
+      "no moving picture to look at, bad `format`, `person` and `anchor` together, `person` unknown or its file not scanned), " +
+      "ClipNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg, ONNX Runtime or the model cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Id of a media clip on a video track, from `timeline.show`."),
+      format: z.string().min(1).optional().describe("Aspect of the frame, `<w>x<h>` or `<w>:<h>`: `9x16` (default), `1x1`, `4x5`, `16x9`…"),
+      person: z.string().min(1).optional().describe("Follow this person's face (id or exact name from `people.list`) from the cached scan of the clip's file."),
+      anchor: z.number().min(0).max(1).optional().describe("Fixed horizontal position of the picture in the frame, 0 (left edge) to 1 (right edge); no face detection."),
+    }),
+    result: ClipReframeResultSchema,
+  },
   "segment.prepare": {
     description:
       "Get a still image ready to be pointed into (ADR 0022, photo segmentation): encodes it once with MobileSAM and keeps the " +
@@ -1997,6 +2379,42 @@ export const methods = {
       hash: z.string().describe("`sha256:<hex>` of the asset's content, the key of the cached embedding."),
       model: z.string().describe("Pinned model, `mobilesam@<revision>`."),
       cached: z.boolean().describe("True when the image was prepared already."),
+    }),
+  },
+  "matte.prepare": {
+    description:
+      "Compute the subject matte of a video asset (ADR 0032): which pixels of each frame are the person in front, so text " +
+      "or graphics can later sit behind them. Locally on CPU: MediaPipe's selfie segmenter (Apache-2.0; the first run " +
+      "downloads 0.5 MB, plus ONNX Runtime Web, 33 MB, if face detection never ran) on every frame of the asset's proxy, " +
+      "smoothed over time and snapped to the picture's edges. The whole asset is matted once per content: the result is a " +
+      "grayscale video at proxy size (white = subject, black = background, same frames as the proxy) cached in " +
+      "`.frameshell/cache/mattes/` (regenerable, swept by `gc`); a later call returns it at once (`cached: true`). " +
+      "Waits for the asset's ingest when its proxy is not built yet. Takes an estimated 1.5 minutes per minute of 30 fps video " +
+      "on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
+      "it goes on if the caller disconnects. Known limits: one merged matte for two or more people; thin hair strands " +
+      "and mic stands are often left out. Nothing on a timeline uses a matte yet. " +
+      "Example: `{ asset: \"assets/interview.mp4\" }`. Fails with AssetNotFound, OutsideProject, InvalidOperation " +
+      "(reason `not a video`: audio or a still picture; `image project`; `ingest failed`), or the Binary* errors when ffmpeg, " +
+      "ONNX Runtime or the model cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Video asset, absolute or relative to `cwd`, e.g. `assets/interview.mp4`."),
+    }),
+    result: z.object({
+      asset: z.string().describe("Project-relative asset path."),
+      hash: z.string().describe("`sha256:<hex>` of the asset's content, part of the cache key."),
+      model: z.string().describe("Model that made it: `mediapipe-selfie@<revision>`, or `stand-in` in tests."),
+      matte: z
+        .string()
+        .describe(
+          "Project-relative matte video, `.frameshell/cache/mattes/<key>.mp4`: H.264, luma = matte (full range, 0 " +
+            "background to 255 subject, chroma neutral), frame N = proxy frame N.",
+        ),
+      size: z.object({ width: z.int(), height: z.int() }).describe("Matte pixels: the proxy's size (short side at most 540)."),
+      fps: z.number().describe("Frames per second: the project fps, as the proxy."),
+      frames: z.int().describe("Frames in the matte."),
+      cached: z.boolean().describe("True when the matte of this content existed already and nothing was computed."),
+      seconds: z.number().describe("Seconds it took to compute (when it was computed, for a cached one)."),
     }),
   },
   "image.cutout": {
@@ -2117,6 +2535,35 @@ export const methods = {
     }),
     result: MulticamDirectResultSchema,
   },
+  "captions.set": {
+    mutating: true,
+    description:
+      "Write hand-chunked captions with chosen keywords on a subtitle track. `text` (or a project file, `file`) holds one phrase per " +
+      "line: chunks (one cue each) separated by `|`, the phrase's ONE emphasised word between asterisks, e.g. " +
+      "`No need to | open any | *editor*`; an optional `[chars]`, `[words]`, `[line]` or `[none]` at the start of a line sets that " +
+      "phrase's entry; blank lines and `#` lines are skipped. The text covers every word the track shows between `from` and `to` " +
+      "(timeline seconds, default the whole track), in order: the words are matched by position, so a text that loses or repeats a " +
+      "word fails (the error names the first difference); typed words that differ from the transcript after case, accents and " +
+      "punctuation only warn. Mapped onto transcript word ids, so cuts and transcript corrections keep the phrases (a word a cut " +
+      "removed just leaves its chunk). Words no phrase holds keep the style's automatic grouping. A chunk lasts until the next cue " +
+      "starts, at most 0.35 s past its last word and never under 0.4 s. The keyword takes the style's `keywordColor` " +
+      "(`track.set` `style`; default the preset's accent) and, with an `entry`, settles from `keywordScale`. Phrases that share a " +
+      "word with the new ones are replaced; `replace: true` drops all the track's other phrases first, and with no text clears them. " +
+      "`cues` lists what the range shows now. Example: `{ track: \"t_4d5e6f\", text: \"No need to | open any | *editor*\", from: 12, to: 15 }`. " +
+      "Fails with TrackNotFound or InvalidOperation (not a subtitle track, no text, a second keyword in a phrase, an empty chunk, a " +
+      "phrase across two assets, word counts that differ).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: z.string().min(1).describe("Subtitle track id from `track.list`, e.g. `t_4d5e6f`."),
+      text: z.string().optional().describe("The captions, one phrase per line. Give this or `file`; neither with `replace: true` clears the phrases."),
+      file: z.string().min(1).optional().describe("Text file inside the project with the same format, absolute or relative to `cwd`."),
+      from: z.number().nonnegative().optional().describe("Timeline seconds where the captioned range starts: words from this frame on. Default 0."),
+      to: z.number().nonnegative().optional().describe("Timeline seconds where it ends: words that start before this frame. Default: the end of the track's words."),
+      replace: z.boolean().optional().describe("Also drop every other phrase of the track. Default false."),
+    }),
+    result: CaptionsSetResultSchema,
+  },
   "clip.move": {
     mutating: true,
     description:
@@ -2155,12 +2602,17 @@ export const methods = {
   "clip.set": {
     mutating: true,
     description:
-      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `transform` (merged field by field), " +
+      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
+      "`null` clears; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
       "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
       "alone for the whole script; null clears). A `scriptRef` whose script or scene does not exist is still stored, with a `warnings` entry naming the scenes " +
       "there are; a `scriptRef` path that is absolute or uses `..` fails with InvalidOperation. " +
+      "`audioEffects` (ADR 0031) process the clip's sound in order before gain and fades: the voice chain is " +
+      "`[{ kind: \"highpass\", frequency: 85 }, { kind: \"denoise\", floor: -30, reduction: 8 }, { kind: \"compressor\", threshold: -20, ratio: 2.5, " +
+      "attack: 8, release: 140, makeup: 2 }]`. The asset is baked once per chain in the background; export waits for it, the preview plays " +
+      "dry until it is ready. Energy snapping and transcription keep the dry sound. Integrated loudness stays the export's (`export.loudness`). " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -2168,15 +2620,23 @@ export const methods = {
   "transition.set": {
     mutating: true,
     description:
-      "Put a transition on a clip edge (ADR 0018). Only `at` is needed: `{ at: 12.5 }` dissolves into the clip starting at 12.5 s on " +
-      "every video and audio track that has an edge there (sound crossfades), 0.5 s long. `kind: \"fade\"` dips through black instead " +
-      "(transparent on upper tracks, silence for sound); `duration` is the total seconds; `tracks` limits it. The clips stay where they " +
-      "are and the timeline length never changes: a dissolve is centered on the cut and borrows source from before the incoming clip's " +
-      "`in` and after the outgoing clip's `out`. An edge with no clip butted to it (a clip's start or end) fades in or out for either kind: " +
-      "`{ at: 58, kind: \"fade\", duration: 1 }` fades the last clip out. Replaces any transition already on that edge. Multicam program " +
-      "tracks are skipped with a warning (hard cuts). Short material never fails: it shortens the transition, or plays a dissolve with no " +
-      "spare source as a dip, and a `warnings` entry says so. Fails with InvalidOperation when no targeted track has a clip edge at `at` " +
-      "(the message lists the edges), TrackNotFound.",
+      "Put a transition on a clip edge (ADR 0018, ADR 0030). Only `at` is needed: `{ at: 12.5 }` dissolves into the clip starting at " +
+      "12.5 s on every video and audio track that has an edge there (sound crossfades), 0.5 s long. `kind: \"fade\"` dips through black " +
+      "instead (transparent on upper tracks, silence for sound). `kind: \"wipe\"` (a straight edge uncovers the incoming clip) and " +
+      "`kind: \"push\"` (the incoming clip slides in and pushes the outgoing one out) move the picture instead of mixing it; `direction` " +
+      "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
+      "They play on the bottom video track only (the first shown picture track; a video track over a multicam program track is not it): " +
+      "any other video track named in `tracks` is refused, and without `tracks` the others are skipped with a warning; audio tracks " +
+      "crossfade. They are refused at an edge of a nested timeline clip. Pick the kind by why the picture changes (see the skill's transitions reference); " +
+      "a `warnings` entry flags three transitions of one kind in a row, or more than a third hard cuts, on the bottom track. " +
+      "`duration` is the total seconds; `tracks` limits it. The clips stay where they are and the timeline length never changes: a " +
+      "transition is centered on the cut and borrows source from before the incoming clip's `in` and after the outgoing clip's `out`. " +
+      "An edge with no clip butted to it (a clip's start or end) fades in or out for any kind: `{ at: 58, kind: \"fade\", duration: 1 }` " +
+      "fades the last clip out. Replaces any transition already on that edge. Multicam program tracks are skipped with a warning (hard " +
+      "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
+      "entry says so; a wipe or push with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
+      "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
+      "with `dissolve` or `fade`, or a wipe or push finds the edge only on video tracks that are not the bottom one; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -2203,6 +2663,34 @@ export const methods = {
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "track.duck": {
+    mutating: true,
+    description:
+      "Duck music under speech: write gain keys (ADR 0018, `clip.key` `gain`) on the clips of the audio track `track` so they dip " +
+      "while someone speaks on the `under` tracks. Speech is found from the energy of the `under` tracks' sound (muted clips and " +
+      "tracks are ignored): a stretch is where it stays above `threshold`, stretches closer than `gap` merge. Each stretch " +
+      "gets a dip of `depth` dB that is complete when the voice starts (`attackMs` before) and lets go `releaseMs` after it ends, " +
+      "straight lines in between. The keys are the clip's level (its `audio.gain`, or its own keys) minus the dip, with a key at the " +
+      "clip's start and end so the lane never holds a dip by accident. They are marked `auto: \"duck\"`: running it again replaces " +
+      "those and keeps the keys you set by hand; clips with no speech over them lose their old ones. The person sees and edits the " +
+      "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
+      "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
+      "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
+      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8 }`. Fails with InvalidOperation (`track` is not an audio " +
+      "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: operationArgs["track.duck"].shape.track,
+      under: z.array(z.string().min(1).describe("Track id from `track.list`.")).min(1).describe("Video or audio tracks whose speech the music ducks under."),
+      depth: z.number().positive().max(60).default(7).describe("dB the clips dip below their level while someone speaks. Default 7."),
+      attackMs: z.number().min(1).max(5000).default(40).describe("Milliseconds the dip takes to reach full depth, ending as the voice starts. Default 40."),
+      releaseMs: z.number().min(1).max(10000).default(450).describe("Milliseconds the level takes to come back after the voice stops. Default 450."),
+      threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
+      gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
+    }),
+    result: TrackDuckResultSchema,
+  },
   cut: {
     mutating: true,
     description:
@@ -2215,6 +2703,89 @@ export const methods = {
       "A cut that trims or splits an adapter clip (e.g. `hyperframes`) adds a `warnings` entry naming its id, type and `scriptRef`: edit audio before building visuals.",
     params: operationArgs.cut.extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  "marker.list": {
+    description:
+      "List a timeline's markers (ADR 0029): named points on the timeline clock, each with id (`m_…`), timeline second `at`, " +
+      "label and optional colour, sorted by `at`. Markers paint nothing and play nothing; they name moments (a hook, a beat to land on) " +
+      "for the person and the agent. `timeline.show` lists them too. In review mode, `view` picks the file or the open proposal's version. " +
+      "Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: MarkerListResultSchema.extend(ViewedShape),
+  },
+  "marker.add": {
+    mutating: true,
+    description:
+      "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
+      "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
+      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
+      "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
+      "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
+      "the message names the marker holding it).",
+    params: operationArgs["marker.add"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "marker.set": {
+    mutating: true,
+    description:
+      "Move, rename or recolour a marker (ADR 0029): `{ marker: \"hook\", at: 14 }`, `{ marker: \"m_1a2b3c\", label: \"cta\" }`; " +
+      "`color: null` clears its colour. `marker` is the id or the label (ignoring case). Fields left out keep their value. Fails with " +
+      "InvalidOperation (no such marker, the message lists them; label taken; nothing to change).",
+    params: operationArgs["marker.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "marker.remove": {
+    mutating: true,
+    description:
+      "Delete a marker (ADR 0029): `{ marker: \"hook\" }`, by id or label (ignoring case). Fails with InvalidOperation when there is no " +
+      "such marker (the message lists them).",
+    params: operationArgs["marker.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  cleanup: {
+    mutating: true,
+    description:
+      "Propose, then make, the cuts that take dead air and false starts out of a talking head. It reads the words of the " +
+      "transcripts of the unmuted media clips (and the sound of multicam program tracks) and the audio energy of their files, " +
+      "and cuts like `cut` does (ripple on every video, audio and program track). `pauses` (seconds, default 0.4; `false` = " +
+      "off): a gap between two kept words longer than that, confirmed by the audio being quiet there (whisper stretches words " +
+      "over silence, so the edges come from the audio, not from the word times); the cut leaves `breath` seconds (default 0.1) " +
+      "of silence on each side and lies on the frame grid. `retakes: true`: a phrase of 1 to 6 words said again right after " +
+      "(a false start, a stop, a restart; spelling variants and a cut-off last word match) cuts the earlier attempt and " +
+      "keeps the last. Only candidates with `confidence` of `minConfidence` or more (default 0.5) count. A cut is made only " +
+      "where transcribed speech covers every instant of it, so it never removes b-roll or other material that is not part of " +
+      "the speech; a word with `speechInside` is never cut around. `dryRun: true` changes nothing and returns the candidates: " +
+      "show them as a table (kind, start, end, words, reason, confidence), ask, then call again with the same options (the " +
+      "plan is made again from the timeline as it is) and `skip` the ids the person rejected (a retake covers the pauses around it: rejecting it brings them back as `p` candidates). Without `dryRun` the cuts are " +
+      "one transaction labelled `Cleanup: …` (`revert` undoes it whole; with review mode on it is one proposal); a cut word " +
+      "shows struck through in the transcript view and clicking it restores it. Example: `{ pauses: 0.5, retakes: true, " +
+      "dryRun: true }`. Fails with InvalidOperation (`breath` too large for `pauses`, a `skip` id that is not a candidate, " +
+      "no transcript for the speech) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      pauses: z
+        .union([z.number().min(0.15).max(30), z.literal(false)])
+        .default(CLEANUP_PAUSES_DEFAULT_S)
+        .describe(`Shortest gap between two words, in seconds, to cut as a pause; \`false\` leaves pauses alone. Default ${CLEANUP_PAUSES_DEFAULT_S}.`),
+      breath: z
+        .number()
+        .min(0)
+        .max(2)
+        .default(CLEANUP_BREATH_DEFAULT_S)
+        .describe(`Seconds of silence left on each side of a cut. Default ${CLEANUP_BREATH_DEFAULT_S}; must be under half of \`pauses\`.`),
+      retakes: z.boolean().default(false).describe("Also cut the earlier attempts of repeated phrases (false starts). Default false."),
+      minConfidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(CLEANUP_MIN_CONFIDENCE_DEFAULT)
+        .describe(`Drop candidates below this confidence. Default ${CLEANUP_MIN_CONFIDENCE_DEFAULT}.`),
+      dryRun: z.boolean().default(false).describe("Only return the candidates; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Candidate ids (`p1`, `r2`…) from a dry run to leave out."),
+    }),
+    result: CleanupResultSchema,
   },
   "tx.begin": {
     mutating: true,
@@ -2317,7 +2888,8 @@ export const methods = {
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
       "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
-      "HistoryNotFound when the id is not in the timeline's journal.",
+      "HistoryNotFound when the id is not in the timeline's journal, InvalidOperation (reason `format change`) for the `op` " +
+      "of a `format.add`/`format.remove`: run its `undo` call instead.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -2413,6 +2985,30 @@ export const methods = {
       "`decided` or `unknown`.",
     params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
     result: z.object({ tx: z.string() }),
+  },
+  "style.show": {
+    description:
+      "The project's style guide (ADR 0028): `style.json` at the project root, with measurable values for every " +
+      "visual and sound decision: `brand` (product, hook, CTA, audience; `?` = ask the person), `colors` (hex), " +
+      "`fonts` (family, file under `assets/fonts/`, weight, tracking in em), `type` (px on a frame whose short side " +
+      "is 1080), `motion` (seconds; `personality` playful, premium, corporate, energetic or calm, then the file's " +
+      "overrides), `sound` (dB under the voice, ducking, voice-chain defaults; the loudness target stays " +
+      "`export.loudness`), `platforms`, `notes`, `rules`, `banned`. Every value is `{ value, source }`: `file` " +
+      "(written in style.json), `personality` (from its motion personality) or `default` (Frameshell's; null = not " +
+      "decided, ask the person). `safeZones`: for each platform named, the pixels of a reference frame its app " +
+      "covers (`measured: false` = from editing guides). `style` is null when the project has no style.json: none " +
+      "is required. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      path: z.string().describe("The style file, project-relative: `style.json`."),
+      style: ResolvedStyleSchema.nullable().describe("Every value with its source; null when there is no style.json."),
+      from: z
+        .object({ id: z.string(), sha256: z.string() })
+        .nullable()
+        .describe("User style the file was copied from (id, SHA-256 at copy time); null when none."),
+      safeZones: z.array(SafeZoneSchema).describe("Safe zone of each platform in `platforms`, in that order; empty when none."),
+    }),
   },
   "people.list": {
     description:
@@ -2854,7 +3450,7 @@ export const notifications = {
         .describe(
           "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
             "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
-            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`. Codes may be added: treat an unknown one as `message`.",
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`, `matte` (`values`: `asset`, `eta` seconds left once known). Codes may be added: treat an unknown one as `message`.",
         ),
       values: z
         .record(z.string(), z.union([z.string(), z.number()]))
@@ -2998,6 +3594,8 @@ export type ProposalStatusResult = MethodResult<"proposal.status">;
 /** Result of `proposal.wait`. */
 export type ProposalWaitResult = MethodResult<"proposal.wait">;
 
+/** Result of `style.show`. */
+export type StyleShowResult = MethodResult<"style.show">;
 /** Result of `script.outline`. */
 export type ScriptOutlineResult = MethodResult<"script.outline">;
 /** Result of `shoot.status`. */
@@ -3021,6 +3619,14 @@ export type ProjectInitResult = MethodResult<"project.init">;
 export type DoctorParams = MethodParams<"doctor">;
 /** Result of `doctor`. */
 export type DoctorResult = MethodResult<"doctor">;
+/** H.264 encoder ranking in a {@link DoctorResult}: what renders use and what was tried. */
+export type EncoderReport = z.output<typeof EncoderReportSchema>;
+/** One H.264 encoder Frameshell can pick, in the order tried. */
+export type EncoderName = z.output<typeof EncoderNameSchema>;
+/** Encode quality tier. */
+export type QualityTier = z.output<typeof QualityTierSchema>;
+/** Speed class and recommended sizes of a machine in a {@link DoctorResult}. */
+export type MachineProfile = z.output<typeof MachineProfileSchema>;
 /** One binary in a {@link DoctorResult}. */
 export type BinaryReport = z.output<typeof BinaryReportSchema>;
 /** One encoder or decoder in a {@link DoctorResult}. */
@@ -3039,6 +3645,14 @@ export type RenderResult = MethodResult<"render">;
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
 export type FrameResult = MethodResult<"frame">;
+/** One format as `format.list` reports it. */
+export type FormatInfo = z.output<typeof FormatInfoSchema>;
+/** Result of `format.add` and `format.remove`. */
+export type FormatChange = z.output<typeof FormatChangeSchema>;
+/** `cover` params. */
+export type CoverParams = MethodParams<"cover">;
+/** Result of `cover`. */
+export type CoverResult = MethodResult<"cover">;
 /** Image format `frame` writes; see {@link FrameFormatSchema}. */
 export type FrameFormat = z.output<typeof FrameFormatSchema>;
 /** One export preset as listed by `export.presets`. */
@@ -3059,6 +3673,10 @@ export type ClipLiveParams = MethodParams<"clip.live">;
 export type ClipLiveResult = MethodResult<"clip.live">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
+/** One entry of `audio.bakes`. */
+export type AudioBakeInfo = z.output<typeof AudioBakeSchema>;
+/** Result of `audio.bakes`. */
+export type AudioBakesResult = MethodResult<"audio.bakes">;
 /** ffprobe summary of an asset. */
 export type MediaProbe = z.output<typeof ProbeSchema>;
 /** One asset as reported by `asset.list`. */
@@ -3067,6 +3685,14 @@ export type AssetInfo = z.output<typeof AssetSchema>;
 export type AssetImportParams = MethodParams<"asset.import">;
 /** Result of `asset.import`. */
 export type AssetImportResult = MethodResult<"asset.import">;
+/** `credits.set` params. */
+export type CreditsSetParams = MethodParams<"credits.set">;
+/** Result of `credits.set`. */
+export type CreditsSetResult = MethodResult<"credits.set">;
+/** `credits.check` params. */
+export type CreditsCheckParams = MethodParams<"credits.check">;
+/** Result of `credits.check`. */
+export type CreditsCheckResult = MethodResult<"credits.check">;
 /** `gc` params. */
 export type GcParams = MethodParams<"gc">;
 /** Result of `gc`. */
@@ -3272,6 +3898,8 @@ export const ErrorCode = {
   ModelNotRegistered: -32043,
   /** data: `{ file, reason }`: the file is not a ggml, gguf or ONNX model, or is pickle-based (it could run code). */
   UnsupportedModelFormat: -32044,
+  /** data: `{ format, available: string[] }`: the project has no such format (ADR 0027); `available` lists its formats. */
+  FormatNotFound: -32045,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

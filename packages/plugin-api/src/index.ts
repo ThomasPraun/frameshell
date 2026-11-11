@@ -184,7 +184,10 @@ export interface RenderContext {
   readonly outDir: string;
   /** Project frame rate. */
   readonly fps: number;
-  /** Project resolution: a render of this size maps 1:1 onto the frame. */
+  /**
+   * Frame size rendered: the project resolution, or a format of the project (ADR 0027).
+   * A render of this size maps 1:1 onto the frame.
+   */
   readonly width: number;
   readonly height: number;
   /** Aborted when the daemon stops: stop work and reject. */

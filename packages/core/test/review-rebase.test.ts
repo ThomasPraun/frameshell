@@ -95,6 +95,28 @@ describe("review mode rebase on clips", () => {
   });
 });
 
+describe("review mode rebase on markers (ADR 0029)", () => {
+  const marker = (ref: string, args: Record<string, unknown>): OperationRequest => ({ op: "marker.set", args: { marker: ref, ...args } } as OperationRequest);
+  const markers = (timeline: Timeline) => (timeline.markers ?? []).map((m) => [m.id, m.label, m.at]);
+
+  it("rebases when the person moves another marker, and goes stale when the person changes the proposal's marker", async () => {
+    const { root, timelines, apply, file, turnOn, changes } = setup();
+    await apply("ui", "tx_00000001", { op: "marker.add", args: { at: 1, label: "intro" } }); // m_1
+    await apply("ui", "tx_00000002", { op: "marker.add", args: { at: 4, label: "hook" } }); // m_2
+    turnOn();
+    await apply("cli", "tx_000000a1", marker("hook", { label: "cta" }));
+    await timelines.ready("tx_000000a1");
+    await apply("ui", "tx_00000003", marker("intro", { at: 2 }));
+    expect(await timelines.proposal(root)).toMatchObject({ tx: "tx_000000a1", state: "ready" });
+    expect(markers((await timelines.viewTimeline(root, "main", "proposal")).timeline)).toEqual([["m_1", "intro", 2], ["m_2", "cta", 4]]);
+
+    await apply("ui", "tx_00000004", marker("m_2", { at: 5 }));
+    expect(await timelines.proposal(root)).toBeNull();
+    expect(changes.at(-1)).toMatchObject({ tx: "tx_000000a1", state: "stale", conflicts: ["m_2"] });
+    expect(markers(file())).toEqual([["m_1", "intro", 2], ["m_2", "hook", 5]]);
+  });
+});
+
 describe("proposal diff", () => {
   it("marks what the proposal changes from the file, in history.diff's shape", async () => {
     const { root, timelines, add, apply, turnOn } = setup();
@@ -139,5 +161,11 @@ describe("overlappingIds", () => {
 
   it("counts a whole-track rewrite as touching the clips on it", () => {
     expect(overlappingIds([upsert("c_1", 1)], [rewrite], [state])).toEqual(["c_1", "t_v"]);
+  });
+
+  it("names a marker both sides changed, and no track rewrite touches a marker", () => {
+    const moved = (id: string, at: number): TimelinePatch => ({ markers: [{ id, marker: { id, at, label: id } }] });
+    expect(overlappingIds([moved("m_1", 1)], [moved("m_1", 2)], [state])).toEqual(["m_1"]);
+    expect(overlappingIds([moved("m_1", 1)], [moved("m_2", 2), rewrite], [state])).toEqual([]);
   });
 });

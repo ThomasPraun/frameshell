@@ -6,6 +6,7 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
+export { FORMAT_JOURNAL, type FormatJournalEntry, FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound } from "./formats.js";
 export {
   type FaceScans,
   type NameWrites,
@@ -132,6 +133,8 @@ export {
   PHOTO_SEGMENTATION_DECODER_MODEL,
   PHOTO_SEGMENTATION_ENCODER_MODEL,
   PHOTO_SEGMENTATION_MODELS,
+  VIDEO_MATTE_MODEL,
+  VIDEO_MATTE_MODELS,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   buildCandidates,
@@ -168,6 +171,9 @@ export {
   probeVersion,
 } from "./binaries/probe.js";
 export { type DoctorOptions, runDoctor } from "./binaries/doctor.js";
+export { ENCODER_CACHE_FILE, EncoderCache, type EncoderProbe, probeEncoders } from "./encoders/probe.js";
+export { type MachineFacts, machineProfile, readMachineFacts } from "./encoders/profile.js";
+export { ENCODER_PREFERENCE, type EncodeTarget, tierFps, tierVideoArgs, videoToolboxKbps } from "./encoders/tiers.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";
 export {
   type TranscribeAssetOptions,
@@ -201,6 +207,7 @@ export {
   type EditPoint,
   type EditPointResolution,
   type EditPointResolver,
+  type IdPrefix,
   type OperationArgs,
   type OperationRequest,
   type SourceInfo,
@@ -208,6 +215,8 @@ export {
 } from "./timeline/engine.js";
 export { applyPatch, diffTimelines } from "./timeline/patch.js";
 export { FrameGrid } from "./timeline/grid.js";
+export { type CleanupPlanOptions, type SpeechAudio, type SpeechWord, planCleanup } from "./cleanup/plan.js";
+export { type CleanupDeps, type CleanupPlan, type CleanupRequest, cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 export { NestedTimelineError } from "./timeline/timing.js";
 export {
   type AudioItem,
@@ -226,6 +235,7 @@ export {
   compileRender,
   MIX_FILE,
   SUBTITLES_FILE,
+  COVER_FILE,
   FONTS_DIR,
   loudnessAnalysis,
   mixStep,
@@ -234,8 +244,23 @@ export {
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
+export { type FontMetrics, bundledFontMetrics, parseFontMetrics } from "./export/font-metrics.js";
+export {
+  COVER_MAX_CHARS,
+  type CoverLayout,
+  type CoverReadability,
+  DEFAULT_COVER_COLOR,
+  MIN_THUMBNAIL_CAP_HEIGHT,
+  THUMBNAIL_WIDTH,
+  assCover,
+  coverReadability,
+  coverText,
+  firstPictureTime,
+  hookWordTime,
+  layoutCover,
+} from "./export/cover.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
-export { type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
   ENERGY_HOP_S,
@@ -250,6 +275,18 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export {
+  AUDIO_FX_DIR,
+  AUDIO_FX_VERSION,
+  type AudioBakeNeed,
+  AudioFxService,
+  type AudioFxServiceOptions,
+  DENOISE_LATENCY_SAMPLES,
+  audioFxArgs,
+  audioFxCacheKey,
+  audioFxFilter,
+  classifyAudioFx,
+} from "./media/audio-fx.js";
 export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
@@ -317,6 +354,7 @@ export {
   type YunetFiles,
   yunetWorkerScanner,
   type ReframeKeyOptions,
+  type SourceRange,
   angleFaceKeys,
   decodeYunet,
   faceFrameSize,
@@ -325,6 +363,18 @@ export {
   proposeReframeKeys,
   sampleFaceFrames,
 } from "./multicam/faces.js";
+export {
+  type FrameFormat,
+  REFRAME_FACE_AT,
+  type ReframeGeometry,
+  type ReframeKey,
+  type ReframePlacement,
+  type ReframePlan,
+  parseFrameFormat,
+  planReframe,
+  reframeBounds,
+  reframePlacement,
+} from "./reframe.js";
 export {
   type DecoderOutput,
   type PhotoInput,
@@ -345,6 +395,38 @@ export {
 } from "./segment/segmenter.js";
 export { standInSegmentEngine } from "./segment/stand-in.js";
 export { type SegmentFiles,type WorkerSegmentEngine, workerSegmentEngine } from "./segment/engine.js";
+export {
+  CONTRAST_GAIN,
+  GUIDED_EPS,
+  GUIDED_RADIUS,
+  GUIDED_SUBSAMPLE,
+  type PlaneSize,
+  TEMPORAL_TAU_S,
+  boxMean,
+  contrast,
+  emaStep,
+  emaWeight,
+  guidedFilter,
+  refineFrame,
+  resizeBilinear,
+  smoothForwardBackward,
+} from "./matte/refine.js";
+export { MATTE_MODEL_PIN, type MatteModelSpec, SELFIE, coarseAlpha, modelInput } from "./matte/models.js";
+export { MATTES_DIR, MATTE_VERSION, type MatteInfo, classifyMatte, matteKey, mattePaths, readMatteInfo, writeMatteInfo } from "./matte/cache.js";
+export {
+  type MatteFiles,
+  type MatteInfer,
+  type MatteVideoRequest,
+  type MatteVideoResult,
+  etaSeconds,
+  loadSelfieMatte,
+  matteEncodeArgs,
+  matteInWorker,
+  matteVideo,
+} from "./matte/video.js";
+export { type MatteJobDeps, type MatteTarget, computeMatte, formatEta } from "./matte/job.js";
+export { standInMatte } from "./matte/stand-in.js";
+export { readRawFrames } from "./media/raw-frames.js";
 export { type PreparedPhoto, SEGMENT_MODEL_PIN, SegmentService, type SegmentServiceOptions, readPhotoRgb } from "./segment/service.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";

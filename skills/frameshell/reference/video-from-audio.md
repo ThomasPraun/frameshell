@@ -34,7 +34,7 @@ Ask which level the person wants when they did not say. For simple, check `frame
    frameshell tx commit
    ```
    Titles, overlays and compositions come from the `hyperframes` and `remotion` skills. `script outline` then lists the clip under its scene, and newer app versions also show the span of every scene on the timeline, filled or not. Look at each result with `frameshell frame --at <s> --out <file.png>`.
-7. **Export and verify.** `frameshell render --preset youtube-1080p --json` (`vertical-1080x1920` for a 9:16 project), then `frameshell transcribe --verify exports/<file>.mp4 --json`. Done = `lost` empty and the person has the export path and the transaction ids.
+7. **Export and verify.** `frameshell render --json` (the project's own size, 9:16 included; `--formats` when it has several, see [cli.md](cli.md)), then `frameshell transcribe --verify exports/<file>.mp4 --json`. Done = `lost` empty and the person has the export path and the transaction ids.
 
 ## Rules
 

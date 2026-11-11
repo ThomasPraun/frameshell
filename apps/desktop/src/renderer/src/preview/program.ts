@@ -1,6 +1,6 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
-import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track } from "@frameshell/schema";
+import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
+import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
   type HostFade,
   type LayerRect,
@@ -26,7 +26,8 @@ import {
   soundSamples,
   staticGain,
 } from "@frameshell/schema/composite";
-import { type ClipEdges, type TransitionContext, clipLength, edgeTransitions } from "@frameshell/schema/transitions";
+import { audioEffectsOf, bakeRef } from "@frameshell/schema/effects";
+import { type ClipEdges, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -154,6 +155,8 @@ export interface SpanDissolve {
   at: number;
   /** Timeline seconds on each side of it. */
   half: number;
+  /** Its shape on the bottom track (ADR 0030): the pictures move or are cut by `shapeAt` instead of mixing. */
+  shape?: TransitionShape;
 }
 
 /** Effective edge transitions of a clip as its spans play them (ADR 0018, `edgeTransitions`), timeline seconds. */
@@ -202,13 +205,47 @@ export function spanPlacement(span: PlacedSpan, frame: number, fps: number): Pla
   return weight === 1 ? base : { ...base, opacity: base.opacity * weight };
 }
 
-/** Factor 0 to 1 of the fades and dissolves of `edges` at timeline second `t`: a picture's opacity, a sound's gain. */
+/**
+ * Factor 0 to 1 of the fades and dissolves of `edges` at timeline second `t`: a picture's opacity, a sound's gain.
+ * A shaped dissolve leaves a picture's opacity alone ({@link spanShape} draws it); its sound still crossfades.
+ */
 export function edgeWeight(edges: EdgeWeights, t: number, kind: "bottom" | "upper" | "sound"): number {
   let weight = fadeWeight(edges, edges.start, edges.end, t, kind === "sound");
-  if (edges.dissolveIn) weight *= dissolveWeights(dissolveProgress(edges.dissolveIn.at, edges.dissolveIn.half, t), kind).incoming;
-  if (edges.dissolveOut) weight *= dissolveWeights(dissolveProgress(edges.dissolveOut.at, edges.dissolveOut.half, t), kind).outgoing;
+  const mixes = (dissolve: SpanDissolve) => kind === "sound" || !dissolve.shape;
+  if (edges.dissolveIn && mixes(edges.dissolveIn)) weight *= dissolveWeights(dissolveProgress(edges.dissolveIn.at, edges.dissolveIn.half, t), kind).incoming;
+  if (edges.dissolveOut && mixes(edges.dissolveOut)) weight *= dissolveWeights(dissolveProgress(edges.dissolveOut.at, edges.dissolveOut.half, t), kind).outgoing;
   for (const host of edges.hosts ?? []) weight *= fadeWeight(host, host.start, host.end, t, kind === "sound");
   return weight;
+}
+
+/**
+ * Where `span` draws at program frame `frame` while a shaped dissolve it comes in or goes out by plays (ADR 0030):
+ * `shapeAt` of that dissolve, as export draws it. Null outside one: `spanPlacement` alone places it.
+ */
+export function spanShape(span: PlacedSpan, frame: number, fps: number): ShapePart | null {
+  const { motion } = span;
+  if (!motion) return null;
+  const t = frame / fps;
+  const playing = (dissolve: SpanDissolve | undefined): dissolve is SpanDissolve & { shape: TransitionShape } =>
+    dissolve?.shape !== undefined && t >= dissolve.at - dissolve.half && t < dissolve.at + dissolve.half;
+  const incoming = playing(motion.dissolveIn) ? shapeAt(motion.dissolveIn.shape, dissolveProgress(motion.dissolveIn.at, motion.dissolveIn.half, t)).incoming : null;
+  const outgoing = playing(motion.dissolveOut) ? shapeAt(motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)).outgoing : null;
+  if (!incoming || !outgoing) return incoming ?? outgoing;
+  // A clip shorter than both its dissolves: both move it; the incoming one cuts it.
+  return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip };
+}
+
+/**
+ * Where a picture placed at `rect` in an `output`-sized frame draws under `shape` ({@link spanShape}): its corner moved
+ * by the offset, rounded as export rounds it, and the frame rectangle it may show in (null: anywhere).
+ */
+export function shapedRect(shape: ShapePart, rect: LayerRect, output: Size): { left: number; top: number; clip: LayerRect | null } {
+  const left = rect.left + Math.floor(shape.dx * output.width + 0.5);
+  const top = rect.top + Math.floor(shape.dy * output.height + 0.5);
+  if (!shape.clip) return { left, top, clip: null };
+  const [x0, y0, x1, y1] = shape.clip;
+  const clip = { left: x0 * output.width, top: y0 * output.height, width: (x1 - x0) * output.width, height: (y1 - y0) * output.height };
+  return { left, top, clip };
 }
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */
@@ -276,6 +313,24 @@ export interface ProgramOptions {
   nested?: ReadonlyMap<string, TimelineView>;
   /** Render cache states of generated clips by clip id (`clip.renders`); absent ones are not known yet. */
   renders?: ReadonlyMap<string, ClipRenderInfo>;
+  /**
+   * Ready bakes of clip audio effects by `bakeRef` of asset and chain (`audio.bakes`, ADR 0031): a clip with effects
+   * plays its bake as its sidecar, the dry sidecar while the bake is absent.
+   */
+  bakes?: ReadonlyMap<string, BakedSound>;
+}
+
+/** A ready audio effects bake: raw s16le in the sidecar's format and clock. */
+export type BakedSound = NonNullable<AssetInfo["sidecar"]>;
+
+/** The ready entries of an `audio.bakes` list, by `bakeRef` of asset and chain: {@link ProgramOptions.bakes}. */
+export function readyBakes(bakes: readonly AudioBakeInfo[]): Map<string, BakedSound> {
+  const ready = new Map<string, BakedSound>();
+  for (const bake of bakes) {
+    if (bake.state !== "ready" || bake.file === null) continue;
+    ready.set(bakeRef(bake.asset, bake.effects), { path: bake.file, format: "s16le", sampleRate: bake.sampleRate, channels: bake.channels });
+  }
+  return ready;
 }
 
 /** Build the {@link Program} of `view`; `assets` by project-relative path. */
@@ -341,12 +396,14 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
       if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) return;
+      const effects = audioEffectsOf(clip);
+      const sidecar = (effects && options.bakes?.get(bakeRef(clip.asset, effects))) || info.sidecar;
       const cursor = last?.span.end ?? 0;
       if (isProgramSound(clip)) {
         // Nested program sound, as export places it: exact samples, after the track's previous sound, until the next clip starts.
         const next = kept[index + 1];
         const until = next ? (isProgramSound(next.clip) ? Math.round(next.clip.start * rate) : sample(next.start)) : Number.POSITIVE_INFINITY;
-        const span = exactSpan(clip, info.sidecar, rate, cursor, until);
+        const span = exactSpan(clip, sidecar, rate, cursor, until);
         if (span.end <= span.start) return;
         if (last?.exact && continuesSpan(last.span, span)) {
           last.span.end = span.end;
@@ -370,9 +427,9 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         clip: clip.id,
         start: first,
         end: until,
-        sidecar: info.sidecar.path,
-        channels: info.sidecar.channels,
-        in: Math.round((frame(clip.in) / fps) * info.sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * info.sidecar.sampleRate),
+        sidecar: sidecar.path,
+        channels: sidecar.channels,
+        in: Math.round((frame(clip.in) / fps) * sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * sidecar.sampleRate),
         speed,
         gain: gainOf(clip),
         ...(envelope ? { envelope } : {}),
@@ -521,7 +578,14 @@ function nestedResolver(nested: ReadonlyMap<string, TimelineView> | undefined): 
 function asTimeline(view: TimelineView, root: boolean): Timeline {
   const tracks = view.tracks.map((track): Track => {
     if (track.kind === "subtitles") {
-      return { id: track.id, kind: "subtitles", follows: track.follows ?? "", ...(track.style ? { style: track.style } : {}) };
+      return {
+        id: track.id,
+        kind: "subtitles",
+        follows: track.follows ?? "",
+        ...(track.style ? { style: track.style } : {}),
+        ...(track.phrases ? { phrases: track.phrases } : {}),
+        ...(track.gaps ? { gaps: track.gaps } : {}),
+      };
     }
     const clips = track.clips.map((clip) => {
       if (root) return clip as unknown as Clip;
@@ -696,12 +760,15 @@ function pictureLayers(
   });
   const main: VideoSpan[] = [];
   const slot: VideoSpan[] = [];
+  // Shapes play on the bottom track only (ADR 0030); elsewhere a shaped dissolve mixes, as export does.
+  const shapeOf = (clip: Clip) => (track === "bottom" && clip.shape ? { shape: clip.shape } : {});
   kept.forEach(({ clip }, i) => {
     const picture = pictures[i];
     if (!picture) return;
     const next = kept[i + 1];
     const outHalf = next ? halves[i + 1]! : 0;
-    const weights = edgeWeightsOf(clip, edges.get(clip.id), halves[i]!, outHalf > 0 ? { at: next!.clip.start, half: outHalf } : undefined, context);
+    const out = outHalf > 0 ? { at: next!.clip.start, half: outHalf, ...shapeOf(next!.clip) } : undefined;
+    const weights = edgeWeightsOf(clip, edges.get(clip.id), halves[i]!, out, context, shapeOf(clip).shape);
     let span = picture.kind === "placeholder" ? picture : withMotion(picture, clip, weights, track);
     const head = Math.round(halves[i]! * fps);
     if (head > 0 && span.kind !== "placeholder") {
@@ -755,15 +822,25 @@ function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number): AudioEnvelo
   return { ...weights, ...(keyed ? { keyed: clip } : {}), rate };
 }
 
-/** The {@link EdgeWeights} of `clip` from its effective edges, the dissolve it comes in by and the one it goes out by. */
-function edgeWeightsOf(clip: Clip, own: ClipEdges | undefined, inHalf: number, out: SpanDissolve | undefined, context: TransitionContext): EdgeWeights {
+/**
+ * The {@link EdgeWeights} of `clip` from its effective edges, the dissolve it comes in by (shaped by `shape`) and the
+ * one it goes out by.
+ */
+function edgeWeightsOf(
+  clip: Clip,
+  own: ClipEdges | undefined,
+  inHalf: number,
+  out: SpanDissolve | undefined,
+  context: TransitionContext,
+  shape?: TransitionShape,
+): EdgeWeights {
   const hosts = hostFades(clip);
   return {
     start: clip.start,
     end: clip.start + clipLength(clip, context),
     fadeIn: own?.fadeIn ?? 0,
     fadeOut: own?.fadeOut ?? 0,
-    ...(inHalf > 0 ? { dissolveIn: { at: clip.start, half: inHalf } } : {}),
+    ...(inHalf > 0 ? { dissolveIn: { at: clip.start, half: inHalf, ...(shape ? { shape } : {}) } } : {}),
     ...(out ? { dissolveOut: out } : {}),
     ...(hosts.length > 0 ? { hosts } : {}),
   };
