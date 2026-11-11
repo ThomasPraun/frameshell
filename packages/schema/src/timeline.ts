@@ -417,6 +417,28 @@ export const ProgramTrackSchema = z.strictObject({
   clips: z.array(ShotClipSchema).describe("Shots, sorted by `start`, never overlapping."),
 });
 
+/** How a cue's text enters: not animated, per character, per word (at its spoken time) or as one line. */
+export const SUBTITLE_ENTRIES = ["none", "chars", "words", "line"] as const;
+
+/**
+ * One hand-chunked caption phrase (#460): transcript words of one asset, in
+ * order, cut into cues. The ids are the transcript's, so cuts and text
+ * corrections keep it: a word a cut removed is simply not shown.
+ */
+export const CaptionPhraseSchema = z.strictObject({
+  asset: z.string().min(1).describe("Project-relative asset whose transcript holds the words."),
+  words: z.array(Id).min(1).describe("Transcript word ids (`w_…`) in spoken order."),
+  chunks: z.array(z.int().positive()).min(1).describe("Words per cue, in order; sums to the number of `words`."),
+  keyword: z.int().nonnegative().optional().describe("Index in `words` of the one emphasised word."),
+  entry: z.enum(SUBTITLE_ENTRIES).optional().describe("Entry of this phrase's cues; default: the track style's."),
+});
+
+/** A time range in which a subtitle track shows nothing. */
+export const CaptionGapSchema = z.strictObject({
+  from: z.number().nonnegative().describe("Timeline seconds."),
+  to: z.number().positive().describe("Timeline seconds; greater than `from`."),
+});
+
 /**
  * Subtitle track. Holds no clips: its words are the transcript words inside
  * each clip of the `follows` track, mapped to timeline time (SPEC §5.3).
@@ -431,8 +453,18 @@ export const SubtitleTrackSchema = z.strictObject({
       preset: z.string().optional(),
       position: z.enum(["top", "center", "bottom"]).optional(),
       speakerNames: z.boolean().optional().describe("Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false."),
+      keywordColor: z
+        .string()
+        .regex(/^#[0-9a-fA-F]{6}$/)
+        .nullable()
+        .optional()
+        .describe("Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's."),
+      keywordScale: z.number().min(1).max(2).optional().describe("Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's."),
+      entry: z.enum(SUBTITLE_ENTRIES).optional().describe("How cues enter: `none`, `chars`, `words` or `line`. Default `none`."),
     })
     .optional(),
+  phrases: z.array(CaptionPhraseSchema).optional().describe("Hand-chunked phrases with their keywords (`captions.set`); words no phrase holds are grouped by the style."),
+  gaps: z.array(CaptionGapSchema).optional().describe("Ranges in which no cue shows: a cue overlapping one is hidden."),
 });
 
 /** Any track. Track order = stacking order; the first video track is the bottom layer. */
@@ -476,6 +508,7 @@ export const TimelineSchema = z
     });
     timeline.tracks.forEach((track, t) => {
       if (track.kind !== "subtitles") return;
+      checkCaptions(track, t, ctx);
       const followed = timeline.tracks.find((other) => other.id === track.follows);
       if (!followed || (followed.kind !== "video" && followed.kind !== "audio")) {
         ctx.addIssue({
@@ -486,6 +519,29 @@ export const TimelineSchema = z
       }
     });
   });
+
+/** Phrases hold each word once and add up; gaps run forward. */
+function checkCaptions(track: SubtitleTrack, t: number, ctx: z.RefinementCtx): void {
+  const seen = new Set<string>();
+  track.phrases?.forEach((phrase, p) => {
+    const path = ["tracks", t, "phrases", p];
+    const total = phrase.chunks.reduce((sum, count) => sum + count, 0);
+    if (total !== phrase.words.length) {
+      ctx.addIssue({ code: "custom", message: `chunks add up to ${total} words but the phrase has ${phrase.words.length}`, path: [...path, "chunks"] });
+    }
+    if (phrase.keyword !== undefined && phrase.keyword >= phrase.words.length) {
+      ctx.addIssue({ code: "custom", message: `keyword ${phrase.keyword} is past the last word (${phrase.words.length - 1})`, path: [...path, "keyword"] });
+    }
+    phrase.words.forEach((id, w) => {
+      const key = `${phrase.asset}\0${id}`;
+      if (seen.has(key)) ctx.addIssue({ code: "custom", message: `word ${id} of ${phrase.asset} is in two places of the phrases`, path: [...path, "words", w] });
+      seen.add(key);
+    });
+  });
+  track.gaps?.forEach((gap, g) => {
+    if (gap.to <= gap.from) ctx.addIssue({ code: "custom", message: "`to` must be greater than `from`", path: ["tracks", t, "gaps", g, "to"] });
+  });
+}
 
 /** A program track names an existing group no other program track shows; its shots name that group's angles and never overlap. */
 function checkProgramTrack(
@@ -545,6 +601,12 @@ export type ProgramTrack = z.infer<typeof ProgramTrackSchema>;
 export type AnyClipTrack = ClipTrack | ProgramTrack;
 /** Subtitle track. */
 export type SubtitleTrack = z.infer<typeof SubtitleTrackSchema>;
+/** Hand-chunked caption phrase of a subtitle track. */
+export type CaptionPhrase = z.infer<typeof CaptionPhraseSchema>;
+/** Range in which a subtitle track shows nothing. */
+export type CaptionGap = z.infer<typeof CaptionGapSchema>;
+/** How a cue's text enters. */
+export type SubtitleEntry = (typeof SUBTITLE_ENTRIES)[number];
 /** Clip of a video or audio track. */
 export type Clip = z.infer<typeof ClipSchema>;
 /** `type: "shot"` clip of a program track. */

@@ -1248,6 +1248,8 @@ export class TimelineService {
         follows: track.kind === "subtitles" ? track.follows : null,
         ...(track.kind === "program" ? { group: track.group } : {}),
         ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
+        ...(track.kind === "subtitles" && track.phrases ? { phrases: track.phrases } : {}),
+        ...(track.kind === "subtitles" && track.gaps ? { gaps: track.gaps } : {}),
         ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
         ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
         clips,

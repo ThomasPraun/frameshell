@@ -21,7 +21,7 @@ exports/                 render output
 
 `timelines/<id>.json`: `id`, `revision` (bumped by every change), `tracks` in stacking order (first video track = bottom layer).
 
-- **Track:** `id` (`t_…`), `kind` (`video`, `audio`, `program`, `subtitles`), `name`, `clips`, optional `muted: true` (no sound from the whole track; not on subtitle tracks) and `hidden: true` (video and program tracks: no picture, the tracks below show through, its sound still plays); set both with `track set`. A subtitle track has no clips: it `follows` a video or audio track and carries `style` (`preset`, `position`).
+- **Track:** `id` (`t_…`), `kind` (`video`, `audio`, `program`, `subtitles`), `name`, `clips`, optional `muted: true` (no sound from the whole track; not on subtitle tracks) and `hidden: true` (video and program tracks: no picture, the tracks below show through, its sound still plays); set both with `track set`. A subtitle track has no clips: it `follows` a video or audio track and carries `style` (`preset`, `position`, `speakerNames`, `entry`, `keywordColor`, `keywordScale`), optional `phrases` (hand-chunked captions as transcript word ids, written by `captions set`) and `gaps` (`{ from, to }` ranges with no cue).
 - **Clip:** `id` (`c_…`), `type`, `start` (timeline seconds).
   - `media`: `asset`, `in`/`out` (source seconds), `speed`; length `(out - in) / speed`.
   - `timeline`: `source` is another timeline file, embedded as one clip.

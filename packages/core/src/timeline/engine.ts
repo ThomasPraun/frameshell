@@ -255,6 +255,8 @@ class Edit {
         return this.shotSet(request.args);
       case "multicam.direct":
         return this.multicamDirect(request.args);
+      case "captions.set":
+        return this.captionsSet(request.args);
       case "timeline.patch":
         return this.patch(request.args);
     }
@@ -289,10 +291,10 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
-    const { name, follows, style, index, muted, hidden } = args;
-    if (name === undefined && follows === undefined && style === undefined && index === undefined && muted === undefined && hidden === undefined) {
+    const { name, follows, style, gaps, index, muted, hidden } = args;
+    if (name === undefined && follows === undefined && style === undefined && gaps === undefined && index === undefined && muted === undefined && hidden === undefined) {
       throw this.invalid("nothing to change.", {
-        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows` or `style`.",
+        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows`, `style` or `gaps`.",
       });
     }
     if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
@@ -326,6 +328,29 @@ class Edit {
       const merged = { ...track.style, ...Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined)) };
       if (Object.keys(merged).length > 0) track.style = merged;
     }
+    if (gaps !== undefined) {
+      const snapped = gaps.map((gap) => ({ from: this.grid.snap(gap.from), to: this.grid.snap(gap.to) }));
+      const empty = snapped.find((gap) => gap.to <= gap.from);
+      if (empty) throw this.invalid(`gap ${empty.from}-${empty.to} s is empty on the frame grid.`, { field: "gaps", hint: "`to` must be at least one frame after `from`." });
+      if (snapped.length > 0) track.gaps = snapped.sort((a, b) => a.from - b.from);
+      else delete track.gaps;
+    }
+  }
+
+  /**
+   * `captions.set`: the resolved phrases replace the track's phrases that share a word with them (all of the
+   * track's with `replace`). Word ids are checked by the daemon method that resolves them, against the transcript.
+   */
+  captionsSet(args: OperationArgs<"captions.set">): void {
+    const track = this.track(args.track);
+    if (track.kind !== "subtitles") {
+      throw this.invalid(`${track.id} is a ${track.kind} track; phrases belong on a subtitle track.`, { field: "track" });
+    }
+    const taken = new Set(args.phrases.flatMap((phrase) => phrase.words.map((id) => `${phrase.asset}\0${id}`)));
+    const kept = args.replace ? [] : (track.phrases ?? []).filter((phrase) => !phrase.words.some((id) => taken.has(`${phrase.asset}\0${id}`)));
+    const phrases = [...kept, ...args.phrases];
+    if (phrases.length > 0) track.phrases = phrases;
+    else delete track.phrases;
   }
 
   /** `follows` must name an existing video or audio track. */
@@ -338,9 +363,10 @@ class Edit {
     }
   }
 
-  refuseSubtitleFields(args: { follows?: string | undefined; style?: object | undefined }): void {
+  refuseSubtitleFields(args: { follows?: string | undefined; style?: object | undefined; gaps?: object | undefined }): void {
     if (args.follows !== undefined) throw this.invalid("only subtitle tracks take `follows`.", { field: "follows" });
     if (args.style !== undefined) throw this.invalid("only subtitle tracks take `style`.", { field: "style" });
+    if (args.gaps !== undefined) throw this.invalid("only subtitle tracks take `gaps`.", { field: "gaps" });
   }
 
   trackRemove(args: OperationArgs<"track.remove">): void {

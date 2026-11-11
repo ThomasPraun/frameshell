@@ -28,7 +28,22 @@ import {
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
-import { type MulticamGroup, type ProgramTrack, type ProjectConfig, type ShotClip, type Timeline, createTimeline, findPerson, parseTimeline } from "@frameshell/schema";
+import {
+  type CaptionPhrase,
+  type MulticamGroup,
+  type ProgramTrack,
+  type ProjectConfig,
+  type ShotClip,
+  type Timeline,
+  type Transcript,
+  createTimeline,
+  cueTokens,
+  findPerson,
+  parseTimeline,
+  subtitleTracks,
+  subtitleWords,
+} from "@frameshell/schema";
+import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/captions.js";
 import { runDoctor } from "./binaries/doctor.js";
 import { EncoderCache } from "./encoders/probe.js";
 import { ExportService } from "./export/service.js";
@@ -1591,6 +1606,64 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const found = groupOf(loaded, group, "multicam.turns");
       const result = await groupTurns(turnsSource, dir, found);
       return { timeline, revision: loaded.revision, group, ...result };
+    },
+    "captions.set": async ({ cwd, timeline, track: trackId, text, file, from, to, replace }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const track = loaded.tracks.find((candidate) => candidate.id === trackId);
+      const invalid = (message: string, field: string) =>
+        new RpcError(ErrorCode.InvalidOperation, `captions.set: ${message}`, { op: "captions.set", reason: field, field });
+      if (!track || track.kind !== "subtitles") {
+        // The engine names what is wrong with the track.
+        await operate("captions.set", { cwd, timeline, track: trackId, phrases: [], replace: false }, caller);
+        throw new Error("captions.set: the operation accepted a track that is not a subtitle track");
+      }
+      if (text !== undefined && file !== undefined) throw invalid("give `text` or `file`, not both.", "file");
+      const source = text ?? (file === undefined ? undefined : await readCaptionFile(dir, cwd, file));
+      if (source === undefined && replace !== true) {
+        throw invalid("give `text` or `file` (the captions, one phrase per line), or `replace: true` alone to clear the phrases.", "text");
+      }
+      const grid = new FrameGrid(fps);
+      const first = from === undefined ? 0 : grid.frame(from);
+      const last = to === undefined ? Number.POSITIVE_INFINITY : grid.frame(to);
+      const transcripts = new Map<string, Transcript>();
+      let phrases: CaptionPhrase[] = [];
+      let covered = 0;
+      let warnings: string[] = [];
+      if (source !== undefined) {
+        const followed = loaded.tracks.find((candidate) => candidate.id === track.follows);
+        const assets = followed && followed.kind !== "subtitles" ? followed.clips.flatMap((clip) => (clip.type === "media" && "asset" in clip ? [clip.asset] : [])) : [];
+        for (const asset of new Set(assets)) {
+          const found = await resolveTranscript(dir, asset).then((resolved) => resolved.previous, () => null);
+          if (found) transcripts.set(asset, found);
+        }
+        const shown = subtitleWords(loaded, track.id, (asset) => transcripts.get(asset) ?? null, fps).filter((word) => word.start >= first && word.start < last);
+        if (shown.length === 0) {
+          throw invalid(
+            `track ${track.id} shows no words in that range. Transcribe the assets of ${track.follows} first (\`frameshell transcribe\`), or check \`from\` and \`to\`.`,
+            "text",
+          );
+        }
+        const resolved = resolveCaptions(parseCaptionText(source), shown, (word) => word.start / fps);
+        phrases = resolved.phrases;
+        covered = resolved.words;
+        warnings = resolved.warnings;
+      }
+      let written: Timeline | undefined;
+      const result = await operate("captions.set", { cwd, timeline, track: trackId, phrases, replace: replace === true }, caller, (after) => {
+        written = after;
+      });
+      const shown = written ? subtitleTracks(written, (asset) => transcripts.get(asset) ?? null, fps).find((candidate) => candidate.track === trackId) : undefined;
+      const cues = (shown?.cues ?? [])
+        .filter((cue) => cue.start >= first && cue.start < last)
+        .map((cue) => {
+          const lead = cueTokens(cue).length - cue.words.length;
+          const text = cueTokens(cue)
+            .map((token, i) => (cue.keyword !== undefined && i === cue.keyword + lead ? `*${token}*` : token))
+            .join(" ");
+          return { start: grid.seconds(cue.start), end: grid.seconds(cue.end), text, entry: cue.entry };
+        });
+      return { ...result, track: trackId, phrases: phrases.length, words: covered, cues: source === undefined ? [] : cues, warnings: [...result.warnings, ...warnings] };
     },
     "multicam.direct": async ({ cwd, timeline, group, template, rules, from, to, replaceHuman }, caller) => {
       const dir = await root(cwd);

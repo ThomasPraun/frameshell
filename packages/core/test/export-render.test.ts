@@ -351,4 +351,81 @@ describe("export render (real ffmpeg)", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it(
+    "fades a hand-chunked cue in over 0.4 s: invisible at its first frame, settled after, the keyword in its colour",
+    async () => {
+      const W = 320;
+      const H = 180;
+      const dark = join(dir, "dark-entry.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=0x202020:s=${W}x${H}:r=30:d=3`],
+        ...["-f", "lavfi", "-i", "sine=f=440:r=48000:d=3", "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", dark],
+      ]);
+      const sources = new Map([["assets/dark.mp4", { path: dark, video: { codec: "h264", still: false, width: W, height: H }, audio: true }]]);
+      const timeline: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [{ id: "c", type: "media", asset: "assets/dark.mp4", start: 0, in: 0, out: 2.5 }] },
+          {
+            id: "s1",
+            kind: "subtitles",
+            follows: "v1",
+            style: { preset: "plain", entry: "line" },
+            phrases: [{ asset: "assets/dark.mp4", words: ["w_000001", "w_000002"], chunks: [2], keyword: 1 }],
+          },
+        ],
+      };
+      // One cue from frame 6 (0.2 s) to 1.3 + 0.35 s.
+      const transcript: Transcript = {
+        schemaVersion: 1,
+        asset: "assets/dark.mp4",
+        assetHash: `sha256:${"b".repeat(64)}`,
+        provider: "test",
+        model: "test",
+        words: [
+          { id: "w_000001", text: "uno", start: 0.2, end: 0.6 },
+          { id: "w_000002", text: "dos", start: 0.7, end: 1.3 },
+        ],
+        edits: {},
+      };
+      const preset: ExportPreset = { ...TINY, video: { ...TINY.video, width: W, height: H } };
+      const plan = compileRender({ timeline, fps: 30, preset, loudness: -17, sources, resolution: { width: W, height: H }, transcripts: new Map([[transcript.asset, transcript]]) });
+      const output = join(dir, "entry.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-entry"), output });
+
+      const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+      const size = W * H * 3;
+      const white: number[] = [];
+      const yellow: number[] = [];
+      const ink: number[] = [];
+      for (let offset = 0; offset + size <= raw.length; offset += size) {
+        let w = 0;
+        let y = 0;
+        let i2 = 0;
+        for (let i = offset; i < offset + size; i += 3) {
+          const [r, g, b] = [raw[i]!, raw[i + 1]!, raw[i + 2]!];
+          if (r > 200 && g > 200 && b > 200) w++;
+          if (r > 200 && g > 160 && b < 110) y++;
+          // Lighter than the 0x20 background and the black outline: any text, however faded.
+          if (r > 70) i2++;
+        }
+        white.push(w);
+        yellow.push(y);
+        ink.push(i2);
+      }
+      expect(ink[5]).toBe(0);
+      expect(ink[6]).toBeLessThan(ink[30]! / 4);
+      expect(ink[10]).toBeGreaterThan(ink[6]!);
+      expect(ink[10]).toBeLessThan(ink[30]!);
+      // Settled from 0.4 s after the start (frame 18): the same picture until the cue ends.
+      expect(Math.abs(ink[20]! - ink[30]!)).toBeLessThan(ink[30]! * 0.03);
+      expect(white[30]).toBeGreaterThan(5);
+      expect(yellow[30]).toBeGreaterThan(5);
+      expect(ink[60]).toBe(0);
+    },
+    MEDIA_TIMEOUT,
+  );
 });

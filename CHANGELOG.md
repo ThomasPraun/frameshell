@@ -62,6 +62,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multicam program tracks, placed by the clip that plays most of each word; a cut is made only where transcribed
   speech covers it. Export and preview already fade the audio 2 ms at every cut (SPEC §3.4), so splices made in
   quiet audio do not click.
+- Captions with chosen keywords, hand chunking and soft entries (#460, part of #451): `frameshell captions set <track>
+  --text "No need to | open any | *editor*"` (MCP `captions_set`, daemon `captions.set`) chunks the words a subtitle
+  track shows into cues by hand and marks one keyword per phrase. The text is matched to transcript words by position
+  (a lost or repeated word fails, naming the first difference) and stored as word ids in the track's `phrases`, so cuts
+  and transcript corrections keep it. A chunk lasts until the next cue starts, at most 0.35 s after its last word and
+  never under 0.4 s. Style: `entry` (`none`, `chars`, `words`, `line`: 0.4 s, ease out, slight blur, no bounce, the
+  keyword settling from `keywordScale`), `keywordColor` (null for none); `gaps` hide cues over a time range
+  (`track set --gap 12-15.5`). Preview and ASS export share the cue, timing and easing rules (`SUBTITLE_ENTRY`);
+  `PROTOCOL_VERSION` 76, timeline JSON Schema regenerated. Left for later: a keyword font, UI controls in the subtitle
+  inspector, a one-word-per-cut preset.
 
 ## [0.18.0] - 2026-11-07
 
