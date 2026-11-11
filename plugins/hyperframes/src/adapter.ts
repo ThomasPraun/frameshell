@@ -228,7 +228,7 @@ function isPlainJson(value: unknown): boolean {
  * the whole directory is walked and copied, and the renderer never hashes
  * outside inputs, so such a clip would read foreign files and never re-render.
  */
-async function compositionDir(projectDir: string, clip: { id: string; source: string }): Promise<{ path: string; rel: string }> {
+export async function compositionDir(projectDir: string, clip: { id: string; source: string }): Promise<{ path: string; rel: string }> {
   const { id, source } = clip;
   const refuse = (): never => {
     throw new Error(

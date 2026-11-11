@@ -2,6 +2,46 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Style (ADR 0028)
+
+**Style guide**:
+The project's `style.json`: brand, colours, fonts, type sizes, motion, sound levels, platforms, rules and banned list, as numbers.
+_Avoid_: style notes, brand kit, theme
+
+**User style**:
+A style guide kept per machine for reuse, copied into a project (never linked to it).
+_Avoid_: global style, template
+
+**Motion personality**:
+A named set of motion values (playful, premium, corporate, energetic, calm) a style starts from and overrides field by field.
+_Avoid_: motion preset, animation style
+
+**Token**:
+One named style value a consumer reads (a colour role, a duration, a dip in dB), never an inline number.
+_Avoid_: variable, setting
+
+**Safe zone**:
+The part of the frame a platform's app covers (buttons, captions, profile), in pixels of a reference frame; held once per platform, named by styles and formats.
+_Avoid_: safe area (alone), margin
+
+## Voiceover (ADR 0034)
+
+**Voiceover**:
+Narration generated from text by a speech provider, one take per line of a voiceover script.
+_Avoid_: TTS (the technique, not the feature), narration track, dubbing
+
+**Speech provider**:
+What turns one line of text into spoken audio for `voiceover generate`: built into the daemon, or contributed by a plugin (`contributes.speechProviders`). Paid when its cost estimate is above 0.
+_Avoid_: TTS engine, voice (a voice is one of a provider's voices)
+
+**Voiceover script**:
+A script in `scripts/` marked `voiceover: true`, read line by line like a shoot script; each line has a display form (captions) and a spoken form (what the voice says).
+_Avoid_: narration script, TTS script
+
+**Voiceover take**:
+The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
+_Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
@@ -76,6 +116,26 @@ _Avoid_: proposal (review mode's word), match, guess, auto-assignment
 A span of timeline time where a person speaks or is on screen, as `people ranges` returns it.
 _Avoid_: segment, turn (a turn is an angle's speaking stretch on the group clock), occurrence
 
+## Subject matte (ADR 0032)
+
+**Matte**:
+A grayscale video, frame for frame with an asset's proxy, white where the person in front is and black elsewhere; made once per asset content and cached, never stored in the project.
+_Avoid_: mask (a Pick mask is one still picture, ADR 0022), alpha, segmentation, cut-out
+
+**Plate**:
+The video track whose person a track flagged `behind` goes behind: its clips are drawn as usual, and drawn again above the flagged track through their matte.
+_Avoid_: background track, source track, base layer
+
+## Motion (ADR 0033)
+
+**Motion runtime**:
+The page script (`frameshell-motion.js`, `window.FrameshellMotion`) that a HyperFrames composition loads from its own directory to paint every frame as a pure function of time: it binds one paint function to the composition clock and writes only 2D `transform` and `opacity`.
+_Avoid_: animation library, motion engine, timeline (a timeline is the project's `timeline.json`)
+
+**Spring**:
+A closed-form damped oscillator that carries a value to a target, set by `response` (period, seconds) and `damping` (ratio ζ: 1 never overshoots, lower bounces); the presets are snappy, default, heavy and playful.
+_Avoid_: bounce, elastic ease, physics animation
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:
@@ -86,11 +146,33 @@ _Avoid_: override, patch, element transform (a clip's `transform` places the who
 The preview state entered by double-clicking a generated clip, where handles move and scale the element under the cursor instead of the clip; Escape leaves it.
 _Avoid_: edit mode, isolation mode
 
-## Transitions and keyframes (ADR 0018)
+## Effects (ADR 0031)
+
+**Audio effect**:
+One step that processes a media clip's sound, in list order: high-pass, denoise or compressor.
+_Avoid_: filter, plugin, preset
+
+**Voice chain**:
+The audio effects that make a phone or laptop voice sound finished: high-pass at 85 Hz, light denoise, gentle 2.5:1 compression. Written into a clip as explicit entries, never as a name.
+_Avoid_: voice preset, voice polish, mastering
+
+**Bake**:
+An asset's sound processed once through one chain of audio effects and cached in `.frameshell/audio-fx/`; preview and export both play it. One bake serves every clip of that asset and chain.
+_Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry sound)
+
+## Transitions and keyframes (ADR 0018, ADR 0030)
 
 **Transition**:
-A dissolve or a fade at a clip edge, stored on the clip (`dissolve`, `fadeIn`, `fadeOut`) and centered on the cut; the timeline length never changes.
-_Avoid_: effect, wipe (a shaped transition, not supported)
+A dissolve (plain or shaped) or a fade at a clip edge, stored on the clip (`dissolve`, `shape`, `fadeIn`, `fadeOut`) and centered on the cut; the timeline length never changes.
+_Avoid_: effect
+
+**Shaped transition**:
+A dissolve whose `shape` moves the pictures instead of mixing them: a wipe (a straight edge uncovers the incoming clip) or a push (the incoming clip slides in and pushes the outgoing one out), in a `direction`; `shapeAt` gives its geometry. Picked by why the picture changes.
+_Avoid_: slide, transition effect, xfade
+
+**Hold** (of a shaped transition):
+Where a shaped transition runs past a clip's handle, the clip's edge frame (the outgoing clip's last, the incoming clip's first) shows still instead of a dip through black.
+_Avoid_: freeze frame (a separate edit), still
 
 **Dissolve**:
 A mix from the clip that ends at a clip's start into that clip, over the handles of both; for sound, an equal-power crossfade.
@@ -101,8 +183,12 @@ A ramp from or to nothing inside one clip: black under the bottom track, transpa
 _Avoid_: dip to black (that is two fades), fade transition
 
 **Handle**:
-Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip, never an error.
+Source material just outside a clip's `[in, out]` that a dissolve plays; a clip without enough gets a shorter dissolve or a dip (a shaped transition: a hold), never an error.
 _Avoid_: tail, overlap, pre-roll
+
+**Marker**:
+A named point on a timeline's clock (`markers` in the timeline file: id, `at`, label, optional colour, ADR 0029): a hook, a beat to land on, a note. It moves with the material when a `cut` of every track ripples it and is deleted when the cut removes the moment it names. Paints and plays nothing.
+_Avoid_: cue (a shoot script's `[LABEL: …]`), keyframe, chapter
 
 **Keyframe**:
 A value of one clip property (`x`, `y`, `scale`, `opacity`, `gain`) at a time on the clip's own clock (the seconds `in` counts), stored in the clip's `keys`; between keyframes the value follows the ease, outside them it holds. "Key" for short.
@@ -121,6 +207,20 @@ _Avoid_: still project, photo project
 **Layer**:
 A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
 _Avoid_: level, sheet
+
+## Formats (ADR 0027)
+
+**Format**:
+One delivery size of a project's single edit (`formats` in `frameshell.json`: an id such as `9x16` and a frame size); every format plays the same cuts, captions and audio.
+_Avoid_: variant, aspect, version, cutdown (a shorter edit is another timeline)
+
+**Primary format**:
+The first format, equal to the project `resolution`; its export is laid out as a project without formats is.
+_Avoid_: master, main format, default format
+
+**Cover**:
+How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
+_Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 
 ## Photo segmentation (ADR 0022)
 

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Timeline, createProjectConfig, createTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { fileUses, timelineUses } from "../src/file-uses.js";
+import { fileUses, timelineRefs, timelineUses } from "../src/file-uses.js";
 import { tempDir } from "./helpers.js";
 
 function media(id: string, asset: string, start = 0) {
@@ -37,6 +37,21 @@ describe("timelineUses", () => {
       groups: [{ id: "g_1", angles: [{ id: "a", asset: "assets/cam.mp4", offset: 0 }], mics: [{ id: "m", asset: "assets/mic.wav", offset: 0 }] }],
     } as unknown as Timeline;
     expect(timelineUses("main", timeline, "assets/mic.wav")).toEqual([{ timeline: "main", id: "g_1", ref: "assets/mic.wav" }]);
+  });
+});
+
+describe("timelineRefs", () => {
+  it("lists every file clips, angles and mics name, in order", () => {
+    const timeline = {
+      ...withClips("main", [media("c_a", "assets/take.mp4"), { id: "c_n", type: "timeline" as const, source: "timelines/intro.json", start: 1 } as never]),
+      groups: [{ id: "g_1", angles: [{ id: "a", asset: "assets/cam.mp4", offset: 0 }], mics: [{ id: "m", asset: "assets/mic.wav", offset: 0 }] }],
+    } as unknown as Timeline;
+    expect(timelineRefs("main", timeline).map((use) => [use.id, use.ref])).toEqual([
+      ["c_a", "assets/take.mp4"],
+      ["c_n", "timelines/intro.json"],
+      ["g_1", "assets/cam.mp4"],
+      ["g_1", "assets/mic.wav"],
+    ]);
   });
 });
 

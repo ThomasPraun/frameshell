@@ -33,6 +33,9 @@ import {
   PHOTO_SEGMENTATION_MODELS,
   SegmentService,
   workerSegmentEngine,
+  VIDEO_MATTE_MODEL,
+  VIDEO_MATTE_MODELS,
+  matteInWorker,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   yunetWorkerScanner,
@@ -47,7 +50,8 @@ import { tempDir } from "./helpers.js";
 import { makeDiscPhoto, overlapWithDisc } from "./segment-fixture.js";
 import { toneWav } from "./whisper-fixture.js";
 import { drawFace, encodeFrames } from "./face-fixture.js";
-import { mediaTools } from "./media-tools.js";
+import { mediaTools, runBuffer } from "./media-tools.js";
+import { drawFigure, matteOverlap } from "./matte-fixture.js";
 
 describe("pinned ffmpeg manifest", () => {
   const platforms = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64"] as const;
@@ -355,6 +359,14 @@ describe("pinned face detection manifest", () => {
     }
   });
 
+  it("pins the MediaPipe selfie segmenter by Hugging Face revision and SHA-256 under Apache-2.0", () => {
+    expect(VIDEO_MATTE_MODELS.map((model) => [model.id, model.license, model.size, model.version])).toEqual([[VIDEO_MATTE_MODEL, "Apache-2.0", 462_352, "be49485c8e02"]]);
+    expect(VIDEO_MATTE_MODELS[0]!.urls).toEqual([
+      "https://huggingface.co/onnx-community/mediapipe_selfie_segmentation/resolve/be49485c8e027524be38591817fc5cd31bd9d00e/onnx/model.onnx",
+    ]);
+    expect(VIDEO_MATTE_MODELS[0]!.sha256).toBe("3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad");
+  });
+
   it("reports an installed module at its pinned version without running it", async () => {
     const dataDir = tempDir();
     const binaries = new BinaryManager({ dataDir, configDir: tempDir() });
@@ -534,6 +546,28 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_DOWNLOAD"] === "1")("real pinne
         expect((await service.segment(dir, "disc.png", { x: disc.cx + 20, y: disc.cy })).cached).toBe(true);
       } finally {
         await engine.close();
+      }
+    },
+    600_000,
+  );
+
+  it(
+    "installs ONNX Runtime Web and the selfie segmenter, verified, and mattes a drawn figure that moves, in a worker thread",
+    async () => {
+      const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir() });
+      const files = { runtime: await binaries.ensure(ONNX_RUNTIME_WEB), model: await binaries.ensureModel(VIDEO_MATTE_MODEL) };
+      const { ffmpeg } = await mediaTools();
+      const dir = tempDir();
+      const [width, height] = [640, 360];
+      // 2 s at 10 fps: the figure walks from x 200 to 440.
+      const frames = Array.from({ length: 20 }, (_, i) => drawFigure(width, height, 200 + 12 * i));
+      await encodeFrames(ffmpeg, join(dir, "figure.mp4"), width, height, 10, frames.map((frame) => frame.bgr));
+      const output = join(dir, "matte.mp4");
+      const result = await matteInWorker(files, { ffmpeg, source: join(dir, "figure.mp4"), width, height, fps: 10, frames: 20, output, scratch: join(dir, "coarse") }, {});
+      expect(result.frames).toBe(20);
+      for (const n of [3, 10, 16]) {
+        const matte = await runBuffer(ffmpeg, ["-v", "error", "-i", output, "-vf", `select=eq(n\\,${n}),format=gray`, "-frames:v", "1", "-f", "rawvideo", "-"]);
+        expect(matteOverlap(matte, frames[n]!.mask)).toBeGreaterThan(0.85);
       }
     },
     600_000,

@@ -13,6 +13,10 @@
       "types": "./dist/composite.d.ts",
       "default": "./dist/composite.js"
     },
+    "./motion": {
+      "types": "./dist/motion.d.ts",
+      "default": "./dist/motion.js"
+    },
     "./subtitles": {
       "types": "./dist/subtitles.d.ts",
       "default": "./dist/subtitles.js"
@@ -20,6 +24,10 @@
     "./transitions": {
       "types": "./dist/transitions.d.ts",
       "default": "./dist/transitions.js"
+    },
+    "./effects": {
+      "types": "./dist/effects.d.ts",
+      "default": "./dist/effects.js"
     },
     "./json-schema/*": "./json-schema/*"
   },

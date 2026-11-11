@@ -345,6 +345,7 @@ describe("plugin manifest", () => {
       registerCommand: (name) => registered.push(`command:${name}`),
       registerExportPreset: () => {},
       registerTranscriptionProvider: () => {},
+      registerSpeechProvider: () => {},
       refreshRenders: () => {},
     });
     const { clipTypes, commands, skills } = manifest.value.contributes;

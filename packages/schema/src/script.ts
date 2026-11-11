@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { numberLanguage, spellNumbersIn } from "./numbers.js";
 import { personNameKey } from "./people.js";
 import { WordIdSchema } from "./transcript.js";
 
@@ -135,9 +136,10 @@ const UNNAMED = "scene";
 
 /**
  * Parse a script. Only `##` ATX headings (up to 3 spaces of indentation,
- * outside fenced code) are scenes; setext headings are not. In a shoot
- * script (`shoot: true`) a closing timing, `## Hook (0:00–0:05)`, is left out
- * of the title and slug, so retiming a scene keeps its `scriptRef`.
+ * outside fenced code) are scenes; setext headings are not. In a shoot or
+ * voiceover script (`shoot: true`, `voiceover: true`) a closing timing,
+ * `## Hook (0:00–0:05)`, is left out of the title and slug, so retiming a
+ * scene keeps its `scriptRef`.
  */
 export function parseScript(text: string): ScriptOutline {
   return scanScript(text).outline;
@@ -150,7 +152,7 @@ interface ScriptScan {
   /** Frontmatter mapping; null when absent or unreadable. */
   fields: Record<string, unknown> | null;
   bodyStart: number;
-  /** Per scene: seconds from a closing heading timing (shoot scripts only), or null. */
+  /** Per scene: seconds from a closing heading timing (shoot and voiceover scripts only), or null. */
   expected: (number | null)[];
   /** Per file line (0-based): inside a fenced block, fence lines included. */
   fenced: boolean[];
@@ -160,7 +162,7 @@ function scanScript(text: string): ScriptScan {
   const lines = (text.startsWith("\u{FEFF}") ? text.slice(1) : text).split(/\r?\n/);
   const warnings: string[] = [];
   const { meta, bodyStart, fields } = readFrontmatter(lines, warnings);
-  const shoot = fields?.["shoot"] === true;
+  const timed = fields?.["shoot"] === true || fields?.["voiceover"] === true;
 
   const headings: { title: string; base: string; line: number; expected: number | null }[] = [];
   const fenced = lines.map(() => false);
@@ -183,7 +185,7 @@ function scanScript(text: string): ScriptScan {
     if (!heading) continue;
     let title = (heading[1] ?? "").trim();
     let expected: number | null = null;
-    const timing = shoot ? readTiming(title) : null;
+    const timing = timed ? readTiming(title) : null;
     if (timing) {
       title = timing.title;
       expected = timing.seconds;
@@ -227,14 +229,43 @@ function scanScript(text: string): ScriptScan {
  * Works without `shoot: true` too, with a warning, so a draft can be checked.
  */
 export function parseShootScript(text: string): ShootScript {
-  const { outline, lines, fields, bodyStart, expected, fenced } = scanScript(text);
-  const warnings = [...outline.warnings];
-  const shoot = readShootMeta(fields, warnings);
+  const scan = scanScript(text);
+  const warnings = [...scan.outline.warnings];
+  const shoot = readShootMeta(scan.fields, warnings);
+  const read = readScenes(scan, warnings, "is not compared");
+  const scenes: ShootScene[] = read.scenes.map(({ scene, expected, lines: sceneLines }) => {
+    const words = sceneLines.reduce((total, line) => total + line.words.length, 0);
+    if (words === 0 && !sceneLines.some((line) => line.cues.some((cue) => cue.free))) {
+      warnings.push(`Scene "${scene.slug}" has nothing to say: no spoken words and no \`[FREE: …]\` slot.`);
+    }
+    return { title: scene.title, slug: scene.slug, line: scene.line, endLine: scene.endLine, expected, words, lines: sceneLines };
+  });
+  const { unnamed } = read;
+  if (read.speakers.size > 0 && unnamed.length > 0) {
+    warnings.push(`Line${unnamed.length === 1 ? "" : "s"} ${unnamed.join(", ")} come${unnamed.length === 1 ? "s" : ""} before any \`**Name:**\` and ${unnamed.length === 1 ? "has" : "have"} no speaker.`);
+  }
+  return { meta: scan.outline.meta, shoot, scenes, speakers: [...read.speakers.values()], warnings };
+}
 
+/** Scenes with their lines read the shoot-script way (ADR 0023), shared by shoot and voiceover scripts. */
+interface ReadScenes {
+  scenes: { scene: ScriptScene; expected: number | null; lines: ShootLine[] }[];
+  /** Speaker names by {@link personNameKey}, first spelling kept, in order of first use. */
+  speakers: Map<string, string>;
+  /** 1-based file lines with spoken words before any `**Name:**`. */
+  unnamed: number[];
+}
+
+/**
+ * Every scene's lines: one per non-blank text line, speaker held from the last `**Name:**`, cues in brackets.
+ * Warns about text before the first heading (`outside` says what happens to it) and leftover placeholders.
+ */
+function readScenes(scan: ScriptScan, warnings: string[], outside: string): ReadScenes {
+  const { outline, lines, bodyStart, expected, fenced } = scan;
   const firstScene = outline.scenes[0]?.line ?? lines.length + 1;
   for (let index = bodyStart; index < firstScene - 1; index++) {
     if (!fenced[index] && readLine(lines[index]!) !== null) {
-      warnings.push(`Line ${index + 1}: text before the first \`## \` heading is in no scene and is not compared.`);
+      warnings.push(`Line ${index + 1}: text before the first \`## \` heading is in no scene and ${outside}.`);
       break;
     }
   }
@@ -243,7 +274,7 @@ export function parseShootScript(text: string): ShootScript {
   const speakers = new Map<string, string>();
   let speaker: string | null = null;
   const unnamed: number[] = [];
-  const scenes: ShootScene[] = outline.scenes.map((scene, sceneIndex) => {
+  const scenes = outline.scenes.map((scene, sceneIndex) => {
     const sceneLines: ShootLine[] = [];
     for (let index = scene.line; index < scene.endLine; index++) {
       if (fenced[index]) continue;
@@ -261,16 +292,146 @@ export function parseShootScript(text: string): ShootScript {
       }
       sceneLines.push({ line: index + 1, speaker, text: read.text, words: read.words, cues: read.cues });
     }
-    const words = sceneLines.reduce((total, line) => total + line.words.length, 0);
-    if (words === 0 && !sceneLines.some((line) => line.cues.some((cue) => cue.free))) {
-      warnings.push(`Scene "${scene.slug}" has nothing to say: no spoken words and no \`[FREE: …]\` slot.`);
-    }
-    return { title: scene.title, slug: scene.slug, line: scene.line, endLine: scene.endLine, expected: expected[sceneIndex] ?? null, words, lines: sceneLines };
+    return { scene, expected: expected[sceneIndex] ?? null, lines: sceneLines };
   });
-  if (speakers.size > 0 && unnamed.length > 0) {
-    warnings.push(`Line${unnamed.length === 1 ? "" : "s"} ${unnamed.join(", ")} come${unnamed.length === 1 ? "s" : ""} before any \`**Name:**\` and ${unnamed.length === 1 ? "has" : "have"} no speaker.`);
+  return { scenes, speakers, unnamed };
+}
+
+/**
+ * Speaking rate a voiceover is budgeted at (#470: synthetic voices read 2.2 to 3 words/s). A scene whose
+ * words need longer than its heading timing gets a warning: trim the text, never stretch the picture.
+ */
+export const VOICEOVER_WORDS_PER_SECOND = 2.5;
+
+/** Voiceover conventions from the frontmatter (ADR 0034). */
+export const VoiceoverMetaSchema = z.object({
+  voiceover: z.boolean().describe("Frontmatter `voiceover: true`: the voiceover conventions apply."),
+  language: z
+    .string()
+    .nullable()
+    .describe(
+      "Frontmatter `language` (`es`, `en-US`…): passed to the speech provider; with `es` or `en`, numbers written with digits are spelled out in `spoken`.",
+    ),
+  provider: z.string().nullable().describe("Frontmatter `provider`: speech provider id used when the call names none."),
+  voice: z.string().nullable().describe("Frontmatter `voice`: voice id used when the call names none."),
+});
+
+/** One line of a voiceover script: one generated take. */
+export const VoiceoverLineSchema = z.object({
+  id: z
+    .string()
+    .describe(
+      "`<scene slug>-<n>`, n = 1-based position among the scene's spoken lines (`hook-1`): the take's file name, " +
+        "`assets/voiceover/<script slug>/<id>.wav`.",
+    ),
+  scene: z.string().describe("Slug of its scene."),
+  line: z.int().describe("1-based file line."),
+  speaker: z.string().nullable().describe("Name from the last `**Name:**`; null when none."),
+  display: z
+    .string()
+    .describe("Text to show (captions): the line as written, respellings `{display|spoken}` resolved to their display side, numbers kept as digits."),
+  spoken: z
+    .string()
+    .describe("Text the voice reads: respellings resolved to their spoken side and, in `es`/`en`, numbers spelled out (`23` → `veintitrés`)."),
+  words: z.int().describe("Words in `spoken`."),
+  cues: z.array(ShootCueSchema).describe("Cues in the line (`[VISUAL: …]`), never read; `at` counts the line's words as written."),
+});
+
+/** One scene of a voiceover script. */
+export const VoiceoverSceneSchema = z.object({
+  title: z.string().describe("Heading text without `##` and without its timing."),
+  slug: z.string().describe("Same anchor as in `script.outline`."),
+  line: z.int().describe("1-based file line of the heading."),
+  endLine: z.int().describe("1-based last line of the scene."),
+  expected: z.number().nullable().describe("Length the picture gives it in seconds, from a heading timing like `(0:05–0:14)`; null without one."),
+  words: z.int().describe("Spoken words of all its lines."),
+  lines: z.array(VoiceoverLineSchema).describe("Spoken lines in file order; lines of cues only are left out."),
+});
+
+/** See {@link VoiceoverMetaSchema}. */
+export type VoiceoverMeta = z.output<typeof VoiceoverMetaSchema>;
+/** See {@link VoiceoverLineSchema}. */
+export type VoiceoverLine = z.output<typeof VoiceoverLineSchema>;
+/** See {@link VoiceoverSceneSchema}. */
+export type VoiceoverScene = z.output<typeof VoiceoverSceneSchema>;
+
+/** Result of {@link parseVoiceoverScript}. */
+export interface VoiceoverScript {
+  meta: ScriptMeta;
+  voiceover: VoiceoverMeta;
+  /** In file order, with the same slugs as {@link parseScript}. */
+  scenes: VoiceoverScene[];
+  /** {@link ScriptOutline.warnings} plus voiceover convention problems. Empty when clean. */
+  warnings: string[];
+}
+
+/** Respelling `{display|spoken}`: what captions show, then what the voice says. */
+const RESPELLING = /\{([^{}|]*)\|([^{}]*)\}/g;
+
+/**
+ * Parse a voiceover script (ADR 0034): a script read with the shoot-script line rules ({@link parseShootScript}:
+ * one line per non-blank text line, `**Name:**`, `[LABEL: …]` cues) where each line becomes one take. Each line
+ * has two forms joined by position: `display` for captions and `spoken` for the voice. They differ by
+ * respellings `{display|spoken}` (`{Frameshell|freim shel}`) and by numbers spelled out in the frontmatter
+ * `language`. Never fails: problems are warnings. Works without `voiceover: true` too, with a warning.
+ */
+export function parseVoiceoverScript(text: string): VoiceoverScript {
+  const scan = scanScript(text);
+  const warnings = [...scan.outline.warnings];
+  const voiceover = readVoiceoverMeta(scan.fields, warnings);
+  const language = numberLanguage(voiceover.language);
+  const digits: number[] = [];
+  const read = readScenes(scan, warnings, "is not read");
+  const scenes: VoiceoverScene[] = read.scenes.map(({ scene, expected, lines: sceneLines }) => {
+    const voiced: VoiceoverLine[] = [];
+    for (const shootLine of sceneLines) {
+      if (shootLine.cues.some((cue) => cue.free)) {
+        warnings.push(`Line ${shootLine.line}: \`[FREE: …]\` means nothing in a voiceover (the voice improvises nothing): ignored.`);
+      }
+      const display = collapse(shootLine.text.replace(RESPELLING, (_match, shown: string) => shown));
+      const said = collapse(shootLine.text.replace(RESPELLING, (_match, _shown: string, spoken: string) => spoken));
+      if (language === null && /\p{Nd}/u.test(said)) digits.push(shootLine.line);
+      const spoken = language ? spellNumbersIn(said, language) : said;
+      const words = countWords(spoken);
+      if (words === 0) continue;
+      voiced.push({ id: `${scene.slug}-${voiced.length + 1}`, scene: scene.slug, line: shootLine.line, speaker: shootLine.speaker, display, spoken, words, cues: shootLine.cues });
+    }
+    const words = voiced.reduce((total, line) => total + line.words, 0);
+    if (words === 0) warnings.push(`Scene "${scene.slug}" has nothing to say: no spoken words.`);
+    if (expected !== null && words / VOICEOVER_WORDS_PER_SECOND > expected) {
+      const needed = Math.round((words / VOICEOVER_WORDS_PER_SECOND) * 10) / 10;
+      warnings.push(
+        `Scene "${scene.slug}": ${words} words take about ${needed} s at ${VOICEOVER_WORDS_PER_SECOND} words/s, longer than its ${expected} s. ` +
+          "Trim the text; never stretch the picture.",
+      );
+    }
+    return { title: scene.title, slug: scene.slug, line: scene.line, endLine: scene.endLine, expected, words, lines: voiced };
+  });
+  if (digits.length > 0) {
+    warnings.push(
+      `Line${digits.length === 1 ? "" : "s"} ${digits.join(", ")} ${digits.length === 1 ? "has" : "have"} digits the voice reads its own way: ` +
+        "set `language: es` or `language: en` to spell them out, or write them in words.",
+    );
   }
-  return { meta: outline.meta, shoot, scenes, speakers: [...speakers.values()], warnings };
+  return { meta: scan.outline.meta, voiceover, scenes, warnings };
+}
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function readVoiceoverMeta(fields: Record<string, unknown> | null, warnings: string[]): VoiceoverMeta {
+  const meta: VoiceoverMeta = { voiceover: false, language: null, provider: null, voice: null };
+  const value = (key: string) => fields?.[key];
+  if (value("voiceover") === true) meta.voiceover = true;
+  else if (value("voiceover") === undefined) warnings.push("Not a voiceover script: add `voiceover: true` to the frontmatter.");
+  else warnings.push("Frontmatter `voiceover` must be `true`: the voiceover conventions do not apply.");
+  for (const key of ["language", "provider", "voice"] as const) {
+    const field = value(key);
+    if (typeof field === "string" && field.trim() !== "") meta[key] = field.trim();
+    else if (field !== undefined) warnings.push(`Frontmatter \`${key}\` must be text: ignored.`);
+  }
+  return meta;
 }
 
 function readShootMeta(fields: Record<string, unknown> | null, warnings: string[]): ShootMeta {

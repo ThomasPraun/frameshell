@@ -110,7 +110,16 @@ describe("frameshell plugin", () => {
   it("prints the command's data with --json, without passing the flag to the plugin", async () => {
     const result = await frameshell(author, ["hello", "greet", "--json", "Ana"], project);
     expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ output: "Hello, Ana!", data: { greeted: "Ana", project } });
+    expect(JSON.parse(result.stdout)).toEqual({ output: "Hello, Ana!", data: { greeted: "Ana", project }, failed: false });
+  });
+
+  it("exits 1 but still prints the output when the command reports failure", async () => {
+    const result = await frameshell(author, ["hello", "greet", "--refuse"], project);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("greeting declined\n");
+    const json = await frameshell(author, ["hello", "greet", "--refuse", "--json"], project);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.stdout)).toMatchObject({ data: { declined: true }, failed: true });
   });
 
   it("exits 2 and lists plugin commands for an unknown one", async () => {

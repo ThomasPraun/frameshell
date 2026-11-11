@@ -1,6 +1,11 @@
 import type { BinaryReport, DoctorResult } from "@frameshell/protocol";
 import type { BinaryManager, ProjectBinaries } from "./manager.js";
+import { EncoderCache } from "../encoders/probe.js";
+import { machineProfile, readMachineFacts } from "../encoders/profile.js";
 import { type Exec, execProcess, probeFfmpeg, probeVersion } from "./probe.js";
+
+/** Format the disk estimate and size recommendations are for when the caller is in no project. */
+const DEFAULT_PROJECT_FORMAT = { resolution: { width: 1920, height: 1080 }, fps: 30 };
 
 /** Options for {@link runDoctor}. */
 export interface DoctorOptions {
@@ -8,6 +13,12 @@ export interface DoctorOptions {
   project?: ProjectBinaries | undefined;
   /** Download missing managed binaries first; install errors reject. */
   install?: boolean;
+  /** Test the encoders again instead of using the cached probe. */
+  reprobe?: boolean;
+  /** Probe cache; default: `encoders.json` in the binary manager's data dir. */
+  encoders?: EncoderCache;
+  /** Resolution and fps of the project, for the disk estimate. Default 1920x1080 at 30. */
+  format?: { resolution: { width: number; height: number }; fps: number };
   exec?: Exec;
 }
 
@@ -21,7 +32,7 @@ export interface DoctorOptions {
  * versions is a problem.
  */
 export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<Omit<DoctorResult, "skill">> {
-  const { project, install = false, exec = execProcess } = options;
+  const { project, install = false, reprobe = false, exec = execProcess } = options;
   const tools = binaries.tools();
   if (install) {
     for (const tool of tools) {
@@ -83,12 +94,18 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
 
   const ffmpeg = reports.find((report) => report.name === "ffmpeg");
   let codecs: DoctorResult["codecs"] = [];
+  let encoders: DoctorResult["encoders"] = null;
   if (ffmpeg?.installed && ffmpeg.path && ffmpeg.version !== null) {
     const probe = await probeFfmpeg(ffmpeg.path, exec);
     codecs = probe.codecs;
     problems.push(...probe.problems);
+    const cache = options.encoders ?? new EncoderCache(binaries.dataDir, exec);
+    encoders = await cache.get(ffmpeg.path, ffmpeg.version, reprobe);
+    if (encoders.picked === null) problems.push(`No H.264 encoder (VideoToolbox, NVENC or x264) encoded a test clip with ${ffmpeg.path}; renders will fail.`);
   }
-  return { platform: binaries.platform, dataDir: binaries.dataDir, binaries: reports, codecs, problems };
+  const hardware = encoders !== null && encoders.picked !== null && encoders.picked !== "libx264";
+  const profile = machineProfile(readMachineFacts(hardware), options.format ?? DEFAULT_PROJECT_FORMAT);
+  return { platform: binaries.platform, dataDir: binaries.dataDir, binaries: reports, codecs, encoders, profile, problems };
 }
 
 /** A module cannot be run to ask: a managed install is its pin (the version is in its path); an override is taken as given. */

@@ -52,6 +52,8 @@ Set `binaries` in `frameshell.json` (project) or in `<configDir>/config.json` (g
 
 Requirements: GPL build with libx264, and libvpx with both the VP9 encoder and decoder. The native `vp9` decoder drops alpha (ADR 0002). Static builds only, so nothing depends on system libraries.
 
+Hardware encoders (VideoToolbox, NVENC) are optional and probed, never assumed: an encoder in `ffmpeg -encoders` can still fail (no GPU, old driver). `packages/core/src/encoders/probe.ts` encodes 0.2 s of lavfi colour with each of `h264_videotoolbox`, `h264_nvenc`, `libx264` in that order, and renders with the first that works. The result is cached in `encoders.json` in `dataDir`, keyed by ffmpeg path and version (so a re-pin probes again); `doctor --reprobe` refreshes it after a driver or GPU change. Per-tier settings (draft, final, master, preview) are in `encoders/tiers.ts`.
+
 | Platform | Version | Builder | Archive | Licence |
 |---|---|---|---|---|
 | darwin-arm64 | 9.0.2 | [Martin Riedl](https://ffmpeg.martin-riedl.de) | `ffmpeg.zip` + `ffprobe.zip` (28 MB each) | GPL-3.0-or-later (`--enable-gpl --enable-version3`, no `--enable-nonfree`) |
@@ -286,6 +288,26 @@ I/O the code depends on: encoder `input_image` float32 `[H, W, 3]` (RGB 0..255, 
 Verified when pinning (2026-10-23): both files hashed to their Hugging Face large-file oid at that revision; `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the runtime and both models and segments a drawn disc from one click (mask overlap with the disc above 0.9), on every platform of the Real binaries workflow.
 
 Re-pin: take both files' large-file SHA-256 (the Hugging Face file page, or `curl -sI` on the `resolve` URL, `x-linked-etag`) at the new revision, download and compare, update `PHOTO_SEGMENTATION_MODELS` (`packages/core/src/binaries/manifest.ts`), and run the opt-in test above: it fails when the input or output names change.
+
+## Video subject matte (MediaPipe selfie segmenter)
+
+Used by `matte.prepare` (`frameshell matte <asset>`, ADR 0032: which pixels of each frame are the person in front, so graphics can sit behind them). On demand: the first matte installs the model, and the ONNX Runtime Web pin above when face detection never did. Nothing is downloaded before someone asks for a matte.
+
+Model, [`onnx-community/mediapipe_selfie_segmentation`](https://huggingface.co/onnx-community/mediapipe_selfie_segmentation) on Hugging Face (Google's general 256×256 selfie segmenter converted to ONNX, fp32), pinned by revision `be49485c8e027524be38591817fc5cd31bd9d00e`:
+
+| Id | File | Size | SHA-256 | Licence |
+|---|---|---|---|---|
+| `mediapipe-selfie` | `onnx/model.onnx` (installed as `mediapipe_selfie_segmentation.onnx`) | 0.46 MB (462,352) | `3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad` | Apache-2.0 |
+
+URL form: `https://huggingface.co/onnx-community/mediapipe_selfie_segmentation/resolve/<revision>/onnx/model.onnx`. No mirror. Licence: Google's model card ("Model Card MediaPipe Selfie Segmentation", the PDF linked from the MediaPipe Image Segmenter guide) says "Licensed under Apache License, Version 2.0", read first-hand when pinning; the conversion repository is tagged apache-2.0. Frameshell never redistributes the file: the user's machine downloads it. The landscape 144×256 model (same card, same licence) and MODNet (Apache-2.0) were measured and not pinned (`docs/research/video-subject-matte.md`). u2net_human_seg is excluded: its weights carry no licence of their own and were trained on a non-commercial dataset.
+
+A daemon worker thread (`packages/core/src/matte/matte-worker.ts`) runs it single-threaded on every frame of the asset's proxy: about 10 ms per frame on an Apple M3, the refinement (`matte/refine.ts`) about 23 ms more. The matte is cached per content, model and fps in `.frameshell/cache/mattes/` and swept by `gc`.
+
+I/O the code depends on: input `pixel_values` float32 `[1, 3, 256, 256]` (RGB 0..1, no mean or scale), output `alphas` float32 `[1, 1, 256, 256]` (person probability 0..1).
+
+Verified when pinning (2026-11-10): the file hashed to its Hugging Face large-file oid at that revision; `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the runtime and the model and mattes a drawn figure that moves (overlap with the figure above 0.85 on three frames). It ran locally on darwin-arm64 only; the other platforms are covered by the Real binaries workflow once its jobs pass.
+
+Re-pin: take the file's large-file SHA-256 at the new revision (the Hugging Face file page, or `curl -sI` on the `resolve` URL, `x-linked-etag`), download and compare, update `VIDEO_MATTE_MODELS` (`packages/core/src/binaries/manifest.ts`), and run the opt-in test above: it fails when the input or output names change. A new model or revision changes the cache key (`matteKey`), so old mattes are made again and the old ones swept.
 
 ## Re-pinning ffmpeg
 

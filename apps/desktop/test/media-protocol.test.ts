@@ -51,6 +51,19 @@ describe("serveMedia", () => {
     expect((await serveMedia(get(`${base}.frameshell/cache/render/x.mp4`), roots)).status).toBe(403);
   });
 
+  it("serves baked audio effects (ADR 0031) as raw PCM ranges, nothing else from their folder", async () => {
+    const { root, roots, base } = project();
+    const baked = join(root, ".frameshell", "audio-fx");
+    mkdirSync(baked, { recursive: true });
+    writeFileSync(join(baked, "0123-x1.pcm"), BYTES);
+    writeFileSync(join(baked, "notes.txt"), "x");
+    const response = await serveMedia(get(`${base}.frameshell/audio-fx/0123-x1.pcm`, { Range: "bytes=10-19" }), roots);
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(BYTES.subarray(10, 20));
+    expect((await serveMedia(get(`${base}.frameshell/audio-fx/notes.txt`), roots)).status).toBe(403);
+  });
+
   it("answers a byte range with 206 and exactly those bytes", async () => {
     const { roots, base } = project();
     const response = await serveMedia(get(`${base}.frameshell/proxies/abc.pcm`, { Range: "bytes=100-199" }), roots);

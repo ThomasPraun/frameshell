@@ -10,6 +10,7 @@ const specExample = {
   contributes: {
     clipTypes: ["hyperframes"],
     transcriptionProviders: [],
+    speechProviders: [],
     commands: ["hyperframes new"],
     exportPresets: [],
     skills: ["skills/hyperframes/SKILL.md"],
@@ -30,7 +31,7 @@ describe("plugin manifest (frameshell-plugin.json)", () => {
     const result = parsePluginManifest({ name: "tiny", version: "1.0.0", apiVersion: "1", main: "index.js" });
     expect(result).toMatchObject({
       ok: true,
-      value: { contributes: { clipTypes: [], transcriptionProviders: [], commands: [], exportPresets: [], skills: [] } },
+      value: { contributes: { clipTypes: [], transcriptionProviders: [], speechProviders: [], commands: [], exportPresets: [], skills: [] } },
     });
   });
 
@@ -43,6 +44,7 @@ describe("plugin manifest (frameshell-plugin.json)", () => {
     ["main", { main: "/abs/index.js" }],
     ["contributes.commands.0", { contributes: { commands: ["justone"] } }],
     ["contributes.skills.0", { contributes: { skills: ["../../etc/passwd"] } }],
+    ["contributes.speechProviders.0", { contributes: { speechProviders: ["Not An Id"] } }],
     ["unknownPoint", { contributes: { unknownPoint: [] } }],
   ])("rejects a bad %s with a message naming the field", (field, patch) => {
     const result = parsePluginManifest({ ...specExample, ...patch });
@@ -54,6 +56,7 @@ describe("plugin manifest (frameshell-plugin.json)", () => {
     const result = parsePluginManifest({ ...specExample, contributes: { commands: ["plugin install"] } });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/built-in/);
+    expect(parsePluginManifest({ ...specExample, contributes: { commands: ["voiceover say"] } }).ok).toBe(false);
   });
 });
 

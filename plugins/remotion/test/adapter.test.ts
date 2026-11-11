@@ -617,6 +617,7 @@ describe("remotion plugin", () => {
       registerCommand: (name: string) => commands.push(name),
       registerExportPreset: () => {},
       registerTranscriptionProvider: () => {},
+      registerSpeechProvider: () => {},
       refreshRenders: () => refreshed++,
     } as unknown as PluginApi;
     activate(api);

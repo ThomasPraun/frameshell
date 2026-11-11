@@ -1,5 +1,5 @@
 import type { ClipDiff, OperationResult } from "@frameshell/protocol";
-import type { Clip } from "@frameshell/schema";
+import { type Clip, MARKER_LABEL_MAX } from "@frameshell/schema";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -35,6 +35,7 @@ import {
   type DragPreview,
   type EditCommand,
   type Grab,
+  type SnapPoint,
   commandEdits,
   commandOptions,
   dragEdits,
@@ -46,6 +47,8 @@ import {
 } from "../timeline/edit.js";
 import {
   type ClipBox,
+  EMPTY_LAYOUT,
+  type MarkerBox,
   RULER_HEIGHT,
   type SceneBox,
   type TimelineLayout,
@@ -56,6 +59,8 @@ import {
   formatDuration,
   formatTimecode,
   layoutTimeline,
+  markerAt,
+  onMarkerLane,
   sceneAt,
   zoomAround,
   zoomLimits,
@@ -388,6 +393,8 @@ function TimelineCanvas({
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   /** Track whose header shows a name input (track menu "Rename track"). */
   const [renaming, setRenaming] = useState<string | null>(null);
+  /** Marker name input over the marker lane (ruler menu): a new marker at `at`, or `marker` renamed; `x` in canvas px. */
+  const [naming, setNaming] = useState<{ marker: MarkerBox | null; at: number; x: number } | null>(null);
   const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
 
   /** Forget nudges in flight once none is pending and the shown timeline has their last revision. */
@@ -417,7 +424,7 @@ function TimelineCanvas({
     const started = performance.now();
     const drag = ghost.current?.drag;
     const { mediaDrawn } = paintTimeline(context, {
-      layout: current ?? { scenes: [], head: RULER_HEIGHT, rows: [], duration: 0, height: RULER_HEIGHT, clipCount: 0 },
+      layout: current ?? EMPTY_LAYOUT,
       viewport: view,
       fps: rate,
       playhead: at,
@@ -593,6 +600,9 @@ function TimelineCanvas({
       audio: read("--track-audio", DEFAULT_THEME.audio),
       subtitles: read("--track-sub", DEFAULT_THEME.subtitles),
       angles: DEFAULT_THEME.angles.map((fallback, index) => read(`--angle-${index + 1}`, fallback)),
+      markers: Object.fromEntries(
+        Object.entries(DEFAULT_THEME.markers).map(([name, fallback]) => [name, read(`--marker-${name}`, fallback)]),
+      ) as TimelineTheme["markers"],
       diffAdded: read("--diff-added", DEFAULT_THEME.diffAdded),
       diffMoved: read("--diff-moved", DEFAULT_THEME.diffMoved),
       diffChanged: read("--diff-changed", DEFAULT_THEME.diffChanged),
@@ -822,8 +832,14 @@ function TimelineCanvas({
     const at = locate(event);
     if (event.button !== 0 || !layout || !at) return;
     const box = scroller.current!;
-    if (at.y < RULER_HEIGHT) {
+    if (at.y < layout.sceneTop) {
       transport.pause();
+      // A marker on its lane takes the playhead exactly to it; the rest of the lane scrubs like the ruler.
+      const marker = onMarkerLane(layout, at.y) ? markerAt(layout, state.current, at.x, at.y) : null;
+      if (marker) {
+        seek(marker.at, false);
+        return;
+      }
       gesture.current = { kind: "scrub", pointer: event.pointerId };
       box.setPointerCapture(event.pointerId);
       seek(timeAt(at.x), false);
@@ -1107,6 +1123,41 @@ function TimelineCanvas({
     );
   };
 
+  /**
+   * Right-click on the ruler or the marker lane: add a marker at that time (on the frame grid), and rename or delete
+   * the marker under the pointer. Image projects have no timeline to mark.
+   */
+  const rulerItems = (x: number, y: number): MenuItem[] => {
+    const current = latest.current.layout;
+    if (image || !current) return [];
+    const marker = markerAt(current, state.current, x, y);
+    const at = onGrid(timeAt(x));
+    const left = (time: number) => time * state.current.pxPerSecond - state.current.scrollLeft;
+    return [
+      { label: t.timeline.addMarker, separated: true, run: () => setNaming({ marker: null, at, x: left(at) }) },
+      ...(marker
+        ? [
+            { label: t.timeline.renameMarker(marker.label), run: () => setNaming({ marker, at: marker.at, x: left(marker.at) }) },
+            {
+              label: t.timeline.deleteMarker(marker.label),
+              separated: true,
+              danger: true,
+              run: () => send([{ op: "marker.remove", args: { marker: marker.id } }]),
+            },
+          ]
+        : []),
+    ];
+  };
+
+  /** Save the name typed for a marker: a new one at its time, or the renamed one; an empty or unchanged name does nothing. */
+  const nameMarker = (typed: string) => {
+    const chosen = naming;
+    setNaming(null);
+    const label = typed.trim();
+    if (!chosen || label === "" || label === chosen.marker?.label) return;
+    send([chosen.marker ? { op: "marker.set", args: { marker: chosen.marker.id, label } } : { op: "marker.add", args: { at: chosen.at, label } }]);
+  };
+
   /** Save the name typed in a track header; an empty name clears it. */
   const rename = (row: TrackRow, typed: string) => {
     setRenaming(null);
@@ -1144,6 +1195,10 @@ function TimelineCanvas({
     const onLane = layout ? laneAt(layout, state.current, x, y) : null;
     if (onLane) {
       openLaneMenu(event, onLane);
+      return;
+    }
+    if (layout && y < layout.sceneTop) {
+      openAskMenu(event, rulerItems(x, y));
       return;
     }
     const edge = layout && !image ? edgeAt(layout, state.current, x, y) : null;
@@ -1213,8 +1268,13 @@ function TimelineCanvas({
             </button>
           </div>
         </div>
+        {layout && layout.markers.length > 0 && (
+          <div className="scene-spacer" style={{ height: layout.sceneTop - RULER_HEIGHT }} data-tip={t.timeline.markersTitle} data-testid="marker-lane-head">
+            {t.timeline.markers}
+          </div>
+        )}
         {layout && layout.scenes.length > 0 && (
-          <div className="scene-spacer" style={{ height: layout.head - RULER_HEIGHT }} title={t.timeline.scenesTitle}>
+          <div className="scene-spacer" style={{ height: layout.head - layout.sceneTop }} data-tip={t.timeline.scenesTitle}>
             {t.timeline.scenes}
           </div>
         )}
@@ -1337,6 +1397,25 @@ function TimelineCanvas({
           <div ref={sizer} className="timeline-sizer" />
         </div>
         {overlay && <div className="timeline-empty">{overlay}</div>}
+        {naming && (
+          <input
+            className="track-name-input marker-name-input"
+            data-testid="marker-name-input"
+            style={{ left: Math.max(0, naming.x), top: RULER_HEIGHT - 2 }}
+            defaultValue={naming.marker?.label ?? ""}
+            placeholder={t.timeline.markerName}
+            aria-label={t.timeline.markerName}
+            maxLength={MARKER_LABEL_MAX}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onBlur={() => setNaming(null)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Escape") setNaming(null);
+              else if (event.key === "Enter") nameMarker(event.currentTarget.value);
+            }}
+          />
+        )}
         {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} />}
         <ClipList layout={layout} fps={fps} selected={selected} cues={cues} scene={selectedScene} />
       </div>
@@ -1424,6 +1503,9 @@ const OP_LABELS: Record<string, string> = {
   "track.add": t.timeline.ops.trackAdd,
   "track.set": t.timeline.ops.trackSet,
   "multicam.paint": t.timeline.ops.paint,
+  "marker.add": t.timeline.ops.markerAdd,
+  "marker.set": t.timeline.ops.markerSet,
+  "marker.remove": t.timeline.ops.markerRemove,
 };
 
 /**
@@ -1489,14 +1571,20 @@ function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; 
         {preview.blocked
           ? t.timeline.overlapRefused
           : preview.snapped
-            ? preview.snapped.kind === "playhead" ? t.timeline.snappedPlayhead : t.timeline.snappedEdge
+            ? snappedText(preview.snapped)
             : formatDuration(preview.end - preview.start)}
       </span>
     </div>
   );
 }
 
-/** The canvas is opaque to assistive tech: the same clips and subtitle cues as a list, selection included, for screen readers and tests. */
+/** What the drag tooltip says about the target an edge landed on. */
+function snappedText(point: SnapPoint): string {
+  if (point.kind === "marker") return t.timeline.snappedMarker(point.label);
+  return point.kind === "playhead" ? t.timeline.snappedPlayhead : t.timeline.snappedEdge;
+}
+
+/** The canvas is opaque to assistive tech: the same markers, clips and subtitle cues as a list, selection included, for screen readers and tests. */
 function ClipList({
   layout,
   fps,
@@ -1513,6 +1601,11 @@ function ClipList({
   if (!layout) return null;
   return (
     <ul className="sr-only" aria-label={t.timeline.clipListLabel}>
+      {layout.markers.map((marker) => (
+        <li key={marker.id} data-marker={marker.id} data-at={marker.at}>
+          {t.timeline.markerItem(marker.label, formatTimecode(marker.at, fps))}
+        </li>
+      ))}
       {layout.scenes.map((box) => {
         const chosen = scene?.script === box.script && scene.slug === box.slug;
         return (

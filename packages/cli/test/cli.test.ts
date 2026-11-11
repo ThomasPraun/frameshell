@@ -346,5 +346,8 @@ esac
     expect(result.stdout).toMatch(/libvpx-vp9 decoder\s+VP9 with alpha \(libvpx\)\s+yes/);
     expect(result.stdout).toMatch(/h264_nvenc encoder\s+H\.264 \(NVENC\)\s+no/);
     expect(result.stdout).toContain("No problems found.");
+    // The fake encodes everything, so the first candidate in the fixture's build is picked.
+    expect(result.stdout).toMatch(/Video encoder:\n {2}h264_videotoolbox\s+works \(\d+ ms\) {2}<- used for renders\n {2}h264_nvenc\s+not in this ffmpeg\n {2}libx264\s+works/);
+    expect(result.stdout).toMatch(/Machine: (fast|medium|slow) \(\d+ cores, [\d.]+ GB\)\. Suggested: proxies \d+p, drafts \d+p\./);
   });
 });

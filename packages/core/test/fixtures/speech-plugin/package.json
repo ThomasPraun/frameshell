@@ -1,0 +1,8 @@
+{
+  "name": "speech-plugin",
+  "version": "0.1.0",
+  "description": "Frameshell test plugin: one paid speech provider.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js"
+}

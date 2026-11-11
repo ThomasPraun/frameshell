@@ -1,4 +1,4 @@
-import { DEFAULT_FRAME_QUALITY, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
+import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
   type Clip,
@@ -6,6 +6,7 @@ import {
   type ClipTrack,
   type CropPath,
   type ExportPreset,
+  type FormatLayout,
   type LayerRect,
   type MediaClip,
   type MulticamGroup,
@@ -16,6 +17,12 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  audioEffectsOf,
+  bakeRef,
+  type TransitionContext,
+  type TransitionShape,
+  clipHandles,
+  coverCrop,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -35,10 +42,24 @@ import {
   subtitleTracks,
   withTrackMutes,
 } from "@frameshell/schema";
-import { fpsRational } from "../media/recipe.js";
+import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
+import { SIDECAR_CHANNELS, SIDECAR_SAMPLE_RATE, fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
+import {
+  GAIN_FRAME_SAMPLES,
+  type Ramp,
+  fadeFilters,
+  gainExpression,
+  gainVolume,
+  keyedOpacity,
+  num,
+  placementExpressions,
+  shapeOffsets,
+  shapeProgressExpression,
+  wipeAlpha,
+} from "./animation.js";
 import { assSubtitles } from "./ass.js";
+import { type CoverLayout, assCover } from "./cover.js";
 
 /**
  * Export compiler (SPEC §3.5): timeline → render plan → ffmpeg argument
@@ -52,7 +73,7 @@ export interface ExportSource {
   /** Absolute path of the original asset (never the proxy: export uses full quality). */
   path: string;
   /** First video stream (`width`x`height` as probed); null for audio-only files. */
-  video: { codec: string; still: boolean; width: number; height: number } | null;
+  video: { codec: string; still: boolean; width: number; height: number; alpha?: boolean } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
   /** Seconds of material (probed); absent when unknown, then a clip has no handle after its `out` (ADR 0018). */
@@ -89,8 +110,27 @@ export interface RenderInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** Render of every generated clip on a video track, by clip id; they composite like footage (SPEC §3.5 step 2). */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /**
+   * Absolute bake (`AudioFxService.ensure`) of every media clip with audio effects, by `bakeRef` of asset and chain
+   * (ADR 0031): the clip's sound is read from it instead of the asset. A clip whose bake is missing plays dry, with a warning.
+   */
+  audioFx?: ReadonlyMap<string, string>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /** Layout of the format rendered (`resolveFormat`, ADR 0027). Absent: the primary format's (letterbox, captions as styled). */
+  variant?: FormatLayout;
+  /**
+   * Makes frame 0 a finished composition: it shows the timeline frame at `at` (timeline seconds), with the
+   * cover word over it when `layout` is set and no subtitles; every other frame is as it is. Needs the
+   * preset's frame rate to equal the project's, else a warning and no change. Absent: frame 0 is the
+   * timeline's own, and a warning says when that is black.
+   */
+  cover?: { at: number; layout: CoverLayout | null };
+  /**
+   * Encode an H.264 preset at a quality tier with `encoder` instead of the preset's own x264 settings; the
+   * tier also caps the frame rate (draft: 30) and sets AAC 320k (final). Other codecs ignore it, with a warning.
+   */
+  encode?: { encoder: EncoderName; tier: "draft" | "final" };
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -158,7 +198,10 @@ export interface RenderPlan {
     sampleRate: number;
     /** Output samples; equals the video length exactly. */
     samples: number;
-    /** Absolute paths of the audio inputs; items refer to them by index. */
+    /**
+     * Absolute paths of the audio inputs; items refer to them by index. A `.pcm` input is an audio effects bake:
+     * raw s16le at the sidecar's rate and channels, on the source clock (ADR 0031).
+     */
     inputs: string[];
     /**
      * One sequence per audible track, each exactly `samples` long; a track whose clips crossfade takes one more
@@ -196,6 +239,8 @@ export interface FrameInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /** See {@link RenderInput.variant}. */
+  variant?: FormatLayout;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -206,6 +251,8 @@ export interface FrameInput {
   format?: FrameFormat;
   /** JPEG and WebP quality, 1 to 100; default {@link DEFAULT_FRAME_QUALITY}. */
   quality?: number;
+  /** Marks a cover composition: its word drawn over the frame (none when null), and no subtitles; see {@link CoverLayout}. */
+  cover?: CoverLayout | null;
 }
 
 /** Single-frame plan (MCP `frame_capture`, `frameshell frame`). */
@@ -243,6 +290,8 @@ export const MIX_FILE = "mix.wv";
 const CONCAT_LIST = "segments.txt";
 /** Burned subtitles, relative to the work directory. */
 export const SUBTITLES_FILE = "subtitles.ass";
+/** The cover word, relative to the work directory. */
+export const COVER_FILE = "cover.ass";
 /** Directory libass loads fonts from, relative to the work directory. */
 export const FONTS_DIR = "fonts";
 
@@ -282,6 +331,19 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /** Absolute bake of the clip's audio effects: its sound is read from it, not from `source` (ADR 0031). */
+  sound?: string;
+  /**
+   * Frames of material past each edge, set where a shaped dissolve may reach further (ADR 0030 decision 1): frames
+   * beyond hold the edge frame. Absent: the source has whatever a dissolve asks for.
+   */
+  reach?: { before: number; after: number };
+  /** On the base track: the shape this clip comes in by (`lead` frames each side of its start). */
+  shapeIn?: TransitionShape;
+  /** On the base track: the shape the next clip comes in by (`trail` frames each side of this clip's end). */
+  shapeOut?: TransitionShape;
+  /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
+  cover?: LayerRect;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -333,22 +395,47 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
-  const outFps = preset.video.fps ?? fps;
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx);
+  const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
+  const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
-  const bounds = segmentBounds(layout.frames, edges, segmentFrames);
+  const warnings = [...layout.warnings];
+  if (input.encode && !tiered) warnings.push(`Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`);
+  const requested = input.cover ?? null;
+  const choosable = requested !== null && outFps === fps;
+  const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
+  // A cover with no word on frame 0 itself changes nothing.
+  const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
+  if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
+  const empty = emptyFrame(layout, coverFrame, fps);
+  if (empty) {
+    const hint = !requested
+      ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
+      : choosable
+        ? "Choose another frame with `at` (`--cover-at`)."
+        : "Start a picture at 0.";
+    const subject = choosable ? `The cover frame (${requested.at} s)` : "Frame 0";
+    warnings.push(`${subject} is ${empty}: platforms use it as the thumbnail. ${hint}`);
+  }
+  // The cover is a one-frame segment in place of frame 0; the rest of the first segment follows it.
+  const bounds = segmentBounds(layout.frames, edges, segmentFrames).flatMap(([from, to]): [number, number][] =>
+    cover && from === 0 ? [[0, 1], ...(to > 1 ? ([[1, to]] as [number, number][]) : [])] : [[from, to]],
+  );
   const ext = preset.container;
   const files: Record<string, string> = {};
   if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
+  if (cover?.layout) files[COVER_FILE] = assCover(cover.layout, { width, height });
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
-    const graph = videoGraph(layout, from, to, target);
-    const tail = `${burnSubtitles(layout, from, to, fps)}${outFps === fps ? "" : `,fps=${rate}`}`;
+    const showsCover = cover !== null && index === 0;
+    const graph = showsCover ? videoGraph(layout, cover.frame, cover.frame + 1, target) : videoGraph(layout, from, to, target);
+    const burn = showsCover ? (cover.layout ? burnCover() : "") : burnSubtitles(layout, from, to, fps);
+    const tail = `${burn}${outFps === fps ? "" : `,fps=${rate}`}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
       file: `${name}.${ext}`,
@@ -359,7 +446,7 @@ export function compileRender(input: RenderInput): RenderPlan {
         ...BASE,
         ...graph.inputs,
         ...["-/filter_complex", `${name}.filter`, "-map", "[v]", "-an", "-frames:v", String(outFrames), "-r", rate],
-        ...videoCodecArgs(preset),
+        ...(tiered ? tierVideoArgs(tiered.encoder, tiered.tier, { width, height, fps: outFps }) : videoCodecArgs(preset)),
         ...["-map_metadata", "-1", "-f", preset.container, `${name}.${ext}`],
       ],
     };
@@ -367,7 +454,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   files[CONCAT_LIST] = segments.map((segment) => `file '${segment.file}'\n`).join("");
 
   const sampleRate = preset.audio.sampleRate ?? 48_000;
-  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate) };
+  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) };
   return {
     timeline: timeline.id,
     preset: preset.id,
@@ -378,9 +465,9 @@ export function compileRender(input: RenderInput): RenderPlan {
     duration: seconds(layout.frames, fps),
     loudness: input.loudness,
     container: preset.container,
-    warnings: layout.warnings,
+    warnings,
     files,
-    fonts: layout.subtitles.length > 0 ? [SUBTITLE_FONT.file] : [],
+    fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
     segments,
     audio,
   };
@@ -453,25 +540,18 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
-  const frame = Math.floor((input.at + 0.0005) * fps);
-  if (frame < 0 || frame >= layout.frames) {
-    const last = seconds(layout.frames - 1, fps);
-    throw new RpcError(
-      ErrorCode.InvalidOperation,
-      `at ${input.at} s is outside timeline ${input.timeline.id} (frames start from 0 to ${last} s).`,
-      { op: "frame", reason: "out of range", field: "at", valid: { min: 0, max: last } },
-    );
-  }
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant);
+  const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
-  const burn = burnSubtitles(layout, frame, frame + 1, fps);
+  const burn = input.cover !== undefined ? (input.cover ? burnCover() : "") : burnSubtitles(layout, frame, frame + 1, fps);
+  const script = input.cover ? { [COVER_FILE]: assCover(input.cover, { width, height }) } : { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) };
   return {
     frame,
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
-    files: burn ? { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) } : {},
+    files: burn ? script : {},
     fonts: burn ? [SUBTITLE_FONT.file] : [],
     args: [
       ...BASE,
@@ -481,6 +561,43 @@ export function compileFrame(input: FrameInput): FramePlan {
       ...["-f", "image2", "-update", "1", input.output],
     ],
   };
+}
+
+/** Timeline frame showing at `at` seconds; `InvalidOperation` with the valid range when outside the `frames` the timeline has. */
+function frameAt(timeline: string, at: number, fps: number, frames: number): number {
+  const frame = Math.floor((at + 0.0005) * fps);
+  if (frame < 0 || frame >= frames) {
+    const last = seconds(frames - 1, fps);
+    throw new RpcError(ErrorCode.InvalidOperation, `at ${at} s is outside timeline ${timeline} (frames start from 0 to ${last} s).`, {
+      op: "frame",
+      reason: "out of range",
+      field: "at",
+      valid: { min: 0, max: last },
+    });
+  }
+  return frame;
+}
+
+/**
+ * Why `frame` shows no whole picture, or null when one is there: no clip draws at it, or every clip that does is
+ * fading in from or out to black (a clip on any track counts, a fade of an upper layer over a visible one does not).
+ */
+function emptyFrame(layout: Layout, frame: number, fps: number): string | null {
+  const drawn = [...layout.video, ...layout.overlays.flat()].filter((span) => span.from <= frame && frame < span.to && span.placed.source.video !== null);
+  const fading = (span: Span) => {
+    const { placed } = span;
+    const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
+    const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
+    return (frame >= placed.start && frame < placed.start + fadeIn) || (fadeOut > 0 && frame >= placed.end - fadeOut && frame < placed.end);
+  };
+  if (drawn.some((span) => !fading(span))) return null;
+  if (drawn.length === 0) return frame === 0 ? "black (no picture starts at 0)" : "black (no picture shows there)";
+  return frame === 0 ? "black (the first clip fades in from black)" : "black (every picture there is fading in or out)";
+}
+
+/** Filter chain appended to the cover frame's graph: the cover word over the picture. */
+function burnCover(): string {
+  return `,ass=filename=${COVER_FILE}:fontsdir=${FONTS_DIR}`;
 }
 
 /** Pixel format and encoder args of a `frame` image. */
@@ -522,7 +639,9 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * like footage: from its `in` (render time = composition time), for its
  * `duration`, transformed and stacked by its track like any clip. Muted
  * tracks are silent; hidden tracks add no picture layer but still count
- * for the length and play their sound.
+ * for the length and play their sound. In a `variant` that covers, media
+ * clips that would fill the frame untransformed are cropped to fill it,
+ * except sources with alpha on upper tracks: overlays are fitted whole.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -531,6 +650,8 @@ function layoutTimeline(
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
+  variant?: FormatLayout,
+  audioFx: ReadonlyMap<string, string> = new Map(),
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -545,7 +666,8 @@ function layoutTimeline(
   /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
   const placeTrack = (track: ClipTrack): Placed[] => {
     const placed: Placed[] = [];
-    const transitions = trackTransitions(track, fps, sources);
+    const context = exportTransitionContext(fps, sources);
+    const transitions = trackTransitions(track, context);
     for (const listed of track.clips) {
       const clip = track.kind === "video" ? asFootage(listed, generated) : listed;
       if (clip.type === "timeline" && "source" in clip) {
@@ -573,6 +695,15 @@ function layoutTimeline(
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
+      const effects = audioEffectsOf(clip);
+      const sound = effects && source.audio && clip.audio?.muted !== true ? audioFx.get(bakeRef(clip.asset, effects)) : undefined;
+      if (effects && source.audio && clip.audio?.muted !== true && sound === undefined) {
+        warnings.push(`Clip ${clip.id} has audio effects that are not baked; its sound was exported without them.`);
+      }
+      const placement = fixedPlacement(clip);
+      // Renders are made at the format's size; only footage is cut to it.
+      const picture = source.video;
+      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
       placed.push({
         clip,
         source,
@@ -580,10 +711,12 @@ function layoutTimeline(
         end,
         in: Math.round(clip.in * fps),
         speed,
-        placement: fixedPlacement(clip),
+        placement,
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(sound !== undefined ? { sound } : {}),
+        ...(covers ? { cover: formatCover(picture, output) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -598,6 +731,12 @@ function layoutTimeline(
       if (half > 0 && before.end === placed[i]!.start) {
         before.trail = half;
         placed[i]!.lead = half;
+        // A shaped dissolve is not cut to the handles (ADR 0030): past them the edge frames hold.
+        if (placed[i]!.clip.shape) {
+          const frames = (seconds: number) => (Number.isFinite(seconds) ? Math.floor(seconds * fps + 1e-6) : Number.POSITIVE_INFINITY);
+          before.reach = { before: before.reach?.before ?? Number.POSITIVE_INFINITY, after: frames(clipHandles(before.clip, context).after) };
+          placed[i]!.reach = { before: frames(clipHandles(placed[i]!.clip, context).before), after: Number.POSITIVE_INFINITY };
+        }
       }
     }
     return placed.filter((p) => p.end > p.start);
@@ -630,7 +769,10 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+  const captionScale = variant?.captionScale ?? 1;
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
+    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
+  );
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -646,15 +788,38 @@ function layoutTimeline(
   // The first picture layer is the base when it is a video track; a program track first leaves the base black.
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
+  // Shapes play on the base track only (ADR 0030); elsewhere a shaped dissolve mixes.
+  for (const placed of baseLayer) {
+    const { shape } = placed.clip;
+    if (!shape || !placed.lead) continue;
+    placed.shapeIn = shape;
+    const before = baseLayer.find((candidate) => candidate.next === placed);
+    if (before) before.shapeOut = shape;
+  }
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
+  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
+  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
+  /** Frames each side of the end of `placed` that a push moves it out over: then it is a layer, not concatenated. */
+  const pushedOut = (placed: Placed) => (placed.shapeOut?.kind === "push" ? (placed.trail ?? 0) : 0);
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
   const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !hasPictureKeys(placed.clip);
   const baseLayers = baseLayer.flatMap((placed): Span[] => {
-    if (!fills(placed)) return [whole(placed)];
     const lead = placed.lead ?? 0;
-    return lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : [];
+    if (!fills(placed)) {
+      // A wipe's mask costs per pixel: only the frames it plays over get it.
+      if (placed.shapeIn?.kind !== "wipe") return [whole(placed)];
+      return [
+        { placed, from: placed.start - lead, to: placed.start + lead },
+        { placed, from: placed.start + lead, to: placed.end + (placed.trail ?? 0) },
+      ];
+    }
+    const pushed = pushedOut(placed);
+    return [
+      ...(lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : []),
+      ...(pushed > 0 ? [{ placed, from: placed.end - pushed, to: placed.end + pushed }] : []),
+    ];
   });
   const overlays = [baseLayers, ...upper.map((layer) => layer.map(whole))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
   for (const angle of pictureless) {
@@ -663,7 +828,9 @@ function layoutTimeline(
   return {
     frames,
     base: baseLayer,
-    video: baseLayer.filter(fills).map((placed) => ({ placed, from: placed.start + (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) })),
+    video: baseLayer
+      .filter(fills)
+      .map((placed) => ({ placed, from: placed.start + (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) - 2 * pushedOut(placed) })),
     overlays,
     audio: audio.filter((track) => track.length > 0),
     shotEdges,
@@ -850,7 +1017,8 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Fades of the bottom track go to black: nothing is under it.
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
-    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fit, ...timed].join(",")}[${label}]`);
+    const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
+    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -870,15 +1038,16 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
   lines.push(`${joined}[base]`);
   let below = "base";
   pieces.forEach(({ placed, start, end }, n) => {
-    const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const rect = placed.tile?.rect ?? (placed.cover ? { left: 0, top: 0, width, height } : layerRect(placed.source.video!, { width, height }, out.project, placed.placement));
     const { opacity } = placed.placement;
-    const crop = placed.tile?.crop;
+    const crop = placed.tile?.crop ?? placed.cover;
     const move = placed.tile?.move;
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
     const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");
     const fades = placed.tile ? [] : fadeFilters(pictureRamps(placed, start, end, fps, true), true);
-    // Ramps, keyed scale and keyed opacity read timeline seconds: the piece's timestamps move there and back.
-    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0;
+    const shape = placed.tile ? null : pieceShape(placed, start, end, rect, from, out);
+    // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
+    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
@@ -887,11 +1056,18 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...fades,
+      ...(shape?.mask ? [shape.mask] : []),
       ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
     lines.push(`${chain.join(",")}[o${n}]`);
-    const position = motion?.x !== undefined ? `x=${motion.x}:y=${motion.y}:eval=frame` : `x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}`;
+    const left = placed.tile?.backdrop ? 0 : rect.left;
+    const top = placed.tile?.backdrop ? 0 : rect.top;
+    const moved = motion?.x !== undefined || shape?.x !== undefined || shape?.y !== undefined;
+    const axis = (base: string, offset: string | undefined) => (offset === undefined ? base : `${base}+${offset}`);
+    const position = moved
+      ? `x='${axis(motion?.x ?? String(left), shape?.x)}':y='${axis(motion?.y ?? String(top), shape?.y)}':eval=frame`
+      : `x=${left}:y=${top}`;
     const overlay = `[${below}][o${n}]overlay=${position}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
@@ -903,16 +1079,21 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
  * Effective fades and dissolves of a track's clips that have any (`edgeTransitions`, ADR 0018 decision 4); null when
  * no clip asks for one, so timelines without transitions compile as before.
  */
-function trackTransitions(track: ClipTrack, fps: number, sources: ReadonlyMap<string, ExportSource>): Map<string, ClipEdges> | null {
+function trackTransitions(track: ClipTrack, context: TransitionContext): Map<string, ClipEdges> | null {
   if (!track.clips.some((clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined)) return null;
+  const edges = edgeTransitions(track.clips, context);
+  for (const [id, edge] of edges) if (edge.fadeIn === 0 && edge.fadeOut === 0 && edge.dissolve === 0) edges.delete(id);
+  return edges;
+}
+
+/** What {@link edgeTransitions} needs about export sources: still images have unlimited handles. */
+function exportTransitionContext(fps: number, sources: ReadonlyMap<string, ExportSource>): TransitionContext {
   const sourceDuration = (clip: Clip) => {
     if (!("asset" in clip)) return undefined;
     const source = sources.get(clip.asset);
     return source?.video?.still ? Number.POSITIVE_INFINITY : source?.duration;
   };
-  const edges = edgeTransitions(track.clips, { fps, sourceDuration });
-  for (const [id, edge] of edges) if (edge.fadeIn === 0 && edge.fadeOut === 0 && edge.dissolve === 0) edges.delete(id);
-  return edges;
+  return { fps, sourceDuration };
 }
 
 /**
@@ -930,7 +1111,8 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   };
   const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
   const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
-  const lead = layer ? (placed.lead ?? 0) : 0;
+  // A shape moves or masks the incoming picture instead of raising its opacity (ADR 0030).
+  const lead = layer && !placed.shapeIn ? (placed.lead ?? 0) : 0;
   const trail = layer && !placed.bottom ? (placed.trail ?? 0) : 0;
   add("in", placed.start - lead, 2 * lead);
   add("in", placed.start, fadeIn);
@@ -944,28 +1126,83 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   return ramps;
 }
 
+/** True when keys move `placed`'s layer: its `x`, `y` or `scale`, its own or a host's. */
+function moves(placed: Placed): boolean {
+  return isKeyed(placed.clip, "x") || isKeyed(placed.clip, "y") || isKeyed(placed.clip, "scale");
+}
+
 /**
  * Keyed placement of a layer piece on timeline frames [start, end) of a graph starting at frame `from`
  * (`placementAt` and `layerRect` as expressions, hosts composed): `scale` with `eval=frame` reading the piece's
- * timeline seconds, `overlay` x/y reading the graph's. Null when no `x`, `y` or `scale` keys move the clip.
+ * timeline seconds, `overlay` x/y (unquoted) reading the graph's. Null when no `x`, `y` or `scale` keys move the clip.
  */
 function layerMotion(placed: Placed, start: number, end: number, from: number, out: GraphTarget): { scale?: string; x: string; y: string } | null {
   const { clip } = placed;
-  if (!isKeyed(clip, "x") && !isKeyed(clip, "y") && !isKeyed(clip, "scale")) return null;
-  const { fps, width, height, project } = out;
+  if (!moves(placed)) return null;
+  const { fps, width, height } = out;
   const video = placed.source.video!;
   const first = start / fps;
   const last = (end - 1) / fps;
   const fit = Math.min(width / video.width, height / video.height);
   const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
-  const at = placementExpressions(clip, time, first, last);
-  const axis = (value: string, size: number, projectSize: number, own: string) => `'floor(${num(size / 2)}+(${value})*${size}/${projectSize}-${own}/2+0.5)'`;
-  const x = axis(at.x, width, project.width, "overlay_w");
-  const y = axis(at.y, height, project.height, "overlay_h");
+  const { x, y } = layerOrigin(placed, time, first, last, out, ["overlay_w", "overlay_h"]);
   if (!isKeyed(clip, "scale")) return { x, y };
   const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
+}
+
+/**
+ * Top-left corner, in output pixels, of a keyed layer at timeline second `time` (an expression), valid for timeline
+ * seconds [`first`, `last`]; `own` names the layer's width and height in the expression's filter.
+ */
+function layerOrigin(placed: Placed, time: string, first: number, last: number, out: GraphTarget, own: [string, string]): { x: string; y: string } {
+  const { width, height, project } = out;
+  const at = placementExpressions(placed.clip, time, first, last);
+  const axis = (value: string, size: number, projectSize: number, side: string) => `floor(${num(size / 2)}+(${value})*${size}/${projectSize}-${side}/2+0.5)`;
+  return { x: axis(at.x, width, project.width, own[0]), y: axis(at.y, height, project.height, own[1]) };
+}
+
+/**
+ * What a shaped dissolve (ADR 0030, `shapeAt`) does to a base-track piece on timeline frames [start, end) of a graph
+ * starting at frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a
+ * wipe's `geq` on the incoming layer, reading the frame time `T` as timeline seconds. Null when neither applies.
+ */
+function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
+  const { fps, width, height } = out;
+  const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
+  const xs: string[] = [];
+  const ys: string[] = [];
+  let mask: string | undefined;
+  const side = (shape: TransitionShape | undefined, cut: number, half: number, which: "incoming" | "outgoing") => {
+    if (!shape || half <= 0 || end <= cut - half || start >= cut + half) return;
+    const progress = (at: string) => shapeProgressExpression(cut / fps, half / fps, at);
+    if (shape.kind === "push") {
+      const offsets = shapeOffsets(shape, which, progress(time), width, height);
+      if (offsets.x) xs.push(offsets.x);
+      if (offsets.y) ys.push(offsets.y);
+    } else if (which === "incoming") {
+      // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
+      const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
+      mask = wipeAlpha(shape, progress("T"), corner.x, corner.y, width, height);
+    }
+  };
+  side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");
+  side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
+  if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
+  return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
+}
+
+/**
+ * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
+ * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
+ */
+function formatCover(source: Size, output: Size): LayerRect {
+  const even = (value: number) => value - (value % 2);
+  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
+  const width = Math.max(2, even(crop.width));
+  const height = Math.max(2, even(crop.height));
+  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**
@@ -1017,13 +1254,17 @@ function movingCrop(path: CropPath, from: number, length: number): string {
  * SPEC §6.3) and `trim` keeps exactly the piece's frames.
  */
 function pieceChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
-  if (!placed.hold || (start >= placed.start && end <= placed.end)) return sourceChain(placed, start, end, fps, inputs);
-  // A render holds its first and last frame for the handles: draw what it has (one edge frame at least), clone the rest.
+  // Frames [lo, hi) have material; outside, the edge frame holds.
+  const lo = placed.start - (placed.hold ? 0 : (placed.reach?.before ?? Number.POSITIVE_INFINITY));
+  const hi = placed.end + (placed.hold ? 0 : (placed.reach?.after ?? Number.POSITIVE_INFINITY));
+  if (start >= lo && end <= hi) return sourceChain(placed, start, end, fps, inputs);
+  // A render holds its first and last frame for the handles, and a shaped dissolve the frames past its handles:
+  // draw what there is (one edge frame at least), clone the rest.
   const frames = end - start;
-  if (end <= placed.start) return `${sourceChain(placed, placed.start, placed.start + 1, fps, inputs)},tpad=start=${frames - 1}:start_mode=clone`;
-  if (start >= placed.end) return `${sourceChain(placed, placed.end - 1, placed.end, fps, inputs)},tpad=stop=${frames - 1}:stop_mode=clone`;
-  const first = Math.max(start, placed.start);
-  const last = Math.min(end, placed.end);
+  if (end <= lo) return `${sourceChain(placed, lo, lo + 1, fps, inputs)},tpad=start=${frames - 1}:start_mode=clone`;
+  if (start >= hi) return `${sourceChain(placed, hi - 1, hi, fps, inputs)},tpad=stop=${frames - 1}:stop_mode=clone`;
+  const first = Math.max(start, lo);
+  const last = Math.min(end, hi);
   const pad = [...(first > start ? [`start=${first - start}:start_mode=clone`] : []), ...(end > last ? [`stop=${end - last}:stop_mode=clone`] : [])];
   return `${sourceChain(placed, first, last, fps, inputs)},tpad=${pad.join(":")}`;
 }
@@ -1097,8 +1338,9 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
       const sourceSamples = exact
         ? end - start
         : Math.round(((placed.end + trail - placed.start) / fps) * placed.speed * sampleRate) + head - Math.round(skipped * placed.speed);
-      let input = inputs.indexOf(placed.source.path);
-      if (input === -1) input = inputs.push(placed.source.path) - 1;
+      const path = placed.sound ?? placed.source.path;
+      let input = inputs.indexOf(path);
+      if (input === -1) input = inputs.push(path) - 1;
       const previous = lane.joinable;
       // A sound running on across a shot change stays one item: shots switch pictures, the edge fade belongs to real cuts (as in the preview).
       if (
@@ -1182,9 +1424,9 @@ function soundRamps(placed: Placed, first: number, fps: number, at: (frame: numb
 
 /**
  * One continuous audio graph (SPEC §3.5 step 4) ending in `[mix]`: every
- * input decoded once on the source clock (same filter as the PCM sidecar),
- * split per clip, `atrim` to the clip's source samples, `atempo` for speed,
- * padded or cut to its exact timeline length, a short fade at both edges so
+ * input decoded once on the source clock (same filter as the PCM sidecar;
+ * a mono bake is spread to both channels at full level), split per clip,
+ * `atrim` to the clip's source samples, `atempo` for speed, padded or cut to its exact timeline length, a short fade at both edges so
  * no cut clicks, tracks concatenated and mixed.
  */
 function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: string[] } {
@@ -1192,9 +1434,10 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
   const format = `aformat=sample_fmts=fltp:sample_rates=${rate}:channel_layouts=stereo`;
   const uses = audio.inputs.map(() => 0);
   for (const item of audio.tracks.flat()) if (item.kind === "clip") uses[item.input]!++;
-  const lines = audio.inputs.map((_, input) => {
+  const lines = audio.inputs.map((path, input) => {
     const outs = Array.from({ length: uses[input]! }, (_, n) => `[i${input}c${n}]`).join("");
-    return `[${input}:a:0]aresample=${rate}:async=1:first_pts=0,${format},asplit=${uses[input]}${outs}`;
+    const spread = isBake(path) && SIDECAR_CHANNELS === 1 ? "pan=stereo|c0=c0|c1=c0," : "";
+    return `[${input}:a:0]${spread}aresample=${rate}:async=1:first_pts=0,${format},asplit=${uses[input]}${outs}`;
   });
   const taken = audio.inputs.map(() => 0);
   const trackLabels = audio.tracks.map((items, t) => {
@@ -1208,8 +1451,10 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
       // atempo returns up to a few ms less than asked: feed it more source, cut the output to length.
       const tail = item.speed === 1 ? 0 : Math.round(ATEMPO_TAIL_SECONDS * rate * item.speed);
       const chain = [
-        `atrim=start_sample=${item.from}:end_sample=${item.to + tail}`,
+        `atrim=start_sample=${Math.max(0, item.from)}:end_sample=${item.to + tail}`,
         "asetpts=PTS-STARTPTS",
+        // A shaped dissolve reaching before the source's first sample (its picture holds, ADR 0030) hears silence there.
+        ...(item.from < 0 ? [`adelay=delays=${-item.from}S:all=1`] : []),
         ...tempo(item.speed),
         ...(item.gain !== undefined || item.fade !== undefined
           ? [`asetnsamples=n=${GAIN_FRAME_SAMPLES}:p=0`, gainVolume(item.gain ?? num(item.gainDb), item.fade)]
@@ -1236,8 +1481,14 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
   } else {
     lines.push(`${trackLabels.map((l) => `[${l}]`).join("")}amix=inputs=${trackLabels.length}:duration=longest:normalize=0[mix]`);
   }
-  const inputs = audio.inputs.flatMap((path) => ["-vn", "-i", path]);
+  const raw = ["-f", "s16le", "-ar", String(SIDECAR_SAMPLE_RATE), "-ac", String(SIDECAR_CHANNELS)];
+  const inputs = audio.inputs.flatMap((path) => (isBake(path) ? [...raw, "-i", path] : ["-vn", "-i", path]));
   return { inputs, lines };
+}
+
+/** True for an audio effects bake input (`AUDIO_FX_DIR`): raw PCM, which ffmpeg cannot probe. */
+function isBake(path: string): boolean {
+  return path.endsWith(".pcm");
 }
 
 /** `atempo` chain for `speed`; each stage accepts 0.5 to 100. */
@@ -1278,8 +1529,13 @@ function videoCodecArgs(preset: ExportPreset): string[] {
   }
 }
 
-function audioCodecArgs(preset: ExportPreset, rate: number): string[] {
-  const { codec, bitrateKbps } = preset.audio;
+/** AAC bitrate of a `final` export. */
+const FINAL_AAC_KBPS = 320;
+
+/** `aacKbps` replaces the preset's own AAC bitrate. */
+function audioCodecArgs(preset: ExportPreset, rate: number, aacKbps?: number): string[] {
+  const { codec } = preset.audio;
+  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : preset.audio.bitrateKbps;
   const bitrate = bitrateKbps ? ["-b:a", `${bitrateKbps}k`] : [];
   switch (codec) {
     case "aac":

@@ -9,7 +9,7 @@ import {
   RpcError,
   type TrustState,
 } from "@frameshell/protocol";
-import type { ClipAdapter, TranscriptionProvider } from "@frameshell/plugin-api";
+import type { ClipAdapter, PluginManifest, SpeechProvider, TranscriptionProvider } from "@frameshell/plugin-api";
 import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
 import { AGENT_SKILLS_DIR, type SkillSync, syncPluginSkills } from "./skills.js";
@@ -219,9 +219,7 @@ export class PluginHost {
 
   /** Every transcription provider of the project's loaded plugins. Throws `ProjectNotTrusted`. */
   async transcriptionProviders(root: string): Promise<TranscriptionProvider[]> {
-    const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
-    if (!loaded && trust !== "not-required") throw notTrusted(root, trust, pins);
-    return (loaded ?? []).flatMap((p) => [...p.providers.values()]);
+    return this.#providers(root, TRANSCRIPTION);
   }
 
   /**
@@ -230,28 +228,45 @@ export class PluginHost {
    * `TranscriptionProviderNotFound` (data lists the loaded providers).
    */
   async transcriptionProvider(root: string, id: string): Promise<TranscriptionProvider> {
+    return this.#provider(root, id, TRANSCRIPTION);
+  }
+
+  /** Every speech provider of the project's loaded plugins (ADR 0034). Throws `ProjectNotTrusted`. */
+  async speechProviders(root: string): Promise<SpeechProvider[]> {
+    return this.#providers(root, SPEECH);
+  }
+
+  /**
+   * Speech provider `id` from the project's loaded plugins. Throws `ProjectNotTrusted`,
+   * `InvalidPlugin` (its plugin failed to load) or `SpeechProviderNotFound` (data lists the loaded providers).
+   */
+  async speechProvider(root: string, id: string): Promise<SpeechProvider> {
+    return this.#provider(root, id, SPEECH);
+  }
+
+  async #providers<T>(root: string, kind: ProviderKind<T>): Promise<T[]> {
+    const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
+    if (!loaded && trust !== "not-required") throw notTrusted(root, trust, pins);
+    return (loaded ?? []).flatMap((p) => [...kind.registered(p).values()]);
+  }
+
+  async #provider<T>(root: string, id: string, kind: ProviderKind<T>): Promise<T> {
     const { pins, trust, loaded } = await this.#exclusive(root, () => this.#ensureLoaded(root));
     if (!loaded && trust !== "not-required") throw notTrusted(root, trust, pins);
     const plugins = loaded ?? [];
-    const owner = plugins.find((p) => p.providers.has(id));
-    if (owner) return owner.providers.get(id)!;
-    const broken = plugins.find((p) => p.manifest?.contributes.transcriptionProviders.includes(id));
+    const owner = plugins.find((p) => kind.registered(p).has(id));
+    if (owner) return kind.registered(owner).get(id)!;
+    const broken = plugins.find((p) => p.manifest && kind.declared(p.manifest).includes(id));
     if (broken) {
       throw new RpcError(ErrorCode.InvalidPlugin, `${broken.info.name} failed to load: ${broken.info.error}`, {
         name: broken.info.name,
         details: broken.info.error,
       });
     }
-    const available = plugins.flatMap((p) => [...p.providers.keys()]);
-    const hint =
-      id === "whisper-cpp"
-        ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`."
-        : ` Install the plugin that provides it with \`frameshell plugin install <spec>\`.`;
+    const available = plugins.flatMap((p) => [...kind.registered(p).keys()]);
     throw new RpcError(
-      ErrorCode.TranscriptionProviderNotFound,
-      `No transcription provider "${id}" in ${root}` +
-        (available.length > 0 ? ` (loaded: ${available.join(", ")}).` : ".") +
-        hint,
+      kind.notFound,
+      `No ${kind.label} "${id}" in ${root}` + (available.length > 0 ? ` (loaded: ${available.join(", ")}).` : ".") + kind.hint(id),
       { provider: id, available },
     );
   }
@@ -350,6 +365,36 @@ export class PluginHost {
   }
 }
 
+/** One kind of provider plugins contribute, for the lookup transcription and speech share. */
+interface ProviderKind<T> {
+  /** Lowercase, for messages: `transcription provider`. */
+  label: string;
+  registered(plugin: LoadedPlugin): ReadonlyMap<string, T>;
+  declared(manifest: PluginManifest): readonly string[];
+  /** Error code when no loaded plugin provides the id. */
+  notFound: number;
+  /** Sentence (with a leading space) on how to get provider `id`. */
+  hint(id: string): string;
+}
+
+const INSTALL_HINT = " Install the plugin that provides it with `frameshell plugin install <spec>`.";
+
+const TRANSCRIPTION: ProviderKind<TranscriptionProvider> = {
+  label: "transcription provider",
+  registered: (plugin) => plugin.transcriptionProviders,
+  declared: (manifest) => manifest.contributes.transcriptionProviders,
+  notFound: ErrorCode.TranscriptionProviderNotFound,
+  hint: (id) => (id === "whisper-cpp" ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`." : INSTALL_HINT),
+};
+
+const SPEECH: ProviderKind<SpeechProvider> = {
+  label: "speech provider",
+  registered: (plugin) => plugin.speechProviders,
+  declared: (manifest) => manifest.contributes.speechProviders,
+  notFound: ErrorCode.SpeechProviderNotFound,
+  hint: () => INSTALL_HINT,
+};
+
 /** Official plugin of each official clip type, for install hints. */
 const OFFICIAL_ADAPTERS: Readonly<Record<string, string>> = {
   hyperframes: "@frameshell/hyperframes",
@@ -395,7 +440,8 @@ function failed(name: string, pin: string, error: string, base?: LoadedPlugin): 
     commands: new Map(),
     presets: [],
     clipTypes: new Map(),
-    providers: new Map(),
+    transcriptionProviders: new Map(),
+    speechProviders: new Map(),
   };
 }
 
@@ -420,13 +466,14 @@ function commandNotFound(command: string, available: string[]): RpcError {
 
 /** Plugin results cross the wire: strings become `output`, `data` must survive JSON. */
 function normalizeResult(result: unknown, command: string, plugin: string): MethodResult<"plugin.run"> {
-  if (result === undefined || result === null) return { output: null, data: null };
-  if (typeof result === "string") return { output: result, data: null };
-  const { output, data } = result as { output?: unknown; data?: unknown };
+  if (result === undefined || result === null) return { output: null, data: null, failed: false };
+  if (typeof result === "string") return { output: result, data: null, failed: false };
+  const { output, data, failed } = result as { output?: unknown; data?: unknown; failed?: unknown };
   try {
     return {
       output: typeof output === "string" ? output : null,
       data: data === undefined ? null : (JSON.parse(JSON.stringify(data)) as unknown),
+      failed: failed === true,
     };
   } catch (error) {
     throw new RpcError(

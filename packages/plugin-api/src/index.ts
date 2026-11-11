@@ -32,6 +32,8 @@ export interface PluginApi {
   registerClipType(adapter: ClipAdapter): void;
   /** Register a transcription provider declared (by `id`) in `contributes.transcriptionProviders`. */
   registerTranscriptionProvider(provider: TranscriptionProvider): void;
+  /** Register a speech provider declared (by `id`) in `contributes.speechProviders` (ADR 0034). */
+  registerSpeechProvider(provider: SpeechProvider): void;
   /**
    * Ask the host to re-check the render cache keys of the project's
    * generated clips (calling {@link ClipAdapter.inputs} again) and render
@@ -68,9 +70,11 @@ export interface CommandContext {
 
 /**
  * Command outcome. A string is human output. `data` must be JSON-serializable:
- * it is what `--json` prints.
+ * it is what `--json` prints. `failed: true` reports a command that ran to
+ * completion but found a problem (a linter with errors): the CLI exits 1 and
+ * still prints `output` and `data`. Throw instead when the command could not run.
  */
-export type CommandResult = string | void | { output?: string; data?: unknown };
+export type CommandResult = string | void | { output?: string; data?: unknown; failed?: boolean };
 
 /**
  * Clip adapter contract (SPEC §8.2). The host renders adapter clips in the
@@ -194,7 +198,10 @@ export interface RenderContext {
   readonly outDir: string;
   /** Project frame rate. */
   readonly fps: number;
-  /** Project resolution: a render of this size maps 1:1 onto the frame. */
+  /**
+   * Frame size rendered: the project resolution, or a format of the project (ADR 0027).
+   * A render of this size maps 1:1 onto the frame.
+   */
   readonly width: number;
   readonly height: number;
   /** Aborted when the daemon stops: stop work and reject. */
@@ -360,6 +367,94 @@ export interface TranscriptWord {
   end: number;
   /** 0..1 */
   confidence?: number;
+}
+
+/**
+ * Speech provider contract (ADR 0034): text to one spoken take. The transcription contract turned around:
+ * the host parses the voiceover script, spells out numbers, caches each take by its text, provider, voice
+ * and options, trims silence, writes the file under `assets/voiceover/` and imports it; the provider only
+ * turns one line of text into a WAV.
+ */
+export interface SpeechProvider {
+  /** Name used by `frameshell voiceover generate --provider` and `provider` in a voiceover script's frontmatter. */
+  readonly id: string;
+  /**
+   * Version of the voice output: part of every take's cache key, so a change that makes the same text sound
+   * different (a new model, a new engine build) regenerates takes. Absent: `"1"`.
+   */
+  readonly version?: string;
+  /** Voice used when neither the call nor the script names one. Absent: the call must name one. */
+  readonly defaultVoice?: string;
+  /** Voices this provider speaks with, for pickers and to check a requested voice before anything is generated. */
+  voices(): readonly SpeechVoice[] | Promise<readonly SpeechVoice[]>;
+  /**
+   * Optional. What saying `text` would cost. A total above 0 makes the provider paid: the host refuses to
+   * generate until the person confirms the cost (CLI `--yes`, app dialog), also when an agent asks.
+   * Absent: free.
+   */
+  estimate?(text: string, voice: string, options: SpeechOptions): SpeechEstimate | Promise<SpeechEstimate>;
+  /**
+   * Say `text` with `voice` into a mono 16-bit PCM WAV (any sample rate) under `context.outDir` and return
+   * its path. `text` is already the spoken form: numbers spelled out, respellings applied. Leading and
+   * trailing silence may be left in; the host trims it. Throw to fail; the message reaches the user.
+   */
+  synthesize(text: string, voice: string, options: SpeechOptions, context: SpeechContext): Promise<SpeechResult>;
+}
+
+/** One voice of a {@link SpeechProvider}. */
+export interface SpeechVoice {
+  /** Id for `--voice` and `voice` in the frontmatter, e.g. `ef_dora`. */
+  id: string;
+  /** Human name, e.g. `Dora (Spanish, female)`. */
+  label?: string;
+  /** BCP-47-ish codes the voice speaks (`es`, `en-US`); absent = not stated. */
+  languages?: readonly string[];
+}
+
+/** What the script asked for besides the text and the voice; part of every take's cache key. */
+export interface SpeechOptions {
+  /** BCP-47-ish language code of the text (`es`, `en`), from the script's `language`; absent = provider default. */
+  language?: string;
+}
+
+/** Cost of saying one text, from {@link SpeechProvider.estimate}. */
+export interface SpeechEstimate {
+  /** Amount in {@link currency}; 0 = free. */
+  cost: number;
+  /** ISO 4217 code, e.g. `USD`. */
+  currency: string;
+  /** Characters the provider bills, when it bills by character. */
+  characters?: number;
+}
+
+/** Host services for one {@link SpeechProvider.synthesize} call. Valid only until it settles. */
+export interface SpeechContext {
+  /** Empty directory for the WAV and any scratch files; removed after the host has read the WAV. */
+  readonly outDir: string;
+  /** Aborted when the daemon stops: stop work and reject. */
+  readonly signal: AbortSignal;
+  /** See {@link RenderContext.ensureBinary}. */
+  ensureBinary(name: string): Promise<string>;
+  /** Report progress to whoever waits (CLI stderr, app). Cheap; call freely. */
+  progress(update: SpeechProgress): void;
+}
+
+/** One progress report of a {@link SpeechProvider.synthesize} call. */
+export interface SpeechProgress {
+  /** Human line, e.g. `Loading voice`. */
+  message: string;
+  /** 0..1 of this line when known. */
+  fraction?: number;
+}
+
+/** What {@link SpeechProvider.synthesize} returns. */
+export interface SpeechResult {
+  /** Absolute path of the WAV, inside {@link SpeechContext.outDir}. */
+  file: string;
+  /** Model actually used, for the result; absent when the provider has none. */
+  model?: string;
+  /** What the user should know about this take, one sentence each. Reported back; not written to the take. */
+  notes?: string[];
 }
 
 /** Identity helper that type-checks a plugin definition. */
