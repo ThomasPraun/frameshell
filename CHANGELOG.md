@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent skill: a playbook for short-form reels from a talking-head take (#452), `skills/frameshell/reference/reels.md`.
+  It covers a one-round intake, the vertical canvas and −14 LUFS loudness, passes (words, cut, captions, graphics
+  plan, zooms, sound), 9:16 safe zones, notes as rules for the whole video, and checks before handing over.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added
