@@ -63,7 +63,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 76;
+export const PROTOCOL_VERSION = 77;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -872,6 +872,9 @@ export const methods = {
     result: z.object({
       output: z.string().nullable().describe("Human-readable output; null when the command printed nothing."),
       data: z.unknown().describe("JSON result of the command; null when none."),
+      failed: z
+        .boolean()
+        .describe("True when the command ran but reports failure (e.g. `hyperframes check` found blocking errors); the CLI then exits 1. `output` and `data` still carry the details."),
     }),
   },
   "export.presets": {

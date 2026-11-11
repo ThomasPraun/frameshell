@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell hyperframes check [<composition>] [--strict]` (`@frameshell/hyperframes` 0.5.0, #479, part of #451):
+  lints HyperFrames compositions in the daemon with `@hyperframes/lint` (`lintProject`, `shouldBlockRender`; a pure
+  library, no network, no telemetry) plus four GSAP seek-safety rules the linter lacks (`gsap_scrolltrigger`,
+  `gsap_delay_chain`, `gsap_callback_not_seek_safe`, `gsap_overwrite_reads_state`); inlined GSAP builds are skipped.
+  The other #479 seek rules are the linter's own: `non_deterministic_code` (random), `gsap_infinite_repeat`,
+  `gsap_repeated_fromto_without_baseline`, `gsap_relative_value_second_writer`, `gsap_function_value_hazard`. Without
+  an argument it checks every `compositions/hyperframes/<name>/index.html`; an argument is a name, a directory or an
+  HTML entry. `--json` carries each finding's `file`, `line`, `column`, `rule`, `severity`, `message` and `fix`;
+  errors exit 1, warnings only under `--strict`. The plugin skill now tells the agent to run it after every
+  composition edit and before waiting for a render, and carries the authoring and GSAP seek-safety rules, citing
+  HyperFrames (Apache-2.0). Frameshell never depends on the `hyperframes` CLI (#478).
+- Plugin commands can report failure without throwing: `CommandResult` takes `failed: true`, `plugin.run` results
+  carry `failed` (protocol 77), and the CLI exits 1 after printing the command's output or `--json` data.
 - Reframe a single clip to vertical following the face (#459, part of #451): `clip.reframe` (protocol 75), CLI
   `frameshell clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]`, MCP `clip_reframe`. It scales
   the picture to cover the frame and writes `x`/`y` keys (ease in-out on a move, static when the face holds) so the face
@@ -72,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`track set --gap 12-15.5`). Preview and ASS export share the cue, timing and easing rules (`SUBTITLE_ENTRY`);
   `PROTOCOL_VERSION` 76, timeline JSON Schema regenerated. Left for later: a keyword font, UI controls in the subtitle
   inspector, a one-word-per-cut preset.
+
+### Changed
+
+- `@frameshell/hyperframes` 0.5.0 renders with `@hyperframes/core` and `@hyperframes/producer` 0.9.30 (was 0.8.92).
+  The 0.9 breaking changes touch only distributed rendering (Lambda, Cloud Run), which the plugin does not use.
+  Clip render caches are keyed by plugin version, so existing `hyperframes` clips render again once.
 
 ## [0.18.0] - 2026-11-07
 
