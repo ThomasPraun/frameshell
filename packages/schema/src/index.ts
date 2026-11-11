@@ -12,6 +12,23 @@ export {
   createProjectConfig,
 } from "./project.js";
 export {
+  BUILTIN_FORMATS,
+  BUILTIN_FORMAT_IDS,
+  RESERVED_FORMAT_IDS,
+  VERTICAL_CAPTION_SCALE,
+  FormatIdSchema,
+  FormatEntrySchema,
+  type FormatEntry,
+  type FormatSource,
+  type FormatLayout,
+  type ResolvedFormat,
+  primaryFormatId,
+  projectFormats,
+  resolveFormat,
+  sameAspect,
+  formatProblems,
+} from "./formats.js";
+export {
   TIMELINE_SCHEMA_URL,
   CORE_CLIP_TYPES,
   ADAPTER_CLIP_TYPE_PATTERN,

@@ -9,6 +9,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import {
+  type FormatEntry,
   PEOPLE_FILE,
   type ParseResult,
   type ProjectConfig,
@@ -58,6 +59,8 @@ export interface ProjectRegistryOptions {
 /** Projects the daemon holds open, keyed by absolute root directory. */
 export class ProjectRegistry {
   readonly #open = new Map<string, ProjectSummary>();
+  /** Per root: the `frameshell.json` edit in progress, so edits of different keys never lose each other. */
+  readonly #configEdits = new Map<string, Promise<unknown>>();
   readonly #onOpen: (dir: string) => void;
   readonly #writeTimeline: ProjectRegistryOptions["writeTimeline"];
 
@@ -137,24 +140,58 @@ export class ProjectRegistry {
   }
 
   /** Replace the declared plugin pins, keeping every other key of `frameshell.json` as written. */
-  async writePins(root: string, pins: PluginPins): Promise<void> {
-    const { raw } = await readConfig(root);
-    await writeJsonAtomic(join(root, PROJECT_FILE), { ...raw, plugins: pins });
+  writePins(root: string, pins: PluginPins): Promise<void> {
+    return this.#editConfig(root, async () => {
+      const { raw } = await readConfig(root);
+      await writeJsonAtomic(join(root, PROJECT_FILE), { ...raw, plugins: pins });
+    });
   }
 
   /**
    * Replace `transcription` of `frameshell.json` (removed when null), keeping every other key as written; resolves
    * with the one it replaced. Throws `InvalidProjectFile` when the result would not validate.
    */
-  async writeTranscription(root: string, transcription: ProjectConfig["transcription"] | null): Promise<ProjectConfig["transcription"]> {
-    const { raw, config } = await readConfig(root);
-    const { transcription: _previous, ...rest } = raw;
-    const next = transcription ? { ...rest, transcription } : rest;
-    const configPath = join(root, PROJECT_FILE);
-    const parsed = parseProjectConfig(next);
-    if (!parsed.ok) throw invalid(configPath, parsed.error);
-    await writeJsonAtomic(configPath, next);
-    return config.transcription;
+  writeTranscription(root: string, transcription: ProjectConfig["transcription"] | null): Promise<ProjectConfig["transcription"]> {
+    return this.#editConfig(root, async () => {
+      const { raw, config } = await readConfig(root);
+      const { transcription: _previous, ...rest } = raw;
+      const next = transcription ? { ...rest, transcription } : rest;
+      const configPath = join(root, PROJECT_FILE);
+      const parsed = parseProjectConfig(next);
+      if (!parsed.ok) throw invalid(configPath, parsed.error);
+      await writeJsonAtomic(configPath, next);
+      return config.transcription;
+    });
+  }
+
+  /**
+   * Replace `formats` of `frameshell.json` (removed when null), keeping every other key as written; `formats`
+   * goes right after `resolution`. Resolves with the one it replaced. Throws `InvalidProjectFile` when the
+   * result would not validate.
+   */
+  writeFormats(root: string, formats: FormatEntry[] | null): Promise<FormatEntry[] | undefined> {
+    return this.#editConfig(root, async () => {
+      const { raw, config } = await readConfig(root);
+      const next: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (key === "formats") continue;
+        next[key] = value;
+        if (key === "resolution" && formats) next["formats"] = formats;
+      }
+      if (formats && !("formats" in next)) next["formats"] = formats;
+      const configPath = join(root, PROJECT_FILE);
+      const parsed = parseProjectConfig(next);
+      if (!parsed.ok) throw invalid(configPath, parsed.error);
+      await writeJsonAtomic(configPath, next);
+      return config.formats;
+    });
+  }
+
+  /** Run read-modify-write `edit` of `frameshell.json` after the one in progress for `root`. */
+  #editConfig<T>(root: string, edit: () => Promise<T>): Promise<T> {
+    const run = (this.#configEdits.get(root) ?? Promise.resolve()).catch(() => {}).then(edit);
+    this.#configEdits.set(root, run);
+    return run;
   }
 
   /**

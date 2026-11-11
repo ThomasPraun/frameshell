@@ -68,6 +68,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 29 | Shoot scripts and takes | **A shoot script** (`scripts/*.md`, `shoot: true`) written by the agent beside the person's untouched original: `**Name:**` per line, `[LABEL: …]` cues, `[FREE: …]` for unscripted speech, `follow: words\|topics`, stale check by `source_hash`. Each **take** is compared word by word against it; **every deviation is marked, none blocks**; the person accepts or records again. The newest take per scene assembles the first cut as timeline transactions. Takes and decisions in `shoots/<slug>.json` (ADR 0023) | One deterministic comparison that works without an agent; the agent sees takes and deviations and adds judgment; the first cut exists when recording ends | A fixed `frameshell-script.md`, reading the original directly, flagging only big misses, an LLM in Frameshell |
 | 30 | Shoot capture | **Record in the app**: camera, screen or window, microphone, system audio (`getDisplayMedia` + `audio: 'loopback'`); a **continuous shoot session** is one multicam group, takes are ranges in it (keys T/C); per-take transcription for deviations; a resident `whisper-server` (`small-q5_1`) drives a **teleprompter** whose focus line keeps the word being said centered (ADR 0024) | One app from script to finished video; one program track per session; live recognition never writes the project | One file set per take, external recorders only, browser speech recognition, the macOS system picker |
 | 31 | Asset provenance | **Optional `credits.json`** at the project root: per outside asset the source URL, licence, author, title and content hash, written by `import --source-url --licence --author` or `credits set`. `credits` judges every placed asset and **fails when one is unverified** (no entry, no licence, a licence that needs credit without an author, changed content); the credit text for the video description is built from the ledger (ADR 0026) | An agent that forgets where a file came from cannot ship it unnoticed; CC BY credits stay correct because the line is derived, not typed | A field per asset in the timeline, `assets/CREDITS.json` (ingested as media), a stored pass/fail |
+| 32 | Formats | **One edit, several formats**: `frameshell.json` `formats` (primary first, equal to `resolution`; built-in `16x9`, `1x1`, `4x5`, `9x16`, custom ids allowed). In a non-primary format untransformed footage covers the frame (crop around the centre; sources with alpha on upper tracks are fitted whole), generated clips render at its size, vertical captions are 1.3x; one pure `resolveFormat` feeds export, `frame` and the preview; the format owns the frame, a preset its codec; sparse per-format overrides later, never of timing or audio (ADR 0027) | Cuts, captions and audio stay one source of truth; the multicam `reframe` model (intent in data, layout per output) already works | A timeline per format nesting the edit (cannot re-block footage), forked timelines (drift), automatic layout only (no per-format handle) |
 
 ### Cross-cutting rules
 
@@ -142,8 +143,8 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 1. Resolve timeline (nested timelines flattened, subtitle words resolved).
 2. Ensure every generated clip has a fresh cache entry (render missing ones via adapters).
 3. **Video:** split the timeline into segments at clean boundaries, compile each to an ffmpeg `filter_complex` (`trim`, `setpts`, `scale`, `overlay`, `subtitles`/`ass`), encode segments in parallel, join with the concat demuxer. Every VP9 input with alpha is decoded with `-c:v libvpx-vp9` (the native `vp9` decoder silently drops alpha). A program track stacks like any video track: each shot becomes one overlay per angle (`crop` to the tile's aspect, `scale` to the tile, `overlay` at the tile), starting when the angle's recording does; a reframed angle whose cut moves during the shot gets a `crop` whose `x`/`y` are expressions of the group second (`exact=1`), the same formula as `cropAt` in `composite.ts`; its angles' sound joins the audio pass (step 4). Keys and transitions (ADR 0018) use the evaluator of `composite.ts` written as expressions of timeline time: `overlay` x/y and `scale` with `eval=frame`, alpha ramps (`fade=alpha=1` for linear spans, an alpha expression for eased keys). A dissolve's incoming piece is overlaid on the outgoing clip's extended tail on every track, bottom track included (no `xfade`); a segment boundary may fall inside it because every expression reads timeline time from the piece's start. A parity test pins the expressions to the evaluator.
-4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix` (dissolves and fades: `afade` with the `qsin` curve over the effective length, the outgoing clip trimmed past its `out` into its handle; gain keys: `volume` with `eval=frame`, ADR 0018), rendered once to a lossless intermediate, then two-pass `loudnorm` reading that file (ADR 0005). Target: preset `loudness`, else project `export.loudness`, else −17 LUFS integrated. Sources whose aspect ratio differs from the preset are letterboxed/pillarboxed by default (crop-to-fill is a later option).
-5. Mux, apply preset (codec, bitrate, resolution, aspect ratio).
+4. **Audio:** one continuous pass (not segmented, avoids clicks at segment joins): `atrim` + short `afade` at every cut, `atempo`, `amix` (dissolves and fades: `afade` with the `qsin` curve over the effective length, the outgoing clip trimmed past its `out` into its handle; gain keys: `volume` with `eval=frame`, ADR 0018), rendered once to a lossless intermediate, then two-pass `loudnorm` reading that file (ADR 0005). Target: preset `loudness`, else project `export.loudness`, else −17 LUFS integrated. In the primary format, sources whose aspect ratio differs from the frame are letterboxed/pillarboxed. In any other format of the project (ADR 0027), a media clip with no transform and no picture keys covers the frame: the centre of its picture with the frame's aspect is cropped (`crop` in source pixels) and scaled to fill it; transformed clips keep their fit, and so do sources with an alpha plane on upper tracks (titles, lower thirds, PNG overlays: fitted whole, never cropped, until per-format overrides), multicam shots their own tile layout, generated clips are rendered at the format's size. Subtitles in a vertical non-primary format are 1.3x larger. `render --formats` runs one job per format, each file suffixed `-<format>`.
+5. Mux, apply preset (codec, bitrate, loudness). The format owns the frame size: a preset of the format's aspect may scale it (when asked for, or in the primary format), a preset of another aspect asked for is refused (ADR 0027).
 6. Optional: `frameshell transcribe --verify` compares the export against source transcripts and reports lost words.
 
 The compiler is a pure function (timeline → plan → ffmpeg args) tested with golden files.
@@ -239,6 +240,10 @@ my-video/
   "kind": "video",
   "fps": 30,
   "resolution": { "width": 2560, "height": 1440 },
+  "formats": [
+    { "id": "16x9-1440", "width": 2560, "height": 1440 },
+    { "id": "9x16", "width": 1080, "height": 1920 }
+  ],
   "sampleRate": 48000,
   "main": "timelines/main.json",
   "plugins": {
@@ -253,6 +258,8 @@ my-video/
 ```
 
 `kind` is `video` (the default when absent) or `image` (ADR 0017).
+
+`formats` (optional, ADR 0027) lists the delivery formats of the one edit, primary first: the first equals `resolution`; ids are unique, lowercase letters, digits and `-` (not `png`, `jpg`, `jpeg`, `webp`); the built-in ids `16x9` (1920x1080), `1x1` (1080x1080), `4x5` (1080x1350) and `9x16` (1080x1920) keep their canvas; sizes after the first are even. Absent: one format, the resolution, named by its built-in id or `<width>x<height>`. Image projects take none. Edited with `frameshell format add|remove` (journaled in `.frameshell/history/project.config.jsonl`, undone by the call each change returns, not `revert`; while review mode is on only the person in the app may) or by hand. The schema is strict, so hosts older than ADR 0027 refuse a project that has it.
 
 ### 5.3 Timeline (`timelines/*.json`)
 
@@ -449,7 +456,7 @@ The watcher sees a timeline file change that the daemon did not write:
 
 ### 6.5 Clip render cache
 
-Cache key = hash(adapter name + adapter version + clip `props` + clip `elements` when present (ADR 0021; absent leaves existing keys unchanged) + content hash of the adapter's declared input files + project fps/resolution). Changing a composition file triggers a background re-render of affected clips.
+Cache key = hash(adapter name + adapter version + clip `props` + clip `elements` when present (ADR 0021; absent leaves existing keys unchanged) + content hash of the adapter's declared input files + fps and the frame size rendered). Changing a composition file triggers a background re-render of affected clips. Background renders are at the project resolution (the primary format) only; a render for another format of the project (ADR 0027) is made at that format's size on export or `frame` in it, under its own key, and `gc` keeps the renders of every declared format.
 
 ### 6.6 Project trust
 
@@ -502,8 +509,9 @@ frameshell proposal wait [--timeout s] [--json]   # block until the open proposa
 frameshell history [--since <tx>] [--json]
 frameshell revert <tx|op>
 
-frameshell render [--preset p] [--out file]   # export
-frameshell frame --at <s> --out <png>         # composited frame, same path as MCP frame_capture
+frameshell render [--preset p] [--formats id,id] [--out file]   # export; one file per format with --formats (ADR 0027)
+frameshell frame --at <s> --out <png> [--format <id>]   # composited frame, same path as MCP frame_capture; --format lays it out in a format
+frameshell format list | add <id> [--size WxH] [--index n] | remove <id>   # delivery formats of the project (ADR 0027)
 frameshell inspect --at <s> --point x,y [--segment]   # clip stack and element under a point; --segment adds the photo's masks (ADR 0011, 0022)
 frameshell image cutout <clip> --mask <png>   # new layer with only the masked part of a photo, exactly over it (ADR 0022)
 frameshell mcp                                # stdio MCP server (§7b)

@@ -99,8 +99,8 @@ describe("cover method", () => {
   it(
     "defaults the file to exports/<timeline>-cover.png and takes the frame from `at`, a size from a preset",
     async () => {
-      const result = await conn.request("cover", { cwd: project, at: 0.5, text: "Sí", preset: "vertical-1080x1920" });
-      expect(result).toMatchObject({ path: join(project, "exports", "main-cover.png"), source: "at", at: 0.5, width: 1080, height: 1920, text: "SÍ" });
+      const result = await conn.request("cover", { cwd: project, at: 0.5, text: "Sí", preset: "youtube-1440p" });
+      expect(result).toMatchObject({ path: join(project, "exports", "main-cover.png"), source: "at", at: 0.5, width: 2560, height: 1440, text: "SÍ" });
       expect(coverPixels(await decode(result.path, "null"))).toBeGreaterThan(20_000);
     },
     MEDIA_TIMEOUT,

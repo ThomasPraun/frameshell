@@ -249,7 +249,8 @@ export class MediaService {
     const project = await readEnclosingProject(root);
     const hash = await store.knownHash(rel);
     const manifest = hash ? await store.manifest(store.key(hash, project?.config.fps ?? 30)) : null;
-    if (manifest) return manifest.media;
+    // A manifest from before probes recorded `alpha` is probed again: export needs the fact.
+    if (manifest && (!manifest.media.video || manifest.media.video.alpha !== undefined)) return manifest.media;
     const key = `${root}\0${rel}\0${current.size}\0${current.mtimeMs}`;
     let probed = this.#probes.get(key);
     if (!probed) {

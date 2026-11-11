@@ -127,7 +127,7 @@ describe("track.duck", () => {
   it(
     "plays the dip in the export",
     async () => {
-      const { job, output } = await conn.request("render", { cwd: project, preset: "vertical-1080x1920" });
+      const { job, output } = await conn.request("render", { cwd: project });
       expect(await finished(job.id)).toMatchObject({ state: "done" });
       const { ffmpeg } = await mediaTools();
       const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:a:0", "-ac", "1", "-f", "f32le", "-"]);

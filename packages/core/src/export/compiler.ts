@@ -6,6 +6,7 @@ import {
   type ClipTrack,
   type CropPath,
   type ExportPreset,
+  type FormatLayout,
   type LayerRect,
   type MediaClip,
   type MulticamGroup,
@@ -16,6 +17,7 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  coverCrop,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -54,7 +56,7 @@ export interface ExportSource {
   /** Absolute path of the original asset (never the proxy: export uses full quality). */
   path: string;
   /** First video stream (`width`x`height` as probed); null for audio-only files. */
-  video: { codec: string; still: boolean; width: number; height: number } | null;
+  video: { codec: string; still: boolean; width: number; height: number; alpha?: boolean } | null;
   /** True when the file has an audio stream. */
   audio: boolean;
   /** Seconds of material (probed); absent when unknown, then a clip has no handle after its `out` (ADR 0018). */
@@ -93,6 +95,8 @@ export interface RenderInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
+  /** Layout of the format rendered (`resolveFormat`, ADR 0027). Absent: the primary format's (letterbox, captions as styled). */
+  variant?: FormatLayout;
   /**
    * Makes frame 0 a finished composition: it shows the timeline frame at `at` (timeline seconds), with the
    * cover word over it when `layout` is set and no subtitles; every other frame is as it is. Needs the
@@ -210,6 +214,8 @@ export interface FrameInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /** See {@link RenderInput.variant}. */
+  variant?: FormatLayout;
   width: number;
   height: number;
   /** Timeline seconds; the frame showing at that time is captured. */
@@ -300,6 +306,8 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
+  cover?: LayerRect;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -351,7 +359,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant);
   const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
   const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
@@ -496,7 +504,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant);
   const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
@@ -595,7 +603,9 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * like footage: from its `in` (render time = composition time), for its
  * `duration`, transformed and stacked by its track like any clip. Muted
  * tracks are silent; hidden tracks add no picture layer but still count
- * for the length and play their sound.
+ * for the length and play their sound. In a `variant` that covers, media
+ * clips that would fill the frame untransformed are cropped to fill it,
+ * except sources with alpha on upper tracks: overlays are fitted whole.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -604,6 +614,7 @@ function layoutTimeline(
   output: Size,
   transcripts: ReadonlyMap<string, Transcript> = new Map(),
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
+  variant?: FormatLayout,
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -646,6 +657,10 @@ function layoutTimeline(
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
+      const placement = fixedPlacement(clip);
+      // Renders are made at the format's size; only footage is cut to it.
+      const picture = source.video;
+      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
       placed.push({
         clip,
         source,
@@ -653,10 +668,11 @@ function layoutTimeline(
         end,
         in: Math.round(clip.in * fps),
         speed,
-        placement: fixedPlacement(clip),
+        placement,
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(covers ? { cover: formatCover(picture, output) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -703,7 +719,10 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+  const captionScale = variant?.captionScale ?? 1;
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
+    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
+  );
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -720,6 +739,8 @@ function layoutTimeline(
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
+  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
+  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
@@ -923,7 +944,8 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Fades of the bottom track go to black: nothing is under it.
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
-    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fit, ...timed].join(",")}[${label}]`);
+    const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
+    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -943,9 +965,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
   lines.push(`${joined}[base]`);
   let below = "base";
   pieces.forEach(({ placed, start, end }, n) => {
-    const rect = placed.tile?.rect ?? layerRect(placed.source.video!, { width, height }, out.project, placed.placement);
+    const rect = placed.tile?.rect ?? (placed.cover ? { left: 0, top: 0, width, height } : layerRect(placed.source.video!, { width, height }, out.project, placed.placement));
     const { opacity } = placed.placement;
-    const crop = placed.tile?.crop;
+    const crop = placed.tile?.crop ?? placed.cover;
     const move = placed.tile?.move;
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
     const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");
@@ -1039,6 +1061,18 @@ function layerMotion(placed: Placed, start: number, end: number, from: number, o
   const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
+}
+
+/**
+ * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
+ * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
+ */
+function formatCover(source: Size, output: Size): LayerRect {
+  const even = (value: number) => value - (value % 2);
+  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
+  const width = Math.max(2, even(crop.width));
+  const height = Math.max(2, even(crop.height));
+  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**

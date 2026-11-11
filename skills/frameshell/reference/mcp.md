@@ -16,7 +16,7 @@ Tool results mirror the CLI's `--json`. Mutating tools return `revision` and `op
 
 Look after every change the viewer would see: an overlay, a transform, a title, a subtitle style, a cut in the middle of a gesture.
 
-- `frame_capture { at: 12.5 }`: the composited frame at that timeline second, rendered by the export compiler, so it matches `render` (works with the app closed). `preset` renders at that preset's size.
+- `frame_capture { at: 12.5 }`: the composited frame at that timeline second, rendered by the export compiler, so it matches `render` (works with the app closed). `preset` renders at that preset's size; `projectFormat` (e.g. `9x16`, from `format_list`) shows the frame as that format of the project lays it out.
 - `cover { text: "nunca" }`: a cover image (a frame with one big word over it) written to a file, not returned as an image; open `path` with your image tool. Same arguments as `frameshell cover`; `readability.readable: false` means the word is too small to read at thumbnail size.
 - `frames_strip { from: 0, to: 30, count: 9 }`: one contact sheet of evenly spaced frames with each tile's time and clip. Use it to review a whole edit or find where a shot changes.
 - Without MCP: `frameshell frame --at 12.5 --out /tmp/f.png`, then open the PNG with your image-reading tool.

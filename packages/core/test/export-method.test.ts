@@ -72,15 +72,15 @@ describe("render and frame methods", () => {
   it(
     "renders the main timeline as a job to exports/<timeline>-<preset>.mp4",
     async () => {
-      const result = await conn.request("render", { cwd: project, preset: "vertical-1080x1920" });
-      const output = join(project, "exports", "main-vertical-1080x1920.mp4");
+      const result = await conn.request("render", { cwd: project, preset: "youtube-1440p" });
+      const output = join(project, "exports", "main-youtube-1440p.mp4");
       expect(result).toMatchObject({
         output,
-        preset: "vertical-1080x1920",
+        preset: "youtube-1440p",
         timeline: "main",
         duration: 1,
-        width: 1080,
-        height: 1920,
+        width: 2560,
+        height: 1440,
         fps: "30/1",
         loudness: -17,
         warnings: [],
@@ -95,7 +95,7 @@ describe("render and frame methods", () => {
         ["video", "h264"],
         ["audio", "aac"],
       ]);
-      expect(streams[0]).toMatchObject({ width: 1080, height: 1920 });
+      expect(streams[0]).toMatchObject({ width: 2560, height: 1440 });
       expect(Number(streams[0]!.duration)).toBeCloseTo(1, 2);
       // No scratch files left behind.
       const scratch = join(project, ".frameshell", "cache", "render");

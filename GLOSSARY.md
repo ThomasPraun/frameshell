@@ -122,6 +122,20 @@ _Avoid_: still project, photo project
 A video track of an image project, shown in the Layers panel; the first track is the bottom layer.
 _Avoid_: level, sheet
 
+## Formats (ADR 0027)
+
+**Format**:
+One delivery size of a project's single edit (`formats` in `frameshell.json`: an id such as `9x16` and a frame size); every format plays the same cuts, captions and audio.
+_Avoid_: variant, aspect, version, cutdown (a shorter edit is another timeline)
+
+**Primary format**:
+The first format, equal to the project `resolution`; its export is laid out as a project without formats is.
+_Avoid_: master, main format, default format
+
+**Cover**:
+How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
+_Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
+
 ## Photo segmentation (ADR 0022)
 
 **Mask**:

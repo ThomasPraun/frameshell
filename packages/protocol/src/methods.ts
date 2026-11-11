@@ -29,7 +29,7 @@ import {
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
+import { CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema } from "@frameshell/schema";
 import {
   CaptionsSetResultSchema,
   MulticamCreateResultSchema,
@@ -64,7 +64,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 78;
+export const PROTOCOL_VERSION = 79;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -373,6 +373,13 @@ const ProbeSchema = z.object({
       fps: z.number().nullable().describe("Average frame rate of the source; null for still images."),
       vfr: z.boolean().describe("Variable frame rate source (phones, OBS); the proxy is CFR at project fps anyway."),
       still: z.boolean().describe("Single image, not a moving stream: no proxy is built."),
+      alpha: z
+        .boolean()
+        .optional()
+        .describe(
+          "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
+            "on an upper track to fill another format's frame (ADR 0027); the base track still crops it. Absent in probes cached before it existed.",
+        ),
     })
     .nullable()
     .describe("First video stream; null for audio-only files."),
@@ -520,7 +527,9 @@ const PresetParam = z
   .optional()
   .describe(
     "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
-      "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`.",
+      "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`. A preset given here must have the " +
+      "aspect of every format rendered and sets the output size; a default preset only gives codec, bitrate and loudness " +
+      "when its aspect differs (ADR 0027).",
   );
 
 /** Quality tiers a `render` can ask for; the other tiers (`master`, `preview`) are for intermediates. */
@@ -533,6 +542,37 @@ const RenderQualityParam = QualityTierSchema.extract(["draft", "final"])
       "preset's own `crf`/`bitrateKbps`; only H.264 presets take a tier (others render as the preset says, with a " +
       "warning). Default: the preset as written (x264, its own CRF).",
   );
+
+/** One format of a project as `format.*` report it (ADR 0027). */
+const FormatInfoSchema = z.object({
+  id: z.string().describe("Format id, e.g. `16x9`, `9x16`, `web-1600x900`."),
+  width: z.int(),
+  height: z.int(),
+  primary: z.boolean().describe("The first format: equals `resolution`, rendered when `render` gets no `formats`."),
+  builtin: z.boolean().describe("A built-in id (`16x9`, `1x1`, `4x5`, `9x16`) with its fixed canvas."),
+});
+
+/** What a `format.add` or `format.remove` changed, and how to undo it. */
+const FormatChangeSchema = z.object({
+  dir: z.string().describe("Project root."),
+  formats: z.array(FormatInfoSchema).describe("The project's formats after the change, primary first."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`."),
+  undo: z
+    .object({ method: z.enum(["format.add", "format.remove"]), params: z.record(z.string(), z.unknown()) })
+    .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
+});
+
+/** One file `render` writes: the export of one format. */
+const RenderOutputSchema = z.object({
+  format: z.string().describe("Format id rendered, e.g. `9x16`."),
+  job: JobSchema,
+  output: z.string().describe("Absolute path the file is written to."),
+  preset: z.string().describe("Preset id used: its codec, bitrate and loudness, and its size when it has the format's aspect."),
+  width: z.int(),
+  height: z.int(),
+  segments: z.int().describe("Video segments encoded in parallel."),
+  warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
+});
 
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
 const VerifiedWordSchema = z.object({
@@ -889,6 +929,54 @@ export const methods = {
         .describe("Declarative presets: `container`, `video` (codec, width, height…), `audio`, `loudness` (LUFS)."),
     }),
   },
+  "format.list": {
+    description:
+      "List the delivery formats of the enclosing project (ADR 0027), primary first: one edit renders at each size. " +
+      "A project without `formats` in `frameshell.json` has one, its `resolution`. `builtins` lists the ids `format.add` " +
+      "takes without a size.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      formats: z.array(FormatInfoSchema).describe("Primary first."),
+      builtins: z.array(FormatInfoSchema).describe("Built-in formats `16x9`, `1x1`, `4x5`, `9x16` with their canvases."),
+    }),
+  },
+  "format.add": {
+    mutating: true,
+    description:
+      "Add a delivery format to the enclosing project's `formats` in `frameshell.json` (ADR 0027), e.g. `{ id: \"9x16\" }`, " +
+      "then `render` with `formats: [\"16x9\", \"9x16\"]` exports every one from the same edit. Built-in ids (`16x9` " +
+      "1920x1080, `1x1` 1080x1080, `4x5` 1080x1350, `9x16` 1080x1920) take no size; a custom id needs `width` and `height` " +
+      "(even), e.g. `{ id: \"web-1600x900\", width: 1600, height: 900 }`. In a format other than the primary, media clips " +
+      "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
+      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl`; `undo` " +
+      "names the call that reverses it (`revert` takes timeline operations only). It applies at once: while review mode is " +
+      "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
+      "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      id: FormatIdSchema,
+      width: z.int().positive().optional().describe("Frame width in pixels, even. Only for a custom id; a built-in id has its own."),
+      height: z.int().positive().optional().describe("Frame height in pixels, even. Only for a custom id."),
+      index: z
+        .int()
+        .min(1)
+        .optional()
+        .describe("Position in the list, 1 = right after the primary (which always stays first). Default: last."),
+    }),
+    result: FormatChangeSchema,
+  },
+  "format.remove": {
+    mutating: true,
+    description:
+      "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
+      "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
+      "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
+      "`undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
+      "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
+    params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
+    result: FormatChangeSchema,
+  },
   render: {
     mutating: true,
     description:
@@ -900,15 +988,29 @@ export const methods = {
       "proxies, and never waits for ingest. Export v1 renders the first video track (media clips, gaps in black), multicam " +
       "program tracks (every shot's angles in their tiles) and the sound of every video, audio and program track; `warnings` lists what it skipped (subtitles, transforms). Fails with " +
       "PresetNotFound, ExportUnsupported (empty timeline, clips on a second video track, nested timelines or adapter " +
-      "clips, a multicam group missing, a program track nested under a transformed clip), TimelineNotFound, AssetNotFound.",
+      "clips, a multicam group missing, a program track nested under a transformed clip), TimelineNotFound, AssetNotFound. " +
+      "Formats (ADR 0027): `formats` renders the edit once per listed format of the project (`format.list`), one job each, " +
+      "the file of each named `<name>-<format>.<container>`; `renders` lists them, and the top-level fields describe the first. " +
+      "In a format other than the primary, untransformed media fills the frame (crop around the centre), generated clips " +
+      "render at that size first, and vertical captions are 1.3x larger. A `preset` whose aspect differs from a format " +
+      "rendered fails with InvalidOperation; FormatNotFound names the project's formats.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       preset: PresetParam,
+      formats: z
+        .array(FormatIdSchema)
+        .min(1)
+        .optional()
+        .describe(
+          "Format ids to render, e.g. `[\"16x9\", \"9x16\"]`; each must be in `format.list`. Each file gets the format id " +
+            "as suffix. Default: the primary format only, file named as before.",
+        ),
       quality: RenderQualityParam,
       out: AbsolutePath.optional().describe(
         "Absolute output file, e.g. `/home/ana/videos/launch/exports/launch.mp4`; its folder is created. " +
-          "Default `<project>/exports/<timeline>-<preset>.<container>`. An existing file is replaced when the job finishes.",
+          "Default `<project>/exports/<timeline>-<preset>.<container>`. With `formats`, `-<format>` is added before the " +
+          "extension of each file. An existing file is replaced when the job finishes.",
       ),
       cover: z
         .strictObject(CoverChoiceShape)
@@ -920,6 +1022,8 @@ export const methods = {
         ),
     }),
     result: z.object({
+      format: z.string().describe("Format id of the first render, which the fields below describe."),
+      renders: z.array(RenderOutputSchema).describe("One per format rendered, in the order asked; the first is the one above."),
       job: JobSchema,
       output: z.string().describe("Absolute path the file is written to."),
       preset: z.string().describe("Preset id used."),
@@ -932,22 +1036,27 @@ export const methods = {
       fps: z.string().describe("Output frame rate as a rational, e.g. `30/1` or `30000/1001`."),
       loudness: z.number().describe("Integrated loudness target, LUFS."),
       segments: z.int().describe("Video segments encoded in parallel."),
-      warnings: z.array(z.string()).describe("Timeline content this export does not render; empty when none."),
+      warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
     }),
   },
   frame: {
     description:
       "Capture the composited frame showing at timeline time `at` as a PNG, JPEG or WebP image, rendered by the export " +
       "compiler (single-frame plan), so it matches `render` and works with the app closed. This is how an image project " +
-      "(ADR 0017) is exported: `at: 0`. Size: the preset's when `preset` is given, else the project resolution. Fails " +
-      "with InvalidOperation (`at` outside the timeline; data.valid has the range), ExportUnsupported, PresetNotFound, " +
-      "TimelineNotFound.",
+      "(ADR 0017) is exported: `at: 0`. `projectFormat` captures the frame as that format of the project lays it out " +
+      "(ADR 0027), e.g. `9x16`. Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
+      "format's (default: the primary, i.e. the project resolution). Fails with InvalidOperation (`at` outside the " +
+      "timeline, data.valid has the range; a preset of another aspect), ExportUnsupported, PresetNotFound, " +
+      "FormatNotFound, TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`; the frame whose time span holds it is captured."),
       out: AbsolutePath.describe("Absolute image path to write, e.g. `/tmp/frame.png`; its folder is created."),
-      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: project resolution."),
+      preset: z.string().min(1).optional().describe("Export preset id whose width and height to use. Default: the format's size."),
+      projectFormat: FormatIdSchema.optional().describe(
+        "Format of the project to capture in (`format.list`), e.g. `9x16`. Default: the primary format. Not the image type: that is `format`.",
+      ),
       format: FrameFormatSchema.optional().describe(
         "Image format. Default: from the extension of `out` (`.jpg`/`.jpeg` JPEG, `.webp` WebP), else `png`.",
       ),
@@ -967,6 +1076,7 @@ export const methods = {
       frame: z.int().describe("Timeline frame index captured (0-based, project fps)."),
       at: z.number().describe("Start time of that frame, timeline seconds."),
       clip: z.string().nullable().describe("Clip showing on the first video track; null in a gap (black frame)."),
+      projectFormat: z.string().describe("Format of the project the frame was laid out in."),
       width: z.int(),
       height: z.int(),
     }),
@@ -2654,7 +2764,8 @@ export const methods = {
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
       "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
-      "HistoryNotFound when the id is not in the timeline's journal.",
+      "HistoryNotFound when the id is not in the timeline's journal, InvalidOperation (reason `format change`) for the `op` " +
+      "of a `format.add`/`format.remove`: run its `undo` call instead.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -3384,6 +3495,10 @@ export type RenderResult = MethodResult<"render">;
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
 export type FrameResult = MethodResult<"frame">;
+/** One format as `format.list` reports it. */
+export type FormatInfo = z.output<typeof FormatInfoSchema>;
+/** Result of `format.add` and `format.remove`. */
+export type FormatChange = z.output<typeof FormatChangeSchema>;
 /** `cover` params. */
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */
@@ -3629,6 +3744,8 @@ export const ErrorCode = {
   ModelNotRegistered: -32043,
   /** data: `{ file, reason }`: the file is not a ggml, gguf or ONNX model, or is pickle-based (it could run code). */
   UnsupportedModelFormat: -32044,
+  /** data: `{ format, available: string[] }`: the project has no such format (ADR 0027); `available` lists its formats. */
+  FormatNotFound: -32045,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

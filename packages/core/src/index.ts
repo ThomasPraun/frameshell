@@ -6,6 +6,7 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
+export { FORMAT_JOURNAL, type FormatJournalEntry, FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound } from "./formats.js";
 export {
   type FaceScans,
   type NameWrites,
