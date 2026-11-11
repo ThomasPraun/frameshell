@@ -77,4 +77,11 @@ describe("frameshell voiceover generate", () => {
     expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--lines", ","]).code).toBe(2);
     expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--speakers", "2"]).code).toBe(2);
   });
+
+  it("takes --voice with a voice id, while clip set --voice stays a switch", () => {
+    const result = frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--voice", "tone", "--lines", "hook-1"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("(stand-in, voice tone)");
+    expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--voice", "nobody"]).code).not.toBe(0);
+  });
 });
