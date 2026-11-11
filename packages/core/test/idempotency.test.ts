@@ -93,6 +93,18 @@ describe("idempotent mutating requests", () => {
     expect((await request()).operation.op).toBe("track.add");
   });
 
+  it("applies a replayed marker.add once: the marker keeps the first request's id", async () => {
+    const { dir, connect, admin, history } = await setup();
+    const key = "marker-0123456789";
+    const params = { cwd: dir, at: 2, label: "hook" };
+    const first = await (await connect("desktop/test")).request("marker.add", params, { idempotencyKey: key });
+    const replay = await (await connect("desktop/test")).request("marker.add", params, { idempotencyKey: key });
+    expect(replay).toEqual(first);
+    expect(await history()).toEqual(["marker.add"]);
+    const { markers } = await admin.request("marker.list", { cwd: dir });
+    expect(markers).toEqual([{ id: first.changes.added[0], at: 2, label: "hook" }]);
+  });
+
   it("replays tx.commit: a retried commit reports the transaction it closed instead of failing", async () => {
     const { dir, connect } = await setup();
     const app = await connect("desktop/test");

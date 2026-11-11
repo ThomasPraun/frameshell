@@ -29,6 +29,13 @@
   --angle-4: #c97bb4;
   --angle-5: #7fc97b;
   --angle-6: #8f86d9;
+  /* Timeline marker colours by name (ADR 0029; paint.ts DEFAULT_THEME.markers). No colour: --accent. */
+  --marker-red: #e0675f;
+  --marker-orange: #e08a4f;
+  --marker-yellow: #d9c45b;
+  --marker-green: #6fbf73;
+  --marker-blue: #5b9fd9;
+  --marker-purple: #a98ad9;
   /* History diff marks: what a transaction did. Removed uses --danger. */
   --diff-added: #79d39a;
   --diff-moved: #66c2e0;
@@ -2363,6 +2370,15 @@ button.track-head {
   border: 1px solid var(--accent);
   border-radius: 3px;
   padding: 1px 4px;
+}
+
+/* Marker name input over the marker lane, at the marker's time (TimelinePanel `naming`). */
+.marker-name-input {
+  position: absolute;
+  z-index: 3;
+  width: 160px;
+  height: 20px;
+  font-size: 11px;
 }
 
 button.track-head:hover {

@@ -24,12 +24,15 @@ export function audioReads(spans: readonly AudioSpan[], from: number, to: number
   return reads;
 }
 
-/** Sidecar frames `[first, first + count)` a read plays; one more at other speeds, to interpolate. */
+/**
+ * Sidecar frames `[first, first + count)` a read plays; one more at other speeds, to interpolate. A shaped dissolve
+ * may reach before frame 0 (ADR 0030): those frames are not read, and {@link renderRead} plays them as silence.
+ */
 export function sourceWindow(read: AudioRead): { first: number; count: number } {
   const { span } = read;
-  const first = Math.floor(position(span, read.from));
+  const first = Math.max(0, Math.floor(position(span, read.from)));
   const last = Math.floor(position(span, read.to - 1));
-  return { first, count: last - first + (span.speed === 1 ? 1 : 2) };
+  return { first, count: Math.max(0, last - first + (span.speed === 1 ? 1 : 2)) };
 }
 
 /**

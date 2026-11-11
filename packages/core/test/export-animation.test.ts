@@ -15,14 +15,21 @@ import {
   keyedValueAt,
   layerRect,
   placementAt,
+  shapeAt,
+  TRANSITION_DIRECTIONS,
+  TRANSITION_SHAPE_KINDS,
+  type TransitionShape,
 } from "@frameshell/schema";
 import { BUILTIN_PRESETS, type ExportSource, compileRender } from "../src/index.js";
-import { keyExpression } from "../src/export/animation.js";
+import { keyExpression, shapeOffsets, shapeProgressExpression, wipeAlpha } from "../src/export/animation.js";
 
 // Parity of the export's ffmpeg expressions and ramps with the schema evaluator (ADR 0018 decision 9): every
 // expression the compiler writes is evaluated here numerically and sampled against `composite.ts`.
 
-/** Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, pow, sin. */
+/**
+ * Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, pow,
+ * sin; `geq`'s `alpha(X,Y)` reads an opaque picture (1).
+ */
 function evaluate(expression: string, variables: Record<string, number>): number {
   const tokens = expression.match(/\d+(?:\.\d+)?|[A-Za-z_][A-Za-z_0-9]*|[-+*/(),]/g)!;
   expect(tokens.join("")).toBe(expression.replace(/\s/g, ""));
@@ -41,6 +48,7 @@ function evaluate(expression: string, variables: Record<string, number>): number
     pow: (a, b) => a! ** b!,
     sin: (a) => Math.sin(a!),
     min: (a, b) => Math.min(a!, b!),
+    alpha: () => 1,
   };
   const primary = (): number => {
     const token = take();
@@ -500,5 +508,88 @@ describe("nested clip parity (ADR 0018 decision 9)", () => {
       const volume = 10 ** (evaluate(item.gain!, { t }) / 20) * evaluate(item.fade!, { t });
       expect(ramps * volume, `sample ${n}`).toBeCloseTo(10 ** (gainAt(bed, at) / 20) * hostWeight(bed, at, true), 4);
     }
+  });
+});
+
+describe("shape parity (ADR 0030)", () => {
+  const SHAPES: TransitionShape[] = TRANSITION_SHAPE_KINDS.flatMap((kind) => TRANSITION_DIRECTIONS.map((direction) => ({ kind, direction })));
+  const width = 64;
+  const height = 36;
+
+  it("push offsets and the wipe's alpha equal shapeAt at every sampled time, before, during and after", () => {
+    const cut = 3;
+    const half = 0.4;
+    for (const shape of SHAPES) {
+      for (let i = -4; i <= 44; i++) {
+        const t = cut - half + (2 * half * i) / 40;
+        const frame = shapeAt(shape, dissolveProgress(cut, half, t));
+        const label = `${shape.kind} ${shape.direction} t ${t}`;
+        if (shape.kind === "push") {
+          const p = shapeProgressExpression(cut, half, "t");
+          for (const side of ["incoming", "outgoing"] as const) {
+            const offsets = shapeOffsets(shape, side, p, width, height);
+            const x = offsets.x === null ? 0 : evaluate(offsets.x, { t });
+            const y = offsets.y === null ? 0 : evaluate(offsets.y, { t });
+            expect([x, y], `${label} ${side}`).toEqual([Math.floor(frame[side].dx * width + 0.5) + 0, Math.floor(frame[side].dy * height + 0.5) + 0]);
+          }
+          continue;
+        }
+        // A layer 8 px in from the frame's corner: the mask is in frame pixels.
+        const alpha = /:a='([^']+)'$/.exec(wipeAlpha(shape, shapeProgressExpression(cut, half, "T"), "8", "4", width, height))![1]!;
+        const [x0, y0, x1, y1] = frame.incoming.clip!;
+        for (let y = 0; y < height - 8; y += 3) {
+          for (let x = 0; x < width - 16; x += 3) {
+            const cx = (x + 8.5) / width;
+            const cy = (y + 4.5) / height;
+            const inside = cx >= x0 && cx < x1 && cy >= y0 && cy < y1;
+            // Pixel centres exactly on the edge may round either way.
+            const onEdge = [cx - x0, cx - x1, cy - y0, cy - y1].some((d) => Math.abs(d) < 1e-9);
+            if (!onEdge) expect(evaluate(alpha, { X: x, Y: y, T: t }), `${label} pixel ${x},${y}`).toBe(inside ? 1 : 0);
+          }
+        }
+      }
+    }
+  });
+
+  it("the compiler moves both pieces of a push by shapeAt over the dissolve, abutting", () => {
+    const fps = 30;
+    const preset = BUILTIN_PRESETS.find((p) => p.id === "youtube-1080p")!;
+    const sources = new Map<string, ExportSource>([
+      ["assets/talk.mp4", { path: "/p/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true, duration: 30 }],
+    ]);
+    const shape: TransitionShape = { kind: "push", direction: "right" };
+    const timeline: Timeline = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "a", type: "media", asset: "assets/talk.mp4", start: 0, in: 3, out: 5 },
+            { id: "b", type: "media", asset: "assets/talk.mp4", start: 2, in: 10, out: 12, dissolve: 0.6, shape },
+          ],
+        },
+      ],
+    };
+    // 0.6 s segments cut inside the push.
+    const plan = compileRender({ timeline, fps, preset, loudness: -17, sources, resolution: { width: 1920, height: 1080 }, segmentSeconds: 0.6 });
+    let checked = 0;
+    for (const segment of plan.segments) {
+      const text = plan.files[segment.args[segment.args.indexOf("-/filter_complex") + 1]!]!;
+      const overlays = [...text.matchAll(/overlay=x='([^']+)':y='([^']+)':eval=frame/g)];
+      const from = Math.round(segment.from * fps);
+      for (let frame = Math.max(from, 51); frame < Math.min(Math.round(segment.to * fps), 69); frame++) {
+        expect(overlays, `segment ${segment.file}`).toHaveLength(2);
+        const t = (frame - from) / fps;
+        const [outgoing, incoming] = overlays.map((match) => evaluate(match[1]!, { t }));
+        const expected = shapeAt(shape, dissolveProgress(2, 0.3, frame / fps));
+        expect(outgoing, `frame ${frame}`).toBe(Math.floor(expected.outgoing.dx * 1920 + 0.5));
+        expect(incoming, `frame ${frame}`).toBe(outgoing! - 1920);
+        checked++;
+      }
+    }
+    expect(checked).toBe(18);
   });
 });

@@ -1,0 +1,109 @@
+{
+  "audio": {
+    "sampleRate": 48000,
+    "samples": 192000,
+    "inputs": [
+      "/project/.frameshell/audio-fx/talk-voice.pcm",
+      "/project/assets/talk.mp4",
+      "/project/.frameshell/audio-fx/music-hum.pcm"
+    ],
+    "tracks": [
+      [
+        {
+          "kind": "clip",
+          "clip": "c_a",
+          "input": 0,
+          "from": 153600,
+          "to": 249600,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 96000
+        },
+        {
+          "kind": "clip",
+          "clip": "c_b",
+          "input": 0,
+          "from": 480000,
+          "to": 535200,
+          "speed": 1.15,
+          "gainDb": -3,
+          "samples": 48000
+        },
+        {
+          "kind": "clip",
+          "clip": "c_dry",
+          "input": 1,
+          "from": 960000,
+          "to": 1008000,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 48000
+        }
+      ],
+      [
+        {
+          "kind": "clip",
+          "clip": "c_music",
+          "input": 2,
+          "from": 0,
+          "to": 192000,
+          "speed": 1,
+          "gainDb": -18,
+          "samples": 192000
+        }
+      ]
+    ],
+    "codec": [
+      "-c:a",
+      "aac",
+      "-b:a",
+      "320k",
+      "-ar",
+      "48000"
+    ]
+  },
+  "mix": {
+    "files": {
+      "mix.filter": "[0:a:0]pan=stereo|c0=c0|c1=c0,aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=2[i0c0][i0c1];\n[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i1c0];\n[2:a:0]pan=stereo|c0=c0|c1=c0,aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=1[i2c0];\n[i0c0]atrim=start_sample=153600:end_sample=249600,asetpts=PTS-STARTPTS,apad=whole_len=96000,atrim=end_sample=96000,afade=t=in:ss=0:ns=96,afade=t=out:ss=95904:ns=96[t0i0];\n[i0c1]atrim=start_sample=480000:end_sample=540720,asetpts=PTS-STARTPTS,atempo=1.15,volume=-3dB,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i1];\n[i1c0]atrim=start_sample=960000:end_sample=1008000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i2];\n[t0i0][t0i1][t0i2]concat=n=3:v=0:a=1[t0];\n[i2c0]atrim=start_sample=0:end_sample=192000,asetpts=PTS-STARTPTS,volume=-18dB,apad=whole_len=192000,atrim=end_sample=192000,afade=t=in:ss=0:ns=96,afade=t=out:ss=191904:ns=96[t1i0];\n[t1i0]concat=n=1:v=0:a=1[t1];\n[t0][t1]amix=inputs=2:duration=longest:normalize=0[mix]\n"
+    },
+    "args": [
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-nostats",
+      "-progress",
+      "pipe:1",
+      "-y",
+      "-f",
+      "s16le",
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-i",
+      "/project/.frameshell/audio-fx/talk-voice.pcm",
+      "-vn",
+      "-i",
+      "/project/assets/talk.mp4",
+      "-f",
+      "s16le",
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-i",
+      "/project/.frameshell/audio-fx/music-hum.pcm",
+      "-/filter_complex",
+      "mix.filter",
+      "-map",
+      "[mix]",
+      "-c:a",
+      "wavpack",
+      "-f",
+      "wv",
+      "mix.wv"
+    ]
+  },
+  "warnings": []
+}

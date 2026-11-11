@@ -158,6 +158,18 @@ describe("nested clips with keys and edges (ADR 0018 decision 9)", () => {
     expect(fadesOf(byId(out, "v1/2", "n/t"))).toEqual([{ start: 5, end: 10, fadeIn: 0.5, fadeOut: 0 }]);
   });
 
+  it("drops an inner clip's shape with its dissolve where the window cuts its start", () => {
+    const shaped = timeline("shaped", [{ id: "v1", kind: "video", clips: [c1, { ...c2, shape: { kind: "push" } }] }]);
+    const cut = timeline("main", [{ id: "v1", kind: "video", clips: [{ id: "n", type: "timeline", source: "timelines/shaped.json", start: 0, in: 4.5, duration: 2 }] }]);
+    const part = byId(
+      flattenTimeline(cut, (source) => (source === "timelines/shaped.json" ? shaped : null), 10),
+      "v1",
+      "n/c2",
+    );
+    expect(part).not.toHaveProperty("dissolve");
+    expect(part).not.toHaveProperty("shape");
+  });
+
   it("composes keys without fps, but records edges and handles only when flattening for playback", () => {
     const loose = flattenTimeline(main, resolve);
     const cam = byId(loose, "v1", "n/c1");

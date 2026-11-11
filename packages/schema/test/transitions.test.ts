@@ -14,6 +14,8 @@ import {
   keyedValueAt,
   parseTimeline,
   placementAt,
+  shapeAt,
+  shapeProgress,
   soundCurve,
 } from "../src/index.js";
 
@@ -48,6 +50,25 @@ describe("edgeTransitions", () => {
     const edges = edgesOf([media("a", 0, 5, 30), media("b", 25, 5, 15, { dissolve: 1 })]);
     expect(edges.get("b")).toMatchObject({ mode: "dip", dissolve: 0, fadeIn: 0.5, dissolveLength: 1 });
     expect(edges.get("a")!.fadeOut).toBeCloseTo(0.5);
+  });
+
+  it("plays a shaped dissolve at full length past missing handles, the edge frames held", () => {
+    const shape = { kind: "push" as const };
+    const edges = edgesOf([media("a", 0, 5, 30), media("b", 25, 0, 10, { dissolve: 1, shape })]);
+    expect(edges.get("b")).toMatchObject({ mode: "dissolve", dissolve: 0.5, dissolveLength: 1, fadeIn: 0 });
+    expect(edges.get("a")).toMatchObject({ fadeOut: 0, mode: null });
+  });
+
+  it("plays a shape on a nested clip as a plain dissolve, cut to the handles", () => {
+    const nested = (extra: Partial<Clip>) => ({ id: "n", type: "timeline", source: "timelines/n.json", start: 25, in: 0, duration: 10, dissolve: 1, ...extra }) as Clip;
+    const plain = edgesOf([media("a", 0, 5, 30), nested({})]);
+    expect(edgesOf([media("a", 0, 5, 30), nested({ shape: { kind: "push" } })])).toEqual(plain);
+    expect(plain.get("n")!.mode).toBe("dip");
+  });
+
+  it("still cuts a shaped dissolve to half of each clip", () => {
+    const edges = edgesOf([media("a", 0, 5, 5.4), media("b", 0.4, 0, 10, { dissolve: 2, shape: { kind: "wipe" } })]);
+    expect(edges.get("b")).toMatchObject({ mode: "dissolve", dissolve: 0.2 });
   });
 
   it("plays an unbutted dissolve as a fade in of the same length", () => {
@@ -205,6 +226,27 @@ describe("transition weights", () => {
   });
 });
 
+describe("shapeAt", () => {
+  it("eases progress in and out, clamped", () => {
+    expect([-1, 0, 0.25, 0.5, 0.75, 1, 2].map(shapeProgress)).toEqual([0, 0, 0.15625, 0.5, 0.84375, 1, 1]);
+  });
+
+  it("pushes both pictures one frame in the direction", () => {
+    expect(shapeAt({ kind: "push" }, 0)).toEqual({ outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 1, dy: 0, clip: null } });
+    expect(shapeAt({ kind: "push", direction: "left" }, 0.5)).toEqual({ outgoing: { dx: -0.5, dy: 0, clip: null }, incoming: { dx: 0.5, dy: 0, clip: null } });
+    expect(shapeAt({ kind: "push", direction: "right" }, 0.5)).toEqual({ outgoing: { dx: 0.5, dy: 0, clip: null }, incoming: { dx: -0.5, dy: 0, clip: null } });
+    expect(shapeAt({ kind: "push", direction: "up" }, 1)).toEqual({ outgoing: { dx: 0, dy: -1, clip: null }, incoming: { dx: 0, dy: 0, clip: null } });
+    expect(shapeAt({ kind: "push", direction: "down" }, 0.25).incoming.dy).toBeCloseTo(-0.84375);
+  });
+
+  it("wipes the incoming picture in from the side it enters by", () => {
+    expect(shapeAt({ kind: "wipe" }, 0.5)).toEqual({ outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip: [0.5, 0, 1, 1] } });
+    expect(shapeAt({ kind: "wipe", direction: "right" }, 0.25).incoming.clip).toEqual([0, 0, 0.15625, 1]);
+    expect(shapeAt({ kind: "wipe", direction: "up" }, 1).incoming.clip).toEqual([0, 0, 1, 1]);
+    expect(shapeAt({ kind: "wipe", direction: "down" }, 0).incoming.clip).toEqual([0, 0, 1, 0]);
+  });
+});
+
 describe("clip transition fields (timeline model)", () => {
   const timeline = (clips: unknown[], kind = "video") => ({ ...createTimeline("main"), tracks: [{ id: "t_1", kind, clips }] });
   const base = { id: "c_1", type: "media", asset: "assets/a.mp4", start: 0, in: 0, out: 5 };
@@ -238,6 +280,19 @@ describe("clip transition fields (timeline model)", () => {
     const result = parseTimeline(timeline([{ ...base, keys: { opacity: [{ at: 0, value: 1 }] } }], "audio"));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("only `gain` keys");
+  });
+
+  it("accepts a shape on a dissolve and refuses one without it or on an audio track", () => {
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "push", direction: "up" } }])).ok).toBe(true);
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "wipe" } }])).ok).toBe(true);
+    const bare = parseTimeline(timeline([{ ...base, shape: { kind: "wipe" } }]));
+    expect(bare.ok).toBe(false);
+    if (!bare.ok) expect(bare.error).toContain("give the clip a `dissolve` too");
+    const audio = parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "wipe" } }], "audio"));
+    expect(audio.ok).toBe(false);
+    if (!audio.ok) expect(audio.error).toContain("no picture to shape");
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "iris" } }])).ok).toBe(false);
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "push", direction: "diagonal" } }])).ok).toBe(false);
   });
 
   it("gives shots no transition fields", () => {

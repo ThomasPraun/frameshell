@@ -17,7 +17,10 @@ import {
 } from "./recipe.js";
 import { DERIVED_DIRS, type Manifest, type MediaStore } from "./store.js";
 
-type IngestStep = Exclude<JobStep, "clips" | "video" | "mux" | "render" | "faces" | "people" | "transcribe" | "matte">;
+type IngestStep = Exclude<
+  JobStep,
+  "clips" | "audio-fx" | "video" | "mux" | "render" | "faces" | "people" | "transcribe" | "matte"
+>;
 
 /** Resolved executables. */
 export interface MediaTools {

@@ -52,6 +52,8 @@ Set `binaries` in `frameshell.json` (project) or in `<configDir>/config.json` (g
 
 Requirements: GPL build with libx264, and libvpx with both the VP9 encoder and decoder. The native `vp9` decoder drops alpha (ADR 0002). Static builds only, so nothing depends on system libraries.
 
+Hardware encoders (VideoToolbox, NVENC) are optional and probed, never assumed: an encoder in `ffmpeg -encoders` can still fail (no GPU, old driver). `packages/core/src/encoders/probe.ts` encodes 0.2 s of lavfi colour with each of `h264_videotoolbox`, `h264_nvenc`, `libx264` in that order, and renders with the first that works. The result is cached in `encoders.json` in `dataDir`, keyed by ffmpeg path and version (so a re-pin probes again); `doctor --reprobe` refreshes it after a driver or GPU change. Per-tier settings (draft, final, master, preview) are in `encoders/tiers.ts`.
+
 | Platform | Version | Builder | Archive | Licence |
 |---|---|---|---|---|
 | darwin-arm64 | 9.0.2 | [Martin Riedl](https://ffmpeg.martin-riedl.de) | `ffmpeg.zip` + `ffprobe.zip` (28 MB each) | GPL-3.0-or-later (`--enable-gpl --enable-version3`, no `--enable-nonfree`) |

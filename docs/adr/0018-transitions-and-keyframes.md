@@ -46,4 +46,4 @@ Moves "Transitions and keyframes" from v0.3 to v0.13. A cut may dissolve into th
 - Protocol v51: `transition.set`, `transition.remove`, `clip.key`; CLI `transition set|remove`, `clip key`; skill updated.
 - `--verify` may hear a word from a handle under a crossfade; a 0.5 s crossfade at a snapped cut rarely holds one.
 - Export of animated opacity costs more per frame than a constant; only keyed and transition pieces pay it.
-- Not covered: wipes, slides and other shaped transitions, transitions between shots, keys on crop or rotation, speed ramps.
+- Not covered: transitions between shots, keys on crop or rotation, speed ramps. Wipes, pushes and other shaped transitions: ADR 0030 (a `shape` on the dissolve, drawn with Canvas 2D clip paths, no WebGL).

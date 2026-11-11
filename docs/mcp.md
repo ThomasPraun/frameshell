@@ -52,8 +52,9 @@ Observe tools return images:
 |---|---|
 | `image_cutout(timeline, clip, mask)` | Image projects: the photo clip with a grayscale mask PNG as alpha, cropped to the mask, written as `assets/<photo>-cutout-<n>.png` and added as a layer right above the photo, exactly over it, in one transaction (ADR 0022). Same as `frameshell image cutout`. |
 | `inspect_point(timeline, at, x, y, unit?, segment?)` | What a point of the frame shows (ADR 0011): clips under it topmost first, the one seen there, and in a generated clip the DOM element painting it, probed in its live page in managed headless Chrome with the app's Pick script. Elements need a trusted project; footage paints its whole box. `segment`: on a photo in an image project, three mask PNGs under `.frameshell/context/` and their boxes (ADR 0022). Same as `frameshell inspect`. |
-| `frame_capture(timeline, at, preset?, out?)` | The composited frame at `at` seconds, rendered by the daemon with the export compiler (single-frame plan, same as `frameshell frame`), as a PNG image scaled to fit 1280x1280, plus frame index and clip. `out` also keeps the full-size image, as PNG, JPEG or WebP by its extension or `format` (`quality` 1-100); how an image project exports (ADR 0017). |
-| `frames_strip(timeline, from, to, count?, preset?)` | `count` (2 to 16, default 6) evenly spaced frames from `from` to `to`, tiled into one contact sheet at most 1280 px wide, plus the time, frame and clip of each tile. |
+| `frame_capture(timeline, at, preset?, projectFormat?, out?)` | The composited frame at `at` seconds, rendered by the daemon with the export compiler (single-frame plan, same as `frameshell frame`), as a PNG image scaled to fit 1280x1280, plus frame index and clip. `projectFormat` lays it out in that format of the project (ADR 0027). `out` also keeps the full-size image, as PNG, JPEG or WebP by its extension or `format` (`quality` 1-100); how an image project exports (ADR 0017). |
+| `cover(timeline, text?, at?, color?, out?, preset?, format?, quality?)` | A cover image: the frame where `text` is first spoken (or `at`, else the first picture) with the word drawn big over it, as the export compiler renders it (the `cover` method; `frameshell cover`). Not returned as an image: JSON with `path`, `frame`, `at`, `source`, `text`, `readability` (the word's capitals at 180 px wide against the 12 px that read) and `warnings`; default file `exports/<timeline>-cover.png`. The `render` tool takes `cover` to make frame 0 of the video the same composition. |
+| `frames_strip(timeline, from, to, count?, preset?, projectFormat?)` | `count` (2 to 16, default 6) evenly spaced frames from `from` to `to`, tiled into one contact sheet at most 1280 px wide, plus the time, frame and clip of each tile. |
 
 ## UI state and navigation
 
@@ -110,6 +111,17 @@ While a proposal is open, another author's change, a new `tx_begin`, and its aut
 
 There is no accept, reject or switch tool: `proposal.accept`, `proposal.reject` and `review.set` are internal registry methods (skipped like `handshake`), and the daemon refuses them with `ProposalState` (reason `forbidden`) for any caller but the app (author `ui`). Review exists so the person decides; an agent that could accept its own proposal would make it pointless.
 
+## Asset credits (ADR 0026)
+
+Optional `credits.json`: where third-party assets came from. `asset_import` records it when given `sourceUrl`, `licence`, `author`, `title` or `credit` (one source per call); nothing is written otherwise.
+
+| Tool | Use |
+|---|---|
+| `credits_set(asset, sourceUrl?, licence?, author?, title?, credit?)` | Record or complete an asset's provenance (`licence: "own"` for the person's footage). Fields left out keep their value while the file is unchanged. |
+| `credits_check` | Read-only. Judges every asset the timelines place; `ok` is false when any is unverified (`unrecorded`, `no-licence`, `no-credit`, `changed`, `missing`). Returns the credit lines and `text` for the video description. The CLI `frameshell credits` exits 1 on `ok: false`. |
+
+`render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
+
 ## People (ADR 0020)
 
 Optional `people.json`: who is who across transcripts, multicam angles and faces. Until a tool writes it (`people_add` creates it), the people tools only read (an empty list, suggestions from multicam angles alone): no download, no job, no transcript change.
@@ -129,6 +141,15 @@ People changes are not timeline operations: review mode does not hold them, `his
 | Tool | Does |
 |---|---|
 | `matte_prepare(asset)` | Matte job (kind `matte`): which pixels of each frame of a video are the person in front, MediaPipe's selfie segmenter on every proxy frame, smoothed and refined, cached per content in `.frameshell/cache/mattes/` as a grayscale video (frame N = proxy frame N). Returns its path; a second call returns it at once. The only tool that downloads the matte model. Same as `frameshell matte`. |
+## Style (ADR 0028)
+
+Optional `style.json`: the project's style guide as numbers (colours, fonts, type sizes, motion personality and overrides, sound levels under the voice, platforms, rules, banned list).
+
+| Tool | Does |
+|---|---|
+| `style_show` | Every style value as `{ value, source }` (`file`, `personality`, `default`; a null default = not decided, ask the person), `from` (the user style it was copied from) and the safe zones of the platforms it names. `style` is null without a file. Read-only; an invalid file fails with `InvalidProjectFile`. |
+
+There is no style write tool yet: agents write `style.json` with `file_write`, which refuses an invalid file. Nothing renders from the style yet.
 
 ## Resources
 

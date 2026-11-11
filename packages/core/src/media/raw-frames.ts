@@ -3,10 +3,33 @@ import { spawn } from "node:child_process";
 /**
  * Frames of the first video stream of absolute `path` decoded by ffmpeg through the video filter `filter`
  * (which must end in a `format=`), `frameBytes` each, in order. Reading waits for the consumer, so a slow
- * model never piles frames up in memory. Throws when ffmpeg cannot decode the file.
+ * model never piles frames up in memory. `range` (source seconds) limits decoding to that span. Throws when
+ * ffmpeg cannot decode the file.
  */
-export async function* readRawFrames(ffmpeg: string, path: string, filter: string, frameBytes: number): AsyncGenerator<Uint8Array> {
-  const args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", path, "-map", "0:v:0", "-an", "-vf", filter, "-f", "rawvideo", "-"];
+export async function* readRawFrames(
+  ffmpeg: string,
+  path: string,
+  filter: string,
+  frameBytes: number,
+  range?: { from: number; to: number },
+): AsyncGenerator<Uint8Array> {
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-nostdin",
+    ...(range ? ["-ss", String(range.from), "-t", String(range.to - range.from)] : []),
+    "-i",
+    path,
+    "-map",
+    "0:v:0",
+    "-an",
+    "-vf",
+    filter,
+    "-f",
+    "rawvideo",
+    "-",
+  ];
   const child = spawn(ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let stderr = "";
   child.stderr.setEncoding("utf8");

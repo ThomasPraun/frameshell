@@ -79,6 +79,79 @@ describe("preview subtitle lines", () => {
   });
 });
 
+describe("preview captions with a keyword and an entry (#460)", () => {
+  const phrased = (style: Record<string, unknown>) =>
+    subtitleTracks(
+      {
+        ...timeline({}),
+        tracks: timeline({}).tracks.map((track) =>
+          track.kind === "subtitles"
+            ? { ...track, style, phrases: [{ asset: "assets/take.mp4", words: ["w_000001", "w_000002"], chunks: [2], keyword: 1 }] }
+            : track,
+        ),
+      },
+      (asset) => (asset === transcript.asset ? transcript : null),
+      30,
+    );
+
+  it("colour the keyword over the spoken highlight, for the whole cue", () => {
+    const [line] = subtitleLines(phrased({ preset: "big-keyword", keywordColor: "#00ff00" }), 65, SIZE, measure);
+    expect(line!.runs.map((run) => [run.text, run.color])).toEqual([
+      ["HOLA", "#ffd426"],
+      ["MUNDO", "#00ff00"],
+    ]);
+    expect(line).not.toHaveProperty("entering");
+  });
+
+  it("draw a line entry at export's progress: faded, blurred, the keyword larger, until it settles", () => {
+    // The cue starts at frame 60; 3 frames in = 0.1 s of 0.4 s, progress sqrt(0.25) = 0.5.
+    const [line] = subtitleLines(phrased({ entry: "line" }), 63, SIZE, measure);
+    expect(line).toMatchObject({ entering: true });
+    const [hola, mundo] = line!.runs;
+    expect(hola).toMatchObject({ text: "HOLA", alpha: 0.5, blur: 1.4 });
+    expect(hola).not.toHaveProperty("font");
+    expect(mundo!.font).toBe('37.1px "Archivo Black"');
+    // 12 frames in: settled, drawn like a plain line.
+    const [settled] = subtitleLines(phrased({ entry: "line" }), 72, SIZE, measure);
+    expect(settled).not.toHaveProperty("entering");
+    expect(settled!.runs.every((run) => run.alpha === undefined && run.blur === undefined && run.font === undefined)).toBe(true);
+  });
+
+  it("enter characters one after another", () => {
+    const [line] = subtitleLines(phrased({ entry: "chars" }), 63, SIZE, measure);
+    expect(line!.runs.map((run) => run.text).join("")).toBe("HOLAMUNDO");
+    const alphas = line!.runs.map((run) => run.alpha ?? 1);
+    expect(alphas[0]).toBeGreaterThan(alphas[3]!);
+    expect(alphas[3]).toBeGreaterThan(alphas[8]!);
+    expect(line!.runs[1]!.x).toBe(line!.runs[0]!.x + 10);
+  });
+
+  it("draw every outline before every fill, each run with its own opacity and blur, then restore the canvas", () => {
+    const calls: string[] = [];
+    const ctx = {
+      font: "",
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 0,
+      lineJoin: "",
+      textBaseline: "",
+      textAlign: "",
+      globalAlpha: 1,
+      filter: "none",
+      strokeText: (text: string) => void calls.push(`stroke ${text} ${ctx.globalAlpha} ${ctx.filter}`),
+      fillText: (text: string) => void calls.push(`fill ${text} ${ctx.globalAlpha} ${ctx.filter}`),
+    };
+    drawSubtitleLines(ctx, subtitleLines(phrased({ entry: "line" }), 63, SIZE, measure));
+    expect(calls).toEqual([
+      "stroke HOLA 0.5 blur(1.4px)",
+      "stroke MUNDO 0.5 blur(1.4px)",
+      "fill HOLA 0.5 blur(1.4px)",
+      "fill MUNDO 0.5 blur(1.4px)",
+    ]);
+    expect(ctx).toMatchObject({ globalAlpha: 1, filter: "none" });
+  });
+});
+
 describe("subtitle lane cues", () => {
   it("are boxes in timeline seconds; a cue selects its words with their transcript and range", () => {
     const [track] = tracks();
