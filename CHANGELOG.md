@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 71), CLI `frameshell matte <asset>`
+  and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
+  MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on
+  every proxy frame, smoothed forward and backward in time and refined by a guided filter. The whole asset is matted
+  once per content into `.frameshell/cache/mattes/` (a grayscale H.264 video, frame N = proxy frame N), as a
+  background job of kind `matte` with an ETA, and swept by `gc`. Nothing on a timeline uses it yet: the `behind`
+  track flag, export and preview come in the next slices. Spike numbers and licences in
+  `docs/research/video-subject-matte.md`.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

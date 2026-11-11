@@ -132,6 +132,8 @@ export {
   PHOTO_SEGMENTATION_DECODER_MODEL,
   PHOTO_SEGMENTATION_ENCODER_MODEL,
   PHOTO_SEGMENTATION_MODELS,
+  VIDEO_MATTE_MODEL,
+  VIDEO_MATTE_MODELS,
   ONNX_RUNTIME_WEB,
   ONNX_RUNTIME_WEB_PACKAGE,
   buildCandidates,
@@ -345,6 +347,39 @@ export {
 } from "./segment/segmenter.js";
 export { standInSegmentEngine } from "./segment/stand-in.js";
 export { type SegmentFiles,type WorkerSegmentEngine, workerSegmentEngine } from "./segment/engine.js";
+export {
+  CONTRAST_GAIN,
+  GUIDED_EPS,
+  GUIDED_RADIUS,
+  GUIDED_SUBSAMPLE,
+  type PlaneSize,
+  TEMPORAL_TAU_S,
+  boxMean,
+  contrast,
+  emaStep,
+  emaWeight,
+  grayOfRgb,
+  guidedFilter,
+  refineFrame,
+  resizeBilinear,
+  smoothForwardBackward,
+} from "./matte/refine.js";
+export { MATTE_MODEL_PIN, type MatteModelSpec, SELFIE, coarseAlpha, modelInput } from "./matte/models.js";
+export { MATTES_DIR, MATTE_VERSION, type MatteInfo, classifyMatte, matteKey, mattePaths, readMatteInfo, writeMatteInfo } from "./matte/cache.js";
+export {
+  type MatteFiles,
+  type MatteInfer,
+  type MatteVideoRequest,
+  type MatteVideoResult,
+  etaSeconds,
+  loadSelfieMatte,
+  matteEncodeArgs,
+  matteInWorker,
+  matteVideo,
+} from "./matte/video.js";
+export { type MatteJobDeps, type MatteTarget, computeMatte, formatEta } from "./matte/job.js";
+export { standInMatte } from "./matte/stand-in.js";
+export { readRawFrames } from "./media/raw-frames.js";
 export { type PreparedPhoto, SEGMENT_MODEL_PIN, SegmentService, type SegmentServiceOptions, readPhotoRgb } from "./segment/service.js";
 export { type DirectedShot, type DirectorAngle, type DirectorInput, type DirectorTurn, directShots } from "./multicam/director.js";
 export { type LoadedRules, humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";

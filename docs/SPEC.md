@@ -67,6 +67,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
 | 29 | Shoot scripts and takes | **A shoot script** (`scripts/*.md`, `shoot: true`) written by the agent beside the person's untouched original: `**Name:**` per line, `[LABEL: …]` cues, `[FREE: …]` for unscripted speech, `follow: words\|topics`, stale check by `source_hash`. Each **take** is compared word by word against it; **every deviation is marked, none blocks**; the person accepts or records again. The newest take per scene assembles the first cut as timeline transactions. Takes and decisions in `shoots/<slug>.json` (ADR 0023) | One deterministic comparison that works without an agent; the agent sees takes and deviations and adds judgment; the first cut exists when recording ends | A fixed `frameshell-script.md`, reading the original directly, flagging only big misses, an LLM in Frameshell |
 | 30 | Shoot capture | **Record in the app**: camera, screen or window, microphone, system audio (`getDisplayMedia` + `audio: 'loopback'`); a **continuous shoot session** is one multicam group, takes are ranges in it (keys T/C); per-take transcription for deviations; a resident `whisper-server` (`small-q5_1`) drives a **teleprompter** whose focus line keeps the word being said centered (ADR 0024) | One app from script to finished video; one program track per session; live recognition never writes the project | One file set per take, external recorders only, browser speech recognition, the macOS system picker |
+| 31 | Subject matte | **Text and graphics behind the person**: a video track flagged `behind: <plateTrackId>` is turned on read into a synthetic subject layer (one pure rewrite in `composite.ts`, inside `flattenTimeline`) cut out by a **matte**, a grayscale video made once per asset content by MediaPipe's selfie segmenter (Apache-2.0) on the managed ONNX Runtime Web, smoothed over time and refined by a guided filter, cached in `.frameshell/cache/mattes/` (ADR 0032) | Plate edits never desync the subject; one rewrite feeds preview and export; the matte is regenerable derived media, never project data | A duplicate clip with a matte field, a baked VP9-alpha asset in `assets/`, MODNet (50× slower), u2net_human_seg (unlicensed weights), RVM (GPL-3.0) |
 
 ### Cross-cutting rules
 
@@ -218,6 +219,7 @@ my-video/
 ├── shoots/<script>.json       # optional: takes, chosen takes, accepted deviations of a shoot script (ADR 0023)
 └── .frameshell/               # gitignored
     ├── cache/clips/           # rendered generated clips (regenerable)
+    ├── cache/mattes/          # subject mattes per asset content, model and fps (ADR 0032; regenerable)
     ├── proxies/               # CFR preview proxies (regenerable)
     ├── waveforms/, thumbs/    # regenerable
     ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
@@ -489,6 +491,7 @@ frameshell people scan [<asset>…]             # background job: faces of video
 frameshell people suggest [--json]            # speaker, face-speaker, angle and face suggestions with ids
 frameshell people confirm <suggestion>… [--reject] [--person <person>]
 frameshell people ranges <person> [--on-screen] [--json]   # timeline spans where the person speaks (default) or is on screen
+frameshell matte <asset>                      # background job: subject matte of a video (ADR 0032), cached in .frameshell/cache/mattes/; prints its path
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
 
@@ -596,6 +599,7 @@ Live pages (`livePreview`, ADR 0010). The daemon method `clip.live` asks the ada
 - Face detection for reframe keys (ADR 0016, `multicam.faces`): ONNX Runtime Web (MIT), the WebAssembly build from Microsoft's npm tarball, one pin for every platform, imported by a daemon worker thread (no native code), with OpenCV zoo's YuNet model (MIT), about 33 MB, downloaded from the builders on first use; not mirrored.
 - Face recognition for people (ADR 0020, `people scan`): OpenCV zoo's SFace model (Apache-2.0, 38.7 MB, pinned at the YuNet commit), run by the same ONNX Runtime Web pin; voice prints reuse the diarization's CAM++ model. Downloaded on first scan; not mirrored.
 - Photo segmentation (ADR 0022, Pick in image projects, `image.cutout`): MobileSAM's encoder and decoder (Apache-2.0, ONNX export pinned by revision on Hugging Face), about 45 MB, run on the same ONNX Runtime Web pin by a daemon worker; downloaded on first use, not mirrored.
+- Video subject matte (ADR 0032, `matte.prepare`): MediaPipe's selfie segmenter, general 256×256 model (Apache-2.0 per Google's model card; ONNX conversion pinned by revision on Hugging Face), 0.46 MB, run on the same ONNX Runtime Web pin by a daemon worker; downloaded on first use, not mirrored.
 - whisper.cpp: pinned version, prebuilt per platform. macOS (Metal) and Linux builds are compiled reproducibly by Frameshell CI and published once on a Frameshell GitHub Release (MIT licence; bytes must match the pin); Windows uses upstream prebuilt assets. v0.1 ships CPU builds on Linux and Windows; GPU builds (CUDA/Vulkan) come from a user override (`binaries.whisper-cli`). DTW and VAD behaviour changes between commits, so the version is never floating. Default model `large-v3-turbo-q5_0` (574 MB) downloaded on first transcription.
 - Override: `"binaries": { "ffmpeg": "/opt/homebrew/bin/ffmpeg" }` in the project, or in the global config.
 

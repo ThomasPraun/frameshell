@@ -76,6 +76,16 @@ _Avoid_: proposal (review mode's word), match, guess, auto-assignment
 A span of timeline time where a person speaks or is on screen, as `people ranges` returns it.
 _Avoid_: segment, turn (a turn is an angle's speaking stretch on the group clock), occurrence
 
+## Subject matte (ADR 0032)
+
+**Matte**:
+A grayscale video, frame for frame with an asset's proxy, white where the person in front is and black elsewhere; made once per asset content and cached, never stored in the project.
+_Avoid_: mask (a Pick mask is one still picture, ADR 0022), alpha, segmentation, cut-out
+
+**Plate**:
+The video track whose person a track flagged `behind` goes behind: its clips are drawn as usual, and drawn again above the flagged track through their matte.
+_Avoid_: background track, source track, base layer
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:

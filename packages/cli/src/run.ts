@@ -106,7 +106,11 @@ ${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}  skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
+${PEOPLE_USAGE}${SHOOT_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
+                               and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
+                               person. Once per file content; about 1.5 min per minute of video. First run
+                               downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
+  skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
                                version; an edited copy needs --force (files you added stay)
   script outline <file>        Scenes (\`## \` headings) of a Markdown script: anchors for --script-ref,
                                linked clips, frontmatter (title, target_duration, aspect)
@@ -133,7 +137,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "skill", "model", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "gc", "plugin", "transcribe", "render", "frame", "inspect", "script", "proposal", "people", "shoot", "matte", "skill", "model", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
@@ -163,6 +167,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   ...PEOPLE_FLAGS,
   ...SHOOT_FLAGS,
   ...MODEL_FLAGS,
+  matte: [],
   "skill update": ["force"],
   ask: ASK_FLAGS,
   "setup claude-code": SETUP_FLAGS,
@@ -215,6 +220,7 @@ type Invocation =
   | PeopleInvocation
   | ShootInvocation
   | ModelInvocation
+  | { kind: "matte"; asset: string }
   | { kind: "skill.update"; force: boolean }
   | TimelineInvocation;
 
@@ -417,6 +423,7 @@ function parseBuiltin(
   if (command === "people") return parsePeople(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
   if (command === "model") return parseModel(rest, options);
+  if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -617,6 +624,12 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         flags.json ? {} : { onProgress: progressPrinter(io) },
       );
       return flags.json ? json(result) : formatTranscribe(result);
+    }
+    case "matte": {
+      const result = await conn.request("matte.prepare", { cwd, asset: inv.asset }, flags.json ? {} : { onProgress: progressPrinter(io) });
+      if (flags.json) return json(result);
+      const how = result.cached ? "cached" : `made in ${result.seconds} s`;
+      return `${result.matte}\n  ${result.asset}: ${result.frames} frames at ${result.fps} fps, ${result.size.width}x${result.size.height}, ${result.model}, ${how}\n`;
     }
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });

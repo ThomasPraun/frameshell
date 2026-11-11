@@ -1,7 +1,7 @@
 // Face-driven reframe keys (ADR 0016): sample frames with ffmpeg, find faces with YuNet on ONNX Runtime Web
 // (WebAssembly, in a worker thread), follow the main face, then keep only the keys where it moves.
-import { spawn } from "node:child_process";
 import type { AngleCrop } from "@frameshell/schema";
+import { readRawFrames } from "../media/raw-frames.js";
 import { loadOnnxModel } from "../onnx-web.js";
 import { runWorkerTask } from "../worker-task.js";
 
@@ -55,50 +55,10 @@ export async function* sampleFaceFrames(
   path: string,
   size: { width: number; height: number },
 ): AsyncGenerator<{ time: number; frame: BgrFrame }> {
-  const frameBytes = size.width * size.height * 3;
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-nostdin",
-    "-i",
-    path,
-    "-map",
-    "0:v:0",
-    "-an",
-    "-vf",
-    `fps=${FACE_SAMPLE_HZ},scale=${size.width}:${size.height}:flags=area,format=bgr24`,
-    "-f",
-    "rawvideo",
-    "-",
-  ];
-  const child = spawn(ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-4000)));
-  const exited = new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
-  let pending: Buffer = Buffer.alloc(0);
+  const filter = `fps=${FACE_SAMPLE_HZ},scale=${size.width}:${size.height}:flags=area,format=bgr24`;
   let index = 0;
-  let finished = false;
-  try {
-    for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
-      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
-      let at = 0;
-      for (; at + frameBytes <= pending.length; at += frameBytes) {
-        const data = Uint8Array.from(pending.subarray(at, at + frameBytes));
-        yield { time: Math.round((index++ / FACE_SAMPLE_HZ) * 1000) / 1000, frame: { ...size, data } };
-      }
-      pending = pending.subarray(at);
-    }
-    const code = await exited;
-    finished = true;
-    if (code !== 0) throw new Error(`ffmpeg could not read the picture of ${path} (exit ${code}): ${stderr.trim()}`);
-  } finally {
-    // The consumer stopped early (an error, a closed connection): do not leave ffmpeg decoding.
-    if (!finished) child.kill();
+  for await (const data of readRawFrames(ffmpeg, path, filter, size.width * size.height * 3)) {
+    yield { time: Math.round((index++ / FACE_SAMPLE_HZ) * 1000) / 1000, frame: { ...size, data } };
   }
 }
 

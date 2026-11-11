@@ -54,7 +54,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -170,7 +170,7 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "shoot", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
         "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `voice`: " +
@@ -179,7 +179,8 @@ const GcEntrySchema = z.object({
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
-        "`.frameshell/shoot/`. `temp`: leftover of an interrupted job or transcription.",
+        "`.frameshell/shoot/`. `matte`: subject matte in `.frameshell/cache/mattes/` of content no asset has now (or of " +
+        "another model, fps or matte version). `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
@@ -227,14 +228,15 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "matte"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`render`: export a timeline to a video file (`render` method). " +
         "`clip`: render one generated clip (e.g. `hyperframes`) into the clip render cache (`clip.renders`). " +
         "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
         "`people`: find, follow and embed the faces of video assets (`people.scan`). " +
-        "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024).",
+        "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
+        "`matte`: compute the subject matte of one video asset (`matte.prepare`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -242,7 +244,7 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated).",
+        "the scanned videos for `people` (comma-separated), the video for `matte`.",
     ),
   output: z
     .string()
@@ -255,14 +257,14 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people", "transcribe"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "video", "mux", "render", "faces", "people", "transcribe", "matte"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe.",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -935,7 +937,7 @@ export const methods = {
     mutating: true,
     description:
       "Delete regenerable files under `.frameshell/` that nothing uses any more: proxies, PCM sidecars, waveforms, " +
-      "thumbnails, energy envelopes, transcription WAVs and voice prints of assets deleted or changed since (or built for an older " +
+      "thumbnails, energy envelopes, transcription WAVs, voice prints and subject mattes of assets deleted or changed since (or built for an older " +
       "recipe or another fps), clip renders no timeline's generated clip keys, and temp files of interrupted jobs. " +
       "Keyed by the media index: assets whose content is not known yet are hashed first. Never touches `assets/`, " +
       "project files, history or rejected edits, nor anything a running job uses: the clip cache, transcription WAVs " +
@@ -1996,6 +1998,42 @@ export const methods = {
       cached: z.boolean().describe("True when the image was prepared already."),
     }),
   },
+  "matte.prepare": {
+    description:
+      "Compute the subject matte of a video asset (ADR 0032): which pixels of each frame are the person in front, so text " +
+      "or graphics can later sit behind them. Locally on CPU: MediaPipe's selfie segmenter (Apache-2.0; the first run " +
+      "downloads 0.5 MB, plus ONNX Runtime Web, 33 MB, if face detection never ran) on every frame of the asset's proxy, " +
+      "smoothed over time and snapped to the picture's edges. The whole asset is matted once per content: the result is a " +
+      "grayscale video at proxy size (white = subject, black = background, same frames as the proxy) cached in " +
+      "`.frameshell/cache/mattes/` (regenerable, swept by `gc`); a later call returns it at once (`cached: true`). " +
+      "Waits for the asset's ingest when its proxy is not built yet. Takes about 1.5 minutes per minute of 30 fps video " +
+      "on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
+      "it goes on if the caller disconnects. Known limits: one merged matte for two or more people; thin hair strands " +
+      "and mic stands are often left out. Nothing on a timeline uses a matte yet. " +
+      "Example: `{ asset: \"assets/interview.mp4\" }`. Fails with AssetNotFound, OutsideProject, InvalidOperation " +
+      "(reason `not a video`: audio or a still picture; `image project`; `ingest failed`), or the Binary* errors when ffmpeg, " +
+      "ONNX Runtime or the model cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Video asset, absolute or relative to `cwd`, e.g. `assets/interview.mp4`."),
+    }),
+    result: z.object({
+      asset: z.string().describe("Project-relative asset path."),
+      hash: z.string().describe("`sha256:<hex>` of the asset's content, part of the cache key."),
+      model: z.string().describe("Model that made it: `mediapipe-selfie@<revision>`, or `stand-in` in tests."),
+      matte: z
+        .string()
+        .describe(
+          "Project-relative matte video, `.frameshell/cache/mattes/<key>.mp4`: H.264, luma = matte (full range, 0 " +
+            "background to 255 subject, chroma neutral), frame N = proxy frame N.",
+        ),
+      size: z.object({ width: z.int(), height: z.int() }).describe("Matte pixels: the proxy's size (short side at most 540)."),
+      fps: z.number().describe("Frames per second: the project fps, as the proxy."),
+      frames: z.int().describe("Frames in the matte."),
+      cached: z.boolean().describe("True when the matte of this content existed already and nothing was computed."),
+      seconds: z.number().describe("Seconds it took to compute (when it was computed, for a cached one)."),
+    }),
+  },
   "image.cutout": {
     mutating: true,
     description:
@@ -2851,7 +2889,7 @@ export const notifications = {
         .describe(
           "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
             "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
-            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`. Codes may be added: treat an unknown one as `message`.",
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`, `matte` (`values`: `asset`, `eta` seconds left once known). Codes may be added: treat an unknown one as `message`.",
         ),
       values: z
         .record(z.string(), z.union([z.string(), z.number()]))
