@@ -97,11 +97,19 @@ describe("edges", () => {
   const row = layout.rows[0]!;
 
   it("reads the stored transition of a clip's start and end edge, a cut's dissolve from the clip coming in", () => {
-    expect(edgeState(row, b!, "in")).toEqual({ at: 2, kind: "dissolve", length: 1, butted: true });
-    expect(edgeState(row, a!, "out")).toEqual({ at: 2, kind: "dissolve", length: 1, butted: true });
-    expect(edgeState(row, a!, "in")).toEqual({ at: 0, kind: null, length: 0, butted: false });
-    expect(edgeState(row, b!, "out")).toEqual({ at: 5, kind: null, length: 0, butted: false });
+    expect(edgeState(row, b!, "in")).toEqual({ at: 2, kind: "dissolve", length: 1, butted: true, shape: null });
+    expect(edgeState(row, a!, "out")).toEqual({ at: 2, kind: "dissolve", length: 1, butted: true, shape: null });
+    expect(edgeState(row, a!, "in")).toEqual({ at: 0, kind: null, length: 0, butted: false, shape: null });
+    expect(edgeState(row, b!, "out")).toEqual({ at: 5, kind: null, length: 0, butted: false, shape: null });
     expect(edgeState(row, c!, "in")).toMatchObject({ kind: null, butted: false });
+  });
+
+  it("carries a shaped dissolve's shape on both sides of its cut (ADR 0030)", () => {
+    const shape = { kind: "push", direction: "up" };
+    const shaped = layoutTimeline(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23, { dissolve: 1, shape })])]), [], undefined, plenty);
+    const [first, second] = shaped.rows[0]!.clips;
+    expect(edgeState(shaped.rows[0]!, second!, "in")).toMatchObject({ kind: "dissolve", shape });
+    expect(edgeState(shaped.rows[0]!, first!, "out")).toMatchObject({ kind: "dissolve", shape });
   });
 
   it("counts a fade at a cut as both halves", () => {

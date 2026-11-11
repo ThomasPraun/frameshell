@@ -118,10 +118,12 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  transition set --at s [--kind dissolve|fade] [--duration s] [--track <track>…]
+  transition set --at s [--kind dissolve|fade|wipe|push] [--direction left|right|up|down] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
-                               (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's
-                               start or end with nothing butted fades in or out. Short material shortens it, with a warning
+                               (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
+                               push move the picture the --direction way (default left) on the bottom video track
+                               only. A clip's start or end with nothing butted fades in or out. Short material
+                               shortens it, with a warning
   transition remove --at s [--track <track>…]
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
@@ -192,6 +194,7 @@ export const TIMELINE_OPTIONS = {
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
   kind: { type: "string" },
+  direction: { type: "string" },
   prop: { type: "string" },
   ease: { type: "string" },
   value: { type: "string" },
@@ -260,7 +263,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
-  "transition set": ["at", "kind", "duration", "track"],
+  "transition set": ["at", "kind", "direction", "duration", "track"],
   "transition remove": ["at", "track"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
@@ -508,7 +511,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = command === "transition set" ? "transition.set" : "transition.remove";
       if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds>, a clip edge.`);
       Object.assign(params, { at: num("at"), tracks });
-      if (method === "transition.set") Object.assign(params, { kind: str("kind"), duration: num("duration") });
+      if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
       break;
     }
     case "clip set": {

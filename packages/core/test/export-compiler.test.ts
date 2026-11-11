@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type Clip, type ClipTrack, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type Timeline, type Transcript, type TransitionShape, flattenTimeline } from "@frameshell/schema";
 import {
   BUILTIN_PRESETS,
   type ExportSource,
@@ -585,6 +585,69 @@ describe("export compiler", () => {
         expect(playback).toEqual(loose);
         expect(JSON.stringify(playback)).not.toMatch(/qsin|eval=frame|alpha=1/);
       });
+    });
+  });
+
+  describe("shaped transitions (ADR 0030)", () => {
+    const sized = new Map([...sources].map(([asset, source]) => [asset, source.video?.still ? source : { ...source, duration: 20 }]));
+    /** Three talk clips on v1 with a shaped dissolve into each of the last two, music on a1; 9 s. */
+    const shaped = (first: TransitionShape, second: TransitionShape): Timeline => ({
+      schemaVersion: 1,
+      id: "main",
+      revision: 3,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_talk1", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 6.2 },
+            { id: "c_talk2", type: "media", asset: "assets/talk.mp4", start: 3, in: 10, out: 13, dissolve: 1, shape: first },
+            // From source 0 after a clip played to the source's end: both edge frames hold.
+            { id: "c_talk3", type: "media", asset: "assets/talk.mp4", start: 6, in: 0, out: 3, dissolve: 0.4, shape: second },
+          ],
+        },
+        { id: "a1", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 9 }] },
+      ],
+    });
+    // c_talk2 plays its source to the end (20 s) so c_talk3's push holds its last frame.
+    const held = (timeline: Timeline): Timeline => {
+      const track = timeline.tracks[0] as ClipTrack;
+      return { ...timeline, tracks: [{ ...track, clips: track.clips.map((clip) => (clip.id === "c_talk2" ? { ...clip, in: 17, out: 20 } : clip)) }, timeline.tracks[1]!] };
+    };
+    const planOf = (timeline: Timeline) => compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources: sized, resolution, segmentSeconds: 2 });
+
+    it("pushes: both pieces are layers moved by overlay offsets, the base black under them, edge frames held past the handles (golden)", () => {
+      const plan = planOf(held(shaped({ kind: "push", direction: "left" }, { kind: "push", direction: "up" })));
+      golden("shaped-push-plan", { segments: plan.segments, files: plan.files, audio: plan.audio, mix: mixStep(plan) });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs).not.toContain("geq");
+      // No alpha ramp for a shaped head: the shape replaces the mix.
+      expect(graphs).not.toContain("alpha=1");
+      // c_talk2's tail past 20 s and c_talk3's head before source 0 hold their edge frames (the cut at 6 s is a segment join).
+      expect(graphs).toContain("trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop=5:stop_mode=clone");
+      expect(graphs).toContain("trim=end_frame=1,setpts=PTS-STARTPTS,tpad=start=5:start_mode=clone");
+      // Both pieces travel left 1920 px over c_talk2's dissolve, then up 1080 px over c_talk3's (values: parity test).
+      expect(graphs.match(/overlay=x='0\+floor\(-1920\*\(max\(0,min\(1,\(\(2\+t\)-2\.5\)\/1\)\)/g)).toHaveLength(2);
+      expect(graphs.match(/:y='0\+floor\(-1080\*\(max\(0,min\(1,\(\(4\+t\)-5\.8\)\/0\.4\)\)/g)).toHaveLength(2);
+      expect(plan.frames).toBe(270);
+    });
+
+    it("wipes: a geq alpha step on the incoming head only, the outgoing clip concatenated under it (golden)", () => {
+      const plan = planOf(shaped({ kind: "wipe", direction: "left" }, { kind: "wipe", direction: "down" }));
+      golden("shaped-wipe-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      // c_talk2's head, and c_talk3's in two pieces: the segment join at its cut.
+      expect(graphs.match(/geq=/g)).toHaveLength(3);
+      expect(graphs).not.toContain("alpha=1");
+      expect(graphs).not.toContain("eval=frame");
+    });
+
+    it("plays a shaped clip on an upper track as a plain dissolve", () => {
+      const timeline = shaped({ kind: "push" }, { kind: "wipe" });
+      const lifted: Timeline = { ...timeline, tracks: [{ id: "v0", kind: "video", clips: [{ id: "c_bg", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 9 }] }, ...timeline.tracks] };
+      const graphs = Object.values(planOf(lifted).files).join("\n");
+      expect(graphs).not.toContain("geq");
+      expect(graphs).toContain("fade=t=in:alpha=1:st=2.5:d=1");
     });
   });
 });

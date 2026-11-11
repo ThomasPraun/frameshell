@@ -1,5 +1,5 @@
 // Transition marks, key diamonds and edge hit testing for the timeline panel (ADR 0018 decision 12): pure, DOM-free.
-import type { Clip, KeyEase } from "@frameshell/schema";
+import type { Clip, KeyEase, TransitionShape } from "@frameshell/schema";
 import { type TransitionContext, edgeTransitions } from "@frameshell/schema/transitions";
 import type { ClipBox, LaneViewport, TimelineLayout, TrackRow } from "./layout.js";
 
@@ -35,6 +35,8 @@ export interface EdgeState {
   length: number;
   /** Another clip on the track ends (start edge) or starts (end edge) there: a cut, where a dissolve can play. */
   butted: boolean;
+  /** The dissolve's stored shape (ADR 0030); null for none. A length change keeps it. */
+  shape: TransitionShape | null;
 }
 
 /** A clip edge under the pointer. */
@@ -129,15 +131,15 @@ export function edgeState(row: TrackRow, clip: ClipBox, side: "in" | "out"): Edg
   if (side === "in") {
     const previous = row.clips.find((other) => other.id !== clip.id && !other.problem && near(other.end, clip.start));
     const butted = previous !== undefined;
-    if (clip.dissolve !== null) return { at: clip.start, kind: "dissolve", length: clip.dissolve, butted };
-    if (clip.fadeIn !== null) return { at: clip.start, kind: "fade", length: clip.fadeIn + (previous?.fadeOut ?? 0), butted };
-    return { at: clip.start, kind: null, length: 0, butted };
+    if (clip.dissolve !== null) return { at: clip.start, kind: "dissolve", length: clip.dissolve, butted, shape: clip.shape };
+    if (clip.fadeIn !== null) return { at: clip.start, kind: "fade", length: clip.fadeIn + (previous?.fadeOut ?? 0), butted, shape: null };
+    return { at: clip.start, kind: null, length: 0, butted, shape: null };
   }
   const next = row.clips.find((other) => other.id !== clip.id && near(other.start, clip.end));
   const butted = next !== undefined;
-  if (next?.dissolve != null) return { at: clip.end, kind: "dissolve", length: next.dissolve, butted };
-  if (clip.fadeOut !== null) return { at: clip.end, kind: "fade", length: clip.fadeOut + (next?.fadeIn ?? 0), butted };
-  return { at: clip.end, kind: null, length: 0, butted };
+  if (next?.dissolve != null) return { at: clip.end, kind: "dissolve", length: next.dissolve, butted, shape: next.shape };
+  if (clip.fadeOut !== null) return { at: clip.end, kind: "fade", length: clip.fadeOut + (next?.fadeIn ?? 0), butted, shape: null };
+  return { at: clip.end, kind: null, length: 0, butted, shape: null };
 }
 
 /**

@@ -17,6 +17,8 @@ import {
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
+  TRANSITION_DIRECTIONS,
+  TRANSITION_SHAPE_KINDS,
 } from "@frameshell/schema";
 import { AGENT_LABEL_PATTERN } from "./agents.js";
 
@@ -281,11 +283,20 @@ export const operationArgs = {
   "transition.set": z.strictObject({
     at: Seconds("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
-      .enum(["dissolve", "fade"])
+      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
       .default("dissolve")
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
-          "A clip edge with nothing butted fades in or out for either kind.",
+          "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
+          "outgoing one out. `wipe` and `push` play on the bottom video track only; sound crossfades as for a dissolve. " +
+          "A clip edge with nothing butted fades in or out for any kind.",
+      ),
+    direction: z
+      .enum(TRANSITION_DIRECTIONS)
+      .optional()
+      .describe(
+        "`wipe` and `push` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
+          "`up` (enters from the bottom) or `down`.",
       ),
     duration: z.number().positive().default(0.5).describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so)."),
     tracks: z

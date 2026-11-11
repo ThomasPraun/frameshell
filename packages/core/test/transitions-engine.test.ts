@@ -279,3 +279,97 @@ describe("split and cut keep edge fields on the right side", () => {
     expect(clip(head.timeline, "v2")).toMatchObject({ fadeOut: 1 });
   });
 });
+
+describe("shaped transitions (ADR 0030)", () => {
+  /** butted() plus an upper video track t_u with clips butted at 4 s. */
+  function layered(): Timeline {
+    const base = butted();
+    return { ...base, tracks: [base.tracks[0]!, { id: "t_u", kind: "video", clips: [media("u1", 0, 2, 6), media("u2", 4, 2, 6)] }, base.tracks[1]!] };
+  }
+
+  it("a push sets a dissolve with its shape on the bottom video track, a plain crossfade on audio, default direction left", async () => {
+    const { timeline, warnings } = await apply(butted(), "transition.set", { at: 4, kind: "push" });
+    expect(clip(timeline, "v2")).toMatchObject({ dissolve: 0.5, shape: { kind: "push", direction: "left" } });
+    expect(clip(timeline, "a2")).toMatchObject({ dissolve: 0.5 });
+    expect(clip(timeline, "a2")).not.toHaveProperty("shape");
+    expect(warnings).toEqual([]);
+    expect(parseTimeline(timeline).ok).toBe(true);
+  });
+
+  it("a wipe takes `direction`; dissolve and fade replace the shape, and refuse a direction", async () => {
+    const wiped = (await apply(butted(), "transition.set", { at: 4, kind: "wipe", direction: "up" })).timeline;
+    expect(clip(wiped, "v2").shape).toEqual({ kind: "wipe", direction: "up" });
+    const dissolved = (await apply(wiped, "transition.set", { at: 4 })).timeline;
+    expect(clip(dissolved, "v2")).not.toHaveProperty("shape");
+    const faded = (await apply(wiped, "transition.set", { at: 4, kind: "fade" })).timeline;
+    expect(clip(faded, "v2")).not.toHaveProperty("shape");
+    const error = await rejection(apply(butted(), "transition.set", { at: 4, kind: "fade", direction: "up" }));
+    expect(error.code).toBe(ErrorCode.InvalidOperation);
+    expect(error.message).toContain("`direction` is for `wipe` and `push`");
+  });
+
+  it("refuses an upper video track named in `tracks`, skips one with a warning otherwise", async () => {
+    const error = await rejection(apply(layered(), "transition.set", { at: 4, kind: "push", tracks: ["t_u"] }));
+    expect(error.code).toBe(ErrorCode.InvalidOperation);
+    expect(error.message).toContain("bottom video track only");
+    const { timeline, warnings } = await apply(layered(), "transition.set", { at: 4, kind: "push" });
+    expect(clip(timeline, "v2")).toHaveProperty("shape");
+    expect(clip(timeline, "u2")).not.toHaveProperty("dissolve");
+    expect(warnings).toEqual([expect.stringContaining("skipped upper video track t_u")]);
+  });
+
+  it("refuses when the edge is only on upper video tracks", async () => {
+    const timeline: Timeline = {
+      ...createTimeline("main"),
+      tracks: [
+        { id: "t_v", kind: "video", clips: [media("v1", 0, 0, 8)] },
+        { id: "t_u", kind: "video", clips: [media("u1", 0, 2, 6), media("u2", 4, 2, 6)] },
+      ],
+    };
+    const error = await rejection(apply(timeline, "transition.set", { at: 4, kind: "wipe" }));
+    expect(error.message).toContain("only on upper video track t_u");
+  });
+
+  it("a lone edge fades, with a warning", async () => {
+    const { timeline, warnings } = await apply(butted(), "transition.set", { at: 8, kind: "push", tracks: ["t_v"] });
+    expect(clip(timeline, "v2")).toMatchObject({ fadeOut: 0.5 });
+    expect(warnings).toContain("push at 8 s on t_v: no clip is butted there, so it fades out instead.");
+  });
+
+  it("holds an edge frame where a handle runs out, with a warning", async () => {
+    const timeline: Timeline = {
+      ...createTimeline("main"),
+      tracks: [{ id: "t_v", kind: "video", clips: [media("v1", 0, 6, 10), media("v2", 4, 0, 4, "assets/tight.mp4")] }],
+    };
+    const { timeline: pushed, warnings } = await apply(timeline, "transition.set", { at: 4, kind: "push" });
+    expect(clip(pushed, "v2")).toMatchObject({ dissolve: 0.5, shape: { kind: "push" } });
+    expect(warnings).toEqual([expect.stringContaining("v2: push holds v1's last frame and its own first frame")]);
+  });
+
+  it("transition.remove, split and cut clear the shape with the dissolve", async () => {
+    const pushed = (await apply(butted(), "transition.set", { at: 4, kind: "push" })).timeline;
+    const removed = (await apply(pushed, "transition.remove", { at: 4 })).timeline;
+    expect(clip(removed, "v2")).not.toHaveProperty("shape");
+    const split = await apply(pushed, "clip.split", { clip: "v2", at: 6 });
+    expect(clip(split.timeline, "v2")).toHaveProperty("shape");
+    expect(clip(split.timeline, split.changes.added[0]!)).not.toHaveProperty("shape");
+    const head = await apply(pushed, "cut", { from: 3, to: 5, snap: false, tracks: ["t_v"] });
+    expect(clip(head.timeline, "v2")).not.toHaveProperty("shape");
+    expect(parseTimeline(head.timeline).ok).toBe(true);
+    expect(applyPatch(removed, (await apply(pushed, "transition.remove", { at: 4 })).inverse.args).tracks).toEqual(pushed.tracks);
+  });
+
+  it("warns on three transitions of one kind in a row and on more than a third hard cuts; jump cuts in one take do not count", async () => {
+    const assets = ["assets/talk.mp4", "assets/tight.mp4"];
+    const clips = Array.from({ length: 5 }, (_, i) => media(`v${i + 1}`, i, 1, 2, assets[i % 2]));
+    let timeline: Timeline = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video", clips }] };
+    const first = await apply(timeline, "transition.set", { at: 1, kind: "push" });
+    expect(first.warnings).toEqual(["variety: 3 of 4 scene cuts on t_v are hard cuts; at most a third should be."]);
+    timeline = first.timeline;
+    for (const at of [2, 3]) timeline = (await apply(timeline, "transition.set", { at, kind: "push" })).timeline;
+    const fourth = await apply(timeline, "transition.set", { at: 4, kind: "wipe" });
+    expect(fourth.warnings).toEqual([expect.stringContaining("the cuts at 1, 2, 3 s on t_v are all pushes")]);
+    const jumps = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video" as const, clips: Array.from({ length: 5 }, (_, i) => media(`j${i + 1}`, i, i, i + 1)) }] };
+    expect((await apply(jumps, "transition.set", { at: 1 })).warnings).toEqual([]);
+  });
+});

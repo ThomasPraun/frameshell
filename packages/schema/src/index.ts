@@ -38,6 +38,9 @@ export {
   AngleCropSchema,
   ReframeKeySchema,
   KEY_EASES,
+  TRANSITION_SHAPE_KINDS,
+  TRANSITION_DIRECTIONS,
+  TransitionShapeSchema,
   ClipKeysSchema,
   PaintedTurnSchema,
   TransformSchema,
@@ -64,6 +67,9 @@ export {
   type KeyEase,
   type ClipKeys,
   type ClipKey,
+  type TransitionShape,
+  type TransitionShapeKind,
+  type TransitionDirection,
   type PaintedTurn,
   type Transform,
   type ClipAudio,
@@ -267,6 +273,12 @@ export {
   nestingOf,
   type NestedFades,
   nestedFades,
+  type FrameRect,
+  type ShapePart,
+  type ShapeFrame,
+  shapeProgress,
+  shapeStep,
+  shapeAt,
 } from "./transitions.js";
 
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";

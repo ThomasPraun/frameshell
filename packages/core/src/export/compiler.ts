@@ -16,6 +16,9 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  type TransitionContext,
+  type TransitionShape,
+  clipHandles,
   edgeTransitions,
   fixedPlacement,
   hasPictureKeys,
@@ -37,7 +40,19 @@ import {
 } from "@frameshell/schema";
 import { fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { GAIN_FRAME_SAMPLES, type Ramp, fadeFilters, gainExpression, gainVolume, keyedOpacity, num, placementExpressions } from "./animation.js";
+import {
+  GAIN_FRAME_SAMPLES,
+  type Ramp,
+  fadeFilters,
+  gainExpression,
+  gainVolume,
+  keyedOpacity,
+  num,
+  placementExpressions,
+  shapeOffsets,
+  shapeProgressExpression,
+  wipeAlpha,
+} from "./animation.js";
 import { assSubtitles } from "./ass.js";
 
 /**
@@ -282,6 +297,15 @@ interface Placed {
   bottom?: true;
   /** A generated clip's render: frames outside the clip hold its first or last rendered frame (ADR 0018 decision 5). */
   hold?: true;
+  /**
+   * Frames of material past each edge, set where a shaped dissolve may reach further (ADR 0030 decision 1): frames
+   * beyond hold the edge frame. Absent: the source has whatever a dissolve asks for.
+   */
+  reach?: { before: number; after: number };
+  /** On the base track: the shape this clip comes in by (`lead` frames each side of its start). */
+  shapeIn?: TransitionShape;
+  /** On the base track: the shape the next clip comes in by (`trail` frames each side of this clip's end). */
+  shapeOut?: TransitionShape;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -545,7 +569,8 @@ function layoutTimeline(
   /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
   const placeTrack = (track: ClipTrack): Placed[] => {
     const placed: Placed[] = [];
-    const transitions = trackTransitions(track, fps, sources);
+    const context = exportTransitionContext(fps, sources);
+    const transitions = trackTransitions(track, context);
     for (const listed of track.clips) {
       const clip = track.kind === "video" ? asFootage(listed, generated) : listed;
       if (clip.type === "timeline" && "source" in clip) {
@@ -598,6 +623,12 @@ function layoutTimeline(
       if (half > 0 && before.end === placed[i]!.start) {
         before.trail = half;
         placed[i]!.lead = half;
+        // A shaped dissolve is not cut to the handles (ADR 0030): past them the edge frames hold.
+        if (placed[i]!.clip.shape) {
+          const frames = (seconds: number) => (Number.isFinite(seconds) ? Math.floor(seconds * fps + 1e-6) : Number.POSITIVE_INFINITY);
+          before.reach = { before: before.reach?.before ?? Number.POSITIVE_INFINITY, after: frames(clipHandles(before.clip, context).after) };
+          placed[i]!.reach = { before: frames(clipHandles(placed[i]!.clip, context).before), after: Number.POSITIVE_INFINITY };
+        }
       }
     }
     return placed.filter((p) => p.end > p.start);
@@ -646,15 +677,36 @@ function layoutTimeline(
   // The first picture layer is the base when it is a video track; a program track first leaves the base black.
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
+  // Shapes play on the base track only (ADR 0030); elsewhere a shaped dissolve mixes.
+  for (const placed of baseLayer) {
+    const { shape } = placed.clip;
+    if (!shape || !placed.lead) continue;
+    placed.shapeIn = shape;
+    const before = baseLayer.find((candidate) => candidate.next === placed);
+    if (before) before.shapeOut = shape;
+  }
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
+  /** Frames each side of the end of `placed` that a push moves it out over: then it is a layer, not concatenated. */
+  const pushedOut = (placed: Placed) => (placed.shapeOut?.kind === "push" ? (placed.trail ?? 0) : 0);
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
   const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !hasPictureKeys(placed.clip);
   const baseLayers = baseLayer.flatMap((placed): Span[] => {
-    if (!fills(placed)) return [whole(placed)];
     const lead = placed.lead ?? 0;
-    return lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : [];
+    if (!fills(placed)) {
+      // A wipe's mask costs per pixel: only the frames it plays over get it.
+      if (placed.shapeIn?.kind !== "wipe") return [whole(placed)];
+      return [
+        { placed, from: placed.start - lead, to: placed.start + lead },
+        { placed, from: placed.start + lead, to: placed.end + (placed.trail ?? 0) },
+      ];
+    }
+    const pushed = pushedOut(placed);
+    return [
+      ...(lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : []),
+      ...(pushed > 0 ? [{ placed, from: placed.end - pushed, to: placed.end + pushed }] : []),
+    ];
   });
   const overlays = [baseLayers, ...upper.map((layer) => layer.map(whole))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
   for (const angle of pictureless) {
@@ -663,7 +715,9 @@ function layoutTimeline(
   return {
     frames,
     base: baseLayer,
-    video: baseLayer.filter(fills).map((placed) => ({ placed, from: placed.start + (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) })),
+    video: baseLayer
+      .filter(fills)
+      .map((placed) => ({ placed, from: placed.start + (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) - 2 * pushedOut(placed) })),
     overlays,
     audio: audio.filter((track) => track.length > 0),
     shotEdges,
@@ -877,8 +931,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const motion = placed.tile ? null : layerMotion(placed, start, end, from, out);
     const opacityKeys = !placed.tile && isKeyed(placed.clip, "opacity");
     const fades = placed.tile ? [] : fadeFilters(pictureRamps(placed, start, end, fps, true), true);
-    // Ramps, keyed scale and keyed opacity read timeline seconds: the piece's timestamps move there and back.
-    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0;
+    const shape = placed.tile ? null : pieceShape(placed, start, end, rect, from, out);
+    // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
+    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
     const chain = [
       pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
@@ -887,11 +942,18 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
       ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...fades,
+      ...(shape?.mask ? [shape.mask] : []),
       ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
     lines.push(`${chain.join(",")}[o${n}]`);
-    const position = motion?.x !== undefined ? `x=${motion.x}:y=${motion.y}:eval=frame` : `x=${placed.tile?.backdrop ? 0 : rect.left}:y=${placed.tile?.backdrop ? 0 : rect.top}`;
+    const left = placed.tile?.backdrop ? 0 : rect.left;
+    const top = placed.tile?.backdrop ? 0 : rect.top;
+    const moved = motion?.x !== undefined || shape?.x !== undefined || shape?.y !== undefined;
+    const axis = (base: string, offset: string | undefined) => (offset === undefined ? base : `${base}+${offset}`);
+    const position = moved
+      ? `x='${axis(motion?.x ?? String(left), shape?.x)}':y='${axis(motion?.y ?? String(top), shape?.y)}':eval=frame`
+      : `x=${left}:y=${top}`;
     const overlay = `[${below}][o${n}]overlay=${position}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
@@ -903,16 +965,21 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
  * Effective fades and dissolves of a track's clips that have any (`edgeTransitions`, ADR 0018 decision 4); null when
  * no clip asks for one, so timelines without transitions compile as before.
  */
-function trackTransitions(track: ClipTrack, fps: number, sources: ReadonlyMap<string, ExportSource>): Map<string, ClipEdges> | null {
+function trackTransitions(track: ClipTrack, context: TransitionContext): Map<string, ClipEdges> | null {
   if (!track.clips.some((clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined)) return null;
+  const edges = edgeTransitions(track.clips, context);
+  for (const [id, edge] of edges) if (edge.fadeIn === 0 && edge.fadeOut === 0 && edge.dissolve === 0) edges.delete(id);
+  return edges;
+}
+
+/** What {@link edgeTransitions} needs about export sources: still images have unlimited handles. */
+function exportTransitionContext(fps: number, sources: ReadonlyMap<string, ExportSource>): TransitionContext {
   const sourceDuration = (clip: Clip) => {
     if (!("asset" in clip)) return undefined;
     const source = sources.get(clip.asset);
     return source?.video?.still ? Number.POSITIVE_INFINITY : source?.duration;
   };
-  const edges = edgeTransitions(track.clips, { fps, sourceDuration });
-  for (const [id, edge] of edges) if (edge.fadeIn === 0 && edge.fadeOut === 0 && edge.dissolve === 0) edges.delete(id);
-  return edges;
+  return { fps, sourceDuration };
 }
 
 /**
@@ -930,7 +997,8 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   };
   const fadeIn = Math.round((placed.edges?.fadeIn ?? 0) * fps);
   const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
-  const lead = layer ? (placed.lead ?? 0) : 0;
+  // A shape moves or masks the incoming picture instead of raising its opacity (ADR 0030).
+  const lead = layer && !placed.shapeIn ? (placed.lead ?? 0) : 0;
   const trail = layer && !placed.bottom ? (placed.trail ?? 0) : 0;
   add("in", placed.start - lead, 2 * lead);
   add("in", placed.start, fadeIn);
@@ -944,28 +1012,71 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   return ramps;
 }
 
+/** True when keys move `placed`'s layer: its `x`, `y` or `scale`, its own or a host's. */
+function moves(placed: Placed): boolean {
+  return isKeyed(placed.clip, "x") || isKeyed(placed.clip, "y") || isKeyed(placed.clip, "scale");
+}
+
 /**
  * Keyed placement of a layer piece on timeline frames [start, end) of a graph starting at frame `from`
  * (`placementAt` and `layerRect` as expressions, hosts composed): `scale` with `eval=frame` reading the piece's
- * timeline seconds, `overlay` x/y reading the graph's. Null when no `x`, `y` or `scale` keys move the clip.
+ * timeline seconds, `overlay` x/y (unquoted) reading the graph's. Null when no `x`, `y` or `scale` keys move the clip.
  */
 function layerMotion(placed: Placed, start: number, end: number, from: number, out: GraphTarget): { scale?: string; x: string; y: string } | null {
   const { clip } = placed;
-  if (!isKeyed(clip, "x") && !isKeyed(clip, "y") && !isKeyed(clip, "scale")) return null;
-  const { fps, width, height, project } = out;
+  if (!moves(placed)) return null;
+  const { fps, width, height } = out;
   const video = placed.source.video!;
   const first = start / fps;
   const last = (end - 1) / fps;
   const fit = Math.min(width / video.width, height / video.height);
   const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
-  const at = placementExpressions(clip, time, first, last);
-  const axis = (value: string, size: number, projectSize: number, own: string) => `'floor(${num(size / 2)}+(${value})*${size}/${projectSize}-${own}/2+0.5)'`;
-  const x = axis(at.x, width, project.width, "overlay_w");
-  const y = axis(at.y, height, project.height, "overlay_h");
+  const { x, y } = layerOrigin(placed, time, first, last, out, ["overlay_w", "overlay_h"]);
   if (!isKeyed(clip, "scale")) return { x, y };
   const factor = placementExpressions(clip, "t", first, last).scale;
   const side = (fitted: number) => `'max(1,floor(${num(fitted)}*(${factor})+0.5))'`;
   return { scale: `scale=w=${side(video.width * fit)}:h=${side(video.height * fit)}:eval=frame`, x, y };
+}
+
+/**
+ * Top-left corner, in output pixels, of a keyed layer at timeline second `time` (an expression), valid for timeline
+ * seconds [`first`, `last`]; `own` names the layer's width and height in the expression's filter.
+ */
+function layerOrigin(placed: Placed, time: string, first: number, last: number, out: GraphTarget, own: [string, string]): { x: string; y: string } {
+  const { width, height, project } = out;
+  const at = placementExpressions(placed.clip, time, first, last);
+  const axis = (value: string, size: number, projectSize: number, side: string) => `floor(${num(size / 2)}+(${value})*${size}/${projectSize}-${side}/2+0.5)`;
+  return { x: axis(at.x, width, project.width, own[0]), y: axis(at.y, height, project.height, own[1]) };
+}
+
+/**
+ * What a shaped dissolve (ADR 0030, `shapeAt`) does to a base-track piece on timeline frames [start, end) of a graph
+ * starting at frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a
+ * wipe's `geq` on the incoming layer, reading the frame time `T` as timeline seconds. Null when neither applies.
+ */
+function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
+  const { fps, width, height } = out;
+  const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
+  const xs: string[] = [];
+  const ys: string[] = [];
+  let mask: string | undefined;
+  const side = (shape: TransitionShape | undefined, cut: number, half: number, which: "incoming" | "outgoing") => {
+    if (!shape || half <= 0 || end <= cut - half || start >= cut + half) return;
+    const progress = (at: string) => shapeProgressExpression(cut / fps, half / fps, at);
+    if (shape.kind === "push") {
+      const offsets = shapeOffsets(shape, which, progress(time), width, height);
+      if (offsets.x) xs.push(offsets.x);
+      if (offsets.y) ys.push(offsets.y);
+    } else if (which === "incoming") {
+      // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
+      const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
+      mask = wipeAlpha(shape, progress("T"), corner.x, corner.y, width, height);
+    }
+  };
+  side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");
+  side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
+  if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
+  return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
 }
 
 /**
@@ -1017,13 +1128,17 @@ function movingCrop(path: CropPath, from: number, length: number): string {
  * SPEC §6.3) and `trim` keeps exactly the piece's frames.
  */
 function pieceChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
-  if (!placed.hold || (start >= placed.start && end <= placed.end)) return sourceChain(placed, start, end, fps, inputs);
-  // A render holds its first and last frame for the handles: draw what it has (one edge frame at least), clone the rest.
+  // Frames [lo, hi) have material; outside, the edge frame holds.
+  const lo = placed.start - (placed.hold ? 0 : (placed.reach?.before ?? Number.POSITIVE_INFINITY));
+  const hi = placed.end + (placed.hold ? 0 : (placed.reach?.after ?? Number.POSITIVE_INFINITY));
+  if (start >= lo && end <= hi) return sourceChain(placed, start, end, fps, inputs);
+  // A render holds its first and last frame for the handles, and a shaped dissolve the frames past its handles:
+  // draw what there is (one edge frame at least), clone the rest.
   const frames = end - start;
-  if (end <= placed.start) return `${sourceChain(placed, placed.start, placed.start + 1, fps, inputs)},tpad=start=${frames - 1}:start_mode=clone`;
-  if (start >= placed.end) return `${sourceChain(placed, placed.end - 1, placed.end, fps, inputs)},tpad=stop=${frames - 1}:stop_mode=clone`;
-  const first = Math.max(start, placed.start);
-  const last = Math.min(end, placed.end);
+  if (end <= lo) return `${sourceChain(placed, lo, lo + 1, fps, inputs)},tpad=start=${frames - 1}:start_mode=clone`;
+  if (start >= hi) return `${sourceChain(placed, hi - 1, hi, fps, inputs)},tpad=stop=${frames - 1}:stop_mode=clone`;
+  const first = Math.max(start, lo);
+  const last = Math.min(end, hi);
   const pad = [...(first > start ? [`start=${first - start}:start_mode=clone`] : []), ...(end > last ? [`stop=${end - last}:stop_mode=clone`] : [])];
   return `${sourceChain(placed, first, last, fps, inputs)},tpad=${pad.join(":")}`;
 }
@@ -1208,8 +1323,10 @@ function audioGraph(audio: RenderPlan["audio"]): { inputs: string[]; lines: stri
       // atempo returns up to a few ms less than asked: feed it more source, cut the output to length.
       const tail = item.speed === 1 ? 0 : Math.round(ATEMPO_TAIL_SECONDS * rate * item.speed);
       const chain = [
-        `atrim=start_sample=${item.from}:end_sample=${item.to + tail}`,
+        `atrim=start_sample=${Math.max(0, item.from)}:end_sample=${item.to + tail}`,
         "asetpts=PTS-STARTPTS",
+        // A shaped dissolve reaching before the source's first sample (its picture holds, ADR 0030) hears silence there.
+        ...(item.from < 0 ? [`adelay=delays=${-item.from}S:all=1`] : []),
         ...tempo(item.speed),
         ...(item.gain !== undefined || item.fade !== undefined
           ? [`asetnsamples=n=${GAIN_FRAME_SAMPLES}:p=0`, gainVolume(item.gain ?? num(item.gainDb), item.fade)]

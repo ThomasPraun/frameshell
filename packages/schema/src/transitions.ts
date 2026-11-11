@@ -1,6 +1,7 @@
-// What a clip's `dissolve`, `fadeIn` and `fadeOut` play as (ADR 0018 decisions 2 to 5). The file stores the requested
-// lengths; export, preview and engine warnings all read the effective ones from here.
-import type { Clip, ClipKeys, Transform } from "./timeline.js";
+// What a clip's `dissolve`, `fadeIn` and `fadeOut` play as (ADR 0018 decisions 2 to 5), and the geometry of a shaped
+// dissolve (ADR 0030). The file stores the requested lengths; export, preview and engine warnings all read the
+// effective ones from here.
+import type { Clip, ClipKeys, Transform, TransitionDirection, TransitionShape } from "./timeline.js";
 
 /**
  * A nested clip that a flattened clip plays inside (ADR 0018 decision 9), as `flattenTimeline` records it: what of
@@ -129,6 +130,7 @@ function ownHandles(clip: Clip, context: TransitionContext): ClipHandles {
  * Effective edge transitions of the clips of one track, by clip id. `clips` are the track's clips in any order.
  * Each half of a dissolve is cut to the handle both clips have and to half of each clip, in whole frames; with no
  * such room it plays as a dip through black, and a dissolve with no clip ending where it starts as a fade in.
+ * A shaped dissolve (`shape`) is cut by the clips only: past a handle its edge frame holds.
  */
 export function edgeTransitions(clips: readonly Clip[], context: TransitionContext): Map<string, ClipEdges> {
   const frame = 1 / context.fps;
@@ -158,13 +160,11 @@ export function edgeTransitions(clips: readonly Clip[], context: TransitionConte
       own.dissolveLength = length;
       return;
     }
-    const half = Math.min(
-      requested,
-      floorFrames(clipHandles(previous, context).after),
-      floorFrames(clipHandles(clip, context).before),
-      floorFrames(lengths[i - 1]! / 2),
-      room,
-    );
+    // A shaped dissolve never dips: where a handle runs out, its edge frame holds (ADR 0030 decisions 1 and 2).
+    const handles = clip.shape
+      ? Number.POSITIVE_INFINITY
+      : Math.min(floorFrames(clipHandles(previous, context).after), floorFrames(clipHandles(clip, context).before));
+    const half = Math.min(requested, handles, floorFrames(lengths[i - 1]! / 2), room);
     if (half > 0) {
       own.mode = "dissolve";
       own.dissolve = half;
@@ -213,4 +213,60 @@ export function nestedFades(clip: Clip, track: readonly Clip[], context: Transit
     dissolveIn = fade(butted ? clip.dissolve / 2 : clip.dissolve);
   }
   return { fadeIn: fade(clip.fadeIn), fadeOut: fade(clip.fadeOut), dissolveIn };
+}
+
+/** Rectangle in fractions of the frame being rendered: left, top, right, bottom (0 to 1). */
+export type FrameRect = readonly [x0: number, y0: number, x1: number, y1: number];
+
+/** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip`. */
+export interface ShapePart {
+  /** Offset from its own placement, fractions of the frame width and height. */
+  dx: number;
+  dy: number;
+  /** The part of the frame it shows in; null: wherever it lands. */
+  clip: FrameRect | null;
+}
+
+/** Both pictures of a shaped dissolve at one moment. Their opacity is their own: a shape replaces the mix. */
+export interface ShapeFrame {
+  incoming: ShapePart;
+  outgoing: ShapePart;
+}
+
+/** Unit step of each direction in frame fractions: the way the incoming picture travels. */
+const DIRECTION_STEPS: Record<TransitionDirection, readonly [number, number]> = {
+  left: [-1, 0],
+  right: [1, 0],
+  up: [0, -1],
+  down: [0, 1],
+};
+
+/** Unit step `[x, y]` of `shape`'s direction in frame fractions (y down): the way the incoming picture travels. */
+export function shapeStep(shape: TransitionShape): readonly [number, number] {
+  return DIRECTION_STEPS[shape.direction ?? "left"];
+}
+
+/** How far a shape has moved at dissolve progress `f` (`dissolveProgress`): `f` eased in and out, f²(3−2f). */
+export function shapeProgress(f: number): number {
+  const w = Math.min(1, Math.max(0, f));
+  return w * w * (3 - 2 * w);
+}
+
+/**
+ * Geometry of `shape` at dissolve progress `f` (0 to 1, `dissolveProgress`), the one truth export and preview draw
+ * (ADR 0030). `push`: both pictures travel one frame in the direction, the outgoing one out, the incoming one in.
+ * `wipe`: the incoming picture shows in the strip of the frame its edge has crossed, over the outgoing one.
+ */
+export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
+  const p = shapeProgress(f);
+  const [ux, uy] = shapeStep(shape);
+  // `+ 0` turns -0 into 0, so frames compare and print alike.
+  if (shape.kind === "push") {
+    return {
+      outgoing: { dx: ux * p + 0, dy: uy * p + 0, clip: null },
+      incoming: { dx: ux * (p - 1) + 0, dy: uy * (p - 1) + 0, clip: null },
+    };
+  }
+  const clip: FrameRect = ux < 0 ? [1 - p, 0, 1, 1] : ux > 0 ? [0, 0, p, 1] : uy < 0 ? [0, 1 - p, 1, 1] : [0, 0, 1, p];
+  return { outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip } };
 }

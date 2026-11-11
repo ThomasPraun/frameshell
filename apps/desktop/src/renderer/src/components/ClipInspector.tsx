@@ -202,7 +202,18 @@ function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: Ed
           <option key={kind.id} value={kind.id}>{`${edge}: ${kind.label}`}</option>
         ))}
       </select>
-      {state.kind && <NumberField name="length" stored={state.length} onCommit={(value) => set(state.kind!, value, "Change transition length")} />}
+      {state.kind && (
+        <NumberField
+          name="length"
+          stored={state.length}
+          onCommit={(value) =>
+            // A shaped dissolve (ADR 0030) keeps its shape: the inspector does not edit shapes yet.
+            state.shape
+              ? onSend({ op: "transition.set", args: { at: state.at, kind: state.shape.kind, direction: state.shape.direction ?? "left", duration: value } }, { label: "Change transition length" })
+              : set(state.kind!, value, "Change transition length")
+          }
+        />
+      )}
     </span>
   );
 }
