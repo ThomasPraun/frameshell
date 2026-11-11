@@ -293,7 +293,7 @@ A daemon worker thread (`packages/core/src/matte/matte-worker.ts`) runs it singl
 
 I/O the code depends on: input `pixel_values` float32 `[1, 3, 256, 256]` (RGB 0..1, no mean or scale), output `alphas` float32 `[1, 1, 256, 256]` (person probability 0..1).
 
-Verified when pinning (2026-11-10): the file hashed to its Hugging Face large-file oid at that revision; `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the runtime and the model and mattes a drawn figure that moves (overlap with the figure above 0.85 on three frames), on every platform of the Real binaries workflow.
+Verified when pinning (2026-11-10): the file hashed to its Hugging Face large-file oid at that revision; `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs the runtime and the model and mattes a drawn figure that moves (overlap with the figure above 0.85 on three frames). It ran locally on darwin-arm64 only; the other platforms are covered by the Real binaries workflow once its jobs pass.
 
 Re-pin: take the file's large-file SHA-256 at the new revision (the Hugging Face file page, or `curl -sI` on the `resolve` URL, `x-linked-etag`), download and compare, update `VIDEO_MATTE_MODELS` (`packages/core/src/binaries/manifest.ts`), and run the opt-in test above: it fails when the input or output names change. A new model or revision changes the cache key (`matteKey`), so old mattes are made again and the old ones swept.
 

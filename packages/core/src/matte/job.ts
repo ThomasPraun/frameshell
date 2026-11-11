@@ -14,6 +14,7 @@ export interface MatteTarget {
   hash: string;
   /** Project-relative proxy of that content. */
   proxy: string;
+  /** Frame rate of the proxy, frames per second. */
   fps: number;
   /** `<id>@<revision>` of the model, or `stand-in`. */
   model: string;
@@ -21,7 +22,9 @@ export interface MatteTarget {
 
 /** What {@link computeMatte} needs from the daemon. */
 export interface MatteJobDeps {
+  /** Absolute path of the managed ffmpeg. */
   ffmpeg(): Promise<string>;
+  /** Absolute path of the managed ffprobe. */
   ffprobe(): Promise<string>;
   /** The runtime and model files, installing them when missing (both null for the stand-in). */
   files(): Promise<MatteFiles>;
@@ -29,6 +32,7 @@ export interface MatteJobDeps {
   onProgress(fraction: number): void;
   /** One human progress line (`stage: "matte"`). */
   report(update: Progress): void;
+  /** Aborts the job; temps are removed. */
   signal: AbortSignal;
   /** Runs the passes; default {@link matteInWorker}. */
   run?: (files: MatteFiles, request: MatteVideoRequest, options: { signal: AbortSignal; onProgress: (fraction: number) => void }) => Promise<MatteVideoResult>;

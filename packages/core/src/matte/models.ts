@@ -12,11 +12,13 @@ export interface MatteModelSpec {
   id: string;
   /** Input tensor size for a frame of `frame` size. */
   inputSize(frame: PlaneSize): PlaneSize;
-  /** Names of the input and output tensors. */
+  /** Name of the input tensor. */
   input: string;
+  /** Name of the output tensor. */
   output: string;
-  /** Per-channel `(v / 255 - mean) / std` applied to RGB bytes. */
+  /** Per-channel mean in `(v / 255 - mean) / std` applied to RGB bytes. */
   mean: number;
+  /** Per-channel divisor in `(v / 255 - mean) / std`. */
   std: number;
 }
 

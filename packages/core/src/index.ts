@@ -358,7 +358,6 @@ export {
   contrast,
   emaStep,
   emaWeight,
-  grayOfRgb,
   guidedFilter,
   refineFrame,
   resizeBilinear,

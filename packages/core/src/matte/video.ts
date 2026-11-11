@@ -3,31 +3,35 @@
 // 2. the scratch file smoothed backward in place, last frame first (forward + backward = no lag);
 // 3. each frame again as the gray guide, its smoothed alpha refined (`refineFrame`) and encoded as luma video.
 import { spawn } from "node:child_process";
-import { open } from "node:fs/promises";
+import { dirname } from "node:path";
+import { open, statfs } from "node:fs/promises";
 import { readRawFrames } from "../media/raw-frames.js";
 import { PROXY_GOP, fpsRational } from "../media/recipe.js";
 import { loadOnnxModel } from "../onnx-web.js";
 import { runWorkerTask } from "../worker-task.js";
 import { SELFIE, coarseAlpha, modelInput } from "./models.js";
-import { type PlaneSize, emaStep, emaWeight, refineFrame } from "./refine.js";
+import { type PlaneSize, emaStep, emaWeight, refineFrame, resizeBilinear } from "./refine.js";
 
 /** Coarse alpha 0..1 of one packed 8-bit RGB frame of `size`, at the model's own size. */
 export type MatteInfer = (rgb: Uint8Array, size: PlaneSize) => Promise<{ alpha: Float32Array; size: PlaneSize }>;
 
 /** One asset's matte to make. */
 export interface MatteVideoRequest {
+  /** Absolute path of the managed ffmpeg. */
   ffmpeg: string;
   /** Absolute path of the asset's proxy (CFR at `fps`, the frames the matte follows one to one). */
   source: string;
   /** The proxy's picture size (even sides). */
   width: number;
+  /** See `width`. */
   height: number;
+  /** Frame rate of the proxy, frames per second. */
   fps: number;
   /** Frames expected, for progress only. */
   frames?: number | undefined;
   /** Absolute path of the `.mp4` to write. */
   output: string;
-  /** Absolute path of the scratch file pass 1 writes and pass 2 rewrites (one byte per coarse pixel per frame). */
+  /** Absolute path of the scratch file pass 1 writes and pass 2 rewrites (one byte per coarse pixel per frame, at most 128 px a side). */
   scratch: string;
 }
 
@@ -37,6 +41,19 @@ export interface MatteVideoResult {
   /** Milliseconds in the model (pass 1) and in refining and encoding (pass 3). */
   inferMs: number;
   refineMs: number;
+}
+
+/** Longest side, pixels, the coarse alpha is stored at in the scratch file (halved until it fits). */
+export const COARSE_MAX_SIDE = 128;
+
+/** Free bytes of `path`'s volume, or null when the platform cannot say. */
+async function freeBytes(path: string): Promise<number | null> {
+  try {
+    const stats = await statfs(path);
+    return stats.bavail * stats.bsize;
+  } catch {
+    return null;
+  }
 }
 
 /** Share of the progress fraction of pass 1 (model); pass 3 (refine, encode) takes the rest. From the spike. */
@@ -77,15 +94,22 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
     let state: Float32Array | null = null;
     for await (const rgb of readRawFrames(request.ffmpeg, request.source, "format=rgb24", size.width * size.height * 3)) {
       const started = performance.now();
-      const { alpha, size: at } = await infer(rgb, size);
+      const inferred = await infer(rgb, size);
       inferMs += performance.now() - started;
+      const stored = shrinkCoarse(inferred.alpha, inferred.size);
+      const at = stored.size;
       if (!coarse) {
         coarse = at;
         plane = at.width * at.height;
+        const need = plane * (request.frames ?? 0);
+        const free = await freeBytes(dirname(request.scratch));
+        if (free !== null && need > free * 0.9) {
+          throw new Error(`not enough free disk for the matte: about ${Math.ceil(need / 1e6)} MB of scratch space needed, ${Math.floor(free / 1e6)} MB free`);
+        }
       } else if (at.width !== coarse.width || at.height !== coarse.height) {
         throw new Error(`the matte model changed its output size from ${coarse.width}x${coarse.height} to ${at.width}x${at.height}`);
       }
-      state = emaStep(state, alpha, weight);
+      state = emaStep(state, stored.alpha, weight);
       await scratch.write(toBytes(state), 0, plane, frames * plane);
       frames++;
       if (request.frames) onProgress?.(INFER_SHARE * Math.min(1, frames / request.frames));
@@ -104,7 +128,7 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
     const chroma = Buffer.alloc((size.width / 2) * (size.height / 2) * 2, 128);
     let written = 0;
     try {
-      for await (const gray of readRawFrames(request.ffmpeg, request.source, "format=gray", size.width * size.height)) {
+      for await (const gray of readRawFrames(request.ffmpeg, request.source, "format=gray,scale=out_range=pc", size.width * size.height)) {
         if (written >= frames) throw new Error(`${request.source} gave more frames on its second read than its first (${frames})`);
         const started = performance.now();
         await scratch.read(bytes, 0, plane, written * plane);
@@ -126,6 +150,16 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
     await scratch.close();
   }
   return { frames, inferMs: Math.round(inferMs), refineMs: Math.round(refineMs) };
+}
+
+/** `alpha` halved (2x2 mean) until its longest side is at most {@link COARSE_MAX_SIDE}. */
+function shrinkCoarse(alpha: Float32Array, size: PlaneSize): { alpha: Float32Array; size: PlaneSize } {
+  let current = { alpha, size };
+  while (Math.max(current.size.width, current.size.height) > COARSE_MAX_SIDE && current.size.width >= 2 && current.size.height >= 2) {
+    const next = { width: Math.floor(current.size.width / 2), height: Math.floor(current.size.height / 2) };
+    current = { alpha: resizeBilinear(current.alpha, current.size, next), size: next };
+  }
+  return current;
 }
 
 function toBytes(alpha: Float32Array): Uint8Array {
@@ -180,7 +214,9 @@ export async function loadSelfieMatte(runtime: string, model: string): Promise<M
 
 /** Files the matte worker loads; both null = the model-free stand-in (`FRAMESHELL_MATTE_STAND_IN=1`). */
 export interface MatteFiles {
+  /** Absolute path of the ONNX Runtime Web module. */
   runtime: string | null;
+  /** Absolute path of the model file. */
   model: string | null;
 }
 

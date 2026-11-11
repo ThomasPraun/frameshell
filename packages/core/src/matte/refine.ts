@@ -179,10 +179,3 @@ export function refineFrame(coarse: Float32Array, coarseSize: PlaneSize, gray: F
   for (let i = 0; i < out.length; i++) out[i] = Math.round(contrast(guided[i]!) * 255);
   return out;
 }
-
-/** Gray guide 0..1 (BT.601 luma weights) of packed 8-bit RGB. */
-export function grayOfRgb(rgb: Uint8Array): Float32Array {
-  const out = new Float32Array(rgb.length / 3);
-  for (let i = 0; i < out.length; i++) out[i] = (0.299 * rgb[i * 3]! + 0.587 * rgb[i * 3 + 1]! + 0.114 * rgb[i * 3 + 2]!) / 255;
-  return out;
-}

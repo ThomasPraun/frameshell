@@ -2006,7 +2006,7 @@ export const methods = {
       "smoothed over time and snapped to the picture's edges. The whole asset is matted once per content: the result is a " +
       "grayscale video at proxy size (white = subject, black = background, same frames as the proxy) cached in " +
       "`.frameshell/cache/mattes/` (regenerable, swept by `gc`); a later call returns it at once (`cached: true`). " +
-      "Waits for the asset's ingest when its proxy is not built yet. Takes about 1.5 minutes per minute of 30 fps video " +
+      "Waits for the asset's ingest when its proxy is not built yet. Takes an estimated 1.5 minutes per minute of 30 fps video " +
       "on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
       "it goes on if the caller disconnects. Known limits: one merged matte for two or more people; thin hair strands " +
       "and mic stands are often left out. Nothing on a timeline uses a matte yet. " +

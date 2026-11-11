@@ -108,7 +108,7 @@ ${MODEL_USAGE}  render [--preset p] [--out file] [--timeline id]
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
 ${PEOPLE_USAGE}${SHOOT_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
                                and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
-                               person. Once per file content; about 1.5 min per minute of video. First run
+                               person. Once per file content; estimated 1.5 min per minute of video. First run
                                downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
   skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
                                version; an edited copy needs --force (files you added stay)
