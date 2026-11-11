@@ -92,4 +92,5 @@ Just ask | and it *edits*"
 
 - `frameshell clip set <clip> --speed 1.1`: faster delivery; the clip's end moves, later clips do not (cut or move to close gaps).
 - `frameshell clip set <clip> --gain=-6` (negative values need `=`), `--muted`.
+- `frameshell clip set <clip> --voice`: the voice chain for phone or laptop recordings (high-pass, light denoise, gentle compression), written into the clip as explicit `audio.effects` you can edit; `--audio-effects '<json>'` sets your own list, `--clear-audio-effects` removes it. The sound is baked in the background: export waits for it, the preview plays the dry sound until it is ready. Cut snapping and transcription keep using the dry sound.
 - Loudness is normalized at export: the preset's `loudness` (built-in presets set none), else `export.loudness` in `frameshell.json`, else -17 LUFS.

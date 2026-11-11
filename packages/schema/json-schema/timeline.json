@@ -112,6 +112,106 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "effects": {
+                              "description": "Audio effects applied in order (at most 8), e.g. the voice chain highpass, denoise, compressor. Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
+                              "minItems": 1,
+                              "maxItems": 8,
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "highpass"
+                                      },
+                                      "frequency": {
+                                        "description": "Cutoff in Hz: rumble below it is removed, 10 to 1000. Default 85.",
+                                        "type": "number",
+                                        "minimum": 10,
+                                        "maximum": 1000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false,
+                                    "description": "High-pass filter: removes rumble and handling noise below `frequency`."
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "denoise"
+                                      },
+                                      "floor": {
+                                        "description": "Noise floor in dB, -80 to -20. Default -30.",
+                                        "type": "number",
+                                        "minimum": -80,
+                                        "maximum": -20
+                                      },
+                                      "reduction": {
+                                        "description": "Noise reduction in dB, 0.01 to 97. Default 8.",
+                                        "type": "number",
+                                        "minimum": 0.01,
+                                        "maximum": 97
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false,
+                                    "description": "FFT noise reduction of steady background noise (hiss, hum, room tone)."
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "compressor"
+                                      },
+                                      "threshold": {
+                                        "description": "Level in dB above which the sound is compressed, -60 to 0. Default -20.",
+                                        "type": "number",
+                                        "minimum": -60,
+                                        "maximum": 0
+                                      },
+                                      "ratio": {
+                                        "description": "Compression ratio, e.g. 2.5 = 2.5:1, 1 to 20. Default 2.5.",
+                                        "type": "number",
+                                        "minimum": 1,
+                                        "maximum": 20
+                                      },
+                                      "attack": {
+                                        "description": "Attack in ms, 0.01 to 2000. Default 8.",
+                                        "type": "number",
+                                        "minimum": 0.01,
+                                        "maximum": 2000
+                                      },
+                                      "release": {
+                                        "description": "Release in ms, 0.01 to 9000. Default 140.",
+                                        "type": "number",
+                                        "minimum": 0.01,
+                                        "maximum": 9000
+                                      },
+                                      "makeup": {
+                                        "description": "Gain in dB added after compression, 0 to 36. Default 2.",
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 36
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false,
+                                    "description": "Compressor: evens out loud and quiet passages."
+                                  }
+                                ]
+                              }
                             }
                           },
                           "additionalProperties": false

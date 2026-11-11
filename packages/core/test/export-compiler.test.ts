@@ -3,11 +3,15 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
 import {
+  type AudioEffect,
   type Clip,
   type ClipTrack,
+  type MediaClip,
   type Timeline,
   type Transcript,
   type TransitionShape,
+  VOICE_CHAIN,
+  bakeRef,
   flattenTimeline,
   resolveFormat,
 } from "@frameshell/schema";
@@ -844,3 +848,64 @@ describe("formats (ADR 0027)", () => {
     expect(plan.files["seg-0001.filter"]).not.toMatch(/crop=[^,]*,scale=1080:1920,setsar=1,format=rgba/);
   });
 });
+
+describe("audio effects (ADR 0031)", () => {
+  const voice: AudioEffect[] = [...VOICE_CHAIN];
+  const hum: AudioEffect[] = [{ kind: "highpass", frequency: 120 }];
+  const fx: Timeline = {
+    schemaVersion: 1,
+    id: "main",
+    revision: 3,
+    tracks: [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          { id: "c_a", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 5.2, audio: { effects: voice } },
+          { id: "c_b", type: "media", asset: "assets/talk.mp4", start: 2, in: 10, out: 11.15, speed: 1.15, audio: { gain: -3, effects: voice } },
+          { id: "c_dry", type: "media", asset: "assets/talk.mp4", start: 3, in: 20, out: 21 },
+        ],
+      },
+      { id: "a1", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 4, audio: { gain: -18, effects: hum } }] },
+    ],
+  };
+  const audioFx = new Map([
+    [bakeRef("assets/talk.mp4", voice), "/project/.frameshell/audio-fx/talk-voice.pcm"],
+    [bakeRef("assets/music.wav", hum), "/project/.frameshell/audio-fx/music-hum.pcm"],
+  ]);
+  const input = { timeline: fx, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, segmentSeconds: 4 };
+  const fxPlan = compileRender({ ...input, audioFx });
+
+  it("reads each clip's sound from its bake, one input per asset and chain, raw PCM spread to stereo (golden)", () => {
+    golden("audio-fx-plan", { audio: fxPlan.audio, mix: mixStep(fxPlan), warnings: fxPlan.warnings });
+    expect(fxPlan.audio.inputs).toEqual(["/project/.frameshell/audio-fx/talk-voice.pcm", "/project/assets/talk.mp4", "/project/.frameshell/audio-fx/music-hum.pcm"]);
+    const mix = mixStep(fxPlan)!;
+    expect(mix.args.join(" ")).toContain("-f s16le -ar 48000 -ac 1 -i /project/.frameshell/audio-fx/talk-voice.pcm");
+    expect(mix.files["mix.filter"]).toContain("[0:a:0]pan=stereo|c0=c0|c1=c0,aresample=48000");
+    expect(mix.files["mix.filter"]).toContain("[1:a:0]aresample=48000");
+  });
+
+  it("leaves video and the plan of a timeline without effects as they were", () => {
+    const dry = compileRender({ ...input, timeline: { ...fx, tracks: fx.tracks.map((track) => stripEffects(track)) } });
+    expect(fxPlan.segments).toEqual(dry.segments);
+    expect(compileRender({ ...input, timeline: { ...fx, tracks: fx.tracks.map((track) => stripEffects(track)) }, audioFx })).toEqual(dry);
+  });
+
+  it("plays a clip whose bake is missing dry, with a warning", () => {
+    const partial = compileRender({ ...input, audioFx: new Map([...audioFx].slice(0, 1)) });
+    expect(partial.audio.inputs).toContain("/project/assets/music.wav");
+    expect(partial.warnings).toEqual(["Clip c_music has audio effects that are not baked; its sound was exported without them."]);
+  });
+});
+
+function stripEffects(track: Timeline["tracks"][number]): Timeline["tracks"][number] {
+  if (track.kind === "subtitles" || track.kind === "program") return track;
+  return {
+    ...track,
+    clips: track.clips.map((clip) => {
+      if (clip.type !== "media" || !clip.audio) return clip;
+      const { effects: _effects, ...audio } = (clip as MediaClip).audio!;
+      return { ...clip, audio } as Clip;
+    }),
+  };
+}

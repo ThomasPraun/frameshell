@@ -433,6 +433,56 @@ describe("transitions and keyframes", () => {
   });
 });
 
+describe("audio effects (ADR 0031)", () => {
+  it("clip set --voice writes the voice chain as explicit entries, --audio-effects replaces it, --clear-audio-effects clears it", () => {
+    const track = json<{ changes: { added: string[] } }>(["track", "add", "audio", "--name", "Voice"]).changes.added[0]!;
+    const clip = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "30", "--in", "0", "--out", "1"]).changes.added[0]!;
+    const audio = () => onDisk().tracks.find((t: { id: string }) => t.id === track).clips[0].audio;
+
+    expect(frameshell(["clip", "set", clip, "--voice", "--gain=-2"]).code).toBe(0);
+    expect(audio()).toEqual({
+      gain: -2,
+      effects: [
+        { kind: "highpass", frequency: 85 },
+        { kind: "denoise", floor: -30, reduction: 8 },
+        { kind: "compressor", threshold: -20, ratio: 2.5, attack: 8, release: 140, makeup: 2 },
+      ],
+    });
+    expect(frameshell(["clip", "set", clip, "--audio-effects", '[{"kind":"highpass","frequency":120}]']).code).toBe(0);
+    expect(audio()).toEqual({ gain: -2, effects: [{ kind: "highpass", frequency: 120 }] });
+    expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
+    expect(audio()).toEqual({ gain: -2 });
+
+    expect(frameshell(["clip", "set", clip, "--voice", "--clear-audio-effects"]).stderr).toMatch(/one of --voice, --audio-effects or --clear-audio-effects/);
+    expect(frameshell(["clip", "set", clip, "--audio-effects", '{"kind":"highpass"}']).stderr).toMatch(/expected a JSON array/);
+    expect(frameshell(["clip", "set", clip, "--audio-effects", '[{"kind":"highpass","frequency":2}]']).code).not.toBe(0);
+  });
+
+  it("the daemon bakes a clip's chain in the background for the preview, and gc sweeps it once no clip plays it", async () => {
+    const track = json<{ changes: { added: string[] } }>(["track", "add", "audio", "--name", "Baked"]).changes.added[0]!;
+    const clip = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "40", "--in", "0", "--out", "1"]).changes.added[0]!;
+    expect(frameshell(["clip", "set", clip, "--audio-effects", '[{"kind":"highpass","frequency":95}]']).code).toBe(0);
+    const daemon = await connectOrStartDaemon({ socketPath, client: "test/bakes", env: cliEnv() });
+    try {
+      type Bakes = { bakes: { asset: string; clips: string[]; state: string; file: string | null; error: string | null }[] };
+      let bakes = (await daemon.request("audio.bakes", { cwd: project, timeline: "main" })) as Bakes;
+      for (let i = 0; i < 200 && bakes.bakes.some((bake) => bake.state !== "ready" && bake.state !== "failed"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        bakes = (await daemon.request("audio.bakes", { cwd: project, timeline: "main" })) as Bakes;
+      }
+      const ours = bakes.bakes.find((bake) => bake.clips.includes(clip))!;
+      expect(ours).toMatchObject({ asset: "assets/take.mp4", state: "ready", error: null });
+      expect(ours.file).toMatch(/^\.frameshell\/audio-fx\/[0-9a-f]{20}-[0-9a-f]{12}-x1\.pcm$/);
+
+      expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
+      const swept = json<{ removed: { path: string; kind: string }[] }>(["gc"]);
+      expect(swept.removed).toContainEqual(expect.objectContaining({ path: ours.file, kind: "audio-fx" }));
+    } finally {
+      daemon.close();
+    }
+  }, 60_000);
+});
+
 describe("markers (ADR 0029)", () => {
   it("marker add, set, list and remove; cut ripples them and removes those inside; bad flags exit 2", () => {
     writeFileSync(

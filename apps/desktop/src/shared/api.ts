@@ -2,6 +2,7 @@ import type { Lang } from "./i18n/index.js";
 import type {
   AgentTarget,
   AssetInfo,
+  AudioBakesResult,
   ClipRendersResult,
   HistoryDiffResult,
   HistoryResult,
@@ -486,6 +487,11 @@ export interface FrameshellApi {
   media: {
     /** `asset.list` of the window's project: ingest state and derived media paths. */
     assets(): Promise<AssetInfo[]>;
+    /**
+     * `audio.bakes` of a timeline of the window's project (ADR 0031): baked sound of clips with audio effects; queues
+     * the missing bakes. `view` as for `timeline.show`. Rejects with the daemon's message.
+     */
+    bakes(timeline: string, view?: TimelineViewName): Promise<AudioBakesResult>;
     /** Bytes of a derived waveform or thumbnail (project-relative path from `assets()`). */
     read(path: string): Promise<Uint8Array>;
     /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
@@ -917,6 +923,7 @@ export const Channel = {
   uiCommand: "ui:command",
   uiReply: "ui:reply",
   mediaAssets: "media:assets",
+  mediaBakes: "media:bakes",
   mediaRead: "media:read",
   mediaChanged: "media:changed",
   contextCaptureFrame: "context:capture-frame",

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Audio effects on media clips (#464, ADR 0031 slice 1): optional `audio.effects`, a list applied in order of
+  `highpass { frequency }`, `denoise { floor, reduction }` and `compressor { threshold, ratio, attack, release,
+  makeup }`; omitted numbers take the voice chain's. `frameshell clip set <clip> --voice` writes the voice chain as
+  explicit entries (high-pass 85 Hz; denoise -30 dB / 8 dB; compressor -20 dB, 2.5:1, 8 ms, 140 ms, +2 dB),
+  `--audio-effects '<json>'` sets a list, `--clear-audio-effects` removes it; `clip.set` takes `audioEffects`
+  (`null` clears; shots are skipped with a warning). Each asset is baked once per chain with the managed ffmpeg into
+  `.frameshell/audio-fx/` (mono s16 on the sidecar clock, `afftdn` latency compensated) as a background `audio-fx`
+  job; export mixes the bake (render step `audio-fx`) and the preview plays it in place of the dry sidecar once it
+  is ready. `gc` sweeps bakes no clip plays. Energy snapping and transcription keep the dry sound. Protocol 83: job
+  kind and step `audio-fx`, `gc` kind and area `audio-fx`, internal method `audio.bakes`. Timelines without effects
+  are unchanged.
 - Shaped transitions, first slice (ADR 0030, #483): `transition set --kind wipe|push [--direction left|right|up|down]`
   (`transition.set` `kind` and `direction`, protocol 82) puts a wipe or a push on a cut of the bottom video track.
   It is stored as the incoming clip's `dissolve` plus an optional `shape: { kind, direction }`; sound still

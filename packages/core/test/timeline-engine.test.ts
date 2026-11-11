@@ -349,6 +349,30 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(blocked, "clip.set", { clip: "c_0001", speed: 0.5 }))).message).toMatch(/would overlap/);
   });
 
+  it("replaces and clears a media clip's audio effects as given; both halves of a split keep them (ADR 0031)", async () => {
+    const effects = [{ kind: "highpass", frequency: 90 }, { kind: "compressor", ratio: 3 }];
+    const { timeline } = await apply(await withClip({ gain: -2 }), "clip.set", { clip: "c_0001", audioEffects: effects });
+    expect(clipsOf(timeline, "t_v")[0]).toMatchObject({ audio: { gain: -2, effects } });
+    expect(parseTimeline(timeline).ok).toBe(true);
+    const replaced = (await apply(timeline, "clip.set", { clip: "c_0001", audioEffects: [{ kind: "denoise" }] })).timeline;
+    expect(clipsOf(replaced, "t_v")[0]).toMatchObject({ audio: { gain: -2, effects: [{ kind: "denoise" }] } });
+    const split = (await apply(replaced, "clip.split", { clip: "c_0001", at: 12 })).timeline;
+    expect(clipsOf(split, "t_v").map((clip) => clip.audio)).toEqual([
+      { gain: -2, effects: [{ kind: "denoise" }] },
+      { gain: -2, effects: [{ kind: "denoise" }] },
+    ]);
+    const cleared = (await apply(replaced, "clip.set", { clip: "c_0001", audioEffects: null })).timeline;
+    expect(clipsOf(cleared, "t_v")[0]!.audio).toEqual({ gain: -2 });
+    const bare = (await apply(await withClip(), "clip.set", { clip: "c_0001", audioEffects: [{ kind: "denoise" }] })).timeline;
+    expect(clipsOf((await apply(bare, "clip.set", { clip: "c_0001", audioEffects: null })).timeline, "t_v")[0]).not.toHaveProperty("audio");
+
+    const nested = (await apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/intro.json" })).timeline;
+    const refused = await rejection(apply(nested, "clip.set", { clip: "c_0001", audioEffects: [{ kind: "denoise" }] }));
+    expect(refused.message).toMatch(/only media clips take `audioEffects`/);
+    const outOfRange = await rejection(apply(timeline, "clip.set", { clip: "c_0001", audioEffects: [{ kind: "highpass", frequency: 5 }] }));
+    expect(outOfRange.code).toBe(ErrorCode.InvalidParams);
+  });
+
   it("removes a clip and reports missing clip ids with where to find ids", async () => {
     const { timeline } = await apply(await withClip(), "clip.remove", { clip: "c_0001" });
     expect(clipsOf(timeline, "t_v")).toEqual([]);

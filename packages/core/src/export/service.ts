@@ -183,6 +183,14 @@ export interface ExportServiceOptions {
     /** `size`: render at that frame size (a format other than the primary, ADR 0027); absent: the project resolution. */
     ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, size?: Size): Promise<ReadonlyMap<string, GeneratedSource>>;
   };
+  /**
+   * Audio effects bakes (ADR 0031): `needs` lists the bakes a flattened timeline plays, `ensure` bakes what is
+   * missing and returns every bake by `bakeRef`. Absent: clips with audio effects export dry, with a warning.
+   */
+  audioFx?: {
+    needs(timeline: Timeline): { ref: string }[];
+    ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<ReadonlyMap<string, string>>;
+  };
   /** H.264 encoder for renders that ask for a quality tier: the first that works on this machine. Absent: x264. */
   encoder?(ffmpeg: string): Promise<EncoderName>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
@@ -251,6 +259,8 @@ export class ExportService {
       transcripts: await this.#transcripts(root, timeline),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
+    const baked = this.#options.audioFx?.needs(timeline) ?? [];
+    const standInBakes = new Map(baked.map(({ ref }) => [ref, "stand-in.pcm"]));
     const base = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
     const planned = await Promise.all(formats.map(async (format) => {
       const size = outputSize(preset, format, params.preset !== undefined, "render");
@@ -262,11 +272,11 @@ export class ExportService {
         ...(cover ? { cover: { at: cover.at, layout: cover.layout } } : {}),
       };
       const renderSize = format.primary ? undefined : { width: format.width, height: format.height };
-      // Validated now with stand-in renders, so a bad timeline fails the request; the job compiles with the real ones.
+      // Validated now with stand-in renders and bakes, so a bad timeline fails the request; the job compiles with the real ones.
       const standIn = this.#options.clips
         ? new Map(layered.map((id) => [id, { path: "", hasAlpha: true, width: format.width, height: format.height }]))
         : new Map<string, GeneratedSource>();
-      const plan = compileRender({ ...input, generated: standIn });
+      const plan = compileRender({ ...input, generated: standIn, audioFx: standInBakes });
       const output = params.formats ? withSuffix(base, format.id) : base;
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
@@ -287,11 +297,17 @@ export class ExportService {
         output,
         run: async (ctx) => {
           let final = plan;
+          let generated: ReadonlyMap<string, GeneratedSource> = new Map();
+          let audioFx: ReadonlyMap<string, string> = new Map();
           if (layered.length > 0 && this.#options.clips) {
             ctx.update({ step: "clips", progress: 0 });
-            const generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
-            final = compileRender({ ...input, generated });
+            generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
           }
+          if (baked.length > 0 && this.#options.audioFx) {
+            ctx.update({ step: "audio-fx", progress: 0 });
+            audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
+          }
+          if (generated.size > 0 || baked.length > 0) final = compileRender({ ...input, generated, audioFx });
           await executeRender(final, {
             ffmpeg: await this.#options.ffmpeg(root),
             workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),

@@ -1,5 +1,5 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
-import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
   type HostFade,
@@ -26,6 +26,7 @@ import {
   soundSamples,
   staticGain,
 } from "@frameshell/schema/composite";
+import { audioEffectsOf, bakeRef } from "@frameshell/schema/effects";
 import { type ClipEdges, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -312,6 +313,24 @@ export interface ProgramOptions {
   nested?: ReadonlyMap<string, TimelineView>;
   /** Render cache states of generated clips by clip id (`clip.renders`); absent ones are not known yet. */
   renders?: ReadonlyMap<string, ClipRenderInfo>;
+  /**
+   * Ready bakes of clip audio effects by `bakeRef` of asset and chain (`audio.bakes`, ADR 0031): a clip with effects
+   * plays its bake as its sidecar, the dry sidecar while the bake is absent.
+   */
+  bakes?: ReadonlyMap<string, BakedSound>;
+}
+
+/** A ready audio effects bake: raw s16le in the sidecar's format and clock. */
+export type BakedSound = NonNullable<AssetInfo["sidecar"]>;
+
+/** The ready entries of an `audio.bakes` list, by `bakeRef` of asset and chain: {@link ProgramOptions.bakes}. */
+export function readyBakes(bakes: readonly AudioBakeInfo[]): Map<string, BakedSound> {
+  const ready = new Map<string, BakedSound>();
+  for (const bake of bakes) {
+    if (bake.state !== "ready" || bake.file === null) continue;
+    ready.set(bakeRef(bake.asset, bake.effects), { path: bake.file, format: "s16le", sampleRate: bake.sampleRate, channels: bake.channels });
+  }
+  return ready;
 }
 
 /** Build the {@link Program} of `view`; `assets` by project-relative path. */
@@ -377,12 +396,14 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       frames = Math.max(frames, end);
       const info = "asset" in clip ? assets.get(clip.asset) : undefined;
       if (!("asset" in clip) || clip.audio?.muted === true || !info?.sidecar) return;
+      const effects = audioEffectsOf(clip);
+      const sidecar = (effects && options.bakes?.get(bakeRef(clip.asset, effects))) || info.sidecar;
       const cursor = last?.span.end ?? 0;
       if (isProgramSound(clip)) {
         // Nested program sound, as export places it: exact samples, after the track's previous sound, until the next clip starts.
         const next = kept[index + 1];
         const until = next ? (isProgramSound(next.clip) ? Math.round(next.clip.start * rate) : sample(next.start)) : Number.POSITIVE_INFINITY;
-        const span = exactSpan(clip, info.sidecar, rate, cursor, until);
+        const span = exactSpan(clip, sidecar, rate, cursor, until);
         if (span.end <= span.start) return;
         if (last?.exact && continuesSpan(last.span, span)) {
           last.span.end = span.end;
@@ -406,9 +427,9 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         clip: clip.id,
         start: first,
         end: until,
-        sidecar: info.sidecar.path,
-        channels: info.sidecar.channels,
-        in: Math.round((frame(clip.in) / fps) * info.sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * info.sidecar.sampleRate),
+        sidecar: sidecar.path,
+        channels: sidecar.channels,
+        in: Math.round((frame(clip.in) / fps) * sidecar.sampleRate) + Math.round(((first - planned) / rate) * speed * sidecar.sampleRate),
         speed,
         gain: gainOf(clip),
         ...(envelope ? { envelope } : {}),
