@@ -473,6 +473,7 @@ frameshell multicam mic <group> <mic> [--name n] [--offset s] [--gain dB] [--mut
 frameshell multicam paint <group> [<angle>] --from s --to s (--speaking [--alone] | --silent | --measured)   # correct who speaks by hand (group seconds)
 frameshell multicam reframe <group> <angle> (--time s | --at s) [--x f] [--y f] [--remove] | --clear   # where cut tiles center the angle (9:16)
 frameshell multicam faces <group> [<angle>…] [--replace]   # propose reframe keys from faces, one transaction
+frameshell clip reframe <clip> [--format 9x16] [--person p | --anchor 0-1]   # frame one clip for another aspect around a face, x/y keys, one transaction
 frameshell shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b] [--corner c]   # change a shot
 frameshell multicam turns <group>                        # who speaks when, from each angle's mic (ADR 0016)
 frameshell direct <group> [--template id] [--rules file] [--from s --to s] [--replace-human]   # shots from turns by director.json rules

@@ -338,6 +338,7 @@ export {
   type YunetFiles,
   yunetWorkerScanner,
   type ReframeKeyOptions,
+  type SourceRange,
   angleFaceKeys,
   decodeYunet,
   faceFrameSize,
@@ -346,6 +347,18 @@ export {
   proposeReframeKeys,
   sampleFaceFrames,
 } from "./multicam/faces.js";
+export {
+  type FrameFormat,
+  REFRAME_FACE_AT,
+  type ReframeGeometry,
+  type ReframeKey,
+  type ReframePlacement,
+  type ReframePlan,
+  parseFrameFormat,
+  planReframe,
+  reframeBounds,
+  reframePlacement,
+} from "./reframe.js";
 export {
   type DecoderOutput,
   type PhotoInput,

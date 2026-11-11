@@ -146,6 +146,29 @@ describe("frameshell multicam", () => {
     expect(angle).not.toHaveProperty("reframe");
   }, 120_000);
 
+  it("frames a clip for 9:16 around a fixed anchor, in one transaction that revert undoes", () => {
+    const track = frameshell(["track", "add", "video", "--name", "Reel"]);
+    expect(track.code).toBe(0);
+    const trackId = /t_[0-9a-f]{6}/.exec(track.stdout)![0];
+    const added = frameshell(["clip", "add", trackId, "assets/ana.mp4", "--start", "20", "--in", "0", "--out", "3"]);
+    const clipId = /c_[0-9a-f]{6}/.exec(added.stdout)![0];
+    const framed = frameshell(["clip", "reframe", clipId, "--anchor", "0.2"]);
+    expect(framed.stderr).toBe("");
+    expect(framed.code).toBe(0);
+    expect(framed.stdout).toContain(`Reframe ${clipId} for 9x16: fixed anchor`);
+    expect(framed.stdout).toMatch(/scale [\d.]+ · x -?[\d.]+ · y -?[\d.]+ at the start · static, no keys/);
+    const tx = /tx (\S+)/.exec(framed.stdout)![1]!;
+    const clipOf = () => JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).tracks.flatMap((t: { clips?: { id: string }[] }) => t.clips ?? []).find((c: { id: string }) => c.id === clipId);
+    expect(clipOf().transform.scale).toBeGreaterThan(1);
+    expect(frameshell(["revert", tx]).code).toBe(0);
+    expect(clipOf().transform).toBeUndefined();
+    const refused = frameshell(["clip", "reframe", clipId, "--format", "tall"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("9x16");
+    // Later tests count on the program track being the last one.
+    expect(frameshell(["track", "remove", trackId, "--force"]).code).toBe(0);
+  }, 60_000);
+
   it("paints who speaks on the group clock and takes the range back to measured", () => {
     const group = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].id as string;
     const first = frameshell(["multicam", "paint", group, "ana", "--from", "1", "--to", "3", "--speaking", "--alone"]);
@@ -301,6 +324,13 @@ describe("parsing multicam commands", () => {
       params: { group: "g_1", angles: ["ana", "ben"], replace: true },
     });
     expect(() => parseTimelineCommand(["multicam", "faces"], {})).toThrow(/takes 1\+ argument/);
+    expect(parseTimelineCommand(["clip", "reframe", "c_1"], {})).toMatchObject({ method: "clip.reframe", params: { clip: "c_1" } });
+    expect(parseTimelineCommand(["clip", "reframe", "c_1"], { format: "4x5", person: "Ana" })!.params).toEqual({ clip: "c_1", format: "4x5", person: "Ana" });
+    expect(parseTimelineCommand(["clip", "reframe", "c_1"], { anchor: "0.25" })!.params).toEqual({ clip: "c_1", anchor: 0.25 });
+    expect(() => parseTimelineCommand(["clip", "reframe", "c_1"], { person: "Ana", anchor: "0.5" })).toThrow(/not both/);
+    expect(() => parseTimelineCommand(["clip", "reframe", "c_1"], { anchor: "left" })).toThrow(/expected a number/);
+    expect(() => parseTimelineCommand(["clip", "reframe", "c_1"], { replace: true })).toThrow(/does not take --replace/);
+    expect(() => parseTimelineCommand(["clip", "move", "c_1"], { format: "9x16" })).toThrow(/does not take --format/);
     expect(parseTimelineCommand(["multicam", "paint", "g_1", "ana"], { from: "2", to: "4.5", speaking: true, alone: true })).toMatchObject({
       method: "multicam.paint",
       params: { group: "g_1", angle: "ana", start: 2, end: 4.5, speaking: true, alone: true },

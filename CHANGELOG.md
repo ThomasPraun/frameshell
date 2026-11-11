@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reframe a single clip to vertical following the face (#459, part of #451): `clip.reframe` (protocol 75), CLI
+  `frameshell clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]`, MCP `clip_reframe`. It scales
+  the picture to cover the frame and writes `x`/`y` keys (ease in-out on a move, static when the face holds) so the face
+  sits centered, 30 % from the top, never showing outside the picture. Faces come from YuNet on the clip's own stretch
+  of its file (the multicam face keys, now with a sampling `range`), or from a person's cached `people scan` track.
+  One transaction (`Reframe <file>`), one proposal in review mode; keys stay editable with `clip key` and in the
+  inspector. Rotation metadata and the proxy GOP of 15 were already honoured and are pinned by tests.
 - Duck music under speech as editable gain keys (#456, part of #451): `frameshell duck <track> --under <track>…`
   (`track.duck`, MCP `track_duck`, protocol 74) listens to the sound of the `--under` tracks and writes `gain` keys
   on the clips of an audio track that dip while someone speaks. Defaults: 7 dB deep (`--depth`), complete as the voice

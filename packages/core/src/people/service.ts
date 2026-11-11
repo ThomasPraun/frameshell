@@ -21,6 +21,7 @@ import {
   speakerLinkKey,
 } from "@frameshell/schema";
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
+import type { FacePoint, SourceRange } from "../multicam/faces.js";
 import { readPrevious } from "../transcripts/transcriber.js";
 import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFacesOffThread, facesOfPeople, presence } from "./face-clusters.js";
 import { angleSuggestions } from "./angle-suggest.js";
@@ -116,6 +117,28 @@ export class PeopleService {
     const source: RangesSource = { transcript: (rel) => transcripts.get(rel) ?? null, turns };
     if (faces) source.faces = async (whose) => personFaces(await faceState(file, faces), whose);
     return { person, ...(await personRanges(person, kind, timeline, source)) };
+  }
+
+  /**
+   * Where a person (id or exact name) is in the picture of `asset` (project-relative) from its cached face scan, one
+   * point per sample (the largest of their faces when several tracks overlap), inside `range` source seconds when
+   * given. `scanned` is false when the asset has no scan, so no point can exist. Throws `InvalidOperation`
+   * (`unknown person`) or `InvalidProjectFile`.
+   */
+  async faceTrack(root: string, ref: string, asset: string, faces: FaceScans, range?: SourceRange): Promise<{ person: Person; scanned: boolean; points: FacePoint[] }> {
+    const file = await readPeople(root);
+    const person = requirePerson("people.faceTrack", file, ref);
+    const state = await faceState(file, faces);
+    const best = new Map<number, { point: FacePoint; area: number }>();
+    for (const track of state.owners.tracks.get(person.id) ?? []) {
+      if (track.asset !== asset) continue;
+      for (const box of track.track.boxes) {
+        if (range && (box.time < range.from || box.time > range.to)) continue;
+        const area = box.width * box.height;
+        if (area > (best.get(box.time)?.area ?? 0)) best.set(box.time, { point: { time: box.time, x: box.x, y: box.y }, area });
+      }
+    }
+    return { person, scanned: state.model.scans.has(asset), points: [...best.values()].map((entry) => entry.point).sort((a, b) => a.time - b.time) };
   }
 
   /** Add a person with no links. Throws `InvalidOperation` (`name taken`) or `InvalidProjectFile`. */

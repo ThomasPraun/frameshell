@@ -830,6 +830,32 @@ export const MulticamFacesResultSchema = z.object({
 /** See {@link MulticamFacesResultSchema}. */
 export type MulticamFacesResult = z.output<typeof MulticamFacesResultSchema>;
 
+/** Result of `clip.reframe`: what was found and the operations that wrote the framing. */
+export const ClipReframeResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
+  clip: z.string(),
+  format: z.string().describe("Aspect framed for, `<w>x<h>` (`9x16`)."),
+  follows: z.enum(["face", "person", "anchor"]).describe("What placed the picture: the largest face found, the named person's face, or the fixed `anchor`."),
+  samples: z.int().describe("Frames looked at (2 per second of the clip's source); 0 for `anchor`, and for `person` the samples of the cached scan used."),
+  faces: z.int().describe("Of those, frames where the face was found; 0 for `anchor`."),
+  placement: z
+    .object({
+      scale: z.number().describe("Factor on the fitted size that makes the picture cover the frame."),
+      x: z.number().describe("Offset in project pixels at the clip's start."),
+      y: z.number().describe("Offset in project pixels at the clip's start."),
+    })
+    .nullable()
+    .describe("Placement at the clip's first key; null when nothing was written."),
+  keys: z.int().describe("Keys written per moving property (`x`, `y`); 0 when the face holds one place and the placement is static."),
+  operations: z.array(z.string()).describe("Ids of the operations written, in order; empty when none was."),
+  tx: z.string().nullable().describe("Transaction of the writes, revertible as one; null when nothing was written."),
+  warnings: z.array(z.string()).describe("Few or no faces found, the framing replaced, a preview in another aspect. Empty when none."),
+});
+
+/** See {@link ClipReframeResultSchema}. */
+export type ClipReframeResult = z.output<typeof ClipReframeResultSchema>;
+
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z
   .looseObject({

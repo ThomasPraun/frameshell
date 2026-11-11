@@ -1,4 +1,5 @@
 import type {
+  ClipReframeResult,
   CleanupResult,
   DaemonConnection,
   HistoryResult,
@@ -41,6 +42,16 @@ mutations print the new revision):
   clip key <clip> --prop x|y|scale|opacity|gain --at s [--value v] [--ease linear|in|out|in-out] [--remove] [--clear]
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
+  clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]
+                               Frame a video clip for another aspect (default 9x16, for reels), keeping a face in
+                               it: scales the picture to cover the frame and positions it so the face sits centered,
+                               30 % from the top, never showing outside the picture. Looks at 2 frames per second
+                               of the clip's own stretch (first run downloads the YuNet face detector, about 33 MB),
+                               follows the largest face and writes x/y keys only where it moves (a face that never
+                               moves gives a static placement). --person follows that person's face from the cached
+                               people scan instead; --anchor (0 left edge, 1 right edge) fixes the picture's
+                               horizontal position with no face detection. Replaces the clip's x, y and scale; one
+                               transaction, revert undoes it. Correct the keys with clip key or in the app
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--script-ref ref | --clear-script-ref]
@@ -253,6 +264,9 @@ export const TIMELINE_OPTIONS = {
   threshold: { type: "string" },
   gap: { type: "string" },
   mask: { type: "string" },
+  format: { type: "string" },
+  person: { type: "string" },
+  anchor: { type: "string" },
   pauses: { type: "string" },
   "no-pauses": { type: "boolean" },
   breath: { type: "string" },
@@ -291,6 +305,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip split": ["at"],
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
+  "clip reframe": ["format", "person", "anchor"],
   "clip set": ["speed", "gain", "muted", "unmuted", "x", "y", "scale", "opacity", "props", "elements", "clear-elements", "script-ref", "clear-script-ref"],
   "transition set": ["at", "kind", "duration", "track"],
   "transition remove": ["at", "track"],
@@ -331,6 +346,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip key": [1, 1],
   "transition set": [0, 0],
   "transition remove": [0, 0],
+  "clip reframe": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -694,6 +710,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], shot: str("layout"), angles, corner: str("corner") });
       break;
     }
+    case "clip reframe":
+      method = "clip.reframe";
+      if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
+      Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
+      break;
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -804,6 +825,7 @@ export async function executeTimeline(
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -849,6 +871,19 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
     lines.push(`  ${shot.clip}  ${shot.start}–${shot.end} s  ${shot.shot} ${shot.angles.join(",")}  ${Math.round(shot.confidence * 100)}%  ${shot.reason}`);
   }
   return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatClipReframe(result: ClipReframeResult): string {
+  const follows = { face: `face in ${result.faces} of ${result.samples} frames`, person: `person's face in ${result.faces} of ${result.samples} frames`, anchor: "fixed anchor" }[result.follows];
+  const lines = [`Reframe ${result.clip} for ${result.format}: ${follows}`];
+  if (result.placement) {
+    const { scale, x, y } = result.placement;
+    const moves = result.keys > 0 ? `${result.keys} keys on x/y` : "static, no keys";
+    lines.push(`  scale ${scale} · x ${x} · y ${y} at the start · ${moves}`);
+  }
+  lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatTrackDuck(result: TrackDuckResult): string {
