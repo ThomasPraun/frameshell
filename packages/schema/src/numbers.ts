@@ -36,6 +36,15 @@ export function spellNumber(token: string, language: NumberLanguage): string[] |
   return [...whole, language === "es" ? "coma" : "point", ...digits];
 }
 
+/**
+ * `text` with every number written with digits replaced by the words {@link spellNumber} gives, everything
+ * else kept (punctuation carries prosody for a voice): `Son 23.` → `Son veintitrés.`. Digits glued to letters
+ * (`mp4`, `v1.2`) and numbers {@link spellNumber} cannot say stay as written.
+ */
+export function spellNumbersIn(text: string, language: NumberLanguage): string {
+  return text.replace(/(?<![\p{L}\p{N}.,])\p{Nd}+(?:[.,]\p{Nd}+)*(?![\p{L}\p{N}])/gu, (token) => spellNumber(token, language)?.join(" ") ?? token);
+}
+
 function integer(value: number, language: NumberLanguage): string[] | null {
   if (!Number.isSafeInteger(value) || value > MAX_SPELLED) return null;
   return language === "es" ? spanish(value) : english(value);

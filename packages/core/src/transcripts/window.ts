@@ -40,12 +40,13 @@ export async function readPcmWav(path: string): Promise<Pcm16 | null> {
   } catch {
     return null;
   }
-  if (bytes.length < 12 || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") return null;
+  return pcmOfWav(bytes);
+}
+
+/** {@link readPcmWav} on bytes already read. */
+export function pcmOfWav(bytes: Buffer): Pcm16 | null {
   let sampleRate = 0;
-  for (let offset = 12; offset + 8 <= bytes.length; ) {
-    const id = bytes.toString("ascii", offset, offset + 4);
-    const size = bytes.readUInt32LE(offset + 4);
-    const body = offset + 8;
+  for (const { id, body, size } of riffChunks(bytes)) {
     if (id === "fmt ") {
       if (body + 16 > bytes.length) return null;
       const format = bytes.readUInt16LE(body);
@@ -60,29 +61,58 @@ export async function readPcmWav(path: string): Promise<Pcm16 | null> {
       for (let i = 0; i < length; i++) samples[i] = bytes.readInt16LE(body + i * 2);
       return { sampleRate, samples };
     }
-    offset = body + size + (size % 2);
   }
   return null;
 }
 
-/** `pcm` as a mono 16-bit PCM WAV file. */
-export function pcmWavBytes(pcm: Pcm16): Buffer {
+/** Body of the first chunk `id` (4 ASCII characters) of a WAV file before its `data` chunk; null when absent or not a WAV. */
+export function wavChunk(bytes: Buffer, id: string): Buffer | null {
+  for (const chunk of riffChunks(bytes)) {
+    if (chunk.id === id) return bytes.subarray(chunk.body, Math.min(bytes.length, chunk.body + chunk.size));
+    if (chunk.id === "data") return null;
+  }
+  return null;
+}
+
+/** Top-level chunks of a RIFF WAVE file in order; none when `bytes` is not one. Sizes may run past the end. */
+function* riffChunks(bytes: Buffer): Generator<{ id: string; body: number; size: number }> {
+  if (bytes.length < 12 || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") return;
+  for (let offset = 12; offset + 8 <= bytes.length; ) {
+    const size = bytes.readUInt32LE(offset + 4);
+    yield { id: bytes.toString("ascii", offset, offset + 4), body: offset + 8, size };
+    offset += 8 + size + (size % 2);
+  }
+}
+
+/**
+ * `pcm` as a mono 16-bit PCM WAV file. `chunks` (4-character ASCII ids) go between `fmt ` and `data`, where
+ * WAV readers skip chunks they do not know.
+ */
+export function pcmWavBytes(pcm: Pcm16, chunks: readonly { id: string; body: Uint8Array }[] = []): Buffer {
   const data = pcm.samples.length * 2;
-  const out = Buffer.alloc(44 + data);
-  out.write("RIFF", 0, "ascii");
-  out.writeUInt32LE(36 + data, 4);
-  out.write("WAVEfmt ", 8, "ascii");
-  out.writeUInt32LE(16, 16);
-  out.writeUInt16LE(1, 20);
-  out.writeUInt16LE(1, 22);
-  out.writeUInt32LE(pcm.sampleRate, 24);
-  out.writeUInt32LE(pcm.sampleRate * 2, 28);
-  out.writeUInt16LE(2, 32);
-  out.writeUInt16LE(16, 34);
-  out.write("data", 36, "ascii");
-  out.writeUInt32LE(data, 40);
-  for (let i = 0; i < pcm.samples.length; i++) out.writeInt16LE(pcm.samples[i]!, 44 + i * 2);
-  return out;
+  const extra = chunks.map(({ id, body }) => {
+    const chunk = Buffer.alloc(8 + body.length + (body.length % 2));
+    chunk.write(id, 0, 4, "ascii");
+    chunk.writeUInt32LE(body.length, 4);
+    chunk.set(body, 8);
+    return chunk;
+  });
+  const head = Buffer.alloc(36);
+  head.write("RIFF", 0, "ascii");
+  head.writeUInt32LE(36 + extra.reduce((total, chunk) => total + chunk.length, 0) + data, 4);
+  head.write("WAVEfmt ", 8, "ascii");
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(pcm.sampleRate, 24);
+  head.writeUInt32LE(pcm.sampleRate * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  const body = Buffer.alloc(8 + data);
+  body.write("data", 0, "ascii");
+  body.writeUInt32LE(data, 4);
+  for (let i = 0; i < pcm.samples.length; i++) body.writeInt16LE(pcm.samples[i]!, 8 + i * 2);
+  return Buffer.concat([head, ...extra, body]);
 }
 
 /** Input of {@link transcribeWindow}. */

@@ -31,6 +31,7 @@
       "default": {
         "clipTypes": [],
         "transcriptionProviders": [],
+        "speechProviders": [],
         "commands": [],
         "exportPresets": [],
         "skills": []
@@ -46,6 +47,14 @@
           }
         },
         "transcriptionProviders": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "speechProviders": {
           "default": [],
           "type": "array",
           "items": {

@@ -46,7 +46,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 7 | On-disk format | **JSON + published JSON Schema**, split files (see §5) | Agents edit JSON reliably; small diffs; nested sequences; transcripts isolated | YAML (type gotchas; comments lost on rewrite anyway), single file (huge diffs) |
 | 8 | Time unit | **Decimal seconds**, snapped by core to project frame grid, 3 decimals; **CFR proxies** for VFR sources | Native to humans, agents, whisper and ffmpeg; VFR (OBS, phones) handled at import | Integer frames (conversions everywhere, fps change rewrites all), rationals (hostile to agents) |
 | 9 | AI | **Bring your own agent**: no built-in LLM. The UI injects context references from the user's selection into the agent terminal (decision 21) | Zero model cost; does not compete with agents that improve monthly | Built-in chat/agent |
-| 10 | Media AI services | **Transcription is first-class** (`frameshell transcribe`, provider interface, whisper.cpp default, `--verify`). TTS, video, image, music = assets produced by the agent | The data model needs word timestamps in one format; everything else changes too fast to own | Everything built in, nothing built in |
+| 10 | Media AI services | **Transcription is first-class** (`frameshell transcribe`, provider interface, whisper.cpp default, `--verify`). **Speech from text is a provider interface too** (`frameshell voiceover generate`, ADR 0034; no voice shipped). Video, image, music = assets produced by the agent | The data model needs word timestamps in one format; a voiceover needs a cache, trimming and a cost check every agent would otherwise reinvent; everything else changes too fast to own | Everything built in, nothing built in, TTS only through the agent (decision 10 before ADR 0034) |
 | 11 | Licence | **Apache 2.0** + protected "Frameshell" trademark + DCO | Adoption and ecosystem over protection; patent grant; monetize via services | MIT (no patent grant), GPLv3/AGPLv3 + CLA (lower adoption) |
 | 12 | Native binaries | **Downloaded on first use**: pinned versions + checksums (ffmpeg GPL build with x264, whisper.cpp, whisper models). Override with system binaries. `frameshell doctor` | Small installer; controlled versions; x264 quality; Frameshell does not redistribute GPL binaries | Bundled in installer (size, GPL obligations), system only (version chaos) |
 | 13 | Plugins | **Node/TS packages** + `frameshell-plugin.json`; official adapters built on the same API; GitHub topic discovery; per-project pinning; project trust | herdr-style zero-friction ecosystem; API proven by first-party plugins; every plugin teaches the agent via its skill | Curated marketplace, UI extension points in MVP |
@@ -67,6 +67,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 28 | Photo segmentation | **Point at parts inside a photo** in image projects: a Pick click on a still image returns three masks (part to whole) from MobileSAM, run on the managed ONNX Runtime Web in a daemon worker and downloaded on first use; the first operation is a **cut-out** layer (`image.cutout`), and background removal is a cut-out plus hiding the photo (ADR 0022). | "The person on the left" becomes addressable with no new tool to install; one operation covers cut-out and background removal | A segmentation plugin (untrusted projects lose it), SAM 2.1 tiny (3.5× the download), matting models (cannot be pointed), masked blur in v1 (needs a schema effect) |
 | 29 | Shoot scripts and takes | **A shoot script** (`scripts/*.md`, `shoot: true`) written by the agent beside the person's untouched original: `**Name:**` per line, `[LABEL: …]` cues, `[FREE: …]` for unscripted speech, `follow: words\|topics`, stale check by `source_hash`. Each **take** is compared word by word against it; **every deviation is marked, none blocks**; the person accepts or records again. The newest take per scene assembles the first cut as timeline transactions. Takes and decisions in `shoots/<slug>.json` (ADR 0023) | One deterministic comparison that works without an agent; the agent sees takes and deviations and adds judgment; the first cut exists when recording ends | A fixed `frameshell-script.md`, reading the original directly, flagging only big misses, an LLM in Frameshell |
 | 30 | Shoot capture | **Record in the app**: camera, screen or window, microphone, system audio (`getDisplayMedia` + `audio: 'loopback'`); a **continuous shoot session** is one multicam group, takes are ranges in it (keys T/C); per-take transcription for deviations; a resident `whisper-server` (`small-q5_1`) drives a **teleprompter** whose focus line keeps the word being said centered (ADR 0024) | One app from script to finished video; one program track per session; live recognition never writes the project | One file set per take, external recorders only, browser speech recognition, the macOS system picker |
+| 31 | Voiceover | **Voiceover from text through our own `SpeechProvider` contract** (`contributes.speechProviders`, `registerSpeechProvider`); a **voiceover script** (`scripts/*.md`, `voiceover: true`) read with the shoot-script line rules, each line with a display form and a spoken form (respellings `{display\|spoken}`, numbers spelled out); one take per line in `assets/voiceover/<script slug>/<line id>.wav`, cached by a key stored inside the take, head and tail silence trimmed, imported together; a paid provider generates nothing until the person confirms the cost (`--yes`); first real provider a machine-level `command` in `configDir` only; cloud keys from environment variables; Kokoro later behind a spike, no GPL G2P (ADR 0034) | Core owns what every voice needs (cache, trim, split, misread check, placement) and stays testable with a stand-in; voice churn stays in providers; nothing paid runs twice or unconfirmed | Agent-made narration only, Kokoro in core now (Spanish G2P is GPL), takes in `.frameshell/cache`, a hash index outside the takes |
 
 ### Cross-cutting rules
 
@@ -208,6 +209,7 @@ my-video/
 ├── scripts/
 │   └── script.md              # Markdown scripts
 ├── assets/                    # footage, images, audio, fonts, AI-generated media
+│   └── voiceover/<script>/    # one generated take per voiceover script line (ADR 0034)
 ├── compositions/
 │   ├── hyperframes/intro/     # HTML compositions
 │   └── remotion/              # Remotion project (ADR 0009); clips may also point at one outside the project
@@ -380,6 +382,7 @@ Plain Markdown. Optional conventions:
 - Each `##` heading is a scene; its slug is the anchor used in `scriptRef` (`scripts/script.md#intro`). A `scriptRef` without `#anchor` refers to the whole script.
 - A scene may name the transcript words it covers with an HTML comment right under its heading, `<!-- words: talk.words.json w_000010..w_000042 -->` (ADR 0015). Optional; a single id names one word. Word ids repeat across transcripts, so the comment names the transcript file (under `transcripts/`); the bare form `<!-- words: w_000010..w_000042 -->` works only while exactly one transcript holds both ids, otherwise it warns and places nothing. The range runs in transcript order and stays inside one transcript.
 - **Shoot scripts** (ADR 0023): frontmatter `shoot: true` adds lines (one per non-blank text line), speakers (`**Name:**` at a line start, held until the next), cues (`[LABEL: text]`, never spoken; `[FREE: …]` = unscripted speech checked for presence), `follow: words|topics`, `source` + `source_hash` of the person's original (stale when it changes), and the scene's expected length from a heading timing `(0:05–0:40)`, which is left out of the scene's title and anchor. `frameshell script check <file>` validates them.
+- **Voiceover scripts** (ADR 0034): frontmatter `voiceover: true` reads the script with the shoot-script line rules (one line per non-blank text line, `**Name:**`, cues never read) and adds `language`, `provider`, `voice`. Each line has an id `<scene slug>-<n>`, a display form (as written) and a spoken form: respellings `{display|spoken}` resolved to their spoken side, numbers with digits spelled out in `language` (`es`, `en`). A scene longer than its heading timing at 2.5 words/s warns. `frameshell voiceover generate <file>` says the lines.
 - `frameshell script outline <file> --json` returns parsed scenes; a scene with a words comment also gets its `span`: first to last placed word on each timeline. The UI highlights the scene of the selected clip and flags scenes with no clips; the timeline shows a band under the ruler with one span per scene that has a placed word range (hollow while no clip of that timeline has its `scriptRef`), and a click on a span selects its time range and clips.
 
 ### 5.6 Schema evolution
@@ -491,6 +494,7 @@ frameshell people confirm <suggestion>… [--reject] [--person <person>]
 frameshell people ranges <person> [--on-screen] [--json]   # timeline spans where the person speaks (default) or is on screen
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
+frameshell voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes]   # one take per line into assets/voiceover/, cached, trimmed, imported; paid providers need --yes (ADR 0034)
 
 frameshell tx begin "<label>" | commit | abort
 frameshell proposal status [--json]           # review mode on/off, the open proposal, last decisions (ADR 0019)
@@ -547,6 +551,7 @@ Design rules:
   "contributes": {
     "clipTypes": ["hyperframes"],
     "transcriptionProviders": [],
+    "speechProviders": [],
     "commands": ["hyperframes new"],
     "exportPresets": [],
     "skills": ["skills/hyperframes/SKILL.md"]
@@ -560,6 +565,7 @@ Design rules:
 |---|---|---|
 | Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip)` → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
+| Speech provider | ✅ (ADR 0034) | `voices()`, optional `estimate(text, voice, opts)` → `{ cost, currency }`, `synthesize(text, voice, opts, ctx)` → `{ file }` (mono 16-bit PCM WAV); the host spells numbers, caches, trims, writes and imports the take |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
 | Agent skills | ✅ | Markdown shipped with the plugin; `frameshell plugin install` exposes it to the agent (e.g. linked into `.claude/skills/`) |
 | Export presets | ✅ | Declarative codec, resolution, aspect and loudness settings |
@@ -685,6 +691,7 @@ Estimate: 3–5 months for one developer. First cuts if needed: overlay transfor
 | **v0.15** | People (ADR 0020): `people.json`, voice suggestions across files, face recognition scan and clusters, voice↔face by co-occurrence, people from multicam angles, ranges per person, speaker names in subtitles, People panel |
 | **v0.16** | Drag to edit composition elements (ADR 0021): double-click a generated clip, move or scale an element inside it, saved as clip `elements` (CSS selector → move, scale) applied over the source in live preview and render; HyperFrames first, then Remotion |
 | **v0.17** | Photo segmentation (ADR 0022): Pick names parts inside a photo in image projects (MobileSAM masks), cut-out layer, background removal as cut-out plus hiding the photo. |
+| **Next** | Voiceover from text (ADR 0034): speech provider contract, voiceover scripts, cached and trimmed takes, cost confirmation; then a machine-level `command` provider, silence split and misread check, placement on markers and app UI, cloud plugins, a Kokoro spike |
 | **v1.0** | Windows stable + signed; stable schema v1 and plugin API v1 guarantees; persistent terminal sessions (herdr-style) |
 | **Later** | Remote/cloud daemon (render farm, team sync) as the monetization path; hosted agent; template/plugin marketplace |
 
