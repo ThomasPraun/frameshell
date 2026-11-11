@@ -38,6 +38,7 @@ import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
+import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { probeMedia } from "./media/ffmpeg.js";
@@ -1120,6 +1121,46 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "transition.set": (params, caller) => operate("transition.set", params, caller),
     "transition.remove": (params, caller) => operate("transition.remove", params, caller),
     "clip.key": (params, caller) => operate("clip.key", params, caller),
+    "track.duck": async ({ cwd, timeline, track, under, depth, attackMs, releaseMs, threshold, gap }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `track.duck: ${reason}`, { op: "track.duck", reason, field });
+      const known = (id: string) => {
+        const found = loaded.tracks.find((candidate) => candidate.id === id);
+        if (!found) throw new RpcError(ErrorCode.TrackNotFound, `track.duck: no track "${id}" in timeline ${timeline}.`, { track: id, available: loaded.tracks.map((t) => t.id) });
+        return found;
+      };
+      const music = known(track);
+      if (music.kind !== "audio") throw invalid(`${track} is a ${music.kind} track; ducking writes gain keys on the clips of an audio track.`, "track");
+      for (const id of under) {
+        const voice = known(id);
+        if (id === track) throw invalid(`${id} is the track being ducked; name the tracks with the voice in \`under\`.`, "under");
+        if (voice.kind !== "video" && voice.kind !== "audio") {
+          throw invalid(`${id} is a ${voice.kind} track; \`under\` takes video and audio tracks (a multicam program track has no sound of its own).`, "under");
+        }
+      }
+      const attack = attackMs / 1000;
+      const release = releaseMs / 1000;
+      let stretches: Span[] = [];
+      let heardWarnings: string[] = [];
+      // Measured against the timeline the operation applies to: a voice edited or a proposal rebased meanwhile is heard as it is then.
+      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+        const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
+        stretches = speechStretches(heard.runs, { gap, attack, release });
+        heardWarnings = heard.warnings;
+        const curve = dipCurve(stretches, { depth, attack, release });
+        return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
+      };
+      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, prepare);
+      return {
+        ...result,
+        track,
+        under,
+        stretches: stretches.length,
+        speechSeconds: Math.round(stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
+        warnings: [...result.warnings, ...heardWarnings],
+      };
+    },
     cut: (params, caller) => operate("cut", params, caller),
     cleanup: async ({ cwd, timeline, pauses, breath, retakes, minConfidence, dryRun, skip }, caller) => {
       const dir = await root(cwd);

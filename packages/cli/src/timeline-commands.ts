@@ -13,6 +13,7 @@ import type {
   Progress,
   TimelineProblem,
   TimelineView,
+  TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
 import { resolveSubtitleStyle } from "@frameshell/schema";
@@ -119,6 +120,15 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
+                               Music under a voice: writes gain keys on the clips of audio track <track> that dip
+                               while someone speaks on the --under tracks (video or audio; speech = sound above
+                               --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
+                               Dip --depth dB (default 7), complete as the voice starts (--attack ms, default 40) and
+                               gone --release ms after it ends (default 450). The keys are the clip's level minus
+                               the dip, marked as the duck's: run it again after an edit and they are replaced, keys
+                               you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
+                               like any gain key; a key you set is a level, not a dip. Revert undoes it
   transition set --at s [--kind dissolve|fade] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. A clip's
@@ -158,7 +168,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "cut", "cleanup", "transition", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -236,6 +246,12 @@ export const TIMELINE_OPTIONS = {
   rules: { type: "string" },
   "replace-human": { type: "boolean" },
   replace: { type: "boolean" },
+  under: { type: "string", multiple: true },
+  depth: { type: "string" },
+  attack: { type: "string" },
+  release: { type: "string" },
+  threshold: { type: "string" },
+  gap: { type: "string" },
   mask: { type: "string" },
   pauses: { type: "string" },
   "no-pauses": { type: "boolean" },
@@ -290,6 +306,7 @@ const ALLOWED: Record<string, string[]> = {
   "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
+  "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
   cut: ["from", "to", "no-snap", "snap-window"],
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "tx begin": [],
@@ -327,6 +344,7 @@ const ARITY: Record<string, [number, number]> = {
   "image cutout": [1, 1],
   "multicam turns": [1, 1],
   "direct ": [1, 1],
+  "duck ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
   cleanup: [0, 0],
   "tx begin": [1, 1],
@@ -352,8 +370,8 @@ export function timelineCommandFlags(): Map<string, string[]> {
  */
 export function parseTimelineCommand(positionals: string[], values: Values): TimelineInvocation | null {
   const [group, ...rest] = positionals;
-  // `history`, `revert` and `direct` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
-  const flat = group === "cut" || group === "cleanup" || group === "history" || group === "revert" || group === "direct";
+  // `history`, `revert`, `direct` and `duck` take no subcommand: key them as "<group> " so ALLOWED/ARITY stay one table.
+  const flat = group === "cut" || group === "cleanup" || group === "history" || group === "revert" || group === "direct" || group === "duck";
   const command = group === "cut" || group === "cleanup" ? group : flat ? `${group} ` : `${group} ${rest[0] ?? ""}`;
   const args = flat ? rest : rest.slice(1);
   const allowed = ALLOWED[command];
@@ -696,6 +714,21 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         replaceHuman: values["replace-human"] === true ? true : undefined,
       });
       break;
+    case "duck ": {
+      method = "track.duck";
+      const under = list("under");
+      if (under === undefined) throw new UsageError("`frameshell duck <track>` needs --under <track>: the track with the voice (repeat it for more).");
+      Object.assign(params, {
+        track: args[0],
+        under,
+        depth: num("depth"),
+        attackMs: num("attack"),
+        releaseMs: num("release"),
+        threshold: num("threshold"),
+        gap: num("gap"),
+      });
+      break;
+    }
     case "cleanup":
       method = "cleanup";
       if (values["no-pauses"] === true && values["pauses"] !== undefined) throw new UsageError("Pass --pauses <s> or --no-pauses, not both.");
@@ -771,6 +804,7 @@ export async function executeTimeline(
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
   if (inv.method === "multicam.direct") return formatMulticamDirect(result as MulticamDirectResult);
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
+  if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
@@ -815,6 +849,12 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
     lines.push(`  ${shot.clip}  ${shot.start}–${shot.end} s  ${shot.shot} ${shot.angles.join(",")}  ${Math.round(shot.confidence * 100)}%  ${shot.reason}`);
   }
   return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatTrackDuck(result: TrackDuckResult): string {
+  const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
+  const written = result.changes.updated.length;
+  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${formatOperation(result)}`;
 }
 
 function formatMulticamFaces(result: MulticamFacesResult): string {
