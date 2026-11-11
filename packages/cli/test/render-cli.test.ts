@@ -129,7 +129,7 @@ describe("frameshell render and frame", () => {
       expect(result.code, result.stderr).toBe(0);
       const outputs = ["16x9", "9x16"].map((id) => join(project, "exports", `main-youtube-1080p-${id}.mp4`));
       expect(result.stdout).toBe(outputs.map((output) => `Rendered ${output}\n`).join(""));
-      expect(result.stderr).toContain("youtube-1080p · 1080x1920");
+      expect(result.stderr).toContain("youtube-1080p · libx264 · 1080x1920");
       for (const output of outputs) expect(existsSync(output)).toBe(true);
 
       const shot = frameshell(["frame", "--at", "0.5", "--out", "tall.jpg", "--format", "9x16"]);
