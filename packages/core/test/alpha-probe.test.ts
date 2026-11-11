@@ -28,7 +28,8 @@ function fakeFfprobe(stream: Record<string, unknown>, formatName: string): strin
   return script;
 }
 
-describe("alpha detection by pixel format", () => {
+// The fake ffprobe is a shell script, which Windows cannot spawn; the parsing it checks is the same on every OS.
+describe.skipIf(process.platform === "win32")("alpha detection by pixel format", () => {
   it.each([
     ["ProRes 4444", { codec_name: "prores", pix_fmt: "yuva444p10le" }, "mov,mp4,m4a,3gp,3g2,mj2", true],
     ["QuickTime Animation", { codec_name: "qtrle", pix_fmt: "argb" }, "mov,mp4,m4a,3gp,3g2,mj2", true],
