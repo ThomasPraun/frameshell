@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   encoder in use, a speed class (fast, medium, slow) with the proxy and draft sizes it suits, and the disk a master
   intermediate takes per minute; `doctor --reprobe` tests the encoders again. The codec list's hardware test encode
   is now the same 0.2 s test.
+- Agent skill: a playbook for short-form reels from a talking-head take (#452), `skills/frameshell/reference/reels.md`.
+  It covers a one-round intake, the vertical canvas and −14 LUFS loudness, passes (words, cut, captions, graphics
+  plan, zooms, sound), 9:16 safe zones, notes as rules for the whole video, and checks before handing over.
+- Agent skill: a critique loop for reels and generated videos (#454), `skills/frameshell/reference/critique.md`:
+  contact, phone and loudness checks on the export, a fresh critic that describes before judging, a scoring rubric
+  with automatic caps or pairwise comparison, scoped fix notes, a round log and when to stop.
 
 ## [0.18.0] - 2026-11-07
 
