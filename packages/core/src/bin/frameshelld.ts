@@ -4,6 +4,7 @@
 // FRAMESHELL_TX_IDLE_MS (ms of session inactivity that ends an automatic transaction).
 // FRAMESHELL_SEGMENT_STAND_IN=1 (e2e only): photo segmentation answers with squares instead of downloading MobileSAM.
 // FRAMESHELL_SHOOT_STAND_IN=1 (e2e only): takes recorded in the app are heard as their scene's words, no speech model.
+// FRAMESHELL_MATTE_STAND_IN=1 (tests only): subject mattes take what is brighter than mid-gray, no model download.
 // Startup errors go to stderr: the spawning CLI relays them to the user.
 import { resolveSocketPath } from "@frameshell/protocol";
 import { DEFAULT_IDLE_TIMEOUT_MS, startDaemon } from "../daemon.js";
@@ -19,7 +20,15 @@ try {
   const txIdleGapMs = parseMs("FRAMESHELL_TX_IDLE_MS", DEFAULT_TX_IDLE_GAP_MS);
   const segmentEngine = process.env["FRAMESHELL_SEGMENT_STAND_IN"] === "1" ? standInSegmentEngine() : undefined;
   const shootStandIn = process.env["FRAMESHELL_SHOOT_STAND_IN"] === "1";
-  const daemon = await startDaemon({ socketPath, idleTimeoutMs, txIdleGapMs, ...(segmentEngine ? { segmentEngine } : {}), ...(shootStandIn ? { shootStandIn } : {}) });
+  const matteStandIn = process.env["FRAMESHELL_MATTE_STAND_IN"] === "1";
+  const daemon = await startDaemon({
+    socketPath,
+    idleTimeoutMs,
+    txIdleGapMs,
+    ...(segmentEngine ? { segmentEngine } : {}),
+    ...(shootStandIn ? { shootStandIn } : {}),
+    ...(matteStandIn ? { matteStandIn } : {}),
+  });
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => void daemon.close());
   await daemon.closed;
   process.exit(0);

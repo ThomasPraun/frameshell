@@ -28,6 +28,8 @@ import { AUDIO_CACHE_DIR, audioCacheKey, classifyAudioCache } from "../transcrip
 import { VOICES_DIR, classifyVoiceCache } from "../people/voices.js";
 import { VERIFY_CACHE_DIR, classifyVerifyCache } from "../transcripts/verify.js";
 import { TRANSCRIBE_WINDOW_DIR, classifyWindowWav } from "../transcripts/window.js";
+import { MATTES_DIR, classifyMatte, matteKey } from "../matte/cache.js";
+import { MATTE_MODEL_PIN } from "../matte/models.js";
 
 /** What {@link MediaService.import} reports; the daemon adds whether provenance was recorded. */
 export type MediaImportResult = { dir: string; imported: Omit<AssetImportResult["imported"][number], "provenance">[] };
@@ -52,6 +54,8 @@ export interface MediaServiceOptions {
    * {@link MediaService.gc}). Default true.
    */
   gcOnAttach?: boolean;
+  /** Model whose subject mattes `gc` keeps (`<id>@<revision>`, or `stand-in`). Default {@link MATTE_MODEL_PIN}. */
+  matteModel?: string;
 }
 
 /**
@@ -116,6 +120,7 @@ export class MediaService {
   /** Tail of each asset's report chain (root + path): reports never overtake each other. */
   readonly #reports = new Map<string, Promise<void>>();
   readonly #gcOnAttach: boolean;
+  readonly #matteModel: string;
   #closed = false;
 
   constructor(options: MediaServiceOptions) {
@@ -123,6 +128,7 @@ export class MediaService {
     this.#jobs = options.jobs;
     this.#watch = options.watch ?? true;
     this.#gcOnAttach = options.gcOnAttach ?? true;
+    this.#matteModel = options.matteModel ?? MATTE_MODEL_PIN;
     this.#onAssetChanged = options.onAssetChanged;
     // Only state moves change what `list` says; progress within a state is the queue's own news.
     this.#jobs.watch(({ job, stateChanged }) => {
@@ -232,6 +238,48 @@ export class MediaService {
   }
 
   /**
+   * Content hash, probe and proxy (project-relative; null for audio and stills) of a complete ingest of `rel`
+   * at the project fps. When there is none, queues the ingest (or joins the one queued or running) and waits
+   * for it. Never call it from inside a job of the shared queue: the ingest may need that job's slot. Throws
+   * `InvalidOperation` (reason `ingest failed`) with the ingest's error, `AssetNotFound` when `rel` is gone.
+   */
+  async ingested(root: string, rel: string): Promise<{ hash: string; media: MediaProbe; proxy: string | null }> {
+    const { store } = this.#attached(root);
+    for (let attempt = 0; ; attempt++) {
+      if (!(await stat(store.abs(rel)).catch(() => null))?.isFile()) {
+        throw new RpcError(ErrorCode.AssetNotFound, `${rel} is not a file in ${root}. Import it first: \`frameshell import <file>\`.`, { path: rel });
+      }
+      const hash = await store.hash(rel);
+      const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
+      const manifest = await store.manifest(store.key(hash, fps));
+      if (manifest) return { hash, media: manifest.media, proxy: manifest.proxy };
+      // The file changing under each ingest (still being copied in) must not loop forever.
+      if (attempt === 3) throw new RpcError(ErrorCode.InvalidOperation, `${rel} keeps changing while it is ingested; try again once it is complete.`, { reason: "ingest failed", path: rel });
+      const job = await this.#settled(this.#enqueue(root, rel).id);
+      if (job.state !== "done") {
+        throw new RpcError(ErrorCode.InvalidOperation, `${rel} could not be ingested: ${job.error ?? job.state}.`, { reason: "ingest failed", path: rel });
+      }
+    }
+  }
+
+  /** The job `id` once it is done, failed or canceled. */
+  #settled(id: string): Promise<JobInfo> {
+    return new Promise((resolve) => {
+      const finished = (job: JobInfo | undefined) => job !== undefined && job.state !== "queued" && job.state !== "running";
+      const stop = this.#jobs.watch(({ job }) => {
+        if (job.id !== id || !finished(job)) return;
+        stop();
+        resolve(job);
+      });
+      const now = this.#jobs.get(id);
+      if (finished(now)) {
+        stop();
+        resolve(now!);
+      }
+    });
+  }
+
+  /**
    * ffprobe summary of `rel` (project-relative). Taken from a complete ingest
    * of the current content when there is one, else probed now (sub-second)
    * and cached while size and mtime hold: timeline edits never wait for
@@ -264,7 +312,7 @@ export class MediaService {
 
   /**
    * Delete derived media (proxies, sidecars, manifests, waveforms,
-   * thumbnails, energy envelopes, face scans, transcription WAVs) of content no file of the project has now,
+   * thumbnails, energy envelopes, face scans, subject mattes, transcription WAVs) of content no file of the project has now,
    * keyed by the media index at the current fps and recipe. The files are
    * every one under `assets/` plus every other path the index holds (a
    * deleted asset's entry is dropped). Never touches `assets/`. A key whose
@@ -301,6 +349,7 @@ export class MediaService {
     const mediaKeys = new Set([...hashes].map((hash) => store.key(hash, fps)));
     const energyKeys = new Set([...hashes].map(energyCacheKey));
     const peopleKeys = new Set([...hashes].map(faceScanKey));
+    const matteKeys = new Set([...hashes].map((hash) => matteKey(hash, this.#matteModel, fps)));
     const common = {
       root,
       temps: options.temps,
@@ -323,6 +372,7 @@ export class MediaService {
     removed.push(
       ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
       ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || peopleKeys.has(key) })),
+      ...(await sweep({ ...common, dir: MATTES_DIR, classify: classifyMatte, keep: (key) => unknown > 0 || matteKeys.has(key) })),
       // "Chat about this" captures: by age only, never by key.
       ...(await sweep({
         ...common,

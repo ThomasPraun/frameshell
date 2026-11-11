@@ -76,7 +76,11 @@ import {
   PHOTO_SEGMENTATION_DECODER_MODEL,
   PHOTO_SEGMENTATION_ENCODER_MODEL,
   SPEAKER_EMBEDDING_MODEL,
+  VIDEO_MATTE_MODEL,
 } from "./binaries/manifest.js";
+import { matteKey, mattePaths, readMatteInfo, type MatteInfo } from "./matte/cache.js";
+import { computeMatte } from "./matte/job.js";
+import { MATTE_MODEL_PIN } from "./matte/models.js";
 import { workerSegmentEngine } from "./segment/engine.js";
 import type { SegmentEngine } from "./segment/segmenter.js";
 import { checkMask, cutoutTransform, freeCutoutName, isMediaClip, renderCutout, resolveMask } from "./segment/cutout.js";
@@ -171,6 +175,11 @@ export interface DaemonOptions {
    * ({@link standInWords}) instead of being transcribed. Default false.
    */
   shootStandIn?: boolean;
+  /**
+   * Tests only: `matte.prepare` takes whatever is brighter than mid-gray as the subject (`standInMatte`) and
+   * names the model `stand-in`, so nothing is downloaded. Default false.
+   */
+  matteStandIn?: boolean;
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -274,9 +283,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   };
   /** Root spelled as the project was opened, by canonical path: timeline events carry canonical roots. */
   const openedRoots = new Map<string, string>();
+  const matteModel = options.matteStandIn === true ? "stand-in" : MATTE_MODEL_PIN;
   const media = new MediaService({
     binaries,
     jobs,
+    matteModel,
     onAssetChanged: (root, path, asset) => publishFor("asset.changed", root, { project: root, path, asset }),
   });
   const audioFx = new AudioFxService({
@@ -1928,6 +1939,72 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           signal: ctx.signal,
         });
         return { dir, ...result };
+      });
+    },
+    "matte.prepare": async ({ cwd, asset }, _caller, request) => {
+      const dir = await root(cwd);
+      const invalid = (reason: string, message: string) => new RpcError(ErrorCode.InvalidOperation, `matte.prepare: ${message}`, { op: "matte.prepare", reason, field: "asset" });
+      const project = await readEnclosingProject(dir);
+      // ADR 0032 decision 6: no plates in image projects.
+      if (project?.config.kind === "image") throw invalid("image project", "image projects have no video to matte.");
+      const { rel } = await resolveAsset(dir, resolve(cwd, asset));
+      const probe = await media.probe(dir, rel);
+      if (!probe.video || probe.video.still) throw invalid("not a video", `${rel} has no moving picture to matte.`);
+      // Before the job: the ingest needs a slot of the same queue.
+      const ready = await media.ingested(dir, rel);
+      if (!ready.proxy) throw invalid("not a video", `${rel} has no moving picture to matte.`);
+      const proxy = ready.proxy;
+      const fps = project?.config.fps ?? 30;
+      const key = matteKey(ready.hash, matteModel, fps);
+      const describe = (info: MatteInfo, cached: boolean): MethodResult<"matte.prepare"> => ({
+        asset: rel,
+        hash: ready.hash,
+        model: matteModel,
+        matte: mattePaths(key).video,
+        size: { width: info.width, height: info.height },
+        fps: info.fps,
+        frames: info.frames,
+        cached,
+        seconds: info.seconds,
+      });
+      const known = await readMatteInfo(dir, key, ready.hash);
+      if (known) return describe(known, true);
+      // The caller may be gone (the job outlives it): its progress is then dropped.
+      const tell = (update: Progress) => {
+        try {
+          request.progress(update);
+        } catch {
+          // Connection closed.
+        }
+      };
+      return inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
+        // A job of the same content that finished while this one waited made it already.
+        const made = await readMatteInfo(dir, key, ready.hash);
+        if (made) {
+          ctx.update({ cached: true, progress: 1 });
+          return describe(made, true);
+        }
+        ctx.update({ step: "matte", progress: 0, cached: false });
+        const overrides = await projectBinaries(dir);
+        const info = await computeMatte(
+          dir,
+          { asset: rel, hash: ready.hash, proxy, fps, model: matteModel },
+          {
+            ffmpeg: () => binaries.ensure("ffmpeg", overrides, { onProgress: tell }),
+            ffprobe: () => binaries.ensure("ffprobe", overrides, { onProgress: tell }),
+            files: async () =>
+              options.matteStandIn === true
+                ? { runtime: null, model: null }
+                : {
+                    runtime: await binaries.ensure(ONNX_RUNTIME_WEB, overrides, { onProgress: tell }),
+                    model: await binaries.ensureModel(VIDEO_MATTE_MODEL, { onProgress: tell }),
+                  },
+            onProgress: (progress) => ctx.update({ progress }),
+            report: tell,
+            signal: ctx.signal,
+          },
+        );
+        return describe(info, false);
       });
     },
     "people.ranges": async ({ cwd, person, kind, timeline }, caller) => {
