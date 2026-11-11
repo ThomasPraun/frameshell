@@ -1,14 +1,21 @@
 import { isDeepStrictEqual } from "node:util";
 import type { TimelinePatch } from "@frameshell/protocol";
-import type { AnyClip, AnyClipTrack, MulticamGroup, Timeline, Track } from "@frameshell/schema";
+import type { AnyClip, AnyClipTrack, Marker, MulticamGroup, Timeline, Track } from "@frameshell/schema";
 
 /**
  * Patch turning `from` into `to`, at clip granularity: whole tracks only when
- * a track appears, disappears or its own fields change; whole multicam groups.
- * Diffing makes every operation's inverse correct by construction
+ * a track appears, disappears or its own fields change; whole multicam groups
+ * and markers. Diffing makes every operation's inverse correct by construction
  * (`diff(after, before)`).
  */
 export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
+  const markers: NonNullable<TimelinePatch["markers"]> = [];
+  const markersAfter = new Map((to.markers ?? []).map((marker) => [marker.id, marker]));
+  for (const marker of from.markers ?? []) if (!markersAfter.has(marker.id)) markers.push({ id: marker.id, marker: null });
+  for (const marker of to.markers ?? []) {
+    const before = from.markers?.find((candidate) => candidate.id === marker.id);
+    if (!before || !isDeepStrictEqual(before, marker)) markers.push({ id: marker.id, marker });
+  }
   const groups: NonNullable<TimelinePatch["groups"]> = [];
   const groupsAfter = new Map((to.groups ?? []).map((group) => [group.id, group]));
   for (const group of from.groups ?? []) if (!groupsAfter.has(group.id)) groups.push({ id: group.id, group: null });
@@ -36,6 +43,7 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
     }
   }
   const patch: TimelinePatch = {};
+  if (markers.length > 0) patch.markers = markers;
   if (groups.length > 0) patch.groups = groups;
   if (tracks.length > 0) patch.tracks = tracks;
   // Deletions first: a clip moving between tracks is never in two places after the patch.
@@ -47,12 +55,13 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
 
 /** True when `patch` changes nothing. */
 export function isEmptyPatch(patch: TimelinePatch): boolean {
-  return !patch.groups && !patch.tracks && !patch.clips && !patch.order;
+  return !patch.markers && !patch.groups && !patch.tracks && !patch.clips && !patch.order;
 }
 
 /**
  * Apply `patch` to a copy of `timeline` (revision untouched). Clips stay
- * sorted by start; `groups` disappears when the last group goes. Throws
+ * sorted by start, markers by `at`; `groups` and `markers` disappear when
+ * the last one goes. Throws
  * when the patch names a missing or subtitle track, or `order` is not a
  * permutation of the resulting tracks. Whether a clip suits its track kind
  * is left to the timeline schema.
@@ -73,6 +82,22 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
     }
     if (groups.length > 0) next.groups = groups;
     else delete next.groups;
+  }
+  if (patch.markers) {
+    const markers: Marker[] = next.markers ?? [];
+    for (const { id, marker } of patch.markers) {
+      const index = markers.findIndex((candidate) => candidate.id === id);
+      if (marker === null) {
+        if (index !== -1) markers.splice(index, 1);
+      } else if (index === -1) {
+        markers.push(structuredClone(marker));
+      } else {
+        markers[index] = structuredClone(marker);
+      }
+    }
+    sortMarkers(markers);
+    if (markers.length > 0) next.markers = markers;
+    else delete next.markers;
   }
   for (const { id, track } of patch.tracks ?? []) {
     const index = next.tracks.findIndex((candidate) => candidate.id === id);
@@ -113,6 +138,11 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
 /** Canonical clip order: by start, then id. */
 export function sortClips(track: { clips: AnyClip[] }): void {
   track.clips.sort((a, b) => a.start - b.start || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Canonical marker order: by `at`, then id. */
+export function sortMarkers(markers: Marker[]): void {
+  markers.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 /** Track fields other than its clips. */

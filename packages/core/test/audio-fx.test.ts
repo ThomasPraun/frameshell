@@ -147,7 +147,8 @@ describe("audio effects bake", () => {
         resolution: { width: 64, height: 64 },
         audioFx,
       });
-      expect(plan.warnings).toEqual([]);
+      // An audio-only timeline also gets the black first frame warning (platform thumbnail); only effects matter here.
+      expect(plan.warnings.filter((warning) => /audio effects/.test(warning))).toEqual([]);
       const output = join(dir, `${name}.mp4`);
       await executeRender(plan, { ffmpeg, workDir: join(dir, `work-${name}`), output });
       const decoded = samples(await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:a:0", "-ac", "1", "-ar", String(RATE), "-f", "s16le", "-"]));

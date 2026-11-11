@@ -17,9 +17,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`null` clears; shots are skipped with a warning). Each asset is baked once per chain with the managed ffmpeg into
   `.frameshell/audio-fx/` (mono s16 on the sidecar clock, `afftdn` latency compensated) as a background `audio-fx`
   job; export mixes the bake (render step `audio-fx`) and the preview plays it in place of the dry sidecar once it
-  is ready. `gc` sweeps bakes no clip plays. Energy snapping and transcription keep the dry sound. Protocol 71: job
+  is ready. `gc` sweeps bakes no clip plays. Energy snapping and transcription keep the dry sound. Protocol 83: job
   kind and step `audio-fx`, `gc` kind and area `audio-fx`, internal method `audio.bakes`. Timelines without effects
   are unchanged.
+- Shaped transitions, first slice (ADR 0030, #483): `transition set --kind wipe|push [--direction left|right|up|down]`
+  (`transition.set` `kind` and `direction`, protocol 82) puts a wipe or a push on a cut of the bottom video track.
+  It is stored as the incoming clip's `dissolve` plus an optional `shape: { kind, direction }`; sound still
+  crossfades equal-power. `shapeAt` (`packages/schema/src/transitions.ts`) gives the geometry to export (`overlay`
+  offsets for a push, a `geq` alpha step for a wipe) and to the preview (Canvas 2D clip paths). With no spare source
+  around the cut a shaped transition holds the outgoing clip's last frame or the incoming clip's first instead of
+  dipping through black. `transition.set` now warns when the bottom track has three transitions of one kind in a row
+  or more than a third hard cuts (jump cuts inside one take do not count). Shapes play on the first shown picture
+  track only, so not over a multicam program track; other video tracks and edges of nested clips refuse them for now.
+  The skill's transitions reference gains a table of kinds by cause and the variety rules.
+- Timeline markers (#458, slice 1 of ADR 0029): named points on the timeline clock, `markers: [{ id, at, label,
+  color? }]` in the timeline file, labels unique ignoring case. Operations `marker.add`, `marker.set`,
+  `marker.remove` (journaled, revertible, idempotent) and `marker.list`; `timeline.show` lists them; CLI
+  `frameshell marker add --at s --label l [--color c] | set | remove | list`, MCP tools from the registry
+  (protocol 81). A `cut` of every track moves markers after it with the material and removes those inside the
+  range (with a warning, a marker on the cut's first frame stays); ripple inserts and trims move them too, and a
+  ripple trim removes markers inside the material it cuts away. A cut or ripple of only some tracks leaves markers
+  where they are. Labels never look like an id (`m_1a2b3c`); a hand edit with a duplicate id or label, an id-shaped
+  label or an off-grid time is rejected into `.frameshell/rejected/`. Review mode counts marker ids as touched. In the
+  app, markers show on a lane under the ruler, the ruler's right-click menu adds, renames and deletes them, and
+  dragged clip edges snap to them. A timeline with `markers` is refused by older Frameshell versions.
+- Project style guide, slice 1 of #468 (ADR 0028): an optional `style.json` at the project root holds brand fields,
+  colours (hex), fonts (family, file under `assets/fonts/`, weight, tracking), type sizes (px at a 1080 short side),
+  a motion personality (`playful`, `premium`, `corporate`, `energetic`, `calm`) with field-by-field overrides, sound
+  levels under the voice with ducking and voice-chain defaults (the loudness target stays `export.loudness`),
+  platforms, notes, rules and a banned list. `resolveStyle` (`packages/schema`) gives every value with its source
+  (`file`, `personality`, `default`); safe zones per platform live once in `packages/schema/src/safe-zones.ts`
+  (Instagram Reels measured, the others from guides). New daemon method `style.show` (protocol 80), CLI
+  `frameshell style show [--json]`, MCP `style_show`; `file.write` refuses an invalid `style.json`; JSON Schema
+  `style.json`. The agent skill documents the file. Nothing renders from it yet.
+- Asset provenance and credits ledger (#484, part of #451; ADR 0026): optional `credits.json` at the project root
+  records source URL, licence, author, title and content hash of third-party assets. `frameshell import` takes
+  `--source-url`, `--licence`, `--author`, `--title` and `--credit` (`asset.import` params, protocol 78);
+  `frameshell credits set <asset>` (`credits.set`) completes an entry. `frameshell credits` (`credits.check`) judges
+  every asset the timelines place, exits 1 when any is unverified (no entry, no licence, a licence that needs credit
+  without an author, changed content, missing file) and prints the credit text for the video description. `render`
+  warns about placed assets without verified provenance once the ledger holds an entry. Agent skill:
+  `reference/credits.md`.
+- `frameshell hyperframes check [<composition>] [--strict]` (`@frameshell/hyperframes` 0.5.0, #479, part of #451):
+  lints HyperFrames compositions in the daemon with `@hyperframes/lint` (`lintProject`, `shouldBlockRender`; a pure
+  library, no network, no telemetry) plus four GSAP seek-safety rules the linter lacks (`gsap_scrolltrigger`,
+  `gsap_delay_chain`, `gsap_callback_not_seek_safe`, `gsap_overwrite_reads_state`); inlined GSAP builds are skipped.
+  The other #479 seek rules are the linter's own: `non_deterministic_code` (random), `gsap_infinite_repeat`,
+  `gsap_repeated_fromto_without_baseline`, `gsap_relative_value_second_writer`, `gsap_function_value_hazard`. Without
+  an argument it checks every `compositions/hyperframes/<name>/index.html`; an argument is a name, a directory or an
+  HTML entry. `--json` carries each finding's `file`, `line`, `column`, `rule`, `severity`, `message` and `fix`;
+  errors exit 1, warnings only under `--strict`. The plugin skill now tells the agent to run it after every
+  composition edit and before waiting for a render, and carries the authoring and GSAP seek-safety rules, citing
+  HyperFrames (Apache-2.0). Frameshell never depends on the `hyperframes` CLI (#478).
+- Plugin commands can report failure without throwing: `CommandResult` takes `failed: true`, `plugin.run` results
+  carry `failed` (protocol 77), and the CLI exits 1 after printing the command's output or `--json` data.
+- Reframe a single clip to vertical following the face (#459, part of #451): `clip.reframe` (protocol 75), CLI
+  `frameshell clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]`, MCP `clip_reframe`. It scales
+  the picture to cover the frame and writes `x`/`y` keys (ease in-out on a move, static when the face holds) so the face
+  sits centered, 30 % from the top, never showing outside the picture. Faces come from YuNet on the clip's own stretch
+  of its file (the multicam face keys, now with a sampling `range`), or from a person's cached `people scan` track.
+  One transaction (`Reframe <file>`), one proposal in review mode; keys stay editable with `clip key` and in the
+  inspector. Rotation metadata and the proxy GOP of 15 were already honoured and are pinned by tests.
+- Duck music under speech as editable gain keys (#456, part of #451): `frameshell duck <track> --under <track>…`
+  (`track.duck`, MCP `track_duck`, protocol 74) listens to the sound of the `--under` tracks and writes `gain` keys
+  on the clips of an audio track that dip while someone speaks. Defaults: 7 dB deep (`--depth`), complete as the voice
+  starts (`--attack` 40 ms), gone 450 ms after it ends (`--release`), speech above -38 dBFS (`--threshold`),
+  stretches closer than 0.6 s merged (`--gap`). The keys are the clip's level minus the dip, with keys at the clip's
+  start and end, and carry the new key field `auto: "duck"`: running it again replaces them and keeps keys set by hand
+  (a hand key where someone speaks is dipped as well, its level kept in the new key field `base`).
+  Preview and export play them like any gain key. History shows it as "Duck music under speech".
+- Cover image and a finished frame 0 (#476, part of #451): `frameshell cover [--text word] [--at s] [--color #rrggbb]`
+  (daemon `cover`, MCP `cover`, protocol 72) writes a cover image: a frame with one big word over it (upper-case,
+  centered, outlined, in the bundled subtitle face, as large as the width allows), rendered by the export compiler like
+  `frame`. `--text` alone picks the frame where the word is first spoken in the transcripts; `--at` picks it; neither
+  uses the first whole picture (past the first clip's fade in, never the black frame). It is checked readable at 180 px wide (capitals at least 12 px tall, sized from the face's
+  own metrics, `export/font-metrics.ts`) and warns when the word is too long. `render --cover-frame [--cover-text]
+  [--cover-at] [--cover-color]` (`render` param `cover`) makes frame 0, the thumbnail platforms show, that same
+  composition as a one-frame segment of its own; the other frames and the length are unchanged. Every render now
+  warns when frame 0, or the chosen cover frame, is black (a gap before the first picture, a fade). The cover uses the
+  `big-keyword` subtitle look until the project style guide (#468) holds one; review's frame-0 check (#457) can
+  read the same warning.
+- Hardware encoder probe and quality tiers (#475, part of #451). Frameshell test-encodes 0.2 s of colour with each H.264
+  candidate (VideoToolbox, NVENC, then x264) and uses the first that works, because `ffmpeg -encoders` lists encoders
+  that fail on the machine. The answer is cached per ffmpeg build in `encoders.json` in the data dir
+  (`packages/core/src/encoders/`). `render` takes `quality` (`draft` or `final`; protocol 71, CLI `--quality`): a draft
+  is at most 30 fps at x264 CRF 22 veryfast (NVENC p5, VideoToolbox bitrate from frame size), a final is CRF 16 slow
+  (NVENC p6 cq 17, VideoToolbox 0.25 bits per pixel, about 62 Mb/s at 4K30) with bt709 tags, faststart and AAC 320k.
+  Without `quality` a render is the preset as written. The `render` result names the `encoder`. `doctor` reports the
+  encoder in use, a speed class (fast, medium, slow) with the proxy and draft sizes it suits, and the disk a master
+  intermediate takes per minute; `doctor --reprobe` tests the encoders again. The codec list's hardware test encode
+  is now the same 0.2 s test.
+- Agent skill: a playbook for short-form reels from a talking-head take (#452), `skills/frameshell/reference/reels.md`.
+  It covers a one-round intake, the vertical canvas and −14 LUFS loudness, passes (words, cut, captions, graphics
+  plan, zooms, sound), 9:16 safe zones, notes as rules for the whole video, and checks before handing over.
+- Agent skill: a critique loop for reels and generated videos (#454), `skills/frameshell/reference/critique.md`:
+  contact, phone and loudness checks on the export, a fresh critic that describes before judging, a scoring rubric
+  with automatic caps or pairwise comparison, scoped fix notes, a round log and when to stop.
+- `frameshell cleanup` (and the MCP tool `cleanup`, daemon method `cleanup`, protocol 73; #455, part of #451): proposes
+  and makes the cuts that remove dead air and false starts of a talking head. Pauses: a gap between two kept words
+  longer than `--pauses` (default 0.4 s) that the audio energy shows quiet, cut inside the quiet leaving `--breath`
+  (0.1 s) on each side, on the frame grid. `--retakes`: a phrase of 1 to 6 words said again (spelling variants and a
+  cut-off last word match, same speaker) cuts the earlier attempt and keeps the last. `--dry-run --json` lists every
+  candidate with its range, the words removed, reason and confidence (`--min-confidence`, `--skip <id>` for the ones
+  a person rejected). Applying is one transaction labelled `Cleanup: …`, one proposal in review mode; cut words show
+  struck through in the transcript view. Words come from the transcripts of the unmuted media clips and the sound of
+  multicam program tracks, placed by the clip that plays most of each word; a cut is made only where transcribed
+  speech covers it. Export and preview already fade the audio 2 ms at every cut (SPEC §3.4), so splices made in
+  quiet audio do not click.
+- Captions with chosen keywords, hand chunking and soft entries (#460, part of #451): `frameshell captions set <track>
+  --text "No need to | open any | *editor*"` (MCP `captions_set`, daemon `captions.set`) chunks the words a subtitle
+  track shows into cues by hand and marks one keyword per phrase. The text is matched to transcript words by position
+  (a lost or repeated word fails, naming the first difference) and stored as word ids in the track's `phrases`, so cuts
+  and transcript corrections keep it. A chunk lasts until the next cue starts, at most 0.35 s after its last word and
+  never under 0.4 s. Style: `entry` (`none`, `chars`, `words`, `line`: 0.4 s, ease out, slight blur, no bounce, the
+  keyword settling from `keywordScale`), `keywordColor` (null for none); `gaps` hide cues over a time range
+  (`track set --gap 12-15.5`). Preview and ASS export share the cue, timing and easing rules (`SUBTITLE_ENTRY`);
+  `PROTOCOL_VERSION` 76, timeline JSON Schema regenerated. Left for later: a keyword font, UI controls in the subtitle
+  inspector, a one-word-per-cut preset.
+- Formats of a project, export path (#469, ADR 0027): one edit delivered at several sizes. `frameshell.json` takes
+  `formats` (primary first, equal to `resolution`); built-in `16x9`, `1x1`, `4x5`, `9x16`, or a custom id and size.
+  `frameshell format list|add|remove` (MCP `format_list`, `format_add`, `format_remove`) edits them, journaled in
+  `.frameshell/history/project.config.jsonl`, each change returning the call that undoes it (`revert` of its `op` id
+  is refused and names that call). While review mode is on, only the person in the app may change formats: agents get
+  ProposalState `forbidden`.
+  `frameshell render --formats 16x9,9x16` writes one file per format (`<file>-<format>.mp4`) from the same edit:
+  untransformed footage covers the frame (cropped around the centre; a source with alpha on an upper track, such as a
+  title or lower third, is fitted whole, never cropped), generated clips render at the format's size,
+  vertical captions are 1.3x larger; the primary format exports exactly as before. `frameshell frame --format 9x16`
+  (wire `projectFormat`) captures a frame in a format. `gc` keeps the clip renders of every declared format.
+  Protocol 79.
+
+### Changed
+
+- `@frameshell/hyperframes` 0.5.0 renders with `@hyperframes/core` and `@hyperframes/producer` 0.9.30 (was 0.8.92).
+  The 0.9 breaking changes touch only distributed rendering (Lambda, Cloud Run), which the plugin does not use.
+  Clip render caches are keyed by plugin version, so existing `hyperframes` clips render again once.
+- The format owns the frame (ADR 0027): an export preset given to `render` or `frame` whose aspect differs from the
+  format rendered is refused (`render --preset vertical-1080x1920` in a 16:9 project now asks to add and render the
+  `9x16` format). A vertical project rendered without a preset now exports at its own size, not a letterboxed
+  1920x1080. Likewise an `export.defaultPreset` of another aspect than the project only gives codec, bitrate and
+  loudness: a 16:9 project with `defaultPreset: vertical-1080x1920` exports at 1920x1080, no longer letterboxed into
+  1080x1920, and the render's `warnings` say so.
+- Edits of `frameshell.json` by the daemon (plugin pins, transcription choice, formats) run one at a time per project,
+  so two at once no longer lose one of them.
+- Timeline files: a clip's `shape` without a `dissolve`, or on an audio track, is rejected. Files without `shape`
+  are unchanged and export byte for byte as before; hosts older than this release reject files that carry `shape`.
 
 ## [0.18.0] - 2026-11-07
 

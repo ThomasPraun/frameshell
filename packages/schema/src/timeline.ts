@@ -67,8 +67,17 @@ const effectParam = (limit: { min: number; max: number; default: number }, what:
 
 const { highpass: HPF, denoise: DENOISE, compressor: COMP } = AUDIO_EFFECT_LIMITS;
 
-/** One audio effect of a media clip (ADR 0031); `kind` selects it, omitted parameters take the voice chain's number. */
-export const AudioEffectSchema = z.discriminatedUnion("kind", [
+/** One audio effect of a media clip; see {@link AudioEffectSchema}. */
+export type AudioEffect =
+  | { kind: "highpass"; frequency?: number | undefined }
+  | { kind: "denoise"; floor?: number | undefined; reduction?: number | undefined }
+  | { kind: "compressor"; threshold?: number | undefined; ratio?: number | undefined; attack?: number | undefined; release?: number | undefined; makeup?: number | undefined };
+
+/**
+ * One audio effect of a media clip (ADR 0031); `kind` selects it, omitted parameters take the voice chain's number.
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const AudioEffectSchema: z.ZodType<AudioEffect> = z.discriminatedUnion("kind", [
   z
     .strictObject({ kind: z.literal("highpass"), frequency: effectParam(HPF.frequency, "Cutoff in Hz: rumble below it is removed") })
     .describe("High-pass filter: removes rumble and handling noise below `frequency`."),
@@ -120,6 +129,20 @@ const keyList = (value: z.ZodNumber, unit: string) =>
           .enum(KEY_EASES)
           .optional()
           .describe("How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`."),
+        auto: z
+          .literal("duck")
+          .optional()
+          .describe(
+            "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; " +
+              "setting or moving a key by hand (`clip.key`) clears it.",
+          ),
+        base: z
+          .number()
+          .optional()
+          .describe(
+            "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. " +
+              "Running the command again puts that level back as the hand key and takes the dip from it.",
+          ),
       }),
     )
     .min(1)
@@ -146,6 +169,31 @@ export const ClipKeysSchema = z
 
 const TransitionSeconds = z.number().positive();
 
+/** Shapes a dissolve can take instead of mixing the pictures (ADR 0030). */
+export const TRANSITION_SHAPE_KINDS = ["wipe", "push"] as const;
+
+/** Name of a shape in {@link TRANSITION_SHAPE_KINDS}. */
+export type TransitionShapeKind = (typeof TRANSITION_SHAPE_KINDS)[number];
+
+/** Ways a shape travels: the way the incoming picture moves across the frame. */
+export const TRANSITION_DIRECTIONS = ["left", "right", "up", "down"] as const;
+
+/** Name of a direction in {@link TRANSITION_DIRECTIONS}. */
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
+
+/** How a clip's `dissolve` moves the pictures instead of mixing them (ADR 0030); `shapeAt` evaluates it. */
+export const TransitionShapeSchema = z
+  .strictObject({
+    kind: z
+      .enum(TRANSITION_SHAPE_KINDS)
+      .describe("`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."),
+    direction: z
+      .enum(TRANSITION_DIRECTIONS)
+      .optional()
+      .describe("Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
+  })
+  .describe("Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades.");
+
 const ClipIdSchema = Id.describe("Stable, core-generated (`c_…`); reference clips by it.");
 const ClipStartSchema = Seconds.describe("Timeline seconds of the first frame.");
 const ScriptRefSchema = z
@@ -168,6 +216,7 @@ const clipBase = {
     "Seconds: mix from the clip that ends where this one starts, centered on the cut (a crossfade for sound). " +
       "Short material shortens it; with no clip butted before, it plays as a fade in.",
   ),
+  shape: TransitionShapeSchema.optional(),
   fadeIn: TransitionSeconds.optional().describe("Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start."),
   fadeOut: TransitionSeconds.optional().describe("Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end."),
   keys: ClipKeysSchema.optional(),
@@ -447,6 +496,28 @@ export const ProgramTrackSchema = z.strictObject({
   clips: z.array(ShotClipSchema).describe("Shots, sorted by `start`, never overlapping."),
 });
 
+/** How a cue's text enters: not animated, per character, per word (at its spoken time) or as one line. */
+export const SUBTITLE_ENTRIES = ["none", "chars", "words", "line"] as const;
+
+/**
+ * One hand-chunked caption phrase (#460): transcript words of one asset, in
+ * order, cut into cues. The ids are the transcript's, so cuts and text
+ * corrections keep it: a word a cut removed is simply not shown.
+ */
+export const CaptionPhraseSchema = z.strictObject({
+  asset: z.string().min(1).describe("Project-relative asset whose transcript holds the words."),
+  words: z.array(Id).min(1).describe("Transcript word ids (`w_…`) in spoken order."),
+  chunks: z.array(z.int().positive()).min(1).describe("Words per cue, in order; sums to the number of `words`."),
+  keyword: z.int().nonnegative().optional().describe("Index in `words` of the one emphasised word."),
+  entry: z.enum(SUBTITLE_ENTRIES).optional().describe("Entry of this phrase's cues; default: the track style's."),
+});
+
+/** A time range in which a subtitle track shows nothing. */
+export const CaptionGapSchema = z.strictObject({
+  from: z.number().nonnegative().describe("Timeline seconds."),
+  to: z.number().positive().describe("Timeline seconds; greater than `from`."),
+});
+
 /**
  * Subtitle track. Holds no clips: its words are the transcript words inside
  * each clip of the `follows` track, mapped to timeline time (SPEC §5.3).
@@ -461,12 +532,59 @@ export const SubtitleTrackSchema = z.strictObject({
       preset: z.string().optional(),
       position: z.enum(["top", "center", "bottom"]).optional(),
       speakerNames: z.boolean().optional().describe("Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false."),
+      keywordColor: z
+        .string()
+        .regex(/^#[0-9a-fA-F]{6}$/)
+        .nullable()
+        .optional()
+        .describe("Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's."),
+      keywordScale: z.number().min(1).max(2).optional().describe("Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's."),
+      entry: z.enum(SUBTITLE_ENTRIES).optional().describe("How cues enter: `none`, `chars`, `words` or `line`. Default `none`."),
     })
     .optional(),
+  phrases: z.array(CaptionPhraseSchema).optional().describe("Hand-chunked phrases with their keywords (`captions.set`); words no phrase holds are grouped by the style."),
+  gaps: z.array(CaptionGapSchema).optional().describe("Ranges in which no cue shows: a cue overlapping one is hidden."),
 });
 
 /** Any track. Track order = stacking order; the first video track is the bottom layer. */
 export const TrackSchema = z.discriminatedUnion("kind", [ClipTrackSchema, ProgramTrackSchema, SubtitleTrackSchema]);
+
+/** Colours a marker may take (ADR 0029); the app paints each from its theme. Absent: the accent colour. */
+export const MARKER_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+
+/** Name of a colour in {@link MARKER_COLORS}. */
+export type MarkerColor = (typeof MARKER_COLORS)[number];
+
+/** Longest marker label, characters. */
+export const MARKER_LABEL_MAX = 80;
+
+/** Marker id: `m_` + hex, generated by the core. */
+export const MarkerIdSchema = z
+  .string()
+  .regex(/^m_[0-9a-f]+$/, "must be a marker id like `m_1a2b3c`")
+  .describe("Stable, core-generated (`m_…`); reference markers by it or by their label.");
+
+/**
+ * A named point on the timeline clock (ADR 0029): a hook, a beat to land on, a note. `cut` ripples it like a
+ * clip start and deletes it inside the removed range. Paints nothing and plays nothing.
+ */
+export const MarkerSchema = z.strictObject({
+  id: MarkerIdSchema,
+  at: Seconds.describe("Timeline seconds of the marker, snapped by the core to the frame grid."),
+  label: z
+    .string()
+    .min(1)
+    .max(MARKER_LABEL_MAX)
+    .regex(/^\S(.*\S)?$/, "must not start or end with a space")
+    .regex(/^(?!m_[0-9a-f]+$)/i, "must not look like a marker id (`m_1a2b3c`): a reference to a marker would be ambiguous")
+    .describe(`Name, e.g. \`hook\`; unique in the timeline ignoring case, at most ${MARKER_LABEL_MAX} characters, never shaped like an id (\`m_1a2b3c\`).`),
+  color: z.enum(MARKER_COLORS).optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour."),
+});
+
+/** Key two marker labels clash on: labels are unique per timeline ignoring case. */
+export function markerLabelKey(label: string): string {
+  return label.toLowerCase();
+}
 
 /**
  * Zod model of a timeline file (SPEC §5.3). `revision` guards direct edits
@@ -481,6 +599,10 @@ export const TimelineSchema = z
     revision: z.int().nonnegative().describe("Bumped by the core on every applied operation; stale direct edits are rejected."),
     tracks: z.array(TrackSchema).describe("Stacking order: the first video track is the bottom layer."),
     groups: z.array(MulticamGroupSchema).optional().describe("Multicam groups (ADR 0016), each shown by one program track."),
+    markers: z
+      .array(MarkerSchema)
+      .optional()
+      .describe("Named points on the timeline clock (ADR 0029), sorted by `at`; labels unique ignoring case. Absent when none."),
   })
   .superRefine((timeline, ctx) => {
     const seen = new Set<string>();
@@ -491,6 +613,14 @@ export const TimelineSchema = z
     timeline.tracks.forEach((track, t) => {
       claim(track.id, ["tracks", t, "id"]);
       if (track.kind !== "subtitles") track.clips.forEach((clip, c) => claim(clip.id, ["tracks", t, "clips", c, "id"]));
+      if (track.kind === "video" || track.kind === "audio") {
+        track.clips.forEach((clip, c) => {
+          if (clip.shape === undefined) return;
+          const path = ["tracks", t, "clips", c, "shape"];
+          if (track.kind === "audio") ctx.addIssue({ code: "custom", message: "audio tracks have no picture to shape: `shape` is for video tracks", path });
+          else if (clip.dissolve === undefined) ctx.addIssue({ code: "custom", message: "`shape` shapes a dissolve: give the clip a `dissolve` too, or remove `shape`", path });
+        });
+      }
       if (track.kind !== "audio") return;
       if (track.hidden !== undefined) ctx.addIssue({ code: "custom", message: "audio tracks have no picture to hide: `hidden` is for video and program tracks", path: ["tracks", t, "hidden"] });
       track.clips.forEach((clip, c) => {
@@ -500,12 +630,21 @@ export const TimelineSchema = z
       });
     });
     timeline.groups?.forEach((group, g) => claim(group.id, ["groups", g, "id"]));
+    const labels = new Map<string, string>();
+    timeline.markers?.forEach((marker, m) => {
+      claim(marker.id, ["markers", m, "id"]);
+      const key = markerLabelKey(marker.label);
+      const other = labels.get(key);
+      if (other !== undefined) ctx.addIssue({ code: "custom", message: `label "${marker.label}" is already marker ${other}'s; labels are unique ignoring case`, path: ["markers", m, "label"] });
+      else labels.set(key, marker.id);
+    });
     const shown = new Set<string>();
     timeline.tracks.forEach((track, t) => {
       if (track.kind === "program") checkProgramTrack(timeline, track, t, shown, ctx);
     });
     timeline.tracks.forEach((track, t) => {
       if (track.kind !== "subtitles") return;
+      checkCaptions(track, t, ctx);
       const followed = timeline.tracks.find((other) => other.id === track.follows);
       if (!followed || (followed.kind !== "video" && followed.kind !== "audio")) {
         ctx.addIssue({
@@ -516,6 +655,29 @@ export const TimelineSchema = z
       }
     });
   });
+
+/** Phrases hold each word once and add up; gaps run forward. */
+function checkCaptions(track: SubtitleTrack, t: number, ctx: z.RefinementCtx): void {
+  const seen = new Set<string>();
+  track.phrases?.forEach((phrase, p) => {
+    const path = ["tracks", t, "phrases", p];
+    const total = phrase.chunks.reduce((sum, count) => sum + count, 0);
+    if (total !== phrase.words.length) {
+      ctx.addIssue({ code: "custom", message: `chunks add up to ${total} words but the phrase has ${phrase.words.length}`, path: [...path, "chunks"] });
+    }
+    if (phrase.keyword !== undefined && phrase.keyword >= phrase.words.length) {
+      ctx.addIssue({ code: "custom", message: `keyword ${phrase.keyword} is past the last word (${phrase.words.length - 1})`, path: [...path, "keyword"] });
+    }
+    phrase.words.forEach((id, w) => {
+      const key = `${phrase.asset}\0${id}`;
+      if (seen.has(key)) ctx.addIssue({ code: "custom", message: `word ${id} of ${phrase.asset} is in two places of the phrases`, path: [...path, "words", w] });
+      seen.add(key);
+    });
+  });
+  track.gaps?.forEach((gap, g) => {
+    if (gap.to <= gap.from) ctx.addIssue({ code: "custom", message: "`to` must be greater than `from`", path: ["tracks", t, "gaps", g, "to"] });
+  });
+}
 
 /** A program track names an existing group no other program track shows; its shots name that group's angles and never overlap. */
 function checkProgramTrack(
@@ -575,6 +737,12 @@ export type ProgramTrack = z.infer<typeof ProgramTrackSchema>;
 export type AnyClipTrack = ClipTrack | ProgramTrack;
 /** Subtitle track. */
 export type SubtitleTrack = z.infer<typeof SubtitleTrackSchema>;
+/** Hand-chunked caption phrase of a subtitle track. */
+export type CaptionPhrase = z.infer<typeof CaptionPhraseSchema>;
+/** Range in which a subtitle track shows nothing. */
+export type CaptionGap = z.infer<typeof CaptionGapSchema>;
+/** How a cue's text enters. */
+export type SubtitleEntry = (typeof SUBTITLE_ENTRIES)[number];
 /** Clip of a video or audio track. */
 export type Clip = z.infer<typeof ClipSchema>;
 /** `type: "shot"` clip of a program track. */
@@ -592,6 +760,8 @@ export type MediaClip = z.infer<typeof MediaClipSchema>;
 export type TimelineClip = z.infer<typeof TimelineClipSchema>;
 /** Adapter-rendered clip. */
 export type AdapterClip = z.infer<typeof AdapterClipSchema>;
+/** Timeline marker (ADR 0029). */
+export type Marker = z.infer<typeof MarkerSchema>;
 /** Multicam group (ADR 0016). */
 export type MulticamGroup = z.infer<typeof MulticamGroupSchema>;
 /** Separate sound file of a {@link MulticamGroup}. */
@@ -608,14 +778,14 @@ export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 export type ClipKeys = z.infer<typeof ClipKeysSchema>;
 /** One key of a clip property. */
 export type ClipKey = NonNullable<ClipKeys["x"]>[number];
+/** Shape of a clip's dissolve; see {@link TransitionShapeSchema}. */
+export type TransitionShape = z.infer<typeof TransitionShapeSchema>;
 /** Clip overlay placement. */
 export type Transform = z.infer<typeof TransformSchema>;
 /** Clip audio settings. */
 export type ClipAudio = z.infer<typeof ClipAudioSchema>;
 /** Sound settings of a media clip, audio effects included. */
 export type MediaClipAudio = z.infer<typeof MediaClipAudioSchema>;
-/** One audio effect of a media clip; see {@link AudioEffectSchema}. */
-export type AudioEffect = z.infer<typeof AudioEffectSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {
