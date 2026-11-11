@@ -369,6 +369,14 @@ describe("subtitle tracks", () => {
     expect(frameshell(["captions", "set", "t_x", "--text", "a", "--file", "b.txt", "--timeline", "subs"]).code).toBe(2);
     expect(frameshell(["clip", "add", "v1", "--text", "x"]).code).toBe(2);
   });
+
+  it("captions set takes --text, which cover also uses", () => {
+    const track = JSON.parse(readFileSync(join(project, "timelines", "subs.json"), "utf8")).tracks[1].id as string;
+    const set = frameshell(["captions", "set", track, "--text", "No need to | *editor*", "--timeline", "subs"]);
+    // Reaches the daemon (no words to caption here) instead of failing as a usage error.
+    expect(set.stderr).toMatch(/shows no words/);
+    expect(set.code).toBe(1);
+  });
 });
 
 describe("track mute and hide", () => {
