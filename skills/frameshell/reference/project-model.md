@@ -10,6 +10,7 @@ transcripts/*.words.json word-level transcript per asset
 credits.json            optional: source, licence and author of third-party assets (see credits.md)
 scripts/*.md             Markdown scripts
 compositions/            HyperFrames HTML compositions, the Remotion project (compositions/remotion/)
+style.json               optional style guide: colours, fonts, type, motion, sound, platforms, rules
 exports/                 render output
 .frameshell/             daemon state, regenerable, gitignored (history, proxies, caches, rejected edits)
 ```
@@ -46,6 +47,33 @@ exports/                 render output
 Plain Markdown; optional frontmatter `title`, `target_duration`, `aspect`. Each `## ` heading is a scene whose slug is the anchor in a clip's `scriptRef`. `frameshell script outline <file>` lists scenes, their refs and the clips linked to each; empty scenes still need footage. A scene may name its transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` right under the heading (word ids repeat across transcripts, so name the file; the bare `w_000010..w_000042` works only when one transcript holds both ids); the outline then gives `wordRange` and `span` (timeline seconds those words occupy, per timeline), so you can place its clips on the words. Clips do not follow their words when audio is cut: re-read the outline after cutting. Unknown ids, an ambiguous bare range or a reversed range come back as `warnings`.
 
 A script with `shoot: true` in its frontmatter is a shoot script: lines, `**Name:**` speakers and `[LABEL: …]` cues, checked with `frameshell script check <file>`. Format: [shoot-scripts.md](shoot-scripts.md).
+
+## Style
+
+`style.json` (optional) is the project's style guide: every look and sound decision as a number, so you never improvise "make it nice". Keep the person's style here, not in a Markdown notes file. `frameshell style show` (MCP `style_show`) prints it resolved, each value with its source. Nothing renders from it yet: read it and use its values when you write captions, cards, compositions and mixes.
+
+```json
+{
+  "$schema": "https://frameshell.dev/schema/v1/style.json",
+  "schemaVersion": 1,
+  "brand": { "product": "Acme", "hook": "Stop editing by hand.", "cta": "?", "mustShow": ["logo at the end"] },
+  "colors": { "bg": "#0b0b0f", "ink": "#f5f5f0", "accent": "#ff5a1f" },
+  "fonts": { "display": { "family": "Archivo Black" }, "ui": { "family": "Inter", "file": "assets/fonts/Inter.ttf", "weight": 500 } },
+  "motion": { "personality": "premium", "duration": { "quick": 0.3 } },
+  "sound": { "musicUnderVoice": 14 },
+  "platforms": ["instagram-reels"],
+  "rules": ["sentence case", "accent on the key word only"],
+  "banned": ["emoji in captions"]
+}
+```
+
+- Every section is optional; unknown keys are refused. `brand`: `product`, `url`, `promise`, `hook`, `cta`, `audience`, `reference`, `mustShow`, `mustAvoid`; `?` marks a field to ask the person about. `colors`: `bg`, `ink`, `ink2`, `accent`, `card`, `keyword`, `highlight` as `#rrggbb`. `fonts`: `display`, `ui`, `captions`, `keyword`, each `{ family, file?, weight?, tracking? }` (`file` under `assets/fonts/`; tracking in em). Frameshell never downloads fonts: import the file and record its credit.
+- `type`: `hero`, `card`, `minReadable`, `margin` in px on a frame whose short side is 1080 (defaults 200, 110, 28, 120).
+- `motion.personality` picks the motion values: `playful` (0.15-0.3 s, bouncy), `premium` (0.35-0.8 s, no overshoot), `corporate` (0.2-0.4 s, at most 3 %; the default), `energetic` (0.1-0.25 s, up to 30 %), `calm` (premium's timing, no overshoot, no keyword highlight). Override single values: `duration` (`quick`, `standard`, `slow`), `ease` (cubic-bezier as 4 numbers), `overshoot` (fraction), `spring` (`response` s, `damping` ζ), `stagger`, `exit` (fraction of the entrance), `highlight`. **Times are seconds, never milliseconds.**
+- `sound`: `musicUnderVoice`, `sfxUnderVoice` (dB under the voice), `duck` (`depth` dB, `attack`, `release` s), `voice` chain defaults. The loudness target is `export.loudness` in `frameshell.json`, not here.
+- `platforms` (`instagram-reels`, `tiktok`, `youtube-shorts`, `youtube`): `style show` adds each one's safe zone (pixels its app covers; `measured` false = from guides). Keep text and faces out of them.
+- `notes`, `rules`, `banned`: lists in the person's words. When the person rejects something in a critique ("no emojis"), add it to `banned` and never do it again.
+- Write it with your file tools or the MCP `file_write`; `file_write` refuses an invalid file and `style show` names the bad field. Change it only with the person's agreement, and not while review mode is on (`frameshell proposal status`): style edits are not proposals yet.
 
 ## Direct timeline edits
 

@@ -1,0 +1,685 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "from": {
+      "description": "User style this file was copied from; nothing is inherited from it afterwards.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "User style id."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the user style when copied."
+        }
+      },
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "brand": {
+      "type": "object",
+      "properties": {
+        "product": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Product or channel name. `?` marks a field to ask the person about."
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Address shown or spoken. `?` marks a field to ask the person about."
+        },
+        "promise": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The one-line promise. `?` marks a field to ask the person about."
+        },
+        "hook": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opening line: 2 to 5 words ending in a full stop. `?` marks a field to ask the person about."
+        },
+        "cta": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Call to action at the end. `?` marks a field to ask the person about."
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who it is for. `?` marks a field to ask the person about."
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A video or brand the look follows. `?` marks a field to ask the person about."
+        },
+        "mustShow": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Things every video shows (a logo, the product screen)."
+        },
+        "mustAvoid": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Things no video shows or says."
+        }
+      },
+      "additionalProperties": false
+    },
+    "colors": {
+      "type": "object",
+      "properties": {
+        "bg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Background. Hex `#rrggbb`."
+        },
+        "ink": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Main text. Hex `#rrggbb`."
+        },
+        "ink2": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Secondary text. Hex `#rrggbb`."
+        },
+        "accent": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The one accent (the key word, the chosen item). Hex `#rrggbb`."
+        },
+        "card": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cards and panels over the picture. Hex `#rrggbb`."
+        },
+        "keyword": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Keyword colour in captions. Hex `#rrggbb`."
+        },
+        "highlight": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$",
+              "description": "Hex colour `#rrggbb` (or `#rrggbbaa`)."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Box behind the spoken word in captions. Hex `#rrggbb`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "fonts": {
+      "type": "object",
+      "properties": {
+        "display": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Family name, e.g. `Archivo Black`: a face Frameshell bundles, or the family inside `file`."
+                },
+                "file": {
+                  "description": "Font file under `assets/fonts/` (project-relative, `/`-separated). Frameshell never downloads fonts: import the file with its credit.",
+                  "type": "string",
+                  "pattern": "^assets\\/fonts\\/[^\\\\]+\\.(?:ttf|otf|woff2?)$"
+                },
+                "weight": {
+                  "description": "Weight, 100 to 900 (400 regular, 700 bold).",
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                "tracking": {
+                  "description": "Letter spacing in em (-0.02 = slightly tighter).",
+                  "type": "number",
+                  "minimum": -0.5,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "family"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Titles and big words."
+        },
+        "ui": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Family name, e.g. `Archivo Black`: a face Frameshell bundles, or the family inside `file`."
+                },
+                "file": {
+                  "description": "Font file under `assets/fonts/` (project-relative, `/`-separated). Frameshell never downloads fonts: import the file with its credit.",
+                  "type": "string",
+                  "pattern": "^assets\\/fonts\\/[^\\\\]+\\.(?:ttf|otf|woff2?)$"
+                },
+                "weight": {
+                  "description": "Weight, 100 to 900 (400 regular, 700 bold).",
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                "tracking": {
+                  "description": "Letter spacing in em (-0.02 = slightly tighter).",
+                  "type": "number",
+                  "minimum": -0.5,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "family"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Body text, labels, cards."
+        },
+        "captions": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Family name, e.g. `Archivo Black`: a face Frameshell bundles, or the family inside `file`."
+                },
+                "file": {
+                  "description": "Font file under `assets/fonts/` (project-relative, `/`-separated). Frameshell never downloads fonts: import the file with its credit.",
+                  "type": "string",
+                  "pattern": "^assets\\/fonts\\/[^\\\\]+\\.(?:ttf|otf|woff2?)$"
+                },
+                "weight": {
+                  "description": "Weight, 100 to 900 (400 regular, 700 bold).",
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                "tracking": {
+                  "description": "Letter spacing in em (-0.02 = slightly tighter).",
+                  "type": "number",
+                  "minimum": -0.5,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "family"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Captions (subtitle tracks)."
+        },
+        "keyword": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Family name, e.g. `Archivo Black`: a face Frameshell bundles, or the family inside `file`."
+                },
+                "file": {
+                  "description": "Font file under `assets/fonts/` (project-relative, `/`-separated). Frameshell never downloads fonts: import the file with its credit.",
+                  "type": "string",
+                  "pattern": "^assets\\/fonts\\/[^\\\\]+\\.(?:ttf|otf|woff2?)$"
+                },
+                "weight": {
+                  "description": "Weight, 100 to 900 (400 regular, 700 bold).",
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                "tracking": {
+                  "description": "Letter spacing in em (-0.02 = slightly tighter).",
+                  "type": "number",
+                  "minimum": -0.5,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "family"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The highlighted keyword in captions."
+        }
+      },
+      "additionalProperties": false
+    },
+    "type": {
+      "type": "object",
+      "properties": {
+        "hero": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1080,
+          "description": "Hero text size (one big word or number). Pixels on a frame whose short side is 1080; scale with the short side."
+        },
+        "card": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1080,
+          "description": "Text size on cards. Pixels on a frame whose short side is 1080; scale with the short side."
+        },
+        "minReadable": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1080,
+          "description": "Smallest text meant to be read; smaller is decoration. Pixels on a frame whose short side is 1080; scale with the short side."
+        },
+        "margin": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1080,
+          "description": "Left edge of left-aligned text, from the frame's edge. Pixels on a frame whose short side is 1080; scale with the short side."
+        }
+      },
+      "additionalProperties": false
+    },
+    "motion": {
+      "type": "object",
+      "properties": {
+        "personality": {
+          "description": "Motion values to start from: `playful`, `premium`, `corporate`, `energetic`, `calm`. Default `corporate`.",
+          "type": "string",
+          "enum": [
+            "playful",
+            "premium",
+            "corporate",
+            "energetic",
+            "calm"
+          ]
+        },
+        "duration": {
+          "type": "object",
+          "properties": {
+            "quick": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "description": "Feedback and small moves. Seconds, not milliseconds (at most 5)."
+            },
+            "standard": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "description": "Most entrances. Seconds, not milliseconds (at most 5)."
+            },
+            "slow": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "description": "Hero moves and full-frame changes. Seconds, not milliseconds (at most 5)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "ease": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "Signature ease, about 80 % of moves: `cubic-bezier(x1, y1, x2, y2)` as 4 numbers, x within 0 to 1."
+        },
+        "overshoot": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.3,
+          "description": "Most a move may pass its target, fraction of its travel (0.03 = 3 %). Over 0.25 reads as broken."
+        },
+        "spring": {
+          "type": "object",
+          "properties": {
+            "response": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 5,
+              "description": "Period of the spring, seconds."
+            },
+            "damping": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 2,
+              "description": "Damping ratio ζ: 1 never bounces, 0.7 to 0.85 barely, 0.4 to 0.6 bouncy."
+            }
+          },
+          "additionalProperties": false
+        },
+        "stagger": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Delay between items entering one after another. Seconds, not milliseconds (at most 1)."
+        },
+        "exit": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1,
+          "description": "Exit length as a fraction of the entrance (exits are shorter, ease-in)."
+        },
+        "highlight": {
+          "type": "boolean",
+          "description": "Mark the key word (accent colour, captions keyword). False keeps every word one colour."
+        }
+      },
+      "additionalProperties": false
+    },
+    "sound": {
+      "type": "object",
+      "properties": {
+        "musicUnderVoice": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "description": "How far music sits under the voice, dB, 0 to 60."
+        },
+        "sfxUnderVoice": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "description": "How far sound effects sit under the voice, dB, 0 to 60."
+        },
+        "duck": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60,
+              "description": "How far music dips while someone speaks, dB, 0 to 60."
+            },
+            "attack": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "description": "Dip complete as the voice starts, this long after the dip begins. Seconds, not milliseconds (at most 5)."
+            },
+            "release": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "description": "Dip gone this long after the voice ends. Seconds, not milliseconds (at most 5)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "voice": {
+          "type": "object",
+          "properties": {
+            "highpass": {
+              "type": "number",
+              "minimum": 20,
+              "maximum": 300,
+              "description": "High-pass cutoff, Hz."
+            },
+            "denoise": {
+              "type": "object",
+              "properties": {
+                "floor": {
+                  "type": "number",
+                  "minimum": -80,
+                  "maximum": -20,
+                  "description": "Noise floor, dBFS."
+                },
+                "reduction": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 97,
+                  "description": "Noise reduction, dB."
+                }
+              },
+              "additionalProperties": false
+            },
+            "compressor": {
+              "type": "object",
+              "properties": {
+                "threshold": {
+                  "type": "number",
+                  "minimum": -60,
+                  "maximum": 0,
+                  "description": "Threshold, dBFS."
+                },
+                "ratio": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 20,
+                  "description": "Ratio, e.g. 2.5 for 2.5:1."
+                },
+                "attack": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Attack. Seconds, not milliseconds (at most 1)."
+                },
+                "release": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 5,
+                  "description": "Release. Seconds, not milliseconds (at most 5)."
+                },
+                "makeup": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 24,
+                  "description": "Makeup gain, dB."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "instagram-reels",
+          "tiktok",
+          "youtube-shorts",
+          "youtube"
+        ]
+      },
+      "description": "Platforms the videos go to, each once; their safe zones are Frameshell's data, named, never copied."
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "House notes in the person's words."
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Rules every video keeps, in the person's words (e.g. `sentence case`)."
+    },
+    "banned": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Things never to do again, from critique (e.g. `emoji in captions`)."
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/style.json"
+}

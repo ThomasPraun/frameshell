@@ -113,6 +113,7 @@ import {
   writeSessionTranscripts,
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
+import { showStyle } from "./style/read.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
@@ -1839,6 +1840,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       onlyUi(caller, "reject a proposal", tx);
       return timelines.rejectProposal(await root(cwd), tx);
     },
+    "style.show": async ({ cwd }) => showStyle(await root(cwd)),
     "people.list": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, ...(await people.list(dir)) };

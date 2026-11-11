@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Project style guide, slice 1 of #468 (ADR 0028): an optional `style.json` at the project root holds brand fields,
+  colours (hex), fonts (family, file under `assets/fonts/`, weight, tracking), type sizes (px at a 1080 short side),
+  a motion personality (`playful`, `premium`, `corporate`, `energetic`, `calm`) with field-by-field overrides, sound
+  levels under the voice with ducking and voice-chain defaults (the loudness target stays `export.loudness`),
+  platforms, notes, rules and a banned list. `resolveStyle` (`packages/schema`) gives every value with its source
+  (`file`, `personality`, `default`); safe zones per platform live once in `packages/schema/src/safe-zones.ts`
+  (Instagram Reels measured, the others from guides). New daemon method `style.show` (protocol 80), CLI
+  `frameshell style show [--json]`, MCP `style_show`; `file.write` refuses an invalid `style.json`; JSON Schema
+  `style.json`. The agent skill documents the file. Nothing renders from it yet.
 - Asset provenance and credits ledger (#484, part of #451; ADR 0026): optional `credits.json` at the project root
   records source URL, licence, author, title and content hash of third-party assets. `frameshell import` takes
   `--source-url`, `--licence`, `--author`, `--title` and `--credit` (`asset.import` params, protocol 78);

@@ -2,6 +2,28 @@
 
 An IDE for video: an agent edits a declarative project from the terminal, a human corrects it in the timeline.
 
+## Style (ADR 0028)
+
+**Style guide**:
+The project's `style.json`: brand, colours, fonts, type sizes, motion, sound levels, platforms, rules and banned list, as numbers.
+_Avoid_: style notes, brand kit, theme
+
+**User style**:
+A style guide kept per machine for reuse, copied into a project (never linked to it).
+_Avoid_: global style, template
+
+**Motion personality**:
+A named set of motion values (playful, premium, corporate, energetic, calm) a style starts from and overrides field by field.
+_Avoid_: motion preset, animation style
+
+**Token**:
+One named style value a consumer reads (a colour role, a duration, a dip in dB), never an inline number.
+_Avoid_: variable, setting
+
+**Safe zone**:
+The part of the frame a platform's app covers (buttons, captions, profile), in pixels of a reference frame; held once per platform, named by styles and formats.
+_Avoid_: safe area (alone), margin
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
