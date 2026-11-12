@@ -8,6 +8,7 @@ import {
   SHOT_LOW_CONFIDENCE,
   type TransitionShape,
 } from "@frameshell/schema";
+import { audioEffectsOf, normalizeAudioEffects, type NormalizedAudioEffect } from "@frameshell/schema/effects";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -74,6 +75,8 @@ export interface ClipBox {
   gain: number;
   /** `audio.muted`. */
   muted: boolean;
+  /** Stored `audio.effects` of a media clip (ADR 0031) with every number filled, in processing order; empty without any. */
+  audioEffects: NormalizedAudioEffect[];
   /** Stored `transform` with defaults filled; null when the clip has none. */
   transform: { x: number; y: number; scale: number; opacity: number } | null;
   /** Shots: what they show; null for other clips. */
@@ -372,6 +375,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     problem: clip.end === null ? (problem ?? t.timeline.lengthUnknown) : null,
     gain: typeof audio.gain === "number" ? audio.gain : 0,
     muted: audio.muted === true,
+    audioEffects: normalizeAudioEffects(audioEffectsOf(clip) ?? []),
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
     shot,
     dissolve: stored("dissolve"),

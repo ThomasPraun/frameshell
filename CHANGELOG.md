@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voice section in the clip inspector, app slice of #464 (ADR 0031, epic #451; no wire change): a media clip shows its
+  voice chain. The Voice switch writes the style's voice chain (high-pass, denoise, compressor) or bypasses it, and
+  switching on again brings the bypassed chain back (kept in that window only; the saved clip has no bypass flag).
+  Each effect is a row in processing order with its numbers (cutoff; floor and reduction; threshold, ratio, attack,
+  release, makeup), a move-earlier and a remove button; a menu adds a missing effect and Voice preset puts the style's
+  chain back. Every change is one undoable `clip.set` `audioEffects` by `ui`. Strings in English and Spanish.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
