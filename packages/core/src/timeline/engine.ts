@@ -43,6 +43,7 @@ import {
   isShotClip,
   markerLabelKey,
   findMarker,
+  orderedFrameRect,
   describeMarkers,
   keyedValueAt,
   paintStretches,
@@ -64,6 +65,11 @@ import { applyPatch, diffTimelines, sortClips, sortMarkers } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
 
 const round4 = (value: number) => Math.round(value * 10000) / 10000;
+
+/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
+const DIP_DEPTH = 0.4;
+/** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
+const DIP_FRAMES = 3;
 
 /** What the engine needs to know about a media file. */
 export interface SourceInfo {
@@ -1144,17 +1150,23 @@ class Edit {
     const frames = g.frame(length);
     const outgoingHalf = Math.floor(frames / 2);
     const { kind } = args;
-    const shaped = kind === "wipe" || kind === "push";
-    if (!shaped && args.direction !== undefined) {
-      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; a ${kind} has none.`, { field: "direction" });
+    const shaped = kind === "wipe" || kind === "push" || kind === "iris";
+    if (args.direction !== undefined && kind !== "wipe" && kind !== "push") {
+      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; ${article(kind)} has none.`, {
+        field: "direction",
+        ...(kind === "iris" ? { hint: "An iris opens from `origin`." } : {}),
+      });
     }
+    if (args.origin !== undefined && kind !== "iris") {
+      throw this.invalid(`\`origin\` is for \`iris\`; ${article(kind)} has none.`, { field: "origin" });
+    }
+    if (args.origin !== undefined && !orderedFrameRect(args.origin)) {
+      throw this.invalid("`origin` is `[x0, y0, x1, y1]` in fractions of the frame, with x0 <= x1 and y0 <= y1.", { field: "origin" });
+    }
+    if (kind === "dip-cut") return this.dipCut(args);
     const at = g.snap(args.at);
-    // ADR 0030 slice 1: shapes play on the bottom picture layer only, picked as export and preview pick it: the first
-    // shown picture track, when it is a video track (a program track there leaves none).
-    const first = this.draft.tracks.find(showsPicture);
-    const bottom = first?.kind === "video" ? first : undefined;
+    const { bottom, note: bottomNote } = this.bottomVideoTrack();
     const notBottom = (track: ClipTrack) => track.kind === "video" && track !== bottom;
-    const bottomNote = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
     const onlyBottom = {
       field: "tracks",
       hint: bottom ? `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom.id} and audio tracks.` : "Use kind dissolve or fade there.",
@@ -1164,7 +1176,7 @@ class Edit {
       const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && notBottom(track));
       if (named.length > 0) {
         const ids = named.map((t) => t.id);
-        throw this.invalid(`a ${kind} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
+        throw this.invalid(`${article(kind)} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
       }
     }
     const skipped: string[] = [];
@@ -1177,7 +1189,7 @@ class Edit {
       // Flattening does not carry a shape into a nested clip's own clips yet (ADR 0030 slice 3).
       const nested = shaped && incoming && outgoing ? [outgoing, incoming].find(isNested) : undefined;
       if (nested) {
-        throw this.invalid(`a ${kind} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
+        throw this.invalid(`${article(kind)} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
           field: "kind",
           hint: "Use kind dissolve or fade at this edge.",
         });
@@ -1192,7 +1204,9 @@ class Edit {
           incoming.fadeIn = g.seconds(frames - outgoingHalf);
         } else {
           incoming.dissolve = length;
-          if (shaped && track.kind === "video") incoming.shape = { kind, direction: args.direction ?? "left" };
+          if (shaped && track.kind === "video") {
+            incoming.shape = kind === "iris" ? { kind, ...(args.origin ? { origin: args.origin } : {}) } : { kind, direction: args.direction ?? "left" };
+          }
         }
         return;
       }
@@ -1203,14 +1217,98 @@ class Edit {
       }
     });
     if (!applied) {
-      throw this.invalid(`a ${kind} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
+      throw this.invalid(`${article(kind)} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
     }
     if (skipped.length > 0) {
       this.warnings.push(
-        `skipped ${listed(skipped)}: a ${kind} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
+        `skipped ${listed(skipped)}: ${article(kind)} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
       );
     }
     if (bottom) await this.warnVariety(bottom);
+  }
+
+  /**
+   * The bottom picture layer as export and preview stack the tracks (ADR 0030): the first shown picture track, when it
+   * is a video track (a program track there leaves none); `note` names it for messages.
+   */
+  bottomVideoTrack(): { bottom?: ClipTrack; note: string } {
+    const first = this.draft.tracks.find(showsPicture);
+    const bottom = first?.kind === "video" ? first : undefined;
+    const note = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
+    return { ...(bottom ? { bottom } : {}), note };
+  }
+
+  /**
+   * `transition.set kind: "dip-cut"` (ADR 0030 decision 5): a hard cut on the bottom video track, the clip ending at
+   * `at` darkened over black by {@link DIP_DEPTH} across its last {@link DIP_FRAMES} frames, written as `opacity` keys.
+   * Running it again writes the same keys; sound and other tracks are not touched.
+   */
+  async dipCut(args: OperationArgs<"transition.set">): Promise<void> {
+    const g = this.grid;
+    const at = g.snap(args.at);
+    const { bottom, note } = this.bottomVideoTrack();
+    const named = (args.tracks ?? []).map((id) => this.clipTrack(id));
+    const upper = named.filter((track) => track.kind === "video" && track !== bottom).map((track) => track.id);
+    if (upper.length > 0) {
+      throw this.invalid(
+        `a dip cut darkens the bottom video track over black; on ${upper.join(", ")} lowering opacity would show the track below instead (${note}).`,
+        { field: "tracks", hint: "Use kind fade on an upper track, or leave `tracks` out." },
+      );
+    }
+    if (!bottom || (named.length > 0 && !named.includes(bottom))) {
+      throw this.invalid(`a dip cut plays on the bottom video track: ${bottom ? `${note}, and \`tracks\` leaves it out` : note}.`, { field: "tracks" });
+    }
+    const ignored = named.filter((track) => track.kind !== "video").map((track) => track.id);
+    if (ignored.length > 0) this.warnings.push(`a dip cut leaves sound as it is: ${ignored.join(", ")} not changed.`);
+    const { incoming, outgoing } = await this.edgeAt(bottom, at);
+    if (!outgoing) {
+      throw this.invalid(`no clip ends at ${at} s on ${bottom.id}: a dip cut darkens the clip that ends at the cut.`, {
+        field: "at",
+        hint: await this.edgeTimes([bottom]),
+      });
+    }
+    for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
+    if (incoming) clearIncoming(incoming);
+    delete outgoing.fadeOut;
+    const { lane, from, last } = await this.dipLane(outgoing);
+    if (from === last) throw this.invalid(`${outgoing.id} is one frame long: too short to darken before the cut.`, { field: "at" });
+    const level = placementAt(outgoing, g.seconds(from)).opacity;
+    const kept = lane.filter((key) => key.at < this.keyAt(outgoing, from) - this.halfFrame(outgoing) || key.at > this.keyAt(outgoing, last) + this.halfFrame(outgoing));
+    const dip: ClipKey[] = [
+      { at: this.keyAt(outgoing, from), value: round4(level) },
+      { at: this.keyAt(outgoing, last), value: round4(level * (1 - DIP_DEPTH)) },
+    ];
+    outgoing.keys = { ...outgoing.keys, opacity: [...kept, ...dip].sort((a, b) => a.at - b.at) as [ClipKey, ...ClipKey[]] };
+    await this.warnVariety(bottom);
+  }
+
+  /** Clip-clock second of timeline frame `frame` of `clip`, rounded as `clip.key` rounds a key's `at`. */
+  keyAt(clip: Clip, frame: number): number {
+    return Math.round(clipTime(clip, this.grid.seconds(frame)) * 1000) / 1000;
+  }
+
+  /** Half a frame of timeline time on `clip`'s own clock: keys this close are at one frame. */
+  halfFrame(clip: Clip): number {
+    return (0.5 / this.context.fps) * (isMedia(clip) ? (clip.speed ?? 1) : 1);
+  }
+
+  /** `clip`'s `opacity` keys and the frames a dip cut keys: `from` (full level) and `last`, the clip's last frame. */
+  async dipLane(clip: Clip): Promise<{ lane: ClipKey[]; from: number; last: number }> {
+    const g = this.grid;
+    const last = g.frame((await this.span(clip)).end) - 1;
+    return { lane: [...(clip.keys?.opacity ?? [])], from: Math.max(g.frame(clip.start), last - DIP_FRAMES), last };
+  }
+
+  /** Indexes in `clip`'s `opacity` keys of the two keys a dip cut wrote at its end; null when it has none. */
+  async dipKeys(clip: Clip): Promise<[number, number] | null> {
+    if (!clip.keys?.opacity) return null;
+    const { lane, from, last } = await this.dipLane(clip);
+    const half = this.halfFrame(clip);
+    const near = (key: ClipKey | undefined, frame: number) => key !== undefined && Math.abs(key.at - this.keyAt(clip, frame)) < half;
+    const end = lane.findIndex((key) => near(key, last));
+    const start = end - 1;
+    if (from === last || end < 1 || !near(lane[start], from)) return null;
+    return Math.abs(lane[end]!.value - round4(lane[start]!.value * (1 - DIP_DEPTH))) < 1e-4 ? [start, end] : null;
   }
 
   /**
@@ -1227,14 +1325,16 @@ class Edit {
       const end = await this.end(before);
       if (end === null || g.frame(end) !== g.frame(clip.start)) continue;
       if ("asset" in before && "asset" in clip && before.asset === clip.asset) continue;
-      const kind = clip.shape?.kind ?? (clip.dissolve !== undefined ? "dissolve" : clip.fadeIn !== undefined || before.fadeOut !== undefined ? "fade" : "cut");
+      const mixed = clip.shape?.kind ?? (clip.dissolve !== undefined ? "dissolve" : clip.fadeIn !== undefined || before.fadeOut !== undefined ? "fade" : null);
+      const kind = mixed ?? ((await this.dipKeys(before)) ? "dip cut" : "cut");
       cuts.push({ at: clip.start, kind });
     }
     for (let i = 2; i < cuts.length; i++) {
       const run = cuts.slice(i - 2, i + 1);
       if (run[0]!.kind === "cut" || !run.every((cut) => cut.kind === run[0]!.kind)) continue;
+      const kind = run[0]!.kind;
       this.warnings.push(
-        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${run[0]!.kind === "push" ? "pushes" : `${run[0]!.kind}s`}; ` +
+        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${/(sh|s)$/.test(kind) ? `${kind}es` : `${kind}s`}; ` +
           "never three of a kind in a row. Pick each by why the picture changes.",
       );
       break;
@@ -1248,12 +1348,26 @@ class Edit {
   async transitionRemove(args: OperationArgs<"transition.remove">): Promise<void> {
     const at = this.grid.snap(args.at);
     let cleared = false;
-    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }) => {
+    const { bottom } = this.bottomVideoTrack();
+    let dipped: Clip | undefined;
+    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
       if (incoming && (incoming.dissolve !== undefined || incoming.fadeIn !== undefined || incoming.shape !== undefined)) cleared = true;
       if (outgoing && outgoing.fadeOut !== undefined) cleared = true;
       if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
+      if (outgoing && track === bottom) dipped = outgoing;
     });
+    // A dip cut is keys on the clip ending at the cut (ADR 0030 decision 5): they go with it.
+    const dip = dipped ? await this.dipKeys(dipped) : null;
+    if (dipped && dip) {
+      const lane = dipped.keys!.opacity!.filter((_, index) => !dip.includes(index));
+      const keys: ClipKeys = { ...dipped.keys };
+      if (lane.length > 0) keys.opacity = lane as [ClipKey, ...ClipKey[]];
+      else delete keys.opacity;
+      if (Object.keys(keys).length === 0) delete dipped.keys;
+      else dipped.keys = keys;
+      cleared = true;
+    }
     if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
   }
 
@@ -2763,6 +2877,11 @@ function clearIncoming(clip: Clip): void {
   delete clip.dissolve;
   delete clip.shape;
   delete clip.fadeIn;
+}
+
+/** `kind` of `transition.set` with its article, for messages: "a wipe", "an iris". */
+function article(kind: string): string {
+  return `${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind === "dip-cut" ? "dip cut" : kind}`;
 }
 
 /** Adapter `type` is any string, so `clip.type === "media"` alone does not narrow. */

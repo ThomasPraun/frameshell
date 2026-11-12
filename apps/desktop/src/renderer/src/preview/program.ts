@@ -28,7 +28,16 @@ import {
   subjectOf,
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
-import { type ClipEdges, type FrameRect, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
+import {
+  type ClipEdges,
+  type FrameRect,
+  type ShapePart,
+  type TransitionContext,
+  circleReach,
+  clipLength,
+  edgeTransitions,
+  shapeAt,
+} from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -234,7 +243,7 @@ export function edgeWeight(edges: EdgeWeights, t: number, kind: "bottom" | "uppe
  * Where `span` draws at program frame `frame` while a shaped dissolve it comes in or goes out by plays (ADR 0030):
  * `shapeAt` of that dissolve, as export draws it. Null outside one: `spanPlacement` alone places it.
  */
-export function spanShape(span: PlacedSpan, frame: number, fps: number): ShapePart | null {
+export function spanShape(span: PlacedSpan, frame: number, fps: number): PartShape | null {
   const { motion } = span;
   if (!motion) return null;
   const t = frame / fps;
@@ -244,17 +253,26 @@ export function spanShape(span: PlacedSpan, frame: number, fps: number): ShapePa
   const outgoing = playing(motion.dissolveOut) ? outgoingPart(span, motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)) : null;
   if (!incoming || !outgoing) return incoming ?? outgoing;
   // A clip shorter than both its dissolves: both move it; the incoming one cuts it.
-  return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip };
+  return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip, ...(incoming.circle ? { circle: incoming.circle } : {}) };
+}
+
+/** A {@link ShapePart} as the preview draws it: an outgoing subject an iris uncovers shows outside the circle. */
+export interface PartShape extends ShapePart {
+  /** True: it shows outside `circle` instead of inside (a subject of the outgoing plate clip, ADR 0032). */
+  outside?: true;
 }
 
 /**
  * The outgoing side of `shape` at progress `f` for `span`. A subject (ADR 0032) is not covered by the incoming plate
- * clip of a wipe, so it shows only where the incoming picture does not: the complement of its strip, as export masks it.
+ * clip of a wipe or iris, so it shows only where the incoming picture does not: the complement of its strip or circle,
+ * as export masks it.
  */
-function outgoingPart(span: PlacedSpan, shape: TransitionShape, f: number): ShapePart {
+function outgoingPart(span: PlacedSpan, shape: TransitionShape, f: number): PartShape {
   const frame = shapeAt(shape, f);
-  if (shape.kind !== "wipe" || span.kind !== "media" || span.matte === undefined || !frame.incoming.clip) return frame.outgoing;
-  return { dx: 0, dy: 0, clip: complementStrip(frame.incoming.clip) };
+  if (shape.kind === "push" || span.kind !== "media" || span.matte === undefined) return frame.outgoing;
+  const { clip, circle } = frame.incoming;
+  if (circle) return { dx: 0, dy: 0, clip: null, circle, outside: true };
+  return clip ? { dx: 0, dy: 0, clip: complementStrip(clip) } : frame.outgoing;
 }
 
 /** The rest of the frame beside `strip`, a wipe's strip along one edge (`shapeAt`). */
@@ -265,17 +283,36 @@ function complementStrip([x0, y0, x1, y1]: FrameRect): FrameRect {
   return [0, y1, 1, 1];
 }
 
+/** An iris's circle in output pixels ({@link shapedRect}); `outside`: the picture shows outside it. */
+export interface ShapedCircle {
+  x: number;
+  y: number;
+  radius: number;
+  outside: boolean;
+}
+
 /**
  * Where a picture placed at `rect` in an `output`-sized frame draws under `shape` ({@link spanShape}): its corner moved
- * by the offset, rounded as export rounds it, and the frame rectangle it may show in (null: anywhere).
+ * by the offset, rounded as export rounds it, the frame rectangle it may show in (null: anywhere) and an iris's circle.
  */
-export function shapedRect(shape: ShapePart, rect: LayerRect, output: Size): { left: number; top: number; clip: LayerRect | null } {
+export function shapedRect(shape: PartShape, rect: LayerRect, output: Size): { left: number; top: number; clip: LayerRect | null; circle?: ShapedCircle } {
   const left = rect.left + Math.floor(shape.dx * output.width + 0.5);
   const top = rect.top + Math.floor(shape.dy * output.height + 0.5);
-  if (!shape.clip) return { left, top, clip: null };
+  const { circle: frameCircle } = shape;
+  const circle = frameCircle
+    ? {
+        circle: {
+          x: frameCircle.cx * output.width,
+          y: frameCircle.cy * output.height,
+          radius: frameCircle.r * circleReach(frameCircle, output.width, output.height),
+          outside: shape.outside === true,
+        },
+      }
+    : {};
+  if (!shape.clip) return { left, top, clip: null, ...circle };
   const [x0, y0, x1, y1] = shape.clip;
   const clip = { left: x0 * output.width, top: y0 * output.height, width: (x1 - x0) * output.width, height: (y1 - y0) * output.height };
-  return { left, top, clip };
+  return { left, top, clip, ...circle };
 }
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */

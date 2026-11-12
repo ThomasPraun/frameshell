@@ -5,6 +5,8 @@ import {
   type ExportPreset,
   type MediaClip,
   type Timeline,
+  type TransitionShape,
+  circleReach,
   dissolveProgress,
   dissolveWeights,
   fadeWeight,
@@ -427,13 +429,14 @@ describe("export transitions and keys (real ffmpeg)", () => {
         ["assets/dark.mp4", await flat("dark.mp4", "0x303030")],
         ["assets/bright.mp4", await flat("bright.mp4", "0xd0d0d0")],
       ]);
-      for (const kind of ["wipe", "push"] as const) {
+      for (const kind of ["wipe", "push", "iris"] as const) {
+        const shape: TransitionShape = kind === "iris" ? { kind, origin: [0.5, 0.25, 0.75, 0.5] } : { kind, direction: "left" };
         // bright starts at its source's first frame: its push head holds that frame.
         const timeline = timelineOf([
           {
             id: "v1",
             kind: "video",
-            clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape: { kind, direction: "left" } })],
+            clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape })],
           },
         ]);
         const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 });
@@ -441,8 +444,20 @@ describe("export transitions and keys (real ffmpeg)", () => {
         await executeRender(plan, { ffmpeg, workDir: join(dir, `work-${kind}`), output });
         const shown = await frames(output);
         expect(shown).toHaveLength(60);
-        // Frames 27 and 30 of the 12-frame dissolve centered on frame 30: the incoming picture from column 64 * (1 - p).
-        for (const frame of [27, 30, 33]) {
+        // Frames 27, 30 and 33 of the 12-frame dissolve centered on frame 30: the iris's circle around (40, 24).
+        for (const frame of kind === "iris" ? [27, 30, 33] : []) {
+          const { circle } = shapeAt(shape, dissolveProgress(1, 0.2, frame / 30)).incoming;
+          const radius = circle!.r * circleReach(circle!, 64, 64);
+          for (let y = 2; y < 64; y += 4) {
+            for (let x = 2; x < 64; x += 4) {
+              const distance = Math.hypot(x + 0.5 - 40, y + 0.5 - 24);
+              if (Math.abs(distance - radius) < 3) continue;
+              expect(shown[frame]![y * 64 + x]! > 128, `iris frame ${frame} pixel ${x},${y} (radius ${radius})`).toBe(distance < radius);
+            }
+          }
+        }
+        // The same frames of the wipe and push: the incoming picture from column 64 * (1 - p).
+        for (const frame of kind === "iris" ? [] : [27, 30, 33]) {
           const { incoming } = shapeAt({ kind: "wipe" }, dissolveProgress(1, 0.2, frame / 30));
           const edge = Math.round(64 * incoming.clip![0]);
           const row = shown[frame]!.subarray(32 * 64, 33 * 64);

@@ -57,6 +57,7 @@ import {
   fadeFilters,
   gainExpression,
   gainVolume,
+  irisAlpha,
   keyedOpacity,
   num,
   placementExpressions,
@@ -881,12 +882,15 @@ function layoutTimeline(
   for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
-  /** {@link whole} cut where its wipes end and start (a subject's outgoing one too): a wipe's mask costs per pixel, only the frames it plays over get it. */
+  /**
+   * {@link whole} cut where its wipes and irises end and start (a subject's outgoing one too): their mask costs per
+   * pixel, only the frames it plays over get it.
+   */
   const wipeSplit = (placed: Placed): Span[] => {
     const { from, to } = whole(placed);
     const cuts = [
-      ...(placed.shapeIn?.kind === "wipe" ? [placed.start + (placed.lead ?? 0)] : []),
-      ...(placed.shapeOut?.kind === "wipe" && placed.matte ? [placed.end - (placed.trail ?? 0)] : []),
+      ...(masks(placed.shapeIn) ? [placed.start + (placed.lead ?? 0)] : []),
+      ...(masks(placed.shapeOut) && placed.matte ? [placed.end - (placed.trail ?? 0)] : []),
     ].filter((cut) => cut > from && cut < to);
     const edges = [from, ...[...new Set(cuts)].sort((a, b) => a - b), to];
     return edges.slice(1).map((end, index) => ({ placed, from: edges[index]!, to: end }));
@@ -1339,7 +1343,7 @@ function layerOrigin(placed: Placed, time: string, first: number, last: number, 
 /**
  * What a shaped dissolve (ADR 0030, `shapeAt`) does to a base-track piece on timeline frames [start, end) of a graph
  * starting at frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a
- * wipe's `geq` on the incoming layer (and on a subject's outgoing one), reading the frame time `T` as timeline
+ * wipe or iris `geq` on the incoming layer (and on a subject's outgoing one), reading the frame time `T` as timeline
  * seconds. Null when neither applies.
  */
 function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
@@ -1359,14 +1363,19 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
       // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
       const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
       // The base's outgoing clip is covered by the incoming one; a subject's must be uncovered (ADR 0032).
-      const wipe = wipeAlpha(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
-      mask = mask ? `${mask},${wipe}` : wipe;
+      const alpha = (shape.kind === "iris" ? irisAlpha : wipeAlpha)(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
+      mask = mask ? `${mask},${alpha}` : alpha;
     }
   };
   side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
   if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
   return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
+}
+
+/** True when `shape` cuts the picture with a per-pixel mask (wipe, iris) instead of moving it (push). */
+function masks(shape: TransitionShape | undefined): boolean {
+  return shape !== undefined && shape.kind !== "push";
 }
 
 /**

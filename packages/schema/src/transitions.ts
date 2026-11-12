@@ -226,7 +226,17 @@ export function playedShape(clip: Clip): TransitionShape | undefined {
 /** Rectangle in fractions of the frame being rendered: left, top, right, bottom (0 to 1). */
 export type FrameRect = readonly [x0: number, y0: number, x1: number, y1: number];
 
-/** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip`. */
+/**
+ * A circle of a shaped dissolve (ADR 0030): a circle in pixels whatever the frame's aspect. `cx`, `cy`: its centre in
+ * fractions of the frame; `r`: its radius as a fraction (0 to 1) of {@link circleReach}, so at 1 it covers the frame.
+ */
+export interface FrameCircle {
+  cx: number;
+  cy: number;
+  r: number;
+}
+
+/** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip` and to `circle`. */
 export interface ShapePart {
   /** Horizontal offset from its own placement, fraction of the frame width (positive: right). */
   dx: number;
@@ -234,6 +244,8 @@ export interface ShapePart {
   dy: number;
   /** The part of the frame it shows in; null: wherever it lands. */
   clip: FrameRect | null;
+  /** An iris's circle it shows inside; absent: no circle cuts it. */
+  circle?: FrameCircle;
 }
 
 /** Both pictures of a shaped dissolve at one moment. Their opacity is their own: a shape replaces the mix. */
@@ -257,6 +269,17 @@ export function shapeStep(shape: TransitionShape): readonly [number, number] {
   return DIRECTION_STEPS[shape.direction ?? "left"];
 }
 
+/** Centre `[x, y]` in frame fractions an iris opens from: the centre of its `origin`, the frame's centre without one. */
+export function irisCentre(shape: TransitionShape): readonly [number, number] {
+  const [x0, y0, x1, y1] = shape.origin ?? [0, 0, 1, 1];
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+
+/** Pixels from a circle's centre (`cx`, `cy`, frame fractions) to the farthest corner of a `width` x `height` frame. */
+export function circleReach(circle: Pick<FrameCircle, "cx" | "cy">, width: number, height: number): number {
+  return Math.hypot(Math.max(circle.cx, 1 - circle.cx) * width, Math.max(circle.cy, 1 - circle.cy) * height);
+}
+
 /** How far a shape has moved at dissolve progress `f` (`dissolveProgress`): `f` eased in and out, f²(3−2f). */
 export function shapeProgress(f: number): number {
   const w = Math.min(1, Math.max(0, f));
@@ -267,9 +290,14 @@ export function shapeProgress(f: number): number {
  * Geometry of `shape` at dissolve progress `f` (0 to 1, `dissolveProgress`), the one truth export and preview draw
  * (ADR 0030). `push`: both pictures travel one frame in the direction, the outgoing one out, the incoming one in.
  * `wipe`: the incoming picture shows in the strip of the frame its edge has crossed, over the outgoing one.
+ * `iris`: the incoming picture shows in a circle that grows from {@link irisCentre} until it covers the frame.
  */
 export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
   const p = shapeProgress(f);
+  if (shape.kind === "iris") {
+    const [cx, cy] = irisCentre(shape);
+    return { outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip: null, circle: { cx, cy, r: p } } };
+  }
   const [ux, uy] = shapeStep(shape);
   // `+ 0` turns -0 into 0, so frames compare and print alike.
   if (shape.kind === "push") {

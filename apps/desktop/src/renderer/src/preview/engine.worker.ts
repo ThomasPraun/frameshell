@@ -4,7 +4,6 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
-import type { ShapePart } from "@frameshell/schema/transitions";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
@@ -21,6 +20,7 @@ import {
 } from "./engine-protocol.js";
 import {
   type AngleSpan,
+  type PartShape,
   type Program,
   type VideoSpan,
   angleLayer,
@@ -446,8 +446,8 @@ interface Part {
   angle: AngleSpan | null;
   /** Program frame shown: a reframed angle's cut depends on it. */
   frame: number;
-  /** Offset and frame rectangle of a shaped dissolve it plays in (ADR 0030); null outside one. */
-  shape?: ShapePart | null;
+  /** Offset, frame rectangle and circle of a shaped dissolve it plays in (ADR 0030); null outside one. */
+  shape?: PartShape | null;
   /** A generated clip's backdrop (ADR 0031): laid on what is drawn so far before the picture. */
   glass?: Backdrop;
 }
@@ -782,14 +782,26 @@ class Engine implements LayerHost {
       }
       if (part.placement.opacity <= 0) continue;
       const placed = layerRect(part.size, output, project, part.placement);
-      // A shaped dissolve (ADR 0030) moves the picture and cuts it to a frame rectangle; its own alpha still applies.
+      // A shaped dissolve (ADR 0030) moves the picture and cuts it to a frame rectangle or an iris's circle; its own
+      // alpha still applies.
       const shaped = part.shape ? shapedRect(part.shape, placed, output) : null;
       const rect = shaped ? { ...placed, left: shaped.left, top: shaped.top } : placed;
-      if (shaped?.clip) {
+      const cut = shaped !== null && (shaped.clip !== null || shaped.circle !== undefined);
+      if (cut) {
         context.save();
-        context.beginPath();
-        context.rect(shaped.clip.left, shaped.clip.top, shaped.clip.width, shaped.clip.height);
-        context.clip();
+        if (shaped.clip) {
+          context.beginPath();
+          context.rect(shaped.clip.left, shaped.clip.top, shaped.clip.width, shaped.clip.height);
+          context.clip();
+        }
+        if (shaped.circle) {
+          const { x, y, radius, outside } = shaped.circle;
+          context.beginPath();
+          // Outside: the frame with the circle cut out of it (even-odd).
+          if (outside) context.rect(0, 0, output.width, output.height);
+          context.arc(x, y, radius, 0, 2 * Math.PI);
+          context.clip(outside ? "evenodd" : "nonzero");
+        }
       }
       if (part.glass) {
         const alpha = part.image instanceof VideoFrame ? part.alpha : null;
@@ -802,7 +814,7 @@ class Engine implements LayerHost {
       } else {
         context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
       }
-      if (shaped?.clip) context.restore();
+      if (cut) context.restore();
     }
     context.globalAlpha = 1;
   }

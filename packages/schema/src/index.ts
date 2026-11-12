@@ -57,6 +57,8 @@ export {
   KEY_EASES,
   TRANSITION_SHAPE_KINDS,
   TRANSITION_DIRECTIONS,
+  FrameRectSchema,
+  orderedFrameRect,
   TransitionShapeSchema,
   ClipKeysSchema,
   PaintedTurnSchema,
@@ -423,12 +425,15 @@ export {
   type NestedFades,
   nestedFades,
   type FrameRect,
+  type FrameCircle,
   type ShapePart,
   type ShapeFrame,
   playedShape,
   shapeProgress,
   shapeStep,
   shapeAt,
+  irisCentre,
+  circleReach,
 } from "./transitions.js";
 
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";

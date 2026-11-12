@@ -30,6 +30,7 @@ import {
   TransformSchema,
   TRANSITION_DIRECTIONS,
   TRANSITION_SHAPE_KINDS,
+  FrameRectSchema,
 } from "@frameshell/schema";
 import { AGENT_LABEL_PATTERN } from "./agents.js";
 
@@ -401,13 +402,14 @@ export const operationArgs = {
     snapTo: snapToArg,
     at: TimeRef("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
-      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
+      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS, "dip-cut"])
       .default("dissolve")
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
           "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
-          "outgoing one out. `wipe` and `push` play on the bottom video track only; sound crossfades as for a dissolve. " +
-          "A clip edge with nothing butted fades in or out for any kind.",
+          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on the " +
+          "bottom video track only; sound crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
+          "`dip-cut`: a hard cut, the outgoing bottom-track clip darkened 40 % over its last 3 frames (opacity keys); sound is not touched.",
       ),
     direction: z
       .enum(TRANSITION_DIRECTIONS)
@@ -416,7 +418,15 @@ export const operationArgs = {
         "`wipe` and `push` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
           "`up` (enters from the bottom) or `down`.",
       ),
-    duration: z.number().positive().default(0.5).describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so)."),
+    origin: FrameRectSchema.optional().describe(
+      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1; take it from " +
+        "`inspect.point`: `frameBox`, or `box` divided by the project size). The circle grows from its centre. Default: the frame's centre.",
+    ),
+    duration: z
+      .number()
+      .positive()
+      .default(0.5)
+      .describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so). A `dip-cut` is always 3 frames."),
     tracks: z
       .array(TrackRef)
       .min(1)

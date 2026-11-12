@@ -409,4 +409,80 @@ describe("shaped transitions (ADR 0030)", () => {
     const jumps = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video" as const, clips: Array.from({ length: 5 }, (_, i) => media(`j${i + 1}`, i, i, i + 1)) }] };
     expect((await apply(jumps, "transition.set", { at: 1 })).warnings).toEqual([]);
   });
+
+  it("an iris takes `origin` and no `direction`; other kinds refuse an `origin`", async () => {
+    const { timeline, warnings } = await apply(butted(), "transition.set", { at: 4, kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] });
+    expect(clip(timeline, "v2")).toMatchObject({ dissolve: 0.5, shape: { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] } });
+    expect(clip(timeline, "a2")).not.toHaveProperty("shape");
+    expect(warnings).toEqual([]);
+    expect(parseTimeline(timeline).ok).toBe(true);
+    expect(clip((await apply(butted(), "transition.set", { at: 4, kind: "iris" })).timeline, "v2").shape).toEqual({ kind: "iris" });
+    const direction = await rejection(apply(butted(), "transition.set", { at: 4, kind: "iris", direction: "up" }));
+    expect(direction.message).toContain("an iris has none");
+    const origin = await rejection(apply(butted(), "transition.set", { at: 4, kind: "wipe", origin: [0, 0, 1, 1] }));
+    expect(origin.message).toContain("`origin` is for `iris`; a wipe has none");
+    const unordered = await rejection(apply(butted(), "transition.set", { at: 4, kind: "iris", origin: [0.8, 0, 0.2, 1] }));
+    expect(unordered.message).toContain("x0 <= x1");
+    const upper = await rejection(apply(layered(), "transition.set", { at: 4, kind: "iris", tracks: ["t_u"] }));
+    expect(upper.message).toContain("an iris plays on the bottom video track only");
+  });
+});
+
+describe("dip cut (ADR 0030 decision 5)", () => {
+  const opacity = (timeline: Timeline, id: string) => clip(timeline, id).keys?.opacity;
+
+  it("makes the edge a hard cut on the bottom track and darkens the outgoing clip 40 % over its last 3 frames", async () => {
+    const dissolved = (await apply(butted(), "transition.set", { at: 4 })).timeline;
+    const { timeline, warnings } = await apply(dissolved, "transition.set", { at: 4, kind: "dip-cut" });
+    // v1 plays source 2-6 from 0 s: its last frame is at timeline 119/30 s, source 2 + 119/30.
+    expect(opacity(timeline, "v1")).toEqual([{ at: 5.867, value: 1 }, { at: 5.967, value: 0.6 }]);
+    expect(clip(timeline, "v2")).not.toHaveProperty("dissolve");
+    // Sound is not touched.
+    expect(clip(timeline, "a2")).toMatchObject({ dissolve: 0.5 });
+    expect(warnings).toEqual([]);
+    expect(parseTimeline(timeline).ok).toBe(true);
+  });
+
+  it("darkens from the level that plays there, keeps other keys, and writes the same keys when run again", async () => {
+    const keyed = (await apply(butted(), "clip.key", { clip: "v1", prop: "opacity", time: 1, value: 0.5 })).timeline;
+    const once = (await apply(keyed, "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    expect(opacity(once, "v1")).toEqual([{ at: 3, value: 0.5 }, { at: 5.867, value: 0.5 }, { at: 5.967, value: 0.3 }]);
+    const twice = (await apply(once, "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    expect(twice.tracks).toEqual(once.tracks);
+  });
+
+  it("transition.remove takes the dip keys away and leaves the others", async () => {
+    const keyed = (await apply(butted(), "clip.key", { clip: "v1", prop: "opacity", time: 1, value: 0.5 })).timeline;
+    const dipped = (await apply(keyed, "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    const removed = await apply(dipped, "transition.remove", { at: 4 });
+    expect(opacity(removed.timeline, "v1")).toEqual([{ at: 3, value: 0.5 }]);
+    expect(removed.warnings).toEqual([]);
+    const bare = (await apply((await apply(butted(), "transition.set", { at: 4, kind: "dip-cut" })).timeline, "transition.remove", { at: 4 })).timeline;
+    expect(clip(bare, "v1")).not.toHaveProperty("keys");
+  });
+
+  it("refuses an upper video track, an edge where no clip ends, a one-frame clip; warns when given audio tracks", async () => {
+    const base = butted();
+    const layered: Timeline = { ...base, tracks: [base.tracks[0]!, { id: "t_u", kind: "video", clips: [media("u1", 0, 2, 6)] }, base.tracks[1]!] };
+    const upper = await rejection(apply(layered, "transition.set", { at: 4, kind: "dip-cut", tracks: ["t_u"] }));
+    expect(upper.code).toBe(ErrorCode.InvalidOperation);
+    expect(upper.message).toContain("a dip cut darkens the bottom video track over black");
+    const start = await rejection(apply(base, "transition.set", { at: 0, kind: "dip-cut" }));
+    expect(start.message).toContain("no clip ends at 0 s on t_v");
+    const short: Timeline = { ...base, tracks: [{ id: "t_v", kind: "video", clips: [media("v1", 0, 2, 2 + 1 / 30), media("v2", 1 / 30, 2, 6)] }] };
+    const tiny = await rejection(apply(short, "transition.set", { at: 1 / 30, kind: "dip-cut" }));
+    expect(tiny.message).toContain("one frame long");
+    const { timeline, warnings } = await apply(base, "transition.set", { at: 4, kind: "dip-cut", tracks: ["t_v", "t_a"] });
+    expect(opacity(timeline, "v1")).toHaveLength(2);
+    expect(warnings).toEqual(["a dip cut leaves sound as it is: t_a not changed."]);
+  });
+
+  it("counts as its own kind for the variety warnings, not a hard cut", async () => {
+    const assets = ["assets/talk.mp4", "assets/tight.mp4"];
+    const clips = Array.from({ length: 4 }, (_, i) => media(`v${i + 1}`, i, 1, 2, assets[i % 2]));
+    let timeline: Timeline = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video", clips }] };
+    for (const at of [1, 2]) timeline = (await apply(timeline, "transition.set", { at, kind: "dip-cut" })).timeline;
+    const third = await apply(timeline, "transition.set", { at: 3, kind: "dip-cut" });
+    expect(third.warnings).toEqual([expect.stringContaining("the cuts at 1, 2, 3 s on t_v are all dip cuts")]);
+  });
 });

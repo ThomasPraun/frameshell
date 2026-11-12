@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Iris and dip cut, slice 2 of #483 (ADR 0030, epic #451; protocol 103): `transition set --kind iris --origin
+  x0,y0,x1,y1` opens the incoming clip in a circle growing from the centre of `origin` (fractions of the frame, default
+  its centre) until it covers the frame, on the bottom video track; export masks the incoming piece with a `geq` circle,
+  the preview with a Canvas 2D arc, and a subject of the outgoing plate (ADR 0032) shows outside the circle. `--kind
+  dip-cut` makes the edge a hard cut and darkens the clip ending there by 40 % over its last 3 frames, written as two
+  `opacity` keys on it (bottom video track only; an upper track is refused; sound is not touched); `transition remove`
+  takes those keys away again, and the variety warnings count dip cuts as their own kind. The clip shape `origin` field
+  is new: older Frameshell versions reject a timeline that carries an iris.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
