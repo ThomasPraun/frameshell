@@ -593,6 +593,7 @@ class Engine implements LayerHost {
     this.#drawn = "";
     // The canvas holds the previous program's picture: the next draw announces its frame even when it is the same one.
     this.#shown = Number.NaN;
+    this.#shownAlpha = [];
     const used = new Set<string>();
     for (const layer of next.layers) {
       for (const span of layer) {

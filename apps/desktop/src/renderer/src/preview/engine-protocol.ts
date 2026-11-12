@@ -78,7 +78,10 @@ export type FromEngine =
    */
   | { type: "shown"; frame: number; program: number }
   | { type: "stats"; stats: EngineStats }
-  /** Reply to `alphaAt` `id`: the alpha of the pictures with alpha on the canvas now, at program frame `frame` (-1: black). */
+  /**
+   * Reply to `alphaAt` `id`: the alpha of the pictures with alpha on the canvas now, at program frame `frame` (-1: black).
+   * After a new program, until its first draw: `frame` NaN and no layers.
+   */
   | { type: "alpha"; id: number; frame: number; layers: LayerAlpha[] }
   | { type: "error"; message: string };
 

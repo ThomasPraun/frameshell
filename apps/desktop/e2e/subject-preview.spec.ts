@@ -46,6 +46,7 @@ async function showSubjectAt2s(): Promise<void> {
   const stage = await laidOutBox(page.locator(".preview-stage"));
   await page.mouse.click(stage.x + 4, stage.y + 4);
   await page.keyboard.press("Home");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
   await page.keyboard.press("Shift+ArrowRight");
   await page.keyboard.press("Shift+ArrowRight");
   await expect(page.getByTestId("playhead")).toHaveText("00:00:02:00");

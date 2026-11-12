@@ -123,7 +123,10 @@ export function PreviewPanel({
       project.mediaUrl,
       {
         onTime: (at) => transport.report(at),
-        onShown: (frame) => (frame === null ? box.removeAttribute("data-shown") : box.setAttribute("data-shown", String(frame))),
+        onShown: (frame) => {
+          if (frame === null) box.removeAttribute("data-shown");
+          else box.setAttribute("data-shown", String(frame));
+        },
         onError: (message) => setNotice(message),
         onSilent: () => setNotice(t.preview.noAudio),
       },
