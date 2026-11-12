@@ -264,7 +264,7 @@ export class ExportService {
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
     const sources = await this.#sources(root, timeline);
-    const matted = subjectAssets(timeline, sources);
+    const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)));
     const prepared = matted.length > 0 && this.#options.mattes ? await this.#options.mattes.prepare(root, matted) : null;
     const makeMattes = prepared?.make ?? null;
     // Only the assets that can get one: the plan's warnings name the others, as the final plan does.
@@ -517,7 +517,7 @@ export class ExportService {
     const generated =
       generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, undefined, renderSize) : new Map();
     const sources = await this.#sources(root, timeline);
-    const matted = subjectAssets(timeline, sources, params.at);
+    const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)), params.at);
     // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.
     const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted)).make() : new Map<string, MatteSource>();
     const plan = compileFrame({
@@ -678,18 +678,17 @@ export function frameFormatOf(path: string): FrameFormat {
 }
 
 /**
- * Moving-picture assets the shown subject layers of `timeline` (flattened) play: each needs a matte to export (ADR
- * 0032). With `at`, only those a subject is drawn with near that timeline second (a frame capture).
+ * Assets the shown subject layers of `timeline` (flattened) play that `moving` says have a moving picture: each needs a
+ * matte to export or preview (ADR 0032), in track then time order of its first subject clip. With `at`, only those a
+ * subject is drawn with near that timeline second (a frame capture).
  */
-function subjectAssets(timeline: Timeline, sources: ReadonlyMap<string, ExportSource>, at?: number): string[] {
+export function subjectAssets(timeline: Timeline, moving: (asset: string) => boolean, at?: number): string[] {
   const found = new Set<string>();
   for (const track of timeline.tracks) {
     if (track.kind !== "video" || !showsPicture(track)) continue;
     for (const clip of track.clips) {
       const mark = subjectOf(clip);
-      if (!mark || !("asset" in clip)) continue;
-      const video = sources.get(clip.asset)?.video;
-      if (!video || video.still) continue;
+      if (!mark || !("asset" in clip) || !moving(clip.asset)) continue;
       const speed = clip.speed ?? 1;
       const time = (source: number) => clip.start + (source - clip.in) / speed;
       // A tenth of a second each side covers the snap of `at` to its frame: a matte too many costs time, one too few drops the subject.
@@ -697,6 +696,11 @@ function subjectAssets(timeline: Timeline, sources: ReadonlyMap<string, ExportSo
     }
   }
   return [...found];
+}
+
+/** True for a source with a moving picture (not audio only, not a still). */
+function movingPicture(source: ExportSource | undefined): boolean {
+  return source?.video !== null && source?.video !== undefined && !source.video.still;
 }
 
 /** Picture size of a source with a picture. */

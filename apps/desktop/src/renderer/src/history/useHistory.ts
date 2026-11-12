@@ -1,5 +1,6 @@
 import type { HistoryDiffResult, HistoryResult, TimelineView } from "@frameshell/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { useReview } from "../review/store.js";
 import { type SelectionOrigin, selection } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
 import { historySelection } from "./model.js";
@@ -77,7 +78,8 @@ function feedAt(timeline: string, revision: number): Promise<TimelineView | null
  * timeline feed (which follows daemon `timeline.changed`), so no second
  * subscription exists. Every journaled timeline operation bumps the
  * revision; a project-config operation (ADR 0036) does not, so `reload`
- * reads it again after one made here.
+ * reads it again after one made here, and the list is read again whenever a
+ * review-mode proposal opens or closes (an accepted one may change only config).
  */
 export function useTimelineHistory(timeline: string): { history: HistoryResult | null; error: string | null; reload: () => void } {
   const { view } = useTimelineView(timeline);
@@ -85,6 +87,7 @@ export function useTimelineHistory(timeline: string): { history: HistoryResult |
   const [state, setState] = useState<{ history: HistoryResult | null; error: string | null }>({ history: null, error: null });
   const [asked, setAsked] = useState(0);
   const reload = useCallback(() => setAsked((count) => count + 1), []);
+  const proposal = useReview().proposal?.tx ?? null;
   useEffect(() => {
     if (revision === null) return;
     let live = true;
@@ -95,7 +98,7 @@ export function useTimelineHistory(timeline: string): { history: HistoryResult |
     return () => {
       live = false;
     };
-  }, [timeline, revision, asked]);
+  }, [timeline, revision, asked, proposal]);
   return { ...state, reload };
 }
 

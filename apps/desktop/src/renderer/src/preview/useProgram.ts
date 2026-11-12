@@ -5,6 +5,7 @@ import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTi
 import { type Program, compileProgram } from "./program.js";
 import { useAudioBakes } from "./useAudioBakes.js";
 import { useClipRenders } from "./useClipRenders.js";
+import { useSubjectMattes } from "./useSubjectMattes.js";
 
 /** Poll `asset.list` this often while an asset is still ingesting (until daemon asset events, #69). */
 const INGEST_POLL_MS = 2_000;
@@ -25,9 +26,10 @@ export function useProgram(): Program | null {
   const nested = useNestedViews(view);
   const renders = useClipRenders(view, nested);
   const bakes = useAudioBakes(view, nested);
+  const mattes = useSubjectMattes(view, nested, assets);
   return useMemo(
-    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes }) : null),
-    [view, assets, resolution, nested, renders, bakes],
+    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes }) : null),
+    [view, assets, resolution, nested, renders, bakes, mattes],
   );
 }
 

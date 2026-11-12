@@ -10,6 +10,7 @@ export const endCard: Template = {
   id: "end-card",
   description: "End card: logo, name, call to action and address on a solid background, never static",
   defaultDuration: 4,
+  overlay: false,
   variables({ tokens }: TemplateInput): TemplateVariable[] {
     return [
       { id: "title", type: "string", label: "Name or line above the call to action", default: tokens.brand.product ?? "Your name", maxLength: 60 },

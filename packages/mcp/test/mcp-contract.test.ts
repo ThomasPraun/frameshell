@@ -154,6 +154,11 @@ describe("frameshell mcp", () => {
       expect(reviewed.content.filter((part) => part.type === "image")).toHaveLength(1);
       expect(json(reviewed)).toMatchObject({ source: "timeline", sheets: [{ kind: "seam", tiles: expect.arrayContaining(["1.47 tail", "0.00 head"]) }] });
 
+      // A reference video measured: the sheets as images, the numbers as JSON.
+      const analyzed = await call("analyze", { file: "assets/take.mp4" });
+      expect(analyzed.content.filter((part) => part.type === "image").length).toBeGreaterThanOrEqual(2);
+      expect(json(analyzed)).toMatchObject({ name: "take", stats: { shotCount: 1 }, sheets: [{ kind: "contact", tiles: expect.arrayContaining(["0.00 start"]) }, { kind: "shots" }] });
+
       // Revert the transaction: the cut is undone as a new operation.
       const reverted = json(await call("revert", { target: tx }));
       expect(reverted).toMatchObject({ revision: cut["revision"] + 1, operation: { op: "revert" } });

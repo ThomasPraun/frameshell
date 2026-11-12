@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
-  `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 92): a timeline names the grid it follows in
+  `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
   through the clip's start, `in` and speed, so moving, trimming or speeding up the music moves the grid; `tempo set
   --bpm 120 [--offset s] [--meter n]` is a nominal grid for blocking a film before music exists (each frame rounded once
@@ -28,6 +28,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   edit of `edits` (half or double time, a moved downbeat) changes the grid in the open app at once, and a broken file
   takes the grid away until it validates again. Older Frameshell versions reject a timeline that carries `tempo`.
 
+- Subject layers in the preview (#461 slice 3, ADR 0032; protocol 95): a track `behind` a plate now shows behind the
+  person in the app's preview too, as in export and `frame`. The preview reads the plate's proxy through its subject
+  matte (the matte as the alpha of a second, software decoder; frame N of the matte is frame N of the proxy), on the
+  frames export draws the subject (where a track behind the plate shows and no shown track between covers it), with
+  the plate's push or wipe when the plate is the bottom track (an outgoing subject shows in the rest of a wipe). The
+  internal daemon method `matte.status` reports each plate's matte and queues the missing ones as background `matte`
+  jobs (shared with `matte.prepare`, never made twice); until a matte is ready the plate plays as it is, the word in
+  front, with a note over the picture. A test checks that preview and export draw a subject on the same frames. On an
+  Apple M3, 6 s of a 540p take with a word behind it played with 0 dropped and 0 starved frames and 3 decoders (plate,
+  subject picture, matte). Plates with their own alpha (VP9 proxies) get no subject in the preview yet, only a note
+  that export draws it.
+
+- `frameshell analyze <video>` (#471 slice 1, epic #451, decided in #478; daemon `analyze` as a background job of kind `analyze`, MCP `analyze`, protocol 93):
+  measure a reference video into `.frameshell/analysis/<name>/` (any file; a run of the same name replaces the folder; project
+  files untouched). The shot table comes from ffmpeg's scene score on every frame (`--threshold`, default 0.3; hard cuts, a run of
+  high scores within 3 frames is one cut) with cuts per minute and the average, median, shortest and longest shot; a contact sheet at
+  2 frames a second with the cuts marked, a sheet and a JPEG of the middle frame of every shot, through the sampling and tiling
+  of `review` (now `review/images.ts`, shared); the dominant colours of every shot and of the film; the loudness by EBU R128
+  (LUFS, LU, dBTP); and the tempo and beats by the `beats` detector at 44.1 kHz when the sound has a steady beat (`analysis.json`
+  holds the beat lists). Every time is a frame index / fps rounded down to the millisecond. MCP returns the sheets as images. New
+  skill page `reference-video.md` (measured, estimated and decision labels; the grammar, never the content). Events, motion curves,
+  text placement, look, sync and diff against an original are later slices of #471.
+- `frameshell sound sfx <kind> [--variant n] [--seed n] [--pitch x] [--length s]` (#463 slice 1, ADR 0038; daemon
+  `sound.sfx`, MCP `sound_sfx`, protocol 92) synthesizes a sound effect offline, with no network and no third-party
+  samples: `click`, `tick`, `pop`, `whoosh` (stereo), `riser`, `thump`, `impact` and `shutter`, three variants each, a
+  family `seed` for one timbre across a film and a seeded pitch (0.9 to 1.3) and level (within 1.5 dB) jitter. The same
+  arguments always give the same file: `assets/sound/<kind>-<key>.wav`, 48 kHz 16-bit with the peak near -3 dBFS, imported
+  like a voiceover take and carrying its cache key and `peakAt` (the instant that must land on the picture: the
+  transient of a hit, the peak of a whoosh, the end of a riser) in a RIFF chunk. A take that is current is `cached`, and
+  a file of that name made by hand is never overwritten. When the project already keeps a `credits.json`, the take is
+  recorded there as `own` work. `sound` is a reserved built-in command group. Placing on markers (`sound.place`) and
+  music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
+  taste.
+- Motion templates, second group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template`
+  also takes `lower-third` (card with an accent bar, name and role), `logo-lockup` (logo, name, accent rule, tagline;
+  beside the name on 16:9, stacked on 1:1, 4:5 and 9:16), `checklist` (items separated by `|` spring in, then tick one
+  by one on `tickStart` and `tickGap`), `comparison` (the old option is crossed out, the chosen one springs in on an
+  accent pill), `counter` (counts from `from` to `to`, up or down, in `countTime` seconds, tabular figures, optional
+  glow while it climbs) and `big-word` (one huge word, letters rise through a mask, for a track with `behind` so it
+  sits behind the person, ADR 0032). Each has typed props, takes colours and fonts from `style.json`, lays out
+  per format with `pick()`, uses springs, and passes `hyperframes check --strict`; the ones that can work alone as
+  well as over footage have `bg` and `backdrop` props. The real-Chrome test renders every template in the four
+  formats (inside the frame, same frames cold and after a reseek). Listed in the plugin skill.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
@@ -277,6 +320,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Review mode holds format changes (#496 slice 2, ADR 0036, protocol 94): while review mode is on, an agent's
+  `format add`, `format remove`, `revert` of a format change and `tx abort` of one that reached the file wait in the
+  transaction's proposal like timeline changes, instead of being refused. A transaction mixing clips and formats is
+  one proposal, accepted or rejected whole. The person's change of another format rebases the proposal; a change of
+  the same format makes it stale (`conflicts`: `format:<id>`). Accepting journals the format operations, marked with
+  the proposal, before the timeline ones. `format list` shows the author its proposal's version (`--json`: `view`,
+  `proposal`). A `frameshell.json` write that changes `formats` is journaled as a `file.write` config operation that
+  `revert` undoes; in review mode its formats change waits in the proposal and the other keys are written at once.
+  An agent's `style.json` write is refused while review mode is on, until `style set` exists. The app's proposal bar
+  lists the formats a proposal adds or removes (`Formats: + 9x16 (1080x1920)`), and the History list refreshes when a
+  proposal opens or closes. Wire: `format.add`/`format.remove` results gain `proposal`; `format.list` takes `view`;
+  proposals (`proposal.status`, `status`, `proposal.changed`), `proposal.diff` and `proposal.accept` gain `config`;
+  decisions gain `config`.
 - Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 89): `format add` and
   `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
   `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips

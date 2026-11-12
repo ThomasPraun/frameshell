@@ -3,6 +3,7 @@ import type {
   AgentTarget,
   AssetInfo,
   AudioBakesResult,
+  MatteStatusResult,
   ClipRendersResult,
   HistoryDiffResult,
   HistoryResult,
@@ -492,6 +493,11 @@ export interface FrameshellApi {
      * the missing bakes. `view` as for `timeline.show`. Rejects with the daemon's message.
      */
     bakes(timeline: string, view?: TimelineViewName): Promise<AudioBakesResult>;
+    /**
+     * `matte.status` of a timeline of the window's project (ADR 0032): subject mattes of the plates its subject layers
+     * play; queues the missing ones. `view` as for `timeline.show`. Rejects with the daemon's message.
+     */
+    mattes(timeline: string, view?: TimelineViewName): Promise<MatteStatusResult>;
     /** Bytes of a derived waveform or thumbnail (project-relative path from `assets()`). */
     read(path: string): Promise<Uint8Array>;
     /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
@@ -924,6 +930,7 @@ export const Channel = {
   uiReply: "ui:reply",
   mediaAssets: "media:assets",
   mediaBakes: "media:bakes",
+  mediaMattes: "media:mattes",
   mediaRead: "media:read",
   mediaChanged: "media:changed",
   contextCaptureFrame: "context:capture-frame",

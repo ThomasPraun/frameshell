@@ -9,6 +9,7 @@ import {
   type HandshakeResult,
   type JobInfo,
   type JsonRpcRequest,
+  type MatteStateInfo,
   type MethodName,
   type MethodResult,
   type OpenTransaction,
@@ -30,6 +31,7 @@ import {
   writeMessage,
 } from "@frameshell/protocol";
 import {
+  CREDITS_FILE,
   type CaptionPhrase,
   type MulticamGroup,
   type ProgramTrack,
@@ -37,9 +39,11 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  STYLE_FILE,
   createTimeline,
   cueTokens,
   findPerson,
+  parseProjectConfig,
   parseTimeline,
   projectFormats,
   subtitleTracks,
@@ -47,10 +51,10 @@ import {
 } from "@frameshell/schema";
 import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/captions.js";
 import { runDoctor } from "./binaries/doctor.js";
-import { CreditsService } from "./credits/service.js";
+import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
-import { ExportService } from "./export/service.js";
+import { ExportService, subjectAssets } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
@@ -99,9 +103,11 @@ import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
 import { FormatService, builtinFormatInfos, formatInfos, projectConfigDocument } from "./formats.js";
-import { ConfigJournal, configOperation, readConfigJournal } from "./config/journal.js";
+import { ConfigJournal, readConfigJournal } from "./config/journal.js";
+import { applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
+import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
 import { configReverted } from "./config/revert.js";
-import { ProjectRegistry, readEnclosingProject } from "./projects.js";
+import { PROJECT_FILE, ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker, isTouchedTimeline } from "./history/transactions.js";
 import { ReviewSwitch } from "./proposals/review-switch.js";
@@ -144,7 +150,9 @@ import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
+import { generateSfx } from "./sound/generate.js";
 import { ReviewService } from "./review/service.js";
+import { AnalyzeService } from "./analyze/service.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -362,13 +370,61 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (await timelines.writeFile(dir, id, content, { author, tx })) await transactions.applied(key, tx);
       await settle(key, tx);
     },
+    // ADR 0036: a `formats` change by file.write is a config operation of the writer, like `format add`.
+    writeConfig: async (dir, content, author = "file") => {
+      const key = transactionKey(author);
+      const tx = transactions.next(key);
+      await transactions.touching(key, tx, { root: dir, doc: "project" });
+      if (await configJournal.serial(dir, () => writeProjectFile(dir, content, author, tx))) await transactions.applied(key, tx);
+      await settle(key, tx);
+    },
+    // ADR 0036 decision 5: style.json has no config document yet, so review mode cannot hold its writes.
+    guardWrite: async (dir, rel, author) => {
+      if (rel !== STYLE_FILE || author === "ui" || !(await review.enabled(await canonicalPath(dir)))) return;
+      throw new RpcError(
+        ErrorCode.ProposalState,
+        `Review mode is on: ${STYLE_FILE} changes cannot wait as proposals yet, so only the person, in the Frameshell app, can write it.`,
+        { tx: null, reason: "forbidden", conflicts: [], hint: "Ask the person to change the style guide, or to turn review mode off (History view)." },
+      );
+    },
   });
   const readProjectConfig = async (dir: string) => (await readEnclosingProject(dir))!.config;
   // ADR 0036: every project-config change goes through this journal, so history, revert and tx.abort cover it.
   const configJournal = new ConfigJournal({
     docs: { project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }) },
   });
-  const formats = new FormatService({ readConfig: readProjectConfig, journal: configJournal });
+  const formats = new FormatService({
+    readConfig: readProjectConfig,
+    journal: configJournal,
+    change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make),
+  });
+  /**
+   * `file.write` of `frameshell.json` (ADR 0036): a change of `formats` is a `file.write` config operation of
+   * `author`, journaled before the file is written, or held by review mode while the other keys are written at
+   * once. Caller holds the config journal of `dir`. True when it changed formats.
+   */
+  const writeProjectFile = async (dir: string, content: string, author: string, tx: TxRef): Promise<boolean> => {
+    const parsed = parseProjectConfig(JSON.parse(content));
+    const next = formatState(parsed.ok ? parsed.value.formats : undefined);
+    const current = await configJournal.read(dir, "project");
+    if (configHash(current) === configHash(next)) {
+      await projects.writeConfigText(dir, content);
+      return false;
+    }
+    await timelines.changeConfig(
+      dir,
+      "project",
+      { author, tx },
+      // At once `base` is the file's state; in a proposal, only what the write changed replays on its version.
+      async (base, file) => ({
+        op: "file.write",
+        args: { path: PROJECT_FILE },
+        after: base === file ? next : applyConfigPatch(base, diffConfig(file, next, FORMAT_RULES), "after", FORMAT_RULES),
+      }),
+      { write: () => projects.writeConfigText(dir, content), uncovered: () => projects.writeConfigKeepingFormats(dir, content) },
+    );
+    return true;
+  };
   const plugins = new PluginHost({
     dirs,
     pins: projects,
@@ -409,6 +465,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Running `voiceover.generate` calls, by canonical project root: one at a time per project. */
   const voiceoverRuns = new Map<string, Promise<void>>();
+  /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
+  const soundRuns = new Map<string, Promise<void>>();
   /** Aborts provider calls when the daemon stops. */
   const voiceoverAbort = new AbortController();
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
@@ -494,6 +552,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     fileTx: () => transactions.next("file"),
     reviewEnabled: (dir) => review.enabled(dir),
     txOpen: (tx) => transactions.isOpenTx(tx),
+    config: configJournal,
     onProposal: ({ root, endsTx, ...change }) => {
       events.publish("proposal.changed", root, { project: root, ...change });
       // A building proposal closed unapplied ends its transaction (ADR 0019 §7).
@@ -547,6 +606,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     exports,
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+  });
+  const analyses = new AnalyzeService({
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+    beats,
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -895,6 +959,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       matting.delete(slot);
     }
   };
+  /**
+   * Queue the `matte` job of asset `rel` (or join the one queued or running) and wait for it: `matte.prepare` and the
+   * preview's `matte.status` share it, so a matte is never made twice.
+   */
+  const matteInJob = (dir: string, rel: string, ready: { hash: string; proxy: string }, report?: (update: Progress) => void) =>
+    inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
+      ctx.update({ step: "matte", progress: 0, cached: false });
+      // Made already when a job or an export of the same content finished while this one waited.
+      const made = await makeMatte(dir, rel, ready, { signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }), ...(report ? { report } : {}) });
+      if (made.cached) ctx.update({ cached: true, progress: 1 });
+      return made;
+    });
+  /** Why the matte of a canonical root and cache key could not be made, for `matte.status`: a changed asset has another key. */
+  const matteFailures = new Map<string, string>();
   /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
   const turnsSource: TurnsSource = {
     probe: (d, a) => media.probe(d, a),
@@ -955,22 +1033,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       hint: "Only the person decides, in the Frameshell app.",
     });
   };
-  /**
-   * Config changes are not proposals yet (ADR 0027 decision 11, ADR 0036 slice 2): while review mode is on, only
-   * the person, in the app, makes them or reverts them, so nothing reaches `frameshell.json` unseen.
-   */
-  const formatsOutsideReview = async (dir: string, caller: Caller) => {
-    if (authorOf(caller) === "ui" || !(await review.enabled(await canonicalPath(dir)))) return;
-    throw new RpcError(ErrorCode.ProposalState, "Review mode is on: format changes cannot wait as proposals yet, so only the person, in the Frameshell app, can make or revert them.", {
-      tx: null,
-      reason: "forbidden",
-      conflicts: [],
-      hint: "Ask the person to change the formats, or to turn review mode off (History view).",
-    });
-  };
-  /** Run a project-config change of `caller` in its transaction (ADR 0036). */
+  /** Run a project-config change of `caller` in its transaction (ADR 0036); in review mode it joins the proposal (ADR 0019). */
   const changeConfig = async <T>(dir: string, caller: Caller, work: (author: string, tx: TxRef) => Promise<T>): Promise<T> => {
-    await formatsOutsideReview(dir, caller);
     const key = authorOf(caller);
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, doc: "project" });
@@ -990,6 +1054,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
    * written last, so a timeline conflict leaves both untouched; a config write that still throws (invalid file)
    * leaves the timeline reverted. A target that changed other timelines is reverted one timeline at a time: its
    * config goes with the first, later ones skip it, and naming a timeline it never changed is HistoryNotFound.
+   * In review mode both wait in one proposal (ADR 0019).
    */
   const revertConfig = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller): Promise<MethodResult<"revert">> => {
     const inTimeline = (await readJournal(dir, timeline)).some((entry) => entry.id === target || entry.tx === target);
@@ -999,7 +1064,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     } else if (configReverted(await readConfigJournal(dir), target)) {
       return { ...(await revert(dir, cwd, timeline, target, caller)), config: [] };
     }
-    await formatsOutsideReview(dir, caller);
     const key = authorOf(caller);
     const author = journalAuthorOf(caller);
     const tx = transactions.next(key, { standalone: true });
@@ -1009,7 +1073,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const plans = await configJournal.planRevert(dir, target);
       const reverted = inTimeline ? await timelines.revert({ root: dir, cwd, timeline, author, tx, target }) : null;
       const revision = reverted ? null : (await timelines.load(dir, timeline)).timeline.revision;
-      const config = (await configJournal.commitRevert(dir, plans, { author, tx, target })).map(configOperation);
+      const config = [];
+      for (const { doc, current, restored } of plans) {
+        // Planned on the file; in review mode the same keys are set on the proposal's version.
+        const rules = configJournal.rules(doc);
+        const patch = diffConfig(current, restored, rules);
+        const revertOf = async (base: typeof current) => ({ op: "revert", args: { target }, after: base === current ? restored : applyConfigPatch(base, patch, "after", rules) });
+        config.push((await timelines.changeConfig(dir, doc, { author, tx }, revertOf)).operation);
+      }
       if (reverted) return { ...reverted, config };
       // Only config changed: the timeline stays at its revision, and `operation` is the config revert with no timeline inverse.
       const { id, op, args } = config[0]!;
@@ -1151,10 +1222,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.remove": async ({ cwd, name }) => plugins.remove(await root(cwd), name),
     "plugin.run": async ({ cwd, plugin, command, args }) => plugins.run(await root(cwd), cwd, plugin, command, args),
     "export.presets": async ({ cwd }) => ({ presets: await exports.presets(await root(cwd)) }),
-    "format.list": async ({ cwd }) => {
+    "format.list": async ({ cwd, view }, caller) => {
       const dir = await root(cwd);
       const { config } = (await readEnclosingProject(dir))!;
-      return { dir, formats: formatInfos(config), builtins: builtinFormatInfos() };
+      const shown = await timelines.viewConfig(dir, "project", await viewOf(dir, caller, view));
+      const formats = formatInfos({ ...config, formats: formatsFromState(projectFormats(config)[0]!, shown.state) });
+      return { dir, formats, builtins: builtinFormatInfos(), view: shown.view, proposal: shown.proposal };
     },
     "format.add": async ({ cwd, id, width, height, index }, caller) => {
       const dir = await root(cwd);
@@ -1182,6 +1255,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         every,
         projectFormat,
         view: await viewOf(dir, caller, view),
+      });
+    },
+    analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
+      const dir = await root(cwd);
+      const path = resolve(cwd, file);
+      const inside = relative(dir, path);
+      const input = (inside === "" || inside.startsWith("..") || isAbsolute(inside) ? path : inside).split(sep).join("/");
+      return inJob({ kind: "analyze", project: dir, asset: input }, async (ctx) => {
+        ctx.update({ step: "analyze", progress: 0 });
+        return analyses.run(
+          dir,
+          { file: path, name, threshold },
+          {
+            signal: ctx.signal,
+            progress: (progress) => ctx.update({ progress }),
+            // The caller may be gone (the job outlives it): its progress is then dropped.
+            stage: (message) => {
+              try {
+                request.progress({ message, stage: "analyze", values: { file: input } });
+              } catch {
+                // Connection closed.
+              }
+            },
+          },
+        );
       });
     },
     cover: async ({ cwd, timeline, view, ...choice }, caller) => {
@@ -1465,6 +1563,37 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       voiceoverRuns.set(key, settled);
       void settled.then(() => {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
+      });
+      return run;
+    },
+    "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
+      const dir = await root(cwd);
+      const work = () =>
+        generateSfx({
+          root: dir,
+          kind,
+          variant,
+          seed,
+          pitch,
+          length,
+          importAssets: (files) => media.import(dir, files, "copy"),
+          credit: async (file) => {
+            // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
+            if (!(await exists(join(dir, CREDITS_FILE)))) return false;
+            const ledger = await readCredits(dir);
+            if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
+            return true;
+          },
+        });
+      const key = canonicalPathSync(dir);
+      const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
+      const settled = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      soundRuns.set(key, settled);
+      void settled.then(() => {
+        if (soundRuns.get(key) === settled) soundRuns.delete(key);
       });
       return run;
     },
@@ -2129,8 +2258,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const configRoots: string[] = [];
       // A config root whose change failed journaled nothing: nothing to undo there.
       for (const where of touched) if (!isTouchedTimeline(where) && (await configJournal.has(where.root, tx.id))) configRoots.push(where.root);
-      // Config undo cannot wait as a proposal yet (ADR 0036 slice 2): refused before anything is dropped.
-      for (const dir of configRoots) await formatsOutsideReview(dir, caller);
       // A proposal still building holds what the file never got (ADR 0019 §3).
       await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
@@ -2152,13 +2279,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           }
         }
         const timelineUndo = touched.filter(isTouchedTimeline);
-        const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: timelineUndo });
-        const config = [];
-        for (const { dir, plans: planned } of plans) {
-          const written = await configJournal.commitRevert(dir, planned, { author: journalAuthorOf(caller), tx, target: tx.id });
-          config.push(...written.map(configOperation));
-        }
-        return { reverted, proposal, config };
+        const config = plans.map(({ dir, plans: planned }) => ({ root: dir, plans: planned }));
+        return timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: timelineUndo, config });
       });
       await transactions.end(author);
       return { tx: tx.id, label: tx.label, author, ...done };
@@ -2298,13 +2420,60 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           // Connection closed.
         }
       };
-      return inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
-        ctx.update({ step: "matte", progress: 0, cached: false });
-        // Made already when a job or an export of the same content finished while this one waited.
-        const made = await makeMatte(dir, rel, { hash: ready.hash, proxy }, { signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }), report: tell });
-        if (made.cached) ctx.update({ cached: true, progress: 1 });
-        return describe(made.info, made.cached);
-      });
+      const made = await matteInJob(dir, rel, { hash: ready.hash, proxy }, tell);
+      return describe(made.info, made.cached);
+    },
+    "matte.status": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const flat = await resolveNested(dir, shown.timeline, undefined, shown.fps);
+      const listed = new Map((await media.list(dir)).map((info) => [info.path, info]));
+      // Not probed yet counts as moving: it is `waiting` until its ingest says.
+      const moving = (asset: string) => {
+        const info = listed.get(asset);
+        if (info?.kind !== "media" || info.state === "failed") return false;
+        return info.media === null || (info.media.video !== null && !info.media.video.still);
+      };
+      const assets = subjectAssets(flat, moving);
+      if (assets.length === 0) return { timeline, revision: shown.timeline.revision, mattes: [] };
+      const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
+      const canonical = canonicalPathSync(dir);
+      const mattes: MatteStateInfo[] = [];
+      for (const asset of assets) {
+        const info = listed.get(asset)!;
+        const base = { asset, matte: null, progress: 0, job: null, error: null };
+        if (info.state !== "ready" || info.hash === null || info.proxy === null) {
+          mattes.push({ ...base, state: "waiting" });
+          continue;
+        }
+        const ready = { hash: info.hash, proxy: info.proxy };
+        const key = matteKey(ready.hash, matteModel, fps);
+        if (await readMatteInfo(dir, key, ready.hash)) {
+          mattes.push({ ...base, state: "ready", matte: mattePaths(key).video, progress: 1 });
+          continue;
+        }
+        const slot = `${canonical}\0${key}`;
+        const failed = matteFailures.get(slot);
+        if (failed !== undefined) {
+          mattes.push({ ...base, state: "failed", error: failed });
+          continue;
+        }
+        const active = () => jobs.list({ project: dir, active: true }).find((job) => job.kind === "matte" && job.asset === asset);
+        if (!active()) {
+          // The job's own end, not the promise: a job canceled by the user or a daemon stop is queued again next read.
+          matteInJob(dir, asset, ready).catch(() => {});
+          const queued = active()?.id;
+          const stop = jobs.watch(({ job: change }) => {
+            if (change.id !== queued || (change.state !== "done" && change.state !== "failed" && change.state !== "canceled")) return;
+            stop();
+            if (change.state === "failed") matteFailures.set(slot, change.error ?? "The matte could not be made.");
+          });
+          if (queued === undefined) stop();
+        }
+        const job = active();
+        mattes.push({ ...base, state: job?.state === "running" ? "making" : "queued", progress: job?.progress ?? 0, job: job?.id ?? null });
+      }
+      return { timeline, revision: shown.timeline.revision, mattes };
     },
     "beats.measure": async ({ cwd, asset, bpm, resetEdits }, _caller, request) => {
       const dir = await root(cwd);

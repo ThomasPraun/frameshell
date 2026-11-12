@@ -5,6 +5,8 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ErrorCode,
   type ClipPlace,
+  type ConfigDoc,
+  type ConfigOperation,
   type HistoryDiffResult,
   type HistoryResult,
   type JournalEntry,
@@ -13,6 +15,7 @@ import {
   type OperationResult,
   type GcEntry,
   type Proposal,
+  type ProposalConfigChange,
   type ProposalDecision,
   type ProposalOutcome,
   type ProposalState,
@@ -30,7 +33,15 @@ import {
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
-import { readConfigJournal } from "../config/journal.js";
+import {
+  type ConfigChanged,
+  type ConfigEdit,
+  type ConfigJournal,
+  type ConfigRevertPlan,
+  configOperation,
+  readConfigJournal,
+} from "../config/journal.js";
+import { type ConfigState, PLAIN_RULES, applyConfigPatch, configHash, diffConfig } from "../config/patch.js";
 import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { nonMediaError } from "../media/kind.js";
@@ -48,9 +59,12 @@ import {
 } from "../history/revert.js";
 import {
   type OpenProposal,
+  type ProposalConfigPart,
   type ProposalPart,
+  type ProposedConfigOp,
   type ProposedFile,
   type ProposedOp,
+  type StoredProposal,
   appendDecision,
   loadOpenProposals,
   readDecisions,
@@ -103,6 +117,11 @@ export interface TimelineServiceOptions {
   txOpen?: (tx: string) => boolean;
   /** Called on every step of a review-mode proposal; see {@link ProposalChange}. */
   onProposal?: (change: ProposalChange) => void;
+  /**
+   * Project-config journal (ADR 0036): {@link TimelineService.changeConfig} goes through it, so config changes join
+   * review-mode proposals like timeline ones. Required for config changes; without it none is made.
+   */
+  config?: ConfigJournal;
 }
 
 /** One step of a proposal (ADR 0019), as reported to {@link TimelineServiceOptions.onProposal}. */
@@ -115,6 +134,8 @@ export interface ProposalChange {
   state: ProposalState;
   operations: number;
   timelines: string[];
+  /** Project-config keys it changes (ADR 0036). */
+  config: ProposalConfigChange[];
   conflicts: string[];
   /** It closed unapplied while its transaction was still open: the caller ends that transaction. */
   endsTx: boolean;
@@ -250,6 +271,8 @@ export interface RevertAllCall {
   target: string;
   /** Timelines it changed, in the order to revert and report them. */
   timelines: { root: string; timeline: string }[];
+  /** Planned config reverts per project (ADR 0036), written after the timelines; caller holds `ConfigJournal.serial` of each root. */
+  config?: { root: string; plans: ConfigRevertPlan[] }[];
 }
 
 /** Rejections listed by `status`, newest first. */
@@ -378,7 +401,9 @@ export class TimelineService {
    * before any write. In review mode (ADR 0019) a project's undo is not
    * written: it waits as one ready proposal in a new transaction, `proposal`.
    */
-  async revertAll(call: RevertAllCall): Promise<{ reverted: OperationResult[]; proposal: { tx: string; state: "ready" } | null }> {
+  async revertAll(
+    call: RevertAllCall,
+  ): Promise<{ reverted: OperationResult[]; proposal: { tx: string; state: "ready" } | null; config: ConfigOperation[] }> {
     const { timelines, target } = call;
     const keys = await Promise.all(timelines.map(({ root, timeline }) => this.#key(root, timeline)));
     return this.#exclusive(
@@ -411,6 +436,10 @@ export class TimelineService {
             const real = await this.#realRoot(where.root);
             if (!routes.has(real)) routes.set(real, await this.#route(where.root, call.author, undo));
           }
+          for (const { root } of call.config ?? []) {
+            const real = await this.#realRoot(root);
+            if (!routes.has(real)) routes.set(real, await this.#route(root, call.author, undo));
+          }
           const at = new Date().toISOString();
           const direct: typeof planned = [];
           for (const step of planned) {
@@ -423,6 +452,19 @@ export class TimelineService {
             const patch = diffTimelines(before, applied.timeline);
             const op: ProposedOp = { id: newOpId(), op: "revert", args: { target }, patch, inverse: applied.inverse, at };
             route.proposal.parts.push({ timeline: step.where.timeline, base: before, shadow: applied.timeline, ops: [op] });
+          }
+          const directConfig: { root: string; plans: ConfigRevertPlan[] }[] = [];
+          for (const step of call.config ?? []) {
+            const route = routes.get(await this.#realRoot(step.root));
+            if (!route) {
+              directConfig.push(step);
+              continue;
+            }
+            for (const { doc, current, restored } of step.plans) {
+              const patch = diffConfig(current, restored, this.#journal().rules(doc));
+              const op: ProposedConfigOp = { id: newOpId(), op: "revert", args: { target }, patch, at };
+              (route.proposal.config ??= []).push({ doc, base: current, shadow: restored, ops: [op] });
+            }
           }
           let proposal: { tx: string; state: "ready" } | null = null;
           for (const route of routes.values()) {
@@ -443,7 +485,14 @@ export class TimelineService {
             const context = { root: where.root, cwd: where.root, timeline: where.timeline, author: call.author, tx: call.tx };
             reverted.push(await this.#record(context, before, applied, "revert", { target }));
           }
-          return { reverted, proposal };
+          const config: ConfigOperation[] = [];
+          for (const { root, plans } of directConfig) {
+            for (const { doc, current, restored } of plans) {
+              const record = { op: "revert", args: { target }, author: call.author, tx: call.tx };
+              config.push(configOperation(await this.#journal().commit(root, doc, record, current, restored)));
+            }
+          }
+          return { reverted, proposal, config };
         } finally {
           for (const route of routes.values()) route?.release();
         }
@@ -578,7 +627,10 @@ export class TimelineService {
     const entries = await readJournal(root, id);
     // Project-config operations (ADR 0036) show in every timeline's history.
     const config = await readConfigJournal(root);
-    const decisions = (await readDecisions(await this.#realRoot(root))).filter((decision) => decision.timelines.includes(id));
+    // A decided config change (ADR 0036) shows in every timeline's history, like the config operations.
+    const decisions = (await readDecisions(await this.#realRoot(root))).filter(
+      (decision) => decision.timelines.includes(id) || (decision.config?.length ?? 0) > 0,
+    );
     const { since } = options;
     const sinceAt = [...entries, ...config].filter((entry) => entry.tx === since).map((entry) => entry.at);
     if (since !== undefined && sinceAt.length === 0) {
@@ -611,10 +663,10 @@ export class TimelineService {
    * journaled transaction. Empty without an open proposal and `tx`; throws
    * ProposalState (`decided`, `unknown`) for a `tx` that is not open.
    */
-  async proposalDiff(root: string, tx?: string): Promise<{ tx: string | null; timelines: HistoryDiffResult[] }> {
+  async proposalDiff(root: string, tx?: string): Promise<{ tx: string | null; timelines: HistoryDiffResult[]; config: ProposalConfigChange[] }> {
     const book = await this.#book(root);
     const proposal = tx === undefined ? book.proposal : await this.#decidable(book.root, book, tx);
-    if (!proposal) return { tx: null, timelines: [] };
+    if (!proposal) return { tx: null, timelines: [], config: [] };
     const timelines: HistoryDiffResult[] = [];
     for (const id of proposal.parts.map((part) => part.timeline)) {
       const diff = await this.#turn(root, id, async () => {
@@ -635,7 +687,103 @@ export class TimelineService {
       );
       timelines.push(await this.#placeDiff(root, file.timeline, await projectFps(root), proposal.tx, changes));
     }
-    return { tx: proposal.tx, timelines };
+    if (proposal.config?.length) {
+      const journal = this.#journal();
+      const synced = await journal.serial(root, async () => {
+        for (const part of proposal.config ?? []) if (!(await this.#syncConfig(book, part.doc, await journal.read(root, part.doc)))) return false;
+        return true;
+      });
+      if (!synced) return this.proposalDiff(root, tx);
+    }
+    return { tx: proposal.tx, timelines, config: this.#configChanges(proposal) };
+  }
+
+  /**
+   * Change config document `doc` of project `root` (ADR 0036), a `ConfigChanger`: journaled and written at once,
+   * or, in review mode for any author but `ui`, made on the open proposal's version of the document and held in
+   * it, like a timeline operation (ADR 0019). `files.write` replaces the document's own writer when it applies at
+   * once; `files.uncovered` runs before a held change is saved (keys of the file no document covers go to the file
+   * now). The person's change rebases the open proposal, or makes it stale. Caller holds `ConfigJournal.serial(root)`.
+   */
+  async changeConfig(
+    root: string,
+    doc: ConfigDoc,
+    who: { author: string; tx: TxRef },
+    make: (base: ConfigState, current: ConfigState) => Promise<ConfigEdit>,
+    files: { write?: () => Promise<void>; uncovered?: () => Promise<void> } = {},
+  ): Promise<ConfigChanged> {
+    const journal = this.#journal();
+    const route = await this.#route(root, who.author, who.tx);
+    if (!route) {
+      const current = await journal.read(root, doc);
+      const edit = await make(current, current);
+      const record = { op: edit.op, args: edit.args, undo: edit.undo, author: who.author, tx: who.tx };
+      const entry = await journal.commit(root, doc, record, current, edit.after, files.write);
+      if (who.author === "ui") {
+        const book = await this.#book(root);
+        if (book.proposal) await this.#syncConfig(book, doc, edit.after);
+      }
+      return { operation: configOperation(entry), state: edit.after, proposal: null };
+    }
+    try {
+      const { book, proposal } = route;
+      const current = await journal.read(root, doc);
+      if (!route.created && !(await this.#syncConfig(book, doc, current))) {
+        const notice = book.notices.get(who.author) ?? { tx: proposal.tx, reason: "stale" as const, conflicts: [] };
+        book.notices.delete(who.author);
+        throw closedError(notice);
+      }
+      let part = proposal.config?.find((candidate) => candidate.doc === doc);
+      const base = part ? part.shadow : current;
+      const edit = await make(base, current);
+      const op: ProposedConfigOp = {
+        id: newOpId(),
+        op: edit.op,
+        args: edit.args,
+        patch: diffConfig(base, edit.after, journal.rules(doc)),
+        ...(edit.undo ? { undo: edit.undo } : {}),
+        at: new Date().toISOString(),
+      };
+      await files.uncovered?.();
+      const added = !part;
+      if (!part) (proposal.config ??= []).push((part = { doc, base: current, shadow: current, ops: [] }));
+      const previous = part.shadow;
+      part.ops.push(op);
+      part.shadow = edit.after;
+      if (route.created) book.proposal = proposal;
+      try {
+        await this.#persist(book);
+      } catch (error) {
+        part.ops.pop();
+        part.shadow = previous;
+        if (added) proposal.config!.pop();
+        if (route.created) book.proposal = null;
+        throw error;
+      }
+      this.#emit(book, proposal, "building");
+      const touched = op.patch.map((change) => change.key);
+      return { operation: { id: op.id, op: op.op, args: op.args, author: who.author, tx: who.tx.id, at: op.at, doc, touched }, state: edit.after, proposal: proposal.tx };
+    } finally {
+      route.release();
+    }
+  }
+
+  /**
+   * Keyed state of config document `doc` as a read with `view` shows it (ADR 0036): the file's, or the open
+   * proposal's version of it (the file's when the proposal does not change it), with the open proposal.
+   */
+  viewConfig(root: string, doc: ConfigDoc, view: TimelineViewName): Promise<{ state: ConfigState } & Pick<Viewed, "view" | "proposal">> {
+    const journal = this.#journal();
+    return journal.serial(root, async () => {
+      const current = await journal.read(root, doc);
+      const book = await this.#book(root);
+      let state = current;
+      if (view === "proposal" && book.proposal && (await this.#syncConfig(book, doc, current))) {
+        state = book.proposal?.config?.find((part) => part.doc === doc)?.shadow ?? current;
+      }
+      const open = book.proposal;
+      return { state, view, proposal: open ? { tx: open.tx, state: open.state } : null };
+    });
   }
 
   /** `history.diff` result of `changes`; ends are derived like `show`'s. */
@@ -693,7 +841,7 @@ export class TimelineService {
   /** The open proposal of `root` (ADR 0019); null when none. */
   async proposal(root: string): Promise<Proposal | null> {
     const open = (await this.#book(root)).proposal;
-    return open ? summary(open) : null;
+    return open ? summary(open, this.#configChanges(open)) : null;
   }
 
   /** Review mode of `root` for `status` and `proposal.status`: the switch, the open proposal, the last decisions. */
@@ -702,7 +850,7 @@ export class TimelineService {
     const open = (await this.#book(root)).proposal;
     return {
       enabled: await this.#reviewEnabled(root),
-      proposal: open ? summary(open) : null,
+      proposal: open ? summary(open, this.#configChanges(open)) : null,
       decisions: (await readDecisions(real)).slice(-MAX_DECISIONS).reverse(),
     };
   }
@@ -758,13 +906,13 @@ export class TimelineService {
    * marked `proposal: <tx>`, on every timeline or none. Throws ProposalState
    * (`building`, `decided`, `unknown`, `stale`) or the engine's errors.
    */
-  async acceptProposal(root: string, tx: string): Promise<{ tx: string; operations: OperationResult[] }> {
+  async acceptProposal(root: string, tx: string): Promise<{ tx: string; operations: OperationResult[]; config: ConfigOperation[] }> {
     const real = await this.#realRoot(root);
     const book = await this.#book(root);
     const proposal = await this.#decidable(real, book, tx);
     if (proposal.state !== "ready") throw proposalState(tx, "building", `Proposal ${tx} is still building: its transaction is open. Accept it once it is ready.`);
     const keys = await Promise.all(proposalTimelines(proposal).map((id) => this.#key(root, id)));
-    return this.#exclusive(keys, async () => {
+    return this.#holdingConfig(root, proposal, () => this.#exclusive(keys, async () => {
       if (book.proposal !== proposal) await this.#decidable(real, book, tx);
       const installs: { file: ProposedFile; timeline: Timeline; journaled: Timeline | null; patch: TimelinePatch | null; applied: AppliedOperation | null }[] = [];
       for (const file of proposal.files ?? []) {
@@ -795,8 +943,29 @@ export class TimelineService {
         }
         planned.push({ part, steps });
       }
+      const configured: { part: ProposalConfigPart; current: ConfigState }[] = [];
+      for (const part of proposal.config ?? []) {
+        const current = await this.#journal().read(root, part.doc);
+        if (!(await this.#syncConfig(book, part.doc, current))) {
+          const conflicts = (await readDecisions(real)).findLast((candidate) => candidate.tx === tx)?.conflicts ?? [];
+          throw proposalState(tx, "stale", `Proposal ${tx} is out of date: you changed ${conflicts.join(", ") || "the same formats"} too. It was closed unapplied.`, conflicts);
+        }
+        configured.push({ part, current });
+      }
       const operations: OperationResult[] = [];
       const txRef = { id: proposal.tx, label: proposal.label };
+      // Config first (ADR 0036), each operation journaled before its file write.
+      const config: ConfigOperation[] = [];
+      for (const { part, current } of configured) {
+        const rules = this.#journal().rules(part.doc);
+        let state = current;
+        for (const op of part.ops) {
+          const after = applyConfigPatch(state, op.patch, "after", rules);
+          const record = { op: op.op, args: op.args, undo: op.undo, author: proposal.author, tx: txRef, id: op.id, proposal: proposal.tx };
+          config.push(configOperation(await this.#journal().commit(root, part.doc, record, state, after)));
+          state = after;
+        }
+      }
       for (const { file, timeline, journaled, patch, applied } of installs) {
         const id = file.timeline;
         if (journaled && patch && applied) {
@@ -815,8 +984,8 @@ export class TimelineService {
         }
       }
       await this.#close(book, proposal, "accepted", []);
-      return { tx, operations };
-    });
+      return { tx, operations, config };
+    }));
   }
 
   /** Refuse open proposal `tx`, ready or building (ADR 0019 §8): nothing is journaled. Throws ProposalState (`decided`, `unknown`). */
@@ -826,8 +995,70 @@ export class TimelineService {
     const proposal = await this.#decidable(real, book, tx);
     // Under the timelines' locks: an accept already writing them finishes first, then this finds it decided.
     const keys = await Promise.all(proposalTimelines(proposal).map((id) => this.#key(root, id)));
-    await this.#exclusive(keys, async () => this.#close(book, await this.#decidable(real, book, tx), "rejected", []));
+    await this.#holdingConfig(root, proposal, () =>
+      this.#exclusive(keys, async () => this.#close(book, await this.#decidable(real, book, tx), "rejected", [])),
+    );
     return { tx };
+  }
+
+  /** Run `work` holding the config journal of `root` when `proposal` changes config (ADR 0036), so no config change interleaves. */
+  #holdingConfig<T>(root: string, proposal: OpenProposal, work: () => Promise<T>): Promise<T> {
+    return proposal.config?.length ? this.#journal().serial(root, work) : work();
+  }
+
+  /** The config journal; see {@link TimelineServiceOptions.config}. */
+  #journal(): ConfigJournal {
+    const journal = this.#options.config;
+    if (!journal) throw new Error("TimelineService was built without a config journal (option `config`).");
+    return journal;
+  }
+
+  /** Every config key the open `proposal` changes, from the file's value to the proposal's. */
+  #configChanges(proposal: OpenProposal): ProposalConfigChange[] {
+    return (proposal.config ?? []).flatMap((part) =>
+      diffConfig(part.base, part.shadow, this.#options.config?.rules(part.doc) ?? PLAIN_RULES).map((change) => ({ doc: part.doc, ...change })),
+    );
+  }
+
+  /**
+   * Bring the open proposal's part for config document `doc` up to `current` (ADR 0036), as {@link TimelineService.#sync}
+   * does for a timeline. Caller holds `ConfigJournal.serial`. False when it went stale.
+   */
+  async #syncConfig(book: Book, doc: ConfigDoc, current: ConfigState): Promise<boolean> {
+    const proposal = book.proposal;
+    const part = proposal?.config?.find((candidate) => candidate.doc === doc);
+    if (!proposal || !part || configHash(part.base) === configHash(current)) return true;
+    const rebased = await this.#rebaseConfig(book.root, part, current);
+    if (book.proposal !== proposal) return false;
+    if (!rebased.ok) {
+      await this.#close(book, proposal, "stale", rebased.conflicts);
+      return false;
+    }
+    Object.assign(part, { base: current, shadow: rebased.shadow });
+    await this.#persist(book);
+    this.#emit(book, proposal, proposal.state);
+    return true;
+  }
+
+  /**
+   * `part` replayed on `current`, or the keys that make it stale: the ones the person changed too since its base,
+   * else the ones breaking the document's rules after the replay.
+   */
+  async #rebaseConfig(
+    root: string,
+    part: Omit<ProposalConfigPart, "shadow">,
+    current: ConfigState,
+  ): Promise<{ ok: true; shadow: ConfigState } | { ok: false; conflicts: string[] }> {
+    const journal = this.#journal();
+    const rules = journal.rules(part.doc);
+    const ours = new Set(part.ops.flatMap((op) => op.patch.map((change) => change.key)));
+    const conflicts = diffConfig(part.base, current, rules)
+      .map((change) => change.key)
+      .filter((key) => ours.has(key));
+    if (conflicts.length > 0) return { ok: false, conflicts };
+    const shadow = part.ops.reduce((state, op) => applyConfigPatch(state, op.patch, "after", rules), current);
+    const broken = await journal.check(root, part.doc, shadow);
+    return broken.length > 0 ? { ok: false, conflicts: broken } : { ok: true, shadow };
   }
 
   /**
@@ -857,7 +1088,7 @@ export class TimelineService {
       const timer = setTimeout(() => {
         book.waiters.delete(done);
         const still = book.proposal ?? open;
-        resolve({ outcome: "pending", tx: still.tx, label: still.label, author: still.author, conflicts: [], proposal: summary(still) });
+        resolve({ outcome: "pending", tx: still.tx, label: still.label, author: still.author, conflicts: [], proposal: summary(still, this.#configChanges(still)) });
       }, timeoutMs);
       // A daemon shutting down must not wait for it.
       timer.unref?.();
@@ -1054,6 +1285,7 @@ export class TimelineService {
       author: proposal.author,
       outcome,
       timelines: proposalTimelines(proposal),
+      ...(proposal.config?.length ? { config: proposal.config.map((part) => part.doc) } : {}),
       conflicts,
       at,
     };
@@ -1090,6 +1322,7 @@ export class TimelineService {
       state,
       operations: operationCount(proposal),
       timelines: proposalTimelines(proposal),
+      config: this.#configChanges(proposal),
       conflicts,
       endsTx,
     });
@@ -1121,13 +1354,18 @@ export class TimelineService {
     const stored = await loadOpenProposals(real);
     const latest = stored.pop();
     // Only one can be open; older leftovers of a crash are closed.
+    const open = (stored: StoredProposal): OpenProposal => ({
+      ...stored,
+      parts: stored.parts.map((part) => ({ ...part, shadow: part.base })),
+      config: stored.config?.map((part) => ({ ...part, shadow: part.base })),
+    });
     for (const old of stored) {
-      book.proposal = { ...old, parts: old.parts.map((part) => ({ ...part, shadow: part.base })) };
+      book.proposal = open(old);
       await this.#close(book, book.proposal, "stale", []);
     }
     if (!latest) return book;
     const fps = await projectFps(real);
-    const proposal: OpenProposal = { ...latest, parts: latest.parts.map((part) => ({ ...part, shadow: part.base })) };
+    const proposal = open(latest);
     book.proposal = proposal;
     for (const part of proposal.parts) {
       let current: Timeline;
@@ -1143,6 +1381,16 @@ export class TimelineService {
         return book;
       }
       Object.assign(part, { base: current, ops: rebased.ops, shadow: rebased.shadow });
+    }
+    for (const part of proposal.config ?? []) {
+      const journal = this.#options.config;
+      const current = journal ? await journal.read(real, part.doc).catch(() => null) : null;
+      const rebased = current ? await this.#rebaseConfig(real, part, current) : { ok: false as const, conflicts: [part.doc] };
+      if (!rebased.ok) {
+        await this.#close(book, proposal, "stale", rebased.conflicts);
+        return book;
+      }
+      Object.assign(part, { base: current, shadow: rebased.shadow });
     }
     for (const file of proposal.files ?? []) {
       // A timeline it adds that is readable now (the person wrote it), or kept text that no longer parses.
@@ -1979,7 +2227,8 @@ function proposedEntries(part: ProposalPart, proposal: OpenProposal): { state: T
 
 /** Operations of `proposal`, every timeline; a timeline it adds counts as one. */
 function operationCount(proposal: OpenProposal): number {
-  return proposal.parts.reduce((sum, part) => sum + part.ops.length, 0) + (proposal.files?.length ?? 0);
+  const config = (proposal.config ?? []).reduce((sum, part) => sum + part.ops.length, 0);
+  return proposal.parts.reduce((sum, part) => sum + part.ops.length, 0) + (proposal.files?.length ?? 0) + config;
 }
 
 /** Timelines `proposal` changes or adds. */
@@ -2011,8 +2260,8 @@ function newTxId(): string {
   return `tx_${randomBytes(4).toString("hex")}`;
 }
 
-/** `proposal` as `status` and `proposal.status` list it. */
-function summary(proposal: OpenProposal): Proposal {
+/** `proposal` as `status` and `proposal.status` list it, with the config keys it changes. */
+function summary(proposal: OpenProposal, config: ProposalConfigChange[]): Proposal {
   return {
     tx: proposal.tx,
     label: proposal.label,
@@ -2020,6 +2269,7 @@ function summary(proposal: OpenProposal): Proposal {
     state: proposal.state,
     operations: operationCount(proposal),
     timelines: proposalTimelines(proposal),
+    config,
     openedAt: proposal.openedAt,
     ageMs: Math.max(0, Date.now() - Date.parse(proposal.openedAt)),
   };

@@ -13,6 +13,7 @@ let daemon: Daemon;
 let conn: DaemonConnection;
 let project: string;
 let ffmpeg: string;
+let footage: string;
 
 beforeAll(async () => {
   daemon = await startDaemon({
@@ -26,7 +27,7 @@ beforeAll(async () => {
   project = tempDir();
   await conn.request("project.init", { dir: project });
   ({ ffmpeg } = await mediaTools());
-  const footage = tempDir();
+  footage = tempDir();
   // A 60 px square on black, its left edge at 40 px at 0 s moving 80 px a second: centered at x 150 at 1 s.
   await makeMarkerClip(ffmpeg, join(footage, "mover.mp4"), { box: 60, durationS: 2, x: "40+80*t" });
   await run(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "color=c=red:s=320x180", "-frames:v", "1", "-y", join(footage, "word.png")]);
@@ -96,6 +97,37 @@ describe("tracks behind a subject (ADR 0032)", () => {
       await conn.request("track.set", { cwd: project, track: word.id, behind: null });
       await conn.request("frame", { cwd: project, at: 1, out });
       expect(red((await picture(out)).at(150, 90))).toBe(true);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "matte.status queues the matte of each plate the preview draws a subject of, and reports it ready",
+    async () => {
+      const fresh = tempDir();
+      await conn.request("project.init", { dir: fresh });
+      await conn.request("asset.import", { cwd: fresh, files: ["mover.mp4", "word.png"].map((name) => join(footage, name)) });
+      const plate = (await conn.request("track.add", { cwd: fresh, kind: "video" })).changes.added[0]!;
+      const word = (await conn.request("track.add", { cwd: fresh, kind: "video" })).changes.added[0]!;
+      await conn.request("clip.add", { cwd: fresh, track: plate, asset: "assets/mover.mp4", start: 0, in: 0, out: 2 });
+      await conn.request("clip.add", { cwd: fresh, track: word, asset: "assets/word.png", start: 0, duration: 2 });
+      expect((await conn.request("matte.status", { cwd: fresh, timeline: "main" })).mattes).toEqual([]);
+      await conn.request("track.set", { cwd: fresh, track: word, behind: plate });
+      const states: string[] = [];
+      let found = (await conn.request("matte.status", { cwd: fresh, timeline: "main" })).mattes;
+      for (const deadline = Date.now() + 180_000; found[0]?.state !== "ready" && found[0]?.state !== "failed" && Date.now() < deadline; ) {
+        states.push(found[0]!.state);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        found = (await conn.request("matte.status", { cwd: fresh, timeline: "main" })).mattes;
+      }
+      // The read never makes it in line: the first answer is a pending state.
+      expect(states[0]).toMatch(/^(waiting|queued|making)$/);
+      const matte = expect.stringMatching(/^\.frameshell\/cache\/mattes\/.+\.mp4$/);
+      expect(found).toEqual([{ asset: "assets/mover.mp4", state: "ready", matte, progress: 1, job: null, error: null }]);
+      const jobs = (await conn.request("job.list", { cwd: fresh })).jobs.filter((job) => job.kind === "matte");
+      expect(jobs).toEqual([expect.objectContaining({ state: "done", asset: "assets/mover.mp4" })]);
+      // One matte, never made twice: `matte.prepare` finds the same file.
+      expect(await conn.request("matte.prepare", { cwd: fresh, asset: "assets/mover.mp4" })).toMatchObject({ cached: true, matte: found[0]!.matte });
     },
     MEDIA_TIMEOUT,
   );

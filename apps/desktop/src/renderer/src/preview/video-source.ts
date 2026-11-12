@@ -1,7 +1,8 @@
 // What the engine worker decodes a layer's pictures from: a media proxy (H.264 MP4, or VP9 WebM with alpha for sources
 // with alpha (#90), both read by byte ranges, ADR 0001) or a cached clip render (WebM, alpha as a second stream,
-// ADR 0002, read whole). One shape, so a layer decodes all of them the same way.
-import type { SyncTable } from "./decode-plan.js";
+// ADR 0002, read whole), or a proxy whose alpha is its subject matte (ADR 0032). One shape, so a layer decodes all of
+// them the same way.
+import { type SyncTable, syncTable } from "./decode-plan.js";
 import { type ByteReader, openProxy, readSamples } from "./demux.js";
 import { openWebm, openWebmProxy, readWebmProxy } from "./webm.js";
 
@@ -15,13 +16,56 @@ export interface EncodedPicture {
 
 /** A decodable video file, frame index = sample index (CFR, no reordering). */
 export interface VideoSource {
-  /** `VideoDecoderConfig` fields, for both the colour and the alpha decoder. */
-  config: { codec: string; codedWidth: number; codedHeight: number; description?: Uint8Array; colorSpace?: VideoColorSpaceInit };
+  /** `VideoDecoderConfig` fields, for the colour decoder and, without {@link alphaConfig}, the alpha decoder. */
+  config: DecoderConfig;
+  /** The alpha decoder's, when its frames come from another file (a subject matte). */
+  alphaConfig?: DecoderConfig;
   hasAlpha: boolean;
   /** Decode starts: every stream the source has is at a keyframe. */
   table: SyncTable;
   /** Pictures `[from, to)`, clamped to the source. */
   read(from: number, to: number): Promise<EncodedPicture[]>;
+}
+
+/** `VideoDecoderConfig` fields a source gives. */
+export type DecoderConfig = { codec: string; codedWidth: number; codedHeight: number; description?: Uint8Array; colorSpace?: VideoColorSpaceInit };
+
+/** Joins the two files of a subject picture into one decode path: daemon-made paths never hold a newline. */
+const MATTED = "\n";
+
+/** Decode path of `picture` drawn through `matte` (ADR 0032): the engine opens it as {@link mattedSource}. */
+export function mattedPath(picture: string, matte: string): string {
+  return `${picture}${MATTED}${matte}`;
+}
+
+/** The picture and matte of a {@link mattedPath}; null for any other path. */
+export function splitMattedPath(path: string): { picture: string; matte: string } | null {
+  const at = path.indexOf(MATTED);
+  return at < 0 ? null : { picture: path.slice(0, at), matte: path.slice(at + MATTED.length) };
+}
+
+/**
+ * `picture` with `matte` as its alpha (ADR 0032): the matte's frame N is the picture's frame N, its luma the alpha,
+ * decoded by the alpha decoder like a render's alpha stream. Decoding starts where both files are at a keyframe (the
+ * matte keeps the proxy's GOP, so at every proxy keyframe); frames past the shorter file's end hold its last one.
+ */
+export function mattedSource(picture: VideoSource, matte: VideoSource): VideoSource {
+  const count = Math.min(picture.table.count, matte.table.count);
+  const sync = Array.from({ length: count }, (_, i) => picture.table.isSync(i) && matte.table.isSync(i));
+  return {
+    config: picture.config,
+    alphaConfig: matte.config,
+    hasAlpha: true,
+    table: syncTable(sync),
+    read: async (from, to) => {
+      const end = Math.min(to, count);
+      const [pictures, mattes] = await Promise.all([picture.read(from, end), matte.read(from, end)]);
+      return pictures.map((one, i) => {
+        const alpha = mattes[i];
+        return { data: one.data, key: one.key, alpha: alpha ? { data: alpha.data, key: alpha.key } : null };
+      });
+    },
+  };
 }
 
 /** Folder of the daemon's media proxies (SPEC §5.1). */

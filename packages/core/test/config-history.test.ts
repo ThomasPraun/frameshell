@@ -7,7 +7,7 @@ import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
 // Project-config changes in history (ADR 0036 slice 1): format edits are journaled in their transaction, listed by
-// `history`, undone by `revert` and `tx.abort`. Review mode still leaves them to the person (`desktop/…` = `ui`).
+// `history`, undone by `revert` and `tx.abort` (`desktop/…` = `ui`). Review mode: config-review.test.ts.
 
 let daemon: Daemon | undefined;
 const connections: DaemonConnection[] = [];
@@ -213,23 +213,19 @@ describe("format changes in history", () => {
     expect(await session.request("tx.abort", {})).toMatchObject({ tx: begun.tx, reverted: [], config: [] });
   });
 
-  it("leaves format changes and their reverts to the person while review mode is on", async () => {
-    const { dir, ui, agent, formatIds } = await setup();
-    const square = await agent.request("format.add", { cwd: dir, id: "1x1" });
+  it("lets the person revert a format change at once in review mode, which makes an agent's proposal on it stale", async () => {
+    const { dir, ui, connect, formatIds } = await setup();
+    const session = await connect("cli/test", "agent");
+    const square = await session.request("format.add", { cwd: dir, id: "1x1" });
     await ui.request("review.set", { cwd: dir, enabled: true });
     const before = readFileSync(join(dir, "frameshell.json"), "utf8");
-    for (const call of [
-      agent.request("format.add", { cwd: dir, id: "9x16" }),
-      agent.request("format.remove", { cwd: dir, id: "1x1" }),
-      agent.request("revert", { cwd: dir, timeline: "main", target: square.op }),
-    ]) {
-      await expect(call).rejects.toMatchObject({ code: ErrorCode.ProposalState, data: { tx: null, reason: "forbidden" } });
-    }
+    const begun = await session.request("tx.begin", { label: "drop square" });
+    const removed = await session.request("format.remove", { cwd: dir, id: "1x1" });
+    expect(removed).toMatchObject({ proposal: begun.tx, formats: [{ id: "16x9" }] });
     expect(readFileSync(join(dir, "frameshell.json"), "utf8")).toBe(before);
-    expect((await ui.request("format.add", { cwd: dir, id: "9x16" })).formats.map((format) => format.id)).toEqual(["16x9", "1x1", "9x16"]);
     await ui.request("revert", { cwd: dir, timeline: "main", target: square.op });
-    expect(await formatIds()).toEqual(["16x9", "9x16"]);
-    await ui.request("review.set", { cwd: dir, enabled: false });
-    expect((await agent.request("format.remove", { cwd: dir, id: "9x16" })).formats.map((format) => format.id)).toEqual(["16x9"]);
+    expect(await formatIds()).toEqual(["16x9"]);
+    expect((await ui.request("proposal.status", { cwd: dir })).decisions[0]).toMatchObject({ tx: begun.tx, outcome: "stale", conflicts: ["format:1x1"] });
+    await expect(session.request("format.add", { cwd: dir, id: "9x16" })).rejects.toMatchObject({ code: ErrorCode.ProposalState, data: { reason: "stale" } });
   });
 });

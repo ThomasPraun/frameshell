@@ -53,17 +53,18 @@ function greySize(width: number, height: number): { width: number; height: numbe
 
 /**
  * The picture of exported file `path`, read with ffmpeg. Throws `AssetNotFound` for a missing file and
- * `InvalidOperation` for one with no picture to look at (audio, a still) or no frame rate.
+ * `InvalidOperation` for one with no picture to look at (audio, a still) or no frame rate. `op` names the method in
+ * the errors.
  */
-export async function fileSource(ffmpeg: string, ffprobe: string, path: string): Promise<FilmSource> {
+export async function fileSource(ffmpeg: string, ffprobe: string, path: string, op = "review"): Promise<FilmSource> {
   const found = await stat(path).catch(() => null);
-  if (!found?.isFile()) throw new RpcError(ErrorCode.AssetNotFound, `review: ${path} is not a file.`, { path });
+  if (!found?.isFile()) throw new RpcError(ErrorCode.AssetNotFound, `${op}: ${path} is not a file.`, { path });
   const probe = await probeMedia(ffprobe, path).catch((error: unknown) => {
-    throw new RpcError(ErrorCode.InvalidOperation, `review: ffprobe cannot read ${path}: ${(error as Error).message.split("\n")[0]}`, { op: "review", field: "file" });
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: ffprobe cannot read ${path}: ${(error as Error).message.split("\n")[0]}`, { op, field: "file" });
   });
   const video = probe.video;
   if (!video || video.still || !video.fps || probe.duration === null) {
-    throw new RpcError(ErrorCode.InvalidOperation, `review: ${path} has no video with a frame rate and a length to look at.`, { op: "review", field: "file" });
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${path} has no video with a frame rate and a length to look at.`, { op, field: "file" });
   }
   const fps = video.fps;
   const frames = Math.floor(probe.duration * fps + 1e-6);
@@ -80,7 +81,7 @@ export async function fileSource(ffmpeg: string, ffprobe: string, path: string):
       if (await exists(out)) return;
       // The container is a little longer than its picture: take the last frame from the end.
       await runTool(ffmpeg, [...base, "-sseof", (-1.5 / fps).toFixed(4), "-i", path, "-map", "0:v:0", "-update", "1", "-frames:v", "1", out]);
-      if (!(await exists(out))) throw new RpcError(ErrorCode.InvalidOperation, `review: ${path} has no picture at ${frameTime(frame, fps)} s.`, { op: "review", field: "file" });
+      if (!(await exists(out))) throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${path} has no picture at ${frameTime(frame, fps)} s.`, { op, field: "file" });
     },
     async motion(range, _scratch, signal) {
       const rate = fileSampleRate((range.end - range.first) / fps, fps);

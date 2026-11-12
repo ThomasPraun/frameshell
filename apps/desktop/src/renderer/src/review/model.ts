@@ -1,5 +1,5 @@
 // Review mode state (ADR 0019): pure, so the bar's behaviour is unit tested.
-import type { ProposalStatusResult, TimelineViewName } from "@frameshell/protocol";
+import type { ProposalConfigChange, ProposalStatusResult, TimelineViewName } from "@frameshell/protocol";
 import type { ProposalChange, ReviewEvent } from "../../../shared/api.js";
 import { authorOf } from "../history/model.js";
 
@@ -14,6 +14,8 @@ export interface OpenProposal {
   state: "building" | "ready";
   operations: number;
   timelines: readonly string[];
+  /** Project-config keys it changes (ADR 0036). */
+  config: readonly ProposalConfigChange[];
 }
 
 /** A proposal that went stale: kept until dismissed, since nothing else tells the person why it vanished. */
@@ -45,9 +47,9 @@ function sideFor(previous: OpenProposal | null, next: OpenProposal, side: Review
   return previous?.tx === next.tx ? side : "before";
 }
 
-function proposalOf(open: Omit<OpenProposal, "timelines"> & { timelines: readonly string[] }): OpenProposal {
-  const { tx, label, author, state, operations, timelines } = open;
-  return { tx, label, author, state, operations, timelines };
+function proposalOf(open: OpenProposal): OpenProposal {
+  const { tx, label, author, state, operations, timelines, config } = open;
+  return { tx, label, author, state, operations, timelines, config };
 }
 
 /** State after reading `proposal.status`. */
@@ -110,6 +112,27 @@ export function barOf(state: ReviewState): BarModel | null {
   if (state.proposal) return { kind: state.proposal.state, proposal: state.proposal, side: state.side };
   if (state.stale) return { kind: "stale", notice: state.stale };
   return null;
+}
+
+/** One config change as the bar lists it: a format added (with its size), removed, or resized. */
+export type ConfigLine =
+  | { kind: "added"; id: string; size: string }
+  | { kind: "removed"; id: string }
+  | { kind: "resized"; id: string; from: string; to: string };
+
+/** The bar's list of what `proposal` changes in project config (ADR 0036): formats by id, in key order. */
+export function configLines(proposal: OpenProposal): ConfigLine[] {
+  const size = (value: unknown) => {
+    const { width, height } = value as { width: number; height: number };
+    return `${width}x${height}`;
+  };
+  return proposal.config.flatMap((change): ConfigLine[] => {
+    const id = /^format:(.+)$/.exec(change.key)?.[1];
+    if (id === undefined) return [];
+    if (change.before === null) return [{ kind: "added", id, size: size(change.after) }];
+    if (change.after === null) return [{ kind: "removed", id }];
+    return [{ kind: "resized", id, from: size(change.before), to: size(change.after) }];
+  });
 }
 
 /** Who made a proposal, in a word: an agent's own label (`claude`), else History's name for the author. */

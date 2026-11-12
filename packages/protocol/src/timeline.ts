@@ -720,7 +720,7 @@ export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typ
  * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
  * delete one marker) and `tempo` (replace or delete the beat grid spec) touch nothing else.
  */
-export const TimelinePatchSchema = z.strictObject({
+const PatchShape = z.strictObject({
   tempo: TempoSchema.nullable().optional().describe("The timeline's whole `tempo`; null removes it."),
   markers: z
     .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
@@ -744,7 +744,13 @@ export const TimelinePatchSchema = z.strictObject({
 });
 
 /** See {@link TimelinePatchSchema}. */
-export type TimelinePatch = z.output<typeof TimelinePatchSchema>;
+export type TimelinePatch = z.output<typeof PatchShape>;
+
+/**
+ * {@link TimelinePatch} as a schema. Typed by name, not by its structure: every operation result carries it as its
+ * inverse, and written out per method it makes the type of the `methods` registry too long to emit (TS7056).
+ */
+export const TimelinePatchSchema: z.ZodType<TimelinePatch> = PatchShape;
 
 /** Transaction id: `tx_` + 8 hex digits. */
 export const TxIdSchema = z
@@ -775,15 +781,22 @@ export const AuthorSchema = z
   );
 
 /**
+ * Inverse of a journaled operation. Typed explicitly: inferred, the timeline patch it holds pushes the `methods` registry
+ * past the declaration size the compiler can print.
+ */
+const InverseSchema: z.ZodType<
+  { op: "timeline.patch"; args: TimelinePatch },
+  { op: "timeline.patch"; args: z.input<typeof TimelinePatchSchema> }
+> = z.object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema });
+
+/**
  * One applied operation (SPEC §6.1). `inverse` applied to the timeline right
  * after this operation restores it as it was before.
  */
 export const OperationRecordObject = z.object({
   op: z.string().describe("Operation name, e.g. `clip.trim`."),
   args: z.record(z.string(), z.unknown()).describe("Validated args, defaults filled in."),
-  inverse: z
-    .object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema })
-    .describe("Undoes this operation when applied right after it."),
+  inverse: InverseSchema.describe("Undoes this operation when applied right after it."),
   id: OpIdSchema,
   author: AuthorSchema,
   tx: TxIdSchema.describe("Transaction the operation belongs to; `revert` takes it to undo the whole transaction."),
