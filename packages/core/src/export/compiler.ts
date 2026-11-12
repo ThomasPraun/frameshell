@@ -38,6 +38,7 @@ import {
   programSound,
   shotLayers,
   showsPicture,
+  scaleCaptions,
   soundSamples,
   staticGain,
   subtitleTracks,
@@ -825,9 +826,7 @@ function layoutTimeline(
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
   const captionScale = variant?.captionScale ?? 1;
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
-    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
-  );
+  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) => scaleCaptions(track, captionScale));
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
