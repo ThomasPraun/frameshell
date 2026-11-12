@@ -22,7 +22,7 @@ function view(overrides: Partial<TimelineView> = {}): TimelineView {
     problems: [],
     tracks: [{ id: "v1", kind: "video", name: null, follows: null, clips: [titles("c_a", 0, 3), titles("c_b", 3, 8.25)] }],
     tempo: { bpm: 120, offset: 0.5 },
-    grid: { source: "nominal", bpm: 120, meter: 4, low: false, beats, bars },
+    grid: { source: "nominal", bpm: 120, meter: 4, low: false, beats, bars, beatBase: 0, barBase: 0 },
     ...overrides,
   };
 }
@@ -33,7 +33,7 @@ describe("grid layout", () => {
   it("carries the beats and bars of the view's grid, and none without a grid or with an empty one", () => {
     expect(layoutTimeline(view()).grid).toEqual({ beats, bars, bpm: 120, meter: 4, low: false });
     expect(layoutTimeline(view({ grid: undefined })).grid).toBeNull();
-    expect(layoutTimeline(view({ grid: { source: "nominal", bpm: 120, meter: 4, low: false, beats: [], bars: [] } })).grid).toBeNull();
+    expect(layoutTimeline(view({ grid: { source: "nominal", bpm: 120, meter: 4, low: false, beats: [], bars: [], beatBase: 0, barBase: 0 } })).grid).toBeNull();
   });
 
   it("does not move the lanes: the grid has no lane of its own", () => {
@@ -54,12 +54,12 @@ describe("snapping to beats and bars", () => {
   });
 
   it("offers no beat to snap to while the grid is LOW confidence", () => {
-    const low = layoutTimeline(view({ grid: { source: "beats", bpm: 120, meter: 4, low: true, confidence: 0.3, beats, bars } }));
+    const low = layoutTimeline(view({ grid: { source: "beats", bpm: 120, meter: 4, low: true, confidence: 0.3, beats, bars, beatBase: 0, barBase: 0 } }));
     expect(snapPoints(low, 30, new Set()).some((point) => point.kind === "beat" || point.kind === "bar")).toBe(false);
   });
 
   it("leaves out a grid that rides on a dragged clip: its beats move with it", () => {
-    const riding = layoutTimeline(view({ grid: { source: "beats", clip: "c_b", bpm: 120, meter: 4, low: false, beats, bars } }));
+    const riding = layoutTimeline(view({ grid: { source: "beats", clip: "c_b", bpm: 120, meter: 4, low: false, beats, bars, beatBase: 0, barBase: 0 } }));
     expect(snapPoints(riding, 30, new Set(["c_b"])).some((point) => point.kind === "beat" || point.kind === "bar")).toBe(false);
     expect(snapPoints(riding, 30, new Set(["c_a"])).some((point) => point.kind === "beat")).toBe(true);
   });

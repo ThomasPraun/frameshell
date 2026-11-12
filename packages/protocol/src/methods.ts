@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 101;
+export const PROTOCOL_VERSION = 102;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3230,7 +3230,7 @@ export const methods = {
     description:
       "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
       "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
-      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "(`m_1a2b3c`) or a grid reference (`beat:8`, `bar:2`, any case). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
       "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
       "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
       "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
@@ -3335,7 +3335,7 @@ export const methods = {
     description:
       "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
       "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
-      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "(`end-card`, `outro-1`) or a beat or bar of the timeline's grid (`bar:16`, read on the clip as it is before the fit). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
       "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
       "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
       "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +

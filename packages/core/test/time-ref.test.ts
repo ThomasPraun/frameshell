@@ -228,14 +228,42 @@ describe("beat:N and bar:N", () => {
     expect(await splitAt("beat:2", scored(), vouched)).toBe(0.7);
   });
 
-  it("refuses a number past the end of a measured grid and says how far it runs", async () => {
-    const past = await splitAt("beat:41", scored(), beatsFile()).catch((error: unknown) => error);
-    expect(past).toMatchObject({ message: expect.stringMatching(/"beat:41" is past the end of the grid, which has 40 beats \(the last at 19\.7 s\)/) });
-    const bars = await splitAt("bar:11", scored(), beatsFile()).catch((error: unknown) => error);
-    expect(bars).toMatchObject({ message: expect.stringContaining("which has 10 bar starts") });
+  it("carries a measured grid on at its period past the music instead of refusing", async () => {
     expect(await splitAt("beat:40", scored(), beatsFile())).toBe(19.7);
-    const half = await splitAt("beat:40.5", scored(), beatsFile()).catch((error: unknown) => error);
-    expect(half).toMatchObject({ message: expect.stringContaining("past the end of the grid") });
+    expect(await splitAt("beat:41", scored(), beatsFile())).toBe(20.2);
+    expect(await splitAt("bar:11", scored(), beatsFile())).toBe(20.2);
+    expect(await splitAt("beat:40.5", scored(), beatsFile())).toBe(19.95);
+    expect(await splitAt("bar:101", scored(), beatsFile())).toBe(200.2);
+  });
+
+  describe("counts in the music file, not in the clip", () => {
+    const file = beatsFile();
+    /** The clip plays source 5..20 from timeline `start`: file beat 11 (5.2 s) is the first one it shows, at `start + 0.2`. */
+    const trimmed = (start: number): Timeline => ({
+      ...scored(),
+      tracks: [{ id: "t_a", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start, in: 5, out: 20 }] }],
+    });
+
+    it("trimming the head does not renumber", async () => {
+      expect(await splitAt("beat:11", trimmed(0), file)).toBe(0.2);
+      expect(await splitAt("beat:12", trimmed(0), file)).toBe(0.7);
+      // Bar 4 starts at file beat 13 (6.2 s).
+      expect(await splitAt("bar:4", trimmed(0), file)).toBe(1.2);
+      expect(await splitAt("beat:11", trimmed(3), file)).toBe(3.2);
+    });
+
+    it("a beat the trim cut away is carried back at the period, and refused before the timeline starts", async () => {
+      expect(await splitAt("beat:10", trimmed(3), file)).toBe(2.7);
+      const error = await splitAt("beat:10", trimmed(0), file).catch((thrown: unknown) => thrown);
+      expect((error as RpcError).message).toMatch(/before the start of the timeline/);
+    });
+
+    it("bar:N counts from the first downbeat, so with a pickup it is not beat:(meter*(N-1)+1)", async () => {
+      const pickup = beatsFile({ downbeat: 1 });
+      expect(await splitAt("beat:5", scored(), pickup)).toBe(2.2);
+      expect(await splitAt("bar:2", scored(), pickup)).toBe(2.7);
+      expect(await splitAt("bar:1", scored(), pickup)).toBe(await splitAt("beat:2", scored(), pickup));
+    });
   });
 
   it("refuses numbers it cannot read, and anything before the first beat", async () => {

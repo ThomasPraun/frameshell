@@ -53,8 +53,8 @@ export const TimeRef = (what: string) =>
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
-        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the timeline's grid counting from 1 (`beat:32`, `bar:8`, " +
-        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
+        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the music counting from 1 from the music file's first measured beat or downbeat (not the clip's `in`; `beat:32`, `bar:8`, " +
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo); the daemon turns it into " +
         "seconds first, so the history records seconds.",
     );
 /** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
@@ -1193,6 +1193,8 @@ export interface TempoGrid {
   low: boolean;
   beats: number[];
   bars: number[];
+  beatBase: number;
+  barBase: number;
 }
 
 /** A beat grid on the timeline clock, as `tempo.show` and `timeline.show` (`grid: true`) report it (ADR 0029). */
@@ -1206,6 +1208,8 @@ export const TempoGridSchema: z.ZodType<TempoGrid> = z.object({
   low: z.boolean().describe("True when the measured grid is LOW confidence and no `edits` vouch for it: `snapTo` refuses it."),
   beats: z.array(z.number()).describe("Timeline seconds of every beat, increasing, on the frame grid."),
   bars: z.array(z.number()).describe("Timeline seconds of the beats that start a bar."),
+  beatBase: z.int().describe("Beats of the music file before `beats[0]`: `beats[i]` is `beat:(beatBase + i + 1)`, because `beat:N` counts from the file's first measured beat, not from the clip's `in`."),
+  barBase: z.int().describe("Bar starts of the music file before `bars[0]`: `bars[i]` is `bar:(barBase + i + 1)`."),
 });
 
 

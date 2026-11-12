@@ -378,6 +378,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `beat:N` and `bar:N` count from the song, not the clip (#550, part of #458, ADR 0029; protocol 102): `beat:1` is the
+  music file's first measured beat and `bar:1` its first downbeat, so trimming the head of the music clip no longer
+  renumbers them (`bar:8` stays the same musical bar). Past the measured part a number continues at the grid's period
+  instead of being refused (a result before 0 still is), and `tempo.show` reports `beatBase` and `barBase`, the entries
+  of the file before the first one the clip shows. With a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; ADR, CLI help
+  and skill say so. A marker label shaped like `beat:8` or `bar:2` (any case) is now refused, like an id-shaped one, so
+  a marker cannot shadow a grid reference. `music fit --end` and `--from` take `bar:16` and `beat:N` too: they go
+  through the same asynchronous resolver as every other time.
 - Review mode holds format changes (#496 slice 2, ADR 0036, protocol 94): while review mode is on, an agent's
   `format add`, `format remove`, `revert` of a format change and `tx abort` of one that reached the file wait in the
   transaction's proposal like timeline changes, instead of being refused. A transaction mixing clips and formats is
