@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, second group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template`
+  also takes `lower-third` (card with an accent bar, name and role), `logo-lockup` (logo, name, accent rule, tagline;
+  beside the name on 16:9, stacked on 1:1, 4:5 and 9:16), `checklist` (items separated by `|` spring in, then tick one
+  by one on `tickStart` and `tickGap`), `comparison` (the old option is crossed out, the chosen one springs in on an
+  accent pill), `counter` (counts from `from` to `to`, up or down, in `countTime` seconds, tabular figures, optional
+  glow while it climbs) and `big-word` (one huge word, letters rise through a mask, for a track with `behind` so it
+  sits behind the person, ADR 0032). Each has typed props, takes colours and fonts from `style.json`, lays out
+  per format with `pick()`, uses springs, and passes `hyperframes check --strict`; the ones that can work alone as
+  well as over footage have `bg` and `backdrop` props. The real-Chrome test renders every template in the four
+  formats (inside the frame, same frames cold and after a reseek). Listed in the plugin skill.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
