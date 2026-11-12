@@ -107,7 +107,7 @@ describe("backdrop in the preview (ADR 0031)", () => {
       // Canvas: blur(σ) saturate(s), then black at `dim`. Export: gblur σ, then the saturate matrix times 1 - dim.
       expect(steps).toEqual({ filter: `blur(${layer.sigma}px) saturate(${GLASS.saturate})`, dim: GLASS.dim });
       expect(graph).toContain(`gblur=sigma=${layer.sigma}`);
-      const mixer = /\[bb0\]format=gbrp,gblur=sigma=[\d.]+,colorchannelmixer=([^,]+),format=rgba/.exec(graph)?.[1];
+      const mixer = /\[bb0\]format=gbrp,gblur=sigma=[\d.]+:steps=\d+,colorchannelmixer=([^,]+),format=rgba/.exec(graph)?.[1];
       const coefficients = mixer!.split(":").map((pair) => Number(pair.split("=")[1]));
       expect(coefficients).toEqual(backdropMatrix(layer));
       expect(graph).toContain(`lutrgb=a='gt(val,${layer.threshold})*255'`);

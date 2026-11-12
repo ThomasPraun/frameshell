@@ -1,6 +1,8 @@
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ExportPreset, MediaClip, Timeline, Transcript } from "@frameshell/schema";
+import { backdropBlur } from "../src/export/compiler.js";
 import { type ExportSource, compileFrame, compileRender, executeRender } from "../src/index.js";
 import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
@@ -272,6 +274,35 @@ describe("export render (real ffmpeg)", () => {
         expect(right.deviation, `frame ${n} right`).toBeLessThan(12);
         const expected = 0.85 * (16 + (left.mean - 16) * 0.5) + 0.15 * 235;
         expect(Math.abs(right.mean - expected), `frame ${n} right ${right.mean} vs ${expected}`).toBeLessThan(12);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "blurs glass with a Gaussian kernel like the preview's canvas blur(), not only the same sigma",
+    async () => {
+      const width = 801;
+      const centre = 400;
+      for (const sigma of [20, 46]) {
+        const impulse = new Float32Array(width);
+        impulse[centre] = 1;
+        const input = join(dir, `impulse-${sigma}.raw`);
+        await writeFile(input, impulse);
+        const raw = await runBuffer(ffmpeg, [
+          ...["-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "grayf32le", "-s", `${width}x1`, "-i", input],
+          ...["-vf", backdropBlur(sigma), "-f", "rawvideo", "-pix_fmt", "grayf32le", "-"],
+        ]);
+        const row = Array.from({ length: width }, (_, i) => raw.readFloatLE(i * 4));
+        const total = row.reduce((sum, v) => sum + v, 0);
+        const deviation = Math.sqrt(row.reduce((sum, v, i) => sum + (i - centre) ** 2 * v, 0) / total);
+        const peak = Math.max(...row) / total;
+        const tail = row.reduce((sum, v, i) => (Math.abs(i - centre) > 3 * sigma ? sum + v : sum), 0) / total;
+        const gaussianPeak = 1 / (sigma * Math.sqrt(2 * Math.PI));
+        expect(deviation / sigma, `sigma ${sigma}: deviation ${deviation}`).toBeCloseTo(1, 1);
+        // gblur's default single pass peaks 1.77x a Gaussian and leaves 1.4 % beyond 3 sigma (a Gaussian: 0.27 %).
+        expect(peak / gaussianPeak, `sigma ${sigma}: peak`).toBeLessThan(1.2);
+        expect(tail, `sigma ${sigma}: tail beyond 3 sigma`).toBeLessThan(0.01);
       }
     },
     MEDIA_TIMEOUT,

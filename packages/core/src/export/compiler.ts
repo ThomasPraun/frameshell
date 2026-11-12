@@ -1169,7 +1169,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
       : `x=${left}:y=${top}`;
     if (placed.glass) {
       lines.push(`${head.join(",")},split[c${n}][cm${n}]`, `[c${n}]${tail(`o${n}`).join(",") || "null"}[o${n}]`);
-      below = backdropUnder(below, placed.glass, n, position, tail(`om${n}`), to - from, out, lines);
+      below = backdropUnder(below, placed.glass, n, position, tail(`om${n}`), [start - from, end - from], to - from, out, lines);
     } else {
       lines.push(`${[...head, ...tail(`o${n}`)].join(",")}[o${n}]`);
     }
@@ -1184,17 +1184,29 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
  * The backdrop of overlay piece `n` (ADR 0031) laid on `below`; returns the new label below the piece. The mask is the
  * piece's own alpha cut at its layer's `threshold` (stream `[cm<n>]`, split off before opacity), then faded,
  * wiped and placed like the piece itself, so glass fades with its card. What is below is blurred (`gblur`), put
- * through {@link backdropMatrix} (saturate, then the scrim) and drawn back over itself through that mask.
+ * through {@link backdropMatrix} (saturate, then the scrim) and drawn back over itself through that mask. Blur and
+ * matrix run only on the segment frames [`on[0]`, `on[1]`) the piece covers: elsewhere the mask is empty.
  */
-function backdropUnder(below: string, backdrop: Backdrop, n: number, position: string, maskTail: readonly string[], frames: number, out: GraphTarget, lines: string[]): string {
+function backdropUnder(
+  below: string,
+  backdrop: Backdrop,
+  n: number,
+  position: string,
+  maskTail: readonly string[],
+  on: [number, number],
+  frames: number,
+  out: GraphTarget,
+  lines: string[],
+): string {
   const { width, height } = out;
   const layer = backdropLayer(backdrop, out, out.project);
   const matrix = backdropMatrix(layer);
   const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const enable = on[0] > 0 || on[1] < frames ? `:enable='between(n,${on[0]},${on[1] - 1})'` : "";
   const mixer = matrix.every((value, i) => value === identity[i])
     ? []
-    : [`colorchannelmixer=${MIXER_COEFFICIENTS.map((name, i) => `${name}=${num(matrix[i]!)}`).join(":")}`];
-  const look = ["format=gbrp", ...(layer.sigma > 0 ? [`gblur=sigma=${num(layer.sigma)}`] : []), ...mixer, "format=rgba"];
+    : [`colorchannelmixer=${MIXER_COEFFICIENTS.map((name, i) => `${name}=${num(matrix[i]!)}`).join(":")}${enable}`];
+  const look = ["format=gbrp", ...(layer.sigma > 0 ? [`${backdropBlur(layer.sigma)}${enable}`] : []), ...mixer, "format=rgba"];
   lines.push(
     `[cm${n}]${[`lutrgb=a='gt(val,${layer.threshold})*255'`, ...maskTail].join(",")}[om${n}]`,
     `color=c=black@0:s=${width}x${height}:r=${fpsRational(out.fps)},format=rgba,trim=end_frame=${frames}[cv${n}]`,
@@ -1205,6 +1217,14 @@ function backdropUnder(below: string, backdrop: Backdrop, n: number, position: s
     `[bk${n}][ba${n}]overlay=0:0:format=auto[k${n}]`,
   );
   return `k${n}`;
+}
+
+/**
+ * The `gblur` of a backdrop at Gaussian `sigma` (output pixels). Default `steps=1` peaks 1.77x a Gaussian; 3 passes
+ * give 1.15x, near the canvas `blur()` of the preview (shape test in export-render), at ~8 ms per pass per 1080p frame.
+ */
+export function backdropBlur(sigma: number): string {
+  return `gblur=sigma=${num(sigma)}:steps=3`;
 }
 
 /** `colorchannelmixer` options of a row-major 3 x 3 RGB matrix, in order. */

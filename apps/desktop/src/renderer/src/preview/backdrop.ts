@@ -44,6 +44,8 @@ export class BackdropPass {
   readonly #scratchContext = this.#scratch.getContext("2d")!;
   readonly #mask = new OffscreenCanvas(1, 1);
   readonly #maskContext = this.#mask.getContext("2d")!;
+  readonly #padded = new OffscreenCanvas(1, 1);
+  readonly #paddedContext = this.#padded.getContext("2d")!;
   #pixels: ImageData | null = null;
 
   draw(context: OffscreenCanvasRenderingContext2D, layer: BackdropLayer, target: BackdropTarget): void {
@@ -55,10 +57,13 @@ export class BackdropPass {
     }
     const s = this.#scratchContext;
     const steps = canvasBackdrop(layer);
+    // The canvas blur reads outside the frame as transparent; export's gblur repeats the edge. Blurring a copy with
+    // its edge pixels stretched 3 sigma out matches it.
+    const pad = layer.sigma > 0 ? Math.ceil(3 * layer.sigma) : 0;
     s.globalCompositeOperation = "copy";
     s.globalAlpha = 1;
     s.filter = steps.filter;
-    s.drawImage(canvas, 0, 0);
+    s.drawImage(pad > 0 ? this.#clamped(canvas, pad) : canvas, -pad, -pad);
     s.filter = "none";
     if (steps.dim > 0) {
       // `source-atop` keeps the blur's own alpha at the canvas edges.
@@ -84,6 +89,37 @@ export class BackdropPass {
     context.globalAlpha = 1;
     context.drawImage(scratch, 0, 0);
     context.globalAlpha = alpha;
+  }
+
+  /** `source` with `pad` pixels around it, each a copy of the nearest edge pixel. */
+  #clamped(source: OffscreenCanvas, pad: number): OffscreenCanvas {
+    const { width: w, height: h } = source;
+    const padded = this.#padded;
+    if (padded.width !== w + 2 * pad || padded.height !== h + 2 * pad) {
+      padded.width = w + 2 * pad;
+      padded.height = h + 2 * pad;
+    }
+    const p = this.#paddedContext;
+    p.globalCompositeOperation = "copy";
+    p.globalAlpha = 1;
+    p.filter = "none";
+    p.drawImage(source, pad, pad);
+    p.globalCompositeOperation = "source-over";
+    p.imageSmoothingEnabled = false;
+    // [source x, y] of a 1 px edge or corner, and the [x, y, width, height] it fills.
+    const strips: [number, number, number, number, number, number, number, number][] = [
+      [0, 0, 1, h, 0, pad, pad, h],
+      [w - 1, 0, 1, h, pad + w, pad, pad, h],
+      [0, 0, w, 1, pad, 0, w, pad],
+      [0, h - 1, w, 1, pad, pad + h, w, pad],
+      [0, 0, 1, 1, 0, 0, pad, pad],
+      [w - 1, 0, 1, 1, pad + w, 0, pad, pad],
+      [0, h - 1, 1, 1, 0, pad + h, pad, pad],
+      [w - 1, h - 1, 1, 1, pad + w, pad + h, pad, pad],
+    ];
+    for (const [sx, sy, sw, sh, dx, dy, dw, dh] of strips) p.drawImage(source, sx, sy, sw, sh, dx, dy, dw, dh);
+    p.imageSmoothingEnabled = true;
+    return padded;
   }
 
   /** White where `alpha` is above `threshold`, transparent elsewhere, at the alpha's size. */
