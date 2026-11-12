@@ -483,6 +483,11 @@ export interface ResolvedSubtitleTrack {
   missing: string[];
 }
 
+/** `track` with its font size multiplied by a format's `captionScale` (see `ResolvedFormat`); the track itself when the scale is 1. */
+export function scaleCaptions(track: ResolvedSubtitleTrack, captionScale: number): ResolvedSubtitleTrack {
+  return captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } };
+}
+
 /** Every subtitle track of flattened `timeline`, in track order, with its cues. */
 export function subtitleTracks(timeline: Timeline, transcripts: TranscriptLookup, fps: number): ResolvedSubtitleTrack[] {
   const out: ResolvedSubtitleTrack[] = [];

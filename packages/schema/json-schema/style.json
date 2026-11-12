@@ -639,6 +639,34 @@
       },
       "additionalProperties": false
     },
+    "glass": {
+      "type": "object",
+      "properties": {
+        "cards": {
+          "type": "boolean",
+          "description": "True: cards over the picture are glass in this style (`clip set --glass` on each). False: solid cards. Default false."
+        },
+        "blur": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Backdrop blur, Gaussian sigma in project pixels."
+        },
+        "saturate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "Backdrop saturation, 1 unchanged."
+        },
+        "dim": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Dark scrim over the blurred backdrop, 0 to 1: 0.55, up to 0.72 over bright footage."
+        }
+      },
+      "additionalProperties": false
+    },
     "platforms": {
       "type": "array",
       "items": {

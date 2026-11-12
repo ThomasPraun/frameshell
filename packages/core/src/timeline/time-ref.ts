@@ -147,17 +147,34 @@ export async function resolveTimeRefs(request: WireRequestLike, timeline: TimeRe
     try {
       (resolved ??= { ...args })[field] = await resolveTimeRefAsync(value, timeline, shared);
     } catch (error) {
-      if (!(error instanceof TimeRefError)) throw error;
-      throw new RpcError(ErrorCode.InvalidOperation, `${request.op}: ${field}: ${error.message}`, {
-        op: request.op,
-        field,
-        reason: "time reference",
-        value,
-        ...(error.hint ? { hint: error.hint } : {}),
-      });
+      throw asInvalidOperation(request.op, field, value, error);
     }
   }
   return resolved ? ({ op: request.op, args: resolved } as OperationRequest) : (request as OperationRequest);
+}
+
+/**
+ * {@link resolveTimeRef} for argument `field` of method or operation `op`: a failure is an `RpcError` InvalidOperation that
+ * names both, with the reason `time reference`. For methods that take a time of their own (`music.fit` `end`).
+ */
+export function resolveTimeRefArg(op: string, field: string, value: number | string, timeline: Pick<Timeline, "id" | "markers">): number {
+  try {
+    return resolveTimeRef(value, { timeline });
+  } catch (error) {
+    throw asInvalidOperation(op, field, value, error);
+  }
+}
+
+/** A {@link TimeRefError} as the `RpcError` InvalidOperation that names the operation and argument; anything else unchanged. */
+function asInvalidOperation(op: string, field: string, value: number | string, error: unknown): unknown {
+  if (!(error instanceof TimeRefError)) return error;
+  return new RpcError(ErrorCode.InvalidOperation, `${op}: ${field}: ${error.message}`, {
+    op,
+    field,
+    reason: "time reference",
+    value,
+    ...(error.hint ? { hint: error.hint } : {}),
+  });
 }
 
 /** An operation request whose time arguments may still be names: what a caller sends before {@link resolveTimeRefs}. */

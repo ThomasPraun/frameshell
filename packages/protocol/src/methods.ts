@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -32,7 +33,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -45,11 +46,13 @@ import {
   OpIdSchema,
   OperationResultSchema,
   RejectionRecordSchema,
+  TimeRefParam,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineRejectionSchema,
   TempoGridSchema,
   TimelineViewSchema,
+  TimeRef,
   TrackDuckResultSchema,
   TrackSummarySchema,
   TxIdSchema,
@@ -69,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 99;
+export const PROTOCOL_VERSION = 103;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -722,6 +725,52 @@ const UncertainWordSchema = VerifiedWordSchema.extend({
   heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
 });
 
+/** Fields every sound of `sound.place` takes, whichever way its time is given (ADR 0038). */
+const soundFields = {
+  role: SoundRoleSchema.optional().describe("What the sound does to the picture; it picks the offset against the cue. Default: by kind."),
+  tier: SoundTierSchema.optional().describe("`primary` (carries the picture), `secondary`, `texture` (background); it picks the gain. Default: by kind."),
+  seed: z.number().int().min(0).max(SFX_SEED_MAX).default(0).describe("Family seed, as in `sound.sfx`: one seed per film keeps one timbre."),
+  pitch: z.number().min(SFX_PITCH_RANGE.min).max(SFX_PITCH_RANGE.max).optional().describe("Multiplier of every frequency, as in `sound.sfx`."),
+  offset: z.number().min(-1000).max(1000).optional().describe("Milliseconds from the cue to the take's anchor, replacing the role's offset (negative = before the picture)."),
+  gain: z.number().min(-60).max(12).optional().describe("Clip gain in dB, replacing the one from the style and the tier."),
+};
+
+/** The fields of a sound that has a kind of its own. */
+const soundKindFields = {
+  kind: SfxKindSchema.describe("What the sound is, as in `sound.sfx`."),
+  variant: z.number().int().min(1).max(SFX_VARIANTS).optional().describe(`Recipe of the kind, 1 to ${SFX_VARIANTS}. Default: rotates through them along the timeline.`),
+  length: z.number().positive().optional().describe("Seconds, for `whoosh` and `riser` only, as in `sound.sfx`."),
+};
+
+/** One sound of `sound.place` `cues`. */
+const SoundCueSchema = z.strictObject({
+  at: TimeRefParam("Timeline time of the picture event the sound belongs to."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `cuts` of `sound.place`. */
+const SoundCutsSchema = z.strictObject({
+  track: z.string().min(1).describe("Video or audio track whose cuts (the start of every clip after the first) get a sound, from `track.list`."),
+  which: z.array(z.int().min(1)).min(1).optional().describe("Only these cuts, counted from 1 in time order. Default: every cut."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `typing` of `sound.place`. */
+const SoundTypingSchema = z.strictObject({
+  from: TimeRefParam("Timeline time of the first key."),
+  to: TimeRefParam("Timeline time the run ends; no key at or after it. After `from`."),
+  rate: z
+    .number()
+    .positive()
+    .max(SOUND_TYPING_RATE.max)
+    .default(SOUND_TYPING_RATE.default)
+    .describe(`Keys per second, at most ${SOUND_TYPING_RATE.max}. Default ${SOUND_TYPING_RATE.default}.`),
+  kind: z.enum(["tick", "click"]).default("tick").describe("`tick` (default) or `click`."),
+  ...soundFields,
+});
+
 /**
  * Every method frameshelld serves: the single source for client and daemon
  * types, daemon param validation and generated tool schemas.
@@ -1195,12 +1244,15 @@ export const methods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default all): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
       "frames each: pops, overlaps and blank frames only show there) and `seam` (the last 6 and the first 6 frames, to " +
-      "judge a loop). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
+      "judge a loop). `safe` (with `platform`, or the platforms the style guide names on a vertical film): up to 36 frames chosen like the " +
+      "contact sheet with the platform's UI zones (`style.show` safeZones, one source in `@frameshell/schema`) shaded red; a frame where the captions of a " +
+      "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
+      "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
@@ -1219,7 +1271,12 @@ export const methods = {
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
-      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default all four."),
+      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default contact, phone, motion and seam, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+      platform: SafeZoneSchema.shape.platform
+        .optional()
+        .describe(
+          "Platform whose UI zones the `safe` sheet draws (instagram-reels, tiktok, youtube-shorts, youtube); adds `safe` to the default sheets. Default: the platforms of the style guide, when `sheets` names `safe` or the film is vertical.",
+        ),
       every: z
         .number()
         .positive()
@@ -2257,6 +2314,76 @@ export const methods = {
       credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
     }),
   },
+  "sound.place": {
+    mutating: true,
+    description:
+      "Place generated sound effects (ADR 0038) on a timeline, in one transaction `Sound: …` (one proposal in review mode; " +
+      "`revert` undoes it whole). Each sound is made like `sound.sfx` (reused when the same take exists, else written to " +
+      "`assets/sound/` and imported) and put on an audio track so that the instant of the take that must meet the picture " +
+      "(`peakAt`: the transient of a hit, the peak of a whoosh, the end of a riser) falls on its cue plus an offset by role " +
+      `(ms, negative = before the picture: ${Object.entries(SOUND_ROLE_OFFSETS).map(([role, ms]) => `${role} ${ms}`).join(", ")}; ` +
+      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
+      "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
+      "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
+      "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
+      "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +
+      `${SOUND_TYPING_RATE.default} keys a second by default, at most ${SOUND_TYPING_RATE.max}, spaced at least ${SOUND_KEY_GAP_MS} ms apart (a warning when whole frames bring two keys closer), with a seeded ±10 % timing jitter ` +
+      "and rotating takes). Sounds go on the audio track named `SFX` (made when absent) or on `track`; sounds that overlap in time " +
+      "go on further tracks `SFX 2`, `SFX 3`… The clip `gain` (dB) is minus the style's `sound.sfxUnderVoice` (20 by default) " +
+      `plus the tier: ${Object.entries(SOUND_TIER_OFFSETS_DB).map(([tier, db]) => `${tier} ${db}`).join(", ")} dB (\`gain\` replaces it). ` +
+      "Without `variant` the takes of one kind rotate through variants 1 to 3 along the timeline, so the same whoosh is never twice in a row. " +
+      "Taste is a warning, never a refusal: the call warns (`warnings`) when more than " +
+      `${SOUND_MAX_PER_FRAME} sounds land on one frame, when two sounds of one kind are closer than their minimum gap ` +
+      `(${Object.entries(SOUND_MIN_GAP_MS).map(([kind, ms]) => `${kind} ${ms} ms`).join(", ")}) and when one take plays twice in a row, counting sounds already on the timeline. ` +
+      "Example: `{ cues: [{ at: \"hook\", kind: \"whoosh\" }, { at: 6.2, kind: \"click\", seed: 3 }] }`. " +
+      `At most ${SOUND_MAX_PLACEMENTS} sounds per call. Fails with InvalidParams (nothing to place), InvalidOperation (an unknown ` +
+      "marker, a `track` that is not an audio track, a hand-made file in the way of a take) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      cues: z.array(SoundCueSchema).min(1).optional().describe("Sounds at given times; each is one sound."),
+      cuts: SoundCutsSchema.optional().describe("Sounds on the edit points of a track."),
+      typing: SoundTypingSchema.optional().describe("A run of key sounds between two times."),
+      track: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Audio track for the sounds, from `track.list`. Default: the audio track named `SFX`, made when absent."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id."),
+      revision: z.int().describe("Revision after the last change; the one before the call when nothing was placed."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null when nothing was placed."),
+      tracks: z
+        .array(z.object({ id: z.string(), name: z.string().nullable(), created: z.boolean().describe("This call made the track.") }))
+        .describe("The audio tracks the sounds went on, first lane first."),
+      placed: z
+        .array(
+          z.object({
+            clip: z.string().describe("Id of the new clip."),
+            track: z.string(),
+            file: z.string().describe("The take, project-relative: `assets/sound/<kind>-<key>.wav`."),
+            state: z.enum(["generated", "cached"]).describe("`generated`: this call wrote the take. `cached`: it already existed."),
+            kind: SfxKindSchema,
+            role: SoundRoleSchema.nullable().describe("Role whose offset applied; null for a riser's own rule or an `offset` given."),
+            tier: SoundTierSchema,
+            from: z.enum(["cue", "cut", "typing"]).describe("Which part of the call asked for it."),
+            cue: z.number().describe("Timeline second the sound belongs to."),
+            offset: z.number().describe("Milliseconds from the cue to the take's anchor that were used."),
+            start: z.number().describe("Timeline second the clip starts, on the frame grid."),
+            in: z.number().describe("Source seconds cut off the head of the take; above 0 only when it would start before the timeline does."),
+            anchorAt: z.number().describe("Timeline second where the take's anchor falls after rounding to frames."),
+            gain: z.number().describe("Clip gain, dB."),
+          }),
+        )
+        .describe("The clips made, in time order."),
+      skipped: z
+        .array(z.object({ cue: z.number(), kind: SfxKindSchema, reason: z.string() }))
+        .describe("Sounds asked for and not placed, with why (shorter than one frame, would start before the timeline)."),
+      generated: z.int().describe("Takes this call wrote (the others were reused)."),
+      warnings: z.array(z.string()).describe("Crowded frames, short gaps, a take twice in a row, trimmed heads, and the engine's own warnings."),
+    }),
+  },
   "shoot.status": {
     description:
       "Where a shoot is (ADR 0023): every scene of the shoot script with its state (`none`, `deviations`, `done`), the " +
@@ -3041,7 +3168,7 @@ export const methods = {
     mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
-      "`null` clears; see below), `transform` (merged field by field), " +
+      "`null` clears; see below), `backdrop` (generated clips; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
       "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
@@ -3051,6 +3178,11 @@ export const methods = {
       "`[{ kind: \"highpass\", frequency: 85 }, { kind: \"denoise\", floor: -30, reduction: 8 }, { kind: \"compressor\", threshold: -20, ratio: 2.5, " +
       "attack: 8, release: 140, makeup: 2 }]`. The asset is baked once per chain in the background; export waits for it, the preview plays " +
       "dry until it is ready. Energy snapping and transcription keep the dry sound. Integrated loudness stays the export's (`export.loudness`). " +
+      "`backdrop` (ADR 0031) makes a generated clip glass: export and preview blur (`blur`, Gaussian sigma in project px), saturate " +
+      "(`saturate`, 1 unchanged) and dim (`dim`, 0 to 1) the picture below the clip wherever the clip's alpha shows, then draw the clip; " +
+      "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
+      "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
+      "nothing is below: stored with a warning, not drawn. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3255,6 +3387,50 @@ export const methods = {
       skip: z.array(z.string().min(1)).optional().describe("Candidate ids (`p1`, `r2`…) from a dry run to leave out."),
     }),
     result: CleanupResultSchema,
+  },
+  "music.fit": {
+    mutating: true,
+    description:
+      "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
+      "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
+      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
+      "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
+      "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
+      "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
+      "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
+      "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
+      "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
+      "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +
+      "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
+      "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
+      "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
+      "says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
+      "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
+      "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
+      "TimelineNotFound, ClipNotFound or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Music clip: a media clip of an audio track, id from `timeline.show`, e.g. `c_1a2b3c`."),
+      end: TimeRef("Timeline time the final hit lands on, e.g. the cut into the end card."),
+      from: TimeRef(
+        "Earliest timeline time the music may start (default 0). With `exact`, where it starts (default: where the clip starts now).",
+      ).optional(),
+      hit: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Source seconds of the music file where the final hit begins. Default: found on the track's energy (see `hit.candidates` of a dry run)."),
+      exact: z
+        .boolean()
+        .default(false)
+        .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
+    }),
+    result: MusicFitResultSchema,
   },
   "tx.begin": {
     mutating: true,
@@ -4205,6 +4381,8 @@ export type ScriptCheckResult = MethodResult<"script.check">;
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 /** Result of `sound.sfx`. */
 export type SoundSfxResult = MethodResult<"sound.sfx">;
+/** Result of `sound.place`. */
+export type SoundPlaceResult = MethodResult<"sound.place">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;

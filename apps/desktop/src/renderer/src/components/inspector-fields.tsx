@@ -1,4 +1,5 @@
 // Fields the inspectors share: numeric settings, text, and a segmented single choice.
+import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 import { t } from "../i18n.js";
 
@@ -98,6 +99,33 @@ const FIELDS = {
   cropTop: crop(t.inspector.fieldCropTop, t.inspector.fieldCropTitle(t.inspector.sideTop)),
   cropRight: crop(t.inspector.fieldCropRight, t.inspector.fieldCropTitle(t.inspector.sideRight)),
   cropBottom: crop(t.inspector.fieldCropBottom, t.inspector.fieldCropTitle(t.inspector.sideBottom)),
+  blur: {
+    label: t.inspector.fieldBlur,
+    title: t.inspector.fieldBlurTitle,
+    unit: "px",
+    show: (v) => round(v, 1),
+    store: (v) => (v >= BACKDROP_LIMITS.blur.min && v <= BACKDROP_LIMITS.blur.max ? round(v, 1) : null),
+    step: 1,
+    decimals: 1,
+  },
+  saturate: {
+    label: t.inspector.fieldSaturate,
+    title: t.inspector.fieldSaturateTitle,
+    unit: "%",
+    show: (v) => round(v * 100, 1),
+    store: (v) => (v >= 0 && v <= BACKDROP_LIMITS.saturate.max * 100 ? round(v / 100, 4) : null),
+    step: 5,
+    decimals: 1,
+  },
+  dim: {
+    label: t.inspector.fieldDim,
+    title: t.inspector.fieldDimTitle,
+    unit: "%",
+    show: (v) => round(v * 100, 1),
+    store: (v) => (v >= 0 && v <= 100 ? round(v / 100, 4) : null),
+    step: 1,
+    decimals: 1,
+  },
   reframeX: point(t.inspector.fieldReframeX, t.inspector.fieldReframeXTitle),
   reframeY: point(t.inspector.fieldReframeY, t.inspector.fieldReframeYTitle),
 } satisfies Record<string, FieldSpec>;
