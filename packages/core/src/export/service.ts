@@ -28,6 +28,7 @@ import {
   programGroup,
   resolveFormat,
   sameAspect,
+  scaleCaptions,
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
@@ -390,12 +391,19 @@ export class ExportService {
 
   /**
    * Every subtitle track of `loaded` with its style and cues (frames at the track's `fps`), as export burns them
-   * (what `review` marks and measures on its sheets); `loaded`: see {@link ExportService.frame}.
+   * (what `review` marks and measures on its sheets), at the size of project format `projectFormat` (the primary
+   * when absent; an unknown one counts as the primary, `frame` refuses it); `loaded`: see {@link ExportService.frame}.
    */
-  async resolvedSubtitles(root: string, loaded: { timeline: Timeline; fps: number }): Promise<ResolvedSubtitleTrack[]> {
+  async resolvedSubtitles(
+    root: string,
+    loaded: { timeline: Timeline; fps: number },
+    projectFormat?: string,
+  ): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
-    return subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+    const config = (await readEnclosingProject(root))?.config;
+    const captionScale = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format.captionScale ?? 1;
+    return subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) => scaleCaptions(track, captionScale));
   }
 
   /**

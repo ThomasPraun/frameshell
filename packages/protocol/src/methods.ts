@@ -1171,7 +1171,7 @@ export const methods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default all): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
@@ -1198,7 +1198,7 @@ export const methods = {
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
-      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default all four."),
+      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default contact, phone, motion and seam, plus safe when a platform is given or the style guide names platforms on a vertical film."),
       platform: SafeZoneSchema.shape.platform
         .optional()
         .describe(

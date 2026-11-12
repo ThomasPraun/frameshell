@@ -212,7 +212,7 @@ export class ReviewService {
     }
     const frames = Math.round(shown.duration * loaded.fps);
     if (frames < 1) throw new RpcError(ErrorCode.InvalidOperation, `review: timeline ${request.timeline} is empty.`, { op: "review", reason: "empty" });
-    const subtitles = await exports.resolvedSubtitles(root, loaded).catch((error: unknown) => {
+    const subtitles = await exports.resolvedSubtitles(root, loaded, request.projectFormat).catch((error: unknown) => {
       warnings.push(`contact: subtitle cues are not marked (${(error as Error).message.split("\n")[0]}).`);
       return [];
     });
@@ -249,7 +249,7 @@ export class ReviewService {
     }
     if (!asked && !(request.sheets === undefined && film.height > film.width)) return [];
     const named = await this.#options.platforms(root).catch((error: unknown) => {
-      warnings.push(`safe: the style guide cannot be read (${(error as Error).message.split("\n")[0]}).`);
+      if (asked) warnings.push(`safe: the style guide cannot be read (${(error as Error).message.split("\n")[0]}).`);
       return [] as PlatformId[];
     });
     const usable = named.filter((id) => sameOrientation(SAFE_ZONES[id], film));

@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
   `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
   `safeZones` lists, per platform, the zones in the film's pixels and the captions that cross them by track and
-  zone (how many cues, when, how many px deep). `--platform` adds the sheet to the default ones; a vertical film
+  zone (how many cues, when, how many px deep), at the caption size export draws in that format
+  (`captionScale`, 1.3 in a vertical non-primary format). `--platform` adds the sheet to the default ones; a vertical film
   whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
-  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them. Titles, graphics
+  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
   and faces are not measured yet.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in

@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, type ReviewResult, connectToDaemon } from "@frameshell/protocol";
-import { SAFE_ZONES } from "@frameshell/schema";
-import { type Daemon, startDaemon } from "../src/index.js";
+import { SAFE_ZONES, type Transcript, VERTICAL_CAPTION_SCALE, parseTimeline, scaleCaptions, subtitleTracks } from "@frameshell/schema";
+import { type Daemon, bundledFontMetrics, startDaemon } from "../src/index.js";
+import { cueCrossings, filmInsets, safeFlags } from "../src/review/safe.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
@@ -15,6 +16,7 @@ let daemon: Daemon;
 let conn: DaemonConnection;
 let project: string;
 let footage: string;
+let transcript: Transcript;
 
 beforeAll(async () => {
   daemon = await startDaemon({ socketPath: uniqueSocketPath(), binaries: testBinaryManager(), idleTimeoutMs: Infinity });
@@ -29,7 +31,7 @@ beforeAll(async () => {
   const video = (await conn.request("track.add", { cwd: project, kind: "video" })).changes.added[0]!;
   await conn.request("clip.add", { cwd: project, track: video, asset, start: 0, in: 0, out: 1 });
   await conn.request("track.add", { cwd: project, kind: "subtitles", follows: video });
-  const transcript = {
+  transcript = {
     schemaVersion: 1,
     asset,
     assetHash: `sha256:${"0".repeat(64)}`,
@@ -37,7 +39,7 @@ beforeAll(async () => {
     model: "test",
     words: ["Hola", "mundo"].map((text, i) => ({ id: `w_00000${i + 1}`, text, start: 0.1 + i * 0.4, end: 0.4 + i * 0.4 })),
     edits: {},
-  };
+  } as Transcript;
   await conn.request("file.write", { path: join(project, "transcripts", "take.words.json"), content: JSON.stringify(transcript) });
 }, MEDIA_TIMEOUT);
 
@@ -81,6 +83,27 @@ describe("review safe sheet", () => {
       expect(result.safeZones[0]!.flags[0]!.reach).toBeGreaterThan(0);
       const manifest = JSON.parse(readFileSync(join(result.dir, "review.json"), "utf8")) as { safeZones: unknown };
       expect(manifest.safeZones).toEqual(result.safeZones);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "measures captions at the size export draws them in a vertical non-primary format",
+    async () => {
+      expect(result.fps).toBeGreaterThan(0);
+      const parsed = parseTimeline(JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")));
+      if (!parsed.ok) throw new Error(parsed.error);
+      const timeline = parsed.value;
+      const tracks = subtitleTracks(timeline, () => transcript, result.fps);
+      const frame = { width: result.width, height: result.height };
+      const insets = filmInsets(SAFE_ZONES["instagram-reels"], frame);
+      const metrics = await bundledFontMetrics();
+      const reachAt = (scale: number): number | undefined =>
+        safeFlags(cueCrossings(tracks.map((track) => scaleCaptions(track, scale)), insets, frame, metrics), result.fps)[0]?.reach;
+      const scaled = reachAt(VERTICAL_CAPTION_SCALE);
+      expect(scaled).toBeDefined();
+      expect(scaled).not.toBe(reachAt(1));
+      expect(result.safeZones[0]!.flags[0]!.reach).toBe(scaled);
     },
     MEDIA_TIMEOUT,
   );

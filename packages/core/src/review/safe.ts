@@ -60,7 +60,7 @@ export function crossings(box: Box, insets: Insets, frame: Size): { edge: ZoneEd
     const across = Math.min(box.x1, zone.x1) - Math.max(box.x0, zone.x0);
     const down = Math.min(box.y1, zone.y1) - Math.max(box.y0, zone.y0);
     if (across <= 0 || down <= 0) continue;
-    found.push({ edge, reach: Math.round(edge === "top" || edge === "bottom" ? down : across) });
+    found.push({ edge, reach: Math.max(1, Math.round(edge === "top" || edge === "bottom" ? down : across)) });
   }
   return found;
 }
