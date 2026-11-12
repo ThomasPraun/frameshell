@@ -38,6 +38,7 @@ import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoic
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
+import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
@@ -120,7 +121,7 @@ ${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--fo
                                180 px wide (warns when the word is too long). --text alone picks the frame
                                where the word is first spoken; --at picks the frame; neither: the first
                                picture. Default file: exports/<timeline>-cover.png
-${REVIEW_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
+${REVIEW_USAGE}${ANALYZE_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
                                takes fractions of the frame (0.71,0.14), --px project pixels (1363,151). --segment: on a photo
@@ -162,7 +163,7 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
@@ -186,6 +187,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   ...REVIEW_FLAGS,
+  ...ANALYZE_FLAGS,
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "script check": [],
@@ -253,6 +255,7 @@ type Invocation =
   | { kind: "proposal.diff"; tx?: string }
   | { kind: "style.show" }
   | ReviewInvocation
+  | AnalyzeInvocation
   | PeopleInvocation
   | CreditsInvocation
   | ShootInvocation
@@ -529,6 +532,7 @@ function parseBuiltin(
     range?: string | undefined;
     sheets?: string | undefined;
     every?: string | undefined;
+    threshold?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -543,6 +547,7 @@ function parseBuiltin(
   if (command === "style") return rest.length === 1 && rest[0] === "show" ? { kind: "style.show" } : null;
   if (command === "format") return parseFormat(rest, options);
   if (command === "review") return parseReview(rest, options);
+  if (command === "analyze") return parseAnalyze(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -817,6 +822,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "review":
       return executeReview(conn, inv, cwd, flags.json);
+    case "analyze":
+      return executeAnalyze(conn, inv, cwd, flags.json);
     case "style.show": {
       const result = await conn.request("style.show", { cwd });
       return flags.json ? json(result) : formatStyle(result);

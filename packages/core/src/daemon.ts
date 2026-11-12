@@ -144,6 +144,7 @@ import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvide
 import { generateVoiceover } from "./voiceover/generate.js";
 import { generateSfx } from "./sound/generate.js";
 import { ReviewService } from "./review/service.js";
+import { AnalyzeService } from "./analyze/service.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -543,6 +544,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     exports,
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+  });
+  const analyses = new AnalyzeService({
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+    beats,
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -1152,6 +1158,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         every,
         projectFormat,
         view: await viewOf(dir, caller, view),
+      });
+    },
+    analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
+      const dir = await root(cwd);
+      const path = resolve(cwd, file);
+      const inside = relative(dir, path);
+      const input = (inside === "" || inside.startsWith("..") || isAbsolute(inside) ? path : inside).split(sep).join("/");
+      return inJob({ kind: "analyze", project: dir, asset: input }, async (ctx) => {
+        ctx.update({ step: "analyze", progress: 0 });
+        return analyses.run(
+          dir,
+          { file: path, name, threshold },
+          {
+            signal: ctx.signal,
+            progress: (progress) => ctx.update({ progress }),
+            // The caller may be gone (the job outlives it): its progress is then dropped.
+            stage: (message) => {
+              try {
+                request.progress({ message, stage: "analyze", values: { file: input } });
+              } catch {
+                // Connection closed.
+              }
+            },
+          },
+        );
       });
     },
     cover: async ({ cwd, timeline, view, ...choice }, caller) => {

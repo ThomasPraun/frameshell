@@ -119,6 +119,13 @@ describe("MCP tool catalog", () => {
     expect(review.inputSchema.required).toBeUndefined();
   });
 
+  it("says the analyze tool returns the sheets as images and needs only the video", async () => {
+    const { tools } = await (await connect()).listTools();
+    const analyze = tools.find((tool) => tool.name === "analyze")!;
+    expect(analyze.description).toMatch(/Returns the sheets as images/);
+    expect(analyze.inputSchema.required).toEqual(["file"]);
+  });
+
   it("reports an unreachable daemon as an actionable tool error, not a protocol error", async () => {
     const result = await (await connect()).callTool({ name: "timeline_show", arguments: {} });
     expect(result.isError).toBe(true);

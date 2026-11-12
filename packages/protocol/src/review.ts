@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
 // `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
 
@@ -57,3 +58,53 @@ export const ReviewPeakSchema = z.object({
 
 /** A fast moment of the picture. */
 export type ReviewPeak = z.output<typeof ReviewPeakSchema>;
+
+/** What `review` wrote. */
+export interface ReviewResultShape {
+  /** Which timeline the result shows. */
+  view: TimelineViewName;
+  /** The project's open proposal; null when none. */
+  proposal: { tx: string; state: "building" | "ready" } | null;
+  source: "timeline" | "file";
+  /** Timeline reviewed; null for a file. */
+  timeline: string | null;
+  /** Absolute path of the file reviewed; null for a timeline. */
+  file: string | null;
+  /** `<n>` of the folder. */
+  run: number;
+  /** Absolute folder the sheets and `review.json` (this result without `view` and `proposal`) are in. */
+  dir: string;
+  /** Seconds reviewed. */
+  range: { from: number; to: number };
+  /** Frame rate of the film. */
+  fps: number;
+  /** Size of the film's frames, px. */
+  width: number;
+  height: number;
+  /** Every image written, in order; a kind with many tiles is split into several images. */
+  sheets: ReviewSheet[];
+  /** The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves. */
+  peaks: ReviewPeak[];
+  /** What could not be shown (a seam on a one-frame film, nothing moving…); empty when none. */
+  warnings: string[];
+}
+
+/**
+ * What `review` wrote. Typed by hand: inferred inside the `methods` registry it is too long for TypeScript to print
+ * (TS7056), as the registry has grown.
+ */
+export const ReviewResultSchema: z.ZodType<ReviewResultShape> = z.object({
+  ...ViewedShape,
+  source: z.enum(["timeline", "file"]),
+  timeline: z.string().nullable().describe("Timeline reviewed; null for a file."),
+  file: z.string().nullable().describe("Absolute path of the file reviewed; null for a timeline."),
+  run: z.int().describe("`<n>` of the folder."),
+  dir: z.string().describe("Absolute folder the sheets and `review.json` (this result without `view` and `proposal`) are in."),
+  range: z.object({ from: z.number(), to: z.number() }).describe("Seconds reviewed."),
+  fps: z.number().describe("Frame rate of the film."),
+  width: z.int().describe("Size of the film's frames, px."),
+  height: z.int(),
+  sheets: z.array(ReviewSheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
+  peaks: z.array(ReviewPeakSchema).describe("The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves."),
+  warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
+});

@@ -24,9 +24,9 @@ export interface ToolSpec {
 
 /** Largest side of images returned by `frame_capture`: keeps a 4K frame well under model image limits. */
 export const CAPTURE_MAX_SIDE = 1280;
-/** Largest side of the sheets `review` returns as images: legible tile labels, still within model image limits. */
+/** Largest side of the sheets `review` and `analyze` return as images: legible tile labels, still within model image limits. */
 export const REVIEW_MAX_SIDE = 1568;
-/** Most sheets `review` returns as images in one call; every sheet is on disk at the path the result names. */
+/** Most sheets `review` and `analyze` return as images in one call; every sheet is on disk at the path the result names. */
 export const REVIEW_MAX_IMAGES = 8;
 /** Width of a `frames_strip` contact sheet. */
 export const STRIP_MAX_WIDTH = 1280;
@@ -67,7 +67,7 @@ const CAPTURE_SUFFIX =
   `${CAPTURE_MAX_SIDE}x${CAPTURE_MAX_SIDE}) plus its frame index and clip; \`out\` is optional and also keeps the ` +
   "full-size image there, in the format its extension or `format` names.";
 
-const REVIEW_SUFFIX =
+const SHEETS_SUFFIX =
   ` Returns the sheets as images (scaled to fit ${REVIEW_MAX_SIDE} px, at most ${REVIEW_MAX_IMAGES}; the rest are at their \`path\`) ` +
   "followed by the run's facts: each sheet's path, size and its tiles' labels in reading order.";
 
@@ -94,7 +94,7 @@ export function buildTools(defaultCwd: string): ToolSpec[] {
       if (out) out.description = `Optional. ${out.description ?? ""}`.trim();
       description += CAPTURE_SUFFIX;
     }
-    if (method === "review") description += REVIEW_SUFFIX;
+    if (method === "review" || method === "analyze") description += SHEETS_SUFFIX;
     tools.push({ name: toolName(method), description, inputSchema: input.schema, method, takesCwd: input.takesCwd });
   }
   const strip = withDefaultCwd(z.toJSONSchema(FramesStripParams, { target: "draft-2020-12", io: "input" }), defaultCwd);
