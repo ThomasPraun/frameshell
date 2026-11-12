@@ -7,7 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
-import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
+import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
   ProposalOutcomeSchema,
   ProposalSchema,
@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 88;
+export const PROTOCOL_VERSION = 89;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -607,7 +607,8 @@ const FormatInfoSchema = z.object({
 const FormatChangeSchema = z.object({
   dir: z.string().describe("Project root."),
   formats: z.array(FormatInfoSchema).describe("The project's formats after the change, primary first."),
-  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: TxIdSchema.describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
   undo: z
     .object({ method: z.enum(["format.add", "format.remove"]), params: z.record(z.string(), z.unknown()) })
     .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
@@ -1000,8 +1001,9 @@ export const methods = {
       "1920x1080, `1x1` 1080x1080, `4x5` 1080x1350, `9x16` 1080x1920) take no size; a custom id needs `width` and `height` " +
       "(even), e.g. `{ id: \"web-1600x900\", width: 1600, height: 900 }`. In a format other than the primary, media clips " +
       "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
-      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl`; `undo` " +
-      "names the call that reverses it (`revert` takes timeline operations only). It applies at once: while review mode is " +
+      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl` in the " +
+      "caller's transaction (ADR 0036): `history` lists it, `revert` with its `op` or `tx` undoes it, and `undo` names the " +
+      "call that reverses it. It applies at once: while review mode is " +
       "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
       "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
     params: z.strictObject({
@@ -1023,7 +1025,7 @@ export const methods = {
       "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
       "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
       "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
-      "`undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
+      "`revert` or `undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
       "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
     params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
     result: FormatChangeSchema,
@@ -2999,11 +3001,14 @@ export const methods = {
       "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
       "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. Operations " +
       "that did reach the file (applied before review mode was turned on) are not undone at once: the undo waits for " +
-      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Fails with " +
+      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Its project-config " +
+      "changes (`format.add`/`format.remove`, ADR 0036) are undone too, checked before anything is undone; while review " +
+      "mode is on only the person may abort a transaction that changed config (ProposalState `forbidden`). Fails with " +
       "TransactionState when none is open, ProposalPending when another proposal waits (transaction stays open).",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
       reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed and this undid."),
+      config: z.array(ConfigOperationSchema).describe("One config `revert` operation per config document it changed and this undid (ADR 0036)."),
       proposal: z
         .object({ tx: z.string(), state: ProposalStateSchema })
         .nullable()
@@ -3013,9 +3018,11 @@ export const methods = {
   history: {
     description:
       "List a timeline's journaled operations grouped by transaction, oldest first: op, args, author (`ui`, " +
-      "`cli:<session>`, `agent:<label>:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Pass `since` with your last transaction id " +
+      "`cli:<session>`, `agent:<label>:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Project-config " +
+      "operations (`format.add`/`format.remove`, ADR 0036) are listed in every timeline's history, in their transaction, " +
+      "with `doc` set and their keys (e.g. `format:9x16`) as `touched`. Pass `since` with your last transaction id " +
       "to see only what happened after it, e.g. what the human changed in the app. Fails with HistoryNotFound when " +
-      "`since` is not in this timeline's journal.",
+      "`since` is in neither this timeline's journal nor the config journal.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -3028,8 +3035,9 @@ export const methods = {
       "What a transaction (`tx_…`) or a single operation (`op_…`) did to a timeline's clips: each clip it added, removed, " +
       "moved (other track or start, same length) or otherwise changed (trim, speed, gain, props), with its track, start " +
       "and end right before and right after the target. Later operations do not change the answer. Use it to see what " +
-      "a transaction from `history` changed before you `revert` it. Fails with HistoryNotFound when the id is not in " +
-      "the timeline's journal, HistoryUnavailable when the file changed outside the journal after the target.",
+      "a transaction from `history` changed before you `revert` it. A target only in the project-config journal " +
+      "(`format.add`/`format.remove`, ADR 0036) changed no clips: `clips` is empty. Fails with HistoryNotFound when the " +
+      "id is in neither journal, or changed only other timelines (`data.timelines` names them), HistoryUnavailable when the file changed outside the journal after the target.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -3044,15 +3052,24 @@ export const methods = {
       "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
-      "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
-      "HistoryNotFound when the id is not in the timeline's journal, InvalidOperation (reason `format change`) for the `op` " +
-      "of a `format.add`/`format.remove`: run its `undo` call instead.",
+      "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. " +
+      "Project-config operations (`format.add`/`format.remove`, ADR 0036) revert too: by their `op`, or with the `tx` " +
+      "that holds them, which undoes its timeline and config operations together; a later change of the same format " +
+      "conflicts like a clip (`ids` holds keys such as `format:9x16`), and a hand edit of `formats` in `frameshell.json` " +
+      "refuses like a hand edit of the timeline. When only config was reverted, `operation` is the config `revert` with " +
+      "an empty inverse and `revision` is unchanged; `config` lists the config `revert` operations. While review mode " +
+      "is on, only the person may revert config (ProposalState `forbidden` for others). A transaction that changed " +
+      "several timelines reverts one timeline per call: its config goes with the first, later calls skip it. Fails " +
+      "with HistoryNotFound when the id is in neither the timeline's journal nor the config journal, or changed only " +
+      "other timelines (`data.timelines` names them: pass one as `timeline`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to undo."),
     }),
-    result: OperationResultSchema,
+    result: OperationResultSchema.extend({
+      config: z.array(ConfigOperationSchema).describe("Config `revert` operations it journaled (ADR 0036); empty when the target held none."),
+    }),
   },
   "review.set": {
     mutating: true,

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { AuthorSchema, ErrorCode, RpcError, TxIdSchema } from "@frameshell/protocol";
+import { AuthorSchema, type ConfigDoc, ConfigDocSchema, ErrorCode, RpcError, TxIdSchema } from "@frameshell/protocol";
 import { z } from "zod";
 import { readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { TxRef } from "../timeline/service.js";
@@ -15,12 +15,26 @@ export interface TouchedTimeline {
   timeline: string;
 }
 
+/** A project-config document an open transaction changed (ADR 0036). */
+export interface TouchedConfig {
+  root: string;
+  doc: ConfigDoc;
+}
+
+/** What an open transaction changed: a timeline or a config document. */
+export type Touched = TouchedTimeline | TouchedConfig;
+
+/** Whether `where` is a timeline. */
+export function isTouchedTimeline(where: Touched): where is TouchedTimeline {
+  return "timeline" in where;
+}
+
 /** An explicit transaction as persisted by a {@link TransactionStore}. */
 export interface StoredTransaction {
   author: string;
   tx: { id: string; label: string };
   operations: number;
-  touched: TouchedTimeline[];
+  touched: Touched[];
   /** ISO 8601 time of `begin`; absent in files written before it was recorded. */
   openedAt?: string | undefined;
   /** `tx.begin` `autoCommitAfter` in ms; absent = open until commit or abort. */
@@ -60,7 +74,7 @@ interface Open {
   explicit: boolean;
   lastAt: number;
   operations: number;
-  touched: Map<string, TouchedTimeline>;
+  touched: Map<string, Touched>;
   /** Explicit only: ISO time of `begin`; null when the store did not record it. */
   openedAt: string | null;
   /** Explicit only: commit by itself this long after `lastAt`. */
@@ -182,10 +196,10 @@ export class TransactionTracker {
   }
 
   /**
-   * Record that `tx` is about to change `where`. Persisted before the change,
-   * so a crash between write and bookkeeping never hides a timeline from `tx.abort`.
+   * Record that `tx` is about to change `where` (a timeline or config document). Persisted before the
+   * change, so a crash between write and bookkeeping never hides it from `tx.abort`.
    */
-  async touching(author: string, tx: TxRef, where: TouchedTimeline): Promise<void> {
+  async touching(author: string, tx: TxRef, where: Touched): Promise<void> {
     const open = this.#open.get(author);
     if (open?.tx.id !== tx.id || open.touched.has(touchKey(where))) return;
     open.touched.set(touchKey(where), where);
@@ -355,7 +369,7 @@ export interface ExplicitTransaction {
   tx: { id: string; label: string };
   /** Successful operations, every timeline. */
   operations: number;
-  touched: TouchedTimeline[];
+  touched: Touched[];
   /** ISO 8601 time of `begin`; null when not recorded (opened by an older daemon). */
   openedAt: string | null;
 }
@@ -367,7 +381,7 @@ const StoredFileSchema = z.object({
       author: AuthorSchema,
       tx: z.object({ id: TxIdSchema, label: z.string() }),
       operations: z.int().nonnegative(),
-      touched: z.array(z.object({ root: z.string(), timeline: z.string() })),
+      touched: z.array(z.union([z.object({ root: z.string(), timeline: z.string() }), z.object({ root: z.string(), doc: ConfigDocSchema })])),
       openedAt: z.string().optional(),
       autoCommitMs: z.number().positive().optional(),
       lastAt: z.number().optional(),
@@ -415,8 +429,8 @@ function summary(open: Open): ExplicitTransaction {
   };
 }
 
-function touchKey(where: TouchedTimeline): string {
-  return `${where.root}\0${where.timeline}`;
+function touchKey(where: Touched): string {
+  return isTouchedTimeline(where) ? `${where.root}\0${where.timeline}` : `${where.root}\0config\0${where.doc}`;
 }
 
 function newTxId(): string {

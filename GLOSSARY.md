@@ -230,6 +230,10 @@ _Avoid_: master, main format, default format
 How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
 _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 
+**Config operation** (ADR 0036):
+One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
+_Avoid_: config edit, settings change
+
 ## Photo segmentation (ADR 0022)
 
 **Mask**:

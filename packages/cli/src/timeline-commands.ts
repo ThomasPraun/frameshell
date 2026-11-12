@@ -2,6 +2,7 @@ import type {
   CaptionsSetResult,
   ClipReframeResult,
   CleanupResult,
+  ConfigOperation,
   DaemonConnection,
   HistoryResult,
   MarkerListResult,
@@ -962,14 +963,20 @@ export async function executeTimeline(
     return `Committed ${tx} "${label}" (${operations} operation${operations === 1 ? "" : "s"})\n`;
   }
   if (inv.method === "tx.abort") {
-    const { tx, label, reverted, proposal } = result as MethodResult<"tx.abort">;
-    const lines = reverted.map((r) => `  ${r.timeline}: revision ${r.revision} · op ${r.operation.id}`);
+    const { tx, label, reverted, proposal, config } = result as MethodResult<"tx.abort">;
+    const lines = [...reverted.map((r) => `  ${r.timeline}: revision ${r.revision} · op ${r.operation.id}`), ...config.map(formatConfigRevert)];
     const outcome = proposal
       ? `: the undo waits for review as proposal ${proposal.tx}; run \`frameshell proposal wait\`${reverted.length === 0 ? "" : ". Undone at once:"}`
-      : reverted.length === 0
+      : reverted.length + config.length === 0
         ? " (nothing to undo)"
         : ", changes undone:";
     return `Aborted ${tx} "${label}"${outcome}\n${lines.map((l) => `${l}\n`).join("")}`;
+  }
+  if (inv.method === "revert") {
+    const { config, ...reverted } = result as MethodResult<"revert">;
+    const timelineReverted = !config.some((op) => op.id === reverted.operation.id);
+    const lines = config.map(formatConfigRevert).map((line) => `${line}\n`).join("");
+    return timelineReverted ? `${formatOperation(reverted)}${lines}` : `${lines}revision ${reverted.revision} (timeline unchanged) · tx ${reverted.operation.tx}\n`;
   }
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
@@ -1107,10 +1114,16 @@ function formatHistory(result: HistoryResult): string {
     for (const op of tx.operations) {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
-      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (revision ${op.revision})`);
+      // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
+      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? "project config" : `revision ${op.revision}`})`);
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** A config `revert` of `revert`/`tx.abort` (ADR 0036). */
+function formatConfigRevert(op: ConfigOperation): string {
+  return `  project config: op ${op.id} · ${op.touched.join(", ") || "no change"}`;
 }
 
 function formatOperation(result: OperationResult): string {

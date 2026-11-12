@@ -6,7 +6,20 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
-export { FORMAT_JOURNAL, type FormatJournalEntry, FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound } from "./formats.js";
+export { FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
+export {
+  CONFIG_JOURNAL,
+  type ConfigDocument,
+  ConfigJournal,
+  type ConfigJournalOptions,
+  type ConfigRecord,
+  type ConfigRevertPlan,
+  configOperation,
+  readConfigJournal,
+} from "./config/journal.js";
+export { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
+export { FORMAT_RULES, type FormatKeyValue, formatState, formatsFromState } from "./config/project-doc.js";
+export { CONFIG_DOC_NAMES, planConfigRevert } from "./config/revert.js";
 export {
   type FaceScans,
   type NameWrites,

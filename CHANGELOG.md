@@ -239,6 +239,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 89): `format add` and
+  `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
+  `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips
+  of a mixed transaction. A later change of the same format conflicts like a clip; a hand edit of `formats` in
+  `frameshell.json` refuses the revert like a hand edit of a timeline. `revert` no longer refuses format changes
+  (InvalidOperation reason `format change` is gone). `.frameshell/history/project.config.jsonl` lines are keyed
+  operations now (`doc`, `patch`, `tx`, hash chain); older lines are read as they are. While review mode is on, an
+  agent still cannot change or revert formats. Wire: `format.add`/`format.remove` results carry `tx`, `history`
+  operations `doc`, `revert` and `tx.abort` results `config`. The History panel marks such transactions `project`.
+  A transaction that changed several timelines reverts one `--timeline` at a time, its format changes with the
+  first; naming a timeline it never changed fails with HistoryNotFound naming the ones it did (`data.timelines`).
 - `clip set --voice` (#464, ADR 0031) writes the voice chain of the project's `style.json` (`sound.voice`, ADR 0028)
   instead of fixed numbers: style seconds become milliseconds, each number is held to the effect's range, and a
   noise reduction of 0 leaves `denoise` out. Without a `style.json`, or with a style that does not set `sound.voice`,

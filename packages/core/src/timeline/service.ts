@@ -30,6 +30,7 @@ import {
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { readConfigJournal } from "../config/journal.js";
 import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
 import { nonMediaError } from "../media/kind.js";
@@ -571,21 +572,25 @@ export class TimelineService {
    * journaled after its decision. Throws HistoryNotFound for an unknown `since`.
    */
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
-    await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
+    const { timeline } = await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
     const entries = await readJournal(root, id);
+    // Project-config operations (ADR 0036) show in every timeline's history.
+    const config = await readConfigJournal(root);
     const decisions = (await readDecisions(await this.#realRoot(root))).filter((decision) => decision.timelines.includes(id));
     const { since } = options;
-    if (since !== undefined && !entries.some((entry) => entry.tx === since)) {
+    const sinceAt = [...entries, ...config].filter((entry) => entry.tx === since).map((entry) => entry.at);
+    if (since !== undefined && sinceAt.length === 0) {
       const decided = decisions.findLastIndex((decision) => decision.tx === since);
       if (decided !== -1) {
         const after = decisions[decided]!.at;
-        const view = historyView(entries.filter((entry) => entry.at > after), id);
+        const later = { entries: config.filter((entry) => entry.at > after), revision: timeline.revision };
+        const view = historyView(entries.filter((entry) => entry.at > after), id, undefined, later);
         return { ...view, since, proposals: decisions.slice(decided) };
       }
     }
-    const view = historyView(entries, id, since);
+    const view = historyView(entries, id, since, { entries: config, revision: timeline.revision });
     if (since === undefined) return { ...view, proposals: decisions };
-    const from = entries.findLast((entry) => entry.tx === since)!.at;
+    const from = sinceAt.sort().at(-1)!;
     return { ...view, proposals: decisions.filter((decision) => decision.tx === since || decision.at >= from) };
   }
 

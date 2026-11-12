@@ -1,7 +1,7 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { openAskMenu } from "../ask/ask-agent.js";
-import { abortedTransactions, authorOf, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
+import { abortedTransactions, authorOf, changesConfig, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
 import { t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
@@ -28,10 +28,12 @@ interface Notice {
  * it in the shared selection store; the timeline highlights what it did.
  * Revert undoes it as a new `ui` operation; a conflict lists the later
  * operations to revert first. An aborted transaction changed nothing: it
- * shows dimmed, marked "aborted", with no Revert.
+ * shows dimmed, marked "aborted", with no Revert. A transaction that changed
+ * project config (formats, ADR 0036) is marked "project": it is listed in
+ * every timeline's history.
  */
 export function HistoryPanel() {
-  const { history, error } = useTimelineHistory(TIMELINE);
+  const { history, error, reload } = useTimelineHistory(TIMELINE);
   const { view } = useTimelineView(TIMELINE);
   const { history: selected, origin } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, selected, view?.revision ?? null);
@@ -85,6 +87,8 @@ export function HistoryPanel() {
         return;
       }
       setNotice({ target, tone: "info", text: t.history.reverted(outcome.result.operation.id), conflicts: [] });
+      // A config-only revert leaves the timeline revision as it was: nothing else re-reads the list.
+      reload();
       // Show what the revert itself changed.
       void select(outcome.result.operation.tx, outcome.result.revision);
     } catch (failure) {
@@ -230,6 +234,11 @@ function TransactionRow({
               {author.detail && <span className="history-author-detail">{author.detail}</span>}
             </span>
             <span className="history-count">{t.history.opCount(count)}</span>
+            {changesConfig(tx) && (
+              <span className="history-config" data-tip={t.history.configTitle}>
+                {t.history.config}
+              </span>
+            )}
             {aborted && (
               <span className="history-aborted" title={t.history.abortedTitle}>
                 {t.history.aborted}
