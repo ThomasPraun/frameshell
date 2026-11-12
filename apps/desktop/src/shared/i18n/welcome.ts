@@ -5,6 +5,7 @@ const en = {
   dropHere: "Drop video, audio or images to start a project",
   newFromVideo: "New from video, audio or image…",
   openFolder: "Open folder…",
+  newFromIdea: "New video from an idea…",
   /** Slots: `{dir}`, `{file}`. */
   notProject: "{dir} has no {file} yet.",
   createHere: "Create a project here",
@@ -34,6 +35,27 @@ const en = {
   creating: "Creating…",
   createProject: "Create project",
   cancel: "Cancel",
+  ideaForm: "New video from an idea",
+  ideaLede: "No footage needed. Tell the agent what you have in mind; it builds the video here.",
+  ideaName: "Name of the video",
+  formatsLegend: "Formats",
+  formatsHint: "Every format comes from the same edit. The first one listed is the main format.",
+  /** By built-in format id; the canvas is the one the project gets. */
+  formatLabels: {
+    "16x9": "Horizontal 16:9 (1920x1080)",
+    "9x16": "Vertical 9:16 (1080x1920)",
+    "1x1": "Square 1:1 (1080x1080)",
+    "4x5": "Portrait 4:5 (1080x1350)",
+  } as Record<string, string>,
+  ideaLength: "Rough length",
+  lengthUnknown: "Not sure yet",
+  durationLabel: (seconds: number) =>
+    seconds < 90 ? `About ${seconds} seconds` : `About ${Math.round(seconds / 60)} minutes`,
+  ideaUrl: "A web page to start from (optional)",
+  ideaUrlHint: "A site, article or product page the video is about.",
+  ideaNeedName: "Give the video a name.",
+  ideaNeedFormat: "Choose at least one format.",
+  ideaBadUrl: "That is not a web address. It starts with https://",
 };
 
 const es: typeof en = {
@@ -41,6 +63,7 @@ const es: typeof en = {
   dropHere: "Suelta video, audio o imágenes para crear un proyecto",
   newFromVideo: "Nuevo desde un video, audio o imagen…",
   openFolder: "Abrir carpeta…",
+  newFromIdea: "Nuevo video desde una idea…",
   notProject: "{dir} todavía no tiene {file}.",
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
@@ -68,6 +91,25 @@ const es: typeof en = {
   creating: "Creando…",
   createProject: "Crear proyecto",
   cancel: "Cancelar",
+  ideaForm: "Nuevo video desde una idea",
+  ideaLede: "No necesitas grabaciones. Cuéntale al agente lo que tienes en mente; él arma el video aquí.",
+  ideaName: "Nombre del video",
+  formatsLegend: "Formatos",
+  formatsHint: "Todos los formatos salen de la misma edición. El primero de la lista es el principal.",
+  formatLabels: {
+    "16x9": "Horizontal 16:9 (1920x1080)",
+    "9x16": "Vertical 9:16 (1080x1920)",
+    "1x1": "Cuadrado 1:1 (1080x1080)",
+    "4x5": "Vertical 4:5 (1080x1350)",
+  },
+  ideaLength: "Duración aproximada",
+  lengthUnknown: "Todavía no lo sé",
+  durationLabel: (seconds) => (seconds < 90 ? `Unos ${seconds} segundos` : `Unos ${Math.round(seconds / 60)} minutos`),
+  ideaUrl: "Una página web de la que partir (opcional)",
+  ideaUrlHint: "Un sitio, artículo o página de producto sobre el que trata el video.",
+  ideaNeedName: "Ponle un nombre al video.",
+  ideaNeedFormat: "Elige al menos un formato.",
+  ideaBadUrl: "Eso no es una dirección web. Empieza con https://",
 };
 
 export const welcome = { en, es };

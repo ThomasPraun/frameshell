@@ -9,6 +9,7 @@ import { askTarget } from "../ask/ask-target.js";
 import type { TerminalAgent } from "../ask/chat-targets.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
+import { ideaPrompt } from "../idea.js";
 import { usePanelWindow } from "../panel-window.js";
 import { panelShortcut } from "../shortcuts.js";
 import { windowOf } from "../windows.js";
@@ -126,6 +127,11 @@ export function TerminalPanel({
   /** Tabs whose shell the user ran something in: the agent guide shrinks there to leave the terminal its rows. */
   const [used, setUsed] = useState<ReadonlySet<number>>(() => new Set());
   const markUsed = useCallback((key: number) => setUsed((current) => (current.has(key) ? current : new Set(current).add(key))), []);
+  /** Prompt for the film of a project made from an idea (#472), taken once from main; null when none. */
+  const [idea, setIdea] = useState<string | null>(null);
+  useEffect(() => {
+    void window.frameshell.project.takeIdea().then((brief) => setIdea(brief ? ideaPrompt(brief) : null));
+  }, []);
   const route = useTerminalRouter();
   /** Attached views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -390,6 +396,8 @@ export function TerminalPanel({
         <AgentGuide
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
           compact={used.has(activeTab.key)}
+          idea={idea}
+          onIdeaDone={() => setIdea(null)}
           onRun={(command) => {
             if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);
           }}

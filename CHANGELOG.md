@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New video from an idea, wave 4 of #451 (#472; desktop only, no wire change): the Welcome screen has "New video from an
+  idea..." next to "New from video, audio or image...". The form asks the name, the formats (any of 16:9, 9:16, 1:1 and
+  4:5), a rough length and an optional web page, and makes an empty project in the videos folder (or the folder picked).
+  The first format of that list sets the project's size and each other one is added with `format.add` through the daemon,
+  so it is journaled like any format change (ADR 0027, 0036). The agent guide then keeps itself open with "Make my
+  film": a prompt typed unsent at the agent's prompt that asks for three storylines (a different world, device and form
+  each) with a recommendation, then the assumptions with a free alternative beside every paid item. It names no
+  command, so it holds until the motion film playbook (#453) lands. Strings in English and Spanish.
 - Words behind the head in the app (#461 slice 4, ADR 0032; no wire change): the header menu of a video track offers
   "Put behind the person on V1" for each lower video track that holds a media clip, and "Stop going behind the person"
   while it is behind one (one `track.set`, one undo step). A track behind a plate shows a person icon at the end of its
