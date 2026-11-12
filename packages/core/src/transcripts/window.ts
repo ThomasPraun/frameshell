@@ -84,12 +84,26 @@ function* riffChunks(bytes: Buffer): Generator<{ id: string; body: number; size:
   }
 }
 
+/** Integer PCM audio of any channel count, to write as a WAV file with {@link wavBytes}. */
+export interface PcmWav {
+  /** Samples per second. */
+  sampleRate: number;
+  /** Bits per sample: samples are 16-bit or signed 24-bit integers. */
+  bits: 16 | 24;
+  /** One array per channel, all of one length; 24-bit samples are held in an `Int32Array`. */
+  channels: readonly (Int16Array | Int32Array)[];
+}
+
 /**
- * `pcm` as a mono 16-bit PCM WAV file. `chunks` (4-character ASCII ids) go between `fmt ` and `data`, where
+ * `audio` as a PCM WAV file. `chunks` (4-character ASCII ids) go between `fmt ` and `data`, where
  * WAV readers skip chunks they do not know.
  */
-export function pcmWavBytes(pcm: Pcm16, chunks: readonly { id: string; body: Uint8Array }[] = []): Buffer {
-  const data = pcm.samples.length * 2;
+export function wavBytes(audio: PcmWav, chunks: readonly { id: string; body: Uint8Array }[] = []): Buffer {
+  const { bits, channels, sampleRate } = audio;
+  const count = channels.length;
+  const frames = channels[0]?.length ?? 0;
+  const width = bits / 8;
+  const data = frames * count * width;
   const extra = chunks.map(({ id, body }) => {
     const chunk = Buffer.alloc(8 + body.length + (body.length % 2));
     chunk.write(id, 0, 4, "ascii");
@@ -103,16 +117,28 @@ export function pcmWavBytes(pcm: Pcm16, chunks: readonly { id: string; body: Uin
   head.write("WAVEfmt ", 8, "ascii");
   head.writeUInt32LE(16, 16);
   head.writeUInt16LE(1, 20);
-  head.writeUInt16LE(1, 22);
-  head.writeUInt32LE(pcm.sampleRate, 24);
-  head.writeUInt32LE(pcm.sampleRate * 2, 28);
-  head.writeUInt16LE(2, 32);
-  head.writeUInt16LE(16, 34);
+  head.writeUInt16LE(count, 22);
+  head.writeUInt32LE(sampleRate, 24);
+  head.writeUInt32LE(sampleRate * count * width, 28);
+  head.writeUInt16LE(count * width, 32);
+  head.writeUInt16LE(bits, 34);
   const body = Buffer.alloc(8 + data);
   body.write("data", 0, "ascii");
   body.writeUInt32LE(data, 4);
-  for (let i = 0; i < pcm.samples.length; i++) body.writeInt16LE(pcm.samples[i]!, 8 + i * 2);
+  for (let frame = 0; frame < frames; frame++) {
+    for (let channel = 0; channel < count; channel++) {
+      const at = 8 + (frame * count + channel) * width;
+      const sample = channels[channel]![frame]!;
+      if (bits === 16) body.writeInt16LE(sample, at);
+      else body.writeIntLE(sample, at, 3);
+    }
+  }
   return Buffer.concat([head, ...extra, body]);
+}
+
+/** `pcm` as a mono 16-bit PCM WAV file; see {@link wavBytes}. */
+export function pcmWavBytes(pcm: Pcm16, chunks: readonly { id: string; body: Uint8Array }[] = []): Buffer {
+  return wavBytes({ sampleRate: pcm.sampleRate, bits: 16, channels: [pcm.samples] }, chunks);
 }
 
 /** Input of {@link transcribeWindow}. */

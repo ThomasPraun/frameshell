@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell sound sfx <kind> [--variant n] [--seed n] [--pitch x] [--length s]` (#463 slice 1, ADR 0038; daemon
+  `sound.sfx`, MCP `sound_sfx`, protocol 92) synthesizes a sound effect offline, with no network and no third-party
+  samples: `click`, `tick`, `pop`, `whoosh` (stereo), `riser`, `thump`, `impact` and `shutter`, three variants each, a
+  family `seed` for one timbre across a film and a seeded pitch (0.9 to 1.3) and level (within 1.5 dB) jitter. The same
+  arguments always give the same file: `assets/sound/<kind>-<key>.wav`, 48 kHz 16-bit with the peak near -3 dBFS, imported
+  like a voiceover take and carrying its cache key and `peakAt` (the instant that must land on the picture: the
+  transient of a hit, the peak of a whoosh, the end of a riser) in a RIFF chunk. A take that is current is `cached`, and
+  a file of that name made by hand is never overwritten. When the project already keeps a `credits.json`, the take is
+  recorded there as `own` work. `sound` is a reserved built-in command group. Placing on markers (`sound.place`) and
+  music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
+  taste.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to

@@ -13,7 +13,7 @@ export const PLUGIN_MANIFEST_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHE
  */
 export const BUILTIN_COMMANDS: readonly string[] = [
   "init", "status", "doctor", "import", "track", "clip", "cut", "timeline", "transcribe", "script",
-  "tx", "history", "revert", "render", "frame", "mcp", "plugin", "help", "version", "voiceover", "beats",
+  "tx", "history", "revert", "render", "frame", "mcp", "plugin", "help", "version", "voiceover", "beats", "sound",
 ];
 
 /** npm package name, scoped or not. */
