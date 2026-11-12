@@ -2481,6 +2481,22 @@ button.track-head:focus-visible {
   height: 12px;
 }
 
+/* Track behind a person (ADR 0032): the icon, plus the matte's percentage while it is made or a "!" when it failed. */
+.track-matte {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.track-matte[data-state="preparing"] {
+  color: var(--accent);
+}
+
+.track-matte[data-state="failed"] {
+  color: var(--danger);
+}
+
 .timeline-lanes {
   flex: 1;
   position: relative;

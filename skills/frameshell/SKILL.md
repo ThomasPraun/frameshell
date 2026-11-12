@@ -63,7 +63,7 @@ When you guide the human through the app, name only these places; do not invent 
 | When | Read |
 |---|---|
 | Editing footage by its words: import, transcribe, silences, retakes, subtitles, export, verify | [transcript-editing.md](reference/transcript-editing.md) |
-| A short-form reel, short or TikTok from a take of the person talking to camera: intake, vertical canvas and other formats, passes (words, `cleanup`, captions, graphics plan on markers, zooms, voice and `duck`), draft and final renders, the cover, safe zones, notes as rules, checks before handing over | [reels.md](reference/reels.md) |
+| A short-form reel, short or TikTok from a take of the person talking to camera: intake, vertical canvas and other formats, passes (words, `cleanup`, captions, graphics plan on markers, a big word behind the head, zooms, voice and `duck`), draft and final renders, the cover, safe zones, notes as rules, checks before handing over | [reels.md](reference/reels.md) |
 | Before showing a reel or a generated video: contact and phone sheets of the export, a fresh critic, the scoring rubric with caps, comparing versions, scoped fix notes, when to stop | [critique.md](reference/critique.md) |
 | "Make it like this video": measure a reference (`analyze`): shot table, cuts per minute, contact sheet, palette, loudness, tempo, labelling what is measured and what is guessed, taking the grammar and never the content | [reference-video.md](reference/reference-video.md) |
 | A video made from an audio recording (podcast, talk, voice note): simple, medium or explainer, the scene plan, building clips per scene | [video-from-audio.md](reference/video-from-audio.md) |
