@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 /** A frame size in pixels. */
 export interface FrameSize {
   readonly width: number;
@@ -27,15 +30,27 @@ export function declaredSize(html: string): FrameSize | null {
 }
 
 /**
+ * Resolution in the project's `frameshell.json`, 1920x1080 when it names none (the scaffold's default).
+ * Throws when the file cannot be read.
+ */
+export async function projectResolution(projectDir: string): Promise<FrameSize> {
+  const config = JSON.parse(await readFile(join(projectDir, "frameshell.json"), "utf8")) as {
+    resolution?: { width?: number; height?: number };
+  };
+  return { width: config.resolution?.width ?? 1920, height: config.resolution?.height ?? 1080 };
+}
+
+/**
  * The entry HTML laid out at `size` (ADR 0027 decision 8): the root's `data-width` / `data-height` set to it.
  * The producer sizes the page and the root by them, so nothing else needs editing (spike in ADR 0027).
- * Returned unchanged when the declared size already has `size`'s aspect, so the render keeps the
- * composition's own size and the export scales it, or when the root declares no size.
+ * Only a composition laid out for the `project` frame is resized, and only into a format of another aspect.
+ * Otherwise (same aspect as `size`, a composition of its own shape such as a square card in a 16:9 project, or
+ * no declared size) it is returned unchanged, so the primary output of an existing composition never changes.
  */
-export function sizeEntry(html: string, size: FrameSize): string {
+export function sizeEntry(html: string, size: FrameSize, project: FrameSize): string {
   const root = findRoot(html);
   const declared = declaredSize(html);
-  if (!root || !declared || sameAspect(declared, size)) return html;
+  if (!root || !declared || !sameAspect(declared, project) || sameAspect(declared, size)) return html;
   const tag = setAttribute(setAttribute(root.tag, "data-width", String(size.width)), "data-height", String(size.height));
   return html.slice(0, root.index) + tag + html.slice(root.index + root.tag.length);
 }

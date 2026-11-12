@@ -161,6 +161,24 @@ describe("hyperframes adapter", () => {
       expect(seen).toBe(html);
     });
 
+    it("a composition of another shape than the project (a square card) renders as written, primary or 9:16", async () => {
+      const html = '<html><head></head><body><div data-composition-id="card" data-width="1080" data-height="1080"></div></body></html>';
+      writeFileSync(join(project, entry), html);
+      const seen: string[] = [];
+      const producer: Producer = {
+        createRenderJob: (config) => ({ config }),
+        async executeRenderJob(_job, dir, output) {
+          seen.push(readFileSync(join(dir, "index.html"), "utf8"));
+          writeFileSync(output, "webm");
+        },
+      };
+      const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+      const { ctx } = context(tempDir());
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 2560, height: 1440 });
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 1080, height: 1920 });
+      expect(seen).toEqual([html, html]);
+    });
+
     it("prepends the sheet when the entry has no head, and cannot close its own style tag", async () => {
       const seen = await renderedEntry("<div id=t></div>", '#t[x="</style>"] { scale: 2 !important; }');
       expect(seen.startsWith("<style data-frameshell-elements>\n")).toBe(true);

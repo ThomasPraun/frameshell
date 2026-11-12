@@ -262,7 +262,13 @@ describe("clip render cache", () => {
   it(
     "gc deletes renders no clip keys any more and keeps every current one, nested ones included",
     async () => {
-      // Current renders of the declared format (asking queues the nested clip's); an earlier props change left a stale one.
+      const { formats } = await conn.request("format.list", { cwd: project });
+      if (!formats.some((format) => format.id === "tall")) await conn.request("format.add", { cwd: project, id: "tall", width: 36, height: 64 });
+      // A render of the declared format that a props change made stale.
+      const stale = (await until(red, (info) => info.state === "ready", "tall")).key!;
+      await conn.request("clip.set", { cwd: project, clip: red, props: { label: "Swept" } });
+      await until(red, (info) => info.state === "ready" && info.key !== stale, "tall");
+      // Current renders of the declared format (asking queues the nested clip's).
       const tall = new Set([...(await renders("tall")).values()].map((info) => info.key!));
       for (const deadline = Date.now() + 60_000; ; ) {
         const { jobs } = await conn.request("job.list", { cwd: project, active: true });
@@ -278,8 +284,7 @@ describe("clip render cache", () => {
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.webm`), "x");
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.json`), "{}");
 
-      const staleTall = [...tallKeys()].filter((key) => !tall.has(key));
-      expect(staleTall.length).toBeGreaterThan(0);
+      expect(tallKeys().has(stale)).toBe(true);
       const { removed, skipped } = await conn.request("gc", { cwd: project });
       expect(skipped).toEqual([]);
       const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
@@ -287,7 +292,7 @@ describe("clip render cache", () => {
       expect(keys).toContain(orphan);
       // Renders of a declared format stay (background renders never make them again); once it is removed they go.
       for (const key of tall) expect(keys).not.toContain(key);
-      for (const key of staleTall) expect(keys).toContain(key);
+      expect(keys).toContain(stale);
       await conn.request("format.remove", { cwd: project, id: "tall" });
       const unused = (await conn.request("gc", { cwd: project, dryRun: true })).removed.map((entry) => keyOf(entry.path));
       for (const key of tall) expect(unused).toContain(key);

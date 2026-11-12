@@ -1,6 +1,7 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
+import { projectResolution } from "./frame-size.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
 import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens } from "./templates/index.js";
 
@@ -54,11 +55,7 @@ export const newComposition: PluginCommand = {
     const parsed = parseArgs(args);
     const { name, template } = parsed;
     const duration = parsed.duration ?? template?.defaultDuration ?? 5;
-    const config = JSON.parse(await readFile(join(project.dir, "frameshell.json"), "utf8")) as {
-      resolution?: { width?: number; height?: number };
-    };
-    const width = config.resolution?.width ?? 1920;
-    const height = config.resolution?.height ?? 1080;
+    const { width, height } = await projectResolution(project.dir);
     const dir = join(project.dir, "compositions", "hyperframes", name);
     const entry = `compositions/hyperframes/${name}/index.html`;
     const tokens = await readTokens(project.dir);

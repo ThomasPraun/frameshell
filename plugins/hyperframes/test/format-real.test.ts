@@ -1,17 +1,25 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import { createHyperframesAdapter, newComposition } from "../src/index.js";
 
 // Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): renders at a format size (ADR 0027 decision 8) with the
 // producer in use. A composition scaffolded at 16:9 and rendered at 9:16 must give the frames of one scaffolded at 9:16.
 const execFileAsync = promisify(execFile);
-const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "frameshell-format-real-")));
+const made: string[] = [];
+const tempDir = () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-format-real-")));
+  made.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
 const binaries = () => {
   const dir = process.env["FRAMESHELL_TEST_BINARIES_DIR"] || fileURLToPath(new URL("../../../.cache/test-binaries", import.meta.url));
   return new BinaryManager({ dataDir: dir, configDir: dir });

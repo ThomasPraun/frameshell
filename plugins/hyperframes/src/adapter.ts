@@ -1,7 +1,7 @@
 import { cp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
-import { sizeEntry, withStyle } from "./frame-size.js";
+import { type FrameSize, projectResolution, sizeEntry, withStyle } from "./frame-size.js";
 import { liveHead } from "./live.js";
 
 /** Clip type this adapter registers. */
@@ -69,10 +69,11 @@ const SKIPPED_DIRS = new Set(["node_modules"]);
  * the composition's entry HTML; its directory is the composition, and every
  * file in it is a cache input, so editing any of them re-renders the clip.
  * Renders run in-process with `@hyperframes/producer` to VP9 WebM with alpha,
- * with the managed ffmpeg, ffprobe and headless Chrome, at the render's size when its aspect differs from the
- * composition's (a format of the project, ADR 0027). Live preview
- * (ADR 0010) serves the composition directory as it is, with the clip's
- * variables and the HyperFrames runtime in `head`.
+ * with the managed ffmpeg, ffprobe and headless Chrome. A composition laid
+ * out for the project frame renders at a format's size when the format has
+ * another aspect (ADR 0027). Live preview (ADR 0010) serves the composition
+ * directory as it is, with the clip's variables and the HyperFrames runtime
+ * in `head`.
  */
 export function createHyperframesAdapter(options: HyperframesAdapterOptions): ClipAdapter {
   const { projectDir } = options;
@@ -105,7 +106,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       // Render a copy: the producer may write scratch files next to the entry, which would count as composition edits.
       const composition = join(ctx.outDir, "composition");
       await cp(dir.path, composition, { recursive: true });
-      await prepareEntry(join(composition, basename(source)), ctx);
+      await prepareEntry(join(composition, basename(source)), ctx, await projectResolution(projectDir));
       const output = join(ctx.outDir, "render.webm");
       const producer = await loadProducer();
       ctx.progress({ fraction: 0, message: "Starting headless Chrome" });
@@ -147,9 +148,9 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
  * The copied entry laid out at the render size (`sizeEntry`, ADR 0027 decision 8), with the clip's element CSS
  * (ADR 0021) as its last stylesheet. Written only when it changed, so a plain render reads the file as copied.
  */
-async function prepareEntry(entry: string, ctx: RenderContext): Promise<void> {
+async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSize): Promise<void> {
   const original = await readFile(entry, "utf8");
-  let html = sizeEntry(original, ctx);
+  let html = sizeEntry(original, ctx, project);
   if (ctx.elementCss) html = withStyle(html, "data-frameshell-elements", ctx.elementCss);
   if (html !== original) await writeFile(entry, html);
 }
