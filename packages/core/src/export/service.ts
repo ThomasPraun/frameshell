@@ -350,7 +350,7 @@ export class ExportService {
           });
           if (params.loop) {
             // A diagnostic: a check that cannot run must not fail a render that succeeded.
-            const warning = await loopSeamWarning(ffmpeg, output, final.frames, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
+            const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
               (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
             );
             if (warning) ctx.update({ warning });

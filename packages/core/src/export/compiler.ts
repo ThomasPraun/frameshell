@@ -556,7 +556,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
       `:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}` +
       `:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true,`
     : "";
-  const fade = plan.loop && !silent ? loopFades(rate, samples) : "";
+  const fade = plan.loop && !silent && (plan.container === "mp4" || plan.container === "mov") ? loopFades(rate, samples) : "";
   // loudnorm works at 192 kHz: resample back, then cut to the exact length.
   const audio = silent
     ? `anullsrc=r=${rate}:cl=stereo,atrim=end_sample=${samples}[a]`

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
 import type { ExportPreset, MediaClip, Timeline } from "@frameshell/schema";
-import { type Daemon, type ExportSource, compileRender, executeRender, startDaemon } from "../src/index.js";
+import { type Daemon, type ExportSource, compileRender, executeRender, muxStep, startDaemon } from "../src/index.js";
 import { DUPLICATE_DIFF, MOTION_DIFF, duplicateSeam, loopSeamWarning, meanAbsDiff } from "../src/export/seam.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
@@ -91,6 +91,12 @@ describe("seam judgement", () => {
 });
 
 describe("loop export (real ffmpeg)", () => {
+  it("fades MP4 and MOV audio, not WebM (ADR 0039 decision 7)", async () => {
+    const { plan } = await render(26, "mux", true);
+    const fades = (container: "mp4" | "mov" | "webm") => muxStep({ ...plan, container }, null, "out").args.join(" ").includes("afade=t=in:curve=hsin");
+    expect([fades("mov"), fades("mp4"), fades("webm")]).toEqual([true, true, false]);
+  }, MEDIA_TIMEOUT);
+
   it(
     "fades the first and last 96 samples with a half sine over the cut fade, and leaves the middle alone",
     async () => {
@@ -119,18 +125,21 @@ describe("loop export (real ffmpeg)", () => {
     "warns that the last frame repeats frame 0 when the cycle is one frame too long, and not at the right length",
     async () => {
       const long = await render(LEVELS + 1, "dup", true);
-      const warning = await loopSeamWarning(ffmpeg, long.output, long.plan.frames, join(dir, "seam-work-dup"));
+      const warning = await loopSeamWarning(ffmpeg, long.output, long.plan.frames, long.plan, join(dir, "seam-work-dup"));
       expect(warning).toMatch(/^Loop: the last frame \(25\) repeats frame 0 \(difference [\d.]+ of 255 at 160 px\)/);
       expect(warning).toContain("End the last key one frame earlier, or trim one frame");
 
       const exact = await render(LEVELS, "exact", true);
-      expect(await loopSeamWarning(ffmpeg, exact.output, exact.plan.frames, join(dir, "seam-work-exact"))).toBeNull();
+      expect(await loopSeamWarning(ffmpeg, exact.output, exact.plan.frames, exact.plan, join(dir, "seam-work-exact"))).toBeNull();
+
+      // Frames counted wrongly (here one more than the file has) read four pictures out of line: no verdict.
+      expect(await loopSeamWarning(ffmpeg, long.output, long.plan.frames + 1, long.plan, join(dir, "seam-work-count"))).toBeNull();
     },
     MEDIA_TIMEOUT,
   );
 
   it("leaves a file too short to judge alone", async () => {
-    expect(await loopSeamWarning(ffmpeg, join(dir, "missing.mov"), 2, join(dir, "seam-work-short"))).toBeNull();
+    expect(await loopSeamWarning(ffmpeg, join(dir, "missing.mov"), 2, { width: 64, height: 48 }, join(dir, "seam-work-short"))).toBeNull();
   });
 });
 

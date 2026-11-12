@@ -168,9 +168,13 @@ Optional `style.json`: the project's style guide as numbers (colours, fonts, typ
 
 | Tool | Does |
 |---|---|
-| `style_show` | Every style value as `{ value, source }` (`file`, `personality`, `default`; a null default = not decided, ask the person), `from` (the user style it was copied from) and the safe zones of the platforms it names. `style` is null without a file. Read-only; an invalid file fails with `InvalidProjectFile`. |
+| `style_show(view?)` | Every style value as `{ value, source }` (`file`, `personality`, `default`; a null default = not decided, ask the person), `from` (the user style it was copied from, with `status` `same`, `changed` or `missing`) and the safe zones of the platforms it names. `style` is null without a file. `view: "proposal"` shows an open review-mode proposal's version. Read-only; an invalid file fails with `InvalidProjectFile`. |
+| `style_set(path, value)` | One value by its dotted path (`colors.accent`, `motion.duration.quick`, `fonts.display`, `banned`); `null` removes it so the personality's or default value applies. Creates `style.json` when missing. Journaled in the caller's transaction (ADR 0036): `revert` with its `op` undoes it; held by review mode. |
+| `style_apply(name, replace?)` | Copy a user style (`style_list`) or a motion personality in, value by value (`replace: true` overwrites the file); `changes` lists every value that changed; records `from`. Journaled and held like `style_set`. |
+| `style_save(name, force?)` | The project's `style.json` as user style `name` (`styles/<name>.json` in Frameshell's config folder). Not journaled. |
+| `style_list` | User styles on this machine (id, SHA-256, personality, `error` when invalid) and the motion personalities. |
 
-There is no style write tool yet: agents write `style.json` with `file_write`, which refuses an invalid file. Nothing renders from the style yet.
+Every change of `style.json` goes through the config journal, `file_write` too (a write that changes a value is a `file.write` config operation). Nothing renders from the style yet.
 
 ## Resources
 
