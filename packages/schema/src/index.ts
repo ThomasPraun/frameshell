@@ -249,6 +249,17 @@ export {
   parseExportPreset,
 } from "./plugin.js";
 export {
+  BATCH_SCHEMA_URL,
+  BatchFileSchema,
+  BatchRowIdSchema,
+  BatchRowSchema,
+  type BatchFile,
+  type BatchRow,
+  type SlotTarget,
+  parseBatchFile,
+  parseSlotTarget,
+} from "./batch.js";
+export {
   BEATS_SCHEMA_URL,
   BeatsEditsSchema,
   BeatsFileSchema,

@@ -151,6 +151,12 @@ People changes are not timeline operations: review mode does not hold them, `his
 |---|---|
 | `sound_sfx(kind, variant?, seed?, pitch?, length?)` | Synthesize a sound effect offline (`click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`; `variant` 1 to 3) into `assets/sound/<kind>-<key>.wav` and import it. The same arguments always give the same file (`state: "cached"`, nothing written); `seed` is a family seed, `pitch` multiplies every frequency, `length` is for `whoosh` and `riser`. `peakAt` is the second of the take that must land on the cue; nothing is placed on a timeline. Records the take as `own` work in `credits.json` when the project keeps one (`credited`). Idempotent per `idempotencyKey`. |
 
+## Batch variants (ADR 0040)
+
+| Tool | Does |
+|---|---|
+| `batch_render(file, out?, formats?, dryRun?)` | Render one template timeline once per row of a batch file (`*.batch.json`): each row sets adapter clip props (`<clipId>.props.<path>`) or swaps a media clip's asset (`<clipId>.asset`, in/out kept) in memory, never under `timelines/`. Every row × format is checked first (a bad row fails with InvalidOperation naming `row` and `slot`); then rows render one at a time as `render` jobs into `exports/<batch name>/`, with `manifest.json` there rewritten on each job change. `dryRun` returns the plan only. Never generates voiceover. Idempotent per `idempotencyKey`. |
+
 ## Beat grid (ADR 0029)
 
 | Tool | Does |

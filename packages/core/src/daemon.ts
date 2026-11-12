@@ -54,7 +54,8 @@ import { runDoctor } from "./binaries/doctor.js";
 import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
-import { ExportService, subjectAssets } from "./export/service.js";
+import { ExportService, readTranscriptFile, subjectAssets } from "./export/service.js";
+import { BatchService } from "./batch/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
@@ -603,6 +604,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
+  });
+  const batches = new BatchService({
+    jobs,
+    loadTimeline: (dir, id) => timelines.load(dir, id),
+    applyInMemory: (dir, id, loaded, request) => timelines.applyInMemory(dir, id, loaded, request),
+    source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
+    hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
+    planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
   });
   const reviews = new ReviewService({
     timelines,
@@ -1240,6 +1249,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
+    "batch.render": async ({ cwd, file, out, formats: ids, dryRun }) => batches.render(await root(cwd), cwd, { file, out, formats: ids, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -1414,13 +1424,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const clipDir = clipRoot(dir);
       const active = [...jobs.list({ project: dir, active: true }), ...clipJobs.list({ project: clipDir, active: true })];
-      const temps = active.length === 0;
-      const busy = active.some((job) => job.kind === "clip" || job.kind === "render");
+      // A batch between two rows still needs the clip renders of the rows to come (ADR 0040).
+      const batching = batches.active(dir);
+      const temps = active.length === 0 && !batching;
+      const busy = batching || active.some((job) => job.kind === "clip" || job.kind === "render");
       const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
       const proposals = await timelines.gcProposals(dir, dryRun);
       const shootCache = await shoots.gc(dir, { dryRun, temps });
-      const baked = await audioFx.gc(dir, { dryRun, temps, busy: active.some((job) => job.kind === "render") });
+      const baked = await audioFx.gc(dir, { dryRun, temps, busy: batching || active.some((job) => job.kind === "render") });
       const removed = [...derived.removed, ...cache.removed, ...proposals, ...shootCache, ...baked.removed].sort((a, b) =>
         a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
       );

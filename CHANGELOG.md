@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Batch variants from data rows, slices 1 and 2 of #477 (ADR 0040, epic #451; daemon `batch.render`, MCP
+  `batch_render`, JSON Schema `batch.json`, protocol 98): `frameshell batch <file.batch.json> [--out dir] [--formats
+  id,id] [--dry-run]` renders one template timeline (default `main`) once per row. `slots` name what a row sets:
+  `<clipId>.props.<path>` (written over the clip's props and checked by its adapter, as `clip set` does) or
+  `<clipId>.asset` (a media clip's file swapped, keeping its in, out and placement). Each row's timeline exists only in
+  memory: nothing is written to `timelines/`, journaled or proposed. Every row × format is checked first, so a bad row
+  fails the call with InvalidOperation naming its `row` and `slot` (props the adapter refuses, an unknown clip, a file
+  shorter than the clip's out or without the stream its track plays, a voice file without the transcript a subtitle
+  track follows). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
+  (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
+  job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
+  generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
