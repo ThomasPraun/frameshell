@@ -104,10 +104,10 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Desktop UI strings: never literal in components. Add to area file in `apps/desktop/src/shared/i18n/`, English + Spanish (neutral Latin American, "tú"). Agent-facing text (CLI, skill, daemon errors, Ask references, journal labels) stays English. e2e pin English (`--lang=en`).
 - TSDoc on every public member.
 - `CHANGELOG.md`: Keep a Changelog + SemVer.
-- Verify: `pnpm typecheck && pnpm lint && pnpm test`. Tests run built `dist/`, `pnpm test` builds first.
+- Verify: `node scripts/test-scope.mjs` prints what change can break (unit filter, e2e yes/no); run that, not whole suite. Iterate on area test files only (`pnpm test packages/core/test/beats`). Tests run built `dist/`, `pnpm test` builds first. CI uses same script; push to main runs all. Area reads files outside own package (new cross-area read): add to `scripts/test-scope.mjs`.
 - Media tests use real managed ffmpeg, downloaded once to `.cache/test-binaries` (`FRAMESHELL_TEST_BINARIES_DIR` overrides). Fixtures synthetic, tiny, generated per test. Never commit media. Only exception: landing assets in `website/public/media/`, each < 25 MB.
 - Proxy recipe changed: bump `RECIPE_VERSION` (cache key), else stale proxies reused. Clip cache entry layout or key recipe changed: bump `CACHE_LAYOUT_VERSION` (`clips/cache-key.ts`).
-- Desktop change: also `pnpm test:e2e` (Playwright drives built Electron app).
+- e2e (`pnpm test:e2e`, Playwright drives built Electron app): local only when `apps/desktop` changed. CI runs it when `test-scope` says so.
 - Playhead: one store, `preview/transport.ts`. Never keep a second playhead or play state.
 - Panel code may run in detached panel window (ADR 0012). rAF, timers, observers, focus, fullscreen, `message`: take from element's own window (`ownerDocument.defaultView`). Global keys via `listenEverywhere`. Never `instanceof HTMLElement` on events or nodes: use `elementOf`/`isTag` (`renderer/src/windows.ts`).
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches. Only exception: Explorer Move to Trash (`main/trash.ts`, OS trash after confirm listing daemon `file.uses`).
