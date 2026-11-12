@@ -974,6 +974,85 @@ describe("markers (ADR 0029)", () => {
   });
 });
 
+describe("tempo (ADR 0029 slice 3)", () => {
+  /** base() with a talk clip on t_v (c_0001) and the music on t_a (c_0002, 0–10 s of music.wav at start 2). */
+  async function scored(): Promise<Timeline> {
+    let t = base();
+    t = (await apply(t, "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 0 })).timeline;
+    t = (await apply(t, "clip.add", { track: "t_a", asset: "assets/music.wav", start: 2, out: 10 })).timeline;
+    return t;
+  }
+
+  it("tempo.set follows a media clip, or sets a nominal grid; the inverse restores the previous tempo", async () => {
+    const t = await scored();
+    const followed = await apply(t, "tempo.set", { clip: "c_0002" });
+    expect(followed.timeline.tempo).toEqual({ clip: "c_0002" });
+    expect(followed.inverse.args).toEqual({ tempo: null });
+    const nominal = await apply(followed.timeline, "tempo.set", { bpm: 128, offset: 0.5, meter: 3 });
+    expect(nominal.timeline.tempo).toEqual({ bpm: 128, offset: 0.5, meter: 3 });
+    expect((await apply(nominal.timeline, "timeline.patch", nominal.inverse.args)).timeline.tempo).toEqual({ clip: "c_0002" });
+    const riding = await apply(t, "tempo.set", { clip: "c_0002", bpm: 100, offset: 0.2504 });
+    expect(riding.timeline.tempo).toEqual({ clip: "c_0002", bpm: 100, offset: 0.25 });
+  });
+
+  it("tempo.set drops defaults, snaps a nominal offset to the frame grid and replaces the whole tempo", async () => {
+    const t = (await apply(base(), "tempo.set", { bpm: 120, offset: 0.51, meter: 4 })).timeline;
+    expect(t.tempo).toEqual({ bpm: 120, offset: 0.5 });
+    expect((await apply(t, "tempo.set", { bpm: 90 })).timeline.tempo).toEqual({ bpm: 90 });
+  });
+
+  it("tempo.set clears with `clear`, warns when there was none, and refuses mixed or empty arguments", async () => {
+    const t = (await apply(base(), "tempo.set", { bpm: 120 })).timeline;
+    const cleared = await apply(t, "tempo.set", { clear: true });
+    expect(cleared.timeline).not.toHaveProperty("tempo");
+    expect(cleared.warnings).toEqual([]);
+    expect((await apply(base(), "tempo.set", { clear: true })).warnings).toEqual([expect.stringMatching(/no tempo/)]);
+    expect((await rejection(apply(t, "tempo.set", { clear: true, bpm: 100 }))).message).toMatch(/clear/);
+    expect((await rejection(apply(t, "tempo.set", {}))).message).toMatch(/nothing to set/);
+    expect((await rejection(apply(t, "tempo.set", { offset: 1 }))).message).toMatch(/needs|nominal|bpm/);
+  });
+
+  it("tempo.set refuses a clip that is not a media clip of a video or audio track, or does not exist", async () => {
+    let t = await scored();
+    t = (await apply(t, "clip.add", { track: "t_v", type: "hyperframes", duration: 2, start: 20, props: { title: "x" } }, context({ newId: () => "c_gen" }))).timeline;
+    expect((await rejection(apply(t, "tempo.set", { clip: "c_gen" }))).message).toMatch(/not a media clip/);
+    expect((await rejection(apply(t, "tempo.set", { clip: "c_none" }))).code).toBe(ErrorCode.ClipNotFound);
+  });
+
+  it("removing the clip the tempo follows clears the tempo with a warning, and the inverse brings both back", async () => {
+    const t = (await apply(await scored(), "tempo.set", { clip: "c_0002" })).timeline;
+    const removed = await apply(t, "clip.remove", { clip: "c_0002" });
+    expect(removed.timeline).not.toHaveProperty("tempo");
+    expect(removed.warnings).toEqual([expect.stringMatching(/followed clip c_0002.*tempo cleared/)]);
+    const back = await apply(removed.timeline, "timeline.patch", removed.inverse.args);
+    expect(back.timeline.tempo).toEqual({ clip: "c_0002" });
+    expect(clipsOf(back.timeline, "t_a").map((clip) => clip.id)).toEqual(["c_0002"]);
+    const withoutTrack = await apply(t, "track.remove", { track: "t_a", force: true });
+    expect(withoutTrack.timeline).not.toHaveProperty("tempo");
+    // A nominal tempo has no clip to lose.
+    const nominal = (await apply(await scored(), "tempo.set", { bpm: 100 })).timeline;
+    expect((await apply(nominal, "clip.remove", { clip: "c_0002" })).timeline.tempo).toEqual({ bpm: 100 });
+  });
+
+  it("splitting the clip the tempo follows keeps it on the left part and says so", async () => {
+    const t = (await apply(await scored(), "tempo.set", { clip: "c_0002" })).timeline;
+    const split = await apply(t, "clip.split", { clip: "c_0002", at: 6 }, context({ newId: () => "c_right" }));
+    expect(split.timeline.tempo).toEqual({ clip: "c_0002" });
+    expect(split.warnings).toEqual([expect.stringMatching(/follows c_0002, the left part.*c_right/)]);
+  });
+
+  it("timeline.patch refuses a tempo naming a clip that is not there, and the schema agrees", async () => {
+    const t = await scored();
+    expect((await rejection(apply(t, "timeline.patch", { tempo: { clip: "c_none" } }))).message).toMatch(/tempo\.clip/);
+    expect(parseTimeline({ ...t, tempo: { clip: "c_0001" } })).toMatchObject({ ok: true });
+    expect(parseTimeline({ ...t, tempo: { clip: "c_none" } })).toMatchObject({ ok: false, error: expect.stringMatching(/tempo\.clip/) });
+    expect(parseTimeline({ ...t, tempo: { offset: 1 } })).toMatchObject({ ok: false });
+    expect(parseTimeline({ ...t, tempo: { clip: "c_0001", meter: 4 } })).toMatchObject({ ok: false, error: expect.stringMatching(/bpm/) });
+    expect(parseTimeline({ ...t, tempo: { bpm: 10 } })).toMatchObject({ ok: false });
+    expect(parseTimeline({ ...t, tempo: { bpm: 120, extra: 1 } })).toMatchObject({ ok: false });
+  });
+});
+
 // Property-style: random operation sequences from a seeded PRNG (no dependency).
 
 function prng(seed: number) {
@@ -1004,7 +1083,7 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
   const markers = timeline.markers ?? [];
   const markerRef = () => (markers.length > 0 ? (rand.chance(0.5) ? rand.pick(markers).id : rand.pick(markers).label) : "m_none");
   const label = () => rand.pick(["hook", "intro", "cta", "beat", "Hook"]);
-  switch (rand.int(13)) {
+  switch (rand.int(14)) {
     case 0:
       return { name: "track.add", args: { kind: rand.pick(["video", "audio", "subtitles"] as const), follows: clipTrackId(), ...(rand.chance(0.3) ? { index: rand.int(tracks.length + 1) } : {}) } };
     case 1:
@@ -1053,6 +1132,8 @@ function randomRequest(rand: ReturnType<typeof prng>, timeline: Timeline): { nam
       return rand.chance(0.5)
         ? { name: "marker.set", args: { marker: markerRef(), ...(rand.chance(0.6) ? { at: time() } : {}), ...(rand.chance(0.4) ? { label: label() } : {}) } }
         : { name: "marker.remove", args: { marker: markerRef() } };
+    case 12:
+      return rand.chance(0.15) ? { name: "tempo.set", args: { clear: true } } : { name: "tempo.set", args: rand.chance(0.5) ? { clip: clipId() } : { bpm: 60 + rand.int(100) } };
     default:
       return { name: "track.add", args: { kind: rand.pick(["video", "audio"] as const) } };
   }
@@ -1221,9 +1302,11 @@ describe("operation properties", () => {
       const undone = await applyOperation(result.timeline, result.inverse, ctx);
       expect(undone.timeline.tracks, `inverse of ${name} ${JSON.stringify(args)}`).toEqual(timeline.tracks);
       expect(undone.timeline.markers, `inverse of ${name} ${JSON.stringify(args)}`).toEqual(timeline.markers);
+      expect(undone.timeline.tempo, `inverse of ${name} ${JSON.stringify(args)}`).toEqual(timeline.tempo);
       const redone = await applyOperation(undone.timeline, undone.inverse, ctx);
       expect(redone.timeline.tracks).toEqual(result.timeline.tracks);
       expect(redone.timeline.markers).toEqual(result.timeline.markers);
+      expect(redone.timeline.tempo).toEqual(result.timeline.tempo);
       timeline = result.timeline;
     }
     expect(applied.size).toBeGreaterThanOrEqual(10);

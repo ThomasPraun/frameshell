@@ -10,7 +10,7 @@ import {
   RpcError,
   type TimelinePatch,
 } from "@frameshell/protocol";
-import type { Timeline } from "@frameshell/schema";
+import { type Timeline, findMusicClip } from "@frameshell/schema";
 import { configOperation } from "../config/journal.js";
 import { applyPatch } from "../timeline/patch.js";
 import { timelineHash } from "./hash.js";
@@ -78,6 +78,13 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
     anchor = snapshot(state, keys);
     segment = [];
   }
+  if (conflicts.size === 0) {
+    // A later `tempo.set` follows a clip the target created: undoing the target would leave `tempo.clip` dangling.
+    const follows = restored.tempo?.clip;
+    if (follows !== undefined && !findMusicClip(restored, follows)) {
+      for (const other of tail.filter((entry) => !inTarget(entry) && entry.inverse.args.tempo !== undefined)) conflicts.set(other.id, { entry: other, ids: new Set(["tempo"]) });
+    }
+  }
   if (conflicts.size > 0) {
     const ordered = [...conflicts.values()].sort((a, b) => tail.indexOf(a.entry) - tail.indexOf(b.entry));
     throw conflictError(target, timeline, ordered);
@@ -85,13 +92,14 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
   return restored;
 }
 
-/** Ids of the multicam groups, tracks, clips and markers a patch changes (each named once, in that order). */
+/** Ids of the multicam groups, tracks, clips and markers a patch changes, and `tempo` when it replaces the beat grid (each named once, in that order). */
 export function touchedIds(patch: TimelinePatch): string[] {
   const ids = [
     ...(patch.groups ?? []).map((entry) => entry.id),
     ...(patch.tracks ?? []).map((entry) => entry.id),
     ...(patch.clips ?? []).map((entry) => entry.id),
     ...(patch.markers ?? []).map((entry) => entry.id),
+    ...(patch.tempo !== undefined ? ["tempo"] : []),
   ];
   return [...new Set(ids)];
 }
@@ -212,6 +220,7 @@ function patchKeys(patch: TimelinePatch): string[] {
     ...(patch.tracks ?? []).map((entry) => `track:${entry.id}`),
     ...(patch.clips ?? []).map((entry) => `clip:${entry.id}`),
     ...(patch.markers ?? []).map((entry) => `marker:${entry.id}`),
+    ...(patch.tempo !== undefined ? ["tempo"] : []),
     ...(patch.order ? ["order"] : []),
   ];
 }
@@ -242,6 +251,7 @@ function rewind(state: Timeline, entry: JournalEntry, target: string, timeline: 
 
 function value(timeline: Timeline, key: string): unknown {
   if (key === "order") return timeline.tracks.map((track) => track.id);
+  if (key === "tempo") return timeline.tempo ?? null;
   const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   if (kind === "track") return timeline.tracks.find((track) => track.id === id) ?? null;
   if (kind === "group") return timeline.groups?.find((group) => group.id === id) ?? null;
@@ -267,6 +277,10 @@ function relates(entry: JournalEntry, key: string, ...states: Timeline[]): boole
 function patchRelates(patch: TimelinePatch, key: string, states: Timeline[]): boolean {
   if (patchKeys(patch).includes(key)) return true;
   if (key === "order") return (patch.tracks ?? []).length > 0;
+  // `tempo` and the clip it follows depend on each other: a tempo change relates to that clip, and a change of that clip to the tempo.
+  const followed = states.map((state) => state.tempo?.clip).filter((clip) => clip !== undefined);
+  if (key === "tempo") return followed.some((clip) => (patch.clips ?? []).some((entry) => entry.id === clip));
+  if (patch.tempo !== undefined && key.startsWith("clip:") && followed.includes(key.slice("clip:".length))) return true;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
   if (key.startsWith("group:") || key.startsWith("marker:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);

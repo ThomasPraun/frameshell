@@ -10,6 +10,7 @@ import {
   type TimelineLayout,
   type TrackRow,
   formatDuration,
+  lowerBound,
   rulerTicks,
   visibleClips,
 } from "./layout.js";
@@ -237,6 +238,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   ctx.beginPath();
   ctx.rect(0, layout.head, width, height - layout.head);
   ctx.clip();
+  if (layout.grid) paintGridLines(ctx, input, t0, t1);
   layout.rows.forEach((row, index) => {
     const top = row.top - scrollTop;
     const extent = row.height + row.lanesHeight;
@@ -272,6 +274,7 @@ export function paintTimeline<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): {
   ctx.restore();
 
   paintRuler(ctx, input);
+  if (layout.grid) paintGridTicks(ctx, input, t0, t1);
   if (layout.markers.length > 0) paintMarkers(ctx, input);
   if (layout.scenes.length > 0) paintScenes(ctx, input);
   for (const mark of marks) {
@@ -811,6 +814,61 @@ function paintRuler<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
     ctx.fillStyle = theme.textFaint;
     ctx.fillText(tick.label, x + 4, 4);
   }
+}
+
+/** Closest two beats (or bars) are drawn, px; a denser level is left out so a zoomed-out grid stays a grid, not a wash. */
+const GRID_MIN_SPACING_PX = 6;
+/** Opacity of a beat's and of a bar's line across the lanes: bars stronger (ADR 0029). */
+const BEAT_LINE_ALPHA = 0.07;
+const BAR_LINE_ALPHA = 0.2;
+/** Height of a beat's and of a bar's tick at the bottom of the ruler, px. */
+const BEAT_TICK = 3;
+const BAR_TICK = 8;
+
+/**
+ * What the beat grid draws at this zoom: the beats and bars in view, each level only while its marks are at least
+ * {@link GRID_MIN_SPACING_PX} apart (bars still show when the beats are too dense).
+ */
+function visibleGrid<Img>(input: PaintInput<Img>, t0: number, t1: number): { beats: number[]; bars: number[] } {
+  const grid = input.layout.grid!;
+  const { pxPerSecond } = input.viewport;
+  const within = (times: readonly number[]) => {
+    const out: number[] = [];
+    for (let index = lowerBound(times, (at) => at >= t0 - 1 / pxPerSecond); index < times.length && times[index]! <= t1 + 1 / pxPerSecond; index++) out.push(times[index]!);
+    return out;
+  };
+  const beatPx = (60 / grid.bpm) * pxPerSecond;
+  const barPx = beatPx * grid.meter;
+  const bars = barPx >= GRID_MIN_SPACING_PX ? within(grid.bars) : [];
+  // A bar start is drawn as a bar, not also as a beat.
+  const isBar = new Set(bars);
+  const beats = beatPx >= GRID_MIN_SPACING_PX ? within(grid.beats).filter((time) => !isBar.has(time)) : [];
+  return { beats, bars };
+}
+
+/** The beat grid across the lanes (ADR 0029): a faint line per beat and a stronger one per bar, under the clips. */
+function paintGridLines<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, t0: number, t1: number): void {
+  const { layout, theme, viewport } = input;
+  const { pxPerSecond, scrollLeft, height } = viewport;
+  const { beats, bars } = visibleGrid(input, t0, t1);
+  ctx.fillStyle = theme.textMuted;
+  for (const [times, alpha] of [[beats, BEAT_LINE_ALPHA], [bars, BAR_LINE_ALPHA]] as const) {
+    ctx.globalAlpha = alpha;
+    for (const time of times) ctx.fillRect(Math.round(time * pxPerSecond - scrollLeft), layout.head, 1, height - layout.head);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** Ticks on the bottom edge of the ruler: short for a beat, tall for the start of a bar. */
+function paintGridTicks<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, t0: number, t1: number): void {
+  const { theme, viewport } = input;
+  const { pxPerSecond, scrollLeft } = viewport;
+  const { beats, bars } = visibleGrid(input, t0, t1);
+  ctx.fillStyle = theme.accent;
+  ctx.globalAlpha = 0.55;
+  for (const time of beats) ctx.fillRect(Math.round(time * pxPerSecond - scrollLeft), RULER_HEIGHT - 1 - BEAT_TICK, 1, BEAT_TICK);
+  ctx.globalAlpha = 1;
+  for (const time of bars) ctx.fillRect(Math.round(time * pxPerSecond - scrollLeft), RULER_HEIGHT - 1 - BAR_TICK, 1, BAR_TICK);
 }
 
 /** Opacity of a marker's line across the lanes: a guide for the eye, under clips' outlines in weight. */

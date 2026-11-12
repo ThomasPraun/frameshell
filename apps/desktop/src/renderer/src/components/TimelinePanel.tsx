@@ -1581,6 +1581,8 @@ function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; 
 /** What the drag tooltip says about the target an edge landed on. */
 function snappedText(point: SnapPoint): string {
   if (point.kind === "marker") return t.timeline.snappedMarker(point.label);
+  if (point.kind === "beat") return t.timeline.snappedBeat;
+  if (point.kind === "bar") return t.timeline.snappedBar;
   return point.kind === "playhead" ? t.timeline.snappedPlayhead : t.timeline.snappedEdge;
 }
 
@@ -1601,6 +1603,11 @@ function ClipList({
   if (!layout) return null;
   return (
     <ul className="sr-only" aria-label={t.timeline.clipListLabel}>
+      {layout.grid && (
+        <li data-grid={layout.grid.low ? "low" : "on"} data-beats={layout.grid.beats.length} data-bars={layout.grid.bars.length} data-bpm={layout.grid.bpm}>
+          {t.timeline.gridItem(layout.grid.bpm, layout.grid.meter, layout.grid.low)}
+        </li>
+      )}
       {layout.markers.map((marker) => (
         <li key={marker.id} data-marker={marker.id} data-at={marker.at}>
           {t.timeline.markerItem(marker.label, formatTimecode(marker.at, fps))}

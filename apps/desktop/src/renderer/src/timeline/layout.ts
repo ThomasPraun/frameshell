@@ -194,8 +194,24 @@ export interface MarkerBox {
   color: MarkerColor | null;
 }
 
+/** The timeline's beat grid (ADR 0029) as the panel draws it and drags snap to it. */
+export interface GridBox {
+  /** Timeline seconds of every beat, increasing; bar starts included. */
+  beats: readonly number[];
+  /** Timeline seconds of the beats that start a bar. */
+  bars: readonly number[];
+  bpm: number;
+  meter: number;
+  /** The music clip the grid rides on; absent for a nominal grid on the timeline clock. */
+  clip?: string;
+  /** A LOW confidence grid is drawn but never snapped to (`--snap-to` refuses it too). */
+  low: boolean;
+}
+
 /** Everything the panel draws, derived from one `timeline.show` result. */
 export interface TimelineLayout {
+  /** Beat grid of the timeline's `tempo`; null draws none. */
+  grid: GridBox | null;
   /** Markers by time; empty draws no marker lane. */
   markers: MarkerBox[];
   /** Scene spans in start order; empty draws no band. */
@@ -291,7 +307,8 @@ export function layoutTimeline(
     top += height + lanesHeight;
     return row;
   });
-  return { markers, scenes: [...scenes], sceneTop, head, rows, duration, height: top, clipCount };
+  const grid = view.grid && view.grid.beats.length > 0 ? { beats: view.grid.beats, bars: view.grid.bars, bpm: view.grid.bpm, meter: view.grid.meter, low: view.grid.low, ...(view.grid.clip ? { clip: view.grid.clip } : {}) } : null;
+  return { grid, markers, scenes: [...scenes], sceneTop, head, rows, duration, height: top, clipCount };
 }
 
 type ClipView = TimelineView["tracks"][number]["clips"][number];
@@ -390,7 +407,7 @@ export function visibleClips(clips: readonly ClipBox[], t0: number, t1: number):
 }
 
 /** First index where `past` turns true; `past` must be monotonic over `items`. */
-function lowerBound<T>(items: readonly T[], past: (item: T) => boolean): number {
+export function lowerBound<T>(items: readonly T[], past: (item: T) => boolean): number {
   let lo = 0;
   let hi = items.length;
   while (lo < hi) {
@@ -556,6 +573,7 @@ export function markerAt(layout: TimelineLayout, viewport: LaneViewport, x: numb
 
 /** Empty layout, before the first `timeline.show`: the ruler alone. */
 export const EMPTY_LAYOUT: TimelineLayout = {
+  grid: null,
   markers: [],
   scenes: [],
   sceneTop: RULER_HEIGHT,

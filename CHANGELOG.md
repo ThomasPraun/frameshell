@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
+  `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
+  its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
+  through the clip's start, `in` and speed, so moving, trimming or speeding up the music moves the grid; `tempo set
+  --bpm 120 [--offset s] [--meter n]` is a nominal grid for blocking a film before music exists (each frame rounded once
+  from the beat's index), also on a clip (`--clip c --bpm 120`, offset in the clip's source seconds). `tempo show` lists
+  the grid on the timeline clock (bars and beats in seconds; why there is none when the music has no beats file), `tempo
+  clear` removes it. The schema checks that `tempo.clip` is a media clip of a video or audio track; removing that clip
+  clears the tempo with a warning and a revert brings both back; splitting it keeps the tempo on the left part. The app
+  draws the grid, bars stronger than beats, both on the lanes and as ruler ticks (the level too dense to read at the
+  current zoom is left out), and dragged clip edges snap to beats and bars (a clip edge, marker or the playhead in reach
+  wins; a trimmed edge on a beat goes exactly there; a LOW confidence grid is drawn but never snapped to). `--snap-to
+  beat|bar|marker` (daemon and MCP `snapTo`) on `clip add|move|trim|split|key`, `transition set|remove`, `marker add|set` and
+  `cut` moves each time of the command to the nearest beat, bar start or marker (within 1 s) first and records the seconds; beat
+  and bar are refused with no tempo, without a beats file, on a LOW confidence grid or for a time far outside the music. The daemon watches
+  `beats/` (it may not exist yet): a beats file written, hand-edited, deleted or broken sends `beats.changed`, so a hand
+  edit of `edits` (half or double time, a moved downbeat) changes the grid in the open app at once, and a broken file
+  takes the grid away until it validates again. Older Frameshell versions reject a timeline that carries `tempo`.
+
 - Subject layers in the preview (#461 slice 3, ADR 0032; protocol 95): a track `behind` a plate now shows behind the
   person in the app's preview too, as in export and `frame`. The preview reads the plate's proxy through its subject
   matte (the matte as the alpha of a second, software decoder; frame N of the matte is frame N of the proxy), on the

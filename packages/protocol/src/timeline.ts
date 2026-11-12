@@ -20,6 +20,10 @@ import {
   KEY_EASES,
   MARKER_COLORS,
   MarkerSchema,
+  MAX_TEMPO_BPM,
+  MAX_TEMPO_METER,
+  MIN_TEMPO_BPM,
+  TempoSchema,
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
@@ -52,6 +56,26 @@ const TimeRef = (what: string) =>
         "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`); the daemon turns it into seconds first, so the history records seconds.",
     );
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
+
+/** What `snapTo` lands on (ADR 0029 decision 6). */
+export const SNAP_TO_KINDS = ["beat", "bar", "marker"] as const;
+
+/** A value of `snapTo`. */
+export type SnapToKind = (typeof SNAP_TO_KINDS)[number];
+
+/**
+ * `snapTo` of every operation with a time reference ({@link TIME_REF_FIELDS}): the daemon moves each of its time
+ * arguments to the nearest beat or bar of the timeline's `tempo` grid before the operation runs, so the journal
+ * records the seconds it landed on.
+ */
+const snapToArg: z.ZodOptional<z.ZodType<SnapToKind, SnapToKind>> = z
+  .enum(SNAP_TO_KINDS)
+  .optional()
+  .describe(
+    "Move each time argument to the nearest `beat`, the nearest `bar` start, or the nearest `marker` (within 1 s) before the " +
+      "operation runs. `beat` and `bar` need a `tempo` (`tempo.set`) and a grid that is not LOW confidence. A `cut` or `clip.trim` landing on a " +
+      "beat goes exactly there (pause snapping off unless `snap: true`). Default: the times as given.",
+  );
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
 const CropSide = z.number().min(0).lt(1).optional();
 const MarkerRef = z
@@ -236,6 +260,7 @@ export const operationArgs = {
     force: z.boolean().default(false).describe("Also remove the track's clips. Default false: a track with clips is refused."),
   }),
   "clip.add": z.strictObject({
+    snapTo: snapToArg,
     track: TrackRef.describe("Video or audio track to place the clip on, or a program track for a `shot`."),
     type: z
       .string()
@@ -295,11 +320,13 @@ export const operationArgs = {
     snapBounds: snapBoundsArg,
   }),
   "clip.move": z.strictObject({
+    snapTo: snapToArg,
     clip: ClipRef,
     start: TimeRef("New timeline time of the first frame. Default: unchanged.").optional(),
     track: TrackRef.optional().describe("Track to move the clip to (same kind). Default: unchanged."),
   }),
   "clip.trim": z.strictObject({
+    snapTo: snapToArg,
     clip: ClipRef,
     in: Seconds("New source time of the first frame (head trim); frames that stay keep their timeline position.").optional(),
     out: Seconds("New source time just after the last frame (tail trim).").optional(),
@@ -314,6 +341,7 @@ export const operationArgs = {
     rippleTracks: rippleTracksArg,
   }),
   "clip.split": z.strictObject({
+    snapTo: snapToArg,
     clip: ClipRef,
     at: TimeRef("Timeline time to split at; strictly inside the clip. The left part keeps the id."),
   }),
@@ -346,6 +374,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
   }),
   cut: z.strictObject({
+    snapTo: snapToArg,
     from: TimeRef("Start of the timeline range to remove."),
     to: TimeRef("End of the range; greater than `from`."),
     tracks: z
@@ -356,6 +385,7 @@ export const operationArgs = {
     ...snapArgs,
   }),
   "transition.set": z.strictObject({
+    snapTo: snapToArg,
     at: TimeRef("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
       .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
@@ -381,10 +411,12 @@ export const operationArgs = {
       .describe("Tracks to change. Default: every video and audio track that has an edge at `at`, like `cut`."),
   }),
   "transition.remove": z.strictObject({
+    snapTo: snapToArg,
     at: TimeRef("Timeline time of the clip edge to clear."),
     tracks: z.array(TrackRef).min(1).optional().describe("Tracks to change. Default: every video and audio track that has an edge at `at`."),
   }),
   "clip.key": z.strictObject({
+    snapTo: snapToArg,
     clip: ClipRef,
     prop: z
       .enum(["x", "y", "scale", "opacity", "gain"])
@@ -614,11 +646,13 @@ export const operationArgs = {
     keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
   }),
   "marker.add": z.strictObject({
+    snapTo: snapToArg,
     at: TimeRef("Timeline second of the marker."),
     label: MarkerLabel,
     color: MarkerColor.optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Default: none (the app's accent colour)."),
   }),
   "marker.set": z.strictObject({
+    snapTo: snapToArg,
     marker: MarkerRef,
     at: TimeRef("New timeline second (absolute, not a nudge).").optional(),
     label: MarkerLabel.optional().describe("New label; unique in the timeline ignoring case."),
@@ -626,6 +660,25 @@ export const operationArgs = {
   }),
   "marker.remove": z.strictObject({
     marker: MarkerRef,
+  }),
+  "tempo.set": z.strictObject({
+    clip: ClipRef.optional().describe(
+      "Media clip of a video or audio track (the music) whose asset's beat grid the timeline follows; moving, trimming or re-timing the clip moves the grid. " +
+        "Run `beats.measure` on its asset first. With `bpm`, a nominal grid rides on the clip instead.",
+    ),
+    bpm: z
+      .number()
+      .min(MIN_TEMPO_BPM)
+      .max(MAX_TEMPO_BPM)
+      .optional()
+      .describe("Nominal tempo, beats per minute: a grid before any music exists, to block a film in beats. Without `clip` it runs on the timeline clock."),
+    offset: z
+      .number()
+      .nonnegative()
+      .optional()
+      .describe("With `bpm`: where beat 0 is, seconds. On the timeline clock, or with `clip` in source seconds of that clip. Default 0."),
+    meter: z.int().min(1).max(MAX_TEMPO_METER).optional().describe("With `bpm`: beats per bar. Default 4."),
+    clear: z.boolean().optional().describe("True removes the timeline's tempo. Takes no other field."),
   }),
 } as const;
 
@@ -653,7 +706,7 @@ export const TIME_REF_FIELDS = {
 /** Args of operation `K` once its time references are seconds, as the engine takes them. */
 export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typeof TIME_REF_FIELDS
   ? {
-      [P in keyof z.output<(typeof operationArgs)[K]>]: P extends (typeof TIME_REF_FIELDS)[K][number]
+      [P in keyof z.output<(typeof operationArgs)[K]> as P extends "snapTo" ? never : P]: P extends (typeof TIME_REF_FIELDS)[K][number]
         ? Exclude<z.output<(typeof operationArgs)[K]>[P], string>
         : z.output<(typeof operationArgs)[K]>[P];
     }
@@ -665,9 +718,10 @@ export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typ
  * Applied in order: `groups` (replace, insert or delete whole multicam
  * groups), `tracks` (replace, insert or delete whole tracks), then `clips`
  * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
- * delete one marker) touch nothing else.
+ * delete one marker) and `tempo` (replace or delete the beat grid spec) touch nothing else.
  */
 const PatchShape = z.strictObject({
+  tempo: TempoSchema.nullable().optional().describe("The timeline's whole `tempo`; null removes it."),
   markers: z
     .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
     .optional(),
@@ -739,7 +793,7 @@ const InverseSchema: z.ZodType<
  * One applied operation (SPEC §6.1). `inverse` applied to the timeline right
  * after this operation restores it as it was before.
  */
-export const OperationRecordSchema = z.object({
+export const OperationRecordObject = z.object({
   op: z.string().describe("Operation name, e.g. `clip.trim`."),
   args: z.record(z.string(), z.unknown()).describe("Validated args, defaults filled in."),
   inverse: InverseSchema.describe("Undoes this operation when applied right after it."),
@@ -749,8 +803,22 @@ export const OperationRecordSchema = z.object({
   revisionBefore: z.int().describe("Timeline revision the operation was applied to."),
 });
 
-/** See {@link OperationRecordSchema}. */
-export type OperationRecord = z.output<typeof OperationRecordSchema>;
+/** {@link OperationRecordObject} typed as {@link OperationRecord}: what results embed, so their inferred types stay short. */
+export const OperationRecordSchema: z.ZodType<OperationRecord> = OperationRecordObject;
+
+/**
+ * See {@link OperationRecordSchema}. Written out, not inferred: the record holds the whole patch schema and every
+ * mutating method's result repeats it, which would push the `methods` registry past the compiler's type-size limit.
+ */
+export interface OperationRecord {
+  op: string;
+  args: Record<string, unknown>;
+  inverse: { op: "timeline.patch"; args: TimelinePatch };
+  id: z.output<typeof OpIdSchema>;
+  author: z.output<typeof AuthorSchema>;
+  tx: z.output<typeof TxIdSchema>;
+  revisionBefore: number;
+}
 
 /** One edge moved by energy snapping (ADR 0003). */
 export const SnapReportSchema = z.object({
@@ -1110,6 +1178,33 @@ export const TrackSummarySchema: z.ZodType<TrackSummary> = z.object({
   end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
 
+/** See {@link TempoGridSchema}. Written out so the large `methods` registry stays under the compiler's type-size limit. */
+export interface TempoGrid {
+  source: "beats" | "nominal";
+  bpm: number;
+  meter: number;
+  clip?: string | undefined;
+  asset?: string | undefined;
+  confidence?: number | undefined;
+  low: boolean;
+  beats: number[];
+  bars: number[];
+}
+
+/** A beat grid on the timeline clock, as `tempo.show` and `timeline.show` (`grid: true`) report it (ADR 0029). */
+export const TempoGridSchema: z.ZodType<TempoGrid> = z.object({
+  source: z.enum(["beats", "nominal"]).describe("`beats`: measured, from the music's beats file. `nominal`: from a BPM alone."),
+  bpm: z.number().describe("Beats per minute on the timeline clock (a sped-up music clip is faster)."),
+  meter: z.int().describe("Beats per bar."),
+  clip: z.string().optional().describe("The music clip the grid rides on; absent for a nominal grid on the timeline clock."),
+  asset: z.string().optional().describe("Project-relative asset whose `beats/…beats.json` gave the grid."),
+  confidence: z.number().optional().describe("0..1, measured grids only."),
+  low: z.boolean().describe("True when the measured grid is LOW confidence and no `edits` vouch for it: `snapTo` refuses it."),
+  beats: z.array(z.number()).describe("Timeline seconds of every beat, increasing, on the frame grid."),
+  bars: z.array(z.number()).describe("Timeline seconds of the beats that start a bar."),
+});
+
+
 /** Result of `timeline.show`. */
 export const TimelineViewSchema = z.object({
   timeline: z.string(),
@@ -1141,6 +1236,9 @@ export const TimelineViewSchema = z.object({
     .array(MarkerSchema)
     .optional()
     .describe("Markers as stored (ADR 0029): id, timeline second `at`, label, colour; sorted by `at`; absent when the timeline has none."),
+  tempo: TempoSchema.optional().describe("The beat grid the timeline follows as stored (ADR 0029); absent when none. `grid` (on request) holds its beats."),
+  grid: TempoGridSchema.optional().describe("Only with `grid: true`: the beat grid on the timeline clock; absent when there is no tempo or its beats are missing (`gridProblem`)."),
+  gridProblem: z.string().optional().describe("Only with `grid: true`: why a `tempo` has no beats yet (no beats file for the music, a broken one)."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),
 });
 

@@ -1528,6 +1528,7 @@ export class TimelineService {
       tracks,
       ...(timeline.groups ? { groups: timeline.groups } : {}),
       ...(timeline.markers ? { markers: sortedMarkers(timeline) } : {}),
+      ...(timeline.tempo ? { tempo: timeline.tempo } : {}),
       problems,
     };
   }

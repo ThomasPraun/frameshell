@@ -21,6 +21,7 @@ import {
   type AppDirs,
   PROPOSAL_WAIT_DEFAULT_S,
   INBOX_WAIT_DEFAULT_S,
+  type SnapToKind,
   type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
@@ -134,6 +135,8 @@ import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeli
 import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
+import { snapRequest, tempoGrid } from "./timeline/tempo.js";
+import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { ModelRegistry, notRegistered } from "./transcripts/model-registry.js";
@@ -337,6 +340,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
+  // ADR 0029 slice 3: a beats file written, hand-edited or removed changes the grid of every timeline following that asset.
+  const beatsWatcher = new BeatsWatcher({
+    onChange: ({ root: dir, file, change, message }) => publishFor("beats.changed", dir, { project: dir, file, change, ...(message !== undefined ? { message } : {}) }),
+  });
   /** Skill files updated on their own when a project opened, by canonical root, until `status` reports them. */
   const skillUpdates = new Map<string, string[]>();
   const projects = new ProjectRegistry({
@@ -350,6 +357,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       );
       media.attach(dir);
       timelineWatcher.attach(dir);
+      beatsWatcher.attach(dir);
       const key = canonicalPathSync(dir);
       if (!openedRoots.has(key)) openedRoots.set(key, dir);
       clips.attach(openedRoots.get(key)!);
@@ -710,6 +718,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
     });
   };
+  /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
+  const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
+  /**
+   * The beat grid of timeline `id` on its clock (`tempo.show`, `timeline.show` with `grid`). A beats file that is
+   * broken is a `problem`, not a failure: the person is editing it, and the grid comes back when it validates.
+   */
+  const gridOf = async (dir: string, id: string, view: TimelineViewName, duration: number | null) => {
+    const viewed = await timelines.viewTimeline(dir, id, view);
+    try {
+      // A nominal grid runs a little past the last clip, so a clip dragged past the end still has beats to land on.
+      return await tempoGrid({ fps: viewed.fps, timeline: viewed.timeline, horizon: (duration ?? 0) + 30, beatsOf: (asset) => beatsOf(dir, asset) });
+    } catch (error) {
+      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return { grid: null, problem: error.message };
+      throw error;
+    }
+  };
   /** Run one timeline operation for `caller` in its transaction; params minus `cwd`/`timeline` are the op's args. */
   const operate = async (
     op: OperationRequest["op"],
@@ -718,10 +742,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     onApplied?: (after: Timeline) => void,
     prepare?: (current: Timeline, request: OperationRequest) => Promise<OperationRequest>,
   ) => {
-    const { cwd, timeline, ...args } = params;
+    const { cwd, timeline, snapTo, ...args } = params;
     const request = { op, args } as OperationRequest;
     const dir = await root(cwd);
     const key = authorOf(caller);
+    // `snapTo` (ADR 0029 decision 6) moves the time arguments onto the timeline's beat grid in the operation's turn, after any `prepare`.
+    const prepareWith =
+      prepare || snapTo
+        ? async (current: Timeline): Promise<OperationRequest> => {
+            const prepared = prepare ? await prepare(current, request) : request;
+            if (!snapTo) return prepared;
+            const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
+            return snapRequest(prepared, { timeline: current, fps, snapTo: snapTo as SnapToKind, beatsOf: (asset) => beatsOf(dir, asset) });
+          }
+        : undefined;
     const tx = transactions.next(key);
     await transactions.touching(key, tx, { root: dir, timeline });
     const result = await timelines.apply({
@@ -732,7 +766,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       author: journalAuthorOf(caller),
       tx,
       ...(onApplied ? { onApplied } : {}),
-      ...(prepare ? { prepare: (current: Timeline) => prepare(current, request) } : {}),
+      ...(prepareWith ? { prepare: prepareWith } : {}),
     });
     await transactions.applied(key, tx);
     await settle(key, tx);
@@ -1563,10 +1597,28 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       return run;
     },
-    "timeline.show": async ({ cwd, timeline, view }, caller) => {
+    "timeline.show": async ({ cwd, timeline, view, grid }, caller) => {
       const dir = await root(cwd);
-      return timelines.show(dir, timeline, await viewOf(dir, caller, view));
+      const shown = await timelines.show(dir, timeline, await viewOf(dir, caller, view));
+      if (!grid) return shown;
+      const found = await gridOf(dir, timeline, shown.view, shown.duration);
+      return { ...shown, ...(found.grid ? { grid: found.grid } : {}), ...(found.problem ? { gridProblem: found.problem } : {}) };
     },
+    "tempo.show": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.show(dir, timeline, await viewOf(dir, caller, view));
+      const found = await gridOf(dir, timeline, shown.view, shown.duration);
+      return {
+        view: shown.view,
+        proposal: shown.proposal,
+        timeline,
+        revision: shown.revision,
+        tempo: shown.tempo ?? null,
+        grid: found.grid,
+        problem: found.problem,
+      };
+    },
+    "tempo.set": (params, caller) => operate("tempo.set", params, caller),
     "track.list": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
       return timelines.tracks(dir, timeline, await viewOf(dir, caller, view));
@@ -2675,6 +2727,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await media.close();
       await segmentation.close();
       await timelineWatcher.close();
+      await beatsWatcher.close();
       await clips.close();
       await clipJobs.close();
       await jobs.close();

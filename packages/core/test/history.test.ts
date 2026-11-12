@@ -149,6 +149,21 @@ describe("revert", () => {
     expect(tracks()).toEqual(afterAdd);
   });
 
+  it("refuses to revert the clip a later tempo.set follows, naming the tempo, and reverts once the tempo is undone", async () => {
+    const { add, apply, revert, tracks } = setup();
+    const before = tracks();
+    await add("cli:agent", "tx_000000a1", 0);
+    const tempo = await apply("cli:agent", "tx_000000a2", { op: "tempo.set", args: { clip: "c_1", bpm: 120 } });
+
+    const conflict = await rejection(revert("cli:agent", "tx_000000a3", "tx_000000a1"));
+    expect(conflict.code).toBe(ErrorCode.RevertConflict);
+    expect(conflict.data).toMatchObject({ conflicts: [{ id: tempo.operation.id, op: "tempo.set", ids: ["tempo"] }] });
+
+    await revert("cli:agent", "tx_000000a4", "tx_000000a2");
+    await revert("cli:agent", "tx_000000a5", "tx_000000a1");
+    expect(tracks()).toEqual(before);
+  });
+
   it("refuses when a later operation changed the same clips, naming it, and reverts once that one is undone", async () => {
     const { add, apply, revert, tracks } = setup();
     const agentTx = "tx_000000a1";
