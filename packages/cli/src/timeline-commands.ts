@@ -175,6 +175,17 @@ mutations print the new revision):
                                <marker> is the id (m_…) or the label
   marker remove <marker>
   marker list                  Markers by time: id, time, label, colour
+  tempo set (--clip <clip> | --bpm n [--offset s] [--meter n] | --clip <clip> --bpm n [--offset s] [--meter n])
+                               The timeline's beat grid (the app draws it, bars stronger than beats; drags and
+                               --snap-to land on it). --clip: follow the measured grid of that music clip
+                               (run beats measure on its asset first; moving or trimming the clip moves the grid).
+                               --bpm: a nominal grid for blocking a film before music exists, beat i at
+                               --offset + 60 i / bpm seconds (default 0), --meter beats per bar (default 4); with
+                               --clip it rides on that clip and --offset is in the clip's source seconds. Replaces
+                               the whole tempo; removing the clip clears it
+  tempo clear                  Remove the timeline's tempo
+  tempo show                   The stored tempo and its grid on the timeline clock: bpm, bars and beats in seconds;
+                               says why there is no grid yet (no beats file for the clip)
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
@@ -188,6 +199,10 @@ mutations print the new revision):
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
+  --snap-to beat|bar (clip add, clip move, clip trim, clip split, clip key, transition, marker add and set, cut) moves
+  each time of the command to the nearest beat, or bar start, of the timeline's tempo grid first; a cut or clip trim
+  then lands exactly (no pause snapping). Refused without a tempo, and on a LOW confidence grid (check beats show,
+  correct edits in the beats file or measure again with --bpm).
   --ripple (clip add, clip trim) moves later clips on every video, audio and program track by the length added or
   removed, the inverse of cut: restore removed material without overlapping the next clip.
   --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
@@ -201,7 +216,7 @@ mutations print the new revision):
   --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
   --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
   runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
-  beat: and bar: names are reserved for the beat grid and refused until it exists.
+  beat: and bar: names are reserved and refused until a later slice; use --snap-to beat|bar meanwhile.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -216,7 +231,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "marker", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "marker", "tempo", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -272,6 +287,10 @@ export const TIMELINE_OPTIONS = {
   to: { type: "string" },
   since: { type: "string" },
   "no-snap": { type: "boolean" },
+  "snap-to": { type: "string" },
+  clip: { type: "string" },
+  bpm: { type: "string" },
+  meter: { type: "string" },
   snap: { type: "boolean" },
   ripple: { type: "boolean" },
   "ripple-track": { type: "string", multiple: true },
@@ -353,12 +372,12 @@ const ALLOWED: Record<string, string[]> = {
   "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
-  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
-  "clip move": ["start", "track"],
-  "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window"],
-  "clip split": ["at"],
+  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
+  "clip move": ["start", "track", "snap-to"],
+  "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window", "snap-to"],
+  "clip split": ["at", "snap-to"],
   "clip remove": [],
-  "clip key": ["prop", "at", "value", "ease", "remove", "clear"],
+  "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to"],
   "clip reframe": ["format", "person", "anchor"],
   "clip set": [
     "speed",
@@ -378,12 +397,15 @@ const ALLOWED: Record<string, string[]> = {
     "script-ref",
     "clear-script-ref",
   ],
-  "transition set": ["at", "kind", "direction", "duration", "track"],
-  "transition remove": ["at", "track"],
-  "marker add": ["at", "label", "color"],
-  "marker set": ["at", "label", "color", "clear-color"],
+  "transition set": ["at", "kind", "direction", "duration", "track", "snap-to"],
+  "transition remove": ["at", "track", "snap-to"],
+  "marker add": ["at", "label", "color", "snap-to"],
+  "marker set": ["at", "label", "color", "clear-color", "snap-to"],
   "marker remove": [],
   "marker list": [],
+  "tempo set": ["clip", "bpm", "offset", "meter"],
+  "tempo clear": [],
+  "tempo show": [],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -397,7 +419,7 @@ const ALLOWED: Record<string, string[]> = {
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
   "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
-  cut: ["from", "to", "no-snap", "snap-window"],
+  cut: ["from", "to", "no-snap", "snap-window", "snap-to"],
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
@@ -426,6 +448,9 @@ const ARITY: Record<string, [number, number]> = {
   "marker set": [1, 1],
   "marker remove": [1, 1],
   "marker list": [0, 0],
+  "tempo set": [0, 0],
+  "tempo clear": [0, 0],
+  "tempo show": [0, 0],
   "clip reframe": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
@@ -558,6 +583,12 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       return { from: Number(match[1]), to: Number(match[2]) };
     });
   };
+  /** `--snap-to beat|bar` as the `snapTo` param. */
+  const snapTo = (): { snapTo: string | undefined } => {
+    const kind = str("snap-to");
+    if (kind !== undefined && kind !== "beat" && kind !== "bar") throw new UsageError(`--snap-to: expected beat or bar, got "${kind}".`);
+    return { snapTo: kind };
+  };
   const snap = () => {
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
     return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
@@ -637,21 +668,22 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         ...ripple(),
         snap: values["snap"] === true ? true : undefined,
         snapWindow: num("snap-window"),
+        ...snapTo(),
       });
       break;
     case "clip move":
       method = "clip.move";
       if ((tracks?.length ?? 0) > 1) throw new UsageError("--track: clip move takes one track.");
-      Object.assign(params, { clip: args[0], start: when("start"), track: tracks?.[0] });
+      Object.assign(params, { clip: args[0], start: when("start"), track: tracks?.[0], ...snapTo() });
       break;
     case "clip trim":
       method = "clip.trim";
-      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: when("start"), end: when("end"), ...snap(), ...ripple() });
+      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: when("start"), end: when("end"), ...snap(), ...ripple(), ...snapTo() });
       break;
     case "clip split":
       method = "clip.split";
       if (values["at"] === undefined) throw new UsageError("`frameshell clip split <clip>` needs --at <seconds|marker>.");
-      Object.assign(params, { clip: args[0], at: when("at") });
+      Object.assign(params, { clip: args[0], at: when("at"), ...snapTo() });
       break;
     case "clip remove":
       method = "clip.remove";
@@ -676,6 +708,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         ease: str("ease"),
         remove: values["remove"] === true ? true : undefined,
         clear: values["clear"] === true ? true : undefined,
+        ...snapTo(),
       });
       break;
     }
@@ -683,19 +716,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "transition remove": {
       method = command === "transition set" ? "transition.set" : "transition.remove";
       if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
-      Object.assign(params, { at: when("at"), tracks });
+      Object.assign(params, { at: when("at"), tracks, ...snapTo() });
       if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
       break;
     }
     case "marker add":
       method = "marker.add";
       if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds|marker> and --label <label>.");
-      Object.assign(params, { at: when("at"), label: str("label"), color: str("color") });
+      Object.assign(params, { at: when("at"), label: str("label"), color: str("color"), ...snapTo() });
       break;
     case "marker set":
       method = "marker.set";
       if (str("color") !== undefined && values["clear-color"] === true) throw new UsageError("Pass --color or --clear-color, not both.");
-      Object.assign(params, { marker: args[0], at: when("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color") });
+      Object.assign(params, { marker: args[0], at: when("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color"), ...snapTo() });
       break;
     case "marker remove":
       method = "marker.remove";
@@ -703,6 +736,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "marker list":
       method = "marker.list";
+      break;
+    case "tempo set":
+      method = "tempo.set";
+      if (str("clip") === undefined && str("bpm") === undefined) throw new UsageError("`frameshell tempo set` needs --clip <music clip> or --bpm <n>.");
+      if (str("bpm") === undefined && (str("offset") !== undefined || str("meter") !== undefined)) throw new UsageError("--offset and --meter belong to a nominal grid: pass --bpm too.");
+      Object.assign(params, { clip: str("clip"), bpm: num("bpm"), offset: num("offset"), meter: num("meter") });
+      break;
+    case "tempo clear":
+      method = "tempo.set";
+      params["clear"] = true;
+      break;
+    case "tempo show":
+      method = "tempo.show";
       break;
     case "clip set": {
       method = "clip.set";
@@ -925,7 +971,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     default:
       method = "cut";
       if (values["from"] === undefined || values["to"] === undefined) throw new UsageError("`frameshell cut` needs --from <s> and --to <s>.");
-      Object.assign(params, { from: when("from"), to: when("to"), tracks: args.length > 0 ? args : undefined, ...snap() });
+      Object.assign(params, { from: when("from"), to: when("to"), tracks: args.length > 0 ? args : undefined, ...snap(), ...snapTo() });
   }
   const clean = (value: Record<string, unknown> | undefined) =>
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
@@ -957,6 +1003,7 @@ export async function executeTimeline(
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
+  if (inv.method === "tempo.show") return formatTempo(result as MethodResult<"tempo.show">);
   if (inv.method === "history") return formatHistory(result as HistoryResult);
   if (inv.method === "tx.begin") {
     const { tx, label } = result as MethodResult<"tx.begin">;
@@ -1167,6 +1214,24 @@ function formatTracks(result: { timeline: string; revision: number; tracks: Trac
   return `${[...lines, ...formatProblems(result.problems)].join("\n")}\n`;
 }
 
+function formatTempo(result: MethodResult<"tempo.show">): string {
+  const head = `Timeline ${result.timeline} · revision ${result.revision}`;
+  if (!result.tempo) return `${head} has no tempo. Set one: \`frameshell tempo set --clip <music clip>\` (measured) or \`frameshell tempo set --bpm 120\` (nominal).\n`;
+  const stored = Object.entries(result.tempo).map(([key, value]) => `${key} ${value}`).join(", ");
+  const lines = [`${head} · tempo: ${stored}`];
+  const { grid } = result;
+  if (!grid) {
+    lines.push(`  no grid: ${result.problem ?? "nothing to show"}`);
+    return `${lines.join("\n")}\n`;
+  }
+  const facts = [`${grid.bpm} BPM`, `bars of ${grid.meter}`, `${grid.beats.length} beats`, grid.source === "beats" ? `measured from ${grid.asset} (confidence ${grid.confidence?.toFixed(2)}${grid.low ? " LOW" : ""})` : "nominal"];
+  lines.push(`  ${facts.join(", ")}`);
+  const list = (times: number[]) => (times.length > 12 ? `${times.slice(0, 12).join(" ")} … (${times.length} in all)` : times.join(" "));
+  lines.push(`  bar starts: ${list(grid.bars)}`, `  beats: ${list(grid.beats)}`);
+  if (grid.low) lines.push("  LOW confidence: --snap-to is refused until the grid is corrected (edits.tempo, edits.downbeat in the beats file) or measured again with --bpm.");
+  return `${lines.join("\n")}\n`;
+}
+
 function formatMarkers(result: MarkerListResult): string {
   if (result.markers.length === 0) {
     return `Timeline ${result.timeline} (revision ${result.revision}) has no markers. Add one: \`frameshell marker add --at 12.5 --label hook\`.\n`;
@@ -1213,5 +1278,6 @@ function formatTimeline(view: TimelineView): string {
     }
   }
   if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
+  if (view.tempo) lines.push(`Tempo: ${Object.entries(view.tempo).map(([key, value]) => `${key} ${value}`).join(", ")} (grid: \`frameshell tempo show\`)`);
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }

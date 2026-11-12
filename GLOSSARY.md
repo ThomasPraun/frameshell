@@ -194,6 +194,10 @@ _Avoid_: cue (a shoot script's `[LABEL: …]`), keyframe, chapter
 The beats of one music asset, measured by `beats.measure` into `beats/<name>.beats.json` (tempo, beat times in source seconds, which beat starts a bar, a confidence), with the person's corrections (`edits`: half or double time, bar start, offset) applied on top. LOW confidence means it may be double time or a bar off. A generated track writes its own exact grid.
 _Avoid_: click track, tempo map, markers (a marker is a named point, not a beat)
 
+**Tempo**:
+The beat grid a timeline follows (`tempo` in the timeline file, ADR 0029): a music clip whose beats file gives the grid, carried through the clip's place so it moves with the music, or a nominal BPM for blocking a film before music exists. The app draws it (bars stronger than beats), dragged clips snap to it, and `--snap-to beat|bar` moves a command's times onto it.
+_Avoid_: grid (the beats on the timeline clock are the grid; the tempo is what names its source), BPM setting
+
 **Downbeat**:
 The first beat of a bar. The detector takes it from the phase with most low-band energy; `edits.downbeat` overrides it.
 _Avoid_: bar line, one

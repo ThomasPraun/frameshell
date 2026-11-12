@@ -20,6 +20,7 @@ import {
   type ElementAdjust,
   type ClipKey,
   type Marker,
+  type Tempo,
   type ClipKeys,
   type ClipTrack,
   type MediaClip,
@@ -271,6 +272,8 @@ class Edit {
         return this.markerSet(request.args);
       case "marker.remove":
         return this.markerRemove(request.args);
+      case "tempo.set":
+        return this.tempoSet(request.args);
       case "captions.set":
         return this.captionsSet(request.args);
       case "timeline.patch":
@@ -850,6 +853,9 @@ class Edit {
     this.dropCutEdgeFields(right, "head");
     if (!this.isEmpty(clip) && !this.isEmpty(right)) {
       clipsOf(track).push(right);
+      if (this.draft.tempo?.clip === clip.id) {
+        this.warnings.push(`the timeline's tempo follows ${clip.id}, the left part: its grid stops at the split. Point \`tempo.set\` at ${right.id} to follow the right part.`);
+      }
       return;
     }
     throw this.invalid(`splitting ${clip.id} at ${at} leaves an empty part at this speed.`, { field: "at", hint: "Split a frame later or earlier." });
@@ -2023,6 +2029,59 @@ class Edit {
     else delete this.draft.groups;
     if (next.markers) this.draft.markers = next.markers;
     else delete this.draft.markers;
+    if (next.tempo) this.draft.tempo = next.tempo;
+    else delete this.draft.tempo;
+  }
+
+  // Tempo (ADR 0029)
+
+  tempoSet(args: OperationArgs<"tempo.set">): void {
+    const { clip, bpm, offset, meter, clear } = args;
+    if (clear === true) {
+      if (clip !== undefined || bpm !== undefined || offset !== undefined || meter !== undefined) {
+        throw this.invalid("`clear` removes the tempo: pass it without `clip`, `bpm`, `offset` or `meter`.", { field: "clear" });
+      }
+      if (!this.draft.tempo) this.warnings.push("the timeline has no tempo: nothing to clear.");
+      delete this.draft.tempo;
+      return;
+    }
+    if (clip === undefined && bpm === undefined) {
+      throw this.invalid("nothing to set.", { hint: "Pass `clip` (a music clip with a measured grid) or `bpm` (a nominal grid), or `clear: true`." });
+    }
+    if (bpm === undefined && (offset !== undefined || meter !== undefined)) {
+      throw this.invalid("`offset` and `meter` belong to a nominal grid: pass `bpm` too.", { field: offset !== undefined ? "offset" : "meter" });
+    }
+    if (clip !== undefined) {
+      const { track, clip: found } = this.clip(clip);
+      if (found.type !== "media" || (track.kind !== "video" && track.kind !== "audio")) {
+        throw this.invalid(`${clip} is not a media clip of a video or audio track: the grid comes from the beats of a music file.`, {
+          field: "clip",
+          hint: "Pick the clip that plays the music.",
+        });
+      }
+    }
+    // A nominal offset on the timeline clock sits on the frame grid; on a clip it is source time, snapped when mapped.
+    const tempo: Tempo = {
+      ...(clip !== undefined ? { clip } : {}),
+      ...(bpm !== undefined ? { bpm } : {}),
+      ...(offset !== undefined && offset !== 0 ? { offset: clip === undefined ? this.grid.snap(offset) : Math.round(offset * 1000) / 1000 } : {}),
+      ...(meter !== undefined && meter !== 4 ? { meter } : {}),
+    };
+    this.draft.tempo = tempo;
+  }
+
+  /**
+   * A `tempo` that follows a clip this operation removed (`clip.remove`, `track.remove`, a `cut` over it) is cleared
+   * with a warning, so removing the music never leaves a dangling reference. A `timeline.patch` is left alone: the
+   * schema refuses a patch that dangles it.
+   */
+  clearOrphanTempo(): void {
+    const follows = this.draft.tempo?.clip;
+    if (follows === undefined || this.op === "timeline.patch") return;
+    const present = this.draft.tracks.some((track) => track.kind !== "subtitles" && track.clips.some((candidate) => candidate.id === follows));
+    if (present) return;
+    delete this.draft.tempo;
+    this.warnings.push(`the timeline's tempo followed clip ${follows}, which is gone: tempo cleared. \`revert\` brings it back.`);
   }
 
   // Markers (ADR 0029)
@@ -2147,6 +2206,7 @@ class Edit {
   /** Check rules on what changed, then build the result. */
   async finish(): Promise<AppliedOperation> {
     this.clearStaleBehind();
+    this.clearOrphanTempo();
     for (const track of this.draft.tracks) if (track.kind !== "subtitles") sortClips(track);
     if (this.draft.markers) sortMarkers(this.draft.markers);
     if (this.draft.markers?.length === 0) delete this.draft.markers;

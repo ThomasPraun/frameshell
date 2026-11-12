@@ -519,6 +519,11 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.peopleChanged, change satisfies PeopleChange),
       onResync: () => send(contents, Channel.peopleChanged, null),
     }),
+    // ADR 0029: a beats file written or hand-edited changes the grid the timeline shows: every timeline reads again.
+    daemon.subscribe("beats.changed", project.dir, {
+      onEvent: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
+      onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
+    }),
     // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
     daemon.subscribe("target.changed", project.dir, {
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
@@ -1501,7 +1506,8 @@ function registerIpc(): void {
   ipcMain.handle(Channel.timelineShow, (event, timeline: string, view?: TimelineViewName) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
-      return daemon.request("timeline.show", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
+      // `grid`: the beat grid of the timeline's tempo (ADR 0029), which the panel draws and drags snap to.
+      return daemon.request("timeline.show", { cwd: project.dir, timeline, grid: true, ...(view ? { view } : {}) });
     }),
   );
   ipcMain.handle(Channel.reviewStatus, (event) => outcome(async () => readReview((await requireProject(stateOf(event.sender))).project.dir)));

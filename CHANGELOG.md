@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
+  `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 92): a timeline names the grid it follows in
+  its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
+  through the clip's start, `in` and speed, so moving, trimming or speeding up the music moves the grid; `tempo set
+  --bpm 120 [--offset s] [--meter n]` is a nominal grid for blocking a film before music exists (each frame rounded once
+  from the beat's index), also on a clip (`--clip c --bpm 120`, offset in the clip's source seconds). `tempo show` lists
+  the grid on the timeline clock (bars and beats in seconds; why there is none when the music has no beats file), `tempo
+  clear` removes it. The schema checks that `tempo.clip` is a media clip of a video or audio track; removing that clip
+  clears the tempo with a warning and a revert brings both back; splitting it keeps the tempo on the left part. The app
+  draws the grid, bars stronger than beats, both on the lanes and as ruler ticks (the level too dense to read at the
+  current zoom is left out), and dragged clip edges snap to beats and bars (a clip edge, marker or the playhead in reach
+  wins; a trimmed edge on a beat goes exactly there; a LOW confidence grid is drawn but never snapped to). `--snap-to
+  beat|bar` (daemon and MCP `snapTo`) on `clip add|move|trim|split|key`, `transition set|remove`, `marker add|set` and
+  `cut` moves each time of the command to the nearest beat or bar start first and records the seconds; it is refused
+  with no tempo, without a beats file, on a LOW confidence grid or for a time far outside the music. The daemon watches
+  `beats/` (it may not exist yet): a beats file written, hand-edited, deleted or broken sends `beats.changed`, so a hand
+  edit of `edits` (half or double time, a moved downbeat) changes the grid in the open app at once, and a broken file
+  takes the grid away until it validates again. Older Frameshell versions reject a timeline that carries `tempo`.
+
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to

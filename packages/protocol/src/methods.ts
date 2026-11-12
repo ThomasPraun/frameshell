@@ -30,7 +30,7 @@ import {
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { ReviewPeakSchema, ReviewSheetKindSchema, ReviewSheetSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -46,6 +46,7 @@ import {
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineRejectionSchema,
+  TempoGridSchema,
   TimelineViewSchema,
   TrackDuckResultSchema,
   TrackSummarySchema,
@@ -66,7 +67,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 91;
+export const PROTOCOL_VERSION = 92;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -483,7 +484,7 @@ const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed", "beats.changed"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
@@ -493,6 +494,8 @@ const EventNameSchema = z
       "`shoot.changed`: a take of a shoot script was added, discarded, chosen or compared, or deviations were accepted (`shoots/*.json`). " +
       "`target.changed`: an agent target of the project registered or left, a reference was queued for it, or it read " +
       "its references (ADR 0025). " +
+      "`beats.changed`: a beats file (`beats/*.beats.json`, ADR 0029) was written, edited by hand, deleted or became invalid, so " +
+      "a timeline's beat grid may have changed. " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
@@ -2253,7 +2256,15 @@ export const methods = {
       "Read this before editing and use the returned ids. A clip whose nested timeline file is missing or invalid has " +
       "`end: null` and is listed in `problems` with the fix. In review mode, `view` picks the file or the open " +
       "proposal's version (default: yours when the proposal is yours). Fails with TimelineNotFound or InvalidProjectFile.",
-    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      view: ViewParam,
+      grid: z
+        .boolean()
+        .optional()
+        .describe("True adds `grid`: the beat grid of the timeline's `tempo` with every beat and bar start in timeline seconds (can be long). Default false; `tempo.show` reads it alone."),
+    }),
     result: TimelineViewSchema.extend(ViewedShape),
   },
   "track.list": {
@@ -2961,6 +2972,37 @@ export const methods = {
       "Delete a marker (ADR 0029): `{ marker: \"hook\" }`, by id or label (ignoring case). Fails with InvalidOperation when there is no " +
       "such marker (the message lists them).",
     params: operationArgs["marker.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "tempo.show": {
+    description:
+      "The beat grid of a timeline (ADR 0029): its stored `tempo` and, on the timeline clock, every beat and bar start in timeline " +
+      "seconds. The grid is the measured one in the beats file of the `tempo.clip` music clip (`beats.measure`), carried through the " +
+      "clip's start, `in` and speed so it follows the music when it moves, or a nominal grid from `bpm`. `grid` is null with " +
+      "`problem` when a clip has no beats file yet or the file is broken, and null with no `problem` when the timeline has no tempo. " +
+      "`low` means the measured grid may be double time or a bar off: `snapTo` refuses it until `edits` in the beats file correct it. " +
+      "In review mode, `view` picks the file or the open proposal's version. Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int(),
+      tempo: TempoSchema.nullable().describe("The stored `tempo`; null when the timeline has none."),
+      grid: TempoGridSchema.nullable().describe("The grid on the timeline clock; null when there is none (see `problem`)."),
+      problem: z.string().nullable().describe("Why a `tempo` has no grid yet; null otherwise."),
+      ...ViewedShape,
+    }),
+  },
+  "tempo.set": {
+    mutating: true,
+    description:
+      "Set or clear the timeline's beat grid (ADR 0029): `{ clip }` follows the measured grid in the beats file of that music clip's " +
+      "asset (run `beats.measure` first; moving or trimming the clip moves the grid), `{ bpm, offset?, meter? }` is a nominal grid " +
+      "on the timeline clock for blocking a film before music exists (beat `i` at `offset + 60 i / bpm`, each frame rounded once), " +
+      "`{ clip, bpm, offset? }` a nominal grid riding on a clip (`offset` in its source seconds), `{ clear: true }` removes it. " +
+      "Replaces the whole tempo. The app draws bars stronger than beats, drags snap to them, and any time argument takes `snapTo: " +
+      "\"beat\" | \"bar\"`. Removing the `clip` clears the tempo with a warning. Fails with InvalidOperation (not a media clip " +
+      "of a video or audio track, nothing to set).",
+    params: operationArgs["tempo.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   cleanup: {
@@ -3773,6 +3815,18 @@ export const notifications = {
       "A shoot file changed or a take was compared (ADR 0023). Sent to connections subscribed with `events.subscribe`. " +
       "Re-read with `shoot.status`.",
     params: ShootChangedSchema,
+  },
+  "beats.changed": {
+    description:
+      "A beats file of the project (`beats/*.beats.json`, ADR 0029) was written (by `beats.measure`, a generator, `file.write` or a hand " +
+      "edit), deleted, or became invalid. Sent to connections subscribed with `events.subscribe`, after the write settled. A timeline " +
+      "whose `tempo` follows that asset has a new grid: read it again with `tempo.show`.",
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      file: z.string().describe("Project-relative beats file, e.g. `beats/song.beats.json`."),
+      change: z.enum(["written", "removed", "invalid"]).describe("`written`: valid content now; `removed`: the file is gone; `invalid`: it does not parse or validate (`message`), so its grid is unavailable until fixed."),
+      message: z.string().optional().describe("`invalid`: what is wrong with the file."),
+    }),
   },
   "target.changed": {
     description:

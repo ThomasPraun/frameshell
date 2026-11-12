@@ -34,13 +34,23 @@ export function grabAt(layout: TimelineLayout, viewport: LaneViewport, x: number
   return { row, clip, part };
 }
 
-/** A time edges snap to: another clip's edge, the playhead or a marker (ADR 0029). */
-export type SnapPoint = { time: number; kind: "clip" | "playhead" } | { time: number; kind: "marker"; label: string };
+/**
+ * A time edges snap to: another clip's edge, the playhead, a marker, or a beat or bar start of the timeline's
+ * tempo grid (ADR 0029).
+ */
+export type SnapPoint = { time: number; kind: "clip" | "playhead" | "beat" | "bar" } | { time: number; kind: "marker"; label: string };
 
-/** Snap targets for a drag: every clip edge but those of `exclude`, the playhead and every marker. Sorted by time. */
+/**
+ * Snap targets for a drag: every clip edge but those of `exclude`, the playhead, every marker and, unless the grid is
+ * LOW confidence, every beat (a bar start is a `bar`). Sorted by time.
+ */
 export function snapPoints(layout: TimelineLayout, playhead: number, exclude: ReadonlySet<string>): SnapPoint[] {
   const points: SnapPoint[] = [{ time: playhead, kind: "playhead" }];
   for (const marker of layout.markers) points.push({ time: marker.at, kind: "marker", label: marker.label });
+  if (layout.grid && !layout.grid.low) {
+    const bars = new Set(layout.grid.bars);
+    for (const time of layout.grid.beats) points.push({ time, kind: bars.has(time) ? "bar" : "beat" });
+  }
   for (const row of layout.rows) {
     for (const clip of row.clips) {
       if (exclude.has(clip.id) || clip.problem) continue;
@@ -186,15 +196,22 @@ export function dragPreview(input: DragInput): DragPreview {
   return { clip, part, from: grab.row, row, start, end, edge, snapped, blocked, ripple, others };
 }
 
-/** Nearest snap point within reach of `time`, or null. */
+/** Beats and bars are everywhere on a zoomed-out timeline: a clip edge, marker or the playhead in reach wins over them. */
+const isGridPoint = (point: SnapPoint) => point.kind === "beat" || point.kind === "bar";
+
+/** Nearest snap point within reach of `time`, or null; a beat or bar only when nothing else is in reach. */
 function nearest(snap: DragInput["snap"], time: number): SnapPoint | null {
   if (!snap) return null;
   let best: SnapPoint | null = null;
+  let bestGrid: SnapPoint | null = null;
   for (const point of snap.points) {
     const distance = Math.abs(point.time - time);
-    if (distance <= snap.tolerance && (!best || distance < Math.abs(best.time - time))) best = point;
+    if (distance > snap.tolerance) continue;
+    if (isGridPoint(point)) {
+      if (!bestGrid || distance < Math.abs(bestGrid.time - time)) bestGrid = point;
+    } else if (!best || distance < Math.abs(best.time - time)) best = point;
   }
-  return best;
+  return best ?? bestGrid;
 }
 
 /** Lane under content `y`, or null over the ruler and below the last lane. */
@@ -209,8 +226,8 @@ function rowAt(layout: TimelineLayout, y: number): TrackRow | null {
  * so the panel says why instead of sending it. A group move is a `clip.move`
  * per clip, the leading one first so clips of one track never collide midway. Trims keep the daemon's energy
  * snapping (ADR 0003, as in the CLI), except an edge put on another clip's
- * edge or a marker: a pause-snapped edge there would leave a gap or an overlap,
- * or miss the marker, so it goes exactly. A ripple trim adds `ripple`.
+ * edge, a marker, a beat or a bar: a pause-snapped edge there would leave a gap or an overlap,
+ * or miss the marker or beat, so it goes exactly. A ripple trim adds `ripple`.
  */
 export function dragEdits(preview: DragPreview): TimelineEdit[] {
   const { clip, part } = preview;
@@ -230,7 +247,7 @@ export function dragEdits(preview: DragPreview): TimelineEdit[] {
       .sort((a, b) => (later ? b.clip.start - a.clip.start : a.clip.start - b.clip.start))
       .map((member) => ({ op: "clip.move", args: { clip: member.clip.id, start: seconds(member.start) } }));
   }
-  const exact = preview.snapped?.kind === "clip" || preview.snapped?.kind === "marker" ? { snap: false } : {};
+  const exact = preview.snapped && preview.snapped.kind !== "playhead" ? { snap: false } : {};
   const ripple = preview.ripple ? { ripple: true } : {};
   if (part === "head") {
     const start = seconds(preview.edge);

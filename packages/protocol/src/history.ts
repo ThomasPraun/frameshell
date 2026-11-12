@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProposalDecisionSchema } from "./proposals.js";
-import { AuthorSchema, OpIdSchema, OperationRecordSchema, TxIdSchema } from "./timeline.js";
+import { AuthorSchema, OpIdSchema, OperationRecordObject, TxIdSchema } from "./timeline.js";
 
 /**
  * History and transactions (SPEC §6.2): the journal line format of
@@ -12,7 +12,7 @@ import { AuthorSchema, OpIdSchema, OperationRecordSchema, TxIdSchema } from "./t
  * One journal line: the operation record plus where it sits in history.
  * The journal is append-only; a revert is a new line with op `revert`.
  */
-export const JournalEntrySchema = OperationRecordSchema.extend({
+export const JournalEntrySchema = OperationRecordObject.extend({
   txLabel: z.string().nullable().describe("Label given to `tx.begin`; null for automatic transactions."),
   at: z.string().describe("ISO 8601 time the operation was applied."),
   revision: z.int().describe("Timeline revision after the operation."),

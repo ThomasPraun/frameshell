@@ -588,3 +588,53 @@ describe("markers (ADR 0029)", () => {
     expect(frameshell(["clip", "split", "c_x", "--at", "", ...on]).code).toBe(2);
   });
 });
+
+describe("tempo and --snap-to (ADR 0029)", () => {
+  it("tempo set, show and clear; --snap-to lands each time on the nearest beat or bar; bad flags exit 2", () => {
+    writeFileSync(
+      join(project, "timelines", "scored.json"),
+      JSON.stringify({ schemaVersion: 1, id: "scored", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }] }),
+    );
+    const on = ["--timeline", "scored"];
+    const stored = () => JSON.parse(readFileSync(join(project, "timelines", "scored.json"), "utf8")) as { tempo?: unknown };
+    const markers = () => json<{ markers: { at: number; label: string }[] }>(["marker", "list", ...on]).markers.map((marker) => [marker.label, marker.at]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    expect(frameshell(["clip", "add", "v1", "assets/take.mp4", "--start", "0", ...on]).code).toBe(0);
+
+    expect(frameshell(["tempo", "show", ...on]).stdout).toMatch(/has no tempo. Set one: `frameshell tempo set --clip <music clip>`/);
+    expect(frameshell(["marker", "add", "--at", "1.3", "--label", "early", "--snap-to", "beat", ...on]).stderr).toMatch(/snapTo: the timeline has no tempo/);
+
+    const set = frameshell(["tempo", "set", "--bpm", "120", "--offset", "0.5", ...on]);
+    expect(set.code).toBe(0);
+    expect(set.stdout).toMatch(/^tempo\.set: /);
+    expect(stored().tempo).toEqual({ bpm: 120, offset: 0.5 });
+    const shown = frameshell(["tempo", "show", ...on]).stdout;
+    expect(shown).toMatch(/tempo: bpm 120, offset 0.5/);
+    expect(shown).toMatch(/120 BPM, bars of 4, \d+ beats, nominal/);
+    expect(shown).toMatch(/bar starts: 0.5 2.5 4.5/);
+    expect(shown).toMatch(/beats: 0.5 1 1.5 2/);
+    expect(frameshell(["timeline", "show", ...on]).stdout).toMatch(/Tempo: bpm 120, offset 0.5 \(grid: `frameshell tempo show`\)/);
+
+    expect(frameshell(["marker", "add", "--at", "1.3", "--label", "a", "--snap-to", "beat", ...on]).code).toBe(0);
+    expect(frameshell(["marker", "add", "--at", "1.3", "--label", "b", "--snap-to", "bar", ...on]).code).toBe(0);
+    expect(frameshell(["marker", "add", "--at", "a+0.2", "--label", "c", "--snap-to", "beat", ...on]).code).toBe(0);
+    expect(markers()).toEqual([
+      ["a", 1.5],
+      ["b", 0.5],
+      ["c", 1.5],
+    ]);
+    const cut = json<{ operation: { args: Record<string, unknown> } }>(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", ...on]);
+    expect(cut.operation.args).toMatchObject({ from: 1, to: 2, snap: false });
+
+    expect(frameshell(["tempo", "clear", ...on]).code).toBe(0);
+    expect(stored()).not.toHaveProperty("tempo");
+    expect(frameshell(["tempo", "show", ...on]).stdout).toMatch(/has no tempo/);
+
+    expect(frameshell(["marker", "add", "--at", "1", "--label", "x", "--snap-to", "nope", ...on]).code).toBe(2);
+    expect(frameshell(["track", "list", "--snap-to", "beat", ...on]).code).toBe(2);
+    expect(frameshell(["tempo", "set", ...on]).stderr).toMatch(/needs --clip <music clip> or --bpm <n>/);
+    expect(frameshell(["tempo", "set", "--offset", "1", ...on]).code).toBe(2);
+    expect(frameshell(["tempo", "set", "--bpm", "5", ...on]).code).not.toBe(0);
+    expect(frameshell(["tempo", "set", "--clip", "c_none", ...on]).stderr).toMatch(/c_none/);
+    expect(frameshell(["clip", "add", "v1", "assets/take.mp4", "--bpm", "100", ...on]).code).toBe(2);
+  });
+});

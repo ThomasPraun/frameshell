@@ -603,6 +603,47 @@ export function describeMarkers(markers: readonly Marker[] | undefined): string 
   return (markers ?? []).map((marker) => `${marker.id} "${marker.label}" at ${marker.at} s`).join(", ");
 }
 
+/** The beat grid a timeline follows (ADR 0029); see {@link TempoSchema}. Written out to keep the protocol registry's type small. */
+export interface Tempo {
+  clip?: string | undefined;
+  bpm?: number | undefined;
+  offset?: number | undefined;
+  meter?: number | undefined;
+}
+
+/** Slowest nominal tempo a timeline may name, BPM; the measured grid of a beats file is not bound by it. */
+export const MIN_TEMPO_BPM = 20;
+/** Fastest nominal tempo a timeline may name, BPM. */
+export const MAX_TEMPO_BPM = 400;
+
+/** Most beats per bar a nominal tempo may name (a beats file's `meter` takes the same). */
+export const MAX_TEMPO_METER = 16;
+
+/**
+ * The timeline's beat grid (ADR 0029 decision 4): where the beats the app draws and `--snap-to` lands on come from.
+ * - `{ clip }`: the measured grid in the beats file of the media clip's asset, carried to the timeline through that
+ *   clip's start, `in` and speed, so moving or trimming the music moves the grid.
+ * - `{ clip, bpm, offset?, meter? }`: a nominal grid riding on that clip (the music has no beats file yet): beat `i`
+ *   is source second `offset + 60 i / bpm`.
+ * - `{ bpm, offset?, meter? }`: a nominal grid on the timeline clock, to block a film before music exists: beat `i` is
+ *   timeline second `offset + 60 i / bpm`, each frame rounded once from the index (`nominalBeatFrame`).
+ */
+export const TempoSchema: z.ZodType<Tempo> = z
+  .strictObject({
+    clip: ClipIdSchema.optional().describe("Media clip whose asset's beat grid (`beats.measure`) the timeline follows, or a nominal grid rides on."),
+    bpm: z.number().min(MIN_TEMPO_BPM).max(MAX_TEMPO_BPM).optional().describe("Nominal tempo in beats per minute. Absent: the measured grid of `clip`."),
+    offset: Seconds.optional().describe("Nominal grid only: the first beat, in timeline seconds (with `clip`: in source seconds of the clip). Default 0."),
+    meter: z.int().min(1).max(MAX_TEMPO_METER).optional().describe("Nominal grid only: beats per bar. Default 4."),
+  })
+  .superRefine((tempo, ctx) => {
+    if (tempo.clip === undefined && tempo.bpm === undefined) ctx.addIssue({ code: "custom", message: "needs `clip` (a measured grid) or `bpm` (a nominal one)", path: [] });
+    if (tempo.bpm === undefined) {
+      for (const field of ["offset", "meter"] as const) {
+        if (tempo[field] !== undefined) ctx.addIssue({ code: "custom", message: `\`${field}\` belongs to a nominal grid: give \`bpm\` too`, path: [field] });
+      }
+    }
+  });
+
 /**
  * Zod model of a timeline file (SPEC §5.3). `revision` guards direct edits
  * (SPEC §6.4); duration is derived, never stored. Checks here need no project
@@ -620,6 +661,7 @@ export const TimelineSchema = z
       .array(MarkerSchema)
       .optional()
       .describe("Named points on the timeline clock (ADR 0029), sorted by `at`; labels unique ignoring case. Absent when none."),
+    tempo: TempoSchema.optional().describe("The beat grid the timeline follows (ADR 0029): a music clip's measured grid, or a nominal BPM. Absent: no grid."),
   })
   .superRefine((timeline, ctx) => {
     const seen = new Set<string>();
@@ -662,6 +704,16 @@ export const TimelineSchema = z
       if (other !== undefined) ctx.addIssue({ code: "custom", message: `label "${marker.label}" is already marker ${other}'s; labels are unique ignoring case`, path: ["markers", m, "label"] });
       else labels.set(key, marker.id);
     });
+    if (timeline.tempo?.clip !== undefined) {
+      const music = timeline.tracks.flatMap((track) => (track.kind === "video" || track.kind === "audio" ? track.clips : [])).find((clip) => clip.id === timeline.tempo!.clip);
+      if (!music || music.type !== "media") {
+        ctx.addIssue({
+          code: "custom",
+          message: `must name a media clip of a video or audio track, got "${timeline.tempo.clip}"`,
+          path: ["tempo", "clip"],
+        });
+      }
+    }
     const shown = new Set<string>();
     timeline.tracks.forEach((track, t) => {
       if (track.kind === "program") checkProgramTrack(timeline, track, t, shown, ctx);

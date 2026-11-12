@@ -57,7 +57,7 @@ const en = {
   zoomIn: "Zoom in",
   zoomInTitle: "Zoom in (+)",
   snapping: "Snapping",
-  snappingTitle: (mac: boolean) => `Snap to clip edges and the playhead (N; hold ${mac ? "Option" : "Alt"} to invert)`,
+  snappingTitle: (mac: boolean) => `Snap to clip edges, markers, beats and the playhead (N; hold ${mac ? "Option" : "Alt"} to invert)`,
   rippleTrim: "Ripple trim",
   rippleTrimTitle: "Ripple trim: edge drags move later clips along, leaving no gap (R; hold Shift when pressing an edge to invert)",
   addSubtitleTrack: "Add subtitle track",
@@ -81,6 +81,11 @@ const en = {
   snappedPlayhead: "Snapped to the playhead",
   snappedEdge: "Snapped to a clip edge",
   snappedMarker: (label: string) => `Snapped to marker ${label}`,
+  snappedBeat: "Snapped to a beat",
+  snappedBar: "Snapped to the start of a bar",
+  /** Screen-reader line of the beat grid; `low` grids are drawn but dragged clips do not snap to them. */
+  gridItem: (bpm: number, meter: number, low: boolean) =>
+    `Beat grid, ${bpm} BPM, ${meter} beats to the bar${low ? ", low confidence: clips do not snap to it" : ""}`,
   clipListLabel: "Timeline clips",
   selected: "selected",
   /** Label of the marker lane's head, under the zoom buttons. */
@@ -199,7 +204,7 @@ const es: typeof en = {
   zoomIn: "Acercar",
   zoomInTitle: "Acercar (+)",
   snapping: "Ajuste magnético",
-  snappingTitle: (mac) => `Ajustar a los bordes de los clips y al cursor de reproducción (N; mantén ${mac ? "Opción" : "Alt"} para invertir)`,
+  snappingTitle: (mac) => `Ajustar a los bordes de los clips, los marcadores, los tiempos del compás y al cursor de reproducción (N; mantén ${mac ? "Opción" : "Alt"} para invertir)`,
   rippleTrim: "Recortar y cerrar hueco",
   rippleTrimTitle:
     "Recortar y cerrar hueco: al arrastrar un borde, los clips siguientes lo acompañan sin dejar hueco (R; mantén Mayús al presionar un borde para invertir)",
@@ -224,6 +229,10 @@ const es: typeof en = {
   snappedPlayhead: "Ajustado al cursor de reproducción",
   snappedEdge: "Ajustado al borde de un clip",
   snappedMarker: (label) => `Ajustado al marcador ${label}`,
+  snappedBeat: "Ajustado a un tiempo del compás",
+  snappedBar: "Ajustado al inicio de un compás",
+  gridItem: (bpm, meter, low) =>
+    `Cuadrícula de tempo, ${bpm} BPM, ${meter} tiempos por compás${low ? ", confianza baja: los clips no se ajustan a ella" : ""}`,
   clipListLabel: "Clips de la línea de tiempo",
   selected: "seleccionado",
   markers: "Marcadores",
