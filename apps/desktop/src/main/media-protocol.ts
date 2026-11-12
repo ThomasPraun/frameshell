@@ -10,13 +10,14 @@ export const MEDIA_SCHEME = "frameshell-media";
 
 /**
  * What is served: daemon-derived proxies and sidecars (SPEC §5.1), baked
- * audio effects (ADR 0031), cached renders of generated clips (§6.5), and still images under `assets/` (no
+ * audio effects (ADR 0031), cached renders of generated clips (§6.5), subject mattes (ADR 0032), and still images under `assets/` (no
  * proxy is built for stills; the preview draws the file). `types` limits a folder to those extensions; null allows any.
  */
 const SERVED: readonly { dir: string; types: ReadonlySet<string> | null }[] = [
   { dir: ".frameshell/proxies/", types: null },
   { dir: ".frameshell/audio-fx/", types: new Set(["pcm"]) },
   { dir: ".frameshell/cache/clips/", types: new Set(["webm", "mp4"]) },
+  { dir: ".frameshell/cache/mattes/", types: new Set(["mp4"]) },
   { dir: "assets/", types: new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]) },
 ];
 

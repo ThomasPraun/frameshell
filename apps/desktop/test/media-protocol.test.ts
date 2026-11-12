@@ -51,6 +51,18 @@ describe("serveMedia", () => {
     expect((await serveMedia(get(`${base}.frameshell/cache/render/x.mp4`), roots)).status).toBe(403);
   });
 
+  it("serves subject mattes (ADR 0032) as MP4 ranges, not their records", async () => {
+    const { root, roots, base } = project();
+    const mattes = join(root, ".frameshell", "cache", "mattes");
+    mkdirSync(mattes, { recursive: true });
+    writeFileSync(join(mattes, "0123-m1-abcd.mp4"), BYTES);
+    writeFileSync(join(mattes, "0123-m1-abcd.json"), "{}");
+    const response = await serveMedia(get(`${base}.frameshell/cache/mattes/0123-m1-abcd.mp4`, { Range: "bytes=0-9" }), roots);
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("video/mp4");
+    expect((await serveMedia(get(`${base}.frameshell/cache/mattes/0123-m1-abcd.json`), roots)).status).toBe(403);
+  });
+
   it("serves baked audio effects (ADR 0031) as raw PCM ranges, nothing else from their folder", async () => {
     const { root, roots, base } = project();
     const baked = join(root, ".frameshell", "audio-fx");

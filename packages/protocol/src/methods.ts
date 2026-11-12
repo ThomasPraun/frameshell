@@ -66,7 +66,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 91;
+export const PROTOCOL_VERSION = 92;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -366,6 +366,21 @@ const AudioBakeSchema = z.object({
   channels: z.int().describe("Interleaved channels of `file`, the sidecar's."),
   job: z.string().nullable().describe("Queued or running `audio-fx` job; null otherwise."),
   error: z.string().nullable().describe("Why the bake failed; null otherwise."),
+});
+
+/** Subject matte of one plate asset as the preview needs it (ADR 0032). */
+const MatteStateSchema = z.object({
+  asset: z.string().describe("Project-relative video asset a subject layer plays."),
+  state: z
+    .enum(["ready", "queued", "making", "waiting", "failed"])
+    .describe(
+      "`ready`: `matte` holds it. `queued` / `making`: a `matte` job is on it (`job`, `progress`). `waiting`: the asset's ingest " +
+        "has not built its proxy yet; asked again after it, the matte is queued. `failed`: see `error`; retried once the asset changes.",
+    ),
+  matte: z.string().nullable().describe("Project-relative matte video, `.frameshell/cache/mattes/<key>.mp4` (frame N = proxy frame N); null unless ready."),
+  progress: z.number().min(0).max(1).describe("Fraction of the matte job done; 1 when ready, 0 otherwise."),
+  job: z.string().nullable().describe("Queued or running `matte` job; null otherwise."),
+  error: z.string().nullable().describe("Why the matte could not be made; null otherwise."),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */
@@ -1421,6 +1436,20 @@ export const methods = {
       timeline: z.string(),
       revision: z.int().describe("Revision of the timeline read (the proposal's with `view: proposal`)."),
       bakes: z.array(AudioBakeSchema).describe("In track then time order of their first clip."),
+    }),
+  },
+  "matte.status": {
+    // The app's preview only: export and frame captures make the mattes they need themselves (`matte.prepare` for agents).
+    internal: true,
+    description:
+      "Subject matte (ADR 0032) of every video asset a subject layer of a timeline plays (the plates of tracks `behind` one, nested " +
+      "timelines flattened). Mattes neither ready nor failed are queued as background `matte` jobs; the preview draws the plate " +
+      "without its subject until `ready`. Fails with TimelineNotFound or InvalidProjectFile.",
+    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema, view: ViewParam }),
+    result: z.object({
+      timeline: z.string(),
+      revision: z.int().describe("Revision of the timeline read (the proposal's with `view: proposal`)."),
+      mattes: z.array(MatteStateSchema).describe("One per asset, in track then time order of its first subject clip."),
     }),
   },
   "clip.live": {
@@ -3922,6 +3951,10 @@ export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 export type AudioBakeInfo = z.output<typeof AudioBakeSchema>;
 /** Result of `audio.bakes`. */
 export type AudioBakesResult = MethodResult<"audio.bakes">;
+/** One entry of `matte.status`. */
+export type MatteStateInfo = z.output<typeof MatteStateSchema>;
+/** Result of `matte.status`. */
+export type MatteStatusResult = MethodResult<"matte.status">;
 /** ffprobe summary of an asset. */
 export type MediaProbe = z.output<typeof ProbeSchema>;
 /** One asset as reported by `asset.list`. */

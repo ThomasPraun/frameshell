@@ -1,5 +1,5 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
-import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, MatteStateInfo, TimelineView } from "@frameshell/protocol";
 import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
   type HostFade,
@@ -25,9 +25,10 @@ import {
   showsPicture,
   soundSamples,
   staticGain,
+  subjectOf,
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, bakeRef } from "@frameshell/schema/effects";
-import { type ClipEdges, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
+import { type ClipEdges, type FrameRect, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -45,7 +46,9 @@ export type PlaceholderReason =
   /** Ingest failed, or the asset is not in `asset.list` (missing file). */
   | "unavailable"
   /** Shot of a program track inside a nested clip with a transform: shots fill the frame, so they would show in the wrong place. */
-  | "multicam";
+  | "multicam"
+  /** Subject of a plate (ADR 0032) whose matte is not made yet: the tracks behind the plate show in front of the person meanwhile. */
+  | "matte";
 
 /** One stretch of a video layer, program frames `[start, end)`. */
 export type VideoSpan =
@@ -65,6 +68,11 @@ export type VideoSpan =
       placement: Placement;
       /** Keys and edge transitions (ADR 0018); absent: `placement` holds for every frame. */
       motion?: SpanMotion;
+      /**
+       * On a subject layer (ADR 0032): the project-relative matte of the asset, frame N = proxy frame N, whose luma is the
+       * picture's alpha. The span draws only the person, over the tracks behind the plate.
+       */
+      matte?: string;
     }
   | {
       kind: "still";
@@ -229,10 +237,28 @@ export function spanShape(span: PlacedSpan, frame: number, fps: number): ShapePa
   const playing = (dissolve: SpanDissolve | undefined): dissolve is SpanDissolve & { shape: TransitionShape } =>
     dissolve?.shape !== undefined && t >= dissolve.at - dissolve.half && t < dissolve.at + dissolve.half;
   const incoming = playing(motion.dissolveIn) ? shapeAt(motion.dissolveIn.shape, dissolveProgress(motion.dissolveIn.at, motion.dissolveIn.half, t)).incoming : null;
-  const outgoing = playing(motion.dissolveOut) ? shapeAt(motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)).outgoing : null;
+  const outgoing = playing(motion.dissolveOut) ? outgoingPart(span, motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)) : null;
   if (!incoming || !outgoing) return incoming ?? outgoing;
   // A clip shorter than both its dissolves: both move it; the incoming one cuts it.
   return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip };
+}
+
+/**
+ * The outgoing side of `shape` at progress `f` for `span`. A subject (ADR 0032) is not covered by the incoming plate
+ * clip of a wipe, so it shows only where the incoming picture does not: the complement of its strip, as export masks it.
+ */
+function outgoingPart(span: PlacedSpan, shape: TransitionShape, f: number): ShapePart {
+  const frame = shapeAt(shape, f);
+  if (shape.kind !== "wipe" || span.kind !== "media" || span.matte === undefined || !frame.incoming.clip) return frame.outgoing;
+  return { dx: 0, dy: 0, clip: complementStrip(frame.incoming.clip) };
+}
+
+/** The rest of the frame beside `strip`, a wipe's strip along one edge (`shapeAt`). */
+function complementStrip([x0, y0, x1, y1]: FrameRect): FrameRect {
+  if (x0 > 0) return [0, 0, x0, 1];
+  if (x1 < 1) return [x1, 0, 1, 1];
+  if (y0 > 0) return [0, 0, 1, y0];
+  return [0, y1, 1, 1];
 }
 
 /**
@@ -318,6 +344,16 @@ export interface ProgramOptions {
    * plays its bake as its sidecar, the dry sidecar while the bake is absent.
    */
   bakes?: ReadonlyMap<string, BakedSound>;
+  /**
+   * Project-relative ready subject mattes by asset (`matte.status`, ADR 0032): a subject layer draws its plate's person
+   * through them; one whose matte is absent shows a {@link PlaceholderReason} `matte` note instead.
+   */
+  mattes?: ReadonlyMap<string, string>;
+}
+
+/** The ready entries of a `matte.status` list, by asset: {@link ProgramOptions.mattes}. */
+export function readyMattes(mattes: readonly MatteStateInfo[]): Map<string, string> {
+  return new Map(mattes.flatMap((matte) => (matte.state === "ready" && matte.matte !== null ? [[matte.asset, matte.matte] as const] : [])));
 }
 
 /** A ready audio effects bake: raw s16le in the sidecar's format and clock. */
@@ -349,6 +385,8 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const flat = flattenTimeline(root, resolve, fps);
   const moved = movedProgramGroups(root, resolve);
   const context: TransitionContext = { fps, sourceDuration: (clip) => sourceSeconds(clip, assets, options.nested) };
+  /** The bottom picture track when it is a video track: its clips' shapes play there and on their subjects (ADR 0030, 0032). */
+  let baseTrack: string | null = null;
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
@@ -386,8 +424,17 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     };
 
     if (track.kind === "video" && showsPicture(track)) {
-      const pictures = kept.map(({ clip, start, end }) => pictureOf(clip, "asset" in clip ? assets.get(clip.asset) : undefined, start, end, fps, options.renders));
-      layers.push(...pictureLayers(kept, pictures, edges, context, layers.length === 0 ? "bottom" : "upper"));
+      const pictures = kept.map(({ clip, start, end }) => {
+        const info = "asset" in clip ? assets.get(clip.asset) : undefined;
+        return subjectOf(clip) ? subjectPicture(clip, info, start, end, fps, options.mattes) : pictureOf(clip, info, start, end, fps, options.renders);
+      });
+      const bottom = layers.length === 0;
+      if (bottom) baseTrack = track.id;
+      // A subject takes the shapes of its plate clip when the plate is the bottom track, as export draws it.
+      const plate = kept.map(({ clip }) => subjectOf(clip)?.plate).find((id) => id !== undefined);
+      const shaped = bottom || (plate !== undefined && plate === baseTrack);
+      const own = pictureLayers(kept, pictures, edges, context, bottom ? "bottom" : "upper", shaped);
+      layers.push(...(plate === undefined ? own : own.map((layer) => inSubjectWindows(layer, kept, frame))));
     }
 
     /** Last sound span of this track and whether it is program sound, for {@link continuesSpan}. */
@@ -540,7 +587,8 @@ function nextStart(spans: readonly VideoSpan[], frame: number, end: number): num
 function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (!x || !y) return x === y;
   if ((x.kind === "media" || x.kind === "angle") && x.kind === y.kind) {
-    return x.proxy === y.proxy && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
+    const matte = (span: VideoSpan) => (span.kind === "media" ? span.matte : undefined);
+    return x.proxy === y.proxy && matte(x) === matte(y) && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
   if (x.kind === "generated" && y.kind === "generated") {
@@ -594,7 +642,9 @@ function asTimeline(view: TimelineView, root: boolean): Timeline {
     });
     const state = { ...(track.muted ? { muted: true } : {}), ...(track.hidden ? { hidden: true } : {}) };
     if (track.kind === "program") return { id: track.id, kind: "program", ...state, group: track.group ?? "", clips: clips as unknown as ProgramTrack["clips"] };
-    return { id: track.id, kind: track.kind, ...state, clips };
+    // `behind` (ADR 0032) adds the plate's subject layer when the timeline is flattened.
+    const behind = track.kind === "video" && track.behind !== undefined ? { behind: track.behind } : {};
+    return { id: track.id, kind: track.kind, ...state, ...behind, clips };
   });
   return { schemaVersion: 1, id: view.timeline, revision: view.revision, tracks, ...(view.groups ? { groups: view.groups } : {}) };
 }
@@ -750,6 +800,7 @@ function pictureLayers(
   edges: ReadonlyMap<string, ClipEdges>,
   context: TransitionContext,
   track: SpanMotion["track"],
+  shaped = track === "bottom",
 ): VideoSpan[][] {
   const { fps } = context;
   // Only a picture can dissolve in: a clip still ingesting (placeholder) or with no picture cuts.
@@ -760,8 +811,8 @@ function pictureLayers(
   });
   const main: VideoSpan[] = [];
   const slot: VideoSpan[] = [];
-  // Shapes play on the bottom track only (ADR 0030); elsewhere a shaped dissolve mixes, as export does.
-  const shapeOf = (clip: Clip) => (track === "bottom" && clip.shape ? { shape: clip.shape } : {});
+  // Shapes play on the bottom track only (ADR 0030), and on the subjects of its clips; elsewhere a shaped dissolve mixes, as export does.
+  const shapeOf = (clip: Clip) => (shaped && clip.shape ? { shape: clip.shape } : {});
   kept.forEach(({ clip }, i) => {
     const picture = pictures[i];
     if (!picture) return;
@@ -786,6 +837,29 @@ function pictureLayers(
     if (span.end > span.start) main.push(span);
   });
   return slot.length > 0 ? [main, slot] : [main];
+}
+
+/**
+ * `spans` of a subject layer (ADR 0032) cut to the program frames each clip's `SubjectMark.windows` cover, as export
+ * cuts them: the person is drawn again only while a track behind the plate shows a clip.
+ */
+function inSubjectWindows(spans: readonly VideoSpan[], kept: readonly PlacedClip[], frame: (seconds: number) => number): VideoSpan[] {
+  const windows = new Map(
+    kept.map(({ clip }) => {
+      const speed = "speed" in clip ? (clip.speed ?? 1) : 1;
+      const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;
+      const at = (source: number) => frame(clip.start + (source - clipIn) / speed);
+      return [clip.id, (subjectOf(clip)?.windows ?? []).map(([a, b]) => [at(a), at(b)] as const)] as const;
+    }),
+  );
+  return spans.flatMap((span) =>
+    (windows.get(span.clip) ?? []).flatMap(([a, b]): VideoSpan[] => {
+      const start = Math.max(span.start, a);
+      const end = Math.min(span.end, b);
+      if (end <= start) return [];
+      return [span.kind === "media" ? { ...span, start, end, in: span.in + (start - span.start) * span.speed } : { ...span, start, end }];
+    }),
+  );
 }
 
 /** Spans of the frames `span` plays before its start and first `head` frames: the incoming side of a dissolve. */
@@ -926,6 +1000,26 @@ function pictureOf(
   if (info.state === "pending" || info.state === "processing") return placeholder("ingest");
   if (info.state === "ready" && info.media && !info.media.video) return null; // Audio only: black picture, as in export.
   return placeholder("unavailable");
+}
+
+/**
+ * Picture of a subject clip (ADR 0032): its plate clip's proxy drawn through the asset's matte; a `matte` note while the
+ * matte is not ready. Null where export draws no subject either: no proxy (the plate shows its own placeholder), a still,
+ * audio only. A proxy with its own alpha (VP9 WebM) has no subject in the preview yet.
+ */
+function subjectPicture(
+  clip: Clip,
+  info: AssetInfo | undefined,
+  start: number,
+  end: number,
+  fps: number,
+  mattes: ReadonlyMap<string, string> | undefined,
+): PlacedSpan | PlaceholderSpan | null {
+  if (!("asset" in clip) || !info?.proxy || !info.media?.video || info.media.video.still || info.proxy.endsWith(".webm")) return null;
+  const matte = mattes?.get(clip.asset);
+  if (matte === undefined) return { kind: "placeholder", clip: clip.id, start, end, reason: "matte", type: clip.type };
+  const picture = pictureOf(clip, info, start, end, fps, undefined);
+  return picture?.kind === "media" ? { ...picture, matte } : null;
 }
 
 function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): PlacedSpan {
