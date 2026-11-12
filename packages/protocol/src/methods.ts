@@ -28,7 +28,8 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
-import { ReviewPeakSchema, ReviewSheetKindSchema, ReviewSheetSchema } from "./review.js";
+import { AnalyzeResultSchema } from "./analyze.js";
+import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
@@ -66,7 +67,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 91;
+export const PROTOCOL_VERSION = 92;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -300,7 +301,7 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte", "beats"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte", "beats", "analyze"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`audio-fx`: bake one asset through a clip's audio effects into `.frameshell/audio-fx/` (ADR 0031). " +
@@ -310,7 +311,8 @@ const JobSchema = z.object({
         "`people`: find, follow and embed the faces of video assets (`people.scan`). " +
         "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
         "`matte`: compute the subject matte of one video asset (`matte.prepare`). " +
-        "`beats`: measure the beat grid of one music asset (`beats.measure`).",
+        "`beats`: measure the beat grid of one music asset (`beats.measure`). " +
+        "`analyze`: measure a reference video's shots, colours, loudness and tempo (`analyze`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -318,7 +320,7 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`, the music for `beats`.",
+        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`, the music for `beats`, the video for `analyze` (project-relative when inside the project, else absolute).",
     ),
   output: z
     .string()
@@ -332,7 +334,7 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats", "analyze"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
@@ -340,7 +342,7 @@ const JobSchema = z.object({
         "effects not baked yet), matte (makes the subject mattes of the plates of tracks `behind` one that are not made yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector).",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, loudness, tempo, then the sheets).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1172,21 +1174,42 @@ export const methods = {
       projectFormat: FormatIdSchema.optional().describe("Format of the project to lay a timeline out in (`format.list`), e.g. `9x16`. Default: the primary format."),
       view: ViewParam,
     }),
-    result: z.object({
-      ...ViewedShape,
-      source: z.enum(["timeline", "file"]),
-      timeline: z.string().nullable().describe("Timeline reviewed; null for a file."),
-      file: z.string().nullable().describe("Absolute path of the file reviewed; null for a timeline."),
-      run: z.int().describe("`<n>` of the folder."),
-      dir: z.string().describe("Absolute folder the sheets and `review.json` (this result without `view` and `proposal`) are in."),
-      range: z.object({ from: z.number(), to: z.number() }).describe("Seconds reviewed."),
-      fps: z.number().describe("Frame rate of the film."),
-      width: z.int().describe("Size of the film's frames, px."),
-      height: z.int(),
-      sheets: z.array(ReviewSheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
-      peaks: z.array(ReviewPeakSchema).describe("The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves."),
-      warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
+    result: ReviewResultSchema,
+  },
+  analyze: {
+    description:
+      "Measure a reference video (#471): what it does, in numbers, so \"make it like this\" works from facts instead of a guess. " +
+      "Take its grammar (rhythm, colour, loudness, tempo), never its content. Writes `.frameshell/analysis/<name>/` " +
+      "(replaced by a new run with the same name; regenerable, project files are never touched) and returns: the **shot table** " +
+      "(cuts found by ffmpeg's scene score on every frame, each shot's start, end and length, the score of the cut that opens it, a JPEG of " +
+      "its middle frame and its dominant colours), the **cutting** (shot count, cuts per minute, average, median, shortest and longest shot), " +
+      "the **palette** of the whole film, the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
+      "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
+      "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
+      "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
+      "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
+      "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
+      "events, motion curves, text placement and the mouth-to-voice lag come in later slices). Label what you tell the person: " +
+      "these numbers are MEASURED; what you read off the sheets by eye is ESTIMATED, and say which frames to check. " +
+      "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 25 seconds. The MCP tool returns the " +
+      "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
+      "InvalidOperation (no picture, or shorter than a frame), the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("The video to analyse: absolute, or relative to `cwd`. It may be anywhere (a download, a reference folder); it is only read."),
+      name: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .optional()
+        .describe("Name of the analysis, its folder is `.frameshell/analysis/<name>/`. Default: the file name in lower case, e.g. `reel` for `Reel.mp4`. A new run with the same name replaces the folder."),
+      threshold: z
+        .number()
+        .min(0.05)
+        .max(0.95)
+        .optional()
+        .describe("Scene score (how different a frame is from the one before, 0 to 1) from which a frame opens a new shot. Default 0.3: hard cuts. Lower finds softer ones and false ones (flashes, fast motion); higher keeps only violent changes."),
     }),
+    result: AnalyzeResultSchema,
   },
   cover: {
     description:
@@ -3894,6 +3917,10 @@ export type FormatChange = z.output<typeof FormatChangeSchema>;
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */
 export type CoverResult = MethodResult<"cover">;
+/** `analyze` params. */
+export type AnalyzeParams = MethodParams<"analyze">;
+/** Result of `analyze`. */
+export type AnalyzeResult = MethodResult<"analyze">;
 /** `review` params. */
 export type ReviewParams = MethodParams<"review">;
 /** Result of `review`. */

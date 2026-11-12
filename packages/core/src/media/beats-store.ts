@@ -171,11 +171,25 @@ export class BeatsStore {
     const input = sidecar
       ? { pcm: await readFile(join(root, ...sidecar.path.split("/"))), channels: sidecar.channels, rate: sidecar.sampleRate }
       : await this.#decode(root, rel);
+    return this.measureAudio(root, rel, hash, input, options);
+  }
+
+  /**
+   * Measure PCM that is already decoded (`analyze` reads a file outside the asset store). `label` names the audio in
+   * errors, `hash` (`sha256:<hex>`) keys its cached envelope in {@link BEATS_CACHE_DIR}. Throws like {@link measure}.
+   */
+  async measureAudio(
+    root: string,
+    label: string,
+    hash: string,
+    input: { pcm: Uint8Array; channels: number; rate: number },
+    options: { hint?: number | undefined; signal?: AbortSignal | undefined; onProgress?: ((fraction: number) => void) | undefined } = {},
+  ): Promise<MeasuredBeats> {
     const seconds = input.pcm.byteLength / (2 * input.channels * input.rate);
     if (seconds > MAX_BEAT_AUDIO_S) {
-      throw new RpcError(ErrorCode.InvalidOperation, `${rel} lasts ${Math.round(seconds / 60)} minutes: a beat grid is for music, at most ${MAX_BEAT_AUDIO_S / 60}.`, {
+      throw new RpcError(ErrorCode.InvalidOperation, `${label} lasts ${Math.round(seconds / 60)} minutes: a beat grid is for music, at most ${MAX_BEAT_AUDIO_S / 60}.`, {
         reason: "too long",
-        asset: rel,
+        asset: label,
       });
     }
     const cache = join(root, ...BEATS_CACHE_DIR.split("/"), `${beatsCacheKey(hash)}-${Math.min(input.rate, ANALYSIS_RATE)}.f32`);
@@ -187,7 +201,7 @@ export class BeatsStore {
       onProgress: options.onProgress,
     });
     if (!result.ok) {
-      throw new RpcError(ErrorCode.InvalidOperation, `No beats in ${rel}: ${result.reason}.`, { reason: "no beats", asset: rel });
+      throw new RpcError(ErrorCode.InvalidOperation, `No beats in ${label}: ${result.reason}.`, { reason: "no beats", asset: label });
     }
     const reused = envelope !== null && result.envelope.length === envelope.length;
     if (!reused) await writeTextAtomic(cache, encodeFloats(result.envelope));

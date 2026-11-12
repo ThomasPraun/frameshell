@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell analyze <video>` (#471 slice 1, epic #451, decided in #478; daemon `analyze` as a background job of kind `analyze`, MCP `analyze`, protocol 92):
+  measure a reference video into `.frameshell/analysis/<name>/` (any file; a run of the same name replaces the folder; project
+  files untouched). The shot table comes from ffmpeg's scene score on every frame (`--threshold`, default 0.3; hard cuts, a run of
+  high scores within 3 frames is one cut) with cuts per minute and the average, median, shortest and longest shot; a contact sheet at
+  2 frames a second with the cuts marked, a sheet and a JPEG of the middle frame of every shot, through the sampling and tiling
+  of `review` (now `review/images.ts`, shared); the dominant colours of every shot and of the film; the loudness by EBU R128
+  (LUFS, LU, dBTP); and the tempo and beats by the `beats` detector at 44.1 kHz when the sound has a steady beat (`analysis.json`
+  holds the beat lists). Every time is a frame index / fps rounded down to the millisecond. MCP returns the sheets as images. New
+  skill page `reference-video.md` (measured, estimated and decision labels; the grammar, never the content). Events, motion curves,
+  text placement, look, sync and diff against an original are later slices of #471.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
