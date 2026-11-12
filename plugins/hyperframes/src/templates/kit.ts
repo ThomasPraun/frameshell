@@ -26,6 +26,8 @@ export interface Template {
   description: string;
   /** Seconds the clip plays unless `--duration` says otherwise. */
   defaultDuration: number;
+  /** True when the picture is transparent by default (meant over footage); false when it paints its own background. */
+  overlay: boolean;
   /** The typed props, with defaults already taken from the brand tokens. */
   variables(input: TemplateInput): TemplateVariable[];
   /** The composition's `index.html`. */
@@ -128,3 +130,19 @@ export const COLOR_HELPERS = String.raw`
         var lin = rgb(hex).map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
         return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2] > 0.4 ? "#0b1020" : "#ffffff";
       }`;
+
+/** The two props of a template that can sit on its own background: a colour and how solid it is (0 = transparent over footage). */
+export function backdropVariables(tokens: BrandTokens): TemplateVariable[] {
+  return [
+    { id: "bg", type: "color", label: "Background colour", default: tokens.colors.bg ?? PLACEHOLDER.bg },
+    { id: "backdrop", type: "number", label: "Solid background behind it, 0 = transparent over footage, 1 = opaque", default: 0, min: 0, max: 1, step: 0.05 },
+  ];
+}
+
+/** CSS of the optional background element `<div id="backdrop">`, the first child of the clip. */
+export const BACKDROP_CSS = "#backdrop { position: absolute; inset: 0; }";
+
+/** Page-script setup of `#backdrop` (needs {@link COLOR_HELPERS}); the template writes its opacity as `P.backdrop` times its fade. */
+export const BACKDROP_SETUP = String.raw`
+      var backdrop = document.getElementById("backdrop");
+      backdrop.style.background = "radial-gradient(ellipse at 50% 40%, " + mix(P.bg, "#ffffff", 0.09) + " 0%, " + P.bg + " 72%)";`;

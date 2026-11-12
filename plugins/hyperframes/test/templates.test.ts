@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandResult } from "@frameshell/plugin-api";
 import { type CheckReport, type UpdateReport, checkCompositions, newComposition, updateRuntime } from "../src/index.js";
@@ -72,6 +73,11 @@ describe.each(TEMPLATES.map((t) => [t.id, t] as const))("template %s", (id, temp
     expect(checked.failed).toBe(false);
   });
 
+  it("declares no page global that shadows a window property (var name = ... would coerce to a string)", async () => {
+    await scaffold(["spot", "--template", id]);
+    expect(read("spot")).not.toMatch(/\bvar (name|status|top|parent|length|self|event|origin|close|open|stop|find|history|location|screen|frames|opener|closed|focus|blur|print|scroll|menubar|toolbar)\b/);
+  });
+
   it("uses no GSAP and none of the calls a seek-only composition must not make", async () => {
     await scaffold(["spot", "--template", id]);
     const html = read("spot");
@@ -88,10 +94,21 @@ function placeholderVariables(template: (typeof TEMPLATES)[number]): TemplateVar
   return template.variables({ id: "spot", width: 1920, height: 1080, duration: template.defaultDuration, tokens: { colors: {}, brand: {}, used: [], problem: null } });
 }
 
+describe("the plugin skill", () => {
+  const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
+
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))("lists %s with every prop it declares", (id, template) => {
+    const row = skill.split("\n").find((line) => line.startsWith(`| \`${id}\``));
+    expect(row, `no row for ${id}`).toBeDefined();
+    for (const variable of placeholderVariables(template)) expect(row, `${id} row misses ${variable.id}`).toContain(`\`${variable.id}\``);
+  });
+});
+
 describe("frameshell hyperframes new --template", () => {
   it("lists the template ids when it is unknown or missing", async () => {
-    await expect(scaffold(["x", "--template", "nope"])).rejects.toThrow(/kinetic-headline, end-card; got nope/);
-    await expect(scaffold(["x", "--template"])).rejects.toThrow(/kinetic-headline, end-card/);
+    const ids = TEMPLATES.map((t) => t.id).join(", ");
+    await expect(scaffold(["x", "--template", "nope"])).rejects.toThrow(`${ids}; got nope`);
+    await expect(scaffold(["x", "--template"])).rejects.toThrow(ids);
   });
 
   it("never overwrites, and writes no runtime when the scaffold is refused", async () => {
