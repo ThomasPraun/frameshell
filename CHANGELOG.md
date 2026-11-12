@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
   (`media`, `svg` or `font`) and `state` `ready` once hashed. `clip.add` and other edits that take a media asset
   refuse them with `not media` instead of an ffprobe error. Protocol 86.
+- Words behind the head in export (#461 slice 2, ADR 0032): a video track can go `behind` a lower video track
+  (`track.set` `behind`, `frameshell track set <track> --behind <plate>`, `--behind none` clears it; protocol 91).
+  Export, `frame` and covers draw the plate's media clips again above that track through each asset's subject matte
+  (`alphamerge`, on the same frames as the plate, with its transitions), so a big word or a logo sits between the
+  background and the person. The person is drawn again only while the track behind shows a clip, and not while a
+  shown track between the plate and it (a cutaway) does, with a warning. A `render` job makes missing mattes in a new
+  `matte` step; `frame` makes those of the frame it captures first. Removing or moving the plate track, also by editing the timeline file, clears the flag in the same operation, with
+  a warning (`timeline.changed` gains `warnings`). Track views
+  (`timeline show`, `track list`) show `behind`. Not in the preview yet, nor in image projects; nested, generated and
+  multicam plates are not lifted.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench

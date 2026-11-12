@@ -175,6 +175,74 @@ describe("track operations", () => {
     expect(parseTimeline({ ...file, tracks: [{ id: "t_v", kind: "video", muted: true, hidden: true, clips: [] }] })).toMatchObject({ ok: true });
   });
 
+  describe("behind (ADR 0032)", () => {
+    /** Plate t_v, audio t_a, title track t_t on top. */
+    const stacked = async () => (await apply(base(), "track.add", { kind: "video", name: "Title" }, context({ newId: () => "t_t" }))).timeline;
+
+    it("track.set puts a video track behind a lower video track's subject, null clears it, and the inverse restores it", async () => {
+      const set = await apply(await stacked(), "track.set", { track: "t_t", behind: "t_v" });
+      expect(set.timeline.tracks[2]).toEqual({ id: "t_t", kind: "video", name: "Title", behind: "t_v", clips: [] });
+      expect(set.changes).toMatchObject({ updated: ["t_t"] });
+      expect(set.warnings).toEqual([]);
+      const undone = await apply(set.timeline, "timeline.patch", set.inverse.args);
+      expect(undone.timeline.tracks[2]).toEqual({ id: "t_t", kind: "video", name: "Title", clips: [] });
+      const cleared = await apply(set.timeline, "track.set", { track: "t_t", behind: null });
+      expect(cleared.timeline.tracks[2]).toEqual({ id: "t_t", kind: "video", name: "Title", clips: [] });
+    });
+
+    it("track.set refuses a plate that is missing, itself, above, not video, and behind on a track that is not video", async () => {
+      const timeline = await stacked();
+      expect(await rejection(apply(timeline, "track.set", { track: "t_t", behind: "t_none" }))).toMatchObject({ code: ErrorCode.TrackNotFound });
+      expect((await rejection(apply(timeline, "track.set", { track: "t_t", behind: "t_t" }))).message).toMatch(/cannot go behind its own subject/);
+      expect((await rejection(apply(timeline, "track.set", { track: "t_v", behind: "t_t" }))).message).toMatch(/t_t is above t_v; it must be lower/);
+      expect((await rejection(apply(timeline, "track.set", { track: "t_t", behind: "t_a" }))).message).toMatch(/plate must be a video track; t_a is an audio track/);
+      expect((await rejection(apply(timeline, "track.set", { track: "t_a", behind: "t_v" }))).message).toMatch(/audio tracks cannot go behind a subject/);
+      // Checked after the move: lowered to the bottom, nothing is below it.
+      const hint = await rejection(apply(timeline, "track.set", { track: "t_t", index: 0, behind: "t_v" }));
+      expect(hint.message).toMatch(/t_v is above t_t/);
+      expect(hint.data).toMatchObject({ field: "behind", hint: "Video tracks below t_t: none, add one first." });
+    });
+
+    it("removing or moving the plate clears behind in the same operation, with a warning; revert brings both back", async () => {
+      const { timeline } = await apply(await stacked(), "track.set", { track: "t_t", behind: "t_v" });
+      const removed = await apply(timeline, "track.remove", { track: "t_v" });
+      expect(removed.timeline.tracks.find((track) => track.id === "t_t")).toEqual({ id: "t_t", kind: "video", name: "Title", clips: [] });
+      expect(removed.warnings).toEqual(["track t_t no longer sits behind the subject of t_v: t_v is gone. `revert` brings it back."]);
+      const back = await apply(removed.timeline, "timeline.patch", removed.inverse.args);
+      expect(back.timeline.tracks).toEqual(timeline.tracks);
+      expect(back.warnings).toEqual([]);
+      const moved = await apply(timeline, "track.set", { track: "t_v", index: 2 });
+      expect(moved.timeline.tracks.map((track) => track.id)).toEqual(["t_a", "t_t", "t_v"]);
+      expect(moved.timeline.tracks[1]).not.toHaveProperty("behind");
+      expect(moved.warnings).toEqual(["track t_t no longer sits behind the subject of t_v: t_v is no longer below it. `revert` brings it back."]);
+      // Moving the plate within the stack, still below, keeps it.
+      const kept = await apply(timeline, "track.set", { track: "t_a", index: 0 });
+      expect(kept.timeline.tracks[2]).toMatchObject({ id: "t_t", behind: "t_v" });
+      expect(kept.warnings).toEqual([]);
+    });
+
+    it("a patch that sets behind to no lower video track is refused, not cleared", async () => {
+      const timeline = await stacked();
+      for (const plate of ["t_a", "t_none"]) {
+        const patch = { tracks: [{ id: "t_t", track: { id: "t_t", kind: "video" as const, name: "Title", behind: plate, clips: [] } }] };
+        expect((await rejection(apply(timeline, "timeline.patch", patch))).message).toMatch(/must name a video track listed before this one/);
+      }
+    });
+
+    it("a timeline file whose behind names no lower video track, or sits on an audio track, is not valid", () => {
+      const tracks = (behind: string, kind: "video" | "audio" = "video") => [
+        { id: "t_v", kind: "video", clips: [] },
+        { id: "t_a", kind: "audio", clips: [] },
+        { id: "t_t", kind, behind, clips: [] },
+      ];
+      expect(parseTimeline({ ...base(), tracks: tracks("t_v") })).toMatchObject({ ok: true });
+      for (const plate of ["t_a", "t_t", "t_none"]) {
+        expect(parseTimeline({ ...base(), tracks: tracks(plate) })).toMatchObject({ ok: false, error: expect.stringMatching(/must name a video track listed before this one/) });
+      }
+      expect(parseTimeline({ ...base(), tracks: tracks("t_v", "audio") })).toMatchObject({ ok: false, error: expect.stringMatching(/`behind` is for video tracks/) });
+    });
+  });
+
   it("track.set moves a track in the stack, keeping the others' order; the inverse moves it back", async () => {
     const { timeline } = await apply(base(), "track.add", { kind: "video", name: "Logo" }, context({ newId: () => "t_logo" }));
     const lowered = await apply(timeline, "track.set", { track: "t_logo", index: 0 });

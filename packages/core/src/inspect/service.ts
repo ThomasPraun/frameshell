@@ -15,7 +15,7 @@ import {
   type SegmentedPoint,
   markGenerated,
 } from "@frameshell/protocol";
-import { type AnyClip, type Size, type Timeline, isShotClip, layerRect, placementAt, programGroup, shotLayers, showsPicture } from "@frameshell/schema";
+import { type AnyClip, type Size, type Timeline, isShotClip, isSubjectClip, layerRect, placementAt, programGroup, shotLayers, showsPicture } from "@frameshell/schema";
 import type { InstallProgress } from "../binaries/manager.js";
 import { writeContext } from "../context.js";
 import { encodeGrayPng } from "../segment/png.js";
@@ -217,7 +217,8 @@ export class InspectService {
       }
       if (track.kind !== "video") continue;
       const clip = track.clips.find((candidate) => Math.round(candidate.start * fps) <= frame && frame < endFrame(candidate, fps));
-      if (!clip || clip.type === "timeline") continue;
+      // A subject layer is the plate drawn again where its person is, not a clip of its own (ADR 0032).
+      if (!clip || clip.type === "timeline" || isSubjectClip(clip)) continue;
       const generated = clip.type !== "media";
       // Renders are made at the project format.
       const size = generated ? resolution : await this.#options.pictureSize(root, (clip as { asset: string }).asset);

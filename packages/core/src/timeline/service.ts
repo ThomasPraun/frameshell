@@ -191,6 +191,8 @@ export interface TimelineChange {
   /** SPEC §6.2 author. */
   author: string;
   changes: OperationResult["changes"];
+  /** What the operation changed beyond what was asked (e.g. a stale `behind` cleared); absent when nothing. */
+  warnings?: string[];
 }
 
 /** Who saves a timeline through {@link TimelineService.writeFile}, and in which transaction. */
@@ -485,7 +487,7 @@ export class TimelineService {
         if (route) {
           try {
             const proposed = await this.#propose(root, id, route, who, async (shadow, _current, fps) => {
-              const incoming = checkRevision(id, path, parseIncoming(path, content), shadow);
+              const incoming = checkRevision(id, path, parseEdit(path, content, shadow), shadow);
               const patch = diffTimelines(shadow, incoming);
               if (isEmptyPatch(patch)) return null;
               const applied = await applyOperation(shadow, { op: "timeline.patch", args: patch }, this.#context(root, id, fps, "timeline.patch"));
@@ -1195,19 +1197,21 @@ export class TimelineService {
     await appendJournal(root, id, entry);
     // Only catch-up of edits made while no daemon runs needs it; a lost snapshot must not fail an applied operation.
     await writeHead(root, id, text).catch(() => {});
+    const told = [...warnings, ...applied.warnings];
     this.#options.onChanged?.({
       root: await this.#realRoot(root),
       timeline: id,
       revision: applied.timeline.revision,
       author: call.author,
       changes: applied.changes,
+      ...(told.length > 0 ? { warnings: told } : {}),
     });
     // ADR 0019 §7: the person's edit rebases the open proposal, or makes it stale.
     if (call.author === "ui") {
       const book = await this.#book(root);
       if (book.proposal) await this.#sync(root, id, book, applied.timeline, await projectFps(root));
     }
-    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings: [...warnings, ...applied.warnings] };
+    return { timeline: id, revision: applied.timeline.revision, operation, changes: applied.changes, snaps: applied.snaps, warnings: told };
   }
 
   /**
@@ -1261,6 +1265,7 @@ export class TimelineService {
         ...(track.kind === "subtitles" && track.gaps ? { gaps: track.gaps } : {}),
         ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
         ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
+        ...(track.kind === "video" && track.behind !== undefined ? { behind: track.behind } : {}),
         clips,
       });
     }
@@ -1308,6 +1313,7 @@ export class TimelineService {
         ...(track.style ? { style: track.style } : {}),
         ...(track.muted ? { muted: track.muted } : {}),
         ...(track.hidden ? { hidden: track.hidden } : {}),
+        ...(track.behind !== undefined ? { behind: track.behind } : {}),
         clips: track.clips.length,
         end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
       })),
@@ -1420,7 +1426,11 @@ export class TimelineService {
     if (known?.timeline && known.text === text) return { timeline: structuredClone(known.timeline), fps, ...snap };
     if (known?.timeline) return { timeline: await this.#absorb(root, id, text, known.timeline, fps), fps, ...snap };
     // First sight, or no valid version yet: the journal is the only thing to diff against.
-    const parsed = parseText(text);
+    let parsed = parseText(text);
+    if (!parsed.ok) {
+      const head = await this.#headBase(root, id);
+      if (head) parsed = parseTimelineEdit(text, head);
+    }
     if (!parsed.ok) {
       this.#known.set(key, { text, timeline: null });
       throw invalidFile(path, parsed.error);
@@ -1491,6 +1501,13 @@ export class TimelineService {
     return current ? head : null;
   }
 
+  /** The head snapshot of timeline `id` when it is the journal's last version; null otherwise. */
+  async #headBase(root: string, id: string): Promise<Timeline | null> {
+    const last = (await readJournal(root, id)).at(-1);
+    const head = last ? await readHead(root, id) : null;
+    return head !== null && timelineHash(head) === last?.hash ? head : null;
+  }
+
   /**
    * Apply `patch` to `base` as one journaled `timeline.patch` by `saver`,
    * bumping `base`'s revision. An empty patch journals nothing: `base` is
@@ -1527,7 +1544,7 @@ export class TimelineService {
       let planned: { patch: TimelinePatch; applied: AppliedOperation } | null;
       try {
         const path = timelinePath(root, id);
-        planned = await this.#plan(root, id, base, diffTimelines(base, checkRevision(id, path, parseIncoming(path, text), base)), fps);
+        planned = await this.#plan(root, id, base, diffTimelines(base, checkRevision(id, path, parseEdit(path, text, base), base)), fps);
       } catch (error) {
         if (!(error instanceof RpcError)) throw error;
         await this.#reject(root, id, text, base, error.code === ErrorCode.StaleRevision ? "stale" : "invalid", error.message);
@@ -1681,7 +1698,7 @@ export class TimelineService {
     saver?: Saver,
   ): Promise<{ timeline: Timeline; result: OperationResult | null }> {
     const path = timelinePath(root, id);
-    const incoming = checkRevision(id, path, parseIncoming(path, text), base);
+    const incoming = checkRevision(id, path, parseEdit(path, text, base), base);
     const patch = diffTimelines(base, incoming);
     if (isEmptyPatch(patch)) {
       // Same groups, tracks, clips and markers (formatting, key order): nothing to journal.
@@ -1842,6 +1859,46 @@ function parseText(text: string): ParseResult<Timeline> {
 /** Timeline file content `text` of `path`, parsed; InvalidProjectFile otherwise. */
 function parseIncoming(path: string, text: string): Timeline {
   const parsed = parseText(text);
+  if (!parsed.ok) throw invalidFile(path, parsed.error);
+  return parsed.value;
+}
+
+/**
+ * {@link parseText} for a direct edit on top of `base`: a `behind` that `base` holds on the same track, left as is,
+ * passes unchecked when its plate was removed or moved, for the engine to clear with a warning (ADR 0032 decision 8).
+ */
+function parseTimelineEdit(text: string, base: Timeline): ParseResult<Timeline> {
+  const parsed = parseText(text);
+  if (parsed.ok) return parsed;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return parsed;
+  }
+  if (typeof raw !== "object" || raw === null || !Array.isArray((raw as { tracks?: unknown }).tracks)) return parsed;
+  const kept = new Map<string, string>();
+  const tracks = ((raw as { tracks: unknown[] }).tracks).map((track) => {
+    if (typeof track !== "object" || track === null) return track;
+    const { behind, ...rest } = track as { id?: unknown; kind?: unknown; behind?: unknown };
+    const prior = base.tracks.find((candidate) => candidate.id === rest.id);
+    if (rest.kind !== "video" || typeof behind !== "string" || prior?.kind !== "video" || prior.behind !== behind) return track;
+    kept.set(prior.id, behind);
+    return rest;
+  });
+  if (kept.size === 0) return parsed;
+  const retried = parseTimeline({ ...raw, tracks });
+  if (!retried.ok) return parsed;
+  for (const track of retried.value.tracks) {
+    const plate = kept.get(track.id);
+    if (track.kind === "video" && plate !== undefined) track.behind = plate;
+  }
+  return retried;
+}
+
+/** {@link parseTimelineEdit}, or InvalidProjectFile for `path`. */
+function parseEdit(path: string, text: string, base: Timeline): Timeline {
+  const parsed = parseTimelineEdit(text, base);
   if (!parsed.ok) throw invalidFile(path, parsed.error);
   return parsed.value;
 }

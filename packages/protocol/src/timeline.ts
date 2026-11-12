@@ -215,6 +215,16 @@ export const operationArgs = {
       .boolean()
       .optional()
       .describe("Video and program tracks: true leaves the track's pictures out of export and preview (its sound still plays); false shows them again."),
+    behind: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe(
+        "Video tracks only (ADR 0032): id of a lower video track, the plate; this track's pictures then sit behind the person " +
+          "in front on it (a word behind the head), drawn through the plate asset's subject matte. null clears it. Checked " +
+          "after `index` moves the track. Not in image projects.",
+      ),
     index: z
       .int()
       .nonnegative()
@@ -1048,8 +1058,32 @@ const TrackMutedViewSchema = z.literal(true).optional().describe("True: the trac
 /** Track hide in track views, as stored. */
 const TrackHiddenViewSchema = z.literal(true).optional().describe("True: the track shows no picture, its sound still plays (`track.set` `hidden`); absent otherwise.");
 
-/** Compact track summary of `track.list`. */
-export const TrackSummarySchema = z.object({
+/** Plate of a video track in track views, as stored. */
+const TrackBehindViewSchema = z
+  .string()
+  .optional()
+  .describe("Video tracks: the lower video track (plate) whose person in front this track sits behind (`track.set` `behind`, ADR 0032); absent otherwise.");
+
+/** See {@link TrackSummarySchema}. */
+export type TrackSummary = {
+  id: string;
+  kind: "video" | "audio" | "program" | "subtitles";
+  name: string | null;
+  follows: string | null;
+  group?: string | undefined;
+  style?: { preset?: string | undefined; position?: "top" | "center" | "bottom" | undefined; speakerNames?: boolean | undefined; [key: string]: unknown } | undefined;
+  muted?: true | undefined;
+  hidden?: true | undefined;
+  behind?: string | undefined;
+  clips: number;
+  end: number | null;
+};
+
+/**
+ * Compact track summary of `track.list`.
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const TrackSummarySchema: z.ZodType<TrackSummary> = z.object({
   id: z.string(),
   kind: TrackKindSchema,
   name: z.string().nullable(),
@@ -1058,6 +1092,7 @@ export const TrackSummarySchema = z.object({
   style: StoredStyleSchema,
   muted: TrackMutedViewSchema,
   hidden: TrackHiddenViewSchema,
+  behind: TrackBehindViewSchema,
   clips: z.int().describe("Number of clips (shots on a program track); 0 for subtitle tracks."),
   end: z.number().nullable().describe("Timeline time just after the last clip; 0 when empty; null when a clip's end is unknown."),
 });
@@ -1079,6 +1114,7 @@ export const TimelineViewSchema = z.object({
       style: StoredStyleSchema,
       muted: TrackMutedViewSchema,
       hidden: TrackHiddenViewSchema,
+      behind: TrackBehindViewSchema,
       phrases: z.array(CaptionPhraseSchema).optional().describe("Subtitle tracks: hand-chunked phrases as stored (`captions.set`); absent when none."),
       gaps: z.array(CaptionGapSchema).optional().describe("Subtitle tracks: ranges in which no cue shows (`track.set` `gaps`); absent when none."),
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
@@ -1097,8 +1133,6 @@ export const TimelineViewSchema = z.object({
 
 /** See {@link TimelineViewSchema}. */
 export type TimelineView = z.output<typeof TimelineViewSchema>;
-/** See {@link TrackSummarySchema}. */
-export type TrackSummary = z.output<typeof TrackSummarySchema>;
 /** See {@link TimelineProblemSchema}. */
 export type TimelineProblem = z.output<typeof TimelineProblemSchema>;
 

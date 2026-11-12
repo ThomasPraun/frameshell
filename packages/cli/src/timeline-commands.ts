@@ -32,9 +32,11 @@ mutations print the new revision):
            [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
            [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
-           [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown]
+           [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown] [--behind <plate track> | none]
                                --muted silences a video, audio or program track; --hidden leaves a video or
-                               program track's pictures out of export and preview (its sound still plays)
+                               program track's pictures out of export and preview (its sound still plays);
+                               --behind puts a video track's pictures behind the person in front on a lower video
+                               track (export makes the plate's subject matte when missing; not in the preview yet)
   track remove <track> [--force]
   captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
                                Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
@@ -246,6 +248,7 @@ export const TIMELINE_OPTIONS = {
   unmuted: { type: "boolean" },
   hidden: { type: "boolean" },
   shown: { type: "boolean" },
+  behind: { type: "string" },
   x: { type: "string" },
   y: { type: "string" },
   scale: { type: "string" },
@@ -347,7 +350,7 @@ const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
   "track add": ["name", "follows", "index", "preset", "position", "entry", "keyword-color", "keyword-scale"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window"],
@@ -598,6 +601,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         gaps: gaps(),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
+        behind: str("behind") === "none" ? null : str("behind"),
       });
       break;
     }
@@ -1172,9 +1176,9 @@ function formatMarkers(result: MarkerListResult): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** `  muted`, `  hidden` or both, as a track line ends; empty for a track that plays and shows. */
-function trackState(track: { muted?: true | undefined; hidden?: true | undefined }): string {
-  return `${track.muted ? "  muted" : ""}${track.hidden ? "  hidden" : ""}`;
+/** `  muted`, `  hidden`, `  behind <plate>` or several, as a track line ends; empty for a plain track. */
+function trackState(track: { muted?: true | undefined; hidden?: true | undefined; behind?: string | undefined }): string {
+  return `${track.muted ? "  muted" : ""}${track.hidden ? "  hidden" : ""}${track.behind ? `  behind ${track.behind}` : ""}`;
 }
 
 /** A subtitle track's look as rendered, e.g. `big-keyword at the bottom`; an unknown preset is named. */

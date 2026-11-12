@@ -254,6 +254,64 @@ describe("direct edit of markers (ADR 0029)", () => {
   });
 });
 
+describe("direct edit of a behind plate (ADR 0032 decision 8)", () => {
+  /** Plate t_v and title track t_t behind it, set by an operation. */
+  const behindSetup = async () => {
+    const project = setup();
+    const { root, timelines } = project;
+    const operate = (op: "track.add" | "track.set", args: Record<string, unknown>, tx: string) =>
+      timelines.apply({ root, cwd: root, timeline: "main", author: "cli:agent", tx: { id: tx, label: null }, request: { op, args } as never });
+    await operate("track.add", { kind: "video", name: "Title" }, "tx_000000a1");
+    await operate("track.set", { track: "t_1", behind: "t_v" }, "tx_000000a2");
+    project.changed.length = 0;
+    return project;
+  };
+  const warning = (why: string) => `track t_1 no longer sits behind the subject of t_v: ${why}. \`revert\` brings it back.`;
+
+  it.each([
+    ["removing the plate", (timeline: { tracks: { id: string }[] }) => timeline.tracks.splice(0, 1), "t_v is gone", ["t_1"]],
+    ["moving the plate above", (timeline: { tracks: { id: string }[] }) => timeline.tracks.reverse(), "t_v is no longer below it", ["t_1", "t_v"]],
+  ])("clears behind on %s, with a warning in timeline.changed, instead of rejecting the edit", async (_name, change, why, order) => {
+    const { root, timelines, read, edit, changed, rejected } = await behindSetup();
+    edit(change);
+    await timelines.reconcile(root, "main");
+    expect(rejected).toEqual([]);
+    expect(read().tracks.map((track: { id: string }) => track.id)).toEqual(order);
+    expect(read().tracks.find((track: { id: string }) => track.id === "t_1")).not.toHaveProperty("behind");
+    expect(changed).toMatchObject([{ author: "file", warnings: [warning(why)] }]);
+  });
+
+  it("clears it in an edit made while no daemon ran, taken in by a restarted daemon", async () => {
+    const { root, restart, read, edit, changed, rejected } = await behindSetup();
+    edit((timeline) => timeline.tracks.splice(0, 1));
+    await restart().reconcile(root, "main");
+    expect(rejected).toEqual([]);
+    expect(read().tracks).toEqual([{ id: "t_1", kind: "video", name: "Title", clips: [] }]);
+    expect(changed).toMatchObject([{ author: "file", warnings: [warning("t_v is gone")] }]);
+  });
+
+  it("clears it in a file.write save, returning the warning", async () => {
+    const { root, path, timelines, read } = await behindSetup();
+    const saved = read();
+    saved.tracks.splice(0, 1);
+    const result = await timelines.writeFile(root, "main", JSON.stringify(saved));
+    expect(result?.warnings).toEqual([warning("t_v is gone")]);
+    expect(JSON.parse(readFileSync(path, "utf8")).tracks[0]).not.toHaveProperty("behind");
+  });
+
+  it("still rejects an edit that points behind at a track that is no lower video track", async () => {
+    const { root, path, timelines, edit, rejected } = await behindSetup();
+    const daemonVersion = readFileSync(path, "utf8");
+    edit((timeline) => {
+      timeline.tracks.splice(1, 0, { id: "t_a", kind: "audio", clips: [] });
+      timeline.tracks[2].behind = "t_a";
+    });
+    await timelines.reconcile(root, "main");
+    expect(readFileSync(path, "utf8")).toBe(daemonVersion);
+    expect(rejected).toMatchObject([{ reason: "invalid", message: expect.stringMatching(/must name a video track listed before this one/) }]);
+  });
+});
+
 describe("rejections listed for status", () => {
   const staleEdit = async (project: ReturnType<typeof setup>) => {
     const { root, timelines, edit, addClip } = project;

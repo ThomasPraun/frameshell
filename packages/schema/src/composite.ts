@@ -133,8 +133,8 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
  * sound ({@link programSound}), clips marked {@link isProgramSound} so they keep exact samples.
  *
- * Track mutes are folded into the clips first ({@link withTrackMutes}), at
- * every level. Hidden tracks stay `hidden`, and so do the tracks a hidden
+ * Track mutes are folded into the clips first ({@link withTrackMutes}), then
+ * subject layers are added ({@link withSubjectLayers}), at every level. Hidden tracks stay `hidden`, and so do the tracks a hidden
  * host track's nested clips add; a nested hidden video track goes onto its own
  * hidden track `T/h1`, `T/h2`, … and a nested hidden program track keeps `hidden`.
  *
@@ -143,7 +143,7 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * assumed to be `timelines/<id>.json`.
  */
 export function flattenTimeline(timeline: Timeline, nested: NestedTimelines, fps?: number): Timeline {
-  timeline = withTrackMutes(timeline);
+  timeline = withSubjectLayers(withTrackMutes(timeline));
   const own = timeline.groups ?? [];
   const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`], fps);
   // Every group of the root stays, shown or not; nested ones only when shown.
@@ -193,7 +193,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
       const found = nested(clip.source);
       if (!found) continue;
-      const inner = withTrackMutes(found);
+      const inner = withSubjectLayers(withTrackMutes(found));
       const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source], fps);
       inners.set(clip, { flat, duration: durationOf(flat.tracks) });
     }
@@ -852,6 +852,142 @@ export function withTrackMutes(timeline: Timeline): Timeline {
     return { ...group, angles, ...(group.mics ? { mics: group.mics.map(silence) } : {}) };
   });
   return { ...timeline, tracks, ...(groups ? { groups } : {}) };
+}
+
+/**
+ * Mark of a clip that {@link withSubjectLayers} drew again as the subject of its plate, holding its
+ * {@link SubjectMark}. A symbol key, like {@link isProgramSound}'s: spreads keep it, JSON and Zod never see it.
+ */
+const SUBJECT = Symbol.for("frameshell.subject");
+
+/** Where a subject clip ({@link withSubjectLayers}) is drawn, and what kept it from being drawn elsewhere (ADR 0032). */
+export interface SubjectMark {
+  /**
+   * Source seconds `[from, to)` of the clip's asset that it draws, sorted: where a track behind its plate shows a
+   * clip and no other shown track between them does. Source seconds stay right when nesting moves or cuts the clip.
+   */
+  windows: readonly (readonly [number, number])[];
+  /** Id of the plate track. */
+  plate: string;
+  /** Id of the track behind the plate that the subject layer sits right above (the last of a run). */
+  behind: string;
+  /** Shown tracks between the plate and the tracks behind it that show a clip while one of those does: no subject then. */
+  covered: readonly string[];
+}
+
+/**
+ * True for a clip of a subject layer ({@link withSubjectLayers}): the plate's media clip, same id and fields,
+ * whose picture export draws through the subject matte of its asset (ADR 0032). It plays no sound. The mark does
+ * not survive JSON or `structuredClone`: flatten in the same place that draws the clip.
+ */
+export function isSubjectClip(clip: Clip): boolean {
+  return subjectOf(clip) !== null;
+}
+
+/** The {@link SubjectMark} of a subject clip; null for any other clip. */
+export function subjectOf(clip: Clip): SubjectMark | null {
+  return (clip as { [SUBJECT]?: SubjectMark })[SUBJECT] ?? null;
+}
+
+/**
+ * `timeline` with a subject layer above each shown video track that is `behind` a shown plate (ADR 0032): a video
+ * track `<track>/subject` holding copies of the plate's media clips, marked {@link isSubjectClip} and muted. Drawn
+ * through each asset's matte, it puts the person back in front of the tracks behind the plate, only while one of
+ * them shows a clip ({@link SubjectMark.windows}). A shown track between plate and them covers the person, so no
+ * subject is drawn while it shows a clip either. A run of tracks behind the same plate, with only hidden tracks
+ * between them, shares one layer above the last. Plate clips outside every window are left out, and so are its
+ * nested, timeline and adapter clips (no matte). Unchanged when no track is `behind` one.
+ */
+export function withSubjectLayers(timeline: Timeline): Timeline {
+  const { tracks } = timeline;
+  if (!tracks.some((track) => track.kind === "video" && track.behind !== undefined)) return timeline;
+  const plateOf = (index: number): ClipTrack | null => {
+    const track = tracks[index]!;
+    if (track.kind !== "video" || track.behind === undefined || !showsPicture(track)) return null;
+    const plate = tracks.slice(0, index).find((other) => other.id === track.behind);
+    return plate?.kind === "video" && showsPicture(plate) ? plate : null;
+  };
+  const out: Track[] = [];
+  tracks.forEach((track, index) => {
+    out.push(track);
+    const plate = plateOf(index);
+    if (!plate) return;
+    const next = tracks.findIndex((other, at) => at > index && showsPicture(other));
+    if (next !== -1 && plateOf(next) === plate) return;
+    // The run: this track and the shown tracks right below it behind the same plate.
+    const run: Track[] = [track];
+    let first = index;
+    for (let at = index - 1; at >= 0; at--) {
+      if (!showsPicture(tracks[at]!)) continue;
+      if (plateOf(at) !== plate) break;
+      run.push(tracks[at]!);
+      first = at;
+    }
+    const between = tracks
+      .slice(tracks.indexOf(plate) + 1, first)
+      .filter((other) => showsPicture(other) && !(other.kind === "video" && other.behind === plate.id))
+      .map((other) => ({ id: other.id, spans: pictureSpans(other) }));
+    const behind = unionSpans(run.flatMap(pictureSpans));
+    const shown = subtractSpans(behind, unionSpans(between.flatMap((other) => other.spans)));
+    const clips = plate.clips.flatMap((clip, at): Clip[] => {
+      if (clip.type !== "media" || !("asset" in clip)) return [];
+      // A dissolve draws clips past their cut: the incoming one before its start, the outgoing one after its end.
+      const reach: Spans = [[clip.start - (clip.dissolve ?? 0), clipEnd(clip)! + (plate.clips[at + 1]?.dissolve ?? 0)]];
+      const drawn = intersectSpans(shown, reach);
+      if (drawn.length === 0) return [];
+      const speed = clip.speed ?? 1;
+      const source = (t: number) => clip.in + (t - clip.start) * speed;
+      const under = intersectSpans(behind, reach);
+      const mark: SubjectMark = {
+        windows: drawn.map(([a, b]) => [source(a), source(b)] as const),
+        plate: plate.id,
+        behind: track.id,
+        covered: between.filter((other) => intersectSpans(under, other.spans).length > 0).map((other) => other.id),
+      };
+      return [Object.assign({ ...clip, audio: { muted: true } }, { [SUBJECT]: mark })];
+    });
+    if (clips.length > 0) out.push({ id: `${track.id}/subject`, kind: "video", muted: true, clips });
+  });
+  return { ...timeline, tracks: out };
+}
+
+/** Sorted, disjoint `[from, to)` seconds. */
+type Spans = [number, number][];
+
+/** Timeline seconds where `track` shows a clip or shot. */
+function pictureSpans(track: Track): Spans {
+  if (track.kind === "program") return unionSpans(track.clips.map((shot) => [shot.start, shot.start + (shot.out - shot.in)]));
+  if (track.kind !== "video") return [];
+  return unionSpans(track.clips.map((clip) => [clip.start, clipEnd(clip) ?? clip.start]));
+}
+
+/** `spans` in any order, overlapping or not, sorted and merged where they touch; empty ones dropped. */
+function unionSpans(spans: readonly (readonly [number, number])[]): Spans {
+  const merged: Spans = [];
+  for (const [a, b] of [...spans].filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
+
+function intersectSpans(a: Spans, b: Spans): Spans {
+  return a.flatMap(([a0, a1]) => b.flatMap(([b0, b1]): Spans => (Math.min(a1, b1) > Math.max(a0, b0) ? [[Math.max(a0, b0), Math.min(a1, b1)]] : [])));
+}
+
+function subtractSpans(a: Spans, b: Spans): Spans {
+  return a.flatMap(([from, to]) => {
+    const left: Spans = [];
+    let at = from;
+    for (const [b0, b1] of b) {
+      if (b1 <= at || b0 >= to) continue;
+      if (b0 > at) left.push([at, b0]);
+      at = Math.max(at, b1);
+    }
+    if (to > at) left.push([at, to]);
+    return left;
+  });
 }
 
 /** True when `track` shows pictures: a video or program track that is not `hidden`. */

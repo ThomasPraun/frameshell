@@ -48,6 +48,7 @@ import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/c
 import { runDoctor } from "./binaries/doctor.js";
 import { CreditsService } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
+import type { MatteSource } from "./export/compiler.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
@@ -475,8 +476,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         profile: (asset) => energy.profile(dir, asset),
       }),
     // `root` is canonical, the hub's key; each connection gets `project` spelled as it subscribed.
-    onChanged: ({ root, timeline, revision, author, changes }) => {
-      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes });
+    onChanged: ({ root, timeline, revision, author, changes, warnings }) => {
+      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes, ...(warnings ? { warnings } : {}) });
       // A new or changed generated clip renders in the background (SPEC §6.5).
       const opened = openedRoots.get(root);
       if (opened) void clips.refresh(opened).catch(() => {});
@@ -508,6 +509,28 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       ensure: (dir, timeline, onProgress, size) => clips.ensure(clipRoot(dir), timeline, onProgress, size),
     },
     audioFx,
+    mattes: {
+      prepare: async (dir, assets) => {
+        const ready: { asset: string; hash: string; proxy: string }[] = [];
+        for (const asset of assets) {
+          const { hash, proxy } = await media.ingested(dir, asset);
+          if (proxy) ready.push({ asset, hash, proxy });
+        }
+        return {
+          assets: ready.map((one) => one.asset),
+          make: async (onProgress, signal) => {
+            const found = new Map<string, MatteSource>();
+            for (const [index, one] of ready.entries()) {
+              const share = (fraction: number) => onProgress?.((index + fraction) / ready.length);
+              const made = await makeMatte(dir, one.asset, one, { signal, onProgress: share });
+              found.set(one.asset, { path: join(dir, ...mattePaths(made.key).video.split("/")), width: made.info.width, height: made.info.height });
+            }
+            onProgress?.(1);
+            return found;
+          },
+        };
+      },
+    },
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
   });
@@ -787,6 +810,55 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         stop();
         awaitedJobs.delete(info.id);
       }
+    }
+  };
+  /** Mattes being made, by canonical root and cache key, with whether they were found made already. */
+  const matting = new Map<string, Promise<{ info: MatteInfo; cached: boolean }>>();
+  /**
+   * The matte of asset `rel`, ingested as `ready` (ADR 0032), made now when it is missing. Takes no slot of the
+   * job queue, so a render job can wait for it; a matte another caller is making is waited for, not made twice.
+   */
+  const makeMatte = async (
+    dir: string,
+    rel: string,
+    ready: { hash: string; proxy: string },
+    deps: { signal?: AbortSignal | undefined; onProgress?: ((fraction: number) => void) | undefined; report?: (update: Progress) => void },
+  ): Promise<{ key: string; info: MatteInfo; cached: boolean }> => {
+    const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
+    const key = matteKey(ready.hash, matteModel, fps);
+    const slot = `${canonicalPathSync(dir)}\0${key}`;
+    // Settled, the maker may still have failed or been canceled: then the cache decides again.
+    for (let running = matting.get(slot); running; running = matting.get(slot)) await running.catch(() => {});
+    const tell = deps.report ?? (() => {});
+    const run = (async () => {
+      const known = await readMatteInfo(dir, key, ready.hash);
+      if (known) return { info: known, cached: true };
+      const overrides = await projectBinaries(dir);
+      const info = await computeMatte(
+        dir,
+        { asset: rel, hash: ready.hash, proxy: ready.proxy, fps, model: matteModel },
+        {
+          ffmpeg: () => binaries.ensure("ffmpeg", overrides, { onProgress: tell }),
+          ffprobe: () => binaries.ensure("ffprobe", overrides, { onProgress: tell }),
+          files: async () =>
+            options.matteStandIn === true
+              ? { runtime: null, model: null }
+              : {
+                  runtime: await binaries.ensure(ONNX_RUNTIME_WEB, overrides, { onProgress: tell }),
+                  model: await binaries.ensureModel(VIDEO_MATTE_MODEL, { onProgress: tell }),
+                },
+          onProgress: deps.onProgress ?? (() => {}),
+          report: tell,
+          signal: deps.signal ?? new AbortController().signal,
+        },
+      );
+      return { info, cached: false };
+    })();
+    matting.set(slot, run);
+    try {
+      return { key, ...(await run) };
+    } finally {
+      matting.delete(slot);
     }
   };
   /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
@@ -1379,7 +1451,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "marker.remove": (params, caller) => operate("marker.remove", params, caller),
     "track.add": (params, caller) => operate("track.add", params, caller),
     "track.remove": (params, caller) => operate("track.remove", params, caller),
-    "track.set": (params, caller) => operate("track.set", params, caller),
+    "track.set": async (params, caller) => {
+      // ADR 0032 decision 6: image projects have no plates.
+      if (typeof params.behind === "string" && (await readEnclosingProject(await root(params.cwd)))?.config.kind === "image") {
+        throw new RpcError(ErrorCode.InvalidOperation, "track.set: image projects have no video to put a track behind (`behind`).", {
+          op: "track.set",
+          reason: "image project",
+          field: "behind",
+        });
+      }
+      return operate("track.set", params, caller);
+    },
     "clip.add": (params, caller) => operate("clip.add", params, caller),
     "clip.move": (params, caller) => operate("clip.move", params, caller),
     "clip.trim": (params, caller) => operate("clip.trim", params, caller),
@@ -2165,33 +2247,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       };
       return inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
-        // A job of the same content that finished while this one waited made it already.
-        const made = await readMatteInfo(dir, key, ready.hash);
-        if (made) {
-          ctx.update({ cached: true, progress: 1 });
-          return describe(made, true);
-        }
         ctx.update({ step: "matte", progress: 0, cached: false });
-        const overrides = await projectBinaries(dir);
-        const info = await computeMatte(
-          dir,
-          { asset: rel, hash: ready.hash, proxy, fps, model: matteModel },
-          {
-            ffmpeg: () => binaries.ensure("ffmpeg", overrides, { onProgress: tell }),
-            ffprobe: () => binaries.ensure("ffprobe", overrides, { onProgress: tell }),
-            files: async () =>
-              options.matteStandIn === true
-                ? { runtime: null, model: null }
-                : {
-                    runtime: await binaries.ensure(ONNX_RUNTIME_WEB, overrides, { onProgress: tell }),
-                    model: await binaries.ensureModel(VIDEO_MATTE_MODEL, { onProgress: tell }),
-                  },
-            onProgress: (progress) => ctx.update({ progress }),
-            report: tell,
-            signal: ctx.signal,
-          },
-        );
-        return describe(info, false);
+        // Made already when a job or an export of the same content finished while this one waited.
+        const made = await makeMatte(dir, rel, { hash: ready.hash, proxy }, { signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }), report: tell });
+        if (made.cached) ctx.update({ cached: true, progress: 1 });
+        return describe(made.info, made.cached);
       });
     },
     "beats.measure": async ({ cwd, asset, bpm, resetEdits }, _caller, request) => {

@@ -479,6 +479,13 @@ export const ClipTrackSchema = z.strictObject({
   name: z.string().optional(),
   muted: TrackMutedSchema,
   hidden: z.boolean().optional().describe(`Video tracks only. ${HIDDEN}`),
+  behind: Id.optional().describe(
+    "Video tracks only (ADR 0032): id of a video track listed before this one (lower in the stack), the plate. This " +
+      "track's pictures go behind the person in front on the plate: while this track shows a clip, the plate's media " +
+      "clips are drawn again above it through their subject matte, so a word or a logo sits between the background and " +
+      "the person. A shown track between the plate and this one covers the person: while it shows a clip, nothing is " +
+      "drawn again. Absent: none.",
+  ),
   clips: z.array(ClipSchema).describe("Sorted by `start`, never overlapping."),
 });
 
@@ -631,7 +638,14 @@ export const TimelineSchema = z
           else if (clip.dissolve === undefined) ctx.addIssue({ code: "custom", message: "`shape` shapes a dissolve: give the clip a `dissolve` too, or remove `shape`", path });
         });
       }
+      if (track.kind === "video" && track.behind !== undefined) {
+        const plate = timeline.tracks.slice(0, t).find((other) => other.id === track.behind);
+        if (!plate || plate.kind !== "video") {
+          ctx.addIssue({ code: "custom", message: `must name a video track listed before this one (lower in the stack), got "${track.behind}"`, path: ["tracks", t, "behind"] });
+        }
+      }
       if (track.kind !== "audio") return;
+      if (track.behind !== undefined) ctx.addIssue({ code: "custom", message: "audio tracks have no picture to put behind a subject: `behind` is for video tracks", path: ["tracks", t, "behind"] });
       if (track.hidden !== undefined) ctx.addIssue({ code: "custom", message: "audio tracks have no picture to hide: `hidden` is for video and program tracks", path: ["tracks", t, "hidden"] });
       track.clips.forEach((clip, c) => {
         for (const prop of ["x", "y", "scale", "opacity"] as const) {
