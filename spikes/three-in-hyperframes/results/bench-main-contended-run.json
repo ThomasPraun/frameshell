@@ -1,0 +1,272 @@
+{
+  "1080p-default": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 6830,
+    "pmremMs": 2442,
+    "coldFirstPaintMs": 1555.5,
+    "paintMinMs": 147.2,
+    "paintMedianMs": 206.2,
+    "loadavgAtEnd": [
+      14.9,
+      14.5,
+      18.1
+    ],
+    "paintMaxMs": 554.3,
+    "seekMedianMs": 217.8,
+    "screenshotMedianMs": 101.9,
+    "perFrameMs": 308.1,
+    "errors": []
+  },
+  "1080p-msaa-off": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": false,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 7002.5,
+    "pmremMs": 2242.2,
+    "coldFirstPaintMs": 2534.4,
+    "paintMinMs": 118.9,
+    "paintMedianMs": 143,
+    "loadavgAtEnd": [
+      17.7,
+      15.1,
+      18.2
+    ],
+    "paintMaxMs": 199.3,
+    "seekMedianMs": 145.8,
+    "screenshotMedianMs": 103.5,
+    "perFrameMs": 246.5,
+    "errors": []
+  },
+  "1080p-shadows-pcf-hard": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "pcf",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 6955.5,
+    "pmremMs": 2733.9,
+    "coldFirstPaintMs": 1866.8,
+    "paintMinMs": 99.1,
+    "paintMedianMs": 116.6,
+    "loadavgAtEnd": [
+      16.8,
+      15,
+      18.2
+    ],
+    "paintMaxMs": 227.7,
+    "seekMedianMs": 119.3,
+    "screenshotMedianMs": 111.3,
+    "perFrameMs": 227.9,
+    "errors": []
+  },
+  "1080p-shadows-off": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "off",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 5272.1,
+    "pmremMs": 2549.4,
+    "coldFirstPaintMs": 923.4,
+    "paintMinMs": 78.8,
+    "paintMedianMs": 133,
+    "loadavgAtEnd": [
+      15.6,
+      14.8,
+      18
+    ],
+    "paintMaxMs": 201.1,
+    "seekMedianMs": 141.3,
+    "screenshotMedianMs": 119.6,
+    "perFrameMs": 252.6,
+    "errors": []
+  },
+  "1080p-vsm-1024-r8-s16": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 16,
+      "pmremSize": 256
+    },
+    "readyMs": 5634.6,
+    "pmremMs": 1896.4,
+    "coldFirstPaintMs": 1419.6,
+    "paintMinMs": 160.8,
+    "paintMedianMs": 243.8,
+    "loadavgAtEnd": [
+      15.9,
+      14.9,
+      18
+    ],
+    "paintMaxMs": 525.7,
+    "seekMedianMs": 246.3,
+    "screenshotMedianMs": 103.6,
+    "perFrameMs": 347.4,
+    "errors": []
+  },
+  "1080p-vsm-512-r4-s8": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 512,
+      "shadowRadius": 4,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 8680,
+    "pmremMs": 4323.8,
+    "coldFirstPaintMs": 2141.4,
+    "paintMinMs": 129.7,
+    "paintMedianMs": 204.5,
+    "loadavgAtEnd": [
+      19.3,
+      15.7,
+      18.3
+    ],
+    "paintMaxMs": 476.9,
+    "seekMedianMs": 205.9,
+    "screenshotMedianMs": 137.3,
+    "perFrameMs": 341.8,
+    "errors": []
+  },
+  "1080p-vsm-2048-r16-s16": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 2048,
+      "shadowRadius": 16,
+      "shadowBlurSamples": 16,
+      "pmremSize": 256
+    },
+    "readyMs": 26255.9,
+    "pmremMs": 6241.2,
+    "coldFirstPaintMs": 7861.5,
+    "paintMinMs": 1098.7,
+    "paintMedianMs": 1690.3,
+    "loadavgAtEnd": [
+      27.9,
+      18.8,
+      19.2
+    ],
+    "paintMaxMs": 2960.1,
+    "seekMedianMs": 1707.2,
+    "screenshotMedianMs": 139.9,
+    "perFrameMs": 1830.2,
+    "errors": []
+  },
+  "1080p-pmrem-128": {
+    "config": {
+      "width": 1920,
+      "height": 1080,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 128
+    },
+    "readyMs": 23815,
+    "pmremMs": 7878.2,
+    "coldFirstPaintMs": 7217.3,
+    "paintMinMs": 494.4,
+    "paintMedianMs": 931.6,
+    "loadavgAtEnd": [
+      31.4,
+      20.8,
+      20
+    ],
+    "paintMaxMs": 1294.9,
+    "seekMedianMs": 971.3,
+    "screenshotMedianMs": 232.9,
+    "perFrameMs": 1164.5,
+    "errors": []
+  },
+  "720p-default": {
+    "config": {
+      "width": 1280,
+      "height": 720,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 26136.7,
+    "pmremMs": 12584,
+    "coldFirstPaintMs": 8099.6,
+    "paintMinMs": 188,
+    "paintMedianMs": 343.7,
+    "loadavgAtEnd": [
+      29.9,
+      21.5,
+      20.2
+    ],
+    "paintMaxMs": 496.6,
+    "seekMedianMs": 352,
+    "screenshotMedianMs": 92.8,
+    "perFrameMs": 436.5,
+    "errors": []
+  },
+  "2160p-default": {
+    "config": {
+      "width": 3840,
+      "height": 2160,
+      "msaa": true,
+      "shadows": "vsm",
+      "shadowMap": 1024,
+      "shadowRadius": 8,
+      "shadowBlurSamples": 8,
+      "pmremSize": 256
+    },
+    "readyMs": 38853.3,
+    "pmremMs": 9401.2,
+    "coldFirstPaintMs": 10190.1,
+    "paintMinMs": 1333.4,
+    "paintMedianMs": 1953.9,
+    "loadavgAtEnd": [
+      47,
+      30.5,
+      23.9
+    ],
+    "paintMaxMs": 3438.7,
+    "seekMedianMs": 1989,
+    "screenshotMedianMs": 818.1,
+    "perFrameMs": 2772,
+    "errors": []
+  }
+}
