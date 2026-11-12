@@ -38,6 +38,22 @@ const mattes = () =>
 const engineStats = () =>
   page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats: () => Record<string, number> | null } }).frameshellPreviewProbe.stats());
 
+/**
+ * The preview at 2 s once it draws the subject: the app reads `matte.status` on its own clock, so the matte may reach
+ * the program only after the daemon says ready. Placeholder gone first, then `data-shown` of that program's draw.
+ */
+async function showSubjectAt2s(): Promise<void> {
+  const stage = await laidOutBox(page.locator(".preview-stage"));
+  await page.mouse.click(stage.x + 4, stage.y + 4);
+  await page.keyboard.press("Home");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.getByTestId("playhead")).toHaveText("00:00:02:00");
+  await expect(page.getByTestId("preview-layer-placeholder")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "60");
+}
+
 test.beforeAll(async () => {
   test.setTimeout(300_000);
   await addBarcodeAsset(box, "take.mp4", SECONDS);
@@ -54,6 +70,8 @@ test.beforeAll(async () => {
   // The preview's read queues the matte; the stand-in makes it in seconds.
   await expect.poll(mattes, { timeout: 180_000, intervals: [500, 1000] }).toEqual([`${TAKE}:ready`]);
   await installFrameReader(page);
+  // Before either test, so playback never starts while the program still swaps the placeholder for the subject.
+  await showSubjectAt2s();
 });
 
 test.afterAll(async () => {
@@ -61,13 +79,7 @@ test.afterAll(async () => {
 });
 
 test("the subject layer draws the person over the word behind them: the preview frame matches `frameshell frame`", async () => {
-  const stage = await laidOutBox(page.locator(".preview-stage"));
-  await page.mouse.click(stage.x + 4, stage.y + 4);
-  await page.keyboard.press("Shift+ArrowRight");
-  await page.keyboard.press("Shift+ArrowRight");
-  await expect(page.getByTestId("playhead")).toHaveText("00:00:02:00");
-  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "60");
-  await expect(page.getByTestId("preview-layer-placeholder")).toHaveCount(0);
+  await showSubjectAt2s();
 
   const preview = await previewPixels(page, SIZE);
   const exported = await exportedPixels(box, 2);

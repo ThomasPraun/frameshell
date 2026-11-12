@@ -1,6 +1,7 @@
 import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
+  type Backdrop,
   type Clip,
   type ClipEdges,
   type ClipTrack,
@@ -18,6 +19,9 @@ import {
   type Timeline,
   type Transcript,
   audioEffectsOf,
+  backdropLayer,
+  backdropMatrix,
+  backdropOf,
   bakeRef,
   type TransitionContext,
   type TransitionShape,
@@ -369,6 +373,8 @@ interface Placed {
   matte?: ExportSource;
   /** On a subject layer: the only timeline frames [from, to) it is drawn on (`SubjectMark.windows`), sorted. */
   windows?: [number, number][];
+  /** A generated clip's glass on an upper track (ADR 0031): what is below it is blurred where it shows, then it is drawn. */
+  glass?: Backdrop;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -719,6 +725,7 @@ function layoutTimeline(
         );
       }
       const render = clip.asset.startsWith(GENERATED) ? generated.get(clip.id) : undefined;
+      const backdrop = render ? backdropOf(listed) : null;
       const source = render ? generatedSource(render) : sources.get(clip.asset);
       if (!source) throw new Error(`no export source for ${clip.asset}`);
       const subject = track.kind === "video" ? subjectOf(listed) : null;
@@ -769,6 +776,7 @@ function layoutTimeline(
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(backdrop ? { glass: backdrop } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
@@ -840,6 +848,12 @@ function layoutTimeline(
   }
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
+  // Nothing is below the base track to blur (ADR 0031).
+  for (const placed of baseLayer) {
+    if (!placed.glass) continue;
+    delete placed.glass;
+    warnings.push(`Clip ${placed.clip.id} is on the bottom picture track: nothing is below it, so its backdrop was not drawn.`);
+  }
   // Shapes play on the base track only (ADR 0030); elsewhere a shaped dissolve mixes.
   for (const placed of baseLayer) {
     const { shape } = placed.clip;
@@ -1126,19 +1140,21 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const shape = placed.tile ? null : pieceShape(placed, start, end, rect, from, out);
     // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
     const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
-    const chain = [
+    const head = [
       placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
-      ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+    ];
+    /** What multiplies the piece's alpha after its picture: opacity (`name` = its keyed mixer), fades, a wipe, then its timing back. */
+    const tail = (name: string) => [
+      ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, name)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...fades,
       ...(shape?.mask ? [shape.mask] : []),
       ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
-    lines.push(`${chain.join(",")}[o${n}]`);
     const left = placed.tile?.backdrop ? 0 : rect.left;
     const top = placed.tile?.backdrop ? 0 : rect.top;
     const moved = motion?.x !== undefined || shape?.x !== undefined || shape?.y !== undefined;
@@ -1146,12 +1162,68 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const position = moved
       ? `x='${axis(motion?.x ?? String(left), shape?.x)}':y='${axis(motion?.y ?? String(top), shape?.y)}':eval=frame`
       : `x=${left}:y=${top}`;
+    if (placed.glass) {
+      lines.push(`${head.join(",")},split[c${n}][cm${n}]`, `[c${n}]${tail(`o${n}`).join(",") || "null"}[o${n}]`);
+      below = backdropUnder(below, placed.glass, n, position, tail(`om${n}`), [start - from, end - from], to - from, out, lines);
+    } else {
+      lines.push(`${[...head, ...tail(`o${n}`)].join(",")}[o${n}]`);
+    }
     const overlay = `[${below}][o${n}]overlay=${position}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
 }
+
+/**
+ * The backdrop of overlay piece `n` (ADR 0031) laid on `below`; returns the new label below the piece. The mask is the
+ * piece's own alpha cut at its layer's `threshold` (stream `[cm<n>]`, split off before opacity), then faded,
+ * wiped and placed like the piece itself, so glass fades with its card. What is below is blurred (`gblur`), put
+ * through {@link backdropMatrix} (saturate, then the scrim) and drawn back over itself through that mask. Blur and
+ * matrix run only on the segment frames [`on[0]`, `on[1]`) the piece covers: elsewhere the mask is empty.
+ */
+function backdropUnder(
+  below: string,
+  backdrop: Backdrop,
+  n: number,
+  position: string,
+  maskTail: readonly string[],
+  on: [number, number],
+  frames: number,
+  out: GraphTarget,
+  lines: string[],
+): string {
+  const { width, height } = out;
+  const layer = backdropLayer(backdrop, out, out.project);
+  const matrix = backdropMatrix(layer);
+  const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const enable = on[0] > 0 || on[1] < frames ? `:enable='between(n,${on[0]},${on[1] - 1})'` : "";
+  const mixer = matrix.every((value, i) => value === identity[i])
+    ? []
+    : [`colorchannelmixer=${MIXER_COEFFICIENTS.map((name, i) => `${name}=${num(matrix[i]!)}`).join(":")}${enable}`];
+  const look = ["format=gbrp", ...(layer.sigma > 0 ? [`${backdropBlur(layer.sigma)}${enable}`] : []), ...mixer, "format=rgba"];
+  lines.push(
+    `[cm${n}]${[`lutrgb=a='gt(val,${layer.threshold})*255'`, ...maskTail].join(",")}[om${n}]`,
+    `color=c=black@0:s=${width}x${height}:r=${fpsRational(out.fps)},format=rgba,trim=end_frame=${frames}[cv${n}]`,
+    `[cv${n}][om${n}]overlay=${position}:eof_action=pass:format=rgb,alphaextract[bm${n}]`,
+    `[${below}]split[bk${n}][bb${n}]`,
+    `[bb${n}]${look.join(",")}[bg${n}]`,
+    `[bg${n}][bm${n}]alphamerge[ba${n}]`,
+    `[bk${n}][ba${n}]overlay=0:0:format=auto[k${n}]`,
+  );
+  return `k${n}`;
+}
+
+/**
+ * The `gblur` of a backdrop at Gaussian `sigma` (output pixels). Default `steps=1` peaks 1.77x a Gaussian; 3 passes
+ * give 1.15x, near the canvas `blur()` of the preview (shape test in export-render), at ~8 ms per pass per 1080p frame.
+ */
+export function backdropBlur(sigma: number): string {
+  return `gblur=sigma=${num(sigma)}:steps=3`;
+}
+
+/** `colorchannelmixer` options of a row-major 3 x 3 RGB matrix, in order. */
+const MIXER_COEFFICIENTS = ["rr", "rg", "rb", "gr", "gg", "gb", "br", "bg", "bb"] as const;
 
 /**
  * {@link pieceChain} of a subject piece with `matte` as its alpha (ADR 0032): the matte read on the same frames (it

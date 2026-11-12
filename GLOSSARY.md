@@ -42,6 +42,14 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+**Phrase**:
+One stretch of a voiceover take between silences of 60 ms or more, as a range of the take in seconds; the cuts of the phrase clips a person corrects by trimming. Derived from the file, never stored.
+_Avoid_: segment, chunk
+
+**Misread**:
+A difference between what a voiceover take was heard to say (through the project's transcription provider) and the line it was asked to read: `missing`, `changed`, `added`, `moved`, `restart` or `pause`; the line is `clean`, `doubtful` (the transcription may have made it) or `misread`.
+_Avoid_: error (too broad), mispronunciation (the check hears words, not sounds)
+
 ## Synthesized sound (ADR 0038)
 
 **Sound effect**:
@@ -51,6 +59,14 @@ _Avoid_: SFX file, sample (a sample is one number of the audio), foley
 **Anchor** (`peakAt`):
 The instant of a sound effect that must land on the picture it goes with: the transient of a hit, the peak of a whoosh, the end of a riser. Stored in the take's file; placement subtracts it from the cue.
 _Avoid_: peak (alone: loudness), offset
+
+**Cue**:
+The picture event a sound belongs to, as a time on the timeline (seconds or a marker name): a click, a cut, a badge popping in. `sound place` puts the sound's anchor on the cue plus the offset of its role.
+_Avoid_: trigger, hit point
+
+**Role** and **tier**:
+The role says what a sound does to the picture (tap, knock, click, pop, whoosh, swell) and so how far from the cue its anchor sits; the tier (primary, secondary, texture) says how much it matters and so how far under the voice it plays.
+_Avoid_: priority, layer
 
 ## Talking to the agent (ADR 0025)
 
@@ -169,6 +185,10 @@ _Avoid_: voice preset, voice polish, mastering
 **Bake**:
 An asset's sound processed once through one chain of audio effects and cached in `.frameshell/audio-fx/`; preview and export both play it. One bake serves every clip of that asset and chain.
 _Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry sound)
+
+**Glass** (`backdrop`):
+The picture below a generated clip, blurred, saturated and dimmed wherever the clip's alpha shows, drawn just before the clip; the render itself is unchanged. A style choice (`style.json` `glass`), never a default.
+_Avoid_: frosted glass, backdrop-filter (that is the CSS inside a composition, which blurs nothing in a render), blur effect
 
 ## Transitions and keyframes (ADR 0018, ADR 0030)
 

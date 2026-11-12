@@ -1,9 +1,12 @@
 // Preview engine (ADR 0001, SPEC §3.4): decodes proxies and cached clip renders with WebCodecs and composites every
 // video layer into an OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one
 // AudioWorklet mixer. Runs in a Worker: main-thread (React) stalls must not freeze the picture.
+import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
+import { backdropLayer } from "@frameshell/schema/effects";
 import type { ShapePart } from "@frameshell/schema/transitions";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
+import { BackdropPass } from "./backdrop.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
   type Anchor,
@@ -456,6 +459,8 @@ interface Part {
   shape?: ShapePart | null;
   /** Pixels of `image` that fill the whole frame (a covering span, ADR 0027); absent: placed by `layerRect`. */
   cover?: LayerRect;
+  /** A generated clip's backdrop (ADR 0031): laid on what is drawn so far before the picture. */
+  glass?: Backdrop;
 }
 
 class Engine implements LayerHost {
@@ -474,6 +479,7 @@ class Engine implements LayerHost {
   /** Still images by `path#version`. */
   readonly #stills = new Map<string, Still>();
   readonly #masker = new AlphaMasker();
+  readonly #glass = new BackdropPass();
 
   #anchor: Anchor | null = null;
   #clock: ClockSample | null = null;
@@ -602,6 +608,9 @@ class Engine implements LayerHost {
     this.#program = next;
     this.#programVersion++;
     this.#drawn = "";
+    // The canvas holds the previous program's picture: the next draw announces its frame even when it is the same one.
+    this.#shown = Number.NaN;
+    this.#shownAlpha = [];
     const used = new Set<string>();
     for (const layer of next.layers) {
       for (const span of layer) {
@@ -715,7 +724,8 @@ class Engine implements LayerHost {
           parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span, frame: want });
         } else {
           const cover = coverPixels(span, decoded);
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover });
+          const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -795,6 +805,10 @@ class Engine implements LayerHost {
         context.rect(shaped.clip.left, shaped.clip.top, shaped.clip.width, shaped.clip.height);
         context.clip();
       }
+      if (part.glass) {
+        const alpha = part.image instanceof VideoFrame ? part.alpha : null;
+        this.#glass.draw(context, backdropLayer(part.glass, output, project), { rect, alpha, opacity: part.placement.opacity });
+      }
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
         // Covering: masked at the picture's own size, so the crop reads the same pixels as without alpha.
@@ -851,7 +865,7 @@ class Engine implements LayerHost {
   #announce(frame: number): void {
     if (frame === this.#shown) return;
     this.#shown = frame;
-    scope.postMessage({ type: "shown", frame });
+    scope.postMessage({ type: "shown", frame, program: this.#programVersion });
   }
 
   // ---------- stills ----------
