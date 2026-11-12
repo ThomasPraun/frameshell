@@ -935,11 +935,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "timeline": {
       // Adapter clips need the project's plugins loaded, which may need a trust decision.
       const { type, props } = inv.params;
-      if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
+      if (props !== undefined || inv.method === "clip.verify" || (typeof type === "string" && type !== "media" && type !== "timeline")) {
         await settleTrust(conn, flags, io);
       }
       const long = (inv.method === "multicam.faces" || inv.method === "clip.reframe") && !flags.json;
-      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined);
+      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined, outcome);
     }
     case "render": {
       // Plugin presets load only for trusted projects.

@@ -52,16 +52,24 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 - **Runtime 0.2.0.** Adds `pick`, `stage`, `props`, `resolveProps` and `formatClass`. `bind` also writes `window.__timelines ??= {}` literally, because `@hyperframes/lint` looks for that text in a composition's scripts (`missing_timeline_registry`); templates pass `hyperframes check --strict` clean.
 - **Structure.** A template's wrapper is not a timed element (no `data-start`), so the linter does not ask for sub-compositions; the root carries the duration.
 
+### Settled in slice 3
+
+- **`clip.verify`.** A core method (daemon, CLI `frameshell clip verify <clip> [--probes n] [--tolerance 0-255]`, MCP `clip_verify`), for any adapter with a `livePreview`; the page is the live page `clip.live` returns, so the check needs no change in an adapter. Params: `timeline`, `clip` (flattened id as `clip.renders` reports), `probes` (default 12, 2 to 48), `tolerance` (default 2, of 255 per channel). It reads only: no render, no file, no job.
+- **What a probe is.** `probes` composition times at `in + (i + 0.37) x duration / probes`, 3 decimals. Cold: a fresh page per probe seeks straight to the time and is captured. Reseek: one page seeks to another probe (about half the list away: index `i + max(1, floor(n/2) - 1)`), then to the time, and is captured. Captures are PNGs of the page at the project resolution with a transparent background, so alpha counts; identical bytes are identical pictures, and only differing pairs are decoded (by the managed ffmpeg) and compared channel by channel.
+- **What it reports.** Per probe: `at`, `reseekFrom`, `max` (largest channel difference), `pixels` (pixels over the tolerance), `ok`. Overall `ok`, `distinct` (different cold pictures), `warnings` and `worst`: the probe time with the largest difference, its first worst pixel and the element painting it (selector, tag, id, classes, text, box; the probe script of `inspect.point` run while the reseek page still shows that probe, else on a fresh page at that time when the reseek left the pixel empty). `ok: false` makes the CLI exit 1. `distinct: 1` with several probes warns that the clip never moves or the page ignores `seek`, the failure the binding spike found when a timeline is not registered.
+- **Reuse.** Chrome, the page server (`inspect/live-page.ts`, shared with `inspect.point`) and the element probe are those of ADR 0011; the probe times and the 2/255 budget are those of the real-Chrome test of slice 1, which now runs through `ClipVerifier` (`plugins/hyperframes/test/motion-real.test.ts`, opt-in) and passes on the motion runtime.
+- **Not covered.** Frames that straddle a scene handoff (the adapter knows the handoffs, the daemon does not), and the cached render itself: the check is of the live page, and the render of a HyperFrames clip paints through the same page script.
+
 ### Slices
 
 1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).
 2. Templates, `hyperframes new --template`, and `update` (done: two templates of the #466 first set; the rest of that set follows as more template files).
-3. Core determinism verify.
+3. Core determinism verify (done: `clip.verify`).
 4. Format injection and style tokens into compositions.
 
 ## Consequences
 
-- **Unchanged:** schema files and JSON Schema (motion clips are `type: hyperframes`), protocol (no `PROTOCOL_VERSION` bump in slice 1), plugin API (`apiVersion` "1"), cache layout (the runtime copy is an ordinary input file).
+- **Unchanged:** schema files and JSON Schema (motion clips are `type: hyperframes`), protocol (no `PROTOCOL_VERSION` bump in slice 1; slice 3 adds `clip.verify`), plugin API (`apiVersion` "1"), cache layout (the runtime copy is an ordinary input file).
 - **Coupling to HyperFrames internals.** The binding relies on the `__timelines` duck typing (`play`, `pause`, `seek`) and on `hf-seek`. `plugins/hyperframes/test/motion-real.test.ts` must pass on every HyperFrames bump; a break freezes motion compositions on frame 0.
 - **Slow fixes.** A frozen runtime copy fixes an old clip only through `update`.
 - **Authoring rules (in the plugin skill since slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.

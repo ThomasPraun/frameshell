@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
 import { MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
@@ -72,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 103;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1542,6 +1543,40 @@ export const methods = {
         .array(ClipRenderSchema)
         .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
     }),
+  },
+  "clip.verify": {
+    description:
+      "Check that a generated clip's picture is a pure function of time (ADR 0033), as a motion clip must be: its live page is " +
+      "loaded in headless Chrome at the project resolution and `probes` frames are captured at `(i + 0.37) * duration / probes` " +
+      "of the clip's played part, each twice. Cold: a fresh page seeks straight to the time. Reseek: one page shows an unrelated " +
+      "probe first, then the time. The two captures of a probe must not differ by more than `tolerance` per channel " +
+      "(red, green, blue, alpha; default 2 of 255); a bigger difference means the composition keeps state between frames " +
+      "(a CSS transition, a timer, a clock, unseeded randomness, a composited layer) and its render would depend on the order " +
+      "frames are painted. `ok` is false then, and `worst` names the probe time, the pixel and the page element that paints it. " +
+      "`distinct` counts different cold pictures: 1 with several probes (a `warnings` entry says so) means the clip never moves, " +
+      "for example a composition whose timeline is not bound to the seek. Reads only: never renders, writes no file. Takes " +
+      "seconds to a minute (a page load per probe). Needs the plugin of the clip's type loaded and trusted, and its adapter to " +
+      "have a live preview (`hyperframes` does). Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound, " +
+      "TimelineNotFound, LiveUnavailable (no adapter, no live preview, or the page does not define `window.frameshellLive`), " +
+      "OutsideProject, or the Binary* errors when headless Chrome or ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Generated clip id as `clip.renders` reports it (`<nested clip>/<clip>` inside a nested timeline)."),
+      probes: z
+        .int()
+        .min(2)
+        .max(VERIFY_MAX_PROBES)
+        .default(VERIFY_DEFAULT_PROBES)
+        .describe(`Frames to capture, evenly spread over the clip. Default ${VERIFY_DEFAULT_PROBES}.`),
+      tolerance: z
+        .int()
+        .min(0)
+        .max(255)
+        .default(VERIFY_DEFAULT_TOLERANCE)
+        .describe(`Largest per-channel difference (of 255) that still counts as the same picture. Default ${VERIFY_DEFAULT_TOLERANCE}.`),
+    }),
+    result: ClipVerifyResultSchema,
   },
   "audio.bakes": {
     // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
@@ -4427,6 +4462,10 @@ export type ClipRendersResult = MethodResult<"clip.renders">;
 export type ClipLiveParams = MethodParams<"clip.live">;
 /** Result of `clip.live`. */
 export type ClipLiveResult = MethodResult<"clip.live">;
+/** `clip.verify` params. */
+export type ClipVerifyParams = MethodParams<"clip.verify">;
+/** Result of `clip.verify`. */
+export type ClipVerifyResult = MethodResult<"clip.verify">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** One entry of `audio.bakes`. */

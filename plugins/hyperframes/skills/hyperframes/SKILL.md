@@ -60,6 +60,7 @@ A composition that calls `FrameshellMotion.bind("<composition id>", paint)` has 
 - Fonts and images ship inside the composition directory and are known before frame 0; a fallback font is a bug. Do not measure text in script (`getBoundingClientRect` lies under a scaled ancestor): lay out with CSS.
 - Holds never stop: give a held graphic a slow drift or push of a few percent. Prefer solid or radial backgrounds over long dark linear gradients (they band in H.264), and accents at 15 % opacity or more.
 - Frameshell templates carry no GSAP. For a composition you write for the person you may still use GSAP under the rules below.
+- Verify before you trust it: `frameshell clip verify <clip>` (MCP `clip_verify`) captures 12 frames of the clip twice, cold and after seeking elsewhere first, and fails above 2/255 on a channel, naming the worst time, pixel and element. A difference means the composition keeps state between frames (see the rules above); the single warning "every probe frame is the same picture" means the timeline is not bound to the seek.
 
 ## Check
 

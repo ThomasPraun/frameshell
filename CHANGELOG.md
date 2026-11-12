@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Determinism verify for motion clips, third slice of #465 (ADR 0033, epic #451; daemon `clip.verify`, CLI `clip verify`,
+  MCP `clip_verify`, protocol 103): `frameshell clip verify <clip> [--probes n] [--tolerance 0-255]` loads the clip's live
+  page in managed headless Chrome at the project resolution and captures `--probes` frames (default 12, 2 to 48) at
+  `(i + 0.37) x duration / n` of the played part, each twice: cold (a fresh page seeks straight to the time) and after a
+  reseek (one page shows an unrelated probe first). A channel (red, green, blue or alpha) that differs by more than
+  `--tolerance` of 255 (default 2) fails the probe and the command exits 1, naming the worst probe time, the pixel and
+  the page element that paints it (the cold picture's element where the reseek left the pixel empty). `distinct` counts
+  different cold pictures, and a warning says when it is 1 (a clip that never moves, or a timeline not bound to the
+  seek). It works for any adapter with a live preview, reads only (no render, no file written) and needs the plugin
+  trusted. The headless page loader of `inspect.point` moved to `inspect/live-page.ts` so both use one.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
