@@ -99,6 +99,8 @@ describe("BeatsWatcher", () => {
     const root = tempDir();
     mkdirSync(join(root, "beats"), { recursive: true });
     writeFileSync(join(root, "beats", "old.beats.json"), formatBeatsFile(FILE));
+    // macOS reports a write made a few ms before the watch started as a change; the file was there "when the app opened" long before.
+    await new Promise((resolve) => setTimeout(resolve, 400));
     const { seen, onChange } = collect();
     watcher = new BeatsWatcher({ onChange, stabilityMs: 30 });
     watcher.attach(root);

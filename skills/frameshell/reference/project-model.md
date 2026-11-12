@@ -61,7 +61,7 @@ A timeline names the grid it follows in its optional `tempo` (set with `tempo se
 
 - `{ "clip": "c_…" }`: the beats file of that media clip's asset, carried to the timeline through the clip's `start`, `in` and `speed` (a beat inside `[in, out)` lands at `start + (beat - in) / speed`, on the frame grid). Moving, trimming or speeding up the music moves the grid; `edits` of the beats file apply. A clip with no beats file has no grid yet (`tempo show` says so).
 - `{ "bpm": 120, "offset": 0.5, "meter": 4 }`: a nominal grid on the timeline clock, to block a film in bars before music exists. With `"clip"` too, it rides on that clip and `offset` is in the clip's source seconds.
-- `tempo.clip` must name a media clip of a video or audio track; a direct edit that drops the clip but keeps `tempo` is rejected. The app draws the grid on the timeline (bars stronger than beats) and drags snap to it; a hand edit of the beats file updates it live. `--snap-to beat|bar` does the same for a command's times. **Never snap on a LOW grid.**
+- `tempo.clip` must name a media clip of a video or audio track; a direct edit that drops the clip but keeps `tempo` is rejected. The app draws the grid on the timeline (bars stronger than beats) and drags snap to it; a hand edit of the beats file updates it live. `--snap-to beat|bar|marker` does the same for a command's times. **Never snap on a LOW grid.**
 
 ## Scripts
 

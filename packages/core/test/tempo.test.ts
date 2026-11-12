@@ -2,7 +2,7 @@ import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { type BeatsFile, type Timeline, createTimeline, nominalBeatFrame } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import type { OperationRequest } from "../src/timeline/engine.js";
-import { MAX_GRID_BEATS, nearestBeat, snapRequest, tempoGrid } from "../src/timeline/tempo.js";
+import { MARKER_SNAP_REACH_S, MAX_GRID_BEATS, nearestBeat, snapRequest, tempoGrid } from "../src/timeline/tempo.js";
 
 // Seam under test: the timeline's beat grid on the timeline clock (ADR 0029 slice 3), pure but for the beats file
 // lookup, which these tests inject.
@@ -102,7 +102,8 @@ describe("tempoGrid", () => {
     expect(grid!.beats.at(-1)!).toBeGreaterThanOrEqual(60);
     expect(grid!.beats.at(-1)!).toBeLessThan(62);
     expect(await tempoGrid({ fps: FPS, timeline: { ...createTimeline("main"), tempo: { bpm: 90, meter: 3 } }, horizon: 6, beatsOf: beatsOf(null) })).toMatchObject({
-      grid: { meter: 3, bars: [0, 2, 4, 6] },
+      // The grid runs a whole bar (3 beats, 2 s) past the horizon at least.
+      grid: { meter: 3, bars: [0, 2, 4, 6, 8] },
     });
   });
 
@@ -120,6 +121,15 @@ describe("tempoGrid", () => {
     expect(grid!.beats.at(-1)).toBe(5.767);
     expect(grid!.beats).toHaveLength(8);
     expect(grid!.bars).toEqual([3.267, 5.267]);
+  });
+
+  it("keeps a bar start whose beat shares a frame with the one before it", async () => {
+    // Beats 0.2 and 0.21 round to frame 6; beat 1 starts the bar (downbeat 1), so the bar must survive the dedupe.
+    const crowded = beatsFile({ downbeat: 1, beats: [0.2, 0.21, 0.7, 1.2, 1.7, 2.2, 2.7, 3.2, 3.7, 4.2] });
+    const { grid } = await tempoGrid({ fps: FPS, timeline: scored({}, { clip: "c_music" }), horizon: 10, beatsOf: beatsOf(crowded) });
+    expect(grid!.beats.slice(0, 2)).toEqual([0.2, 0.7]);
+    expect(grid!.bars[0]).toBe(0.2);
+    expect(grid!.bars.every((bar) => grid!.beats.includes(bar))).toBe(true);
   });
 
   it("stops a runaway grid", async () => {
@@ -175,6 +185,36 @@ describe("snapRequest", () => {
     expect(bars.args).toEqual({ clip: "c_1", at: 2 });
     const range = await snapRequest(request("cut", { from: 1.1, to: 3.4 }), context);
     expect(range.args).toMatchObject({ from: 1, to: 3.5 });
+  });
+
+  it("finds the next bar of a long meter even when it is more than two beats past the time", async () => {
+    // 120 BPM, 8 beats to the bar: bars at 0 s and 4 s. 2.5 s is 5 beats into the bar, so the bar at 4 s (3 beats) beats the one at 0 s.
+    const long = { ...context, timeline: { ...createTimeline("main"), tempo: { bpm: 120, meter: 8 } }, snapTo: "bar" as const };
+    expect((await snapRequest(request("clip.split", { clip: "c_1", at: 2.5 }), long)).args).toEqual({ clip: "c_1", at: 4 });
+    const six = { ...long, timeline: { ...createTimeline("main"), tempo: { bpm: 120, meter: 6 } } };
+    expect((await snapRequest(request("clip.split", { clip: "c_1", at: 1.8 }), six)).args).toEqual({ clip: "c_1", at: 3 });
+  });
+
+  it("snaps to the nearest marker within reach, with no tempo, never to the marker it moves", async () => {
+    const marked: Timeline = {
+      ...createTimeline("main"),
+      markers: [
+        { id: "m_a", at: 2.3, label: "hook" },
+        { id: "m_b", at: 5, label: "drop" },
+      ],
+    };
+    const near = { ...context, timeline: marked, snapTo: "marker" as const };
+    expect((await snapRequest(request("clip.move", { clip: "c_1", start: 2.9 }), near)).args).toEqual({ clip: "c_1", start: 2.3 });
+    expect((await snapRequest(request("cut", { from: 2.5, to: 4.4 }), near)).args).toEqual({ from: 2.3, to: 5, snap: false });
+    // The marker being moved is not a target: hook, moved to 2.5, does not snap to itself but finds nothing within reach.
+    const moving = await failure(snapRequest(request("marker.set", { marker: "hook", at: 2.5 }), near));
+    expect(moving.message).toMatch(/marker.set: snapTo: at: 2.5 s is more than 1 s from the nearest marker \(at 5 s\)/);
+    expect((await snapRequest(request("marker.set", { marker: "hook", at: 4.4 }), near)).args).toEqual({ marker: "hook", at: 5 });
+    const far = await failure(snapRequest(request("clip.move", { clip: "c_1", start: 8 }), near));
+    expect(far.data).toMatchObject({ reason: "snap", field: "snapTo" });
+    expect(far.message).toContain(`more than ${MARKER_SNAP_REACH_S} s`);
+    const none = await failure(snapRequest(request("clip.move", { clip: "c_1", start: 1 }), { ...near, timeline: createTimeline("main") }));
+    expect(none.message).toMatch(/no marker to snap to/);
   });
 
   it("puts a snapped cut or trim exactly there: pause snapping off unless asked for", async () => {

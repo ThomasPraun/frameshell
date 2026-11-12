@@ -10,7 +10,7 @@ import {
   RpcError,
   type TimelinePatch,
 } from "@frameshell/protocol";
-import type { Timeline } from "@frameshell/schema";
+import { type Timeline, findMusicClip } from "@frameshell/schema";
 import { configOperation } from "../config/journal.js";
 import { applyPatch } from "../timeline/patch.js";
 import { timelineHash } from "./hash.js";
@@ -77,6 +77,13 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
     state = previous;
     anchor = snapshot(state, keys);
     segment = [];
+  }
+  if (conflicts.size === 0) {
+    // A later `tempo.set` follows a clip the target created: undoing the target would leave `tempo.clip` dangling.
+    const follows = restored.tempo?.clip;
+    if (follows !== undefined && !findMusicClip(restored, follows)) {
+      for (const other of tail.filter((entry) => !inTarget(entry) && entry.inverse.args.tempo !== undefined)) conflicts.set(other.id, { entry: other, ids: new Set(["tempo"]) });
+    }
   }
   if (conflicts.size > 0) {
     const ordered = [...conflicts.values()].sort((a, b) => tail.indexOf(a.entry) - tail.indexOf(b.entry));
@@ -270,7 +277,10 @@ function relates(entry: JournalEntry, key: string, ...states: Timeline[]): boole
 function patchRelates(patch: TimelinePatch, key: string, states: Timeline[]): boolean {
   if (patchKeys(patch).includes(key)) return true;
   if (key === "order") return (patch.tracks ?? []).length > 0;
-  if (key === "tempo") return false;
+  // `tempo` and the clip it follows depend on each other: a tempo change relates to that clip, and a change of that clip to the tempo.
+  const followed = states.map((state) => state.tempo?.clip).filter((clip) => clip !== undefined);
+  if (key === "tempo") return followed.some((clip) => (patch.clips ?? []).some((entry) => entry.id === clip));
+  if (patch.tempo !== undefined && key.startsWith("clip:") && followed.includes(key.slice("clip:".length))) return true;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
   if (key.startsWith("group:") || key.startsWith("marker:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);

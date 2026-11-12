@@ -77,6 +77,7 @@ export {
   type Tempo,
   markerLabelKey,
   findMarker,
+  findMusicClip,
   describeMarkers,
   type Timeline,
   type Track,

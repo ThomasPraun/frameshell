@@ -603,6 +603,16 @@ export function describeMarkers(markers: readonly Marker[] | undefined): string 
   return (markers ?? []).map((marker) => `${marker.id} "${marker.label}" at ${marker.at} s`).join(", ");
 }
 
+/** The media clip of a video or audio track with id `id`, the only kind `tempo.clip` may name (ADR 0029 decision 4); undefined when there is none. */
+export function findMusicClip(timeline: Pick<Timeline, "tracks">, id: string): MediaClip | undefined {
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video" && track.kind !== "audio") continue;
+    const clip = track.clips.find((candidate) => candidate.id === id);
+    if (clip) return clip.type === "media" ? (clip as MediaClip) : undefined;
+  }
+  return undefined;
+}
+
 /** The beat grid a timeline follows (ADR 0029); see {@link TempoSchema}. Written out to keep the protocol registry's type small. */
 export interface Tempo {
   clip?: string | undefined;
@@ -705,8 +715,7 @@ export const TimelineSchema = z
       else labels.set(key, marker.id);
     });
     if (timeline.tempo?.clip !== undefined) {
-      const music = timeline.tracks.flatMap((track) => (track.kind === "video" || track.kind === "audio" ? track.clips : [])).find((clip) => clip.id === timeline.tempo!.clip);
-      if (!music || music.type !== "media") {
+      if (!findMusicClip(timeline, timeline.tempo.clip)) {
         ctx.addIssue({
           code: "custom",
           message: `must name a media clip of a video or audio track, got "${timeline.tempo.clip}"`,

@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   draws the grid, bars stronger than beats, both on the lanes and as ruler ticks (the level too dense to read at the
   current zoom is left out), and dragged clip edges snap to beats and bars (a clip edge, marker or the playhead in reach
   wins; a trimmed edge on a beat goes exactly there; a LOW confidence grid is drawn but never snapped to). `--snap-to
-  beat|bar` (daemon and MCP `snapTo`) on `clip add|move|trim|split|key`, `transition set|remove`, `marker add|set` and
-  `cut` moves each time of the command to the nearest beat or bar start first and records the seconds; it is refused
-  with no tempo, without a beats file, on a LOW confidence grid or for a time far outside the music. The daemon watches
+  beat|bar|marker` (daemon and MCP `snapTo`) on `clip add|move|trim|split|key`, `transition set|remove`, `marker add|set` and
+  `cut` moves each time of the command to the nearest beat, bar start or marker (within 1 s) first and records the seconds; beat
+  and bar are refused with no tempo, without a beats file, on a LOW confidence grid or for a time far outside the music. The daemon watches
   `beats/` (it may not exist yet): a beats file written, hand-edited, deleted or broken sends `beats.changed`, so a hand
   edit of `edits` (half or double time, a moved downbeat) changes the grid in the open app at once, and a broken file
   takes the grid away until it validates again. Older Frameshell versions reject a timeline that carries `tempo`.

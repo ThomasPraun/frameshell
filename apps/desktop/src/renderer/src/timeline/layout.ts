@@ -202,6 +202,8 @@ export interface GridBox {
   bars: readonly number[];
   bpm: number;
   meter: number;
+  /** The music clip the grid rides on; absent for a nominal grid on the timeline clock. */
+  clip?: string;
   /** A LOW confidence grid is drawn but never snapped to (`--snap-to` refuses it too). */
   low: boolean;
 }
@@ -305,7 +307,7 @@ export function layoutTimeline(
     top += height + lanesHeight;
     return row;
   });
-  const grid = view.grid && view.grid.beats.length > 0 ? { beats: view.grid.beats, bars: view.grid.bars, bpm: view.grid.bpm, meter: view.grid.meter, low: view.grid.low } : null;
+  const grid = view.grid && view.grid.beats.length > 0 ? { beats: view.grid.beats, bars: view.grid.bars, bpm: view.grid.bpm, meter: view.grid.meter, low: view.grid.low, ...(view.grid.clip ? { clip: view.grid.clip } : {}) } : null;
   return { grid, markers, scenes: [...scenes], sceneTop, head, rows, duration, height: top, clipCount };
 }
 
@@ -405,7 +407,7 @@ export function visibleClips(clips: readonly ClipBox[], t0: number, t1: number):
 }
 
 /** First index where `past` turns true; `past` must be monotonic over `items`. */
-function lowerBound<T>(items: readonly T[], past: (item: T) => boolean): number {
+export function lowerBound<T>(items: readonly T[], past: (item: T) => boolean): number {
   let lo = 0;
   let hi = items.length;
   while (lo < hi) {

@@ -10,6 +10,7 @@ import {
   type TimelineLayout,
   type TrackRow,
   formatDuration,
+  lowerBound,
   rulerTicks,
   visibleClips,
 } from "./layout.js";
@@ -824,18 +825,6 @@ const BAR_LINE_ALPHA = 0.2;
 const BEAT_TICK = 3;
 const BAR_TICK = 8;
 
-/** Index of the first of `times` (increasing) at or after `time`. */
-function firstFrom(times: readonly number[], time: number): number {
-  let low = 0;
-  let high = times.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if (times[mid]! < time) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
 /**
  * What the beat grid draws at this zoom: the beats and bars in view, each level only while its marks are at least
  * {@link GRID_MIN_SPACING_PX} apart (bars still show when the beats are too dense).
@@ -845,7 +834,7 @@ function visibleGrid<Img>(input: PaintInput<Img>, t0: number, t1: number): { bea
   const { pxPerSecond } = input.viewport;
   const within = (times: readonly number[]) => {
     const out: number[] = [];
-    for (let index = firstFrom(times, t0 - 1 / pxPerSecond); index < times.length && times[index]! <= t1 + 1 / pxPerSecond; index++) out.push(times[index]!);
+    for (let index = lowerBound(times, (at) => at >= t0 - 1 / pxPerSecond); index < times.length && times[index]! <= t1 + 1 / pxPerSecond; index++) out.push(times[index]!);
     return out;
   };
   const beatPx = (60 / grid.bpm) * pxPerSecond;

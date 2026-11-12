@@ -58,7 +58,7 @@ const TimeRef = (what: string) =>
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 
 /** What `snapTo` lands on (ADR 0029 decision 6). */
-export const SNAP_TO_KINDS = ["beat", "bar"] as const;
+export const SNAP_TO_KINDS = ["beat", "bar", "marker"] as const;
 
 /** A value of `snapTo`. */
 export type SnapToKind = (typeof SNAP_TO_KINDS)[number];
@@ -72,8 +72,8 @@ const snapToArg: z.ZodOptional<z.ZodType<SnapToKind, SnapToKind>> = z
   .enum(SNAP_TO_KINDS)
   .optional()
   .describe(
-    "Move each time argument to the nearest `beat`, or the nearest `bar` start, of the timeline's grid (`tempo.show`) before the " +
-      "operation runs. Needs a `tempo` (`tempo.set`) and a grid that is not LOW confidence. A `cut` or `clip.trim` landing on a " +
+    "Move each time argument to the nearest `beat`, the nearest `bar` start, or the nearest `marker` (within 1 s) before the " +
+      "operation runs. `beat` and `bar` need a `tempo` (`tempo.set`) and a grid that is not LOW confidence. A `cut` or `clip.trim` landing on a " +
       "beat goes exactly there (pause snapping off unless `snap: true`). Default: the times as given.",
   );
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");

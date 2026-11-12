@@ -3000,7 +3000,7 @@ export const methods = {
       "on the timeline clock for blocking a film before music exists (beat `i` at `offset + 60 i / bpm`, each frame rounded once), " +
       "`{ clip, bpm, offset? }` a nominal grid riding on a clip (`offset` in its source seconds), `{ clear: true }` removes it. " +
       "Replaces the whole tempo. The app draws bars stronger than beats, drags snap to them, and any time argument takes `snapTo: " +
-      "\"beat\" | \"bar\"`. Removing the `clip` clears the tempo with a warning. Fails with InvalidOperation (not a media clip " +
+      "\"beat\" | \"bar\" | \"marker\"`. Removing the `clip` clears the tempo with a warning. Fails with InvalidOperation (not a media clip " +
       "of a video or audio track, nothing to set).",
     params: operationArgs["tempo.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

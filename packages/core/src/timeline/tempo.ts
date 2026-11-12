@@ -1,6 +1,5 @@
 import { ErrorCode, RpcError, type SnapToKind, TIME_REF_FIELDS } from "@frameshell/protocol";
-import { type BeatsFile, type MediaClip, type Tempo, type Timeline, effectiveBeatGrid, isLowConfidence, nominalBeatFrame } from "@frameshell/schema";
-import { isMediaClip } from "../segment/cutout.js";
+import { type BeatsFile, type MediaClip, type Tempo, type Timeline, effectiveBeatGrid, findMarker, findMusicClip, isLowConfidence, nominalBeatFrame } from "@frameshell/schema";
 import { FrameGrid } from "./grid.js";
 import { TimeRefError, resolveTimeRef } from "./time-ref.js";
 import type { OperationRequest } from "./engine.js";
@@ -14,8 +13,14 @@ import type { OperationRequest } from "./engine.js";
 /** Most beats one grid lists; a nominal grid over hours at a high tempo stops here. */
 export const MAX_GRID_BEATS = 20_000;
 
-/** How far past a nominal grid's last requested time it is built, beats. */
+/** Fewest beats a nominal grid is built past its last requested time; it is built a whole bar past it at least. */
 const NOMINAL_TAIL_BEATS = 2;
+
+/** How far a time may sit from the marker `--snap-to marker` moves it to, seconds. */
+export const MARKER_SNAP_REACH_S = 1;
+
+/** The beat kinds of `snapTo`, which need a grid; `marker` does not. */
+type GridKind = Exclude<SnapToKind, "marker">;
 
 /** A beat grid on the timeline clock. */
 export interface TimelineGrid {
@@ -57,16 +62,6 @@ export interface TempoInput {
   beatsOf(asset: string): Promise<BeatsFile | null>;
 }
 
-/** The media clip `tempo.clip` names, with the track kind it sits on; undefined when it is gone. */
-function musicClip(timeline: Pick<Timeline, "tracks">, id: string): MediaClip | undefined {
-  for (const track of timeline.tracks) {
-    if (track.kind !== "video" && track.kind !== "audio") continue;
-    const clip = track.clips.find((candidate) => candidate.id === id);
-    if (clip && isMediaClip(clip)) return clip;
-  }
-  return undefined;
-}
-
 /** Indexes (of `count` beats) that start a bar when beat `first` does and bars repeat every `meter` beats. */
 function barIndexes(count: number, first: number, meter: number): Set<number> {
   const starts = new Set<number>();
@@ -86,7 +81,7 @@ export async function tempoGrid(input: TempoInput): Promise<TempoResult> {
   if (!tempo) return { grid: null, problem: null };
   const frames = new FrameGrid(fps);
   if (tempo.clip === undefined) return { grid: nominalGrid(tempo, fps, input.horizon, frames), problem: null };
-  const clip = musicClip(timeline, tempo.clip);
+  const clip = findMusicClip(timeline, tempo.clip);
   if (!clip) return { grid: null, problem: `tempo follows clip ${tempo.clip}, which is not a media clip of the timeline.` };
   const speed = clip.speed ?? 1;
   if (tempo.bpm !== undefined) return { grid: nominalClipGrid(tempo, clip, speed, fps, frames), problem: null };
@@ -102,10 +97,15 @@ export async function tempoGrid(input: TempoInput): Promise<TempoResult> {
     // Half a frame of slack at the clip's edges: a beat on the first or last frame belongs to the clip.
     if (time < clip.in - 0.5 / fps || time >= clip.out - 0.5 / fps || beats.length >= MAX_GRID_BEATS) return;
     const frame = frames.frame(clip.start + (time - clip.in) / speed);
-    if (frame === last) return;
+    const seconds = frames.seconds(frame);
+    if (frame === last) {
+      // Two beats on one frame (a very fast grid): keep one beat, but never lose a bar start that was the second of them.
+      if (starts.has(index) && bars.at(-1) !== seconds) bars.push(seconds);
+      return;
+    }
     last = frame;
-    beats.push(frames.seconds(frame));
-    if (starts.has(index)) bars.push(frames.seconds(frame));
+    beats.push(seconds);
+    if (starts.has(index)) bars.push(seconds);
   });
   const grid: TimelineGrid = {
     source: "beats",
@@ -126,7 +126,7 @@ function nominalGrid(tempo: Tempo, fps: number, horizon: number, frames: FrameGr
   const bpm = tempo.bpm!;
   const meter = tempo.meter ?? 4;
   const offset = tempo.offset ?? 0;
-  const until = horizon + (NOMINAL_TAIL_BEATS * 60) / bpm;
+  const until = horizon + (Math.max(NOMINAL_TAIL_BEATS, meter) * 60) / bpm;
   const beats: number[] = [];
   const bars: number[] = [];
   for (let index = 0; index < MAX_GRID_BEATS; index++) {
@@ -160,7 +160,7 @@ function nominalClipGrid(tempo: Tempo, clip: MediaClip, speed: number, fps: numb
 }
 
 /** The beat or bar of `grid` nearest to `seconds`; the earlier one on a tie. Throws when the grid has none within a beat of it. */
-export function nearestBeat(grid: TimelineGrid, seconds: number, kind: SnapToKind): number {
+export function nearestBeat(grid: TimelineGrid, seconds: number, kind: GridKind): number {
   const list = kind === "bar" ? grid.bars : grid.beats;
   if (list.length === 0) throw new TimeRefError(`the timeline's grid has no ${kind === "bar" ? "bar starts" : "beats"} to snap to.`);
   let low = 0;
@@ -190,11 +190,25 @@ export interface SnapContext {
 }
 
 /**
+ * The marker of `timeline` nearest to `seconds` within {@link MARKER_SNAP_REACH_S}; the earlier one on a tie.
+ * `except` is a marker id never offered (the marker a `marker.set` moves). Throws when there is none in reach.
+ */
+export function nearestMarker(timeline: Pick<Timeline, "markers">, seconds: number, except?: string): number {
+  const times = (timeline.markers ?? []).filter((marker) => marker.id !== except).map((marker) => marker.at).sort((a, b) => a - b);
+  if (times.length === 0) throw new TimeRefError("the timeline has no marker to snap to.", "Add one with `marker.add`.");
+  const best = times.reduce((near, time) => (Math.abs(time - seconds) < Math.abs(near - seconds) ? time : near));
+  if (Math.abs(best - seconds) > MARKER_SNAP_REACH_S) {
+    throw new TimeRefError(`${seconds} s is more than ${MARKER_SNAP_REACH_S} s from the nearest marker (at ${best} s).`, "Give a time closer to a marker, or name the marker (`--at hook`).");
+  }
+  return best;
+}
+
+/**
  * `request` with every time argument of its operation (the {@link TIME_REF_FIELDS} table) resolved and moved to the
- * nearest beat or bar of the timeline's grid (`snapTo`, ADR 0029 decision 6). A `cut` or `clip.trim` that is snapped
+ * nearest beat or bar of the timeline's grid, or the nearest marker (`snapTo`, ADR 0029 decision 6). A `cut` or `clip.trim` that is snapped
  * to the beat goes exactly there, so pause snapping is off unless the caller asked for it. Throws `RpcError`
  * `InvalidOperation` (reason `snap`) when the timeline has no usable grid, the grid is LOW confidence or a time is
- * outside it.
+ * outside it. `marker` needs no tempo: it fails when no marker is within {@link MARKER_SNAP_REACH_S}.
  */
 export async function snapRequest(request: OperationRequest, context: SnapContext): Promise<OperationRequest> {
   const fields: readonly string[] | undefined = (TIME_REF_FIELDS as Partial<Record<string, readonly string[]>>)[request.op];
@@ -212,6 +226,18 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
       throw new RpcError(ErrorCode.InvalidOperation, `${request.op}: ${field}: ${error.message}`, { op: request.op, field, reason: "time reference", ...(error.hint ? { hint: error.hint } : {}) });
     }
   }
+  const snapTo = context.snapTo;
+  if (snapTo === "marker") {
+    const self = request.op === "marker.set" && typeof args["marker"] === "string" ? findMarker(context.timeline.markers, args["marker"])?.id : undefined;
+    return withSnapped(request, args, given, (field) => {
+      try {
+        return nearestMarker(context.timeline, resolved[field]!, self);
+      } catch (error) {
+        if (!(error instanceof TimeRefError)) throw error;
+        throw refuse(`${field}: ${error.message}`, error.hint);
+      }
+    });
+  }
   const { grid, problem } = await tempoGrid({
     fps: context.fps,
     timeline: context.timeline,
@@ -227,15 +253,20 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
       `Check it with \`beats.show\`, then correct it with \`edits.tempo\` or \`edits.downbeat\` in its beats file, or measure again with a \`bpm\` hint.`,
     );
   }
-  const next: Record<string, unknown> = { ...args };
-  for (const field of given) {
+  return withSnapped(request, args, given, (field) => {
     try {
-      next[field] = nearestBeat(grid, resolved[field]!, context.snapTo);
+      return nearestBeat(grid, resolved[field]!, snapTo);
     } catch (error) {
       if (!(error instanceof TimeRefError)) throw error;
       throw refuse(`${field}: ${error.message}`, error.hint);
     }
-  }
+  });
+}
+
+/** `request` with each of `fields` replaced by `land(field)`; a `cut` or `clip.trim` then goes exactly there (pause snapping off unless asked). */
+function withSnapped(request: OperationRequest, args: Record<string, unknown>, fields: string[], land: (field: string) => number): OperationRequest {
+  const next: Record<string, unknown> = { ...args };
+  for (const field of fields) next[field] = land(field);
   if ((request.op === "cut" || request.op === "clip.trim") && next["snap"] === undefined) next["snap"] = false;
   return { op: request.op, args: next } as OperationRequest;
 }

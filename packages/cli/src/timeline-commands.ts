@@ -199,10 +199,10 @@ mutations print the new revision):
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
-  --snap-to beat|bar (clip add, clip move, clip trim, clip split, clip key, transition, marker add and set, cut) moves
-  each time of the command to the nearest beat, or bar start, of the timeline's tempo grid first; a cut or clip trim
-  then lands exactly (no pause snapping). Refused without a tempo, and on a LOW confidence grid (check beats show,
-  correct edits in the beats file or measure again with --bpm).
+  --snap-to beat|bar|marker (clip add, clip move, clip trim, clip split, clip key, transition, marker add and set, cut)
+  moves each time of the command to the nearest beat, bar start or marker (within 1 s) first; a cut or clip trim
+  then lands exactly (no pause snapping, so --snap-window is refused with it). beat and bar are refused without a
+  tempo, and on a LOW confidence grid (check beats show, correct edits in the beats file or measure again with --bpm).
   --ripple (clip add, clip trim) moves later clips on every video, audio and program track by the length added or
   removed, the inverse of cut: restore removed material without overlapping the next clip.
   --ripple-track <track> (repeatable) limits that to the clip's own track plus the named ones.
@@ -216,7 +216,7 @@ mutations print the new revision):
   --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
   --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
   runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
-  beat: and bar: names are reserved and refused until a later slice; use --snap-to beat|bar meanwhile.
+  beat: and bar: names are reserved and refused until a later slice; use --snap-to beat|bar|marker meanwhile.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -583,10 +583,13 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       return { from: Number(match[1]), to: Number(match[2]) };
     });
   };
-  /** `--snap-to beat|bar` as the `snapTo` param. */
+  /** `--snap-to beat|bar|marker` as the `snapTo` param. */
   const snapTo = (): { snapTo: string | undefined } => {
     const kind = str("snap-to");
-    if (kind !== undefined && kind !== "beat" && kind !== "bar") throw new UsageError(`--snap-to: expected beat or bar, got "${kind}".`);
+    if (kind !== undefined && kind !== "beat" && kind !== "bar" && kind !== "marker") throw new UsageError(`--snap-to: expected beat, bar or marker, got "${kind}".`);
+    if (kind !== undefined && values["snap-window"] !== undefined && (command === "cut" || command === "clip trim")) {
+      throw new UsageError("--snap-window does nothing with --snap-to: the time lands exactly on the beat, bar or marker.");
+    }
     return { snapTo: kind };
   };
   const snap = () => {

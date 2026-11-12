@@ -58,6 +58,12 @@ describe("snapping to beats and bars", () => {
     expect(snapPoints(low, 30, new Set()).some((point) => point.kind === "beat" || point.kind === "bar")).toBe(false);
   });
 
+  it("leaves out a grid that rides on a dragged clip: its beats move with it", () => {
+    const riding = layoutTimeline(view({ grid: { source: "beats", clip: "c_b", bpm: 120, meter: 4, low: false, beats, bars } }));
+    expect(snapPoints(riding, 30, new Set(["c_b"])).some((point) => point.kind === "beat" || point.kind === "bar")).toBe(false);
+    expect(snapPoints(riding, 30, new Set(["c_a"])).some((point) => point.kind === "beat")).toBe(true);
+  });
+
   it("moves a dragged clip's start onto the nearest beat, and puts a trimmed edge on a bar exactly", () => {
     const snap = { points: snapPoints(layout, 30, new Set(["c_b"])), tolerance: 0.2 };
     // c_b plays 3–8.25: a start dragged to 3.9 lands on the beat at 4; the end (9.15) is farther from a beat (9).

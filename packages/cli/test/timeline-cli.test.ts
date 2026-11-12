@@ -625,6 +625,12 @@ describe("tempo and --snap-to (ADR 0029)", () => {
     const cut = json<{ operation: { args: Record<string, unknown> } }>(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", ...on]);
     expect(cut.operation.args).toMatchObject({ from: 1, to: 2, snap: false });
 
+    expect(frameshell(["marker", "add", "--at", "1.2", "--label", "d", "--snap-to", "marker", ...on]).code).toBe(0);
+    // The cut above removed a and c (inside 1-2 s); b at 0.5 s is the only marker in reach of 1.2 s.
+    expect(markers()).toContainEqual(["d", 0.5]);
+    expect(frameshell(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", "--snap-window", "1", ...on]).stderr).toMatch(/--snap-window does nothing with --snap-to/);
+    expect(frameshell(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", "--snap-window", "1", ...on]).code).toBe(2);
+
     expect(frameshell(["tempo", "clear", ...on]).code).toBe(0);
     expect(stored()).not.toHaveProperty("tempo");
     expect(frameshell(["tempo", "show", ...on]).stdout).toMatch(/has no tempo/);

@@ -42,12 +42,13 @@ export type SnapPoint = { time: number; kind: "clip" | "playhead" | "beat" | "ba
 
 /**
  * Snap targets for a drag: every clip edge but those of `exclude`, the playhead, every marker and, unless the grid is
- * LOW confidence, every beat (a bar start is a `bar`). Sorted by time.
+ * LOW confidence, every beat (a bar start is a `bar`). Sorted by time. A grid that rides on a dragged clip is left
+ * out: it moves with the clip, so its beats would only snap the clip to where it already was.
  */
 export function snapPoints(layout: TimelineLayout, playhead: number, exclude: ReadonlySet<string>): SnapPoint[] {
   const points: SnapPoint[] = [{ time: playhead, kind: "playhead" }];
   for (const marker of layout.markers) points.push({ time: marker.at, kind: "marker", label: marker.label });
-  if (layout.grid && !layout.grid.low) {
+  if (layout.grid && !layout.grid.low && !(layout.grid.clip !== undefined && exclude.has(layout.grid.clip))) {
     const bars = new Set(layout.grid.bars);
     for (const time of layout.grid.beats) points.push({ time, kind: bars.has(time) ? "bar" : "beat" });
   }
