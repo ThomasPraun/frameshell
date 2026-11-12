@@ -22,7 +22,7 @@ Every visual and sound decision of a video (colours, fonts, text sizes, how thin
 3. **Plain JSON** (SPEC decision 7 unchanged), schema `style.json` published with the others.
 4. **Notes, rules and the banned list live inside `style.json`** as string arrays in the person's words, so critique and review read them as data. The `scripts/style.md` habit migrates by a skill edit.
 5. **Loudness, one source per thing.** The integrated LUFS target stays `export.loudness` / the preset. The style holds only relative levels (music and effects under the voice, ducking) and the voice-chain defaults; an effect set on a clip overrides the style's default.
-6. **Style edits are journaled** (revertible, held by review mode) with the same project-config journal as formats (#496). Until that exists, the same stopgap as formats: agents may not change the style while review mode is on.
+6. **Style edits are journaled** (revertible, held by review mode) with the same project-config journal as formats (#496, ADR 0036).
 7. **Fonts** are project files under `assets/fonts/` or a short list of bundled OFL faces. Frameshell never downloads fonts; an agent that fetches one imports it as an asset with its credit (#484).
 8. **Five motion personalities**: playful, premium, corporate, energetic (the measured numbers) and **calm** (no overshoot, no keyword highlight). A style picks one and overrides single values; objects merge field by field, as `director.json` does over its template.
 9. **Safe zones are core data per platform with one home** (`packages/schema/src/safe-zones.ts`). Styles and formats name the platform; nobody copies its numbers. Each zone says whether it was measured.
@@ -44,9 +44,20 @@ Every visual and sound decision of a video (colours, fonts, text sizes, how thin
 - Daemon method `style.show { cwd }` (read-only; `style` null without a file; `InvalidProjectFile` on a bad file) with the safe zones of the named platforms, `PROTOCOL_VERSION` 80; CLI `frameshell style show [--json]`; MCP `style_show` from the registry. `file.write` refuses an invalid `style.json`.
 - Nothing renders from the style yet; no existing output changes.
 
+## Slice 2: style set, user styles (built)
+
+- **One write path.** `style.json` is the `style` document of the config journal (ADR 0036): keyed state `style:<path>` per value of `STYLE_PATHS` (`packages/schema/src/style.ts`, derived from `resolveStyle`'s leaves, so a font, a colour, an ease and a list are one key each) plus `style:from`. A value null or absent in the file has no key; a state with no key is no file, so reverting the change that created `style.json` removes it. The document writes only the keys that changed into the file on disk, keeping `$schema`, key order and the rest (`packages/core/src/style/doc.ts`).
+- **`style.set { path, value }`** (CLI `frameshell style set <path> <value>`, value JSON else text, `null` removes): checked against the schema before anything is journaled (InvalidOperation `path` or `value`), journaled with `undo` = `style.set` of the old value, held by review mode for anyone but `ui`.
+- **User styles** in `<configDir>/styles/<id>.json` (`USER_STYLES_DIR`, only via the daemon's `resolveAppDirs()` dirs), ids lowercase `[a-z0-9_-]`, never a personality id. `style.save <name> [force]` copies the project file out without `from` (not journaled: not a project change; an existing one is kept unless `force`). `style.list` lists them with SHA-256, personality and `error` when invalid.
+- **`style.apply <name|personality> [replace]`** (decision 10): a user style merges value by value over the project's values (`replace`: the file becomes exactly the user style) and records `from: { id, sha256 }` of the file's bytes; a personality sets only `motion.personality` (with `replace`, all the file keeps). The result lists every changed value in schema order. An invalid user style is InvalidGlobalConfig; an unknown name is InvalidOperation `not found` with the available ids.
+- **`style.show`** gains `view` (an open proposal's version, ADR 0036 decision 4) and `from.status`: `same`, `changed` (the user style was edited since: apply it again to take the edit) or `missing`.
+- **`file.write` of `style.json`** (ADR 0036 decision 5) is a `file.write` config operation when it changes a value, written as given at once or held whole by review mode; one that changes no value, or replaces an invalid file, is written at once. The review-mode refusal of slice 1 is gone.
+- Wire: `PROTOCOL_VERSION` 98; `ConfigDocSchema` gains `style`.
+
 ## Consequences
 
-- Later slices: user styles (`configDir/styles/` via `resolveAppDirs()`, `style apply`/`save`), a journaled `style set` with the review-mode stopgap of decision 6, captions taking the style as their base (decision 11, with a preview/export parity test), project fonts (metrics read from the file instead of the `SUBTITLE_FONT` constants), and tokens injected into generated clips the way ADR 0021 injects element CSS, entering the clip key only for adapters that opt in.
-- Until `style set` exists, agents write `style.json` with `file_write` or their file tools, which is not journaled; while review mode is on the daemon refuses an agent's `file_write` of it (ADR 0036 slice 2) and the skill tells them not to write it by hand.
+- Later slices: captions taking the style as their base (decision 11, with a preview/export parity test), project fonts (metrics read from the file instead of the `SUBTITLE_FONT` constants), and tokens injected into generated clips the way ADR 0021 injects element CSS, entering the clip key only for adapters that opt in.
+- Every write of `style.json` by the daemon goes through the config journal; only a hand edit outside the daemon bypasses it, and shows as a hash gap on `revert` (direct on-disk edits are ADR 0036 slice 5).
+- The proposal bar of the app lists only format changes so far; a proposal holding style changes shows them in `proposal status`/`proposal diff` (`style:<path>` keys) and in `style.show` with `view: proposal`.
 - A host older than this ADR ignores `style.json`; nothing else reads it.
 - Safe zones other than Instagram's are from editing guides, marked `measured: false`, to be measured before review (#457) fails a video on them.

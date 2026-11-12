@@ -584,7 +584,7 @@ describe("markers (ADR 0029)", () => {
     const unknown = frameshell(["cut", "--from", "drop", "--to", "3", ...on]);
     expect(unknown.code).not.toBe(0);
     expect(unknown.stderr).toMatch(/cut: from: "drop" is neither seconds nor a marker of timeline named/);
-    expect(frameshell(["cut", "--from", "hook", "--to", "beat:4", ...on]).stderr).toMatch(/needs the beat grid/);
+    expect(frameshell(["cut", "--from", "hook", "--to", "beat:4", ...on]).stderr).toMatch(/to: "beat:4": the timeline has no tempo/);
     expect(frameshell(["clip", "split", "c_x", "--at", "", ...on]).code).toBe(2);
   });
 });
@@ -628,12 +628,17 @@ describe("tempo and --snap-to (ADR 0029)", () => {
     expect(frameshell(["marker", "add", "--at", "1.2", "--label", "d", "--snap-to", "marker", ...on]).code).toBe(0);
     // The cut above removed a and c (inside 1-2 s); b at 0.5 s is the only marker in reach of 1.2 s.
     expect(markers()).toContainEqual(["d", 0.5]);
+    // beat:N / bar:N count from 1 on the same grid: the second bar starts at 0.5 + 2 s.
+    expect(frameshell(["marker", "add", "--at", "bar:2-0.5", "--label", "e", ...on]).code).toBe(0);
+    expect(markers()).toContainEqual(["e", 2]);
+    expect(frameshell(["marker", "add", "--at", "beat:0", "--label", "f", ...on]).stderr).toMatch(/before the first beat/);
     expect(frameshell(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", "--snap-window", "1", ...on]).stderr).toMatch(/--snap-window does nothing with --snap-to/);
     expect(frameshell(["cut", "--from", "0.9", "--to", "2.1", "--snap-to", "beat", "--snap-window", "1", ...on]).code).toBe(2);
 
     expect(frameshell(["tempo", "clear", ...on]).code).toBe(0);
     expect(stored()).not.toHaveProperty("tempo");
     expect(frameshell(["tempo", "show", ...on]).stdout).toMatch(/has no tempo/);
+    expect(frameshell(["marker", "add", "--at", "bar:2", "--label", "g", ...on]).stderr).toMatch(/"bar:2": the timeline has no tempo/);
 
     expect(frameshell(["marker", "add", "--at", "1", "--label", "x", "--snap-to", "nope", ...on]).code).toBe(2);
     expect(frameshell(["track", "list", "--snap-to", "beat", ...on]).code).toBe(2);

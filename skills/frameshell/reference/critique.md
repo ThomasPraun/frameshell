@@ -16,8 +16,9 @@ It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files ar
 - `phone*.png`: one frame per second at 360 px wide: how it reads on a phone.
 - `motion-1.png`, `motion-2.png`: the two fastest moments (`peaks` in `--json` give their time and how much of the picture moved) as 12 consecutive frames: pops, overlaps and blank frames only show in consecutive frames.
 - `seam.png`: the last 6 and the first 6 frames: does the loop jump.
+- `safe-<platform>.png` (a vertical film, `--platform instagram|tiktok|shorts|youtube`): up to 36 frames with the platform's UI zones shaded red. A caption that reaches into a zone is marked `!subtitle` on its tile and listed in `safeZones[].flags` (`--json`) by track and zone with how many px it reaches in. Captions are the only text review measures: look for titles, graphics and faces in the shaded bands yourself, on the tiles. A file has the zones but no flags. A vertical film whose `style.json` names platforms gets this sheet without `--platform`; `--sheets safe` alone uses those platforms too.
 
-`--range 5,12` limits the sheets to those seconds; `--sheets phone,seam` writes only those. For a project with several formats review each format's file. Then the numbers that are not pictures:
+`--range 5,12` limits the sheets to those seconds; `--sheets phone,seam` writes only those; `--platform tiktok` adds the safe-zone sheet to the default ones. For a project with several formats review each format's file. Then the numbers that are not pictures:
 
 ```sh
 # loudness and true peak of the file people will hear
@@ -71,7 +72,7 @@ Go through these one by one, on the sheets and strips:
 - Banned looks: a centred title on a gradient, corner labels, frame borders, glow on UI, generic particles, crossfades between every shot, a whoosh on every cut, the same sound machine-gunned.
 - Numbers or claims on screen the person or a source did not give.
 
-Add every default you catch the video falling into to `banned` in the project's `style.json` (with the person's agreement), so the next round and the next video avoid it. Judge brand, type sizes, motion and sound levels against `frameshell style show`, not your taste.
+Add every default you catch the video falling into to `banned` in the project's `style.json` with `frameshell style set banned '[…]'` (the whole list; with the person's agreement), so the next round and the next video avoid it. Judge brand, type sizes, motion and sound levels against `frameshell style show`, not your taste.
 
 ## 5. Notes, then fixes
 

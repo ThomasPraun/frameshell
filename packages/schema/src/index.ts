@@ -167,6 +167,9 @@ export {
   MOTION_PERSONALITIES,
   STYLE_DEFAULTS,
   STYLE_SOURCES,
+  STYLE_PATHS,
+  USER_STYLES_DIR,
+  UserStyleIdSchema,
   StyleFileSchema,
   StyleValuesSchema,
   StyleMotionValuesSchema,
@@ -392,6 +395,7 @@ export {
   cueTokens,
   subtitleAt,
   subtitleLayout,
+  scaleCaptions,
   subtitleTracks,
 } from "./subtitles.js";
 export {

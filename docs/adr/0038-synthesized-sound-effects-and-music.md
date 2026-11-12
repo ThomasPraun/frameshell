@@ -60,7 +60,7 @@ Gain: clip `gain` relative to the voice from `style.sound.sfxUnderVoice` and `mu
 - **Warnings** (never refusals, decision 5), computed over the new sounds and those already on audio tracks (read from the `fssd` mark of each take): more than 2 anchors on one frame (`SOUND_MAX_PER_FRAME`); two ticks closer than 66 ms or two pops closer than 114 ms (`SOUND_MIN_GAP_MS`; two keys of a typing run closer than 87 ms, `SOUND_KEY_GAP_MS`, measured on the placed anchors); one take twice in a row in time order. Only warnings that involve a new sound are shown, the first 6 and then a count. The same function (`soundWarnings`) is what #457 can lint with.
 - **Credits** are the slice 1 path: each take is recorded as `own` when the project keeps a ledger.
 - **Stale.** The times are read before the takes are made and the timeline is read again after: a changed revision fails with `StaleRevision` and places nothing (the takes stay, they are cached).
-- Protocol 97.
+- Protocol 100.
 
 ## Considered options
 

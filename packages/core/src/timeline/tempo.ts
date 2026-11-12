@@ -1,7 +1,7 @@
 import { ErrorCode, RpcError, type SnapToKind, TIME_REF_FIELDS } from "@frameshell/protocol";
 import { type BeatsFile, type MediaClip, type Tempo, type Timeline, effectiveBeatGrid, findMarker, findMusicClip, isLowConfidence, nominalBeatFrame } from "@frameshell/schema";
 import { FrameGrid } from "./grid.js";
-import { TimeRefError, resolveTimeRef } from "./time-ref.js";
+import { TimeRefError, resolveTimeRefAsync, unusableGrid } from "./time-ref.js";
 import type { OperationRequest } from "./engine.js";
 
 /**
@@ -218,9 +218,10 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
     new RpcError(ErrorCode.InvalidOperation, `${request.op}: snapTo: ${message}`, { op: request.op, field: "snapTo", reason: "snap", ...(hint ? { hint } : {}) });
   if (given.length === 0) throw refuse(`${request.op} has no time argument to snap.`, `It snaps ${(fields ?? []).join(", ") || "nothing"}.`);
   const resolved: Record<string, number> = {};
+  const loadGrid = (horizon: number) => tempoGrid({ fps: context.fps, timeline: context.timeline, horizon, beatsOf: context.beatsOf });
   for (const field of given) {
     try {
-      resolved[field] = resolveTimeRef(args[field] as number | string, { timeline: context.timeline });
+      resolved[field] = await resolveTimeRefAsync(args[field] as number | string, context.timeline, loadGrid);
     } catch (error) {
       if (!(error instanceof TimeRefError)) throw error;
       throw new RpcError(ErrorCode.InvalidOperation, `${request.op}: ${field}: ${error.message}`, { op: request.op, field, reason: "time reference", ...(error.hint ? { hint: error.hint } : {}) });
@@ -244,18 +245,12 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
     horizon: Math.max(...Object.values(resolved)),
     beatsOf: context.beatsOf,
   });
-  if (!grid) {
-    throw refuse(problem ?? "the timeline has no tempo.", problem ? undefined : "Set one with `tempo.set` { clip } (a measured music clip) or { bpm } (a nominal grid).");
-  }
-  if (grid.low) {
-    throw refuse(
-      `the grid of ${grid.asset} is LOW confidence (${grid.confidence}): it may be double time or a bar off.`,
-      `Check it with \`beats.show\`, then correct it with \`edits.tempo\` or \`edits.downbeat\` in its beats file, or measure again with a \`bpm\` hint.`,
-    );
-  }
+  const unusable = unusableGrid({ grid, problem });
+  if (unusable) throw refuse(unusable.message, unusable.hint);
+  const usable = grid as TimelineGrid;
   return withSnapped(request, args, given, (field) => {
     try {
-      return nearestBeat(grid, resolved[field]!, snapTo);
+      return nearestBeat(usable,resolved[field]!, snapTo);
     } catch (error) {
       if (!(error instanceof TimeRefError)) throw error;
       throw refuse(`${field}: ${error.message}`, error.hint);
