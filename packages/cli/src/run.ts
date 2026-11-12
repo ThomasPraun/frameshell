@@ -102,7 +102,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]]
+${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
@@ -112,6 +112,11 @@ ${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--fo
                                --cover-frame makes frame 0 (the thumbnail platforms show) a finished
                                composition: the frame \`cover\` would pick, with its word over it,
                                replaces the first frame only; a warning says when frame 0 is black
+                               --loop: a file meant to repeat (title loops, banners). Frames 0 to the
+                               last, 2 ms half-sine audio fades at both ends (MP4, MOV); warns when the
+                               output fps breaks the cycle, when an end is black, and, once written,
+                               when the last frame repeats frame 0 (end the last key a frame earlier).
+                               Refused with --cover-frame. Never changes the timeline
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.
@@ -170,7 +175,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "reset-edits", "variant", "seed", "pitch", "length"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "range", "sheets", "every", "reset-edits", "variant", "seed", "pitch", "length"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -184,7 +189,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin remove": [],
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
-  render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color"],
+  render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   ...REVIEW_FLAGS,
@@ -245,7 +250,7 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
-  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string } }
+  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string }; loop?: true }
   | { kind: "cover"; text?: string; at?: number; color?: string; out?: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; projectFormat?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
@@ -360,6 +365,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           text: { type: "string" },
           color: { type: "string" },
           "cover-frame": { type: "boolean", default: false },
+          loop: { type: "boolean", default: false },
           "cover-text": { type: "string" },
           "cover-at": { type: "string" },
           "cover-color": { type: "string" },
@@ -525,6 +531,7 @@ function parseBuiltin(
     text?: string | undefined;
     color?: string | undefined;
     "cover-frame"?: boolean | undefined;
+    loop?: boolean | undefined;
     "cover-text"?: string | undefined;
     "cover-at"?: string | undefined;
     "cover-color"?: string | undefined;
@@ -614,7 +621,7 @@ function parseBuiltin(
       if (quality !== undefined && quality !== "draft" && quality !== "final") {
         throw new UsageError(`--quality: expected draft or final, got "${quality}".`);
       }
-      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(formats ? { formats } : {}), ...(out ? { out } : {}), ...(cover ? { cover } : {}) };
+      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(formats ? { formats } : {}), ...(out ? { out } : {}), ...(cover ? { cover } : {}), ...(options.loop ? { loop: true as const } : {}) };
     }
     const at = Number(options.at);
     if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
@@ -942,7 +949,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (renders.some((render) => render.job.state !== "done")) outcome.code = 1;
       if (flags.json) return json({ ...result, job: renders[0]!.job, renders });
       return renders
-        .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
+        .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n${render.job.warnings.map((warning) => `  warning: ${warning}\n`).join("")}` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
         .join("");
     }
     case "cover": {

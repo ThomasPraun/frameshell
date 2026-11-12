@@ -184,6 +184,25 @@ describe("frameshell render and frame", () => {
     120_000,
   );
 
+  it("refuses --loop with --cover-frame: the cover replaces frame 0", () => {
+    const result = frameshell(["render", "--loop", "--cover-frame", "--out", "out/never.mp4"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/A loop cannot have a cover frame/);
+    expect(existsSync(join(project, "out", "never.mp4"))).toBe(false);
+  });
+
+  it(
+    "renders with --loop and reports the job's warnings after the file",
+    () => {
+      const result = frameshell(["render", "--loop", "--out", "out/looped.mp4"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/^Rendered .*looped\.mp4\n/);
+      expect(existsSync(join(project, "out", "looped.mp4"))).toBe(true);
+      expect((JSON.parse(frameshell(["render", "--loop", "--json", "--out", "out/looped-json.mp4"]).stdout) as { job: { warnings: string[] } }).job.warnings).toEqual(expect.any(Array));
+    },
+    120_000,
+  );
+
   it("makes an image project with init --kind image", () => {
     const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-image-"))), "poster");
     const result = frameshell(["init", dir, "--kind", "image", "--no-skill"], tmpdir());

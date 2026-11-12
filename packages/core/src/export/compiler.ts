@@ -146,6 +146,11 @@ export interface RenderInput {
    * tier also caps the frame rate (draft: 30) and sets AAC 320k (final). Other codecs ignore it, with a warning.
    */
   encode?: { encoder: EncoderName; tier: "draft" | "final" };
+  /**
+   * Export a file meant to repeat (ADR 0039): MP4 and MOV audio gets a {@link LOOP_FADE_SECONDS} half-sine fade at its
+   * first and last sample, and the warnings name what weakens the seam. Refused with `cover`, which replaces frame 0.
+   */
+  loop?: boolean;
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -200,6 +205,8 @@ export interface RenderPlan {
   container: ExportPreset["container"];
   /** Things the timeline holds that this export does not render. */
   warnings: string[];
+  /** True for a loop export: {@link muxStep} fades the audio ends. Absent otherwise, so other plans stay as they were. */
+  loop?: true;
   /** Files to write into the work directory before any step runs. */
   files: Record<string, string>;
   /**
@@ -291,6 +298,8 @@ export interface FramePlan {
 export const DEFAULT_SEGMENT_SECONDS = 10;
 /** Edge fade at every audio cut; same length as the preview's (SPEC §3.4). */
 export const EDGE_FADE_SECONDS = 0.002;
+/** Half-sine audio fade at both ends of a loop export (ADR 0039); the fade at every cut, {@link EDGE_FADE_SECONDS}, is equal-power. */
+export const LOOP_FADE_SECONDS = 0.002;
 /** Decode this much source before a clip's first frame, so the nearest frame is always available. */
 const SEEK_PREROLL_SECONDS = 1;
 /** Extra source seconds read past a sped-up clip's out point; see `audioGraph`. */
@@ -429,13 +438,22 @@ export function compileRender(input: RenderInput): RenderPlan {
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const warnings = [...layout.warnings];
   if (input.encode && !tiered) warnings.push(`Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`);
+  if (input.loop && input.cover) {
+    throw new RpcError(
+      ErrorCode.InvalidOperation,
+      "A loop cannot have a cover frame: the cover replaces frame 0 and breaks the seam. Render without `cover` (`--cover-frame`), or without `loop`.",
+      { op: "render", field: "loop", reason: "cover replaces frame 0" },
+    );
+  }
+  if (input.loop) warnings.push(...loopWarnings(layout, fps, outFps));
   const requested = input.cover ?? null;
   const choosable = requested !== null && outFps === fps;
   const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
   // A cover with no word on frame 0 itself changes nothing.
   const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
   if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
-  const empty = emptyFrame(layout, coverFrame, fps);
+  // A loop refuses a cover, so its black first frame has its own warning.
+  const empty = input.loop ? null : emptyFrame(layout, coverFrame, fps);
   if (empty) {
     const hint = !requested
       ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
@@ -490,6 +508,7 @@ export function compileRender(input: RenderInput): RenderPlan {
     loudness: input.loudness,
     container: preset.container,
     warnings,
+    ...(input.loop ? { loop: true as const } : {}),
     files,
     fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
     segments,
@@ -537,10 +556,11 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
       `:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}` +
       `:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true,`
     : "";
+  const fade = plan.loop && !silent ? loopFades(rate, samples) : "";
   // loudnorm works at 192 kHz: resample back, then cut to the exact length.
   const audio = silent
     ? `anullsrc=r=${rate}:cl=stereo,atrim=end_sample=${samples}[a]`
-    : `[1:a:0]${normalize}aresample=${rate},atrim=end_sample=${samples}[a]`;
+    : `[1:a:0]${normalize}aresample=${rate},atrim=end_sample=${samples}${fade}[a]`;
   return {
     files: {},
     args: [
@@ -554,6 +574,34 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
       output,
     ],
   };
+}
+
+/** Half-sine (`hsin`) fades over the first and last `S = round(0.002 x rate)` samples: the tail of a loop's audio chain. */
+function loopFades(rate: number, samples: number): string {
+  const length = Math.min(Math.round(LOOP_FADE_SECONDS * rate), Math.floor(samples / 2));
+  if (length < 1) return "";
+  return `,afade=t=in:curve=hsin:nb_samples=${length},afade=t=out:curve=hsin:start_sample=${samples - length}:nb_samples=${length}`;
+}
+
+/**
+ * What weakens a loop's seam, as warnings: an output rate that makes the cycle a fraction of a frame, and a first or
+ * last frame that is black (a fade from or to black, or no picture), so every pass jumps through it.
+ */
+function loopWarnings(layout: Layout, fps: number, outFps: number): string[] {
+  const warnings: string[] = [];
+  const output = (layout.frames * outFps) / fps;
+  if (Math.abs(output - Math.round(output)) > 1e-6) {
+    warnings.push(
+      `Loop: ${layout.frames} frames at ${fps} fps are ${Number(output.toFixed(3))} frames at ${outFps} fps: the cycle is not whole, so the last output frame does not meet frame 0. ` +
+        "Render at the project's frame rate, or change the length so that frames x output fps / fps is a whole number.",
+    );
+  }
+  const first = emptyFrame(layout, 0, fps);
+  if (first) warnings.push(`Loop: frame 0 is ${first}, so every pass restarts from black. Start the picture at 0 without a fade in.`);
+  const last = layout.frames - 1;
+  const closing = last > 0 ? emptyFrame(layout, last, fps) : null;
+  if (closing) warnings.push(`Loop: the last frame (${last}) is ${closing}, so every pass ends on black. Remove the fade out.`);
+  return warnings;
 }
 
 /**

@@ -13,6 +13,7 @@ const job = (state: JobInfo["state"], step: JobInfo["step"] = null): JobInfo => 
   progress: state === "done" ? 1 : 0,
   cached: state === "done" ? true : null,
   error: null,
+  warnings: [],
   createdAt: "2026-09-30T18:34:00.000Z",
   startedAt: null,
   finishedAt: null,

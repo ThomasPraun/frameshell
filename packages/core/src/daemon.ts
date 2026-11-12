@@ -1238,8 +1238,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return changeConfig(dir, caller, (author, tx) => formats.remove(dir, id, author, tx));
     },
-    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
-      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
+    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
+      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));

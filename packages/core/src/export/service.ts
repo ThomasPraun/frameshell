@@ -62,6 +62,7 @@ import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
+import { loopSeamWarning } from "./seam.js";
 
 /** Options for {@link executeRender}. */
 export interface ExecuteRenderOptions {
@@ -249,6 +250,8 @@ export class ExportService {
       out?: string | undefined;
       cover?: CoverChoice | undefined;
       formats?: readonly string[] | undefined;
+      /** A file meant to repeat (ADR 0039); refused with `cover`. */
+      loop?: boolean | undefined;
     },
   ): Promise<RenderResult> {
     const config = (await readEnclosingProject(root))?.config;
@@ -274,6 +277,7 @@ export class ExportService {
       timeline,
       fps,
       ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
+      ...(params.loop ? { loop: true } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources,
@@ -334,14 +338,23 @@ export class ExportService {
             mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
           }
           if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
+          const ffmpeg = await this.#options.ffmpeg(root);
+          const cache = join(root, ".frameshell", "cache", "render");
           await executeRender(final, {
-            ffmpeg: await this.#options.ffmpeg(root),
-            workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
+            ffmpeg,
+            workDir: join(cache, randomBytes(6).toString("hex")),
             output,
             signal: ctx.signal,
             onProgress: (update: JobUpdate) => ctx.update(update),
             ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
           });
+          if (params.loop) {
+            // A diagnostic: a check that cannot run must not fail a render that succeeded.
+            const warning = await loopSeamWarning(ffmpeg, output, final.frames, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
+              (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
+            );
+            if (warning) ctx.update({ warning });
+          }
         },
       });
       return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
