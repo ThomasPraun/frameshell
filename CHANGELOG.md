@@ -214,6 +214,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `opacity` so element adjustments still apply. `pnpm gen:motion` bundles it into `@frameshell/hyperframes`
   (`motion-runtime.ts`); compositions do not use it until templates land (slice 2). Spike:
   `docs/research/motion-runtime.md`.
+- Motion templates, slice 2 of #465 and first set of #466 (ADR 0033): `frameshell hyperframes new <name> --template
+  <kinetic-headline|end-card>` scaffolds a composition painted by the motion runtime, with `frameshell-motion.js`
+  copied next to it (frozen per clip). The kinetic headline (words rise through a mask, keyword in the accent colour,
+  transparent over footage) and the end card (logo, name, call to action, address on a solid background, never
+  static) declare typed props (number with min and max, colour, image path, enum), lay out per format with
+  `pick(wide, square, tall)` (16:9, 1:1, 4:5, 9:16) and take colours, fonts and brand texts from `style.json` as the
+  defaults when it exists. `frameshell hyperframes update [<composition>] [--dry-run] [--force]` refreshes older
+  frozen runtime copies on request. Runtime 0.2.0 adds `pick`, `stage`, `props` (props clamped and typed) and
+  registers `window.__timelines` where the HyperFrames linter looks for it, so `hyperframes check` passes. The skill
+  gains the motion-composition authoring rules. No GSAP in templates. `@frameshell/hyperframes` 0.5.0 gains the
+  `hyperframes update` command.
 
 ### Changed
 
