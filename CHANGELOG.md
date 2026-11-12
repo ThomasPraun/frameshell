@@ -192,6 +192,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 86): `format add` and
+  `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
+  `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips
+  of a mixed transaction. A later change of the same format conflicts like a clip; a hand edit of `formats` in
+  `frameshell.json` refuses the revert like a hand edit of a timeline. `revert` no longer refuses format changes
+  (InvalidOperation reason `format change` is gone). `.frameshell/history/project.config.jsonl` lines are keyed
+  operations now (`doc`, `patch`, `tx`, hash chain); older lines are read as they are. While review mode is on, an
+  agent still cannot change or revert formats. Wire: `format.add`/`format.remove` results carry `tx`, `history`
+  operations `doc`, `revert` and `tx.abort` results `config`. The History panel marks such transactions `project`.
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.

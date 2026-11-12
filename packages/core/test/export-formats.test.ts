@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
-import { type Daemon, FORMAT_JOURNAL, startDaemon } from "../src/index.js";
+import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { ffprobeJson, makeClip } from "./media-fixtures.js";
 import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
@@ -71,10 +71,12 @@ describe("formats of a project", () => {
       { id: "web-1600x900", width: 1600, height: 900 },
       { id: "9x16", width: 1080, height: 1920 },
     ]);
-    const journal = readFileSync(join(project, FORMAT_JOURNAL), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(journal.map((entry) => [entry["op"], entry["author"], entry["before"] === null])).toEqual([
-      ["format.add", "cli", true],
-      ["format.add", "cli", false],
+    const journal = readFileSync(join(project, CONFIG_JOURNAL), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    // 9x16 moving down one place is no change of its own (ADR 0036): only the added key is patched.
+    const keys = (entry: Record<string, unknown>) => (entry["patch"] as { key: string }[]).map((change) => change.key);
+    expect(journal.map((entry) => [entry["op"], entry["author"], keys(entry)])).toEqual([
+      ["format.add", "cli", ["format:9x16"]],
+      ["format.add", "cli", ["format:web-1600x900"]],
     ]);
   });
 

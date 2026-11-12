@@ -51,4 +51,4 @@ Moves "opt-in proposal mode per transaction" from v0.2 to v0.14 and amends decis
 - With review on, a person running `frameshell` by hand in a terminal reviews their own commands too: authors say who connected, not who typed.
 - Turning review mode off leaves an open proposal open until the person accepts or rejects it; only new proposals stop.
 - The app's Ask agent context frames and its `frame` calls read the current timeline even while After is shown.
-- Not covered: changes outside timelines (compositions, scripts, transcripts, assets, `frameshell.json`, plugin installs). A changed composition re-renders a clip already on the timeline without review.
+- Not covered: changes outside timelines (compositions, scripts, transcripts, assets, `frameshell.json`, plugin installs). ADR 0036 brings `formats` of `frameshell.json` and later `style.json` into history (slice 1) and into proposals (slice 2). A changed composition re-renders a clip already on the timeline without review.

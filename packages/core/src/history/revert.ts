@@ -1,6 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  type ConfigJournalEntry,
   ErrorCode,
+  type HistoryOperation,
   type HistoryResult,
   type HistoryTransaction,
   type JournalEntry,
@@ -9,6 +11,7 @@ import {
   type TimelinePatch,
 } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
+import { configOperation } from "../config/journal.js";
 import { applyPatch } from "../timeline/patch.js";
 import { timelineHash } from "./hash.js";
 
@@ -95,41 +98,69 @@ export function touchedIds(patch: TimelinePatch): string[] {
 
 /**
  * `history` view: entries grouped into runs of one transaction, oldest first.
- * With `since`, only entries after that transaction's last entry. Throws
- * HistoryNotFound when `since` is not in the journal.
+ * Project-config operations (`config.entries`, ADR 0036) are merged in by
+ * time with `doc` set; they change no timeline, so both their revisions are
+ * the timeline's revision at the time (`config.revision`, the file's now,
+ * when no timeline entry follows or precedes them). With `since`, only
+ * entries after that transaction's last entry. Throws HistoryNotFound when
+ * `since` is in neither journal.
  */
-export function historyView(entries: JournalEntry[], timeline: string, since?: string): Omit<HistoryResult, "proposals"> {
-  let shown = entries;
+export function historyView(
+  entries: JournalEntry[],
+  timeline: string,
+  since?: string,
+  config: { entries: readonly ConfigJournalEntry[]; revision: number } = { entries: [], revision: 0 },
+): Omit<HistoryResult, "proposals"> {
+  const items: { tx: string; txLabel: string | null; author: string; at: string; operation: HistoryOperation }[] = [];
+  let next = 0;
+  for (const entry of entries) {
+    while (next < config.entries.length && config.entries[next]!.at < entry.at) items.push(configItem(config.entries[next++]!, entry.revisionBefore));
+    items.push({
+      tx: entry.tx,
+      txLabel: entry.txLabel,
+      author: entry.author,
+      at: entry.at,
+      operation: {
+        id: entry.id,
+        op: entry.op,
+        args: entry.args,
+        author: entry.author,
+        at: entry.at,
+        revisionBefore: entry.revisionBefore,
+        revision: entry.revision,
+        touched: touchedIds(entry.inverse.args),
+      },
+    });
+  }
+  while (next < config.entries.length) items.push(configItem(config.entries[next++]!, entries.at(-1)?.revision ?? config.revision));
+  let shown = items;
   if (since !== undefined) {
-    const last = entries.findLastIndex((entry) => entry.tx === since);
-    if (last === -1) {
+    const found = items.findLastIndex((item) => item.tx === since);
+    if (found === -1) {
       throw new RpcError(
         ErrorCode.HistoryNotFound,
         `No transaction ${since} in the history of timeline ${timeline}. It may have changed another timeline: pass --timeline.`,
         { target: since, timeline },
       );
     }
-    shown = entries.slice(last + 1);
+    shown = items.slice(found + 1);
   }
   const transactions: HistoryTransaction[] = [];
-  for (const entry of shown) {
+  for (const item of shown) {
     let group = transactions.at(-1);
-    if (group?.tx !== entry.tx) {
-      group = { tx: entry.tx, label: entry.txLabel, author: entry.author, at: entry.at, operations: [] };
+    if (group?.tx !== item.tx) {
+      group = { tx: item.tx, label: item.txLabel, author: item.author, at: item.at, operations: [] };
       transactions.push(group);
     }
-    group.operations.push({
-      id: entry.id,
-      op: entry.op,
-      args: entry.args,
-      author: entry.author,
-      at: entry.at,
-      revisionBefore: entry.revisionBefore,
-      revision: entry.revision,
-      touched: touchedIds(entry.inverse.args),
-    });
+    group.operations.push(item.operation);
   }
   return { timeline, revision: entries.at(-1)?.revision ?? null, since: since ?? null, transactions };
+}
+
+/** A config journal line as a `history` item at timeline revision `revision`. */
+function configItem(entry: ConfigJournalEntry, revision: number) {
+  const { tx, ...operation } = configOperation(entry);
+  return { tx, txLabel: entry.txLabel, author: entry.author, at: entry.at, operation: { ...operation, revisionBefore: revision, revision } };
 }
 
 /** HistoryNotFound for a tx or op id missing from `timeline`'s journal. */

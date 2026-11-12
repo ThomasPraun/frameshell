@@ -1,5 +1,5 @@
 import type { HistoryDiffResult, HistoryResult, TimelineView } from "@frameshell/protocol";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { type SelectionOrigin, selection } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
 import { historySelection } from "./model.js";
@@ -75,12 +75,16 @@ function feedAt(timeline: string, revision: number): Promise<TimelineView | null
 /**
  * `history` of `timeline`, live: read again on each revision of the shared
  * timeline feed (which follows daemon `timeline.changed`), so no second
- * subscription exists. Every journaled operation bumps the revision.
+ * subscription exists. Every journaled timeline operation bumps the
+ * revision; a project-config operation (ADR 0036) does not, so `reload`
+ * reads it again after one made here.
  */
-export function useTimelineHistory(timeline: string): { history: HistoryResult | null; error: string | null } {
+export function useTimelineHistory(timeline: string): { history: HistoryResult | null; error: string | null; reload: () => void } {
   const { view } = useTimelineView(timeline);
   const revision = view?.revision ?? null;
   const [state, setState] = useState<{ history: HistoryResult | null; error: string | null }>({ history: null, error: null });
+  const [asked, setAsked] = useState(0);
+  const reload = useCallback(() => setAsked((count) => count + 1), []);
   useEffect(() => {
     if (revision === null) return;
     let live = true;
@@ -91,8 +95,8 @@ export function useTimelineHistory(timeline: string): { history: HistoryResult |
     return () => {
       live = false;
     };
-  }, [timeline, revision]);
-  return state;
+  }, [timeline, revision, asked]);
+  return { ...state, reload };
 }
 
 /**

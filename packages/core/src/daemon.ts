@@ -25,7 +25,6 @@ import {
   isMethodName,
   parseRequest,
   readMessages,
-  formatUndoCommand,
   resolveAppDirs,
   writeMessage,
 } from "@frameshell/protocol";
@@ -95,10 +94,11 @@ import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
-import { FormatService, builtinFormatInfos, findFormatChange, formatInfos } from "./formats.js";
+import { FormatService, builtinFormatInfos, formatInfos, projectConfigDocument } from "./formats.js";
+import { ConfigJournal, configOperation } from "./config/journal.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
-import { FileTransactionStore, TransactionTracker } from "./history/transactions.js";
+import { FileTransactionStore, TransactionTracker, isTouchedTimeline } from "./history/transactions.js";
 import { ReviewSwitch } from "./proposals/review-switch.js";
 import { IdempotencyCache } from "./idempotency.js";
 import { checkScript } from "./scripts/check.js";
@@ -349,10 +349,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await settle(key, tx);
     },
   });
-  const formats = new FormatService({
-    readConfig: async (dir) => (await readEnclosingProject(dir))!.config,
-    writeFormats: (dir, list) => projects.writeFormats(dir, list),
+  const readProjectConfig = async (dir: string) => (await readEnclosingProject(dir))!.config;
+  // ADR 0036: every project-config change goes through this journal, so history, revert and tx.abort cover it.
+  const configJournal = new ConfigJournal({
+    docs: { project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }) },
   });
+  const formats = new FormatService({ readConfig: readProjectConfig, journal: configJournal });
   const plugins = new PluginHost({
     dirs,
     pins: projects,
@@ -832,17 +834,68 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     });
   };
   /**
-   * Format changes are not proposals yet (ADR 0027): while review mode is on, only the person, in the app, makes
-   * them, so nothing reaches `frameshell.json` unseen.
+   * Config changes are not proposals yet (ADR 0027 decision 11, ADR 0036 slice 2): while review mode is on, only
+   * the person, in the app, makes them or reverts them, so nothing reaches `frameshell.json` unseen.
    */
   const formatsOutsideReview = async (dir: string, caller: Caller) => {
     if (authorOf(caller) === "ui" || !(await review.enabled(await canonicalPath(dir)))) return;
-    throw new RpcError(ErrorCode.ProposalState, "Review mode is on: format changes cannot wait as proposals yet, so only the person, in the Frameshell app, can make them.", {
+    throw new RpcError(ErrorCode.ProposalState, "Review mode is on: format changes cannot wait as proposals yet, so only the person, in the Frameshell app, can make or revert them.", {
       tx: null,
       reason: "forbidden",
       conflicts: [],
       hint: "Ask the person to change the formats, or to turn review mode off (History view).",
     });
+  };
+  /** Run a project-config change of `caller` in its transaction (ADR 0036). */
+  const changeConfig = async <T>(dir: string, caller: Caller, work: (author: string, tx: TxRef) => Promise<T>): Promise<T> => {
+    await formatsOutsideReview(dir, caller);
+    const key = authorOf(caller);
+    const tx = transactions.next(key);
+    await transactions.touching(key, tx, { root: dir, doc: "project" });
+    const result = await work(journalAuthorOf(caller), tx);
+    await transactions.applied(key, tx);
+    await settle(key, tx);
+    return result;
+  };
+  /** Run `work` holding the config journal of every root in `roots`, in a fixed order so two callers never deadlock. */
+  const holdingConfig = <T>(roots: string[], work: () => Promise<T>): Promise<T> => {
+    const [first, ...rest] = [...new Set(roots)].sort();
+    return first === undefined ? work() : configJournal.serial(first, () => holdingConfig(rest, work));
+  };
+  /**
+   * `revert` of a target the config journal holds (ADR 0036): its config operations, and its operations on
+   * `timeline` when that journal holds some too, in one standalone transaction. Config is planned first and
+   * written last, so a timeline conflict leaves both untouched.
+   */
+  const revertConfig = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller): Promise<MethodResult<"revert">> => {
+    await formatsOutsideReview(dir, caller);
+    const inTimeline = (await readJournal(dir, timeline)).some((entry) => entry.id === target || entry.tx === target);
+    const key = authorOf(caller);
+    const author = journalAuthorOf(caller);
+    const tx = transactions.next(key, { standalone: true });
+    await transactions.touching(key, tx, { root: dir, doc: "project" });
+    if (inTimeline) await transactions.touching(key, tx, { root: dir, timeline });
+    const result = await configJournal.serial(dir, async (): Promise<MethodResult<"revert">> => {
+      const plans = await configJournal.planRevert(dir, target);
+      const reverted = inTimeline ? await timelines.revert({ root: dir, cwd, timeline, author, tx, target }) : null;
+      const revision = reverted ? null : (await timelines.load(dir, timeline)).timeline.revision;
+      const config = (await configJournal.commitRevert(dir, plans, { author, tx, target })).map(configOperation);
+      if (reverted) return { ...reverted, config };
+      // Only config changed: the timeline stays at its revision, and `operation` is the config revert with no timeline inverse.
+      const { id, op, args } = config[0]!;
+      return {
+        timeline,
+        revision: revision!,
+        operation: { id, op, args, inverse: { op: "timeline.patch", args: {} }, author, tx: tx.id, revisionBefore: revision! },
+        changes: { added: [], updated: [], removed: [], range: null },
+        snaps: [],
+        warnings: [],
+        config,
+      };
+    });
+    await transactions.applied(key, tx);
+    await settle(key, tx);
+    return result;
   };
   /** Open explicit transactions that changed project `dir` (however its root was spelled) or nothing yet. */
   const openTransactions = async (dir: string): Promise<OpenTransaction[]> => {
@@ -850,7 +903,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const listed: OpenTransaction[] = [];
     for (const { author, tx, operations, touched, openedAt } of transactions.list()) {
       const here = [];
-      for (const where of touched) if ((await canonicalPath(where.root)) === real) here.push(where.timeline);
+      for (const where of touched) if ((await canonicalPath(where.root)) === real) here.push(where);
       if (touched.length > 0 && here.length === 0) continue;
       listed.push({
         tx: tx.id,
@@ -858,7 +911,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         author,
         session: author.startsWith("cli:") ? author.slice("cli:".length) : null,
         operations,
-        timelines: here,
+        timelines: here.filter(isTouchedTimeline).map((where) => where.timeline),
         openedAt,
         ageMs: openedAt === null ? null : Math.max(0, Date.now() - Date.parse(openedAt)),
       });
@@ -975,13 +1028,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "format.add": async ({ cwd, id, width, height, index }, caller) => {
       const dir = await root(cwd);
-      await formatsOutsideReview(dir, caller);
-      return formats.add(dir, { id, width, height, index }, journalAuthorOf(caller));
+      return changeConfig(dir, caller, (author, tx) => formats.add(dir, { id, width, height, index }, author, tx));
     },
     "format.remove": async ({ cwd, id }, caller) => {
       const dir = await root(cwd);
-      await formatsOutsideReview(dir, caller);
-      return formats.remove(dir, id, journalAuthorOf(caller));
+      return changeConfig(dir, caller, (author, tx) => formats.remove(dir, id, author, tx));
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
@@ -1900,28 +1951,56 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "tx.abort": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
+      const configRoots = touched.filter((where) => !isTouchedTimeline(where)).map((where) => where.root);
+      // Config undo cannot wait as a proposal yet (ADR 0036 slice 2): refused before anything is dropped.
+      for (const dir of configRoots) await formatsOutsideReview(dir, caller);
       // A proposal still building holds what the file never got (ADR 0019 §3).
       await timelines.abortProposal(tx.id);
       // All or nothing; a conflict leaves the transaction open to resolve, or to commit instead.
       // In review mode an undo of what reached the file waits as a proposal of its own.
-      const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: touched });
+      // Config is planned before the timelines and written after them (ADR 0036).
+      const done = await holdingConfig(configRoots, async () => {
+        const plans = [];
+        for (const dir of new Set(configRoots)) {
+          try {
+            plans.push({ dir, plans: await configJournal.planRevert(dir, tx.id) });
+          } catch (error) {
+            if (!(error instanceof RpcError && error.code === ErrorCode.RevertConflict)) throw error;
+            throw new RpcError(
+              ErrorCode.RevertConflict,
+              `Cannot abort ${tx.id}: nothing was undone, because reverting it conflicts in the project config.\n${error.message}\n` +
+                "The transaction stays open: resolve the conflict and abort again, or commit it.",
+              { ...(error.data as Record<string, unknown>), target: tx.id, timelines: [] },
+            );
+          }
+        }
+        const timelineUndo = touched.filter(isTouchedTimeline);
+        const { reverted, proposal } = await timelines.revertAll({ author: journalAuthorOf(caller), tx, target: tx.id, timelines: timelineUndo });
+        const config = [];
+        for (const { dir, plans: planned } of plans) {
+          const written = await configJournal.commitRevert(dir, planned, { author: journalAuthorOf(caller), tx, target: tx.id });
+          config.push(...written.map(configOperation));
+        }
+        return { reverted, proposal, config };
+      });
       await transactions.end(author);
-      return { tx: tx.id, label: tx.label, author, reverted, proposal };
+      return { tx: tx.id, label: tx.label, author, ...done };
     },
     history: async ({ cwd, timeline, since }) => timelines.history(await root(cwd), timeline, { since }),
-    "history.diff": async ({ cwd, timeline, target }) => timelines.diff(await root(cwd), timeline, target),
+    "history.diff": async ({ cwd, timeline, target }) => {
+      const dir = await root(cwd);
+      try {
+        return await timelines.diff(dir, timeline, target);
+      } catch (error) {
+        // A config-only target (ADR 0036) changed no clips.
+        if (error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target))) return { timeline, target, clips: [] };
+        throw error;
+      }
+    },
     revert: async ({ cwd, timeline, target }, caller) => {
       const dir = await root(cwd);
-      const change = await findFormatChange(dir, target);
-      if (change) {
-        const undo = formatUndoCommand(change.undo);
-        throw new RpcError(
-          ErrorCode.InvalidOperation,
-          `${target} is a ${change.op} in frameshell.json, not a timeline operation: \`revert\` cannot undo it yet. Run \`${undo}\` instead.`,
-          { op: "revert", reason: "format change", field: "target", hint: `\`${undo}\` (\`${change.undo.method}\`).` },
-        );
-      }
-      return revert(dir, cwd, timeline, target, caller);
+      if (await configJournal.has(dir, target)) return revertConfig(dir, cwd, timeline, target, caller);
+      return { ...(await revert(dir, cwd, timeline, target, caller)), config: [] };
     },
     "review.set": async ({ cwd, enabled }, caller) => {
       onlyUi(caller, "turn review mode on or off");

@@ -8,7 +8,12 @@ import type { Timeline } from "@frameshell/schema";
  * alone misses edits that keep it (a hand edit made while no daemon watched).
  */
 export function timelineHash(timeline: Timeline): string {
-  return `sha256:${createHash("sha256").update(canonical(timeline)).digest("hex")}`;
+  return contentHash(timeline);
+}
+
+/** sha256 of plain JSON `value` with object keys sorted, as {@link timelineHash}; the config journal's hash (ADR 0036). */
+export function contentHash(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
 }
 
 function canonical(value: unknown): string {
