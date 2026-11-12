@@ -69,6 +69,7 @@ import {
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, isEmptyPatch, sortMarkers } from "./patch.js";
+import { resolveTimeRefs } from "./time-ref.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -313,7 +314,7 @@ export class TimelineService {
       if (route) {
         try {
           const result = await this.#propose(root, id, route, call, async (base, _current, fps, settings) => {
-            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call);
+            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call, base);
             const applied = await applyOperation(base, request, this.#context(root, id, fps, request.op, settings));
             return { applied, op: request.op, args: request.args as Record<string, unknown>, warnings };
           });
@@ -324,7 +325,7 @@ export class TimelineService {
         }
       }
       const { timeline, fps, ...settings } = await this.#current(root, id);
-      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call);
+      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call, timeline);
       const context = this.#context(root, id, fps, request.op, settings);
       const applied = await applyOperation(timeline, request, context);
       const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);
@@ -1994,9 +1995,11 @@ export async function readTimelineFile(root: string, rel: string): Promise<Timel
  * Project-relative `asset`/`source` args, so the record and the file never
  * hold caller-specific paths. A relative path is tried against `cwd` first,
  * then the project root; a bare timeline id (`intro`) means `timelines/intro.json`.
+ * Time references (marker names, ADR 0037) become seconds against `timeline`, the state the operation applies to.
  */
-function normalizeArgs(call: TimelineCall): OperationRequest {
-  const { request, root, cwd } = call;
+function normalizeArgs(call: TimelineCall, timeline: Timeline): OperationRequest {
+  const { root, cwd } = call;
+  const request = resolveTimeRefs(call.request, timeline);
   if (request.op !== "clip.add") return request;
   const args = { ...request.args };
   if (args.asset !== undefined) args.asset = projectPath(root, cwd, args.asset, "asset");

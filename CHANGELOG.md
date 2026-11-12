@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Times as names, first slice of #485 (ADR 0037, amends ADR 0029 decision 7; protocol 88): the time arguments
+  `transition set|remove --at`, `clip key --at`, `clip split --at`, `cut --from/--to`, `clip move --start`,
+  `clip trim --start/--end`, `clip add --start` and `marker add|set --at` (and the matching MCP and daemon params)
+  take seconds or a marker id or label with an optional offset: `--at hook`, `--at hook+0.5`, `--from intro --to
+  outro-1`. One shared resolver in core (`resolveTimeRefs`) turns the name into seconds in the daemon before the
+  operation runs, against the timeline as it is then (a marker added earlier in the same transaction counts, and in
+  review mode the proposal's timeline), so the history records seconds and a revert never depends on a marker staying
+  put. A label is tried whole first (`end-card` is not `end` minus `card`); an unknown name fails and lists the
+  markers. Plain decimals are seconds (`0x10` and `1e2` are not); a marker whose label is a plain number (`10`) is
+  reached by its id, since `--at 10` means seconds. `beat:`, `bar:` and `word:` are reserved and refused until the
+  beat grid and word references exist. `music fit` itself is a later slice.
 - Beat grid, slice 2 of #458 (ADR 0029): `frameshell beats measure <asset> [--bpm n] [--reset-edits]` and `beats show
   <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 87) measure the beats
   of a music file locally, with no download and no model, and write `beats/<name>.beats.json`: tempo, every beat in

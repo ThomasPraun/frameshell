@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 87;
+export const PROTOCOL_VERSION = 88;
 
 /**
  * One daemon method as declared in {@link methods}.

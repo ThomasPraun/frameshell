@@ -71,6 +71,8 @@ export {
   type Marker,
   type MarkerColor,
   markerLabelKey,
+  findMarker,
+  describeMarkers,
   type Timeline,
   type Track,
   type ClipTrack,

@@ -745,7 +745,7 @@ describe("markers (ADR 0029)", () => {
     const t = await marked();
     const unknown = await rejection(apply(t, "marker.set", { marker: "nope", at: 1 }));
     expect(unknown.code).toBe(ErrorCode.InvalidOperation);
-    expect(unknown.message).toMatch(/no marker "nope" in timeline main\. Markers: m_a "intro" at 1, m_b "hook" at 4, m_c "outro" at 9\./);
+    expect(unknown.message).toMatch(/no marker "nope" in timeline main\. Markers: m_a "intro" at 1 s, m_b "hook" at 4 s, m_c "outro" at 9 s\./);
     expect((await rejection(apply(base(), "marker.remove", { marker: "hook" }))).message).toMatch(/It has no markers/);
     expect((await rejection(apply(t, "marker.set", { marker: "hook" }))).message).toMatch(/nothing to change on marker m_b/);
     expect((await rejection(apply(t, "marker.set", { marker: "hook", label: "Outro" }))).message).toMatch(/already marker m_c/);
