@@ -3,6 +3,7 @@ import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  type ConfigDoc,
   ErrorCode,
   type EventName,
   type EventParams,
@@ -40,10 +41,12 @@ import {
   type Timeline,
   type Transcript,
   STYLE_FILE,
+  USER_STYLES_DIR,
   createTimeline,
   cueTokens,
   findPerson,
   parseProjectConfig,
+  parseStyleFile,
   parseTimeline,
   projectFormats,
   subtitleTracks,
@@ -129,7 +132,8 @@ import {
   writeSessionTranscripts,
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
-import { showStyle } from "./style/read.js";
+import { styleConfigDocument, styleState } from "./style/doc.js";
+import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
@@ -378,26 +382,61 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (await configJournal.serial(dir, () => writeProjectFile(dir, content, author, tx))) await transactions.applied(key, tx);
       await settle(key, tx);
     },
-    // ADR 0036 decision 5: style.json has no config document yet, so review mode cannot hold its writes.
-    guardWrite: async (dir, rel, author) => {
-      if (rel !== STYLE_FILE || author === "ui" || !(await review.enabled(await canonicalPath(dir)))) return;
-      throw new RpcError(
-        ErrorCode.ProposalState,
-        `Review mode is on: ${STYLE_FILE} changes cannot wait as proposals yet, so only the person, in the Frameshell app, can write it.`,
-        { tx: null, reason: "forbidden", conflicts: [], hint: "Ask the person to change the style guide, or to turn review mode off (History view)." },
-      );
+    // ADR 0036: a style.json write that changes a value is a config operation of the writer, like `style set`.
+    writeStyle: async (dir, content, author = "file") => {
+      const key = transactionKey(author);
+      const tx = transactions.next(key);
+      await transactions.touching(key, tx, { root: dir, doc: "style" });
+      if (await configJournal.serial(dir, () => writeStyleFile(dir, content, author, tx))) await transactions.applied(key, tx);
+      await settle(key, tx);
     },
   });
   const readProjectConfig = async (dir: string) => (await readEnclosingProject(dir))!.config;
   // ADR 0036: every project-config change goes through this journal, so history, revert and tx.abort cover it.
   const configJournal = new ConfigJournal({
-    docs: { project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }) },
+    docs: {
+      project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }),
+      style: styleConfigDocument(),
+    },
   });
   const formats = new FormatService({
     readConfig: readProjectConfig,
     journal: configJournal,
     change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make),
   });
+  const styles = new StyleService({
+    userDir: join(dirs.configDir, USER_STYLES_DIR),
+    journal: configJournal,
+    change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make),
+  });
+  /**
+   * `file.write` of `style.json` (ADR 0036): a write that changes a value is a `file.write` config operation of
+   * `author`, journaled before the file is written as given, or held whole by review mode. A write that changes no
+   * value, or that replaces an invalid file (an edit the journal cannot key), is written at once. Caller holds the
+   * config journal of `dir`. True when it changed a value.
+   */
+  const writeStyleFile = async (dir: string, content: string, author: string, tx: TxRef): Promise<boolean> => {
+    const path = join(dir, STYLE_FILE);
+    const parsed = parseStyleFile(JSON.parse(content));
+    const next = styleState(parsed.ok ? parsed.value : null);
+    const current = await configJournal.read(dir, "style").catch((error: unknown) => {
+      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return null;
+      throw error;
+    });
+    if (current === null || configHash(current) === configHash(next)) {
+      await writeTextAtomic(path, content);
+      return false;
+    }
+    await timelines.changeConfig(
+      dir,
+      "style",
+      { author, tx },
+      // At once `base` is the file's state; in a proposal, only what the write changed replays on its version.
+      async (base, file) => ({ op: "file.write", args: { path: STYLE_FILE }, after: base === file ? next : applyConfigPatch(base, diffConfig(file, next), "after") }),
+      { write: () => writeTextAtomic(path, content) },
+    );
+    return true;
+  };
   /**
    * `file.write` of `frameshell.json` (ADR 0036): a change of `formats` is a `file.write` config operation of
    * `author`, journaled before the file is written, or held by review mode while the other keys are written at
@@ -1035,10 +1074,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     });
   };
   /** Run a project-config change of `caller` in its transaction (ADR 0036); in review mode it joins the proposal (ADR 0019). */
-  const changeConfig = async <T>(dir: string, caller: Caller, work: (author: string, tx: TxRef) => Promise<T>): Promise<T> => {
+  const changeConfig = async <T>(dir: string, caller: Caller, doc: ConfigDoc, work: (author: string, tx: TxRef) => Promise<T>): Promise<T> => {
     const key = authorOf(caller);
     const tx = transactions.next(key);
-    await transactions.touching(key, tx, { root: dir, doc: "project" });
+    await transactions.touching(key, tx, { root: dir, doc });
     const result = await work(journalAuthorOf(caller), tx);
     await transactions.applied(key, tx);
     await settle(key, tx);
@@ -1068,7 +1107,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const key = authorOf(caller);
     const author = journalAuthorOf(caller);
     const tx = transactions.next(key, { standalone: true });
-    await transactions.touching(key, tx, { root: dir, doc: "project" });
+    const docs = new Set((await readConfigJournal(dir)).filter((entry) => entry.id === target || entry.tx === target).map((entry) => entry.doc));
+    for (const doc of docs) await transactions.touching(key, tx, { root: dir, doc });
     if (inTimeline) await transactions.touching(key, tx, { root: dir, timeline });
     const result = await configJournal.serial(dir, async (): Promise<MethodResult<"revert">> => {
       const plans = await configJournal.planRevert(dir, target);
@@ -1232,11 +1272,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "format.add": async ({ cwd, id, width, height, index }, caller) => {
       const dir = await root(cwd);
-      return changeConfig(dir, caller, (author, tx) => formats.add(dir, { id, width, height, index }, author, tx));
+      return changeConfig(dir, caller, "project", (author, tx) => formats.add(dir, { id, width, height, index }, author, tx));
     },
     "format.remove": async ({ cwd, id }, caller) => {
       const dir = await root(cwd);
-      return changeConfig(dir, caller, (author, tx) => formats.remove(dir, id, author, tx));
+      return changeConfig(dir, caller, "project", (author, tx) => formats.remove(dir, id, author, tx));
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
@@ -2332,7 +2372,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       onlyUi(caller, "reject a proposal", tx);
       return timelines.rejectProposal(await root(cwd), tx);
     },
-    "style.show": async ({ cwd }) => showStyle(await root(cwd)),
+    "style.show": async ({ cwd, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewConfig(dir, "style", await viewOf(dir, caller, view));
+      return { ...(await styles.show(dir, shown.state)), view: shown.view, proposal: shown.proposal };
+    },
+    "style.set": async ({ cwd, path, value }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "style", (author, tx) => styles.set(dir, path, value, author, tx));
+    },
+    "style.apply": async ({ cwd, name, replace }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name, replace === true, author, tx));
+    },
+    "style.save": async ({ cwd, name, force }) => styles.save(await root(cwd), name, force === true),
+    "style.list": async () => styles.list(),
     "people.list": async ({ cwd }) => {
       const dir = await root(cwd);
       return { dir, ...(await people.list(dir)) };

@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   history records seconds. They are refused with the same messages as `--snap-to`: no tempo, a music clip with no beats
   file yet, a LOW confidence grid, and a number past the last beat or bar of a measured grid. Word references
   (`"this#2"`) are still refused with a pointer.
+- Style changes and user styles, second slice of #468 (ADR 0028, ADR 0036 slice 4, epic #451; daemon `style.set`,
+  `style.apply`, `style.save`, `style.list`, `style.show` `view` and `from.status`, MCP `style_set`, `style_apply`,
+  `style_save`, `style_list`, protocol 98): `frameshell style set <path> <value>` changes one value of `style.json`
+  (JSON or text; `null` removes it) and keeps the rest of the file. `style save <name>` keeps the project's style as a
+  user style in Frameshell's config folder (`styles/<name>.json`); `style apply <name>` copies one into a project value
+  by value and lists what changed (`--replace` overwrites), recording where it came from so `style show` says when the
+  user style changed since; `style apply premium` (any motion personality) sets the personality; `style list` lists
+  them. Every change of `style.json`, by these commands or by `file.write`, is journaled: `history` lists it, `revert`
+  undoes it (reverting the change that created the file removes it), and in review mode it waits in the agent's
+  proposal like a timeline change instead of being refused.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
