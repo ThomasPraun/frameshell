@@ -532,6 +532,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
   };
   const replays = new IdempotencyCache();
+  /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
+  const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
@@ -553,6 +555,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     reviewEnabled: (dir) => review.enabled(dir),
     txOpen: (tx) => transactions.isOpenTx(tx),
     config: configJournal,
+    beatsOf,
     onProposal: ({ root, endsTx, ...change }) => {
       events.publish("proposal.changed", root, { project: root, ...change });
       // A building proposal closed unapplied ends its transaction (ADR 0019 §7).
@@ -718,8 +721,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
     });
   };
-  /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
-  const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
   /**
    * The beat grid of timeline `id` on its clock (`tempo.show`, `timeline.show` with `grid`). A beats file that is
    * broken is a `problem`, not a failure: the person is editing it, and the grid comes back when it validates.

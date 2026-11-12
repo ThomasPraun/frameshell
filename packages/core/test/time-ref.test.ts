@@ -1,10 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, RpcError, TIME_REF_FIELDS, operationArgs } from "@frameshell/protocol";
-import { createProjectConfig, createTimeline } from "@frameshell/schema";
+import { type BeatsFile, type Timeline, createProjectConfig, createTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import { TimelineService } from "../src/timeline/service.js";
-import { TimeRefError, resolveTimeRef, resolveTimeRefs } from "../src/timeline/time-ref.js";
+import { tempoGrid } from "../src/timeline/tempo.js";
+import { GridNeeded, TimeRefError, resolveTimeRef, resolveTimeRefs } from "../src/timeline/time-ref.js";
 import { tempDir } from "./helpers.js";
 
 // Seam under test: the TimeRef resolver (pure), and the daemon's use of it in front of the engine.
@@ -72,10 +73,16 @@ describe("resolveTimeRef", () => {
     expect(failure(() => resolveTimeRef("   ", scope)).message).toContain("empty");
   });
 
-  it("reserves beat:, bar: and word: for the slices that build them", () => {
-    expect(failure(() => resolveTimeRef("beat:32", scope)).message).toContain("beat grid");
-    expect(failure(() => resolveTimeRef("bar:8", scope)).message).toContain("does not exist yet");
+  it("keeps word: reserved, and says beat: and bar: need a tempo when the timeline has none", () => {
     expect(failure(() => resolveTimeRef("word:over", scope)).message).toContain("word references");
+    expect(failure(() => resolveTimeRef("beat:32", scope)).message).toContain("the timeline has no tempo");
+    expect(failure(() => resolveTimeRef("bar:8", scope)).hint).toContain("tempo.set");
+  });
+
+  it("asks for the grid of a timeline with a tempo, and fails plainly for a caller that cannot read one", () => {
+    const tempoed = { timeline: { ...timeline, tempo: { bpm: 120 } } };
+    expect(failure(() => resolveTimeRef("beat:2", tempoed))).toBeInstanceOf(GridNeeded);
+    expect(failure(() => resolveTimeRef("bar:2", tempoed)).message).toContain("beat grid");
   });
 
   it("lets a label that looks like a scheme win over the reserved name", () => {
@@ -85,23 +92,23 @@ describe("resolveTimeRef", () => {
 });
 
 describe("resolveTimeRefs", () => {
-  it("turns the listed fields of an operation into seconds and leaves the rest", () => {
+  it("turns the listed fields of an operation into seconds and leaves the rest", async () => {
     const request = { op: "clip.trim", args: { clip: "hook", start: "hook", end: "hook+2", in: 1 } } as const;
-    const resolved = resolveTimeRefs(request, timeline);
+    const resolved = await resolveTimeRefs(request, timeline);
     expect(resolved).toEqual({ op: "clip.trim", args: { clip: "hook", start: 4, end: 6, in: 1 } });
     expect(request.args.start).toBe("hook");
   });
 
-  it("returns the request itself when nothing needs resolving", () => {
+  it("returns the request itself when nothing needs resolving", async () => {
     const request = { op: "transition.set", args: { at: 4, kind: "dissolve", duration: 0.5 } } as const;
-    expect(resolveTimeRefs(request, timeline)).toBe(request);
+    expect(await resolveTimeRefs(request, timeline)).toBe(request);
     const other = { op: "track.add", args: { kind: "video" } } as const;
-    expect(resolveTimeRefs(other, timeline)).toBe(other);
+    expect(await resolveTimeRefs(other, timeline)).toBe(other);
   });
 
-  it("names the operation and the argument when a reference fails", () => {
+  it("names the operation and the argument when a reference fails", async () => {
     try {
-      resolveTimeRefs({ op: "cut", args: { from: "intro", to: "nowhere" } }, timeline);
+      await resolveTimeRefs({ op: "cut", args: { from: "intro", to: "nowhere" } }, timeline);
       throw new Error("expected a rejection");
     } catch (error) {
       expect(error).toBeInstanceOf(RpcError);
@@ -110,6 +117,140 @@ describe("resolveTimeRefs", () => {
       expect(rpc.message).toMatch(/^cut: to: "nowhere" is neither seconds nor a marker of timeline main\. Markers: /);
       expect(rpc.data).toMatchObject({ op: "cut", field: "to", reason: "time reference", value: "nowhere" });
     }
+  });
+});
+
+// ---------- beat:N and bar:N (ADR 0029 slice 4): the same grid `--snap-to` reads ----------
+
+const FPS = 30;
+
+/** A beats file of a 120 BPM track whose first beat is 0.2 s in: beats 0.2, 0.7, … and a bar every 4 beats. */
+function beatsFile(overrides: Partial<BeatsFile> = {}): BeatsFile {
+  return {
+    schemaVersion: 1,
+    asset: "assets/music.wav",
+    assetHash: `sha256:${"a".repeat(64)}`,
+    detector: "onset-flux@1",
+    bpm: 120,
+    meter: 4,
+    downbeat: 0,
+    confidence: 0.95,
+    beats: Array.from({ length: 40 }, (_, index) => Math.round((0.2 + index * 0.5) * 1000) / 1000),
+    edits: {},
+    ...overrides,
+  };
+}
+
+/** A timeline with the music on an audio track from second 0 (source 0..20), following it unless `tempo` says otherwise. */
+function scored(tempo: Timeline["tempo"] = { clip: "c_music" }): Timeline {
+  return {
+    ...createTimeline("main"),
+    tracks: [{ id: "t_a", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 20 }] }],
+    ...(tempo ? { tempo } : {}),
+  };
+}
+
+/** A grid loader over `timeline` that counts its calls; `file` is the only beats file there is. */
+function gridOf(timeline: Timeline, file: BeatsFile | null) {
+  const calls: number[] = [];
+  const load = (horizon: number) => {
+    calls.push(horizon);
+    return tempoGrid({ fps: FPS, timeline, horizon, beatsOf: async (asset) => (file && asset === file.asset ? file : null) });
+  };
+  return { load, calls };
+}
+
+/** What `clip.split` at `at` resolves to on `timeline`. */
+async function splitAt(at: string, timeline: Timeline, file: BeatsFile | null = null) {
+  const { load } = gridOf(timeline, file);
+  const resolved = await resolveTimeRefs({ op: "clip.split", args: { clip: "c_1", at } }, timeline, load);
+  return (resolved.args as { at: number }).at;
+}
+
+describe("beat:N and bar:N", () => {
+  const nominal: Timeline = { ...createTimeline("main"), tempo: { bpm: 120 } };
+
+  it("counts from 1 on a nominal grid: beat:1 is the first beat, bar:2 the start of the second bar", async () => {
+    expect(await splitAt("beat:1", nominal)).toBe(0);
+    expect(await splitAt("beat:3", nominal)).toBe(1);
+    expect(await splitAt("bar:1", nominal)).toBe(0);
+    expect(await splitAt("bar:2", nominal)).toBe(2);
+    expect(await splitAt("BAR:2", nominal)).toBe(2);
+  });
+
+  it("follows the offset and meter of a nominal grid, however far the number reaches", async () => {
+    const waltz: Timeline = { ...createTimeline("main"), tempo: { bpm: 120, offset: 0.5, meter: 3 } };
+    expect(await splitAt("bar:2", waltz)).toBe(2);
+    expect(await splitAt("bar:100", nominal)).toBe(198);
+    expect(await splitAt("beat:5000", nominal)).toBe(2499.5);
+  });
+
+  it("adds the optional offset in seconds, like a marker", async () => {
+    expect(await splitAt("bar:3-0.2", nominal)).toBe(3.8);
+    expect(await splitAt("beat:17 + 0.1", nominal)).toBe(8.1);
+  });
+
+  it("interpolates a fractional number between neighbours", async () => {
+    expect(await splitAt("beat:2.5", nominal)).toBe(0.75);
+    expect(await splitAt("bar:2.5", nominal)).toBe(3);
+  });
+
+  it("reads a measured grid through the music clip, with bars from the downbeat", async () => {
+    const file = beatsFile();
+    expect(await splitAt("beat:1", scored(), file)).toBe(0.2);
+    expect(await splitAt("beat:3", scored(), file)).toBe(1.2);
+    expect(await splitAt("bar:2", scored(), file)).toBe(2.2);
+    const shifted = beatsFile({ downbeat: 1 });
+    expect(await splitAt("bar:1", scored(), shifted)).toBe(0.7);
+  });
+
+  it("loads the grid once for every argument of an operation, and not at all for seconds and markers", async () => {
+    const { load, calls } = gridOf(scored(), beatsFile());
+    const cut = await resolveTimeRefs({ op: "cut", args: { from: "bar:1", to: "bar:3" } }, scored(), load);
+    expect(cut.args).toMatchObject({ from: 0.2, to: 4.2 });
+    expect(calls).toHaveLength(1);
+    await resolveTimeRefs({ op: "cut", args: { from: 1, to: "hook" } }, { ...scored(), markers: [{ id: "m_a", at: 2, label: "hook" }] }, load);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses with the words of --snap-to: no tempo, no beats file yet, a LOW confidence grid", async () => {
+    const none = await splitAt("bar:2", createTimeline("main")).catch((error: unknown) => error);
+    expect(none).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining('clip.split: at: "bar:2": the timeline has no tempo.') });
+    const unmeasured = await splitAt("beat:2", scored(), null).catch((error: unknown) => error);
+    expect(unmeasured).toMatchObject({ message: expect.stringContaining("assets/music.wav has no beat grid yet") });
+    const low = await splitAt("beat:2", scored(), beatsFile({ confidence: 0.3 })).catch((error: unknown) => error);
+    expect(low).toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("the grid of assets/music.wav is LOW confidence (0.3): it may be double time or a bar off."),
+      data: expect.objectContaining({ reason: "time reference", field: "at", value: "beat:2" }),
+    });
+    const vouched = beatsFile({ confidence: 0.3, edits: { downbeat: 0 } });
+    expect(await splitAt("beat:2", scored(), vouched)).toBe(0.7);
+  });
+
+  it("refuses a number past the end of a measured grid and says how far it runs", async () => {
+    const past = await splitAt("beat:41", scored(), beatsFile()).catch((error: unknown) => error);
+    expect(past).toMatchObject({ message: expect.stringMatching(/"beat:41" is past the end of the grid, which has 40 beats \(the last at 19\.7 s\)/) });
+    const bars = await splitAt("bar:11", scored(), beatsFile()).catch((error: unknown) => error);
+    expect(bars).toMatchObject({ message: expect.stringContaining("which has 10 bar starts") });
+    expect(await splitAt("beat:40", scored(), beatsFile())).toBe(19.7);
+    const half = await splitAt("beat:40.5", scored(), beatsFile()).catch((error: unknown) => error);
+    expect(half).toMatchObject({ message: expect.stringContaining("past the end of the grid") });
+  });
+
+  it("refuses numbers it cannot read, and anything before the first beat", async () => {
+    for (const text of ["beat:0", "bar:0.5", "beat:", "beat:two", "bar:-1", "beat:1e2"]) {
+      const error = await splitAt(text, nominal).catch((thrown: unknown) => thrown);
+      expect(error, text).toBeInstanceOf(RpcError);
+      expect((error as RpcError).message, text).toMatch(/not a (beat|bar) number|before the first/);
+    }
+  });
+
+  it("fails as a plain reference error for a caller with no way to read a grid", async () => {
+    await expect(resolveTimeRefs({ op: "clip.split", args: { clip: "c_1", at: "beat:2" } }, nominal)).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("beat grid"),
+    });
   });
 });
 
@@ -155,13 +296,14 @@ function project(): string {
   return root;
 }
 
-function session() {
+function session(beatsOf?: (root: string, asset: string) => Promise<BeatsFile | null>) {
   const root = project();
   let next = 0;
   const timelines = new TimelineService({
     probe: async () => PROBE,
     clipTypes: async () => new Map(),
     newId: (prefix) => `${prefix}_${++next}`,
+    ...(beatsOf ? { beatsOf } : {}),
   });
   const run = (op: string, args: Record<string, unknown>) =>
     timelines.apply({ root, cwd: root, timeline: "main", author: "cli", tx: TX, request: { op, args } as never });
@@ -231,5 +373,55 @@ describe("time references in operations", () => {
       message: expect.stringContaining('clip.split: at: "drop" is neither seconds nor a marker of timeline main'),
     });
     expect((await timelines.show(root, "main")).revision).toBe(before);
+  });
+});
+
+describe("beat:N and bar:N in operations", () => {
+  async function tempoed() {
+    const s = session();
+    await s.run("clip.add", { track: "t_v", type: "media", asset: "assets/a.mp4", start: 4 });
+    await s.run("tempo.set", { bpm: 120 });
+    return s;
+  }
+
+  it("resolves a beat or bar of a nominal grid in the operation's turn and records the seconds", async () => {
+    const { run } = await tempoed();
+    const split = await run("clip.split", { clip: "c_1", at: "bar:4+1" });
+    expect(split.operation.args).toMatchObject({ at: 7 });
+    const marker = await run("marker.add", { at: "beat:13", label: "verse" });
+    expect(marker.operation.args).toMatchObject({ at: 6 });
+  });
+
+  it("sees the tempo set earlier, so a later one changes what a name means", async () => {
+    const { run, timelines, root } = await tempoed();
+    await run("tempo.set", { bpm: 60 });
+    const marker = await run("marker.add", { at: "bar:2", label: "verse" });
+    expect(marker.operation.args).toMatchObject({ at: 4 });
+    expect((await timelines.markers(root, "main")).markers.map((m) => m.at)).toEqual([4]);
+  });
+
+  it("refuses without a tempo before the engine runs and changes nothing", async () => {
+    const { run, timelines, root } = session();
+    await run("clip.add", { track: "t_v", type: "media", asset: "assets/a.mp4", start: 0 });
+    const before = (await timelines.show(root, "main")).revision;
+    await expect(run("clip.split", { clip: "c_1", at: "bar:2" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining('clip.split: at: "bar:2": the timeline has no tempo.'),
+    });
+    expect((await timelines.show(root, "main")).revision).toBe(before);
+  });
+
+  it("reads the beats file of the followed music clip through the service's beatsOf", async () => {
+    const asked: string[] = [];
+    const { run, timelines, root } = session(async (_dir, asset) => {
+      asked.push(asset);
+      return beatsFile({ asset });
+    });
+    await run("clip.add", { track: "t_v", type: "media", asset: "assets/a.mp4", start: 0 });
+    await run("tempo.set", { clip: "c_1" });
+    const marker = await run("marker.add", { at: "bar:2-0.2", label: "verse" });
+    expect(marker.operation.args).toMatchObject({ at: 2 });
+    expect(asked).toContain("assets/a.mp4");
+    expect((await timelines.markers(root, "main")).markers.map((m) => m.at)).toEqual([2]);
   });
 });
