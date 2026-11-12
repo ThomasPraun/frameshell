@@ -1,5 +1,6 @@
 // `voiceover.generate` (ADR 0034): script → lines → cache check by take key → cost check → provider → trim →
-// marked WAV in assets/voiceover/<script slug>/ → one asset import. The provider only turns text into audio.
+// marked WAV in assets/voiceover/<script slug>/ → one asset import → phrases and misread check of every line.
+// The provider only turns text into audio.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
@@ -11,7 +12,15 @@ import type { MediaImportResult } from "../media/service.js";
 import { locateScript } from "../scripts/outline.js";
 import { type Pcm16, pcmOfWav, readPcmWav } from "../transcripts/window.js";
 import { type TakeFile, type TakeMark, VOICEOVER_DIR, readTakes, takeKey, takeWavBytes } from "./takes.js";
+import { PHRASE_FADE_S, splitPhrases } from "./split.js";
 import { trimSilence } from "./trim.js";
+import { type Verification, type VerifyRequest, textInRanges, verifyTakes } from "./verify.js";
+
+/** What the misread check needs of the daemon: the project's transcription provider and its tools. */
+export type VerifyServices = Pick<VerifyRequest, "providerId" | "provider" | "model" | "tools" | "extractAudio"> & {
+  /** Language of the transcription when the script names none. */
+  language: string | null;
+};
 
 /** Input of {@link generateVoiceover}: the call's params plus the daemon services it needs. */
 export interface VoiceoverRequest {
@@ -24,6 +33,8 @@ export interface VoiceoverRequest {
   voice?: string;
   /** The person confirmed the cost of a paid provider. */
   yes: boolean;
+  /** The misread check; null = the call said `verify: false`. */
+  verify: VerifyServices | null;
   /** Provider by id: built-in or from a loaded plugin. Throws `SpeechProviderNotFound` or `ProjectNotTrusted`. */
   speechProvider(id: string): Promise<SpeechProvider>;
   /** Ids of the providers this project can use, for messages. */
@@ -37,6 +48,8 @@ export interface VoiceoverRequest {
 }
 
 type ResultLine = VoiceoverGenerateResult["lines"][number];
+/** A result line before its phrases and check are known. */
+type PartialLine = Omit<ResultLine, "phrases" | "check">;
 
 /** One line asked for, with what to do about it. */
 interface Plan {
@@ -135,15 +148,18 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
     );
   }
 
-  const results = new Map<string, ResultLine>();
+  const results = new Map<string, PartialLine>();
   const written: string[] = [];
   const warnings = [...script.warnings];
-  const finish = (plan: Plan, take: { pcm: { sampleRate: number; samples: Int16Array }; head: number; tail: number }) =>
+  const pcms = new Map<string, Pcm16>();
+  const finish = (plan: Plan, take: { pcm: Pcm16; head: number; tail: number }) => {
+    pcms.set(plan.line.id, take.pcm);
     results.set(plan.line.id, {
       ...lineFields(plan),
       duration: round(take.pcm.samples.length / take.pcm.sampleRate),
       trimmed: { head: take.head, tail: take.tail },
     });
+  };
   for (const plan of plans) {
     if (plan.state === "generated" || plan.duplicateOf) continue;
     const bytes = plan.copy ?? plan.existing!.bytes;
@@ -190,16 +206,55 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   }
 
   const imported = written.length > 0 ? (await request.importAssets(written.map((file) => join(root, ...file.split("/"))))).imported : [];
+
+  // Phrases and the misread check come last: the takes are written and imported, so nothing they do can lose one.
+  const verified = await checkTakes(request, plans, pcms, script.voiceover.language);
+  warnings.push(...verified.warnings);
+  const outLines: ResultLine[] = plans.map((plan) => {
+    const line = results.get(plan.line.id)!;
+    const phrases = splitPhrases(pcms.get(plan.line.id)!);
+    const checked = verified.checks.get(plan.line.id);
+    const heard = checked ? textInRanges(phrases, checked.words) : null;
+    return { ...line, phrases: phrases.map((phrase, i) => ({ ...phrase, heard: heard ? heard[i]! : null })), check: checked?.check ?? null };
+  });
   return {
     script: path,
     dir,
     provider: provider.id,
     voice,
-    lines: plans.map((plan) => results.get(plan.line.id)!),
+    lines: outLines,
+    phraseFade: PHRASE_FADE_S,
+    verification: verified.verification,
     imported: imported.map(({ asset, job }) => ({ asset, job })),
     cost: cost && toSay.length > 0 ? cost : null,
     warnings,
   };
+}
+
+/** The misread check of every planned line, or the reason it did not run. */
+async function checkTakes(
+  request: VoiceoverRequest,
+  plans: readonly Plan[],
+  pcms: ReadonlyMap<string, Pcm16>,
+  scriptLanguage: string | null,
+): Promise<{ verification: Verification; checks: Awaited<ReturnType<typeof verifyTakes>>["checks"]; warnings: string[] }> {
+  const { verify, root } = request;
+  if (!verify) {
+    return { verification: { status: "skipped", provider: null, model: null, reason: "Verification was not asked for (`verify: false`).", misread: 0, doubtful: 0 }, checks: new Map(), warnings: [] };
+  }
+  request.progress({ message: "Checking the takes against their lines", stage: "verify" });
+  return verifyTakes({
+    root,
+    takes: plans.map((plan) => ({ id: plan.line.id, spoken: plan.line.spoken, display: plan.line.display, file: join(root, ...plan.file.split("/")), pcm: pcms.get(plan.line.id)! })),
+    language: scriptLanguage ?? verify.language,
+    providerId: verify.providerId,
+    provider: verify.provider,
+    model: verify.model,
+    tools: verify.tools,
+    extractAudio: verify.extractAudio,
+    progress: request.progress,
+    signal: request.signal,
+  });
 }
 
 /** Lines `ids` names, in script order; all when absent. Throws `InvalidParams` naming unknown ids. */
@@ -270,7 +325,7 @@ function pcmOf(bytes: Buffer) {
   return pcm;
 }
 
-function lineFields(plan: Plan): Omit<ResultLine, "duration" | "trimmed"> {
+function lineFields(plan: Plan): Omit<PartialLine, "duration" | "trimmed"> {
   const { id, scene, line, display, spoken } = plan.line;
   return { id, scene, line, display, spoken, file: plan.file, state: plan.state };
 }
