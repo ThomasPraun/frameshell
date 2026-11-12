@@ -1,4 +1,5 @@
 import { SYNC_LOW_CONFIDENCE } from "@frameshell/protocol";
+import { fft, nextPowerOfTwo } from "../fft.js";
 import { ENERGY_HOP_S, type EnergyProfile } from "../media/energy.js";
 
 /**
@@ -184,50 +185,4 @@ function sumSquares(values: Float64Array): number {
   let sum = 0;
   for (const value of values) sum += value * value;
   return sum;
-}
-
-function nextPowerOfTwo(n: number): number {
-  let size = 1;
-  while (size < n) size *= 2;
-  return size;
-}
-
-/** In-place iterative radix-2 FFT; `inverse` also divides by the length. */
-function fft(re: Float64Array, im: Float64Array, inverse: boolean): void {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      [re[i], re[j]] = [re[j]!, re[i]!];
-      [im[i], im[j]] = [im[j]!, im[i]!];
-    }
-  }
-  for (let length = 2; length <= n; length <<= 1) {
-    const angle = ((inverse ? 2 : -2) * Math.PI) / length;
-    const wRe = Math.cos(angle);
-    const wIm = Math.sin(angle);
-    for (let start = 0; start < n; start += length) {
-      let curRe = 1;
-      let curIm = 0;
-      for (let k = 0; k < length / 2; k++) {
-        const a = start + k;
-        const b = a + length / 2;
-        const tRe = re[b]! * curRe - im[b]! * curIm;
-        const tIm = re[b]! * curIm + im[b]! * curRe;
-        re[b] = re[a]! - tRe;
-        im[b] = im[a]! - tIm;
-        re[a] = re[a]! + tRe;
-        im[a] = im[a]! + tIm;
-        [curRe, curIm] = [curRe * wRe - curIm * wIm, curRe * wIm + curIm * wRe];
-      }
-    }
-  }
-  if (inverse) {
-    for (let i = 0; i < n; i++) {
-      re[i] = re[i]! / n;
-      im[i] = im[i]! / n;
-    }
-  }
 }

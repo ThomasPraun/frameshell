@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Beat grid, slice 2 of #458 (ADR 0029): `frameshell beats measure <asset> [--bpm n] [--reset-edits]` and `beats show
+  <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 86) measure the beats
+  of a music file locally, with no download and no model, and write `beats/<name>.beats.json`: tempo, every beat in
+  source seconds (each snapped to a measured hit within 8 ms), which beat starts a bar, the strong hits, a confidence and
+  the largest gap to the hits (under 15 ms on clean click tracks). Calm music, which gets a double-time grid, is flagged
+  LOW with the other tempi to try; a track decoded without a finished ingest is capped LOW too. `--bpm` says the tempo you
+  expect so a 60 BPM song stays 60. Human corrections go in the file's `edits` (`tempo` double or half, `downbeat`,
+  `offset`), are validated by `file.write` and kept when you measure again. It runs as a `beats` job in a worker thread
+  (about 5 s for 3 minutes); the onset envelope is cached in `.frameshell/beats/` and swept by `gc`, which never touches
+  `beats/`. The file's `detector` also admits `exact` for generated music that knows its beats. Nothing on a timeline
+  reads a grid yet (the grid in the app, `tempo.clip` and `--snap-to` are slice 3). The FFT of multicam sync is now one
+  shared module used by the detector too.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench

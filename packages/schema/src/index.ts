@@ -240,6 +240,18 @@ export {
   parseExportPreset,
 } from "./plugin.js";
 export {
+  BEATS_SCHEMA_URL,
+  BeatsFileSchema,
+  EXACT_DETECTOR,
+  LOW_BEAT_CONFIDENCE,
+  type BeatGrid,
+  type BeatsFile,
+  effectiveBeatGrid,
+  isLowConfidence,
+  nominalBeatFrame,
+  parseBeatsFile,
+} from "./beats.js";
+export {
   TRANSCRIPT_SCHEMA_URL,
   TranscriptSchema,
   type Transcript,

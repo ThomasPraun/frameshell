@@ -107,7 +107,7 @@ async function envelopeOfPcm(path: string, layout: { sampleRate: number; channel
 }
 
 /** Format and data chunk of a 16-bit PCM WAV. Throws when it is not one. */
-function wavData(bytes: Buffer): { rate: number; channels: number; data: Uint8Array } {
+export function wavData(bytes: Buffer): { rate: number; channels: number; data: Uint8Array } {
   if (bytes.toString("latin1", 0, 4) !== "RIFF" || bytes.toString("latin1", 8, 12) !== "WAVE") throw new Error("not a WAV file");
   let rate = TRANSCRIPTION_SAMPLE_RATE;
   let channels = 1;
@@ -127,13 +127,15 @@ function wavData(bytes: Buffer): { rate: number; channels: number; data: Uint8Ar
   throw new Error("WAV file has no data chunk");
 }
 
-function encodeFloats(values: Float32Array): Buffer {
+/** Little-endian float32 bytes of `values`, the format of the `.f32` caches. */
+export function encodeFloats(values: Float32Array): Buffer {
   const out = Buffer.alloc(values.length * 4);
   values.forEach((value, i) => out.writeFloatLE(value, i * 4));
   return out;
 }
 
-function decodeFloats(bytes: Buffer): Float32Array {
+/** Inverse of {@link encodeFloats}. */
+export function decodeFloats(bytes: Buffer): Float32Array {
   const out = new Float32Array(bytes.length / 4);
   for (let i = 0; i < out.length; i++) out[i] = bytes.readFloatLE(i * 4);
   return out;
