@@ -149,6 +149,11 @@ describe("frameshell mcp", () => {
       expect(sheet.content.some((part) => part.type === "image")).toBe(true);
       expect(json(sheet)).toMatchObject({ columns: 2, tiles: [{ at: 0, row: 0, column: 0 }, {}, {}, { row: 1, column: 1 }] });
 
+      // The review sheets as images, with the labels of their tiles.
+      const reviewed = await call("review", { sheets: ["seam"] });
+      expect(reviewed.content.filter((part) => part.type === "image")).toHaveLength(1);
+      expect(json(reviewed)).toMatchObject({ source: "timeline", sheets: [{ kind: "seam", tiles: expect.arrayContaining(["1.47 tail", "0.00 head"]) }] });
+
       // Revert the transaction: the cut is undone as a new operation.
       const reverted = json(await call("revert", { target: tx }));
       expect(reverted).toMatchObject({ revision: cut["revision"] + 1, operation: { op: "revert" } });

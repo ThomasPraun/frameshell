@@ -37,6 +37,7 @@ import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeat
 import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
+import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import { FormatIdSchema } from "@frameshell/schema";
@@ -118,7 +119,7 @@ ${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--fo
                                180 px wide (warns when the word is too long). --text alone picks the frame
                                where the word is first spoken; --at picks the frame; neither: the first
                                picture. Default file: exports/<timeline>-cover.png
-  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
+${REVIEW_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
                                takes fractions of the frame (0.71,0.14), --px project pixels (1363,151). --segment: on a photo
@@ -160,13 +161,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "inspect", "script", "proposal", "people", "shoot", "voiceover", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "inspect", "script", "proposal", "people", "shoot", "voiceover", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "bpm", "reset-edits"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "bpm", "reset-edits"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -183,6 +184,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
+  ...REVIEW_FLAGS,
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "script check": [],
@@ -248,6 +250,7 @@ type Invocation =
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
   | { kind: "style.show" }
+  | ReviewInvocation
   | PeopleInvocation
   | CreditsInvocation
   | ShootInvocation
@@ -350,6 +353,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "cover-text": { type: "string" },
           "cover-at": { type: "string" },
           "cover-color": { type: "string" },
+          range: { type: "string" },
+          sheets: { type: "string" },
+          every: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -508,6 +514,10 @@ function parseBuiltin(
     "cover-text"?: string | undefined;
     "cover-at"?: string | undefined;
     "cover-color"?: string | undefined;
+    file?: string | undefined;
+    range?: string | undefined;
+    sheets?: string | undefined;
+    every?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -520,6 +530,7 @@ function parseBuiltin(
   if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
   if (command === "style") return rest.length === 1 && rest[0] === "show" ? { kind: "style.show" } : null;
   if (command === "format") return parseFormat(rest, options);
+  if (command === "review") return parseReview(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -792,6 +803,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const result = await conn.request("script.check", { cwd, file: inv.file });
       return flags.json ? json(result) : formatCheck(result);
     }
+    case "review":
+      return executeReview(conn, inv, cwd, flags.json);
     case "style.show": {
       const result = await conn.request("style.show", { cwd });
       return flags.json ? json(result) : formatStyle(result);

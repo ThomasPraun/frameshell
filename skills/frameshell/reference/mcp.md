@@ -6,7 +6,7 @@
 
 Both reach the same daemon, journal the same operations and take the same arguments (`clip.add` → `clip_add`, `--snap-window` → `snapWindow`). Pick per task:
 
-- **MCP only:** seeing pixels (`frame_capture` and `frames_strip` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `job_list`, `export_presets`.
+- **MCP only:** seeing pixels (`frame_capture`, `frames_strip` and `review` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `job_list`, `export_presets`.
 - **CLI:** loops over many operations from one shell call (dozens of `cut`s), and every environment where the MCP server is not registered.
 - **One channel per transaction.** A transaction groups one session's operations: the CLI's session is `FRAMESHELL_SESSION`, the server's is its own. Begin, edit and commit through the same one.
 
@@ -19,6 +19,7 @@ Look after every change the viewer would see: an overlay, a transform, a title, 
 - `frame_capture { at: 12.5 }`: the composited frame at that timeline second, rendered by the export compiler, so it matches `render` (works with the app closed). `preset` renders at that preset's size; `projectFormat` (e.g. `9x16`, from `format_list`) shows the frame as that format of the project lays it out.
 - `cover { text: "nunca" }`: a cover image (a frame with one big word over it) written to a file, not returned as an image; open `path` with your image tool. Same arguments as `frameshell cover`; `readability.readable: false` means the word is too small to read at thumbnail size.
 - `frames_strip { from: 0, to: 30, count: 9 }`: one contact sheet of evenly spaced frames with each tile's time and clip. Use it to review a whole edit or find where a shot changes.
+- `review { file: "exports/draft.mp4" }` (or no `file`: the timeline): the sheets of a whole film as images, labelled with times; see [critique.md](critique.md). `sheets` picks `contact`, `phone`, `motion` or `seam`; `from`/`to` limit it. Without MCP: `frameshell review`, then open the PNGs it prints.
 - Without MCP: `frameshell frame --at 12.5 --out /tmp/f.png`, then open the PNG with your image-reading tool.
 - `inspect_point { at: 12.5, x: 0.71, y: 0.14 }` (or `unit: "pixel"` with project pixels): the clips under that point, topmost first, the one seen there (`target`), and in a generated clip the DOM element painting it, as the user's Pick tool reports it (`elements[0]`, then its ancestors). CLI: `frameshell inspect --at 12.5 --point 0.71,0.14`. `segment: true` (CLI `--segment`) on a photo of an image project also returns `segment` (see [image-projects.md](image-projects.md)).
 

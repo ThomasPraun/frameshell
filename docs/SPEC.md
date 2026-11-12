@@ -240,6 +240,7 @@ my-video/
     ├── audio-fx/              # clip audio effects baked per asset and chain (ADR 0031; regenerable)
     ├── waveforms/, thumbs/    # regenerable
     ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
+    ├── review/<n>/            # `frameshell review` sheets, strips and `review.json`; the last 10 runs (regenerable)
     ├── rejected/              # refused direct edits kept for recovery
     ├── rejected.jsonl         # why each was refused (listed by `status`)
     ├── proposals/             # review mode (ADR 0019): open proposal, decided ones for 7 days, decisions.jsonl
@@ -597,6 +598,7 @@ frameshell revert <tx|op>
 
 frameshell render [--preset p] [--formats id,id] [--out file]   # export; one file per format with --formats (ADR 0027)
 frameshell frame --at <s> --out <png> [--format <id>]   # composited frame, same path as MCP frame_capture; --format lays it out in a format
+frameshell review [--file <video>] [--range a,b] [--sheets contact,phone,motion,seam] [--every s]   # contact sheet, phone sheet, fast-motion strips, loop seam into .frameshell/review/<n>/ (#457)
 frameshell format list | add <id> [--size WxH] [--index n] | remove <id>   # delivery formats of the project (ADR 0027)
 frameshell inspect --at <s> --point x,y [--segment]   # clip stack and element under a point; --segment adds the photo's masks (ADR 0011, 0022)
 frameshell image cutout <clip> --mask <png>   # new layer with only the masked part of a photo, exactly over it (ADR 0022)
@@ -617,7 +619,7 @@ All mutating commands accept `--timeline <id>` (default `main`) and print the re
 |---|---|
 | **Project** | Every CLI operation of §7 as a typed tool (`clip_add`, `clip_trim`, `cut`, `track_add`, `transcribe`, `render`, `tx_begin`, `history`, `revert`, `plugin_install`…). Input schemas generated from the same Zod models as the protocol; errors as actionable tool errors. |
 | **Read** | Resources for timeline, transcript, script outline, history and project status, in the compact form of `--json` CLI output. Resource change notifications on `timeline.changed` / `history.appended`. |
-| **Observe** | `frame_capture(timeline, at)` returns the composited frame as an image; `frames_strip(timeline, from, to, count)` returns a contact sheet. Rendered by the daemon with the export compiler (single-frame plan), so it works with the app closed and matches export. `inspect_point(timeline, at, x, y)` returns the clip stack under that point and, for generated clips in trusted projects, the composition element there (ADR 0011); with `segment`, on a photo in an image project, three masks of the part under the point (ADR 0022). |
+| **Observe** | `frame_capture(timeline, at)` returns the composited frame as an image; `frames_strip(timeline, from, to, count)` returns a contact sheet; `review(timeline | file, from?, to?, sheets?, every?)` returns the sheets of a whole film (#457): a **contact sheet** (6 tiles wide, 10 in a vertical format, 30 a sheet; frames at clip starts and ends, cuts, markers, subtitle cues, the deepest zoom of a keyed clip, and one every 0.5 s, each labelled with its time and why), a **phone sheet** (1 fps, 360 px tiles), **motion strips** (the two fastest moments by mean grey difference of sampled frames at 320 px, consecutive only on a short film or a file at its own rate; 12 consecutive frames each at 640 px) and a **loop seam** sheet (last 6 and first 6 frames), written to `.frameshell/review/<n>/` with a `review.json` manifest (sheets, tile times and tags, peaks); the last 10 runs are kept and no project file is touched. A timeline is captured frame by frame with the `frame` path (its motion sampled at most 90 times); a file is decoded by the managed ffmpeg. Rendered by the daemon with the export compiler (single-frame plan), so it works with the app closed and matches export. `inspect_point(timeline, at, x, y)` returns the clip stack under that point and, for generated clips in trusted projects, the composition element there (ADR 0011); with `segment`, on a photo in an image project, three masks of the part under the point (ADR 0022). |
 | **UI state** | `ui_state()` returns playhead, selection (clips, words, time range, preview region, picked points), open editor tab and visible range. Available when the app is connected; otherwise returns `{ connected: false }`. |
 | **Navigate** | `ui_seek`, `ui_play`, `ui_pause`, `ui_select` (also picked points, so the model can show what it understood), `ui_open_file`, `ui_show_tx_diff`. Routed daemon → connected UI client. Navigation only: no pixel clicks, no drags. |
 

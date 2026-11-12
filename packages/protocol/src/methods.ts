@@ -28,6 +28,7 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
+import { ReviewPeakSchema, ReviewSheetKindSchema, ReviewSheetSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
@@ -65,7 +66,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 89;
+export const PROTOCOL_VERSION = 90;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1132,6 +1133,59 @@ export const methods = {
       projectFormat: z.string().describe("Format of the project the frame was laid out in."),
       width: z.int(),
       height: z.int(),
+    }),
+  },
+  review: {
+    description:
+      "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
+      "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
+      "touches project files. Sheets (`sheets`, default all): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
+      "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
+      "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
+      "frames each: pops, overlaps and blank frames only show there) and `seam` (the last 6 and the first 6 frames, to " +
+      "judge a loop). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
+      "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
+      "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
+      "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
+      "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
+      "TimelineNotFound, FormatNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      file: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "An exported video to review instead of the timeline (the judge of a reel is the file people get): absolute, or relative to `cwd`, " +
+            "e.g. `exports/draft.mp4`. Then `timeline`, `projectFormat` and `view` are ignored and only the grid frames of the contact sheet exist (no cuts, markers or cues).",
+        ),
+      from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
+      to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
+      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default all four."),
+      every: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Seconds between the grid frames of the contact sheet. Default 0.5 (2 per second), widened so that a long film stays within 120 tiles."),
+      projectFormat: FormatIdSchema.optional().describe("Format of the project to lay a timeline out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      source: z.enum(["timeline", "file"]),
+      timeline: z.string().nullable().describe("Timeline reviewed; null for a file."),
+      file: z.string().nullable().describe("Absolute path of the file reviewed; null for a timeline."),
+      run: z.int().describe("`<n>` of the folder."),
+      dir: z.string().describe("Absolute folder the sheets and `review.json` (this result without `view` and `proposal`) are in."),
+      range: z.object({ from: z.number(), to: z.number() }).describe("Seconds reviewed."),
+      fps: z.number().describe("Frame rate of the film."),
+      width: z.int().describe("Size of the film's frames, px."),
+      height: z.int(),
+      sheets: z.array(ReviewSheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
+      peaks: z.array(ReviewPeakSchema).describe("The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves."),
+      warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
     }),
   },
   cover: {
@@ -3829,6 +3883,10 @@ export type FormatChange = z.output<typeof FormatChangeSchema>;
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */
 export type CoverResult = MethodResult<"cover">;
+/** `review` params. */
+export type ReviewParams = MethodParams<"review">;
+/** Result of `review`. */
+export type ReviewResult = MethodResult<"review">;
 /** Image format `frame` writes; see {@link FrameFormatSchema}. */
 export type FrameFormat = z.output<typeof FrameFormatSchema>;
 /** One export preset as listed by `export.presets`. */
