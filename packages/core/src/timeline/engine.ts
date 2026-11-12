@@ -2,10 +2,10 @@ import {
   ErrorCode,
   type OperationName,
   type OperationResult,
+  type ResolvedOperationArgs,
   RpcError,
   type SnapReport,
   type TimelinePatch,
-  type operationArgs,
 } from "@frameshell/protocol";
 import { basename } from "node:path/posix";
 import {
@@ -53,7 +53,6 @@ import {
   showsPicture,
   splitScriptRef,
 } from "@frameshell/schema";
-import type { z } from "zod";
 import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
@@ -148,8 +147,8 @@ export interface EditContext {
 /** Prefix of a core-generated id: `c` clip, `t` track, `g` multicam group, `m` marker. */
 export type IdPrefix = "c" | "t" | "g" | "m";
 
-/** Args of a public operation after param validation. */
-export type OperationArgs<K extends OperationName> = z.output<(typeof operationArgs)[K]>;
+/** Args of a public operation after param validation and time resolution: time references are seconds (`resolveTimeRefs`). */
+export type OperationArgs<K extends OperationName> = ResolvedOperationArgs<K>;
 
 /** Any operation the engine applies: a public verb, or a patch (inverses, reverts). */
 export type OperationRequest =

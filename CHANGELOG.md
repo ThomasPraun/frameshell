@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Times as names, first slice of #485 (ADR 0037, amends ADR 0029 decision 7; protocol 86): the time arguments
+  `transition set|remove --at`, `clip key --at`, `clip split --at`, `cut --from/--to`, `clip move --start`,
+  `clip trim --start/--end`, `clip add --start` and `marker add|set --at` (and the matching MCP and daemon params)
+  take seconds or a marker id or label with an optional offset: `--at hook`, `--at hook+0.5`, `--from intro --to
+  outro-1`. One shared resolver in core (`resolveTimeRefs`) turns the name into seconds in the daemon before the
+  operation runs, against the timeline as it is then (a marker added earlier in the same transaction counts, and in
+  review mode the proposal's timeline), so the history records seconds and a revert never depends on a marker staying
+  put. A label is tried whole first (`end-card` is not `end` minus `card`); an unknown name fails and lists the
+  markers. `beat:`, `bar:` and `word:` are reserved and refused until the beat grid and word references exist.
+  `music fit` itself is a later slice.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench
